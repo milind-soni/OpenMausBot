@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { transcribe } from "./fish.ts";
+import { listVoices, synthesize, transcribe, verifyKey } from "./fish.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -42,5 +42,19 @@ describe("Fish Audio transcribe", () => {
   it("says Fish was unreachable when the request throws", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("fetch failed"); }));
     await expect(transcribe(new Uint8Array(4), "audio/wav", "k")).rejects.toThrow("Couldn't reach Fish Audio to hear you");
+  });
+});
+
+describe("Fish Audio requests", () => {
+  it("refuse redirects, so the key and the person's audio go only to Fish", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await verifyKey("k");
+    await listVoices("k");
+    await synthesize("hello", "voice", "k");
+    await transcribe(new Uint8Array(4), "audio/wav", "k");
+    const inits = (fetchMock.mock.calls as unknown as Array<[string, RequestInit]>).map(([, init]) => init);
+    expect(inits.length).toBeGreaterThanOrEqual(4);
+    for (const init of inits) expect(init.redirect).toBe("error");
   });
 });

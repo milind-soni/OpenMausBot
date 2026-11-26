@@ -4,9 +4,9 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { agentsMcp } from "./drivers/agents-mcp.ts";
-import { agentsServerEnv, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type AgentsConversation, type AgentsTurn } from "./agents-turn.ts";
+import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type AgentsConversation, type AgentsTurn } from "./agents-turn.ts";
 
-const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, escalations: true, voiceNotes: true, x: true, research: true, imageGeneration: false };
+const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, voiceNotes: true, x: true, research: true, imageGeneration: false, localVm: true };
 const CHAT: AgentsConversation = { threadId: "thread-1", bot: { id: "bot-1", chiefOfStaff: true }, room: false, teamComputer: false, host: HOST };
 const ROOM: AgentsConversation = { ...CHAT, threadId: "room-1", room: true };
 
@@ -54,6 +54,18 @@ describe("one conversation's agents tools", () => {
     }
   }
 
+  it("never lists select_computer in a conversation only bots or automation drive, where every pick would be refused", async () => {
+    const names = async (conversation: AgentsConversation) =>
+      (JSON.parse((await everyTurn(conversation))[0]!.wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
+    expect(await names(CHAT)).toContain("select_computer");
+    expect(await names({ ...CHAT, botDriven: true })).not.toContain("select_computer");
+    expect(botDrivenConversation({ openedBy: { botId: "b" } })).toBe(true);
+    expect(botDrivenConversation({ botApi: true })).toBe(true);
+    expect(botDrivenConversation({ routineRunId: "r1" })).toBe(true);
+    expect(botDrivenConversation({})).toBe(false);
+    expect(botDrivenConversation(undefined)).toBe(false);
+  });
+
   it("lists a direct chat select_computer and the wait tools and a room none, and both the skill tools while authoring is on", async () => {
     const names = async (conversation: AgentsConversation) =>
       (JSON.parse((await everyTurn(conversation))[0]!.wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
@@ -71,6 +83,23 @@ describe("one conversation's agents tools", () => {
     expect(await names({ ...CHAT, host: { ...HOST, research: false } })).toEqual(["x_search"]);
     expect(await names({ ...CHAT, host: { ...HOST, x: false } })).toEqual([]);
     expect(await names({ ...CHAT, bot: { ...CHAT.bot, xResearch: false } })).toEqual([]);
+  });
+
+  it("leaves out the tool groups the bot's person turned off, on every kind of turn, and only for that bot", async () => {
+    const off = { ...CHAT, host: { ...HOST, meetings: true, imageGeneration: true }, bot: { ...CHAT.bot, toolsOff: ["meetings", "pages"] } };
+    const turns = await everyTurn(off);
+    for (const { kind, env, wire } of turns) {
+      expect(env.OMB_TOOLS_OFF, kind).toBe("meetings,pages");
+      expect(wire, kind).toBe(turns[0]!.wire);
+    }
+    const names = (wire: string) => (JSON.parse(wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
+    const kept = names(turns[0]!.wire), everything = names((await everyTurn({ ...off, bot: CHAT.bot }))[0]!.wire);
+    for (const tool of ["join_meeting", "show_html", "publish_page"]) {
+      expect(everything).toContain(tool);
+      expect(kept).not.toContain(tool);
+    }
+    expect(kept).toContain("generate_image");
+    expect((await everyTurn(CHAT))[0]!.env.OMB_TOOLS_OFF).toBe("");
   });
 
   it("leaves select_computer out only where the conversation can never pick a computer", async () => {

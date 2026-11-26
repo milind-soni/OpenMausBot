@@ -94,6 +94,11 @@ describe("an instance's mark", () => {
     expect(instanceIcon(server("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"))).toEqual({ icon: { kind: "preset", preset: "qwen" } });
   });
 
+  it("is Ollama's mark for a server on Ollama's port or added as Ollama", () => {
+    expect(instanceIcon(server("http://127.0.0.1:11434/v1"))).toEqual({ icon: { kind: "preset", preset: "ollama" } });
+    expect(instanceIcon({ driver: "openai-compat", config: { url: "http://gpu-box.local:8080/v1", catalog: "ollama" } })).toEqual({ icon: { kind: "preset", preset: "ollama" } });
+  });
+
   it("keeps a stored icon, preset or custom, over the server's", () => {
     const preset = { kind: "preset", preset: "cohere" } as const;
     const custom = { kind: "custom", dataUrl: "data:image/png;base64,iVBORw0KGgo=" } as const;
@@ -105,7 +110,7 @@ describe("an instance's mark", () => {
 
   it("leaves the driver's own mark for an unknown or missing address and for other drivers", () => {
     expect(instanceIcon(server("https://llm.example.test/v1"))).toEqual({});
-    expect(instanceIcon(server("http://127.0.0.1:11434/v1"))).toEqual({});
+    expect(instanceIcon(server("http://127.0.0.1:1234/v1"))).toEqual({});
     expect(instanceIcon(server(42))).toEqual({});
     expect(instanceIcon({ driver: "openai-compat" })).toEqual({});
     expect(instanceIcon({ driver: "openai-compat", config: null })).toEqual({});

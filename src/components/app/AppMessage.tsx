@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStore, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
@@ -7,18 +7,40 @@ import { appBlockedLine } from "./app-blocked";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
-import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
+import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, PageCardFooter } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
-import { PAGE_HEIGHT, PageFullScreen, PageNotes, PageToolbar, usePagePoint, usePageShare, usePageVersion } from "./PageTools";
+import type { AppSelection } from "./app-frame-host";
+import { PageCitationButton } from "../CitationUI";
+import { appendComposerDraft, appendDraftAttachments } from "@/lib/drafts";
+import { returnFocusToComposer } from "../AskCard";
+import { useCanWriteIn } from "@/lib/cloud-guest";
+import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
+import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
+const CARD_WIDTH = "max-w-[560px]";
+const CARD_TITLE = "truncate px-5 pt-5 text-[17px] font-semibold leading-6 text-ink";
+const CARD_TITLE_HEIGHT = 44;
 const DOC_REUSE_MS = 60_000;
 
 const heights = new Map<string, number>();
+/** Whether a page opens with a heading of its own, as it last said: by message id and version. */
+const headings = new Map<string, boolean>();
+/** How long a card waits for its page to say, before it shows the preview with the title above it for good. */
+const HEADING_WAIT_MS = 1_500;
+/** The same once the page has said it is still drawing itself. */
+const HEADING_DRAWING_MS = 10_000;
 const docs = new Map<string, { doc: AppDocument; at: number }>();
+
+function rememberHeading(key: string, opens: boolean) {
+  headings.delete(key);
+  headings.set(key, opens);
+  while (headings.size > 200) headings.delete(headings.keys().next().value!);
+}
 
 export function forgetAppRows(): void {
   heights.clear();
+  headings.clear();
   docs.clear();
 }
 
@@ -77,7 +99,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   pool?: AppPool;
   room?: boolean;
 }) {
-  const { dispatch } = useStore();
+  const { dispatch, state: store } = useStore();
   const uid = useId();
   const page = payload.source === "html";
   const version = usePageVersion(payload);
@@ -92,9 +114,19 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [fetching, setFetching] = useState(false);
   const [problem, setProblem] = useState<AppFrameProblem | null>(null);
+  // Text the person selected in the page, to cite in the composer as chat text is; never in a room.
+  const [selection, setSelection] = useState<AppSelection | null>(null);
+  const [heading, setHeading] = useState<{ key: string; opens: boolean | null } | null>(null);
+  const yourAccess = store?.bots?.find((candidate) => candidate.id === botId)?.yourAccess;
+  const canWrite = useCanWriteIn(threadId, yourAccess) !== false;
   const frame = useRef<AppFrameHandle | null>(null);
   const wide = useRef<AppFrameHandle | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
+  // A page is a compact card where it has somewhere to open: the chat's page pane, or over the window in a room.
+  const paneSlot = useContext(PagePaneContext);
+  const pane = page && !room ? paneSlot : null;
+  const compact = Boolean(pane) || (page && Boolean(room));
+  const paneOpen = Boolean(pane && fullScreen);
   const row = useRef<HTMLDivElement | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
@@ -107,7 +139,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     await frame.current?.teardown();
     frame.current = null;
   }, []);
-  const slot = useAppPoolSlot({ key: `${threadId}:${message.id}`, target: row, auto, evict, ...(pool ? { pool } : {}) });
+  const slot = useAppPoolSlot({ key: `${threadId}:${message.id}`, target: row, auto, evict, held: paneOpen, ...(pool ? { pool } : {}) });
 
   const wanted = slot.live && docKey ? `${docKey}:${reload}` : "";
   useEffect(() => {
@@ -147,14 +179,38 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     heights.set(`${message.id}:${rev}`, next);
     if (mounted.current) setHeight(next);
   }, [message.id, rev]);
+  const arrived = Boolean(wanted) && loaded?.key === wanted;
+  const onHeading = useCallback((next: boolean | null) => {
+    if (!arrived) return;
+    const key = `${message.id}:${rev}`;
+    if (next !== null) rememberHeading(key, next);
+    // Once the card has an answer, or stopped waiting for one, "still drawing" cannot take the preview away again.
+    else if (headings.has(key)) return;
+    if (mounted.current) setHeading((was) => (next === null && was?.key === key && was.opens !== null ? was : { key, opens: next }));
+  }, [arrived, message.id, rev]);
 
   const current = slot.live ? loaded?.doc : undefined;
   const point = usePagePoint({
-    frame: () => (fullScreen ? wide.current : frame.current)?.iframe,
-    threadId, appId: message.id, rev, title: payload.title, picked: () => setFullScreen(false),
+    frame: () => (fullScreen ? wide.current : frame.current)?.iframe, view: fullScreen ? "full" : "inline", frameKey: loaded?.key,
+    // In the pane the message box stays usable, so the page stays open while the person writes about what they picked.
+    threadId, appId: message.id, rev, title: payload.title, picked: () => { if (!pane) setFullScreen(false); },
   });
+  useEffect(() => {
+    if (!paneOpen) return;
+    openPage(threadId, { appId: message.id, rev });
+    const off = onPageOpened(() => { if (openPageFor(threadId)?.appId !== message.id) setFullScreen(false); });
+    return () => { off(); closePage(threadId, message.id); };
+  }, [paneOpen, threadId, message.id, rev]);
+  const draft = (text: string) => {
+    appendComposerDraft(`bot:${botId}:${threadId}`, text);
+    if (!pane) { point.stop(); setFullScreen(false); }
+    returnFocusToComposer();
+  };
+  const onDraft = page && !room ? { onDraft: draft } : {};
   const share = usePageShare(threadId, message.id, message.publishedPage);
-  const tools = { version, point, share, room, ready: Boolean(current), fullScreen: { open: fullScreen, toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const save = usePageSave(threadId, message.id, payload.title);
+  const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
+  const tools = { version, point, share, save, room, pin, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
@@ -200,14 +256,42 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const state = collapsed ? "collapsed" : current ? "live" : noPage ? "unavailable" : slot.live ? "loading" : "idle";
   const infoId = `${uid}-info`;
 
+  // The page says, once it has rendered, whether it opens with a heading of its own; a card whose page does not gets
+  // the title above the preview. Until the page has spoken the preview stays covered, so nothing moves under the eye.
+  const said = heading?.key === `${message.id}:${rev}` ? heading.opens : undefined;
+  const opens = said ?? headings.get(`${message.id}:${rev}`);
+  const undecided = compact && Boolean(current) && opens === undefined;
+  const timing = undecided && arrived;
+  const drawing = said === null;
+  const frameKey = loaded?.key;
+  useEffect(() => {
+    if (!timing) return;
+    const key = `${message.id}:${rev}`;
+    const timer = setTimeout(() => {
+      rememberHeading(key, false);
+      setHeading({ key, opens: false });
+    }, drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [timing, drawing, frameKey, message.id, rev]);
+  // The title stays while the frame is away (the pool took its slot), so the card keeps its height.
+  const titled = compact && opens === false;
+  // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
+  const previewHeight = height + (titled ? CARD_TITLE_HEIGHT : 0);
+  const boxHeight = compact ? Math.min(previewHeight, PAGE_PREVIEW_HEIGHT) : height;
   const body = collapsed ? null : fullScreen && current ? (
-    <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]")} style={{ height }}>
-      <AppPlaceholder height={height} open={() => setFullScreen(false)} label={t("chat.preview.exitFullScreen")} />
+    <div data-app-box className={cn("relative w-full", bordered && !compact && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
+      {compact
+        ? <AppPlaceholder height={boxHeight}><span className="ui-pill">{t("chat.preview.closePage")}</span></AppPlaceholder>
+        : <AppPlaceholder height={boxHeight} open={() => setFullScreen(false)} label={t("chat.preview.exitFullScreen")} />}
     </div>
   ) : noPage ? (
-    message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
+    message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", compact ? "px-4 pt-3" : bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
   ) : (
-    <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")} style={{ height }}>
+    <div data-app-box className={cn("relative w-full", compact && "overflow-hidden", bordered && !compact && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")}
+      // The whole card opens the page, so the keyboard must not reach what the preview shows underneath it.
+      inert={(compact && Boolean(current) && !point.pointing) || undefined}
+      style={{ height: boxHeight }}>
+      {titled && <div data-page-title title={payload.title} className={CARD_TITLE}><bdi dir="auto">{payload.title}</bdi></div>}
       {current ? (
         <AppFrame
           key={loaded!.key}
@@ -218,15 +302,33 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
           height={height}
           handle={frame}
           onHeight={onHeight}
+          {...(compact ? { onHeading } : {})}
           onProblem={setProblem}
           onTeardownRequested={onTeardownRequested}
           {...(page ? { maxHeight: PAGE_HEIGHT.cap } : {})}
+          {...(!room ? { onSelection: setSelection } : {})}
+          {...onDraft}
         />
       ) : (
-        <AppPlaceholder height={height} loading={slot.live} open={slot.live ? undefined : reloadNow} />
+        <AppPlaceholder height={boxHeight - (titled ? CARD_TITLE_HEIGHT : 0)} loading={slot.live} open={slot.live ? undefined : reloadNow} />
+      )}
+      {undecided && (
+        <div data-page-settling className="absolute inset-0 bg-composer">
+          <AppPlaceholder height={boxHeight} loading />
+        </div>
+      )}
+      {compact && current && !undecided && previewHeight > PAGE_PREVIEW_HEIGHT && (
+        <div data-page-fade aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-composer to-transparent" />
       )}
     </div>
   );
+  const info = infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered || compact} />;
+  const reopen = collapsed && (
+    <div className={cn("flex", bordered || compact ? "px-4 pb-3.5" : "pb-2", compact && "pt-3.5")}>
+      <AppOpenButton label={t("app.openAgain")} onClick={reloadNow} />
+    </div>
+  );
+  const kind = t("chat.preview.kind");
 
   return (
     <div
@@ -238,33 +340,65 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       data-app-source={payload.source}
       {...(page ? { "data-app-rev": rev } : {})}
       {...(room ? { "data-app-room": "" } : {})}
-      className={cn("w-full text-start", WIDTH)}
+      className={cn("w-full text-start", compact ? CARD_WIDTH : WIDTH)}
     >
-      <div className={cn(bordered ? APP_SURFACE : "w-full")}>
-        <AppHeader
-          title={payload.title}
-          origin={origin}
-          infoId={infoId}
-          infoOpen={infoOpen}
-          onInfo={() => setInfoOpen((open) => !open)}
-          onReload={docKey ? reloadNow : undefined}
-          reloading={fetching && Boolean(current)}
-          bordered={bordered}
-        />
-        {page && <PageToolbar {...tools} className={bordered ? "px-4 pb-3" : "pb-2"} />}
-        {page && <PageNotes version={version} point={point} share={share} room={room} className={bordered ? "px-4 pb-3" : "pb-2"} />}
-        {infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered} />}
-        {collapsed && (
-          <div className={cn("flex", bordered ? "px-4 pb-3.5" : "pb-2")}>
-            <AppOpenButton label={t("app.openAgain")} onClick={reloadNow} />
+      {compact ? (
+        <div className={APP_SURFACE}>
+          <div className="group/page relative">
+            {reopen}
+            {body}
+            <PageCardFooter
+              title={payload.title}
+              detail={version.last > 0 ? `${kind} · ${t("chat.preview.version", { n: version.rev + 1 })}` : kind}
+              updated={version.flash}
+              infoId={infoId}
+              infoOpen={infoOpen}
+              onInfo={() => setInfoOpen((open) => !open)}
+              onReload={docKey ? reloadNow : undefined}
+              reloading={fetching && Boolean(current)}
+            />
+            {current && !point.pointing && (
+              <button type="button" data-page-open onClick={tools.fullScreen.toggle} aria-pressed={fullScreen}
+                aria-label={t(fullScreen ? "chat.preview.closePage" : "chat.preview.openPage")}
+                className="absolute inset-0 cursor-pointer rounded-2xl transition-colors duration-[120ms] hover:bg-ink/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus motion-reduce:transition-none" />
+            )}
           </div>
-        )}
-        {body}
-        {payload.done && <AppDone done={payload.done} bordered={bordered} />}
-        {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
-      </div>
+          {info}
+          {payload.done && <AppDone done={payload.done} bordered />}
+          {strip && <AppStrip text={strip.text} action={strip.action} bordered />}
+        </div>
+      ) : (
+        <div className={cn(bordered ? APP_SURFACE : "w-full")}>
+          <AppHeader
+            title={payload.title}
+            origin={origin}
+            infoId={infoId}
+            infoOpen={infoOpen}
+            onInfo={() => setInfoOpen((open) => !open)}
+            onReload={docKey ? reloadNow : undefined}
+            reloading={fetching && Boolean(current)}
+            bordered={bordered}
+          />
+          {page && <PageToolbar {...tools} className={bordered ? "px-4 pb-3" : "pb-2"} />}
+          {page && <PageNotes version={version} point={point} share={share} save={save} room={room} className={bordered ? "px-4 pb-3" : "pb-2"} />}
+          {info}
+          {reopen}
+          {body}
+          {payload.done && <AppDone done={payload.done} bordered={bordered} />}
+          {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
+        </div>
+      )}
+      {!room && canWrite && (
+        <PageCitationButton
+          selection={selection && { text: selection.text, point: { left: selection.left, top: selection.bottom + 8 } }}
+          source={{ ownerType: "bot", ownerId: botId, threadId, messageId: message.id }}
+          onAdd={(citation) => appendDraftAttachments(`bot:${botId}:${threadId}`, [citation])}
+          onDismiss={() => setSelection(null)}
+        />
+      )}
       {page && fullScreen && current && (
-        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => setFullScreen(false)} />
+        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => { point.stop(); setFullScreen(false); }} pane={pane}
+          {...(!room ? { onSelection: setSelection } : {})} {...onDraft} />
       )}
     </div>
   );

@@ -10,9 +10,11 @@ import {
   type FailedRequest, type HealthDelta, type RelayRead,
 } from "./browser-page-health.ts";
 import { RelayPorts, RelayTimeout, relay, relayPorts, relayTarget, type RelayTarget } from "./browser-relay.ts";
-import type { BrowserSpawnSpec } from "./browser-runtime.ts";
+import { attachesToChrome, type BrowserSpawnSpec } from "./browser-runtime.ts";
 import { sanitizeUrl, scrubBrowserResult } from "./browser-tool-shape.ts";
 import { browserEgress } from "./browser/egress/registry.ts";
+import { browserInputLog, type BrowserInputLog } from "./browser/input-log.ts";
+import { chromeLauncher } from "./browser/chrome/launcher.ts";
 
 export interface StepContext {
   botId: string;
@@ -61,10 +63,39 @@ interface StepState {
   geometry: Geometry | null;
   box: Box | null;
   target: { selector: string; role?: string; name?: string; inFrame: boolean } | null;
+  /** The target was disabled just before the action. */
+  disabled: boolean;
+  /** The page a fill or type started on: one it left, or a line it submitted, may clear its field. */
+  typedOn: { url: string; loadedAt?: number } | null;
 }
 
 const ACTIONS = new Set(["open", "click", "fill", "type", "press", "check", "uncheck", "select", "scroll", "back", "forward", "reload", "tab_new", "tab_switch", "tab_close", "eval", "close"]
   .map((name) => `agent_browser_${name}`));
+/** Actions on a target whose success agent-browser 0.37.0 reports for a disabled one, and for a fill or type that landed
+ * elsewhere (a non-text target writes into the field focused before; a ref whose element the page replaced writes nowhere). */
+const ON_TARGET = new Set(["click", "dblclick", "check", "uncheck", "fill", "type"].map((name) => `agent_browser_${name}`));
+const TYPING = new Set(["agent_browser_fill", "agent_browser_type"]);
+const verb = (tool: string) => tool.replace("agent_browser_", "");
+/** A disabled target, or text that is not in it afterwards: the bot hears it as an error. */
+export const disabledTarget = (tool: string) => `The ${verb(tool)} reported done, but its target was disabled, so nothing happened. Wait until the page enables it, or check what the page still needs first.`;
+export const textNotLanded = (tool: string) => `The ${verb(tool)} reported done, but its target does not hold the text afterwards: it may not be a text field, or the page replaced it since the last snapshot. Take a new snapshot and use its refs.`;
+
+/** Letters and digits only, so a field that formats what it holds (a phone number, a card) still matches. */
+const comparable = (text: string) => text.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+/** Whether the element `selector` names holds `text` (a field's value, else its text); null when that cannot be told. */
+async function holdsText(read: RelayRead, selector: string, text: string): Promise<boolean | null> {
+  const wanted = comparable(text);
+  if (!wanted) return null;
+  const value = await read({ action: "inputvalue", selector });
+  if (!value?.success) return null;
+  const held = typeof value.data?.value === "string" ? comparable(value.data.value) : "";
+  // A field with a length limit keeps the start of the text.
+  if (held) return held.includes(wanted) || wanted.startsWith(held);
+  const inner = await read({ action: "innertext", selector });
+  return inner?.success ? comparable(String(inner.data?.text ?? "")).includes(wanted) : null;
+}
+
 const REFS_RESET = new Set(["open", "tab_new", "tab_switch", "tab_close", "close"].map((name) => `agent_browser_${name}`));
 
 const PASS_MS = 1_000;
@@ -77,6 +108,8 @@ const CODE_LATCH_MS = 60_000;
 const FRESH_IMAGE_MS = 2_000;
 
 const RELAUNCHED = "The browser had stopped and was started again during this call: pages, refs and form input from before are gone. Take a snapshot before acting on refs.";
+/** Said when a page answers 403 to the headless shell: many sites refuse it, and only the person can bring a real Chrome. */
+export const SHELL_REFUSED = "This page answered 403 Forbidden, and this built-in browser is Chromium's headless shell (Google Chrome is not installed on this computer), which many sites refuse. If the site keeps refusing it, do not try to get around the block: tell the person that once they install Google Chrome the built-in browser uses it instead, or that they can open the site and sign in themselves in their own browser or on their Local VM.";
 
 /** Read-only; reports how much the focused element holds, never its value. A cross-origin frame stops the focus walk. */
 export const GEOMETRY_SCRIPT = `(() => {
@@ -143,6 +176,38 @@ export const GEOMETRY_SCRIPT = `(() => {
 })()`;
 
 const PAGE_SCRIPT = "JSON.stringify({ url: location.href, loadedAt: performance.timeOrigin })";
+
+/** PAGE_SCRIPT with `typed`: whether the focused element is an editable field holding text; null inside a frame of another site. */
+export const TYPED_PAGE_SCRIPT = `(() => {
+  let a = document.activeElement;
+  let typed = false;
+  for (let depth = 0; a && depth < 20; depth++) {
+    if (a.shadowRoot && a.shadowRoot.activeElement) { a = a.shadowRoot.activeElement; continue; }
+    const t = String(a.tagName || "").toLowerCase();
+    if (t !== "iframe" && t !== "frame") break;
+    let doc = null;
+    try { doc = a.contentDocument; } catch {}
+    if (!doc) { a = null; typed = null; break; }
+    a = doc.activeElement;
+  }
+  if (a) {
+    const t = String(a.tagName || "").toLowerCase();
+    const editable = a.isContentEditable || ((t === "input" || t === "textarea") && !a.readOnly && !a.disabled);
+    typed = Boolean(editable && (typeof a.value === "string" ? a.value.length : (a.innerText || "").length) > 0);
+  }
+  return JSON.stringify({ url: location.href, loadedAt: performance.timeOrigin, typed });
+})()`;
+
+/** False when a fill or type the engine called done left no text in the focused field; null when that cannot be told. */
+function typedLanded(geometry: Geometry | null, raw: unknown): boolean | null {
+  if (geometry) return geometry.focus?.frame === "cross" ? null : Boolean(geometry.focus?.editable && geometry.focus.valueLength > 0);
+  let parsed: unknown = raw;
+  for (let depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
+    try { parsed = JSON.parse(parsed); } catch { return null; }
+  }
+  const typed = record(parsed)?.typed;
+  return typeof typed === "boolean" ? typed : null;
+}
 
 const FRAME_SCRIPT = "new Promise((r) => { const t = setTimeout(() => r(0), 250); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(1); })); })";
 
@@ -315,9 +380,13 @@ export class BrowserSteps {
   private sessions = new Map<string, SessionSteps>();
   private now: () => number;
   private sleep: (ms: number) => Promise<void>;
+  private shellForWantOfChrome: () => boolean;
+  private inputLog: BrowserInputLog;
 
-  constructor(options: { ports: RelayPorts; evidence: BrowserEvidence | null; health?: PageHealthReader; now?: () => number; sleep?: (ms: number) => Promise<void> }) {
+  constructor(options: { ports: RelayPorts; evidence: BrowserEvidence | null; health?: PageHealthReader; now?: () => number; sleep?: (ms: number) => Promise<void>; shellForWantOfChrome?: () => boolean; inputLog?: BrowserInputLog }) {
     this.ports = options.ports;
+    this.inputLog = options.inputLog ?? browserInputLog;
+    this.shellForWantOfChrome = options.shellForWantOfChrome ?? (() => chromeLauncher.runsShellForWantOfChrome());
     this.evidence = options.evidence;
     this.health = options.health ?? new PageHealthReader();
     this.now = options.now ?? Date.now;
@@ -366,7 +435,7 @@ export class BrowserSteps {
     steps.image = null;
     const state: StepState = {
       startedAt: this.now(), actionAt: 0, action: ACTIONS.has(call.tool), recorded: call.ctx?.record === true && ACTIONS.has(call.tool),
-      aliveBefore: null, noDaemon: false, wasRunning: steps.running, late: null, geometry: null, box: null, target: null,
+      aliveBefore: null, noDaemon: false, wasRunning: steps.running, late: null, geometry: null, box: null, target: null, disabled: false, typedOn: null,
     };
     try {
       if (call.stopped()) return state;
@@ -378,6 +447,10 @@ export class BrowserSteps {
       const read = this.reader(target, probe.port);
       state.late = await this.health.read(call.session, read, call.ctx?.threadId ?? null);
       await this.health.clear(call.session, read);
+      if (ON_TARGET.has(call.tool) && typeof call.args.selector === "string" && call.args.selector) {
+        state.disabled = (await read({ action: "isenabled", selector: call.args.selector }))?.data?.enabled === false;
+        if (TYPING.has(call.tool)) state.typedOn = parseGeometry((await read({ action: "evaluate", script: PAGE_SCRIPT }))?.data?.result);
+      }
       if (!state.recorded) return state;
       state.geometry = parseGeometry((await read({ action: "evaluate", script: GEOMETRY_SCRIPT }))?.data?.result);
       const selector = typeof call.args.selector === "string" ? call.args.selector : "";
@@ -396,8 +469,8 @@ export class BrowserSteps {
   }
 
   /** Never throws; a person who takes the browser meanwhile ends it at the next check. */
-  async after(call: StepCall, result: unknown, state: StepState, engineMs = 0): Promise<{ parts: Array<{ type: "text"; text: string }>; launched: boolean }> {
-    const out: { parts: Array<{ type: "text"; text: string }>; launched: boolean } = { parts: [], launched: false };
+  async after(call: StepCall, result: unknown, state: StepState, engineMs = 0): Promise<{ parts: Array<{ type: "text"; text: string }>; launched: boolean; failed?: true }> {
+    const out: { parts: Array<{ type: "text"; text: string }>; launched: boolean; failed?: true } = { parts: [], launched: false };
     const steps = this.session(call.session);
     const ok = record(result)?.isError !== true;
     const tool = call.tool;
@@ -447,14 +520,32 @@ export class BrowserSteps {
         geometry = parseGeometry(answer?.data?.result);
         failure = answer?.error;
       }
-      const page = geometry ?? parseGeometry((await read({ action: "evaluate", script: PAGE_SCRIPT }))?.data?.result);
+      const typing = ok && (tool === "agent_browser_fill" || tool === "agent_browser_type") && typeof call.args.text === "string" && call.args.text !== "";
+      const raw = geometry ? null : (await read({ action: "evaluate", script: typing ? TYPED_PAGE_SCRIPT : PAGE_SCRIPT }))?.data?.result;
+      const page = geometry ?? parseGeometry(raw);
+      const selector = typeof call.args.selector === "string" ? call.args.selector : "";
+      const stayed = state.typedOn !== null && page !== null && page.url === state.typedOn.url && page.loadedAt === state.typedOn.loadedAt;
+      const checkable = typing && stayed && !/[\r\n]/u.test(String(call.args.text));
+      const missed = !ok || !selector ? null : state.disabled ? disabledTarget(tool)
+        : checkable && await holdsText(read, selector, String(call.args.text)) === false ? textNotLanded(tool) : null;
+      if (missed) {
+        out.failed = true;
+        out.parts.push({ type: "text", text: missed });
+        this.inputLog.record({ who: "bot", reason: state.disabled ? "target_not_actionable" : "typed_not_landed", what: tool, engine: "agent-browser", transport: "tools", session: call.session });
+      } else if (typing && (geometry || raw !== undefined) && typedLanded(geometry, raw) === false) {
+        this.inputLog.record({ who: "bot", reason: "typed_not_landed", what: tool, engine: "agent-browser", transport: "tools", session: call.session });
+      }
       this.health.setPage(call.session, page?.url ?? null, page?.loadedAt ?? null);
       const delta = await this.health.read(call.session, read, call.ctx?.threadId ?? null, state.noDaemon);
       if (this.ports.takeStarted(call.session)) await this.started(call, steps, true, out);
       const pageHost = this.health.pageHost(call.session);
+      const late = state.late ? this.health.visible(call.session, state.late) : null;
+      const visible = delta ? this.health.visible(call.session, delta) : null;
+      const refused = [late, visible].some((seen) => seen?.requests.some((request) => request.status === 403 && request.type.toLowerCase() === "document"));
       const lines = [
-        state.late ? healthLine(this.health.visible(call.session, state.late), [], "late", SETTLE_CAP_MS / 1000, pageHost) : null,
-        delta ? healthLine(this.health.visible(call.session, delta), recording ? unansweredWorthSaying(pending) : [], state.action ? "after" : "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        late ? healthLine(late, [], "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        visible ? healthLine(visible, recording ? unansweredWorthSaying(pending) : [], state.action ? "after" : "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        refused && !attachesToChrome(call.spec.env) && this.shellForWantOfChrome() ? SHELL_REFUSED : null,
         browserEgress.takeNotice(call.session),
       ];
       for (const text of lines) if (text) out.parts.push({ type: "text", text });

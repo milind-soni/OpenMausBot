@@ -1,15 +1,19 @@
 import { EffortRow, ModelPicker } from "../ModelPicker";
 import { X } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { useStore, type Bot, type InstanceInfo } from "@/state/store";
+import { type Bot, type InstanceInfo } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { ProposalStatus } from "./ProposalStatus";
+import { CheckWorkSetting } from "./CheckWorkSetting";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
+import { BackupReasoning } from "../BackupReasoning";
+import { backupNote } from "@/lib/engine-rail";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function ModelSection({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const { draft } = useBotEditor();
   const modelVariants = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.modelVariants;
   return (
@@ -46,6 +50,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
           </div>
         }
       />
+      {!draft && <CheckWorkSetting bot={bot} />}
       {!draft && <FallbackChain bot={bot} onChange={(fallback) => dispatch({ type: "updateBot", botId: bot.id, patch: { fallback } })} />}
       {!draft && state.config?.cacheKeepWarm && (
         <KeepWarmRow bot={bot} workspaceOn={state.config.cacheKeepWarm.enabled}
@@ -72,14 +77,14 @@ function KeepWarmRow({ bot, workspaceOn, onChange }: { bot: Bot; workspaceOn: bo
 }
 
 export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["fallback"]) => void }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const chain = bot.fallback ?? [];
   // Backups may share an account with the main AI or each other, never a model.
   const taken = (instanceId: string, model: string, except?: number) =>
     (bot.modelSelection.instanceId === instanceId && bot.modelSelection.model === model)
     || chain.some((entry, at) => at !== except && entry.instanceId === instanceId && entry.model === model);
   const offeredBy = (instance: InstanceInfo | undefined) =>
-    instance?.models.options.filter((model) => !model.orgBlocked && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
+    instance?.models.options.filter((model) => !model.orgBlocked && !model.needsCliUpdate && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
   // The default too must be one the account offers now: not blocked, and signed in unless it is a custom model.
   const defaultOffered = (instance: InstanceInfo) => {
     const listed = instance.models.options.find((model) => model.id === instance.models.default);
@@ -90,6 +95,11 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
   const available = state.instances.filter((instance) =>
     instance.snapshot.state === "available" && Boolean(instance.models.default.trim()) && freeModel(instance) !== undefined);
   const nameOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId)?.displayName ?? instanceId;
+  const main = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const backupLabel = (instance: InstanceInfo) => {
+    const note = backupNote(main, instance);
+    return note ? `${instance.displayName} · ${note}` : instance.displayName;
+  };
   const modelsOf = (entry: NonNullable<Bot["fallback"]>[number], index: number) => {
     const offered = offeredBy(state.instances.find((candidate) => candidate.instanceId === entry.instanceId))
       .filter((model) => !taken(entry.instanceId, model.id, index));
@@ -117,9 +127,11 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
               <span className="min-w-0 flex-1 truncate text-ink">{nameOf(entry.instanceId)}</span>
               <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}
                 aria-label={t("model.fallback.model", { name: nameOf(entry.instanceId) })}
-                onChange={(event) => onChange(chain.map((candidate, at) => at === index ? { ...candidate, model: event.target.value } : candidate))}>
+                onChange={(event) => onChange(chain.map((candidate, at) => at === index ? { instanceId: candidate.instanceId, model: event.target.value } : candidate))}>
                 {modelsOf(entry, index).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </Select>
+              <BackupReasoning instance={state.instances.find((instance) => instance.instanceId === entry.instanceId)} selection={entry}
+                onChange={(next) => onChange(chain.map((candidate, at) => at === index ? next : candidate))} />
               <button
                 type="button"
                 onClick={() => onChange(chain.filter((_, at) => at !== index))}
@@ -143,8 +155,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
             <option value="">{available.length === 0 ? t("model.fallback.none") : t("model.fallback.addOption")}</option>
             {available.map((instance) => (
               <option key={instance.instanceId} value={instance.instanceId}>
-                {instance.instanceId === bot.modelSelection.instanceId
-                  ? `${instance.displayName} · ${t("botPanel.backups.sameAccount")}` : instance.displayName}
+                {backupLabel(instance)}
               </option>
             ))}
           </Select>

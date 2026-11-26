@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -303,6 +303,34 @@ describe("advertised base URL", () => {
       expect(health.status).toBe(200);
     } finally {
       await new Promise<void>((resolve) => proxied.server.close(() => resolve()));
+    }
+  });
+
+  // The compose files' Caddy runs in its own container and reaches the receiver over this socket, so a server that
+  // restarts on its own never leaves Caddy behind in a network the new one is not in.
+  it.skipIf(process.platform === "win32")("answers on its Unix socket too, replacing one a stopped server left", async () => {
+    const socketPath = join(dir, "hooks.sock");
+    // A server killed with -9 never unlinks its socket: the next one must still listen there.
+    writeFileSync(socketPath, "left behind");
+    const receiver = await listenWebhookIngress(manager, { port: 0, socketPath });
+    try {
+      expect(statSync(socketPath).isSocket()).toBe(true);
+      const viaSocket = (path: string, method = "GET") => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const sent = request({ socketPath, path, method, headers: { host: "bots.example.com", "content-type": "application/json", "idempotency-key": "via-socket" } }, (response) => {
+          let body = "";
+          response.setEncoding("utf8").on("data", (chunk: string) => { body += chunk; }).on("end", () => resolve({ status: response.statusCode ?? 0, body }));
+        });
+        sent.on("error", reject);
+        sent.end(method === "POST" ? "{}" : undefined);
+      });
+      expect(await viaSocket("/health")).toEqual({ status: 200, body: JSON.stringify({ app: "openmausbot-webhooks", ready: true }) });
+      expect((await viaSocket("/api/bots")).status).toBe(404);
+      const before = queued.length;
+      expect((await viaSocket(`/hooks/${endpointId}/${secret}`, "POST")).status).toBe(202);
+      expect(queued).toHaveLength(before + 1);
+    } finally {
+      await new Promise<void>((resolve) => receiver.server.close(() => resolve()));
+      await new Promise<void>((resolve) => receiver.socketServer?.close(() => resolve()) ?? resolve());
     }
   });
 

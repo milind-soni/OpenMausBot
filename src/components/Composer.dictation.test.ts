@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -18,6 +19,8 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// The model picker in Advanced mode's footer reads a store this file does not build.
+vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-slash-skills", () => ({ useSlashSkills: () => [] }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 vi.mock("./CallView", () => ({ CallButton: () => null }));
@@ -112,6 +115,34 @@ describe("native dictation in the real composer", () => {
     expect(input().value).toBe("");
   });
 
+  it("stops and starts again with the dictation shortcut in the text field", () => {
+    const press = () => {
+      const event = new KeyboardEvent("keydown", { key: "d", code: "KeyD", bubbles: true, cancelable: true, ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) });
+      flushSync(() => input().dispatchEvent(event));
+      return event;
+    };
+    expect(press().defaultPrevented).toBe(true);
+    expect(speechStop).toHaveBeenCalledOnce();
+    expect(button(t("composer.dictation.start"))).not.toBeNull();
+    press();
+    expect(speechStart).toHaveBeenCalledTimes(2);
+    expect(button(t("composer.dictation.stop"))).not.toBeNull();
+  });
+
+  it("ignores the repeats of a held dictation shortcut", () => {
+    const press = (repeat: boolean) => {
+      const event = new KeyboardEvent("keydown", { key: "d", code: "KeyD", repeat, bubbles: true, cancelable: true, ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) });
+      flushSync(() => input().dispatchEvent(event));
+      return event;
+    };
+    press(false);
+    expect(speechStop).toHaveBeenCalledOnce();
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(speechStart).toHaveBeenCalledOnce();
+    expect(button(t("composer.dictation.start"))).not.toBeNull();
+  });
+
   it("accepts multiple recognition results before React paints", () => {
     flushSync(() => {
       transcript({ text: "一", partial: true });
@@ -151,6 +182,17 @@ describe("native dictation in the real composer", () => {
     expect(speechStart).toHaveBeenCalledOnce();
     flushSync(() => root.render(createElement(Composer, { bot })));
     await expect.poll(() => input().value).toBe("元スレッドの文章。");
+  });
+
+  it("says Windows has no recognizer for the language instead of asking to try again", () => {
+    flushSync(() => end({ code: 1, reason: "speech-language-missing" }));
+    expect(container.textContent).toContain(t("composer.dictation.languageMissing"));
+    expect(container.textContent).not.toContain(t("composer.dictation.failed"));
+  });
+
+  it("still asks to try again for other helper failures", () => {
+    flushSync(() => end({ code: 1, reason: "helper-start-failed" }));
+    expect(container.textContent).toContain(t("composer.dictation.failed"));
   });
 
   it("retains text when recognition ends in an error", () => {

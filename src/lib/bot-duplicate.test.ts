@@ -46,4 +46,13 @@ describe("what a duplicated bot is created with", () => {
     const { vpsAlias: _alias, ...onDefault } = source;
     expect(duplicateBotProfile(onDefault as Bot).vpsAlias).toBeUndefined();
   });
+
+  it("a team's User gives a copy only who it is and how it looks: nothing an admin alone sets", () => {
+    const source = { name: "Quotes", title: "Prices", description: "d", soul: "s", notifications: true, modelSelection: { instanceId: "claude", model: "m" },
+      computer: "cloud", cloudBackend: "vps", autoStartVps: true, vpsAlias: "box", avatarUrl: "/a.png", visibility: { people: ["rui@acme.test"] }, toolScope: { allow: [] }, helperModel: false } as unknown as Bot;
+    expect(restrictedCopyRequest(source, true)).toEqual({});
+    expect(Object.keys(duplicateBotProfile(source, true)).sort()).toEqual(["avatarCrop", "avatarFocusX", "avatarFocusY", "avatarUrl", "avatarZoom", "description", "modelSelection", "name", "notifications", "soul", "title"]);
+    expect(duplicateBotProfile(source, true).name).toBe("Quotes copy");
+    expect(Object.keys(duplicateBotProfile(source, false))).toEqual(expect.arrayContaining(["computer", "cloudBackend", "autoStartVps", "vpsAlias"]));
+  });
 });

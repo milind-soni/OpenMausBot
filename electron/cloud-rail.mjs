@@ -45,7 +45,7 @@ function circle(entry, { activeId, mine, state, offers, waiting }) {
   const paint = railPaint(placeLook(entry, { clouds: connected?.clouds ?? null, homeOrigin: mine }), color);
   return { id: entry.id, name: entry.name, color, kind, opens: true, ...(paint ? { paint } : {}), ...(entry.id === activeId ? { active: true } : {}),
     ...(progress !== null ? { progress } : {}), ...(problem || waiting(entry.id) ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}),
-    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}), ...(kind === "server" ? { removable: true, forget: true } : {}),
+    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}), ...(kind === "server" ? { removable: true, forget: true, renames: true } : {}),
     ...(kind === "server" && offers(entry) ? { makeHome: true } : {}) };
 }
 
@@ -155,10 +155,12 @@ const CHOICES = Object.freeze(["cloud", "link", "address"]);
  * `places()` is railPlaces' list now; `open(id)` main's own switch; `add` the ＋ sheet's fixed actions; `account()` the
  * MausBot Cloud sign-in; `targets()` the pages told when something changed; `makeHome(id)` starts the move to a server
  * of the person's own (own-home-main.mjs `start`). `switchAccount(id)`: that account becomes the one in use (cloud-accounts.mjs).
+ * `rename(id, name)`: a server saved by hand takes that name on this computer: true when saved, false for a name that is blank; a throw is a failed save.
  * `openProfile(id)`: the window shows that workspace of this computer's own (local-profiles.mjs `open`). `local`: those
  * workspaces' ＋, names, colours and removal (local-profiles.mjs), and the end of a switch still waiting when another place opens.
+ * `ask(id, run)`: a circle's click, listed at once, `run` told when a newer one came (place-switch.mjs); `switching()`: the place it opens, or null.
  */
-export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null, forget = null, switchAccount = null, openProfile = null, local = null, t = nativeText.englishText.t }) {
+export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null, forget = null, rename = null, switchAccount = null, openProfile = null, local = null, ask = (_id, run) => run(() => false), switching = () => null, t = nativeText.englishText.t }) {
   let sheetOpen = false, sent = "";
   const allowed = (channel, handler) => guard((event, ...args) => {
     if (!trusted(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -173,28 +175,28 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
   // ＋'s choices: main's, and a new organization while this account runs a Team plan's organizations (unless the Admin has
   // turned adding them off).
   const choices = () => { const organizations = account()?.state().organizations; return { ...add.choices(), organization: Boolean(organizations) && organizations.blocked !== "off", local: local?.creatable() === true }; };
-  ipcMain.handle("workspaces:places", guard((event) => (lists(event) ? { places: places().map(seen), add: choices() }
+  ipcMain.handle("workspaces:places", guard((event) => (lists(event) ? { places: places().map(seen), add: choices(), ...(switching() ? { switching: switching() } : {}) }
     : { places: [], add: { cloud: false, link: false, address: false, organization: false }, ...(beside() ? { beside: true } : {}) })));
   // A Cloud the Admin is still making has no saved place: its own screen opens, by main's word for which Cloud it is.
-  const opening = place => {
+  const opening = (place, stale) => {
     if (place.id.startsWith(PENDING)) { local?.cancel(); return openCloud(place.cloudId); }
-    if (!place.profile) { local?.cancel(); return open(place.id); }
+    if (!place.profile) { local?.cancel(); return open(place.id, stale); }
     if (!openProfile) throw new Error(t("native.places.noLongerHere"));
-    return openProfile(place.profile);
+    return openProfile(place.profile, stale);
   };
   // A place of another account: that account becomes the one in use first, and nothing moves if it can't. By then the place is
   // listed as that account's own; an account with no place of its own is simply where the window goes.
-  const switchingTo = async place => {
+  const switchingTo = async (place, stale) => {
     const said = await switchAccount(place.account);
     if (said.outcome !== "switched") return { outcome: said.outcome, ...(said.email ? { email: said.email } : {}) };
     const arrived = places().find(entry => entry.id === place.id && entry.opens && !entry.account);
-    if (arrived) await opening(arrived);
+    if (arrived) await opening(arrived, stale);
     return { outcome: "switched" };
   };
   listed("workspaces:open", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.opens);
     if (!place) throw new Error(t("native.places.noLongerHere"));
-    return place.account ? switchingTo(place) : opening(place);
+    return ask(place.id, stale => (place.account ? switchingTo(place, stale) : opening(place, stale)));
   });
   // Remove from list, from a circle's menu (the page asked the person first): only a Cloud or a server saved by hand that
   // main listed as removable. A server is forgotten here; a Cloud is taken off the person's list at the Admin.
@@ -205,12 +207,22 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     const client = account();
     return { outcome: client?.hideCloud ? (await client.hideCloud(place.cloudId)).outcome : "unsupported" };
   });
-  // Make … my home, from a circle's menu: only a server main listed with it, by main's own word for it.
-  listed("workspaces:make-home", (_event, id) => {
+  // Rename, from a circle's menu: only a server saved by hand that main listed with it; its new name is this app's own.
+  listed("workspaces:rename", (_event, id, name) => {
+    const place = places().find(entry => entry.id === plain(id) && entry.renames);
+    if (!place) throw new Error(t("native.places.noLongerHere"));
+    if (!rename) return { outcome: "unsupported" };
+    try { return { outcome: rename(place.id, plain(name)) ? "saved" : "name" }; } catch { return { outcome: "failed" }; }
+  });
+  // Make … my home, from a circle's menu or Settings → Devices on this computer's own page (`trusted`): only a server
+  // main listed with it, by main's own word for it.
+  handle("workspaces:make-home", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.makeHome);
     if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
     return makeHome(place.id);
   });
+  // The servers main offers Make … my home for now, by id: Settings → Devices shows the button only for those.
+  handle("workspaces:home-offers", () => (makeHome ? places().filter(entry => entry.makeHome).map(entry => entry.id) : []));
   // A workspace of this computer's own: a new one from ＋ (on the rail's page, or this computer's own from the Server menu),
   // and a name, a colour or its removal from its circle's menu, only for one main listed.
   handle("workspaces:local-new", (_event, name, color) => {
@@ -284,7 +296,7 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     /** The places, the sign-in or the rail beside the page changed: the rail's page and the page beside it read them
      * again (a signal only, never the list). */
     changed() {
-      const key = JSON.stringify([places(), choices(), account()?.state().adding ?? null, account()?.state().addCloud ?? null, beside()]);
+      const key = JSON.stringify([places(), choices(), account()?.state().adding ?? null, account()?.state().addCloud ?? null, beside(), switching()]);
       if (key === sent) return;
       sent = key;
       for (const target of targets()) if (target && !target.isDestroyed()) target.send("workspaces:changed");

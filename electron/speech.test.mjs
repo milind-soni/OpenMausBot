@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,10 +8,19 @@ const fixture = vi.hoisted(() => ({ launches: [], onLaunch: null }));
 vi.mock("electron", () => ({ app: { isPackaged: true, getPath: () => tmpdir() } }));
 vi.mock("node:child_process", async (importOriginal) => ({
   ...await importOriginal(),
-  spawn: (_file, args) => {
+  spawn: (file, args, options) => {
     const proc = new EventEmitter();
     const arg = flag => args[args.indexOf(flag) + 1];
-    fixture.launches.push({ proc, args, output: arg("-o"), stop: arg("--stop-file"), finish: arg("--finish-file") });
+    if (args.includes("-File")) {
+      // Windows: the helper talks over pipes. A copy of its script is read while it runs.
+      proc.stdout = Object.assign(new EventEmitter(), { setEncoding: () => {} });
+      proc.stdin = Object.assign(new EventEmitter(), { written: [], write(data) { this.written.push(data); return true; } });
+      proc.kill = () => { proc.killed = true; return true; };
+      const script = arg("-File");
+      fixture.launches.push({ proc, file, args, options, script, scriptText: readFileSync(script, "utf8") });
+    } else {
+      fixture.launches.push({ proc, args, output: arg("-o"), stop: arg("--stop-file"), finish: arg("--finish-file") });
+    }
     fixture.onLaunch();
     return proc;
   },
@@ -208,3 +218,73 @@ describe.skipIf(platform === "win32")("native speech file transport", () => {
     expect(fixture.launches.at(-1).args).not.toContain("--finish-on-release");
   });
 });
+
+describe("Windows speech helper", () => {
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+  });
+  const say = (session, ...lines) => session.proc.stdout.emit("data", lines.map(line => `${JSON.stringify(line)}\r\n`).join(""));
+
+  it("listens through Windows' own recognizer in PowerShell, with no key, and hands the page what it hears", async () => {
+    const session = await launch();
+    expect(path.win32.basename(session.file).toLowerCase()).toBe("powershell.exe");
+    expect(session.args).toEqual(expect.arrayContaining(["-NoProfile", "-NonInteractive", "-File", session.script]));
+    expect(session.args.slice(-2)).toEqual(["-EndpointMs", "0"]);
+    expect(session.options).toMatchObject({ windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+    expect(session.scriptText).toContain("System.Speech.Recognition.SpeechRecognitionEngine");
+    expect(speechBusy()).toBe(true);
+    say(session, { partial: true, text: "hello" });
+    session.proc.stdout.emit("data", `${JSON.stringify({ partial: true, text: "hello there" }).slice(0, 9)}`);
+    session.proc.stdout.emit("data", `${JSON.stringify({ partial: true, text: "hello there" }).slice(9)}\r\n`);
+    say(session, { partial: false, text: "hello there" });
+    session.proc.emit("close", 0);
+    expect(session.events).toEqual([
+      { channel: "speech:transcript", body: { partial: true, text: "hello" } },
+      { channel: "speech:transcript", body: { partial: true, text: "hello there" } },
+      { channel: "speech:transcript", body: { partial: false, text: "hello there" } },
+      { channel: "speech:end", body: { code: 0, reason: "completed" } },
+    ]);
+    expect(existsSync(session.script)).toBe(false);
+    expect(speechBusy()).toBe(false);
+  });
+
+  it("asks the helper to end a call's turn after the quiet the call chose", async () => {
+    await start({ transcript: () => {}, end: () => {}, replaced: () => {} }, { endpointMs: 900, finishOnRelease: ["control"] });
+    const session = fixture.launches.at(-1);
+    expect(session.args.slice(-2)).toEqual(["-EndpointMs", "900"]);
+    expect(session.args).not.toContain("--finish-on-release");
+  });
+
+  it("finishes through the helper's input, and a stop ends the helper without a late result", async () => {
+    const session = await launch();
+    finishSpeech(session.win);
+    expect(session.proc.stdin.written).toEqual(["finish\n"]);
+    expect(session.proc.killed).toBeUndefined();
+    stopSpeech(session.win);
+    expect(session.proc.killed).toBe(true);
+    expect(speechBusy()).toBe(false);
+    say(session, { partial: false, text: "too late" });
+    session.proc.emit("close", 1);
+    expect(session.events).toEqual([]);
+    expect(existsSync(session.script)).toBe(false);
+  });
+
+  it("passes on the helper's own reason when it cannot listen", async () => {
+    const session = await launch();
+    say(session, { error: "speech-language-missing" });
+    session.proc.emit("close", 1);
+    expect(session.events).toEqual([
+      { channel: "speech:transcript", body: { error: "speech-language-missing" } },
+      { channel: "speech:end", body: { code: 1, reason: "speech-language-missing" } },
+    ]);
+  });
+
+  it("ends with a start failure when PowerShell cannot run", async () => {
+    const session = await launch();
+    session.proc.emit("error", new Error("spawn ENOENT"));
+    session.proc.emit("close", -4058);
+    expect(session.events).toEqual([{ channel: "speech:end", body: { code: 1, reason: "helper-start-failed" } }]);
+    expect(speechBusy()).toBe(false);
+  });
+});
+

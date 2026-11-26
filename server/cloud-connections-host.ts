@@ -5,7 +5,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 
 import { answerConnection, connectionFingerprints, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
-import { createConnectionPrompt, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
+import { createConnectionPrompt, type ConnectionPromptAppFor, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
 import { createStayedNotices, type StayedNoticesDeps } from "./cloud-connections-stayed.ts";
 import { movedFrom } from "./cloud-send-arrived.ts";
 import * as composio from "./composio.ts";
@@ -39,6 +39,8 @@ export interface CloudConnectionsHostDeps {
   email?: { accounts(): readonly EmailAccount[]; adopt(accounts: unknown[]): { adopted: number; kept: number } };
   /** How the person hears what stayed on their computer; a Cloud home only. */
   stayedNotices?: Pick<StayedNoticesDeps, "bots" | "say" | "notify" | "language" | "lent">;
+  /** The Vault items each MCP server may read its keys from, which go with it when a move carries it. */
+  mcpKeys?(name: string): string[];
 }
 
 const managedService = (): boolean => { try { return brokerAccess() !== null; } catch { return false; } };
@@ -48,7 +50,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
   const computer: McpRunsOn = { environmentId: deps.environmentId, label };
   let commands: string[] | null = null;
   const mcpAuth = (name: string, url: string) => deps.mcpOAuth.authState(name, url);
-  const sources = () => ({ config: deps.config(), mcpSignIn: (name: string, url: string) => deps.mcpOAuth.signInRecord(name, url), email: () => deps.email?.accounts() ?? [] });
+  const sources = () => ({ config: deps.config(), mcpSignIn: (name: string, url: string) => deps.mcpOAuth.signInRecord(name, url), email: () => deps.email?.accounts() ?? [], ...(deps.mcpKeys ? { mcpKeys: deps.mcpKeys } : {}) });
   const composioConnected = async (slugs: string[]) =>
     Object.fromEntries(Object.entries(await composio.connectionStatus(deps.config(), slugs)).map(([slug, state]) => [slug, state.connected]));
   const programs = () => (commands ??= launchersOnPath());
@@ -68,7 +70,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       ...(deps.ownHome ? { ownHome: deps.ownHome } : {}),
       ...(deps.cloudHome?.team ? { personalRefusal: (what: string) => personalConnectionRefusal(deps.cloudHome!.team!, what) } : {}),
       async list() {
-        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: programs(),
+        return { computer, connections: await connections(), engines: await deps.engines().catch((): string[] => []), commands: programs(), ...(deps.cloudHome?.team ? {} : { vaultKeys: true as const }),
           ...(deps.cloudHome === null && !managedService() ? { managedApps: false as const } : {}) };
       },
       adoptShare: adoptComposioShare,
@@ -99,7 +101,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       return answerConnection(what.id, sources());
     },
 
-    prompt: (bot: ConnectionPromptBot, lent?: ReadonlyMap<string, string>): string => prompt?.(bot, lent) ?? "",
+    prompt: (bot: ConnectionPromptBot, lent?: ReadonlyMap<string, string>, appFor?: ConnectionPromptAppFor): string => prompt?.(bot, lent, appFor) ?? "",
     /** What stayed on the person's computer: said when the move ends, and in the first conversation with each bot. */
     moved: (language?: string): void => stayed?.moved(language),
     personTurn: (bot: Parameters<NonNullable<typeof stayed>["personTurn"]>[0], threadId: string): void => stayed?.personTurn(bot, threadId),

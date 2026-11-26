@@ -31,6 +31,12 @@ describe("what the app may do", () => {
     ["PUT", "/api/phones/self"],
     ["GET", "/api/phones/self/jobs"],
     ["POST", "/api/phones/self/jobs/j1/result"],
+    ["PUT", "/api/push/device"],
+    ["GET", "/api/push/device"],
+    ["DELETE", "/api/push/device"],
+    ["PUT", "/api/push/activity"],
+    ["GET", "/api/push/activity"],
+    ["DELETE", "/api/push/activity"],
     ["GET", "/api/config"],
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
@@ -41,6 +47,7 @@ describe("what the app may do", () => {
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["PATCH", "/api/bots/bot_123"],
+    ["DELETE", "/api/bots/bot_123"],
     ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
@@ -90,6 +97,7 @@ describe("what the app may do", () => {
     ["GET", "/api/threads/th_1/messages/msg_2/image"],
     ["GET", "/api/threads/th_1/messages/msg_2/tool"],
     ["GET", "/api/threads/th_1/messages/msg_2/app"],
+    ["GET", "/api/threads/th_1/messages/msg_2/app/download"],
     ["POST", "/api/bots/bot_123/apps/msg_2/rpc"],
     ["POST", "/api/bots/bot_123/apps/msg_2/context"],
     ["POST", "/api/threads/th_1/messages/msg_2/file"],
@@ -97,10 +105,12 @@ describe("what the app may do", () => {
     ["GET", "/api/threads/th_1/export"],
     ["POST", "/api/threads/th_1/respond"],
     ["GET", "/api/search"],
+    ["GET", "/api/bots/bot_123/skills"],
     ["POST", "/api/attachments"],
     ["GET", "/api/attachments/avatar-123.webp"],
     ["GET", "/api/attachments/voice-note-1.mp3"],
     ["GET", "/api/attachments/voice-note-1.wav"],
+    ["DELETE", "/api/attachments/3f2c9a1e-photo.jpg"],
     ["POST", "/api/files"],
     ["GET", "/api/tts/voices"],
     ["POST", "/api/tts/prepare"],
@@ -147,7 +157,6 @@ describe("what it may not", () => {
 
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
-      ["PUT", "/api/config"],
       ["PATCH", "/api/config"],
       ["GET", "/api/devices"],
       ["GET", "/api/companion"],
@@ -188,6 +197,38 @@ describe("what it may not", () => {
       ["POST", "/api/mcp/servers/warehouse/sign-in"],
     ] as Array<[string, string]>) {
       expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+  });
+
+  it("reads a bot's skills and changes none of them", () => {
+    expect(ask("GET", "/api/bots/bot_123/skills", false)?.status).toBe(401);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/skills"],
+      ["PUT", "/api/bots/bot_123/skills"],
+      ["PATCH", "/api/bots/bot_123/skills"],
+      ["DELETE", "/api/bots/bot_123/skills"],
+      ["GET", "/api/bots/bot_123/skills/research"],
+      ["PATCH", "/api/bots/bot_123/skills/research"],
+      ["POST", "/api/bots/bot_123/skills/import"],
+      ["GET", "/api/bots/bot_123/../skills"],
+      ["GET", "/api/skills"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+  });
+
+  it("discards one uploaded file by its generated name, never a path", () => {
+    expect(ask("DELETE", "/api/attachments/3f2c9a1e-photo.jpg", false)?.status).toBe(401);
+    for (const path of [
+      "/api/attachments",
+      "/api/attachments/../config.json",
+      "/api/attachments/..%2Fconfig.json",
+      "/api/attachments/sub/photo.jpg",
+      "/api/attachments/photo",
+      "/api/attachments/.hidden",
+      "/api/attachments/photo.jpg.",
+    ]) {
+      expect(allowed("DELETE", path), path).toBe(false);
     }
   });
 
@@ -280,7 +321,7 @@ describe("what it may not", () => {
 
   it("allows a path only for the methods it was allowed for", () => {
     expect(allowed("GET", "/api/bots")).toBe(true);
-    expect(allowed("DELETE", "/api/bots/bot_123")).toBe(false);
+    expect(allowed("DELETE", "/api/bots")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages")).toBe(false);
     expect(allowed("GET", "/api/threads/th_1/messages/msg_2/file")).toBe(false);
     expect(allowed("POST", "/api/threads/th_1/messages/msg_2/file/extra")).toBe(false);
@@ -300,7 +341,7 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/sidebar-sections")).toBe(false);
     expect(allowed("PATCH", "/api/sidebar-sections")).toBe(false);
     expect(allowed("POST", "/api/sidebar-sections/extra")).toBe(false);
-    expect(allowed("PUT", "/api/config")).toBe(false);
+    expect(allowed("PATCH", "/api/config")).toBe(false);
     expect(allowed("GET", "/api/attachments/../config.json")).toBe(false);
     expect(allowed("GET", "/api/files")).toBe(false);
     expect(allowed("POST", "/api/files/anything")).toBe(false);
@@ -332,9 +373,34 @@ describe("what it may not", () => {
     }
   });
 
+  it("lets a phone set provider keys and sign engines in, and nothing wider", () => {
+    for (const [method, path] of [
+      ["PUT", "/api/config"],
+      ["POST", "/api/keys/test"],
+      ["POST", "/api/instances/codex/auth/start"],
+      ["POST", "/api/instances/claude.work/auth/complete"],
+      ["POST", "/api/instances/codex/auth/cancel"],
+      ["POST", "/api/instances/codex/auth/sign-out"],
+      ["GET", "/api/instances/codex/auth/status"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(true);
+    }
+    for (const [method, path] of [
+      ["POST", "/api/instances/../auth/start"],
+      ["GET", "/api/instances/codex/auth/start"],
+      ["POST", "/api/instances/codex/auth/status"],
+      ["POST", "/api/instances/codex/install"],
+      ["PUT", "/api/config/extra"],
+      ["PATCH", "/api/config"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+    expect(ask("PATCH", "/api/config")?.error).toBe("this setting is changed on your computer");
+  });
+
   it("allows only the four Live call routes, never the key", () => {
     expect(ask("POST", "/api/live/summary")?.status).toBe(404);
-    expect(ask("PUT", "/api/config")?.status).toBe(403);
+    expect(ask("PATCH", "/api/config")?.status).toBe(403);
     expect(allowed("PUT", "/api/live/settings")).toBe(false);
     expect(allowed("GET", "/api/live/settings")).toBe(false);
     expect(allowed("GET", "/api/live/session")).toBe(false);
@@ -353,6 +419,34 @@ describe("what it may not", () => {
       ["POST", "/api/bots/bot_123/apps/../rpc"],
       ["GET", "/api/threads/th_1/messages/msg_2/app/../../../config"],
     ] as const) expect(allowed(method, path), `${method} ${path}`).toBe(false);
+  });
+
+  it("reads a bot's Data and nothing that runs, changes or exports it", () => {
+    expect(allowed("GET", "/api/bots/bot_123/data")).toBe(true);
+    expect(allowed("POST", "/api/bots/bot_123/data/page")).toBe(true);
+    expect(allowed("GET", "/api/bots/bot_123/data/cards/c_2/image")).toBe(true);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/data/run"],
+      ["POST", "/api/bots/bot_123/data/cancel"],
+      ["POST", "/api/bots/bot_123/data/export"],
+      ["PATCH", "/api/bots/bot_123/data/cards/c_2"],
+      ["DELETE", "/api/bots/bot_123/data/cards/c_2"],
+      ["GET", "/api/bots/bot_123/data/tables/orders/stats"],
+      ["POST", "/api/bots/bot_123/data"],
+      ["GET", "/api/bots/bot_123/data/page"],
+      ["GET", "/api/bots/bot_123/data/cards/../../config"],
+      ["GET", "/api/bots/bot_123/data/cards/c_2/image/extra"],
+    ] as const) expect(ask(method, path)?.status, `${method} ${path}`).toBe(404);
+    expect(ask("GET", "/api/bots/bot_123/data", false)?.status).toBe(401);
+  });
+
+  it("lets a paired phone delete one bot, and nothing beside it", () => {
+    expect(allowed("DELETE", "/api/bots/bot_123")).toBe(true);
+    expect(allowed("DELETE", "/api/bots")).toBe(false);
+    expect(allowed("DELETE", "/api/bots/bot_123/extra")).toBe(false);
+    expect(allowed("DELETE", "/api/bots/../config")).toBe(false);
+    expect(allowed("GET", "/api/bots/bot_123")).toBe(false);
+    expect(ask("DELETE", "/api/bots/bot_123", false)?.status).toBe(401);
   });
 
   it("is not fooled by a prefix", () => {

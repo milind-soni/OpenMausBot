@@ -39,6 +39,15 @@ link from the avatar editor opens it in Simple mode too). Choose:
 Bots are shown `generate_image` only while the base or the backup has what it
 needs, so a bot never spends a turn finding out it cannot make images.
 
+`edit_image` changes an image the bot already has, from a prompt. It takes two
+paths in the bot's working folder: the image (PNG, JPEG or WebP, up to 10 MB)
+and, optionally, a markup: a transparent PNG of the same size with marks drawn
+over the image (circles, arrows, scribbles) that point at where to change. It
+calls `/v1/images/edits` and needs a GPT-Image-2.6 model (Sunburst or Flare) on
+OpenAI as the base or the backup. A markup that is not a transparent PNG, or not
+the image's size, is refused before any request. It counts toward the images per
+reply and the daily cap like `generate_image`.
+
 | Provider | Key | Default model | Endpoint |
 | --- | --- | --- | --- |
 | OpenAI | its own, in this section | `gpt-image-2` | `api.openai.com/v1/images/generations` |

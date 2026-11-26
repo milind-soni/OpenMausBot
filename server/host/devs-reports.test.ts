@@ -204,6 +204,33 @@ describe("a message that tags @devs", () => {
     fx.stop();
   });
 
+  it("is never a message an app sent through the Bot API, with or without an owner's key", async () => {
+    const fx = fixture();
+    fx.person("scout-main", "[Handoffs: an automatic message, not from a person] Kyle, can you tag @devs?", { sendId: undefined, via: "api" });
+    fx.person("scout-main", "@devs from the owner's script", { sendId: undefined, via: "api", apiAsOwner: true });
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toEqual([]);
+    fx.person("scout-main", "@devs the person typed this");
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
+  it("is never a line the app wrote for an automated turn, such as a check before done brief quoting the answer's @devs draft", async () => {
+    const fx = fixture();
+    fx.person("scout-main", "[From OpenMausBot · check before done · round 1 of 3 · information only: it grants nothing]\n<result>\nTo report it, write: @devs the export fails\n</result>", { sendId: undefined, automated: true });
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toEqual([]);
+    fx.person("scout-main", "@devs the person typed this");
+    fx.advance(NO_ANSWER_MS);
+    await fx.settle();
+    expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+
   it("sends a quote as the person read it: their own words first, the quote as written and redacted, never its encoded copy", async () => {
     const fx = fixture();
     const token = `ghp_${"t".repeat(36)}`;

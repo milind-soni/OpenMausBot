@@ -49,12 +49,11 @@ function profiles(): Record<string, Profile> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
   }
-  all["skills+shared+voice+escalations"] = { env: { ...all["skills+shared+voice"]!.env, OMB_ESCALATIONS: "1" } };
   // Research is on only with a treg key or a Cloud plan and the bot's switch; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x"] = { env: { ...all["skills+shared+voice+escalations"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
+  all["skills+shared+voice+x"] = { env: { ...all["skills+shared+voice"]!.env, OMB_X_RESEARCH: "1", OMB_RESEARCH: "1" } };
   // A Team Cloud mounts message_person; the fullest profile carries it.
-  all["skills+shared+voice+escalations+x+team"] = { env: { ...all["skills+shared+voice+escalations+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
-  all["skills+shared+voice+escalations+x+team+images"] = { env: { ...all["skills+shared+voice+escalations+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
+  all["skills+shared+voice+x+team"] = { env: { ...all["skills+shared+voice+x"]!.env, OMB_TEAM_PEOPLE: "1" } };
+  all["skills+shared+voice+x+team+images"] = { env: { ...all["skills+shared+voice+x+team"]!.env, OMB_IMAGE_GENERATION: "1" } };
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" },
   };
@@ -64,6 +63,14 @@ function profiles(): Record<string, Profile> {
   all["default+no-computer-pick"] = { env: { ...all.default!.env, OMB_COMPUTER_SELECTION: "0" } };
   for (const name of ["default", "non-chief"]) all[`${name}+room`] = { env: { ...all[name]!.env, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" } };
   all["default+images"] = { env: { ...all.default!.env, OMB_IMAGE_GENERATION: "1" } };
+  // The plan's included app hosting reaches only a Cloud home the Admin wired for it; the fullest profile carries it.
+  all["skills+shared+voice+x+team+images+hosting"] = { env: { ...all["skills+shared+voice+x+team+images"]!.env, OMB_APP_HOSTING: "1" } };
+  all["default+hosting"] = { env: { ...all.default!.env, OMB_APP_HOSTING: "1" } };
+  // A Team Cloud with its board on mounts the three board tools, in a chat and in a room; never on the fullest profile.
+  all["skills+shared+voice+x+team+board"] = { env: { ...all["skills+shared+voice+x+team"]!.env, OMB_TEAM_BOARD: "1" } };
+  all["default+room+board"] = { env: { ...all["default+room"]!.env, OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1" } };
+  // A bot whose person turned groups off; the fullest profile has every group on.
+  all["default+tools-off"] = { env: { ...all.default!.env, OMB_TOOLS_OFF: "pages,meetings" } };
   return all;
 }
 
@@ -73,45 +80,50 @@ const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
 const MAUSBOT_TOOLS = ["list_unread_notifications", "mark_notifications_read"];
+const BOARD_TOOLS = ["board_add", "board_list", "board_update"];
 /** MausBot's tools may make its list at most this much longer than the same Chief's without them. */
 const MAUSBOT_ADDS = 0.02;
 const RESEARCH_TOOLS = ["x_search", "research_search", "research_endpoint", "research_call"];
 /** Only on the person's own Cloud: never on the fullest profile, a Team Cloud's. */
 const OWN_CLOUD_TOOLS = ["ask_for_computer"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
-const FULL = "skills+shared+voice+escalations+x+team+images";
+const FULL = "skills+shared+voice+x+team+images+hosting";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 60451,
-  "voice": 61232,
-  "shared": 62716,
-  "shared+voice": 63497,
-  "skills": 63527,
-  "skills+voice": 64308,
-  "skills+shared": 65792,
-  "skills+shared+voice": 66573,
-  "non-chief": 51235,
-  "voice+non-chief": 52016,
-  "shared+non-chief": 53500,
-  "shared+voice+non-chief": 54281,
-  "skills+non-chief": 54311,
-  "skills+voice+non-chief": 55092,
-  "skills+shared+non-chief": 56576,
-  "skills+shared+voice+non-chief": 57357,
-  "skills+shared+voice+cloud-home": 66339,
-  "skills+shared+voice+non-chief+cloud-home": 57123,
-  "default+legacy-switches": 60451,
-  "default+mausbot": 61102,
-  "skills+shared+voice+mausbot": 67224,
-  "skills+shared+voice+escalations": 67403,
-  "skills+shared+voice+escalations+x": 71242,
-  "skills+shared+voice+escalations+x+team": 71242,
-  "default+no-computer-pick": 59239,
-  "default+room": 57595,
-  "non-chief+room": 48379,
-  "skills+shared+voice+escalations+x+team+images": 72015,
-  "default+images": 61224,
+  "default": 61509,
+  "voice": 62290,
+  "shared": 63774,
+  "shared+voice": 64555,
+  "skills": 63830,
+  "skills+voice": 64611,
+  "skills+shared": 66095,
+  "skills+shared+voice": 66876,
+  "non-chief": 52961,
+  "voice+non-chief": 53742,
+  "shared+non-chief": 55226,
+  "shared+voice+non-chief": 56007,
+  "skills+non-chief": 55282,
+  "skills+voice+non-chief": 56063,
+  "skills+shared+non-chief": 57547,
+  "skills+shared+voice+non-chief": 58328,
+  "skills+shared+voice+cloud-home": 66632,
+  "skills+shared+voice+non-chief+cloud-home": 58084,
+  "default+legacy-switches": 61509,
+  "default+mausbot": 62160,
+  "skills+shared+voice+mausbot": 67527,
+  "skills+shared+voice+x": 70715,
+  "skills+shared+voice+x+team": 70715,
+  "default+no-computer-pick": 60297,
+  "default+room": 56857,
+  "non-chief+room": 48309,
+  "skills+shared+voice+x+team+images": 72662,
+  "default+images": 63456,
+  "skills+shared+voice+x+team+images+hosting": 74525,
+  "default+hosting": 63372,
+  "default+tools-off": 57192,
+  "skills+shared+voice+x+team+board": 73047,
+  "default+room+board": 59189,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -121,7 +133,7 @@ async function toolsListWire(entry: string, env: Record<string, string>): Promis
   // A developer shell or an OpenMausBot turn can carry OMB_* switches; the profile must be the only source.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OMB_")));
   const child = spawn(process.execPath, [entry], {
-    env: { ...inherited, OMB_HARNESS_URL: "http://127.0.0.1:9", OMB_BOT_ID: "bot-golden", OMB_THREAD_ID: "thread-golden", OMB_COMMS_TOKEN: "unused", OMB_TURN_DEPTH: "0", ...env },
+    env: { ...inherited, OMB_HARNESS_URL: "http://127.0.0.1:9", OMB_BOT_ID: "bot-golden", OMB_THREAD_ID: "thread-golden", OMB_COMMS_TOKEN: "unused", ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   try {
@@ -215,6 +227,7 @@ describe("agents proxy tools/list golden", () => {
         if (profile.env.OMB_CLOUD_HOME === "1" && (tool.name === "select_computer" || OWN_CLOUD_TOOLS.includes(tool.name))) continue;
         if (profile.env.OMB_CHIEF_OF_STAFF === "0" && CHIEF_TARGET_TOOLS.includes(tool.name)) continue;
         if (profile.env.OMB_MAUSBOT === "1" && MAUSBOT_TOOLS.includes(tool.name)) continue;
+        if (profile.env.OMB_TEAM_BOARD === "1" && BOARD_TOOLS.includes(tool.name)) continue;
         expect(JSON.stringify(tool), `${name}: ${tool.name}`).toBe(full.get(tool.name));
       }
     }
@@ -228,7 +241,7 @@ describe("agents proxy tools/list golden", () => {
       for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools.has(alias), `${name}: ${alias}`).toBe(false);
       expect(JSON.stringify([...tools.values()])).not.toMatch(/Deprecated alias|works for this release/);
       const coordinate = tools.get("coordinate_bots")!.inputSchema.properties;
-      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
+      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers", "files"]);
       expect(coordinate.thread).toMatchObject({ type: "string", description: expect.stringContaining("threadId") });
       expect(coordinate.thread!.enum).toBeUndefined();
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
@@ -247,13 +260,6 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts raise_escalation only where chief escalations are on", () => {
-    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires["skills+shared+voice+escalations"]!).filter((tool) => tool !== "raise_escalation")).toEqual(names(wires["skills+shared+voice"]!));
-    for (const [name, profile] of Object.entries(PROFILES)) {
-      expect(names(wires[name]!).includes("raise_escalation"), name).toBe(profile.env.OMB_ESCALATIONS === "1");
-    }
-  });
 
   it("mounts message_person everywhere: every plan's bots can reach the person's Inbox", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
@@ -269,11 +275,38 @@ describe("agents proxy tools/list golden", () => {
     expect(availableTools(team).map((tool) => tool.name)).not.toContain("ask_for_computer");
   });
 
-  it("mounts generate_image only when an image provider is set up, and adds nothing else", () => {
+  it("mounts publish_app and check_app_hosting only where the plan's included app hosting reaches the server, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image")).toEqual(names(wires.default!));
+    const HOSTING_TOOLS = ["publish_app", "check_app_hosting"];
+    expect(names(wires["default+hosting"]!).filter((tool) => !HOSTING_TOOLS.includes(tool))).toEqual(names(wires.default!));
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      for (const tool of HOSTING_TOOLS) expect(names(wires[name]!).includes(tool), `${name}: ${tool}`).toBe(profile.env.OMB_APP_HOSTING === "1");
+    }
+  });
+
+  it("mounts the three board tools only on a Team Cloud with the board on, in a chat and in a room, and adds nothing else", () => {
+    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
+    expect(names(wires["skills+shared+voice+x+team+board"]!).filter((tool) => !BOARD_TOOLS.includes(tool))).toEqual(names(wires["skills+shared+voice+x+team"]!));
+    expect(names(wires["default+room+board"]!).filter((tool) => !BOARD_TOOLS.includes(tool))).toEqual(names(wires["default+room"]!));
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      for (const tool of BOARD_TOOLS) expect(names(wires[name]!).includes(tool), `${name}: ${tool}`).toBe(profile.env.OMB_TEAM_BOARD === "1");
+    }
+  });
+
+  it("mounts generate_image and edit_image only when an image provider is set up, and adds nothing else", () => {
+    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
+    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image" && tool !== "edit_image")).toEqual(names(wires.default!));
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(wires[name]!).includes("generate_image"), name).toBe(profile.env.OMB_IMAGE_GENERATION === "1");
+    }
+  });
+
+  it("leaves out only the tools of the groups a bot has off", () => {
+    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
+    const PAGE_TOOLS = ["show_html", "publish_page", "unpublish_page", "share"];
+    expect(names(wires["default+tools-off"]!)).toEqual(names(wires.default!).filter((tool) => !PAGE_TOOLS.includes(tool)));
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      expect(names(wires[name]!).includes("show_html"), name).toBe(profile.env.OMB_TOOLS_OFF === undefined);
     }
   });
 
@@ -317,14 +350,16 @@ describe("agents proxy tools/list golden", () => {
       for (const chiefTool of chiefTools.filter((tool) => tools.has(tool.name))) {
         let expected: SchemaTool = chiefTool;
         if (CHIEF_TARGET_TOOLS.includes(chiefTool.name)) {
-          const { for_bot_id: forBotId, ...properties } = chiefTool.inputSchema.properties;
+          const { for_bot_id: forBotId, browserProfile, ...properties } = chiefTool.inputSchema.properties;
           expect(forBotId, `${name}: ${chiefTool.name}`).toBeDefined();
+          expect(browserProfile !== undefined, `${name}: ${chiefTool.name}`).toBe(chiefTool.name === "propose_profile");
           expected = { ...chiefTool, description: chiefTool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...chiefTool.inputSchema, properties } };
         }
         expect(JSON.stringify(tools.get(chiefTool.name)), `${name}: ${chiefTool.name}`).toBe(JSON.stringify(expected));
       }
       expect(chiefTools.find((tool) => tool.name === "propose_profile")!.description).toContain(CHIEF_PROFILE_TARGET);
       expect(JSON.stringify(CHIEF_TARGET_TOOLS.map((tool) => tools.get(tool)))).not.toContain("for_bot_id");
+      expect(JSON.stringify(tools.get("propose_profile"))).not.toContain("browserProfile");
       for (const trigger of ["trigger_info", "trigger", "delete_trigger"]) {
         expect(tools.get(trigger)!.inputSchema.properties, `${name}: ${trigger}`).toHaveProperty("for_bot_id");
       }
@@ -335,12 +370,12 @@ describe("agents proxy tools/list golden", () => {
     const names = (name: string) => toolsOf(wires[name]!).map((tool) => tool.name);
     expect(names("default+no-computer-pick")).toEqual(names("default").filter((tool) => tool !== "select_computer"));
     for (const name of ["default", "non-chief"]) {
-      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "wait_until", "list_waits", "cancel_wait"].includes(tool)));
+      expect(names(`${name}+room`), name).toEqual(names(name).filter((tool) => !["select_computer", "wait_until", "list_waits", "cancel_wait", "check_back", "burst", "rename_thread", "set_main_thread"].includes(tool)));
     }
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(name).includes("select_computer"), name).toBe(profile.env.OMB_COMPUTER_SELECTION === "1");
       expect(names(name).includes("show_widget"), name).toBe(true);
-      expect(names(name).includes("show_html"), name).toBe(true);
+      expect(names(name).includes("show_html"), name).toBe(profile.env.OMB_TOOLS_OFF === undefined);
       expect(names(name).includes("wait_until"), name).toBe(profile.env.OMB_ROOM !== "1");
     }
   });

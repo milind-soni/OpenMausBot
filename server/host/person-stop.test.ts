@@ -11,7 +11,7 @@ function world(over: { working?: string[]; asking?: boolean; threads?: string[] 
       bot: () => ({ name: "Ada" }), botByThread: () => undefined, groupByThread: () => undefined, taskByThread: () => undefined,
       tasks: () => (over.threads ?? ["t", "other"]).map((threadId) => ({ threadId })),
     } as unknown as PersonStopDeps["store"],
-    routines: () => null, handoffs: () => ({ stoppedByPerson: () => {} }) as never, interruptDirectThread: async (_botId, threadId) => { stopped.push(threadId); },
+    routines: () => null, handoffs: () => ({ stoppedByPerson: () => {} }) as never, interruptDirectThread: async (_botId, threadId) => { stopped.push(threadId); }, stopping: () => () => {},
     clearUnattended: () => {}, markStopped: () => {}, stopGoal: () => {},
     working: (_botId, threadId) => (over.working ?? []).includes(threadId), asking: () => over.asking === true, language: () => undefined,
   });

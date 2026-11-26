@@ -25,6 +25,7 @@ vi.mock("@/state/store", async (original) => ({
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 
 import { SecretRequestCard } from "./SecretRequestCard";
+import { VaultChoices } from "./VaultChoices";
 import { setLocale } from "@/lib/i18n";
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request";
 
@@ -328,15 +329,23 @@ describe("SecretRequestCard key analytics", () => {
     expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "xai", via: "chat_request", result: "unverified" }]]);
   });
 
-  // Settings keeps an AI provider key in the server's settings, not the desktop's store: the card does the same.
-  it("saves an Anthropic key where Settings does, never through the desktop store, keeping Claude sign-ins", async () => {
-    const setCredential = vi.fn();
+  it("saves an Anthropic key in the desktop store as Settings does, keeping Claude sign-ins", async () => {
+    const setCredential = vi.fn().mockResolvedValue({ anthropic: { configured: true } });
     vi.stubGlobal("window", { ogb: { setCredential } });
+    fixture.api.mockResolvedValueOnce({ ok: true });
+    await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
+    expect(setCredential).toHaveBeenCalledExactlyOnceWith("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789", { everyClaudeBot: false });
+    expect(fixture.api.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot-1/secret-cards/secret-card/provided"]);
+    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
+  });
+
+  it("sends a provider key typed on a desktop paired to another computer to that computer's server", async () => {
+    const setCredential = vi.fn();
+    vi.stubGlobal("window", { ogb: { setCredential, remoteClient: { active: true } } });
     fixture.api.mockResolvedValueOnce({ anthropic: { configured: true } }).mockResolvedValueOnce({ ok: true });
     await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
     expect(setCredential).not.toHaveBeenCalled();
     expect(fixture.api.mock.calls[0]).toEqual(["/api/config", { method: "PUT", body: JSON.stringify({ anthropic: { key: "sk-ant-ZZtestSECRET0123456789", everyClaudeBot: false } }) }]);
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
   });
 
   it("saves the Composio key in the desktop store's slot, as Settings does", async () => {
@@ -397,5 +406,22 @@ describe("SecretRequestCard custom secrets", () => {
     expect(file).not.toContain("Where to get this key");
     const ref = view({ target: "customSecret", label: "Notion key", reason: "For Notion.", helpUrl: "", delivery: "ref" });
     expect(ref).toContain("MausBot keeps it for one use by its own tools. Your bot never sees it");
+  });
+});
+
+describe("SecretRequestCard saved secrets", () => {
+  type Props = { children?: ReactNode };
+  const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
+    Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+  const offered = (secret: Record<string, unknown>) => {
+    Object.assign(fixture, { counting: true, index: 0, values: [] });
+    try { return nodes(SecretRequestCard({ botId: "bot-1", threadId: "thread-1", message: secretCard(secret) })).some((node) => node.type === VaultChoices); }
+    finally { fixture.counting = false; }
+  };
+
+  it("offers the Vault's secrets on a card for any other secret, never for a key the app keeps or a mailbox", () => {
+    expect(offered({ target: "customSecret", label: "Stripe secret key", delivery: "ref", helpUrl: "" })).toBe(true);
+    expect(offered({})).toBe(false);
+    expect(offered({ target: "customSecret", label: "Connect your mailbox", delivery: "email", helpUrl: "" })).toBe(false);
   });
 });

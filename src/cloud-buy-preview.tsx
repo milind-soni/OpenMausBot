@@ -3,6 +3,7 @@
 //   |team-setup|team-ready|unreachable|whats-new|whats-new-plan
 // &skin=midnight&staging=1&reduced=1&plan=starter&lang=de
 // &current=pro (a subscriber's own plan says Your plan; current=personal shows a Personal subscriber's own card)
+// &bots=1 (this computer has bots of its own: the offer says a bot lives in one place)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Cloud, FolderOpen, MessageSquare, Repeat } from "lucide-react";
@@ -49,7 +50,7 @@ const VIEWS: Record<string, CloudAddView> = {
   unreachable: { kind: "unreachable" },
 };
 const FREE: CloudAccountState = { status: "connected", account: { id: "a", email: "maya@studio.co" }, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } };
-const TEAM = { tier: "team", label: "Team", amount: 16900, trialDays: 3, allowances: allowances(4, 4, 100, 4, 300, 180_000, 14) };
+const TEAM = { tier: "team", label: "Team", amount: 4000, trialDays: 3, allowances: allowances(4, 4, 100, 4, 300, 180_000, 14) };
 const POPUPS: Record<string, { account: CloudAccountState; offer: CloudOffer }> = {
   "whats-new": { account: FREE, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
   "whats-new-plan": { account: { ...FREE, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 30 * DAY, version: 2 } }, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
@@ -88,7 +89,7 @@ function Preview() {
   }
   const view = VIEWS[state] ?? VIEWS.choose!;
   const current = params.get("current");
-  const ui: CloudAddUi = { chosen: params.get("plan"), current, offerShown: view.kind === "offer" ? view.offer : OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
+  const ui: CloudAddUi = { botsHere: params.get("bots") === "1", chosen: params.get("plan"), current, offerShown: view.kind === "offer" ? view.offer : OFFER, now: NOW, busy: state === "sign-in-done", openFailed: false,
     email: "maya@studio.co", code: state === "sign-in-code" ? "4820" : "", profileEmail: "maya@studio.co",
     look: { typed: "My Cloud", name: "My Cloud", color: "blue" }, counting: state === "ready" ? 3 : null, copied: false, payFailed: false, interest: null };
   return <div className="relative h-screen overflow-hidden">

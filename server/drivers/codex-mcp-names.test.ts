@@ -2,7 +2,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { codexConfigMcp, codexConfigMcpServerNames, codexConfigRunsServer, mcpServerNamesInToml, mountedMcpServerName } from "./codex-mcp-names.ts";
+import { codexConfigMcp, codexConfigMcpServerNames, codexConfigRunsServer, codexMcpDisableArgs, mcpServerNamesInToml, mountedMcpServerName } from "./codex-mcp-names.ts";
+
+import { parseToml } from "../toml-lite.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true }); });
@@ -64,6 +66,28 @@ describe("codexConfigRunsServer", () => {
     return codexConfigMcp({ CODEX_HOME: home });
   };
 
+  it.each([
+    'mcp_servers = { notes = { url = "https://notes.example/mcp" } }',
+    'mcp_servers.notes.url = "https://notes.example/mcp"',
+    '[mcp_servers."not\\u0065s"]\nurl = "https://notes.example/mcp"',
+  ])("reserves the parsed server name in %s", (toml) => {
+    const config = configFor(toml);
+    expect([...config.names]).toEqual(["notes"]);
+    expect(mountedMcpServerName("notes", config.names)).toBe("notes_openmausbot");
+    expect(codexConfigRunsServer(config, "notes", { type: "http", url: "https://notes.example/mcp", headers: {} })).toBe(true);
+  });
+
+  it("ignores table-looking text inside strings when the file parses", () => {
+    const config = configFor('instructions = """\n[mcp_servers.decoy]\n"""\n');
+    expect([...config.names]).toEqual([]);
+  });
+
+  it("still reserves header names if an unrelated setting cannot be parsed", () => {
+    const config = configFor('[mcp_servers.notes]\nurl = "https://notes.example/mcp"\nunfinished = [');
+    expect([...config.names]).toEqual(["notes"]);
+    expect(config.tables).toEqual({});
+  });
+
   it("knows a server config.toml already starts, as one brought in from there, and nothing else", () => {
     const config = configFor([
       "[mcp_servers.sentry]", 'command = "npx"', 'args = ["-y", "@sentry/mcp-server", 8080]', "[mcp_servers.sentry.env]", 'SENTRY_TOKEN = "t"',
@@ -82,3 +106,24 @@ describe("codexConfigRunsServer", () => {
   });
 });
 
+
+describe("Codex literal MCP override keys", () => {
+  it("disables literal dotted and quoted names without creating nested servers", () => {
+    const names = new Set(["notes.prod", 'quoted"name', "ordinary"]);
+    const args = codexMcpDisableArgs(names);
+    expect(args).toHaveLength(2);
+    expect(args[0]).toBe("-c");
+    expect(parseToml(args[1]!).mcp_servers).toEqual({
+      "notes.prod": { enabled: false },
+      'quoted"name': { enabled: false },
+      ordinary: { enabled: false },
+    });
+  });
+
+  it("keeps existing flat CLI overrides for ordinary names", () => {
+    expect(codexMcpDisableArgs(new Set(["notes", "plain-name"]))).toEqual([
+      "-c", "mcp_servers.notes.enabled=false", "-c", "mcp_servers.plain-name.enabled=false",
+    ]);
+    expect(codexMcpDisableArgs(new Set())).toEqual([]);
+  });
+});

@@ -1,8 +1,10 @@
 import { notificationTrayPinned } from "@/lib/notification-preferences";
 import type { Action, AppState } from "./store";
 import { openOwnTeamChat, teamChats } from "./team-chats";
+import { teamThreadToOpen } from "./team-side";
+import { openFeedThread, roomFeedShows, type FeedRoom } from "@/lib/room-feed";
 
-interface NotificationThreadOwner {
+interface NotificationThreadOwner extends Partial<FeedRoom> {
   id: string;
   threadId: string;
   mainThreadId?: string;
@@ -17,14 +19,14 @@ interface NotificationRoutingState {
 }
 
 export function visibleNotificationThread(
-  state: NotificationRoutingState & Pick<AppState, "activeView" | "selectedId">,
+  state: NotificationRoutingState & Pick<AppState, "activeView" | "selectedId" | "forkPanel"> & Partial<Pick<AppState, "config">>,
+  threadId?: string,
 ): string | null {
+  if (threadId && state.forkPanel?.threadId === threadId) return threadId;
   if (state.activeView !== "chat") return null;
-  return (
-    state.bots.find((candidate) => candidate.id === state.selectedId)?.threadId ??
-    state.groups.find((candidate) => candidate.id === state.selectedId)?.threadId ??
-    null
-  );
+  const room = state.groups.find((candidate) => candidate.id === state.selectedId);
+  if (room && roomFeedShows(state.config, room)) return null;
+  return state.bots.find((candidate) => candidate.id === state.selectedId)?.threadId ?? room?.threadId ?? null;
 }
 
 export function botOpensTo(bot: Pick<NotificationThreadOwner, "threadId" | "mainThreadId" | "tasks">, threadsShown: boolean): string {
@@ -36,12 +38,15 @@ export function awayFromMainThread(bot: Pick<NotificationThreadOwner, "threadId"
   return !threadsShown && botOpensTo(bot, false) !== bot.threadId;
 }
 
-/** On a team's Cloud, the person's own conversation with the bot, never the team's main chat (team-chats.ts). */
+/** On a team's Cloud, the bot's conversation on the side the sidebar shows: the person's own with it under "Just me", its
+ * shared chat under "Team". */
 export function openBot(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
   threadsShown: boolean,
 ) {
+  const shared = teamThreadToOpen(bot, teamChats());
+  if (shared) return openBotThread(dispatch, bot, shared, threadsShown);
   if (openOwnTeamChat(dispatch, bot, (threadId) => openBotThread(dispatch, bot, threadId, threadsShown))) return;
   const opened = botOpensTo(bot, threadsShown);
   if (opened === bot.threadId) dispatch({ type: "select", id: bot.id });
@@ -102,7 +107,7 @@ export interface ThreadTarget {
   threadId: string;
 }
 
-interface ThreadOpeningState extends NotificationRoutingState {
+interface ThreadOpeningState extends NotificationRoutingState, Partial<Pick<AppState, "config">> {
   bots: Array<NotificationThreadOwner & { name: string }>;
 }
 
@@ -121,7 +126,8 @@ export function openThread(
   const named = state.bots.find((candidate) => candidate.id === target.botId);
   if (group) {
     dispatch({ type: "select", id: group.id });
-    if (group.threadId !== target.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: target.threadId });
+    if (roomFeedShows(state.config, group)) dispatch(openFeedThread(group.id, target.threadId));
+    else if (group.threadId !== target.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: target.threadId });
   } else if (owner) openBotThread(dispatch, owner, target.threadId, threadsShown);
   else if (named) openBot(dispatch, named, threadsShown);
   dispatch({ type: "revealThread", threadId: target.threadId });

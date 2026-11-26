@@ -26,7 +26,7 @@ const standard = (extra = {}) => catalogOf([
   entry(TEAM),
   entry(SKILLS, { ref: "acme/refund-skills", name: "Refund skills", kind: "library", release: release(skillBytes, { version: "2.0.0" }) }),
   entry(OFF, { ref: "acme/old-desk", mode: "off", release: release(Buffer.from("off release bytes")) }),
-  entry(NEWER, { ref: "acme/next-desk", release: release(Buffer.from("a version 3 document"), { formatVersion: 3 }) }),
+  entry(NEWER, { ref: "acme/next-desk", release: release(Buffer.from("a version 4 document"), { formatVersion: 4 }) }),
 ], extra);
 const bytesOf = value => Buffer.from(JSON.stringify(value));
 const flush = async () => { for (let index = 0; index < 20; index++) await new Promise(resolve => setImmediate(resolve)); };
@@ -93,14 +93,14 @@ async function fixture(t, { catalog = standard(), relayOk = true } = {}) {
 
 test("the catalog parser ignores unknown fields, drops a bad entry, and keeps Off and newer-format entries listed", () => {
   const extra = { ...entry(TEAM), future: { anything: true }, release: { ...release(teamBytes), mirror: "https://elsewhere.invalid" } };
-  const parsed = parseOrgLibraryCatalog(catalogOf([extra, { ...entry(SKILLS), mode: "pinned" }, entry(OFF, { mode: "off" }), entry(NEWER, { release: release(teamBytes, { formatVersion: 3 }) })], { truncated: true, surprise: 1 }));
+  const parsed = parseOrgLibraryCatalog(catalogOf([extra, { ...entry(SKILLS), mode: "pinned" }, entry(OFF, { mode: "off" }), entry(NEWER, { release: release(teamBytes, { formatVersion: 4 }) })], { truncated: true, surprise: 1 }));
   assert.deepEqual(parsed.packages.map(item => item.packageId), [TEAM, OFF, NEWER]);
   assert.equal(parsed.truncated, true);
   assert.equal("surprise" in parsed, false);
   assert.equal("future" in parsed.packages[0], false);
   assert.equal("mirror" in parsed.packages[0].release, false);
   assert.equal(parsed.packages[0].release.notes, "First release.\nAdds the deal desk.", "release notes keep their newlines");
-  assert.equal(parsed.packages[2].release.formatVersion, 3);
+  assert.equal(parsed.packages[2].release.formatVersion, 4);
   assert.deepEqual(parseOrgLibraryCatalog(bytesOf(standard())), parseOrgLibraryCatalog(JSON.stringify(standard())));
   assert.deepEqual(parseOrgLibraryCatalog(bytesOf(standard())), parseOrgLibraryCatalog(standard()));
   assert.equal(parseOrgLibraryCatalog(catalogOf([entry(TEAM, { release: null })])).packages[0].release, null, "every release withdrawn");

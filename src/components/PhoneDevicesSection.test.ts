@@ -18,6 +18,7 @@ import {
   pairingSurfaceCopy,
   RouteNotices,
   shouldHydrateCompanionEmail,
+  showTunnelRetiredNotice,
 } from "./PhoneDevicesSection";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
@@ -217,6 +218,12 @@ describe("Tailscale pairing onboarding", () => {
     expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "not-installed" })).toMatchObject({ kind: "not-installed", title: "Tailscale isn't installed on this computer." });
     expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "signed-out" })).toMatchObject({ kind: "signed-out", title: "Open Tailscale and sign in, then try again." });
     expect(deriveTailscalePairingStatus({ enabled: true, routes: tailscale({ on: true, since: 1, name: null }) }).kind).toBe("magicdns");
+    expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "magicdns" })).toMatchObject({ kind: "magicdns", title: "Tailscale found, but MagicDNS is still needed" });
+    expect(deriveTailscalePairingStatus({ enabled: true, tailscaleProblem: "custom-name" })).toMatchObject({
+      kind: "magicdns",
+      title: "Tailscale is connected, but phone pairing and sharing with your other computers need a Tailscale name ending in .ts.net.",
+      detail: "Your tailnet gives its own names (Headscale, say). Pair the device over Same Wi-Fi instead.",
+    });
     expect(deriveTailscalePairingStatus({ enabled: false, routes: tailscale({ on: true, since: 1, name: "mac.tail1234.ts.net" }) })).toMatchObject({
       kind: "waiting",
       title: "Ready on mac.tail1234.ts.net",
@@ -247,5 +254,18 @@ describe("the update's notes about routes it kept on", () => {
     expect(html.match(/>Turn off</g)).toHaveLength(2);
     expect(html.match(/>OK</g)).toHaveLength(2);
     expect(renderToStaticMarkup(createElement(RouteNotices, { c, notices: [] }))).toBe("");
+  });
+});
+
+describe("the notice after the secure address ended for old phone apps", () => {
+  const phone = (extra: Record<string, unknown> = {}) => ({ id: "p", name: "Phone", lastSeenAt: 1, ...extra }) as never;
+
+  it("shows only while a paired phone has not used the encrypted connection", () => {
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [phone()] })).toBe(true);
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [phone({ e2eAt: 5 }), phone()] })).toBe(true);
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [phone({ e2eAt: 5 })] })).toBe(false);
+    expect(showTunnelRetiredNotice({ tunnelRetired: true }, { devices: [] })).toBe(false);
+    expect(showTunnelRetiredNotice({}, { devices: [phone()] })).toBe(false);
+    expect(showTunnelRetiredNotice(null, null)).toBe(false);
   });
 });

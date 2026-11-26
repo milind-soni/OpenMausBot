@@ -1,6 +1,7 @@
 import { isCitationAttachment, serializeCitation, type CitationAttachment } from "./citations.ts";
 import { randomUuid } from "./random-uuid.ts";
 import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
+import { serverFetch } from "./relay-server.ts";
 export { dataContextFor, type DataContext, type DataViewContext } from "../../shared/data-context.ts";
 
 export type PasteAttachment = {
@@ -138,12 +139,9 @@ export function imagesThatFit<T extends { name: string; size: number }>(images: 
   return kept;
 }
 
-const ARCHIVE_NAME = /\.(?:zip|rar|7z|tar|gz|tgz|bz2|xz)$/i;
-
 export type AttachProblem =
   | { kind: "too-large"; name: string; limitMb: number }
   | { kind: "unsupported"; names: string[] }
-  | { kind: "archives"; names: string[] }
   | { kind: "image-limit"; names: string[] }
   | { kind: "upload-failed"; name: string; reason: string };
 
@@ -178,6 +176,7 @@ const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   odt: "application/vnd.oasis.opendocument.text",
   ods: "application/vnd.oasis.opendocument.spreadsheet",
   odp: "application/vnd.oasis.opendocument.presentation",
+  xmind: "application/vnd.xmind.workbook",
 };
 
 const ACCEPTED_DOCUMENT_MIMES = new Set(Object.values(DOCUMENT_MIMES));
@@ -192,10 +191,28 @@ const AUDIO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
   flac: "audio/flac",
   webm: "audio/webm",
 };
+/** Sent as plain files and never unpacked; typed by name alone, since browsers declare archives inconsistently. */
+const ARCHIVE_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
+  zip: "application/zip",
+  rar: "application/vnd.rar",
+  "7z": "application/x-7z-compressed",
+  tar: "application/x-tar",
+  gz: "application/gzip",
+  tgz: "application/x-compressed-tar",
+  bz2: "application/x-bzip2",
+  xz: "application/x-xz",
+};
+
 const ACCEPTED_AUDIO_MIMES = new Set([
   ...Object.values(AUDIO_MIMES_BY_EXTENSION),
   "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
 ]);
+const VIDEO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+};
+const ACCEPTED_VIDEO_MIMES = new Set(Object.values(VIDEO_MIMES_BY_EXTENSION));
 
 export function documentMime(file: Pick<File, "name" | "type">): string | null {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
@@ -237,6 +254,15 @@ export function clipboardImageFiles(
   return [];
 }
 
+/** A file copied in Finder or Explorer reaches a paste in clipboardData.files (Chromium), with only its name as text.
+ * Anything there but pictures is attached the way a picked file is; pictures alone keep the image paste. */
+export function clipboardFilesToAttach<T extends { type: string }>(
+  clipboardData: { files?: Iterable<T> | null } | null | undefined,
+): T[] {
+  const files = Array.from(clipboardData?.files ?? []);
+  return files.some((file) => !isImageFile(file)) ? files : [];
+}
+
 export function clipboardHasImages(
   clipboardData: {
     files?: Iterable<{ type: string; size?: number }> | null;
@@ -276,7 +302,7 @@ async function uploadWithRetry<T>(url: string, init: RequestInit): Promise<T> {
   for (let attempt = 0; attempt < UPLOAD_ATTEMPTS; attempt += 1) {
     let response: Response;
     try {
-      response = await fetch(url, init);
+      response = await serverFetch(url, init);
     } catch (error) {
       const aborted = typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
       if (aborted || attempt === UPLOAD_ATTEMPTS - 1) throw error;
@@ -358,12 +384,17 @@ export async function imageAttachmentFromFile(
   };
 }
 
-/** Copied into the private store so the companion route never sees an arbitrary Finder path. */
-export async function fileAttachmentFromFile(file: File): Promise<FileAttachment | null> {
+/** Copied into the private store so the companion route never sees an arbitrary Finder path.
+ * `anyType` sends a file of any other type, which the server keeps as a plain download. */
+export async function fileAttachmentFromFile(file: File, anyType = false): Promise<FileAttachment | null> {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const extension = file.name.split(".").at(-1)?.toLowerCase() ?? "";
+  const video = ACCEPTED_VIDEO_MIMES.has(declared) ? declared : VIDEO_MIMES_BY_EXTENSION[extension];
   const mime = documentMime(file) ??
-    (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]);
+    (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]) ??
+    ARCHIVE_MIMES_BY_EXTENSION[extension] ??
+    (file.size <= FILE_MAX_BYTES ? video : undefined) ??
+    (anyType ? declared || "application/octet-stream" : undefined);
   if (!mime) return null;
   if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
   const uploadId = newUploadId();
@@ -694,7 +725,7 @@ export function discardUnsentUpload(attachment: Attachment): void {
   if ((attachment.kind !== "image" && attachment.kind !== "file") || !attachment.path) return;
   const name = attachmentBasename(attachment.path);
   if (!/^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/.test(name)) return;
-  void fetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
+  void serverFetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
 }
 
 export function attachmentBasename(path: string): string {
@@ -756,7 +787,8 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     allowImages: boolean;
     getPath: (file: T) => string;
     uploadImage: (file: T) => Promise<Attachment | null>;
-    uploadFile?: (file: T) => Promise<FileAttachment | null>;
+    /** `anyType` is set for a file nothing else takes, to upload it as a plain download. */
+    uploadFile?: (file: T, anyType?: boolean) => Promise<FileAttachment | null>;
     /** Images the message can still take; the rest are left out and named in the notice. */
     imageSlots?: number;
     /** Image bytes the message can still take; images past it are left out the same way. */
@@ -768,9 +800,9 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   const overflow = new Set(fitImagesToSlots(images, _opts.imageSlots ?? Infinity, _opts.imageBytes).leftOut);
   const leftOut = [...overflow].map((file) => file.name);
   const files = _files.filter((file) => !overflow.has(file));
-  const uploadFile = _opts.uploadFile ?? (async (file: T) => {
+  const uploadFile = _opts.uploadFile ?? (async (file: T, anyType?: boolean) => {
     if (!file.arrayBuffer) return null;
-    return fileAttachmentFromFile(file as unknown as File);
+    return fileAttachmentFromFile(file as unknown as File, anyType);
   });
   const failed = (file: T, err: unknown): { uploadError: AttachProblem; uploadErrorText: string } => ({
     uploadError: err instanceof AttachError ? err.problem
@@ -800,17 +832,20 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
       return { attachments: [], rejectedNames: [], ...failed(file, err) };
     }
     const result = await attachmentsFromDroppedFiles([file], getPath);
-    return result;
+    if (!result.rejectedNames.length) return result;
+    try {
+      const attachment = await uploadFile(file, true);
+      return attachment ? { attachments: [attachment], rejectedNames: [] } : result;
+    } catch (err) {
+      return { attachments: [], rejectedNames: [], ...failed(file, err) };
+    }
   }));
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);
-  const archives = rejectedNames.filter((name) => ARCHIVE_NAME.test(name));
-  const unsupported = rejectedNames.filter((name) => !ARCHIVE_NAME.test(name));
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
-  const pathless = [
-    unsupported.length ? `Unable to attach ${unsupported.join(", ")}. Choose a supported image, document, or audio file.` : "",
-    archives.length ? `Archives can't be attached: unzip ${archives.join(", ")} and attach the files inside.` : "",
-  ].filter(Boolean).join(" ") || null;
+  const pathless = rejectedNames.length
+    ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
+    : null;
   const uploadErrorText = results.flatMap((result) => result.uploadErrorText ? [result.uploadErrorText] : []).join("; ") || null;
   const notice = pathless && uploadErrorText ? `${pathless} (${uploadErrorText})` : (pathless ?? uploadErrorText);
   const limited = leftOut.length ? imageLimitNotice(leftOut) : null;
@@ -818,8 +853,7 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     attachments,
     problems: [
       ...(leftOut.length ? [{ kind: "image-limit" as const, names: leftOut }] : []),
-      ...(unsupported.length ? [{ kind: "unsupported" as const, names: unsupported }] : []),
-      ...(archives.length ? [{ kind: "archives" as const, names: archives }] : []),
+      ...(rejectedNames.length ? [{ kind: "unsupported" as const, names: rejectedNames }] : []),
       ...uploadErrors,
     ],
     notice: limited && notice ? `${limited} ${notice}` : (limited ?? notice),

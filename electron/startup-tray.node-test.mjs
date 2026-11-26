@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import nativeText from "./native-text.cjs";
 import { createStartupScreen, startupScreenHtml } from "./startup-screen.mjs";
+import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 
 const iconPath = fileURLToPath(new URL("./resources/app-icon.png", import.meta.url));
@@ -149,11 +150,11 @@ test("the tray's menu and the startup screen speak the app's language, and the t
   }
   const tray = createSystemTray({ Tray, Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) },
     iconPath, getWindow: () => null, onQuit: () => {}, t: text.t });
-  assert.deepEqual(trayInstance.menu.map(item => item.label), ["Open OpenMaus Bot", undefined, "Quit OpenMaus Bot"]);
+  assert.deepEqual(trayInstance.menu.map(item => item.label), ["Open OpenMausBot", undefined, "Quit OpenMausBot"]);
   text.set("pt-br");
   tray.relabel();
-  assert.deepEqual(trayInstance.menu.map(item => item.label), ["Abrir o OpenMaus Bot", undefined, "Sair do OpenMaus Bot"]);
-  assert.equal(trayInstance.tooltip, "OpenMaus Bot");
+  assert.deepEqual(trayInstance.menu.map(item => item.label), ["Abrir o OpenMausBot", undefined, "Sair do OpenMausBot"]);
+  assert.equal(trayInstance.tooltip, "OpenMausBot");
   const html = startupScreenHtml(iconPath, { t: text.t, lang: text.intlTag() });
   assert.match(html, /<html lang="pt-BR">/);
   assert.match(html, /<button aria-label="Fechar"/);
@@ -215,4 +216,69 @@ test("the loading screen says what the app waits on, before its page has loaded 
   splash.dispose();
   splash.status("Opening My Cloud…");
   assert.equal(ran.length, 2, "nothing after it is gone");
+});
+
+test("the startup screen says how the workspace came up, once", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ways = [];
+  const painted = fixture({ onReveal: via => ways.push(via) });
+  await painted.splash.ready;
+  painted.win.webContents.executeJavaScript = () => Promise.resolve();
+  painted.splash.attach(painted.win);
+  painted.win.webContents.emit("did-finish-load"); await flush();
+  painted.win.webContents.emit("render-process-gone");
+  const crashed = fixture({ onReveal: via => ways.push(via) });
+  await crashed.splash.ready; crashed.splash.attach(crashed.win);
+  crashed.win.webContents.emit("render-process-gone");
+  const slow = fixture({ onReveal: via => ways.push(via) });
+  await slow.splash.ready; slow.splash.attach(slow.win);
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(ways, ["painted", "crashed", "timeout"]);
+  const hidden = fixture({ onReveal: via => ways.push(via) });
+  await hidden.splash.ready;
+  hidden.splash.window.emit("close", { preventDefault() {} });
+  hidden.win.webContents.executeJavaScript = () => Promise.resolve();
+  hidden.splash.attach(hidden.win);
+  hidden.win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(ways.at(-1), "hidden");
+});
+
+test("on Linux the lending indicator borrows the one tray icon and hands Open and Quit back", () => {
+  const made = [], opened = [];
+  class Tray extends EventEmitter {
+    constructor() { super(); made.push(this); }
+    setToolTip(value) { this.tooltip = value; }
+    setTitle(value) { this.title = value; }
+    setContextMenu(value) { this.menu = value; }
+    isDestroyed() { return this.destroyed ?? false; }
+    destroy() { this.destroyed = true; }
+  }
+  const fakes = { Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath };
+  const win = new Window();
+  const tray = createSystemTray({ ...fakes, Tray, getWindow: () => win, onQuit: () => {} });
+  const labels = () => made[0].menu.filter(item => item.label).map(item => item.label);
+  const openQuit = labels();
+  const lending = createLendingIndicator({ ...fakes, Tray: tray.Borrowed,
+    onPause: () => {}, onResume: () => {}, onActivity: () => {}, device: "PC" });
+  win.on("show", () => opened.push("show"));
+
+  lending.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.equal(made.length, 1, "no second tray icon");
+  assert.match(made[0].tooltip, /^OpenMausBot: My Cloud/);
+  assert.ok(labels().includes("Pause"));
+  tray.relabel();
+  assert.ok(labels().includes("Pause"), "a language change does not put Open and Quit over the lending menu");
+  made[0].emit("click");
+  assert.deepEqual(opened, ["show"], "a click still opens the window");
+
+  lending.update({ clouds: [], using: [], paused: false });
+  assert.equal(made[0].isDestroyed(), false);
+  assert.equal(made[0].tooltip, "OpenMausBot");
+  assert.deepEqual(labels(), openQuit);
+
+  lending.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.equal(made.length, 1);
+  assert.ok(labels().includes("Pause"), "lending again borrows the icon again");
+  lending.destroy(); tray.destroy();
+  assert.equal(made[0].isDestroyed(), true);
 });

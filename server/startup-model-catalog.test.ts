@@ -84,7 +84,7 @@ function slowDriver(gate: Promise<ModelCatalog>): {
   return { driver, seenByTurn: () => seen };
 }
 
-const acpSupport = (resolveModels: () => Promise<ModelCatalog>): AcpSupport => ({
+const acpSupport = (resolveModels: NonNullable<AcpSupport["resolveModels"]>): AcpSupport => ({
   driverKind: "startup-catalog-test",
   displayName: "Startup catalog",
   models: { default: "static-model", options: [{ id: "static-model", label: "Static" }] },
@@ -116,6 +116,22 @@ describe("startup model catalogs", () => {
   it("keeps a model the organization turned off marked in the saved list, so no start offers it while its refresh waits", () => {
     writeStartupModelCache("org-blocked", { default: "a", options: [{ id: "a", label: "A" }, { id: "b", label: "B", orgBlocked: true }] });
     expect(readStartupModelCache("org-blocked")?.options[1]).toEqual({ id: "b", label: "B", orgBlocked: true });
+  });
+
+  it("preserves per-model effortLevels in the saved list so warm restarts do not leak unsupported efforts, and reads an empty list as none", () => {
+    writeStartupModelCache("per-model-efforts", {
+      default: "gpt-5.4",
+      options: [
+        { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "high", "ultra"] },
+        { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "high"] },
+        { id: "gpt-4o", label: "GPT-4o", effortLevels: [] },
+      ],
+    });
+    expect(readStartupModelCache("per-model-efforts")?.options).toEqual([
+      { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "high", "ultra"] },
+      { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "high"] },
+      { id: "gpt-4o", label: "GPT-4o" },
+    ]);
   });
 
   it("does not wait for a slow refresh when a later start already has a catalog", async () => {
@@ -266,6 +282,44 @@ describe("startup model catalogs", () => {
     expect(seenByTurn()).toEqual(FRESH);
   });
 
+  it("a saved catalog stands in without counting as confirmed, and Refresh drops ids the engine no longer returns", async () => {
+    writeStartupModelCache("saved-gone", {
+      default: "gone-model",
+      options: [{ id: "gone-model", label: "Gone" }, { id: "kept-model", label: "Kept" }],
+    });
+    let reads = 0;
+    const freshSeen: boolean[] = [];
+    const driver = createAcpDriver({
+      ...acpSupport((_env, _config, _id, fresh) => {
+        reads += 1;
+        freshSeen.push(fresh === true);
+        return { default: "kept-model", options: [{ id: "kept-model", label: "Kept" }] };
+      }),
+      // Not probed at startup, so a recent file is the only list until Refresh.
+      resolveModelsOnCreate: false,
+    });
+    const instance = await driver.create({
+      instanceId: "saved-gone",
+      displayName: "Saved gone",
+      environment: {},
+      enabled: true,
+      config: driver.defaultConfig(),
+    });
+    try {
+      expect(instance.models.options.map((option) => option.id)).toEqual(["gone-model", "kept-model"]);
+      expect(instance.modelsUnconfirmed).toBe(true);
+      expect(reads).toBe(0);
+      await instance.refreshModels?.();
+      expect(reads).toBe(1);
+      expect(freshSeen).toEqual([true]);
+      expect(instance.models).toEqual({ default: "kept-model", options: [{ id: "kept-model", label: "Kept" }] });
+      expect(instance.modelsUnconfirmed).toBe(false);
+      expect(readStartupModelCache("saved-gone")?.options.map((option) => option.id)).toEqual(["kept-model"]);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
   it("an ACP engine serves a saved catalog and lets the turn wait for the refresh", async () => {
     seedBots();
     writeStartupModelCache("cursor", CACHED, STALE);
@@ -291,6 +345,29 @@ describe("startup model catalogs", () => {
     await expect(turn).rejects.toThrow("spawned");
     expect(instance.models).toEqual(FRESH);
     expect(spawn).toHaveBeenCalled();
+    await instance.dispose();
+  });
+
+  it("an ACP engine that opts in runs a turn the saved catalog serves without waiting for the refresh", async () => {
+    seedBots();
+    writeStartupModelCache("cursor", CACHED, STALE);
+    const gate = deferredCatalog();
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => {
+      throw new Error("spawned");
+    });
+    const driver = createAcpDriver({ ...acpSupport(() => gate.promise), modelListStandsIn: true });
+    const instance = await driver.create({ instanceId: "cursor", displayName: "Cursor", environment: {}, enabled: true, config: driver.defaultConfig() });
+    for (const model of ["cached-model", undefined]) {
+      await expect(instance.adapter.sendTurn({ threadId: `thread-${model ?? "default"}`, text: "hello", model, cwd: DATA_DIR })).rejects.toThrow("spawned");
+    }
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(instance.models).toEqual(CACHED);
+    // A model the saved catalog lacks still waits for the read.
+    const unknown = instance.adapter.sendTurn({ threadId: "thread-unknown", text: "hello", model: "fresh-model", cwd: DATA_DIR });
+    expect(await settledSoon(unknown)).toBe(false);
+    gate.release(FRESH);
+    await expect(unknown).rejects.toThrow("spawned");
+    expect(instance.models).toEqual(FRESH);
     await instance.dispose();
   });
 });

@@ -1,14 +1,31 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
 import { isIP } from "node:net";
 
-export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "meta";
+export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta";
 
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
-export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta"];
+export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
+
+/** What a paired phone may write per provider: a key, never a URL (`openaiCompat` carries one, so it is absent). */
+const PHONE_KEY_FIELDS: Readonly<Record<string, Readonly<Record<string, "string" | "boolean">>>> = {
+  anthropic: { key: "string", everyClaudeBot: "boolean" },
+  ...Object.fromEntries(PROVIDER_KEY_KINDS.filter((kind) => kind !== "anthropic" && kind !== "openaiCompat").map((kind) => [kind, { key: "string" }])),
+};
+
+/** True when `body` sets only provider keys, so a paired phone's config write cannot widen into anything else. */
+export function isPhoneKeyPatch(body: unknown): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return false;
+  const entries = Object.entries(body);
+  return entries.length > 0 && entries.every(([kind, entry]) => {
+    const fields = Object.hasOwn(PHONE_KEY_FIELDS, kind) ? PHONE_KEY_FIELDS[kind] : undefined;
+    return fields !== undefined && typeof entry === "object" && entry !== null && !Array.isArray(entry) && Object.hasOwn(entry, "key")
+      && Object.entries(entry).every(([name, value]) => Object.hasOwn(fields, name) && typeof value === fields[name]);
+  });
+}
 
 const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   anthropic: "https://api.anthropic.com",
@@ -20,6 +37,7 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
   cerebras: "https://api.cerebras.ai/v1",
   groq: "https://api.groq.com/openai/v1",
   greenference: "https://llm.eu.greenference.com/v1",
+  modelgo: "https://api.modelgo.ai/v1",
   meta: "https://api.meta.ai/v1",
 };
 
@@ -29,6 +47,19 @@ const MAX_MODELS = 5;
 export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
   return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
+}
+
+/** `{root}/{path}`, or null when a key must not be sent there: https anywhere, plain http only to this machine. */
+export function keySafeUrl(root: string, path: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(`${root.trim().replace(/\/+$/, "")}/${path}`);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password) return null;
+  if (url.protocol === "https:") return url;
+  return url.protocol === "http:" && isLoopback(url.hostname) ? url : null;
 }
 
 export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {
@@ -41,9 +72,10 @@ export function providerModelsUrl(provider: ProviderKeyKind, base?: string | nul
   return `${root}/models`;
 }
 
-function modelIds(body: unknown): string[] {
+function modelIds(body: unknown): string[] | null {
   const record = body && typeof body === "object" ? (body as { data?: unknown; models?: unknown }) : null;
-  const list = Array.isArray(body) ? body : Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : [];
+  const list = Array.isArray(body) ? body : Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : null;
+  if (!list) return null;
   const ids: string[] = [];
   for (const entry of list) {
     const item = entry && typeof entry === "object" ? (entry as { id?: unknown; name?: unknown }) : null;
@@ -91,7 +123,10 @@ export async function checkProviderKey(
       if (typeof freeTier !== "boolean") return { ok: false, reason: "unexpected", status: response.status };
       return { ok: true, check: "authentication", models: [], freeTier };
     }
-    return { ok: true, check: "models", models: modelIds(body) };
+    const models = modelIds(body);
+    return models === null
+      ? { ok: false, reason: "unexpected", status: response.status }
+      : { ok: true, check: "models", models };
   } catch {
     return { ok: false, reason: "unreachable" };
   } finally {

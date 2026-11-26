@@ -1,6 +1,6 @@
 // A config written by a newer or differently built app must load as an unavailable shadow, never crash the fleet.
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -229,6 +229,57 @@ describe("ProviderRegistry", () => {
     authenticated = true;
     await read();
     expect(heard, "signed in all along: nothing new to tell").toEqual(["a"]);
+  });
+
+  it("tells nothing more for a sign-in the app saw, and nothing for a provider put in place of a signed-out one", async () => {
+    let authenticated: boolean | undefined = false;
+    const fake = makeFakeDriver({ get answer() { return { state: "available" as const, version: "1.0.0", ...(authenticated === undefined ? {} : { authenticated }) }; } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const heard: string[] = [];
+    registry.onSignedIn((instanceId) => heard.push(instanceId));
+    const read = async () => {
+      registry.forgetSnapshots();
+      await registry.describe();
+    };
+    await read();
+    authenticated = true;
+    registry.sawSignedIn("a");
+    await read();
+    expect(heard, "the app told this sign-in itself").toEqual([]);
+    authenticated = false;
+    await read();
+    authenticated = true;
+    await read();
+    expect(heard, "signed out and in again since: a new sign-in").toEqual(["a"]);
+    heard.length = 0;
+    authenticated = false;
+    await read();
+    await registry.dispose("a");
+    await registry.load({ a: { driver: "fake" } });
+    authenticated = true;
+    await read();
+    expect(heard, "the new provider was never read signed out").toEqual([]);
+  });
+
+  it("tells its listeners of a sign-in when a read between said nothing about the sign-in", async () => {
+    let authenticated: boolean | undefined = false;
+    const fake = makeFakeDriver({ get answer() { return { state: "available" as const, version: "1.0.0", ...(authenticated === undefined ? {} : { authenticated }) }; } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const heard: string[] = [];
+    registry.onSignedIn((instanceId) => heard.push(instanceId));
+    const read = async () => {
+      registry.forgetSnapshots();
+      await registry.describe();
+    };
+    await read();
+    authenticated = undefined;
+    await read();
+    expect(heard).toEqual([]);
+    authenticated = true;
+    await read();
+    expect(heard).toEqual(["a"]);
   });
 
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
@@ -548,6 +599,7 @@ process.exit(0);
     originalPath = process.env.PATH;
     const binDir = join(scratch, "fake-path");
     mkdirSync(binDir);
+    symlinkSync(process.execPath, join(binDir, "node"));
     if (present) addFakeNpm(binDir);
     process.env.PATH = binDir;
     process.env.FAKE_NPM_LOG = join(scratch, "npm-calls.jsonl");

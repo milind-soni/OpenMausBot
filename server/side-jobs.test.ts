@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, loadConfig, parseConfigPatch, parseStoredConfig } from "./config.ts";
 import type { TextGenerationOptions } from "./contracts.ts";
+import { ChatHttpError } from "./drivers/openai-chat-refusals.ts";
 import { createMemoryUpkeep, NO_TEXT_ENGINE, type UpkeepBot } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
+import { createJobSlots } from "./job-slots.ts";
 import { createSideJobs, helperSelection, type SideJobBot, type SideJobInstance, type SideJobsDeps } from "./side-jobs.ts";
 import { ensureWorkspace, workspaceDir, WORKSPACES_DIR } from "./workspace.ts";
 
@@ -60,7 +62,7 @@ function backgroundEngine(instanceId: string, driverKind: string) {
 
 const bot = (id: string, instanceId: string): SideJobBot => ({ id, name: `Bot ${id}`, threadId: `main-${id}`, modelSelection: { instanceId } });
 
-function setup(options: { helper?: { instanceId: string; model?: string } | null; modelAllowed?: SideJobsDeps["modelAllowed"]; smallModels?: SideJobsDeps["smallModels"] } = {}) {
+function setup(options: { helper?: { instanceId: string; model?: string } | null; modelAllowed?: SideJobsDeps["modelAllowed"]; smallModels?: SideJobsDeps["smallModels"]; slots?: SideJobsDeps["slots"] } = {}) {
   const claude = textEngine("claude", "claudeAgent");
   const openrouter = textEngine("openrouter", "openai-compat");
   const acp = backgroundEngine("grok", "grokAgent");
@@ -93,6 +95,7 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
     },
     book: (row, tokensReported, notificationThreadId) => state.booked.push({ row, tokensReported, notificationThreadId }),
     log: (line) => state.logs.push(line),
+    ...(options.slots ? { slots: options.slots } : {}),
   });
   return { jobs, state, claude, openrouter, acp, codex };
 }
@@ -584,6 +587,26 @@ describe("memory upkeep through the resolver", () => {
   });
   const memory = () => readFileSync(join(workspaceDir(BOT.id), "MEMORY.md"), "utf8");
 
+  it("persists the actual fallback model in the upkeep status for the configured choice", async () => {
+    const { jobs, state } = setup();
+    const selection = { instanceId: "openrouter", model: "vendor/memory" };
+    const automatic = "vendor/auto";
+    state.bots.set(BOT.id, { ...bot(BOT.id, selection.instanceId), memoryModel: selection });
+    const calls = vi.fn(async (prompt: string, options?: TextGenerationOptions) => {
+      if (options?.model === selection.model) throw new ChatHttpError(404, "upstream HTTP 404: No endpoints for this model found.");
+      options?.checkModel?.(automatic);
+      options?.onUsage?.({ model: "vendor/served" });
+      return prompt.includes("CAPTURE step") ? facts : '{"moves": []}';
+    });
+    const own = state.instances.get(selection.instanceId)!;
+    state.instances.set(selection.instanceId, { ...own, openRouter: true, models: { default: automatic, options: [] }, generateText: calls });
+    const service = upkeep(jobs);
+
+    expect(await service.capture({ botId: BOT.id, threadId: "t1", turns })).toMatchObject({ added: 1 });
+    expect(calls.mock.calls.map(([, options]) => options?.model)).toEqual([selection.model, undefined]);
+    expect(upkeep(jobs).status(BOT.id).memoryModel).toEqual({ ...selection, last: { ...selection, state: "fallback", used: "vendor/served" } });
+  });
+
   it("captures for a Pi bot once a helper is set", async () => {
     const { jobs, state } = setup();
     state.instances.set("claude", textEngine("claude", "claudeAgent", (prompt) => (prompt.includes("CAPTURE step") ? facts : '{"moves": []}')).instance);
@@ -625,5 +648,28 @@ describe("memory upkeep through the resolver", () => {
     expect(await upkeep(capped.jobs).capture({ botId: BOT.id, threadId: "t1", turns })).toMatchObject({ added: 0, note: "The capture call did not answer in time." });
     expect(capped.claude.calls).toEqual([]);
     expect(memory()).toBe(before);
+  });
+});
+
+describe("background engine calls across bots", () => {
+  it("run a few at once, while the ones a turn or a person waits on start at once", async () => {
+    let open = 0, most = 0;
+    const releases: Array<() => void> = [];
+    const { jobs, state } = setup({ slots: createJobSlots(1) });
+    state.instances.set("claude", { ...state.instances.get("claude")!, generateText: async () => {
+      open += 1; most = Math.max(most, open);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      open -= 1;
+      return "ok";
+    } });
+    const memory = [jobs.text("memory", "claude")!.generateText("a"), jobs.text("memory", "claude")!.generateText("b")];
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(open).toBe(1);
+    const summary = jobs.text("compaction", "claude")!.generateText("c");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(open).toBe(2);
+    while (releases.length || open) { releases.shift()?.(); await new Promise((resolve) => setTimeout(resolve, 5)); }
+    expect(await Promise.all([...memory, summary])).toEqual(["ok", "ok", "ok"]);
+    expect(most).toBe(2);
   });
 });

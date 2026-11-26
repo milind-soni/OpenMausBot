@@ -56,7 +56,7 @@ export function WidgetGlyph({ name, size = 16, className }: { name: unknown; siz
     );
   }
   const Icon = widgetIcon(name);
-  return <Icon aria-hidden="true" size={size} strokeWidth={1.8} fill={widgetIconFilled(name) ? "currentColor" : "none"} className={cn("shrink-0", className)} />;
+  return <Icon aria-hidden="true" size={size} fill={widgetIconFilled(name) ? "currentColor" : "none"} className={cn("shrink-0", className)} />;
 }
 
 

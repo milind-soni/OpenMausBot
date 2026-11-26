@@ -113,7 +113,8 @@ describe("spend against a monthly cap", () => {
     expect(spendState({ budgets: { monthlyUsd: 10, warnAtPercent: 90 } }, dataDir, now, yes)?.warn).toBe(false);
     expect(() => assertWithinBudget({ budgets: { monthlyUsd: 10 } }, dataDir, now, yes)).not.toThrow();
     expect(() => assertWithinBudget({ budgets: { monthlyUsd: 8 } }, dataDir, now, yes)).toThrow(
-      expect.objectContaining({ status: 409, code: "spend_cap", message: expect.stringContaining("$8.00") }),
+      // resetsAt: a Bot API caller is told when to try again (Retry-After), the start of the next UTC month.
+      expect.objectContaining({ status: 409, code: "spend_cap", message: expect.stringContaining("$8.00"), resetsAt: Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1) }),
     );
     expect(() => assertWithinBudget({ budgets: { monthlyUsd: 8 } }, dataDir, now, no)).not.toThrow();
   });
@@ -164,6 +165,6 @@ describe("spend notices", () => {
       body: "$81.50 of $100.00 spent this month (2026-09). New turns stop when the limit is reached.",
     });
     expect(spendAlertText("cap", state({ spentUsd: 100.004, percent: 100, exceeded: true })).body)
-      .toBe("$100.00 of $100.00 spent this month (2026-09). New turns are refused until an admin raises the limit under Settings → Usage.");
+      .toBe("$100.00 of $100.00 spent this month (2026-09). New turns are refused until an admin raises the limit under Settings → Spending.");
   });
 });

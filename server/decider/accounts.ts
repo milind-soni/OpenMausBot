@@ -3,6 +3,8 @@
 import type { AppConfig } from "../config.ts";
 import { deciderCredential, type ServiceCredential } from "../included-services.ts";
 import { WORKERS_AI_ACCOUNT_ID } from "./config.ts";
+import { customEndpoint } from "./custom.ts";
+import { GEMINI_DECIDER_URL } from "./gemini.ts";
 import { OPENROUTER_DEFAULT_BASE_URL } from "./openrouter.ts";
 import type { DeciderProvider } from "./types.ts";
 import { WORKERS_AI_DEFAULT_BASE_URL } from "./workers-ai.ts";
@@ -45,10 +47,24 @@ export function jevAccount(cfg: AppConfig, draft?: string): HelperAccount | null
   return credential ? { ...credential, provider: "jev" } : null;
 }
 
+/** The person's own gateway: a key with nowhere safe to send it is nothing. */
+export function customAccount(cfg: AppConfig, draft?: string): HelperAccount | null {
+  const token = draft?.trim() || cfg.decider?.customKey?.trim();
+  const base = cfg.decider?.customBaseUrl?.trim();
+  if (!token || !base || !customEndpoint(base, "systemone")) return null;
+  return { provider: "custom", token, api: base, included: false };
+}
+
 /** Cloud's included relay, a Jev base URL whose `/v1/extract` also extracts. */
 export function includedAccount(): HelperAccount | null {
   const credential = deciderCredential(undefined, undefined);
   return credential?.included ? { ...credential, provider: "jev" } : null;
+}
+
+/** The Gemini key saved for speech, else the one saved for images: Google's Decisions API takes either. */
+export function geminiAccount(cfg: AppConfig): HelperAccount | null {
+  const token = cfg.tts?.geminiKey?.trim() || cfg.imageGen?.geminiKey?.trim();
+  return token ? { provider: "gemini", token, api: GEMINI_DECIDER_URL, included: false } : null;
 }
 
 export function openrouterAccount(cfg: AppConfig, draft?: string): HelperAccount | null {

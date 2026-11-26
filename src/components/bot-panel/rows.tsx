@@ -13,7 +13,7 @@ const titleCls = "text-[14px] font-medium text-ink";
 const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =
   "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] bg-control px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
-/** The panel's action rows, New conversation and Add a routine: flat like every other row, so the only fill in the
+/** The panel's action row, New conversation: flat like every other row, so the only fill in the
  * tab is the conversation you are in. */
 export const panelActionCls = "flex h-9 min-w-0 items-center gap-2.5 rounded-[8px] [&>svg]:size-4 px-3.5 text-[14px] font-medium text-ink transition-colors hover:bg-ink/[0.04]";
 export const chipCls = (on: boolean) =>
@@ -31,7 +31,7 @@ export function CardLabel({ children, action }: { children: ReactNode; action?: 
   );
 }
 
-export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string; "data-panel-automations"?: string }) {
+export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string }) {
   return (
     <button type="button" {...rest} onClick={onClick} className="inline-flex shrink-0 items-center gap-0.5 rounded-[6px] px-1 py-px text-[13px] font-normal text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
       {children}
@@ -76,12 +76,14 @@ export function RowIcon({ icon: Icon }: { icon: LucideIcon }) {
 }
 
 export function BotSwitch({ color, checked, ...props }: Parameters<typeof Switch>[0] & { color: MausColor }) {
-  return <Switch {...props} checked={checked} style={checked ? { backgroundColor: MAUS_COLORS[color] } : undefined} />;
+  const greyBot = color === "silver" || color === "chrome";
+  return <Switch {...props} checked={checked} style={checked && !greyBot ? { backgroundColor: MAUS_COLORS[color] } : undefined} />;
 }
 
-export function SwitchRow({ title, hint, checked, onChange, disabled, color, label, tooltip, extra, ...rest }: {
+export function SwitchRow({ title, hint, icon, checked, onChange, disabled, color, label, tooltip, extra, ...rest }: {
   title: ReactNode;
   hint?: ReactNode;
+  icon?: LucideIcon;
   checked: boolean;
   onChange: () => void;
   disabled?: boolean;
@@ -93,6 +95,7 @@ export function SwitchRow({ title, hint, checked, onChange, disabled, color, lab
 }) {
   return (
     <div {...rest} className={rowCls}>
+      {icon && <RowIcon icon={icon} />}
       <RowText title={title} hint={hint} />
       {extra}
       <BotSwitch
@@ -132,12 +135,12 @@ export function NavRow({ title, hint, value, icon, onClick, drill = true, danger
       className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
     >
       {icon && <RowIcon icon={icon} />}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[45%] flex-1">
         <div className={cn(titleCls, danger && "text-danger")}>{title}</div>
         {hint && <div className={hintCls}>{hint}</div>}
       </div>
       {value !== undefined && value !== null && value !== "" && (
-        <span className="inline-flex max-w-[45%] shrink-0 items-center gap-1 truncate text-[13px] text-ink-secondary">{value}</span>
+        <span className="inline-flex min-w-0 max-w-[45%] items-center gap-1 text-[13px] text-ink-secondary"><span className="truncate">{value}</span></span>
       )}
       {drill && <ChevronRight size={15} className="shrink-0 text-ink-tertiary" aria-hidden="true" />}
     </button>

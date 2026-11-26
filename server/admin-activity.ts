@@ -195,6 +195,7 @@ const pick = (source: unknown, paths: readonly string[]) =>
 const CONFIG_CATEGORY: Record<string, AdminActivityCategory> = {
   signIn: "people",
   budgets: "budget",
+  usageCaps: "budget",
   billing: "budget",
   mcpServers: "mcp",
   instances: "engine",
@@ -224,9 +225,9 @@ export function configChangeRows(before: unknown, after: unknown): Array<Omit<Ad
 
 /** What a bot may do, where, and who may see it; display fields (colour, unread, pins) are not audited. */
 export const BOT_AUDIT_FIELDS = [
-  "approvalMode", "autoApprove", "alwaysAllow", "peers", "approvePeerComms", "computer", "cloudBackend", "autoStartVps", "vpsAlias",
+  "approvalMode", "autoApprove", "alwaysAllow", "toolScope", "connectorScopes", "connectorTools", "computer", "cloudBackend", "autoStartVps", "vpsAlias",
   "cwd", "composio", "browser", "browserProfile", "mcpServers", "chiefOfStaff", "managedSections", "section",
-  "parkDirectMessages", "hidden", "modelSelection", "helperModel", "visibility",
+  "parkDirectMessages", "hidden", "modelSelection", "helperModel", "checkWork", "visibility",
 ] as const;
 
 /** A Team Cloud's bots are everyone's: who renamed one, recoloured it or changed its instructions is recorded too. */

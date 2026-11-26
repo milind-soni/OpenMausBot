@@ -1,10 +1,16 @@
 // Synthetic local persistence only. Never import config before isolating data.
+// `--bots [BOTSxTHREADS ...]` measures whole-file saves of bots.json instead (scripts/bench-bots-save.ts).
 import { appendFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir, platform, arch } from "node:os";
 import { join } from "node:path";
 import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setImmediate as yieldLoop, setTimeout as delay } from "node:timers/promises";
+
+if (process.argv.includes("--bots")) {
+  await import("./bench-bots-save.ts");
+  process.exit(0);
+}
 
 const directory = mkdtempSync(join(tmpdir(), "omb-persistence-bench-"));
 const previousDataDir = process.env.OMB_DATA_DIR;

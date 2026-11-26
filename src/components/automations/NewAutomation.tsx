@@ -5,8 +5,9 @@ import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { imeComposing } from "@/lib/send-key";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { Select } from "../Select";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export type SetUpKind = "schedule" | "webhook" | "app";
 
@@ -25,7 +26,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
   /** The bot this box would have asked, so the editor starts with it chosen. */
   onSetUpYourself: (kind: SetUpKind, botId: string) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ bots: s.bots, selectedId: s.selectedId }), sameFields), dispatch = useStoreDispatch();
   const bots = state.bots.filter((bot) => !bot.hidden);
   const [text, setText] = useState(initialText);
   const [botId, setBotId] = useState(() => defaultBot(bots, state.selectedId)?.id ?? "");

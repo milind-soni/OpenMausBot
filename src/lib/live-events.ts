@@ -1,14 +1,26 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
+import { relayEventSource, relayLink, type LiveEventSourceLike } from "./relay-server";
 import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
 import { noteTurnEvent } from "@/state/turn-status";
+import { forgetLiveReplies, noteLiveReplyEvent, noteLiveReplyMessage } from "@/state/live-reply";
 
 export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
 export const LIVE_EVENTS_RETRY_MIN_MS = 500;
 export const LIVE_EVENTS_RETRY_MAX_MS = 10_000;
 const RETRY_LIVE_EVENTS = "omb:retry-live-events";
+
+/** What the page's live connection is doing, by a fixed word: the app's 30-second "still waiting" event names it. */
+export const LIVE_PHASES = ["idle", "opening", "open", "retrying", "offline", "hidden", "asleep"] as const;
+export type LivePhase = (typeof LIVE_PHASES)[number];
+let livePhaseNow: LivePhase = "idle";
+export function livePhase(): LivePhase {
+  return livePhaseNow;
+}
+const holdReason = (platform: Pick<LiveEventsPlatform, "isOnline" | "isVisible">): LivePhase | null =>
+  !platform.isOnline() ? "offline" : !platform.isVisible() ? "hidden" : cloudAsleep() ? "asleep" : null;
 
 export function retryLiveEvents(): void {
   window.dispatchEvent(new Event(RETRY_LIVE_EVENTS));
@@ -21,17 +33,7 @@ export interface LiveFrame {
   event?: unknown;
 }
 
-interface LiveMessageEvent {
-  data: string;
-  lastEventId?: string;
-}
-
-export interface LiveEventSourceLike {
-  onopen: (() => void) | null;
-  onerror: (() => void) | null;
-  onmessage: ((event: LiveMessageEvent) => void) | null;
-  close: () => void;
-}
+export type { LiveEventSourceLike };
 
 interface ListenerTarget {
   addEventListener: (type: string, listener: () => void) => void;
@@ -58,13 +60,15 @@ export interface LiveEventsHandlers {
   retryMaxMs?: number;
 }
 
-/** `screens: false` asks the server to leave out live screen frames. */
+/** `screens: false` asks the server to leave out live screen frames; `window=1` tells it an app window is open;
+ * `frames=thread` that this client keeps a bot's other threads when a bot frame says `tasksPartial`. */
 export function liveEventsUrl(options?: { since?: string | null; screens?: boolean }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
   if (options?.screens === false) params.set("screens", "off");
-  const query = params.toString();
-  return query ? `${LIVE_EVENTS_PATH}?${query}` : LIVE_EVENTS_PATH;
+  params.set("window", "1");
+  params.set("frames", "thread");
+  return `${LIVE_EVENTS_PATH}?${params}`;
 }
 
 export interface LiveFrameListener {
@@ -101,6 +105,7 @@ export function publishLiveFrame(frame: ServerFrame): void {
 }
 
 export function publishMissedFrames(): void {
+  forgetLiveReplies();
   for (const listener of liveFrameListeners) listener.onMissedFrames?.();
 }
 
@@ -140,8 +145,10 @@ function tapLiveFrame(frame: ServerFrame): void {
   if (frame.kind === "runtime") {
     // The chat's status line reads every live runtime frame; none of them is stored.
     noteTurnEvent(frame.event);
+    noteLiveReplyEvent(frame.event);
     recordRuntimeEvent(frame.event);
   } else if (frame.kind === "message" && frame.message?.role === "bot" && frame.message?.kind === "text") {
+    noteLiveReplyMessage(frame.threadId, frame.message);
     recordBotTextMessage(frame.message, frame.threadId);
   }
 }
@@ -150,22 +157,23 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
   const NativeEventSource = globalThis.EventSource;
   const createEventSource =
     overrides.createEventSource ??
-    (!NativeEventSource
-      ? undefined
-      : (url: string) => {
-          const native = new NativeEventSource(url);
-          const adapter: LiveEventSourceLike = {
-            onopen: null,
-            onerror: null,
-            onmessage: null,
-            close: () => native.close(),
-          };
-          native.onopen = () => adapter.onopen?.();
-          native.onerror = () => adapter.onerror?.();
-          native.onmessage = (event) => adapter.onmessage?.(event);
-          return adapter;
-        });
-  if (!createEventSource) return null;
+    ((url: string) => {
+      const relay = relayLink();
+      if (relay) return relayEventSource(relay, url);
+      if (!NativeEventSource) throw new Error("no EventSource");
+      const native = new NativeEventSource(url);
+      const adapter: LiveEventSourceLike = {
+        onopen: null,
+        onerror: null,
+        onmessage: null,
+        close: () => native.close(),
+      };
+      native.onopen = () => adapter.onopen?.();
+      native.onerror = () => adapter.onerror?.();
+      native.onmessage = (event) => adapter.onmessage?.(event);
+      return adapter;
+    });
+  if (!overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
 
   const browserWindow = globalThis.window;
   const browserDocument = globalThis.document;
@@ -247,6 +255,7 @@ export function openLiveEvents(
   let connect: () => void;
   const scheduleReconnect = () => {
     // A Cloud home that went to sleep: reconnecting would wake it. The person's next action does (src/lib/cloud-power.ts).
+    if (!stopped) livePhaseNow = holdReason(platform) ?? "retrying";
     if (stopped || retryTimer !== null || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
     const exponent = Math.min(retryAttempt, 20);
     const delay = Math.min(retryMaxMs, retryMinMs * 2 ** exponent);
@@ -266,6 +275,7 @@ export function openLiveEvents(
   };
 
   connect = () => {
+    if (!stopped && !source) livePhaseNow = (!platform.isOnline() ? "offline" : cloudAsleep() ? "asleep" : null) ?? "opening";
     if (stopped || source || !platform.isOnline() || cloudAsleep()) return;
     let current: LiveEventSourceLike;
     try {
@@ -282,6 +292,7 @@ export function openLiveEvents(
     current.onopen = () => {
       if (stopped || source !== current) return;
       lastHeardAt = platform.now();
+      livePhaseNow = "open";
       handlers.onOpen?.();
     };
     current.onerror = () => connectionLost(current);

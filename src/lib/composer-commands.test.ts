@@ -6,8 +6,8 @@ import {
   replaceComposerSlashTrigger,
   skillSlashCommands,
   slashCommandMatches,
-  type ComposerSlashCommandId,
-} from "./composer-commands";
+  threadCommandFromComposer,
+  type ComposerSlashCommandId, builtInCommandText } from "./composer-commands";
 import { enabledSlashSkills } from "./use-slash-skills";
 
 describe("composer slash commands", () => {
@@ -74,6 +74,15 @@ describe("composer slash commands", () => {
     expect(goalTextFromComposer("discuss /goal later")).toBeNull();
   });
 
+  it("reads a whole /archive or /delete as a command on the conversation", () => {
+    expect(threadCommandFromComposer("/archive")).toBe("archive");
+    expect(threadCommandFromComposer("/ARCHIVE  ")).toBe("archive");
+    expect(threadCommandFromComposer("/delete")).toBe("delete");
+    expect(threadCommandFromComposer("/archive this")).toBeNull();
+    expect(threadCommandFromComposer("please /delete")).toBeNull();
+    expect(threadCommandFromComposer("/deleted")).toBeNull();
+  });
+
   it("offers setup as a slash command id and keeps the typed token", () => {
     const id: ComposerSlashCommandId = "setup";
     expect(id).toBe("setup");
@@ -115,5 +124,16 @@ describe("composer slash commands", () => {
       { name: "bare", description: "" },
     ]);
     expect(enabledSlashSkills(null)).toEqual([]);
+  });
+});
+
+describe("burst", () => {
+  it("leaves /burst in the composer for the person to finish, and /goal only flips the mode", () => {
+    expect(builtInCommandText("burst")).toBe("/burst ");
+    expect(builtInCommandText("learn")).toBe("/learn ");
+    expect(builtInCommandText("setup")).toBe("/setup ");
+    expect(builtInCommandText("archive")).toBe("/archive ");
+    expect(builtInCommandText("delete")).toBe("/delete ");
+    expect(builtInCommandText("goal")).toBe("");
   });
 });

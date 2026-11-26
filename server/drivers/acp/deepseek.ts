@@ -20,19 +20,28 @@
 //     it downloaded the dependency tree, so the catalog is only probed on an
 //     explicit Refresh, never at app startup).
 //
+// Approve for me requires dsh 0.2.2-rc.2 to register the bot's memory directory
+// with the workspace-write sandbox. The session model reviews sandbox escalations.
+// Verified with dsh 0.2.2-rc.2, 0.2.2-rc.5 and 0.2.3-alpha.2 on 2026-11-24.
+//
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { join, resolve } from "node:path";
+import { parse as parseYaml, stringify } from "yaml";
 
+import { writeFileAtomicIfChanged } from "../../atomic.ts";
+import { cliVersionProbe } from "../../cli-version-probe.ts";
+import { DATA_DIR } from "../../config.ts";
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
-import { resolveCli } from "../../procs.ts";
+import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { acpVariantOption } from "./config-options.ts";
+import { DSH_APPROVAL_PLUGIN } from "./dsh-approval-plugin.ts";
+import { semVerAtLeast } from "./version-probe.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -163,6 +172,9 @@ export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
   collect(option?.options, undefined);
   if (!out.length) throw new Error("dsh advertised no models");
   const current = typeof option?.currentValue === "string" ? deepseekPickerId(option.currentValue) : null;
+  const selected = out.find((model) => model.id === current);
+  const variants = acpVariantOption(sessionResult)?.options;
+  if (selected && variants?.length) selected.variants = variants;
   return {
     default: current && out.some((row) => row.id === current) ? current : out[0]!.id,
     options: out,
@@ -181,19 +193,24 @@ function catalogTimeoutMs(env: Record<string, string | undefined>): number {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647 ? parsed : DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
+const VARIANT_DISCOVERY_MODEL_LIMIT = 128;
+
 /** Ask the installed dsh what it offers: initialize, session/new in `cwd`,
- * read the catalog, session/close. Rejects on any failure so the core keeps
- * the last usable catalog; never resolves to an empty or guessed list. */
+ * read each model's thinking choices (a model dsh won't switch to keeps none), session/close.
+ * Rejects on any other failure so the core keeps the last usable catalog; never resolves to an
+ * empty or guessed list. */
 export function fetchDeepSeekCatalog(
   cli: string,
   env: Record<string, string | undefined>,
   cwd: string,
+  allowEnv: readonly string[] = [],
 ): Promise<ModelCatalog> {
   return new Promise((resolve, reject) => {
-    let child: ReturnType<typeof spawn>;
+    let child: ReturnType<typeof spawnCli>;
     try {
-      const resolved = resolveCli(cli, ["--profile", "acp"], env);
-      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
+      // Security: while the bot box is on, dsh runs in it, as a bot's turn does: it reads ~/.dsh, which a bot can write.
+      const resolved = resolveCli(cli, ["--profile", "acp"], env as NodeJS.ProcessEnv);
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: { ...env, ...resolved.env }, box: { allowEnv, engine: "deepseekAgent" } });
     } catch (error) {
       return reject(error instanceof Error ? error : new Error(String(error)));
     }
@@ -206,16 +223,8 @@ export function fetchDeepSeekCatalog(
       try {
         child.stdin?.end();
       } catch {}
-      try {
-        if (child.kill()) {
-          const hardKill = setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch {}
-          }, 1_000);
-          hardKill.unref?.();
-        }
-      } catch {}
+      // dsh's own children (its MCP servers) go too: spawnCli started it in a group of its own.
+      void killCliTree(child, 1_000);
       if ("catalog" in outcome) resolve(outcome.catalog);
       else reject(outcome.error);
     };
@@ -242,6 +251,18 @@ export function fetchDeepSeekCatalog(
     let sessionReqId = 0;
     let closeId = 0;
     let catalog: ModelCatalog | null = null;
+    let sessionId: string | null = null;
+    let selectId = 0;
+    let selectedModel: ModelCatalog["options"][number] | undefined;
+    const pendingModels: ModelCatalog["options"] = [];
+    const nextModel = () => {
+      selectedModel = pendingModels.shift();
+      if (selectedModel) {
+        selectId = send("session/set_config_option", { sessionId, configId: "model", value: deepseekWireValue(selectedModel.id) });
+      } else {
+        closeId = send("session/close", { sessionId });
+      }
+    };
     child.stdout?.on("data", (chunk) => {
       buf += String(chunk);
       let nl: number;
@@ -258,7 +279,7 @@ export function fetchDeepSeekCatalog(
           if (!msg.result) return finish({ error: new Error(`dsh rejected initialize: ${JSON.stringify(msg.error ?? msg)}`) });
           sessionReqId = send("session/new", { cwd, mcpServers: [] });
         } else if (sessionReqId && msg?.id === sessionReqId) {
-          const sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
+          sessionId = typeof msg.result?.sessionId === "string" ? msg.result.sessionId : null;
           try {
             catalog = parseDeepSeekCatalog(msg.result);
           } catch (error) {
@@ -267,8 +288,17 @@ export function fetchDeepSeekCatalog(
             return finish({ error: error instanceof Error ? error : new Error(String(error)) });
           }
           if (!sessionId) return finish({ catalog });
-          // Leave no half-open session behind in dsh's persisted list.
-          closeId = send("session/close", { sessionId });
+          if (catalog.options.length <= VARIANT_DISCOVERY_MODEL_LIMIT) {
+            const current = offeredWireValues(msg.result, "model").current;
+            pendingModels.push(...catalog.options.filter((model) => deepseekWireValue(model.id) !== current));
+          }
+          nextModel();
+        } else if (selectId && msg?.id === selectId && selectedModel) {
+          if (offeredWireValues(msg.result, "model").current === deepseekWireValue(selectedModel.id)) {
+            const variants = acpVariantOption(msg.result)?.options;
+            if (variants?.length) selectedModel.variants = variants;
+          }
+          nextModel();
         } else if (closeId && msg?.id === closeId) {
           finish({ catalog: catalog! });
         }
@@ -282,13 +312,39 @@ export function fetchDeepSeekCatalog(
   });
 }
 
+// dsh first exposes ctx.sandboxPolicy.registerWritableRoot in 0.2.2-rc.2.
+const MIN_APPROVAL_VERSION = "0.2.2-rc.2";
+const versionProbes = new Map<string, ReturnType<typeof cliVersionProbe>>();
+const clisWithApprovalPatch = new Set<string>();
+const approvalDir = resolve(DATA_DIR, "engines", "dsh");
+const approvalPlugin = join(approvalDir, "approval-preset.mjs");
+const reviewPatch = join(approvalDir, "approval-review.patch.yml");
+const sandboxPatch = join(approvalDir, "approval-sandbox.patch.yml");
+
+/** The data folder as a conversation's folder is named (its real path), so the plugin finds the bot's memory from it. */
+function approvalDataDir(): string {
+  try { return realpathSync(DATA_DIR); } catch { return DATA_DIR; }
+}
+
+function approvalPatch(review: boolean): string {
+  const patch = review ? reviewPatch : sandboxPatch;
+  mkdirSync(approvalDir, { recursive: true });
+  writeFileAtomicIfChanged(approvalPlugin, DSH_APPROVAL_PLUGIN);
+  writeFileAtomicIfChanged(patch, stringify([{ insert: [
+    { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: approvalDataDir() } },
+  ] }]));
+  return patch;
+}
+
 export const deepseekSupport: AcpSupport = {
   driverKind: "deepseekAgent",
   displayName: "DeepSeek Harness",
+  // @deepseek-ai/dsh declares engines.node ">=24.9.0"; on older Node it quits before answering.
+  minNodeVersion: "24.9.0",
   models: DEEPSEEK_MODELS,
   defaultCli: "dsh",
   nativeSource: "deepseek.acp",
-  loginNote: "DeepSeek Harness has no DeepSeek API key — paste one under Settings → Connections → Model providers, or set DEEPSEEK_API_KEY",
+  loginNote: "DeepSeek Harness has no DeepSeek API key — paste one under Settings → AI → Providers, or set DEEPSEEK_API_KEY",
 
   install: {
     command: {
@@ -302,7 +358,45 @@ export const deepseekSupport: AcpSupport = {
     settings: "connections",
   },
 
-  spawnArgs: () => ["--profile", "acp"],
+  resolveCommand: async (env, { cli }) => {
+    let probe = versionProbes.get(cli);
+    if (!probe) {
+      probe = cliVersionProbe(cli);
+      versionProbes.set(cli, probe);
+    }
+    const result = await probe(env);
+    if ("version" in result && semVerAtLeast(result.version, MIN_APPROVAL_VERSION)) {
+      clisWithApprovalPatch.add(cli);
+      return { command: cli, ro: [approvalPlugin, reviewPatch, sandboxPatch] };
+    }
+    clisWithApprovalPatch.delete(cli);
+    return { command: cli };
+  },
+  spawnArgs: ({ cli }, turn) => {
+    const args = ["--profile", "acp"];
+    if (clisWithApprovalPatch.has(cli)) args.push("--patch", approvalPatch(turn.approvalMode === "auto"));
+    return args;
+  },
+  updateFilter: (calls) => (update) => {
+    const { sessionUpdate, toolCallId, status } = update;
+    if ((sessionUpdate === "tool_call" || sessionUpdate === "tool_call_update") && toolCallId) {
+      if (status === "completed" || status === "failed") calls.delete(toolCallId);
+      else calls.set(toolCallId, { ...calls.get(toolCallId), ...update });
+    }
+    return update;
+  },
+  permissionRequest: (params, calls) => {
+    // dsh sends the call details in session/update and only its ID in session/request_permission.
+    const call = calls.get(params.toolCall.toolCallId);
+    if (!call) return params;
+    const { title, kind, rawInput, locations } = call;
+    const isCommand = typeof rawInput?.command === "string";
+    const path = rawInput?.path ?? rawInput?.file_path;
+    return { ...params, toolCall: {
+      title: !isCommand && typeof path === "string" ? `${title} ${path}` : title,
+      kind: isCommand ? "execute" : kind, rawInput, locations, ...params.toolCall,
+    } };
+  },
   credentialEnv: ["DEEPSEEK_API_KEY"],
   // Model and reasoning effort are session config options (see header).
   selectModel: { configId: "model" },
@@ -312,7 +406,7 @@ export const deepseekSupport: AcpSupport = {
   // ("session is already active"), so a turn with new tools needs a new process.
   restartOnMcpChange: true,
   // Refresh only: a fresh profile boot can take long, and startup must not wait on it.
-  resolveModels: (env, config) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir()),
+  resolveModels: (env, config, _instanceId, _fresh, allowEnv) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir(), allowEnv),
   resolveModelsOnCreate: false,
 
   // initialize advertises no auth methods; the key rides in the child env or

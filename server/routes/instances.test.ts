@@ -8,6 +8,7 @@ import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "
 import { ENGINE_LIST_REUSE_MS, ProviderRegistry } from "../harness/registry.ts";
 import { json, readBody } from "../harness/http.ts";
 import { ProviderAuthSessions } from "../provider-auth-sessions.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { createInstanceRoutes, type InstanceRouteDeps } from "./instances.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -17,7 +18,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function serve(extra: Partial<InstanceRouteDeps> = {}) {
+async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth = { kind: "loopback", scopes: ["admin"] }) {
   const fake = makeFakeDriver();
   const registry = new ProviderRegistry([fake.driver]);
   await registry.load({ a: { driver: "fake" } });
@@ -52,7 +53,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     const url = new URL(req.url ?? "/", "http://localhost");
     const handled = await dispatchRoutes(routes, {
       req, res, url, path: url.pathname, method: req.method ?? "GET",
-      auth: { kind: "loopback", scopes: ["admin"] }, json, readBody,
+      auth, json, readBody,
     });
     if (!handled) json(res, 404, { from: "inline routes" });
   });
@@ -70,7 +71,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}) {
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList, base, fake };
+  return { sign, call, probesAfterList, base, fake, registry };
 }
 
 describe("engine sign-in routes", () => {
@@ -103,6 +104,60 @@ describe("engine sign-in routes", () => {
   });
 });
 
+const phoneHeaders = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" };
+
+describe("browser sign-in from a paired phone", () => {
+  const start = (base: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+
+  it("is refused with the instruction to use the computer, while a code sign-in and the desktop itself are not", async () => {
+    const phone: RequestAuth = { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" };
+    const onPhone = await serve({}, phone);
+    const desktop = await serve();
+    const instance = (served: typeof onPhone) => served.registry.get("a") as { authenticationMethod?: string };
+
+    instance(onPhone).authenticationMethod = "browser";
+    const refused = await start(onPhone.base);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/happens in a browser on the computer/);
+
+    instance(onPhone).authenticationMethod = "browser-pkce";
+    const pkce = await start(onPhone.base);
+    expect(pkce.status).toBe(403);
+    const pkceError = ((await pkce.json()) as { error: string }).error;
+    expect(pkceError).toMatch(/Continue with ChatGPT on the computer/);
+    expect(pkceError).not.toMatch(/hosted-app approval/);
+
+    // A Cloud's added ChatGPT account signs in by device code (no browser callback), from any browser.
+    instance(onPhone).authenticationMethod = undefined;
+    expect((await start(onPhone.base)).status).toBe(200);
+
+    instance(onPhone).authenticationMethod = "code";
+    expect((await start(onPhone.base)).status).toBe(200);
+
+    instance(desktop).authenticationMethod = "browser";
+    // The standalone companion has no desktop token: its phone is plain loopback carrying only the companion's mark.
+    expect((await start(desktop.base, phoneHeaders)).status).toBe(403);
+    expect((await start(desktop.base)).status).toBe(200);
+  });
+});
+
+describe("whose sign-in it is", () => {
+  it("gives a phone its own, so it never resumes or cancels the computer's", async () => {
+    const { base } = await serve();
+    const start = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+    const cancel = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/cancel`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ flowId: "flow-1" }) });
+
+    expect((await start()).status).toBe(200);
+    expect((await start(phoneHeaders)).status).toBe(409);
+    expect((await cancel(phoneHeaders)).status).toBe(404);
+    expect((await start()).status).toBe(200);
+    expect((await cancel()).status).toBe(200);
+  });
+});
+
 describe("the engine list", () => {
   it("answers again from the last status read, and reads every engine again when asked for fresh", async () => {
     const { call, probesAfterList, fake } = await serve();
@@ -111,6 +166,22 @@ describe("the engine list", () => {
     await call("GET", "/api/instances?fresh=1");
     expect(fake.probes).toHaveLength(2);
     expect(await probesAfterList()).toBe(2);
+  });
+});
+
+describe("whether the server can start a bot", () => {
+  it("counts the engines that are available and names none of them", async () => {
+    const { call } = await serve({
+      describeInstances: async () => [
+        { instanceId: "claude", snapshot: { state: "available" } },
+        { instanceId: "codex", snapshot: { state: "needs-login" } },
+        { instanceId: "custom-1", snapshot: { state: "available" } },
+        { instanceId: "broken" },
+      ],
+    });
+    expect(await call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 2 });
+    const none = await serve({ describeInstances: async () => [{ instanceId: "codex", snapshot: { state: "unavailable" } }] });
+    expect(await none.call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 0 });
   });
 });
 
@@ -312,3 +383,32 @@ describe("hiding a provider", () => {
   });
 });
 
+
+describe("looking for Ollama", () => {
+  it("answers what one address said, and refuses an address that is not one", async () => {
+    const ollama = createServer((request, response) => {
+      response.setHeader("content-type", "application/json");
+      if (request.url === "/api/tags") return response.end(JSON.stringify({ models: [{ name: "qwen3:4b", size: 2_500_000_000, details: { parameter_size: "4.0B" } }] }));
+      if (request.url === "/api/version") return response.end(JSON.stringify({ version: "0.12.6" }));
+      response.statusCode = 404;
+      response.end("{}");
+    });
+    servers.push(ollama);
+    await new Promise<void>((ready) => ollama.listen(0, "127.0.0.1", ready));
+    const address = `http://127.0.0.1:${(ollama.address() as AddressInfo).port}`;
+    const { call, base } = await serve();
+    expect(await call("GET", `/api/instances/ollama?url=${encodeURIComponent(`${address}/v1`)}`)).toEqual({
+      status: { state: "ready", url: address, version: "0.12.6", models: [{ name: "qwen3:4b", bytes: 2_500_000_000, parameters: "4.0B" }] },
+    });
+    const refused = await fetch(`${base}/api/instances/ollama?url=${encodeURIComponent("ftp://127.0.0.1:11434")}`);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "Enter an http or https address, such as http://127.0.0.1:11434." });
+  });
+
+  it("is only for the owner: a shared server's bot shell or a hosted workspace can't make this server ask an address", async () => {
+    const shell = await serve({}, { kind: "loopback", scopes: ["admin"], trust: "service" });
+    expect((await fetch(`${shell.base}/api/instances/ollama?url=${encodeURIComponent("http://127.0.0.1:9")}`)).status).toBe(403);
+    const hosted = await serve({ hostedModels: true });
+    expect((await fetch(`${hosted.base}/api/instances/ollama`)).status).toBe(403);
+  });
+});

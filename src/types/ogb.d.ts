@@ -25,6 +25,11 @@ const __APP_VERSION__: string;
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
   type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
+  /** Lending this computer to one server, as the switch shows it (electron/server-lending.mjs view). `why`: what keeps it
+   * from being lent there. `screen`: why its apps and screen don't work yet while it is on (screen-status.mjs). */
+  type DesktopLendView =
+    | { name: string; lendable: true; on: boolean; connected: boolean; paused: boolean; screen?: "starting" | "permissions" | "blocked" | "off" | "not-running" | "unsupported" }
+    | { name: string; lendable: false; why: "team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | "settings" };
 
   type DesktopCapabilities = {
     host: {
@@ -46,7 +51,7 @@ const __APP_VERSION__: string;
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "fish-audio" | "none";
+      engine: "apple-speech" | "windows-speech" | "fish-audio" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -62,8 +67,21 @@ const __APP_VERSION__: string;
       driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
       compositor?: "gnome-mutter" | "hyprland";
+      /** Set with the Wayland seat-safety block: false on a desktop that isn't Ubuntu, which may have no Xorg session. */
+      ubuntuDesktop?: boolean;
     };
   };
+
+  interface BrowserCookieSource {
+    id: string;
+    name: string;
+    engine: "chromium" | "firefox" | "safari";
+    profiles: Array<{ id: string; name: string }>;
+  }
+
+  type BrowserCookieImportResult =
+    | { ok: true; site: string; imported: number; sessionOnly: number; skipped: Partial<Record<string, number>> }
+    | { ok: false; reason: string };
 
   interface DesktopWorkspaceBounds {
     x: number;
@@ -107,6 +125,16 @@ const __APP_VERSION__: string;
     at: number | null;
     onBattery: boolean;
   }
+  /** Use this computer as an always-on home, as main reads it now. `available`: a packaged app, where Open at login works.
+   * `awake`: held awake on power, let sleep on battery, or off. `updates`: how an update arrives with nobody at the computer. */
+  interface AlwaysOnHomeState {
+    available: boolean;
+    on: boolean;
+    platform: string;
+    openAtLogin: boolean;
+    awake: "holding" | "battery" | "off";
+    updates: "by-itself" | "restart" | "package" | "none";
+  }
   interface DesktopRemoteClientState {
     active: boolean;
     endpoint?: string;
@@ -117,6 +145,7 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      softwareRendering?: boolean;
       /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
        * whose page carries that server's version. Absent in desktop builds before it. */
       app?: { version: string; ownPage: boolean };
@@ -133,6 +162,8 @@ const __APP_VERSION__: string;
         dismiss(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
         onChanged(callback: () => void): () => void;
       };
+      /** This computer's page and My Cloud's own page: the other one's bots in this sidebar (electron/places-together.mjs). */
+      placesTogether?: import("../../electron/places-together.mjs").PlacesTogetherBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
@@ -193,8 +224,13 @@ const __APP_VERSION__: string;
         /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
          * the rail's own page (refused on any other page). Absent on an older app. */
         remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
+        /** Rename: a server the window's rail lists with `renames`, by its circle's id, under a name kept on this computer
+         * only. Absent on an older app. */
+        rename?: (id: string, name: string) => Promise<{ outcome: "saved" | "name" | "failed" | "unsupported" }>;
         /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
         makeHome?: (id: string) => Promise<{ started: true }>;
+        /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
+        homeOffers?: () => Promise<string[]>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
         /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
@@ -283,6 +319,17 @@ const __APP_VERSION__: string;
         /** Every Cloud and server of the person's own stops using this computer until resume(), as the icon's menu does. */
         pause?(): Promise<void>;
         resume?(): Promise<void>;
+      };
+      /** The one switch for lending this computer to a server of the person's own (electron/server-lending.mjs). On this
+       * app's own page `id` names the saved server; on a server's own page it is that server, whatever `id` says. */
+      lendComputer?: {
+        state(id: string | null): Promise<DesktopLendView>;
+        set(id: string | null, on: boolean): Promise<DesktopLendView>;
+        /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
+        allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
+         * turns out to be the person's own. */
+        wish?(address: string, on: boolean): Promise<boolean>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
@@ -397,7 +444,7 @@ const __APP_VERSION__: string;
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | "phone" | import("../state/store").SettingsPageId) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
@@ -427,6 +474,21 @@ const __APP_VERSION__: string;
         close(contextId?: string): Promise<boolean>;
         onState(cb: (state: DesktopWorkspaceState) => void): () => void;
       };
+      /** A bot's browser as a native view over its Browser panel (browserEngine.surface "pane"). The main process asks
+       * the server which browser the bot's panel shows; the page never names one. */
+      browserPane?: {
+        show(input: { botId: string; threadId: string | null; profile: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
+        /** The person takes the tab the panel shows from the bot (`held`), or hands it back; the bot may only read a
+         * held tab. Every hold ends when the window closes. */
+        hold(input: { botId: string; threadId: string | null; held: boolean }): Promise<{ held: boolean }>;
+      };
+      /** A site's sign-in from the person's own browsers into a bot's browser, which the person starts. Counts and a
+       * reason code come back, never a cookie. `offer` says whether a site can be imported for a bot (Google never). */
+      browserCookies?: {
+        sources(): Promise<BrowserCookieSource[]>;
+        offer(input: { botId: string; threadId: string | null; site: string }): Promise<{ offered: boolean; reason?: string }>;
+        import(input: { botId: string; threadId: string | null; site: string; source: string; profile: string }): Promise<BrowserCookieImportResult>;
+      };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
       /** Writes the redacted diagnostics report to a user-chosen file;
@@ -441,14 +503,24 @@ const __APP_VERSION__: string;
       /** Points this computer's file manager at a file a bot linked outside
        * its workspace, without opening or reading it. Local app only. */
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
+      /** Opens a folder (never a file) in Finder or Explorer; "not-folder" means keep the page's own handling. */
+      openFolder?(folderPath: string): Promise<"opened" | "not-folder" | "missing" | "invalid" | "failed">;
       /** Opens this app's logs folder in Explorer or Finder and says where it is. */
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
+      /** Use this computer as an always-on home (this computer's own page only). Absent on an older app. */
+      alwaysOnHome?: { state(): Promise<AlwaysOnHomeState>; set(on: boolean): Promise<AlwaysOnHomeState> };
+      /** Saved keys this launch could not read (this app's own page only). `reset` asks the person, moves the unreadable
+       * file aside and restarts; it resolves "cancelled" when they say no, "quitting" (doing nothing) when the app began
+       * to quit while they decided, "failed" (after telling them) when the file could not be moved, and "readable"
+       * (doing nothing) when the keys could be read. */
+      credentialStore?: { unreadable(): Promise<boolean>; reset(): Promise<"reset" | "cancelled" | "quitting" | "failed" | "readable"> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
+        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
+        options?: { everyClaudeBot?: false },
       ): Promise<ConfigStatus>;
       /** In-app auto-update (packaged app only; dormant in dev). Updates
        * download by themselves. On this computer's page and the person's own
@@ -462,6 +534,11 @@ const __APP_VERSION__: string;
         /** The person saw the line that the app updated itself: it is not shown again. */
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
+      };
+      /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
+       * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */
+      appUpdate?: {
+        request(): Promise<AppUpdateAnswer>;
       };
     };
   }
@@ -479,6 +556,9 @@ export interface LinuxLocalControlStatus {
   compositor?: "gnome-mutter" | "hyprland";
   warnings?: Array<{ label: string; status: string; message: string; detail?: string }>;
 }
+
+/** What asking for this app's update from a server's page did (electron/updater.mjs `updateForServerPage`). */
+export type AppUpdateAnswer = "installing" | "later" | "downloading" | "current" | "failed" | "unavailable";
 
 export interface UpdaterState {
   status:
@@ -531,6 +611,11 @@ export interface CompanionAccountState {
   /** The HTTPS address was given back after 30 days with no paired phone
    * seen. Opening the phone page calls prepare(), which brings it back. */
   paused?: boolean;
+  /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
+   * updated and paired again. */
+  tunnelRetired?: boolean;
+  /** What failed, as one fixed word for the connection diagnosis. Absent on older builds. */
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export type AndroidUsbDevice = {

@@ -9,7 +9,7 @@ import { openRuntimeStore } from "./runtime/store.ts";
 import type { Assignment } from "./runtime/types.ts";
 import { createWorkspaceBackupSnapshot, stagedWorkspaceData, stageWorkspaceBackup } from "./workspace-backup.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
-import { omittedAsTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
+import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 
 const BOB = "p_bobbobbobbobbobbobbob1";
 const PASSWORD = "correct horse battery staple";
@@ -46,6 +46,8 @@ function teamData(root: string): void {
   file(join(root, "task-workspaces", "bot", "main", "plan.md"), "shared plan");
   file(join(root, "task-workspaces", "bot", "bob-chat", "draft.md"), "Bob's draft");
   file(join(root, "people", BOB, "about.json"), "{\"aboutMe\":\"interviewing elsewhere\"}");
+  file(join(root, "bots", "bot", "data.duckdb"), "team tables");
+  file(join(root, "bots", "bobs-own", "data.duckdb"), "Bob's own tables");
   const db = new DatabaseSync(join(root, "messages.db"));
   db.exec("CREATE TABLE messages(thread_id TEXT, id TEXT, at INTEGER, role TEXT, kind TEXT, text TEXT, json TEXT, PRIMARY KEY(thread_id,id)); CREATE TABLE thread_state(thread_id TEXT PRIMARY KEY, active_leaf_id TEXT);"
     + " CREATE TABLE chat_followups(id TEXT PRIMARY KEY, kind TEXT, owner_id TEXT, thread_id TEXT, send_id TEXT, status TEXT, payload TEXT);"
@@ -96,16 +98,37 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     expect([...attachments].sort()).toEqual(["bobs.png", "unsent.png"]);
     expect(omittedAsTeamPrivate("attachments/bobs.png", { ...privacy, attachments })).toBe(true);
     expect(omittedAsTeamPrivate("attachments/both.png", { ...privacy, attachments })).toBe(false);
+    expect(omittedAsTeamPrivate("attachment-originals/bobs.png", { ...privacy, attachments })).toBe(true);
+    expect(omittedAsTeamPrivate("attachment-originals/both.png", { ...privacy, attachments })).toBe(false);
     expect(omittedAsTeamPrivate(`workspaces/bot--member-${BOB}/MEMORY.md`, privacy)).toBe(true);
     expect(omittedAsTeamPrivate("workspaces/bot--room-room/MEMORY.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate("workspaces/bot/MEMORY.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate("task-workspaces/bot/bob-chat/draft.md", privacy)).toBe(true);
     expect(omittedAsTeamPrivate("task-workspaces/bot/main/plan.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate(`people/${BOB}/about.json`, privacy)).toBe(true);
+    // Every bot's Data tables: a team bot's hold tables members loaded in their private chats, unmarked.
+    for (const path of ["bots/bobs-own/data.duckdb", "bots/bot/data.duckdb", "bots/bot/data.duckdb.wal"]) expect(omittedAsTeamPrivate(path, privacy), path).toBe(true);
+    expect(omittedAsTeamPrivate("bots/bot/SOUL.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate("peoplesoft/x", privacy)).toBe(false);
     for (const kept of ["events/bob-chat.ndjson", "native/bob-chat.ndjson", `memory-journal/bot--member-${BOB}.ndjson`]) expect(omittedAsTeamPrivate(kept, privacy), kept).toBe(true);
     for (const shared of ["events/main.ndjson", "native/main.ndjson", "memory-journal/bot.ndjson", "memory-journal/bot--room-room.ndjson"]) expect(omittedAsTeamPrivate(shared, privacy), shared).toBe(false);
     expect(withoutTeamPrivate([{ id: "bot", tasks: [{ threadId: "main" }, { threadId: "bob-chat" }] }, { id: "bobs-own", tasks: [] }], privacy)).toEqual([{ id: "bot", tasks: [{ threadId: "main" }] }]);
+  });
+
+  it("leaves out the routines that live in a member's private chat and every run that names one", () => {
+    const privacy = { threads: new Set(["bob-chat", "bob-results", "bob-run"]), bots: new Set(["bobs-own"]), attachments: new Set<string>() };
+    const bots = [{ id: "bot", tasks: [{ threadId: "main", title: "Scout" }, { threadId: "bob-chat", title: "Bob's" }, { threadId: "bob-results", title: "Standup · Results" }] }];
+    const routines = { routines: [
+      { id: "made-there", botId: "bot", name: "Kumquat", sourceThreadId: "bob-chat" },
+      { id: "reports-there", botId: "bot", name: "Quince", resultsThreadId: "bob-chat" },
+      { id: "standup", botId: "bot", name: "Standup", resultsThreadId: "bob-results" },
+      { id: "own-bot", botId: "bobs-own", name: "Mine" },
+    ], runs: [
+      { id: "r1", routineId: "made-there", threadId: "other" },
+      { id: "r2", routineId: "standup", threadId: "bob-run" },
+      { id: "r3", routineId: "standup", threadId: "team-run" },
+    ], ownerNotices: [] };
+    expect(routinesWithoutTeamPrivate(routines, bots, privacy)).toEqual({ routines: [routines.routines[2]], runs: [routines.runs[2]], ownerNotices: [] });
   });
 
   it("strips the private conversations' rows from the snapshot databases and rebuilds them, so no freed page keeps their words", () => {
@@ -144,6 +167,11 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     expect(existsSync(join(team.data, "attachments", "both.png"))).toBe(true);
     expect(existsSync(join(team.data, "attachments", "avatar.png"))).toBe(true);
     expect(existsSync(join(team.data, "workspaces", "bobs-own"))).toBe(false);
+    // No bot's Data tables leave a Team Cloud, the team's bots' included; its notes still do.
+    expect(existsSync(join(team.data, "bots", "bot", "data.duckdb"))).toBe(false);
+    expect(team.warnings).toContain(TEAM_PRIVATE_NOTE);
+    expect(TEAM_PRIVATE_NOTE).toContain("the bots' Data tables");
+    expect(existsSync(join(team.data, "bots", "bobs-own"))).toBe(false);
     expect(table(join(team.data, "messages.db"), "SELECT thread_id AS id FROM messages").map((row) => row.id).sort()).toEqual(["main", "outside-thread", "room-thread"]);
     expect(table(join(team.data, "runtime.db"), "SELECT id FROM assignments").map((row) => row.id)).toEqual(["as-team"]);
     expect(textOf(join(team.data, "messages.db")).toLowerCase()).not.toContain("secret");
@@ -154,6 +182,9 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     const home = await exported(own);
     expect(home.warnings).not.toContain(TEAM_PRIVATE_NOTE);
     expect(existsSync(join(home.data, "workspaces", `bot--member-${BOB}`, "MEMORY.md"))).toBe(true);
+    // A personal export carries every bot's Data tables.
+    expect(textOf(join(home.data, "bots", "bot", "data.duckdb"))).toBe("team tables");
+    expect(textOf(join(home.data, "bots", "bobs-own", "data.duckdb"))).toBe("Bob's own tables");
     expect(table(join(home.data, "messages.db"), "SELECT thread_id AS id FROM messages").map((row) => row.id).sort()).toEqual(["bob-chat", "bobs-inbox", "main", "outside-thread", "room-thread"]);
   }, 60_000);
 });

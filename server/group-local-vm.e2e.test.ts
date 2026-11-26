@@ -4,12 +4,13 @@ import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
-import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
+import { CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -54,6 +55,8 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
+const activityRows = async (threadId: string, text: string) => (await api("GET", `/api/threads/${threadId}/messages`)).messages
+  .filter((message: any) => message.tool?.name?.includes(text)).length;
 // The seeded Chief answers a failed run with a Problems to look at turn on this same engine, and that turn writes the dump.
 async function stepDownSeededChief() {
   const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
@@ -1017,6 +1020,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
       });
       const task = parked.bots.find((bot: any) => bot.id === auto.id).tasks.find((task: any) => task.threadId === auto.threadId);
       expect(task).toMatchObject({ busy: false, activity: "parked.computer" });
+      await new Promise(resolve => setTimeout(resolve, 2_500));
+      expect(await activityRows(auto.threadId, "Parked — it continues automatically")).toBe(1);
       expect(existsSync(dumpFile)).toBe(false);
       expect(JSON.parse(readFileSync(stateFile, "utf8")).actions ?? []).toEqual([]);
       await api("POST", `/api/bots/${holder.id}/interrupt`, { threadId: holder.threadId });
@@ -1032,6 +1037,40 @@ describe("Group Local VM ownership on the real isolated server", () => {
         await idle(bot.id);
         await api("DELETE", `/api/bots/${bot.id}`);
       }
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  }, 60_000);
+
+  it("keeps a turn parked while a person holds the shared VM, and resumes it on the hand-back", async () => {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer(2_000);
+    vmState({ containers: ["shared"], stopped: ["shared"] });
+    rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot } = await api("POST", "/api/bots", { name: "Parked behind a person", computer: "vm", browser: false });
+    try {
+      await api("GET", "/api/local-computer");
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take" });
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the shared VM after the person" });
+      await until(() => activityRows(bot.threadId, "Parked — it continues automatically"), count => count === 1);
+      await new Promise(resolve => setTimeout(resolve, 5_000));
+      expect(await activityRows(bot.threadId, "Waiting for its turn on this computer")).toBe(1);
+      expect(await activityRows(bot.threadId, "Parked — it continues automatically")).toBe(1);
+      expect(existsSync(dumpFile)).toBe(false);
+      const root = readHandoffs(join(fixtureHome, "data")).findLast(node => node.threadId === bot.threadId)!;
+      const db = new DatabaseSync(join(fixtureHome, "data", "runtime.db"), { readOnly: true });
+      try {
+        expect((db.prepare("SELECT detail FROM assignment_events WHERE assignment_id = ? AND kind = 'held'").all(root.id) as Array<{ detail: string }>).at(-1)?.detail)
+          .toBe("waiting for the computer it needs, which another turn or a person is using");
+      } finally { db.close(); }
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" });
+      expect(await dump()).toMatchObject({ prompt: { message: { content: expect.stringContaining("Continue the task that parked waiting for it") } } });
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "release" });
+      await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
       vmState();
       await waitForExit(child, { signal: "SIGTERM" });
       await startServer();
@@ -1087,7 +1126,9 @@ describe("Group Local VM ownership on the real isolated server", () => {
       expect((await gate(holderComputer)).status).toBe(200);
       const started = Date.now();
       const first = await check(autoComputer);
-      expect(first).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_BUSY });
+      expect(first.held).toBe(true);
+      expect(first.blockedReason).toMatch(/^Another thread is using this computer\. This call was not performed\. No screen or app state was checked\. This turn is 1st in line/);
+      expect(first.blockedReason).not.toContain("VM holder");
       expect(controlRefusal(first)).not.toBe(CONTROL_REFUSAL_PLAIN);
       expect(Date.now() - started).toBeGreaterThanOrEqual(CALL_WAIT_MS - 200);
       await until(async () => {
@@ -1107,6 +1148,125 @@ describe("Group Local VM ownership on the real isolated server", () => {
       await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await api("POST", `/api/bots/${holder.id}/interrupt`, {});
       await idle(auto.id); await idle(holder.id);
       await api("DELETE", `/api/bots/${auto.id}`); await api("DELETE", `/api/bots/${holder.id}`);
+    }
+  });
+
+  it("tells a waiting turn its queue place without naming the private task that holds the computer, then parks it without a failure", async () => {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await startServer(5_000);
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "Payroll Holder", computer: "vm", browser: false });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Queued Auto", browser: false });
+    const secret = "Private payroll review";
+    try {
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Take a screenshot when free" });
+      const autoComputer = computer(await dump());
+      rmSync(dumpFile, { force: true });
+      const { task } = await api("POST", `/api/bots/${holder.id}/tasks`, { title: secret });
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the VM", threadId: task.threadId });
+      expect((await gate(computer(await dump()))).status).toBe(200);
+
+      const busy = await check(autoComputer);
+      expect(busy.blockedReason).toMatch(/^Another thread is using this computer\. This call was not performed\. No screen or app state was checked\. This turn is 1st in line/);
+      const parked = await check(autoComputer);
+      expect(parked.blockedReason).toBe("This turn waited 5 seconds for this computer without getting it, so this call was NOT performed. Stop calling the computer tools now; nothing is broken.");
+      for (const said of [busy.blockedReason, parked.blockedReason]) {
+        expect(said).not.toContain(secret);
+        expect(said).not.toContain("Payroll Holder");
+        expect(said).not.toMatch(/could not be started|could not claim/);
+      }
+      // The person still sees who held it.
+      expect(await activityRows(auto.threadId, "Payroll Holder")).toBeGreaterThan(0);
+    } finally {
+      writeFileSync(finishFile, "finish");
+      for (const bot of [auto, holder]) { await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id); await api("DELETE", `/api/bots/${bot.id}`); }
+      vmState();
+      await waitForExit(child, { signal: "SIGTERM" });
+      await startServer();
+    }
+  }, 60_000);
+
+  it("says its own desktop is not ready, not that another thread has it, while nobody holds it", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Slow desktop Auto", browser: false });
+    try {
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Take a screenshot" });
+      const autoComputer = computer(await dump());
+      vmState({ blockedTarget: "shared" });
+      const first = await check(autoComputer);
+      expect(first.blockedReason).toMatch(/^This computer is not ready for this turn yet, so this call was NOT performed\./);
+      expect(first.blockedReason).not.toContain("Another thread");
+    } finally {
+      vmState();
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await idle(auto.id);
+      await api("DELETE", `/api/bots/${auto.id}`);
+    }
+  });
+
+  it("stops saying another thread has it once the turn holds the seat and only its desktop is still getting ready", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Seated slow Auto", browser: false });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "VM holder", computer: "vm", browser: false });
+    try {
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Take a screenshot when free" });
+      const autoComputer = computer(await dump());
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the VM" });
+      expect((await gate(computer(await dump()))).status).toBe(200);
+      expect((await check(autoComputer)).blockedReason).toMatch(/^Another thread is using this computer\./);
+      vmState({ blockedTarget: "shared" });
+      await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
+      const seated = await check(autoComputer);
+      expect(seated.blockedReason).toMatch(/^This computer is not ready for this turn yet, so this call was NOT performed\. It may still be starting/);
+    } finally {
+      vmState();
+      writeFileSync(finishFile, "finish");
+      for (const bot of [auto, holder]) { await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id); await api("DELETE", `/api/bots/${bot.id}`); }
+    }
+  });
+
+  it("answers with the person's hold, not another thread, when a person takes the shared VM during a queued call", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Person-blocked Auto", browser: false });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "VM holder", computer: "vm", browser: false });
+    try {
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Take a screenshot when free" });
+      const autoComputer = computer(await dump());
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the VM" });
+      expect((await gate(computer(await dump()))).status).toBe(200);
+      const waiting = check(autoComputer);
+      await until(() => activityRows(auto.threadId, "Waiting for its turn on this computer"), count => count > 0);
+      await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "take" });
+      expect(await waiting).toMatchObject({ held: true, reason: "person" });
+    } finally {
+      await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "release" });
+      writeFileSync(finishFile, "finish");
+      for (const bot of [auto, holder]) { await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id); await api("DELETE", `/api/bots/${bot.id}`); }
+    }
+  });
+
+  it("does not perform a queued call after a person took the shared VM and handed it back at once while it waited", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Handed-back Auto", browser: false });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "VM holder", computer: "vm", browser: false });
+    try {
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Click when free" });
+      const autoComputer = computer(await dump());
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the VM" });
+      expect((await gate(computer(await dump()))).status).toBe(200);
+      const waiting = check(autoComputer);
+      await until(() => activityRows(auto.threadId, "Waiting for its turn on this computer"), count => count > 0);
+      await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "take" });
+      await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "release" });
+      await api("POST", `/api/bots/${holder.id}/interrupt`, {});
+      expect(await waiting).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_HANDED_BACK });
+    } finally {
+      await api("POST", `/api/bots/${holder.id}/computer/control`, { action: "release" });
+      writeFileSync(finishFile, "finish");
+      for (const bot of [auto, holder]) { await api("POST", `/api/bots/${bot.id}/interrupt`, {}); await idle(bot.id); await api("DELETE", `/api/bots/${bot.id}`); }
     }
   });
 

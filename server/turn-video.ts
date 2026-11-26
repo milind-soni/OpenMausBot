@@ -1,11 +1,11 @@
-// No model here speaks video natively (OpenAI's chat-completions content parts are only "text" and "image_url",
-// and a local vision model takes the same two); ffmpeg on PATH stands in by sampling stills from the clip.
+// Samples stills from a clip with ffprobe and ffmpeg on PATH.
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
+import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 
 export const VIDEO_SAMPLE_FRAME_COUNT = 4;
 const FFPROBE_TIMEOUT_MS = 10_000;
@@ -23,14 +23,14 @@ const VIDEO_READER: Record<TurnVideoInput["mime"], readonly string[]> = {
 
 function run(command: string, args: readonly string[], timeoutMs: number): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], ...OWN_GROUP });
     let stdout = "";
     let stderr = "";
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill();
+      stopGroup(child);
       reject(new Error(`${command} timed out`));
     }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk; });
@@ -69,7 +69,7 @@ async function extractFrame(video: TurnVideoInput, atSeconds: number, outPath: s
     "-i", video.path,
     "-frames:v", "1",
     "-q:v", "4",
-    "-vf", "scale='min(1024,iw)':-2",
+    "-vf", "scale=w='min(1024,iw)':h='min(1024,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
     "-y", outPath,
   ], FFMPEG_TIMEOUT_MS);
 }

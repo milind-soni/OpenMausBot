@@ -5,7 +5,10 @@
 //   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while it exists, load/resume of a session live in this process errors
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
-//   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
+//   FAKE_ACP_COPY_LIVE_LOAD=1  a session/load of a session still open adds a second copy, and each open copy streams
+//     FAKE_ACP_TEXT_REPLY again, like mistral-vibe 3.1.2; session/close ends every copy
+//   FAKE_ACP_TEXT_REPLY  answer every session/prompt with FAKE_ACP_UPDATES_FILE's updates, then only this text
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
 //     | hang-initialize | unkeyed-tool | finished-tools (tool_call frames that arrive already completed or failed, one updated again)
@@ -14,6 +17,7 @@
 //       FAKE_ACP_ASK_PARAMS; the client's reply is written to FAKE_ACP_ASK_ANSWER. FAKE_ACP_ASK_TIMING=with-result
 //       settles the turn with the card open; after-result asks between turns)
 //     | interleave (message, tool, message, tool, message) | no-session-config (set_mode/set_model answer -32601)
+//     | set-model-internal-error (set_model answers -32603)
 //     | ask-peer | delegate-peer | chief-delegate | create-peer (coordinate_bots through the injected agents
 //       MCP; FAKE_ACP_REDELEGATE_FILE, FAKE_ACP_TASKID_FILE; a hand-off result wake gets a fixed line)
 //     | echo-gated (echo the whole prompt; hold until FAKE_ACP_GATE_FILE exists) | safe-agent-reads
@@ -25,20 +29,40 @@
 //       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE; FAKE_ACP_MCP_SCHEMA_BYTES=1 adds each schema's length)
 //     | lend-question (list_shared_computers around a question)
 //     | list-peers (list_bots through the agents MCP; keeps the first agents server it is offered, like Hermes)
+//     | background-wake (OpenCode 2.3.1+: the first prompt's shell call moves to the background and the prompt ends, or with
+//       STOP_ME in it waits for session/cancel; FAKE_ACP_WAKE_MS (300) later that shell's finish wakes a turn no prompt
+//       asked for, one step every FAKE_ACP_STEP_MS (50), each appended to FAKE_ACP_WOKEN_FILE, until session/close or
+//       session/delete interrupts it; only session/delete ends the job. session/fork answers <id>-fork; a closed or
+//       deleted session refuses session/prompt until loaded. Advertises close (unless FAKE_ACP_NO_CLOSE=1), delete and, unless
+//       FAKE_ACP_NO_FORK=1, fork; FAKE_ACP_CLOSE_ENDS_JOBS=1: session/close ends the job too, as grok 1.0.89's does;
+//       FAKE_ACP_LATE_UPDATE=1: a tool_call_update of the finished prompt arrives 50 ms after its answer)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
+//   FAKE_ACP_CAPABILITIES_META  JSON initialize advertises as agentCapabilities._meta
+//   FAKE_ACP_MCP_HOLD=1  every session connects its MCP servers at once and keeps the stdio ones running, as Grok does
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
+//     and <dump>.initialize.json for the initialize params
 //   FAKE_ACP_LAUNCH_COUNT_FILE  process counter incremented at startup
 //   FAKE_ACP_VERSION  what `--version` prints (default "fake-acp 1.0.0"); a CLI the driver checks the shape of needs its own
+//   FAKE_ACP_PROMPT_STDERR  a line written to stderr when a prompt arrives; FAKE_ACP_PROMPT_STDERR_THEN=hang leaves it open
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
 //   FAKE_ACP_RPC_APPEND_FILE  one {"pid","method","cwd"} line appended per request
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
-//   FAKE_ACP_RPC_FAILURE_METHOD  initialize, session/new or session/prompt (default)
+//   FAKE_ACP_RPC_FAILURE_METHOD  initialize, authenticate, session/new or session/prompt (default)
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists
+//   FAKE_ACP_RPC_FAILURE_ONCE  fail once, then answer as usual (the failure file is removed)
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text and a tool result before failing
 //   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit the scripted usage updates and FAKE_ACP_UPDATES_FILE's before failing
 //   FAKE_ACP_LOAD_ERROR  JSON-RPC error returned by session/load
+//   FAKE_ACP_LOAD_REPLAY  session/load first replays this many history updates of the session (REPLAYED-USER-<n>,
+//     REPLAYED-AGENT-<n>), marked _meta.isReplay with FAKE_ACP_LOAD_REPLAY_MARKED=1; FAKE_ACP_LOAD_UNANSWERED=1 then leaves
+//     the load unanswered, as grok 1.0.x can
+//   FAKE_ACP_GROK_EFFORT=1  sessions report grok 1.0.41's `reasoning_effort` select (starting on --reasoning-effort, else
+//     high) and session/set_config_option changes it; =refuse answers that set with -32602
+//   FAKE_ACP_GROK_LOGIN  what `models` says of the login, as grok 1.0.25 prints it: signed-in | signed-out | refreshes (signed
+//     out once, then signed in, as a token refreshed by the first call) | hang | signed-out-hang (says signed out, then hangs
+//     as a slow token refresh would); FAKE_ACP_GROK_LOGIN_COUNT counts the calls
 //   FAKE_ACP_MODELS  model ids: opencode-shaped configOptions and set_config_option (-32602 for others);
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
@@ -54,6 +78,8 @@
 //   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
+//   FAKE_ACP_HANG_ON_MODEL  set_config_option never answers a switch to this model, as a stuck account can; other requests
+//     are still answered
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
 //   FAKE_ACP_CONFIG_UPDATES  JSON [{after, sessionId?, configOptions, replay?}] emitted after the named response
 //   FAKE_ACP_USAGE_ROOT  usage at the prompt result's root, as opencode 1.18.18 sends it
@@ -73,11 +99,86 @@
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
 //   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
+//   FAKE_ACP_GATEWAY_PID_FILE  the first `acp` process starts a stand-in for Hermes' shared gateway the way Hermes does
+//     (a session of its own, HERMES_GATEWAY_DETACHED=1, `gateway run`) and writes its pid here; later ones leave it be
+//   FAKE_ACP_AGY_STEPS_FILE  JSON [[stepType, text], …] re-read per prompt and appended to the session's log under
+//     GEMINI_HOME (antigravity-acp/conversations/<session>.db, a folder made at startup), as agy_acp_server 1.4.5
+//     writes its trajectory
+//   FAKE_ACP_MODE=hermes-steer  hermes-agent's ACP `/steer`: sessions advertise `steer`; a prompt says "working. ", waits for
+//     FAKE_ACP_GATE_FILE, then says "done" and every steer it took; `/steer <text>` during it answers "⏩ Steer queued for
+//     the active turn: …" (FAKE_ACP_STEER_FAIL=1: "⚠️ Steer failed: …"; =rpc: a JSON-RPC error), and with no prompt running it runs <text>
+//     as a prompt that says "ran: <text>". FAKE_ACP_STEER_HOLD_FILE holds a `/steer` while it exists;
+//     FAKE_ACP_HERMES_COMMANDS lists the commands sessions advertise (default help,steer,queue).
+//   FAKE_ACP_MODE=opencode-steer  OpenCode 2.3's `_session/steering`: initialize reports _meta.steering.supported; a prompt says
+//     "working. ", waits for FAKE_ACP_GATE_FILE, then says "done" and every steer it took. `_session/steering` answers
+//     {outcome:"steered"}, or {outcome:"promptRequired"} with no prompt running (FAKE_ACP_STEER_FAIL=rpc: a JSON-RPC error).
+//   FAKE_ACP_MODE=devin-steer  Devin's second `session/prompt`: initialize reports agentCapabilities._meta["cognition.ai/midTurnPrompts"];
+//     a prompt during a running one joins it, and both end together with the same usage and _meta["cognition.ai/userMessageId"].
+//   FAKE_ACP_MODE=grok-steer  Grok's second `session/prompt` with `[ui] follow_up_behavior = "steer"` in GROK_HOME/config.toml: a prompt
+//     during a running one is injected into it and answers {stopReason:"cancelled", _meta:{completionKind:"removedFromQueue"}}
+//     at once; the running prompt then ends with end_turn and every steer it took.
+//   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
+//   FAKE_ACP_MODE=grok-complete  grok 1.0.41's `_x.ai/session/prompt_complete`: a prompt says "answered", then sends the
+//     notification {sessionId, promptId: the prompt's _meta.promptId, stopReason: FAKE_ACP_COMPLETE_STOP (end_turn),
+//     agentResult: FAKE_ACP_COMPLETE_RESULT (null)}, then answers per FAKE_ACP_COMPLETE_REPLY: "after" (default) at once
+//     with that stopReason and usage, "never", "late" after FAKE_ACP_COMPLETE_REPLY_MS (3500) with "late words" and usage,
+//     "late-bare" the same reply with no words, or "rate-limit-error" (JSON-RPC -32003). FAKE_ACP_COMPLETE_NAMES (own) lists the prompts the notifications name:
+//     own, none (no promptId), task (a background task's task-completed-… id), other-session.
+//   FAKE_ACP_START_FAILURE  this line on stderr at startup, then exit 1 before reading anything, as grok 1.0.x does when it
+//     cannot start its threads
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+
+if (process.env.FAKE_ACP_START_FAILURE) {
+  writeSync(2, `${process.env.FAKE_ACP_START_FAILURE}\n`);
+  process.exit(1);
+}
+
+// The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
+// out of the repo.
+type StreamStep = { say?: string; think?: string; tool?: string; fail?: string };
+type StreamScript = { steps: StreamStep[]; chars: number; ms: number };
+function streamScript(prompt: string): StreamScript | null {
+  if (!process.env.FAKE_STREAM_SCRIPT) return null;
+  let scripts: Record<string, StreamStep[]>;
+  try { scripts = JSON.parse(readFileSync(process.env.FAKE_STREAM_SCRIPT, "utf8")); } catch { return null; }
+  // A prompt can carry earlier requests as context: the newest marker in it is the request.
+  const marker = Object.keys(scripts).filter((key) => prompt.includes(key)).sort((a, b) => prompt.lastIndexOf(b) - prompt.lastIndexOf(a) || b.length - a.length)[0];
+  if (!marker) return null;
+  const [chars = 4, ms = 40] = (process.env.FAKE_STREAM_CADENCE ?? "4:40").split(":").map(Number);
+  return { steps: scripts[marker]!, chars: Math.max(1, chars), ms: Math.max(0, ms) };
+}
+function playStreamScript(script: StreamScript, play: { chunk(step: StreamStep, piece: string): void; end(step: StreamStep): void; done(failure?: string): void; cancelled(): boolean }): void {
+  const queue = script.steps.slice();
+  const next = (): void => {
+    if (play.cancelled()) return;
+    const step = queue.shift();
+    if (!step) return play.done();
+    if (step.fail !== undefined) return play.done(step.fail);
+    if (step.tool !== undefined) {
+      play.end(step);
+      setTimeout(next, script.ms);
+      return;
+    }
+    const text = step.say ?? step.think ?? "";
+    let at = 0;
+    const send = (): void => {
+      if (play.cancelled()) return;
+      if (at < text.length) {
+        play.chunk(step, text.slice(at, at += script.chars));
+        setTimeout(send, script.ms);
+        return;
+      }
+      play.end(step);
+      setTimeout(next, script.ms);
+    };
+    send();
+  };
+  next();
+}
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
 {
@@ -125,6 +226,8 @@ const variantValues = (entries: any[]): string[] => entries.flatMap((entry) => (
 const modes = (process.env.FAKE_ACP_MODES ?? "").split(",").filter(Boolean);
 let currentMode: string | null = modes[0] ?? null;
 let currentFast: string | null = null;
+const grokEffort = process.env.FAKE_ACP_GROK_EFFORT;
+let currentEffort = process.argv.includes("--reasoning-effort") ? process.argv[process.argv.indexOf("--reasoning-effort") + 1]! : "high";
 const taskIdFile = process.env.FAKE_ACP_TASKID_FILE ?? "";
 const peerIdOf = (list: string): string => /id: ([\w-]+)/.exec(list)?.[1] ?? "";
 function handoffCall(message: string, options: { consult?: boolean; reason?: string; doneWhen?: string } = {}): { name: string; args: (list: string) => object } {
@@ -192,6 +295,14 @@ const configOptions = () => {
       currentValue: currentMode,
       options: modes.map((value) => ({ value, name: value })),
     }] : []),
+    ...(grokEffort ? [{
+      id: "reasoning_effort",
+      name: "Reasoning Effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: currentEffort,
+      options: ["high", "medium", "low"].map((value) => ({ value, name: value })),
+    }] : []),
     ...(currentFast ? [{
       id: "fast",
       name: "Fast",
@@ -213,6 +324,12 @@ const acpModels = (process.env.FAKE_ACP_SESSION_MODELS ?? "")
   });
 const sessionModels = () =>
   acpModels.length ? { currentModelId: acpModels[0].modelId, availableModels: acpModels } : null;
+const sessionModesList = (process.env.FAKE_ACP_SESSION_MODES ?? "").split(",").filter(Boolean);
+let currentSessionMode: string | null = sessionModesList[0] ?? null;
+const sessionModesPayload = () =>
+  sessionModesList.length
+    ? { currentModeId: currentSessionMode ?? sessionModesList[0], availableModes: sessionModesList.map((id) => ({ id, name: id })) }
+    : null;
 
 const argv = process.argv.slice(2);
 const dumpEnv = Object.fromEntries(
@@ -220,6 +337,9 @@ const dumpEnv = Object.fromEntries(
     "PATH",
     "HOME",
     "USERPROFILE",
+    "NO_PROXY",
+    "no_proxy",
+    "PI_CODING_AGENT_SESSION_DIR",
     "TEMP",
     "TMP",
     "SystemRoot",
@@ -231,6 +351,7 @@ const dumpEnv = Object.fromEntries(
     "OPENCODE_API_KEY",
     "OPENCODE_PERMISSION",
     "OPENCODE_DISABLE_AUTOUPDATE",
+    "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -273,6 +394,7 @@ const dumpEnv = Object.fromEntries(
     "GITHUB_TOKEN",
     "COMMAND_CODE_API_KEY",
     "KIRO_API_KEY",
+    "WINDSURF_API_KEY",
   ].flatMap((key) => (process.env[key] === undefined ? [] : [[key, process.env[key]]] as const)),
 );
 const dumpState: Record<string, unknown> = { argv, env: dumpEnv, pid: process.pid };
@@ -315,6 +437,31 @@ if (argv.includes("--version")) {
 if (argv[0] === "status" || argv[0] === "whoami") {
   const authenticated = process.env.FAKE_ACP_AUTH !== "0";
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
+  process.exit(0);
+}
+const gatewayPidFile = process.env.FAKE_ACP_GATEWAY_PID_FILE;
+if (gatewayPidFile && argv[0] === "acp" && !existsSync(gatewayPidFile)) {
+  const gateway = spawn(process.execPath, ["-e", "setInterval(() => {}, 1 << 30)", "gateway", "run", "--quiet"], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, HERMES_GATEWAY_DETACHED: "1" },
+  });
+  gateway.unref();
+  writeFileSync(gatewayPidFile, String(gateway.pid));
+}
+const grokLogin = process.env.FAKE_ACP_GROK_LOGIN;
+if (argv[0] === "models" && grokLogin) {
+  const countFile = process.env.FAKE_ACP_GROK_LOGIN_COUNT;
+  const calls = countFile && existsSync(countFile) ? Number(readFileSync(countFile, "utf8")) || 0 : 0;
+  if (countFile) writeFileSync(countFile, String(calls + 1));
+  if (grokLogin === "hang" || grokLogin === "signed-out-hang") {
+    if (grokLogin === "signed-out-hang") console.log("You are not authenticated.");
+    setInterval(() => {}, 1_000);
+    await new Promise(() => {});
+  }
+  const signedIn = grokLogin === "signed-in" || (grokLogin === "refreshes" && calls > 0);
+  console.log([signedIn ? "You are logged in with grok.com." : "You are not authenticated.",
+    "Default model: grok-4.5", "Available models:", "  - grok-4.5 (default)"].join("\n"));
   process.exit(0);
 }
 const catalogLock = process.env.FAKE_ACP_MODELS_LOCK;
@@ -419,12 +566,12 @@ const resultAndConfigUpdates = (id: unknown, res: unknown, after: string, sessio
   process.stdout.write([{ jsonrpc: "2.0", id, result: res }, ...updates].map((message) => JSON.stringify(message)).join("\n") + "\n");
 };
 const rpcMethods: string[] = [];
-const recordMethod = (method: string, sessionId?: unknown) => {
+const recordMethod = (method: string, sessionId?: unknown, meta?: unknown) => {
   rpcMethods.push(method);
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
   if (process.env.FAKE_ACP_RPC_APPEND_FILE) {
     try {
-      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd(), sessionId }) + "\n");
+      appendFileSync(process.env.FAKE_ACP_RPC_APPEND_FILE, JSON.stringify({ pid: process.pid, method, cwd: process.cwd(), sessionId, ...(meta === undefined ? {} : { meta }) }) + "\n");
     } catch {}
   }
 };
@@ -438,6 +585,15 @@ let pendingAskQuestionId: number | null = null;
 let onAskQuestionAnswered: (() => void) | null = null;
 
 let hangingPromptId: unknown = null;
+let streamingPromptId: unknown = null;
+let backgroundWakePlayed = false;
+const backgroundJobs = new Map<string, { job: ReturnType<typeof setTimeout> | null; step: ReturnType<typeof setInterval> | null }>();
+const detachedSessions = new Set<string>();
+const endWokenStep = (sessionId: unknown) => {
+  const job = backgroundJobs.get(String(sessionId));
+  if (job?.step) clearInterval(job.step);
+  if (job) job.step = null;
+};
 let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
 
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -464,31 +620,45 @@ function offeredAgents(servers: AnyMcpEntry[]): McpEntry | null {
 /** grok 1.0.25's initialize (`grok mcp doctor`) */
 const GROK_MCP_HANDSHAKE = { protocolVersion: "2025-11-25", capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } }, clientInfo: { name: "grok-shell", version: "1.0.25" } };
 
-async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<string[]> {
+/** An initialized client of a Streamable HTTP MCP server: one POST per frame, the answer read as JSON or as one event. */
+async function httpMcp(entry: AnyMcpEntry, handshake: unknown): Promise<(frame: object) => Promise<any>> {
+  const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+  for (const { name, value } of entry.headers ?? []) headers[name] = value;
+  const post = async (frame: object) => {
+    const response = await fetch(entry.url!, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
+    const session = response.headers.get("mcp-session-id");
+    if (session) headers["mcp-session-id"] = session;
+    const text = await response.text();
+    const body = text.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? text;
+    const parsed = body.trim() ? JSON.parse(body) : {};
+    if (!response.ok || parsed.error) throw new Error(`HTTP ${response.status} ${parsed.error?.message ?? ""}`.trim());
+    return parsed.result;
+  };
+  await post({ id: 1, method: "initialize", params: handshake });
+  await post({ method: "notifications/initialized" });
+  return post;
+}
+/** FAKE_ACP_MCP_HOLD=1: like Grok, each session's stdio MCP servers stay running once connected, until this process ends. */
+const heldMcp = new Set<ReturnType<typeof spawn>>();
+process.once("exit", () => { for (const child of heldMcp) child.kill(); });
+function holdSessionMcp(): void {
+  if (process.env.FAKE_ACP_MCP_HOLD !== "1") return;
+  for (const entry of sessionMcp) void listMcpTools(entry, GROK_MCP_HANDSHAKE, true).catch(() => {});
+}
+
+async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false): Promise<string[]> {
   const names = (result: any) => (result?.tools ?? []).map((tool: { name: string; inputSchema?: unknown }) =>
     process.env.FAKE_ACP_MCP_SCHEMA_BYTES === "1" ? `${tool.name}=${JSON.stringify(tool.inputSchema ?? {}).length}` : tool.name);
   if (typeof entry.url === "string") {
-    const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
-    for (const { name, value } of entry.headers ?? []) headers[name] = value;
-    const post = async (frame: object) => {
-      const response = await fetch(entry.url!, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
-      const session = response.headers.get("mcp-session-id");
-      if (session) headers["mcp-session-id"] = session;
-      const text = await response.text();
-      const body = text.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? text;
-      const parsed = body.trim() ? JSON.parse(body) : {};
-      if (!response.ok || parsed.error) throw new Error(`HTTP ${response.status} ${parsed.error?.message ?? ""}`.trim());
-      return parsed.result;
-    };
-    await post({ id: 1, method: "initialize", params: handshake });
-    await post({ method: "notifications/initialized" });
+    const post = await httpMcp(entry, handshake);
     return names(await post({ id: 2, method: "tools/list", params: {} }));
   }
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     for (const { name, value } of entry.env ?? []) env[name] = value;
     const child = spawn(entry.command!, entry.args ?? [], { env, stdio: ["pipe", "pipe", "ignore"] });
-    const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); child.kill(); if (error) reject(error); else resolve(tools!); };
+    if (hold) heldMcp.add(child);
+    const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); if (!hold || error) child.kill(); if (error) reject(error); else resolve(tools!); };
     const timer = setTimeout(() => finish(new Error("mcp timeout")), 20_000);
     child.on("error", (error) => finish(error));
     const write = (frame: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`);
@@ -509,6 +679,10 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<str
   });
 }
 let liveSession: string | null = null;
+let idleModeUpdateSent = false;
+let modeUpdateAfterSetModeSent = false;
+let modeUpdateOnSetModelSent = false;
+const openCopies = new Map<string, number>();
 let sessionsOpened = 0;
 let rpcFailure: unknown = null;
 function emitSessionReports(): void {
@@ -541,6 +715,10 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
   const fail = () => {
     recordMethod(`${msg.method}.error`);
     out({ jsonrpc: "2.0", id: msg.id, error: rpcFailure });
+    if (process.env.FAKE_ACP_RPC_FAILURE_ONCE === "1") {
+      rpcFailure = null;
+      if (failureFile) try { unlinkSync(failureFile); } catch {}
+    }
   };
   const gate = process.env.FAKE_ACP_RPC_FAILURE_GATE;
   if (gate && !existsSync(gate)) {
@@ -551,6 +729,31 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
     }, 20);
   } else fail();
   return true;
+}
+
+const antigravityConversations = process.env.FAKE_ACP_AGY_STEPS_FILE && process.env.GEMINI_HOME
+  ? `${process.env.GEMINI_HOME}/antigravity-acp/conversations` : null;
+if (antigravityConversations) mkdirSync(antigravityConversations, { recursive: true });
+
+function appendAntigravitySteps(sessionId: unknown): void {
+  const file = process.env.FAKE_ACP_AGY_STEPS_FILE, directory = antigravityConversations;
+  if (!file || !directory || typeof sessionId !== "string" || !existsSync(file)) return;
+  const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+  const database = new DatabaseSync(`${directory}/${sessionId}.db`);
+  try {
+    database.exec("CREATE TABLE IF NOT EXISTS steps (idx INTEGER PRIMARY KEY, step_type INTEGER, step_payload BLOB)");
+    const insert = database.prepare("INSERT INTO steps (step_type, step_payload) VALUES (?, ?)");
+    for (const [type, text] of JSON.parse(readFileSync(file, "utf8")) as Array<[number, string]>) insert.run(type, Buffer.from(text));
+  } finally {
+    database.close();
+  }
+}
+
+async function httpMcpCall(entry: AnyMcpEntry, name: string, args: Record<string, unknown>): Promise<string> {
+  const post = await httpMcp(entry, { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "fake-acp", version: "1" } });
+  const result = await post({ id: 2, method: "tools/call", params: { name, arguments: args } });
+  if (result?.isError) throw new Error(`Fixture MCP request failed: ${JSON.stringify(result)}`);
+  return String(result?.content?.[0]?.text ?? "");
 }
 
 function driveMcp(entry: McpEntry, calls: Array<{ name: string | (() => string); args: (prev: string) => object }>, strict = false): Promise<string> {
@@ -660,6 +863,137 @@ function heldByHoldFile(msg: any): boolean {
   return true;
 }
 
+function advertiseHermesCommands(sessionId: string) {
+  out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update",
+    availableCommands: (process.env.FAKE_ACP_HERMES_COMMANDS ?? "help,steer,queue").split(",").map((name) => ({ name, description: name })) } } });
+}
+
+let gatedTurn: { run: string; steers: string[]; pending: unknown[] } | null = null;
+let gatedRuns = 0;
+/** A prompt that says "working. " and waits for FAKE_ACP_GATE_FILE. devin-steer: a prompt during it joins the run and is
+ * answered with the first one, with the same usage and run id, as Devin does. opencode-steer: only `_session/steering` joins it. */
+function grokCompletePrompt(msg: any) {
+  const sessionId = msg.params?.sessionId, own = msg.params?._meta?.promptId, stopReason = process.env.FAKE_ACP_COMPLETE_STOP ?? "end_turn";
+  const say = (text: string) => out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
+  say("answered");
+  const named: Record<string, { sessionId: unknown; promptId?: unknown }> = {
+    own: { sessionId, promptId: own }, none: { sessionId }, task: { sessionId, promptId: "task-completed-00000000-0000-4000-8000-000000000002" },
+    "other-session": { sessionId: "another-session", promptId: own },
+  };
+  for (const name of (process.env.FAKE_ACP_COMPLETE_NAMES ?? "own").split(",")) {
+    out({ jsonrpc: "2.0", method: "_x.ai/session/prompt_complete", params: { ...named[name], stopReason, agentResult: process.env.FAKE_ACP_COMPLETE_RESULT ?? null } });
+  }
+  const usage = { sessionId, requestId: own, promptId: own, inputTokens: 20, outputTokens: 7 };
+  switch (process.env.FAKE_ACP_COMPLETE_REPLY ?? "after") {
+    case "after": result(msg.id, { stopReason, _meta: usage }); break;
+    case "never": hangKeepAlive = setInterval(() => {}, 1_000); break;
+    case "late": case "late-bare": setTimeout(() => {
+      if (process.env.FAKE_ACP_COMPLETE_REPLY === "late") say(" late words");
+      result(msg.id, { stopReason, _meta: usage });
+    }, Number(process.env.FAKE_ACP_COMPLETE_REPLY_MS ?? 3_500)); break;
+    case "rate-limit-error": out({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "Rate limited", data: { message: process.env.FAKE_ACP_COMPLETE_RESULT ?? "Rate limited" } } }); break;
+  }
+}
+
+function gatedPrompt(msg: any) {
+  const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("");
+  if (gatedTurn && mode === "grok-steer") {
+    recordMethod("session/prompt.steer");
+    gatedTurn.steers.push(text);
+    result(msg.id, { stopReason: "cancelled", _meta: { completionKind: "removedFromQueue" } });
+    return;
+  }
+  if (gatedTurn && mode === "devin-steer") {
+    recordMethod("session/prompt.steer");
+    gatedTurn.steers.push(text);
+    gatedTurn.pending.push(msg.id);
+    return;
+  }
+  const turn = { run: `run-${++gatedRuns}`, steers: [] as string[], pending: [msg.id] as unknown[] };
+  gatedTurn = turn;
+  const say = (line: string) => out({ jsonrpc: "2.0", method: "session/update",
+    params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: line } } } });
+  say("working. ");
+  const finish = () => {
+    gatedTurn = null;
+    say(`done${turn.steers.length ? `; steered: ${turn.steers.join(" | ")}` : ""}`);
+    for (const id of turn.pending) {
+      result(id, { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 }, _meta: { "cognition.ai/userMessageId": turn.run } });
+    }
+  };
+  const gate = process.env.FAKE_ACP_GATE_FILE;
+  if (!gate || existsSync(gate)) return finish();
+  const poll = setInterval(() => {
+    if (!existsSync(gate)) return;
+    clearInterval(poll);
+    finish();
+  }, 50);
+}
+
+/** OpenCode's `_session/steering`: promptRequired when no turn runs; FAKE_ACP_STEER_FAIL=rpc answers a JSON-RPC error. */
+function sessionSteering(msg: any) {
+  if (process.env.FAKE_ACP_STEER_FAIL === "rpc") {
+    out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "unsupported_control" } });
+    return;
+  }
+  if (!gatedTurn) return result(msg.id, { outcome: "promptRequired" });
+  const prompt = Array.isArray(msg.params?.prompt) ? msg.params.prompt : [];
+  gatedTurn.steers.push(prompt.map((block: any) => block?.text ?? "").join(""));
+  result(msg.id, { outcome: "steered" });
+}
+
+let hermesTurn: { steers: string[] } | null = null;
+/** hermes-agent's prompt, `/steer` included, as acp_adapter/server.py and commands.py answer them. */
+function hermesPrompt(msg: any) {
+  const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("").trim();
+  const say = (line: string) => out({ jsonrpc: "2.0", method: "session/update",
+    params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: line } } } });
+  const steer = /^\/steer\s+([\s\S]+)$/.exec(text)?.[1]?.trim();
+  const held = process.env.FAKE_ACP_STEER_HOLD_FILE;
+  if (steer !== undefined && held && existsSync(held)) {
+    const poll = setInterval(() => {
+      if (existsSync(held)) return;
+      clearInterval(poll);
+      hermesPrompt(msg);
+    }, 50);
+    return;
+  }
+  if (steer !== undefined && hermesTurn) {
+    recordMethod("session/prompt.steer");
+    if (process.env.FAKE_ACP_STEER_FAIL === "rpc") {
+      out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "unsupported_control" } });
+      return;
+    }
+    if (process.env.FAKE_ACP_STEER_FAIL === "1") say("⚠️ Steer failed: the agent is compressing its context");
+    else {
+      hermesTurn.steers.push(steer);
+      say(`⏩ Steer queued for the active turn: ${steer.slice(0, 80)}${steer.length > 80 ? "..." : ""}\n`);
+    }
+    result(msg.id, { stopReason: "end_turn" });
+    return;
+  }
+  if (steer !== undefined) {
+    say(`ran: ${steer}`);
+    result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 3, outputTokens: 2 } });
+    return;
+  }
+  const turn = { steers: [] as string[] };
+  hermesTurn = turn;
+  say("working. ");
+  const finish = () => {
+    hermesTurn = null;
+    say(`done${turn.steers.length ? `; steered: ${turn.steers.join(" | ")}` : ""}`);
+    result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
+  };
+  const gate = process.env.FAKE_ACP_GATE_FILE;
+  if (!gate || existsSync(gate)) return finish();
+  const poll = setInterval(() => {
+    if (!existsSync(gate)) return;
+    clearInterval(poll);
+    finish();
+  }, 50);
+}
+
 /** Applies one ACP message while preserving the fake CLI's launcher-owned MCP behavior. */
 function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingAskQuestionId) {
@@ -684,10 +1018,11 @@ function handle(msg: any) {
   }
   if (!msg.method) return;
   if (msg.method === "session/prompt" && heldByHoldFile(msg)) return;
-  recordMethod(msg.method, msg.params?.sessionId);
+  recordMethod(msg.method, msg.params?.sessionId, msg.params?._meta);
 
   switch (msg.method) {
     case "initialize": {
+      if (process.env.FAKE_ACP_DUMP) writeFileSync(`${process.env.FAKE_ACP_DUMP}.initialize.json`, JSON.stringify(msg.params));
       if (failRpc(msg)) break;
       if (mode === "hang-initialize") {
         setInterval(() => {}, 1_000);
@@ -699,10 +1034,11 @@ function handle(msg: any) {
       }
       const authMethods = mode === "no-auth" ? [] : [{ id: process.env.FAKE_ACP_AUTH_METHOD ?? "cached_token" }];
       const agentName = process.env.FAKE_ACP_AGENT_NAME;
+      const capabilityMeta = process.env.FAKE_ACP_CAPABILITIES_META;
       const acceptsImages = process.env.FAKE_ACP_IMAGE_CAPABILITY === "1";
       const mcpTransports = (process.env.FAKE_ACP_MCP_TRANSPORTS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
       const closesSessions = ["1", "error"].includes(process.env.FAKE_ACP_SESSION_CLOSE ?? "");
-      const deletesSessions = process.env.FAKE_ACP_SESSION_DELETE === "1";
+      const deletesSessions = process.env.FAKE_ACP_SESSION_DELETE === "1" || mode === "background-wake";
       if (["1", "stuck"].includes(process.env.FAKE_ACP_CURSOR_FAST ?? "") && msg.params?.clientCapabilities?._meta?.parameterizedModelPicker === true) {
         currentFast = "true";
       }
@@ -712,11 +1048,15 @@ function handle(msg: any) {
         agentInfo: agentName
           ? { name: agentName, version: process.env.FAKE_ACP_AGENT_VERSION ?? "test" }
           : undefined,
-        agentCapabilities: agentName || acceptsImages || mcpTransports.length || closesSessions || deletesSessions
+        agentCapabilities: agentName || acceptsImages || mcpTransports.length || closesSessions || deletesSessions || mode === "devin-steer" || capabilityMeta
           ? {
+              ...(mode === "devin-steer" && process.env.FAKE_ACP_STEERING !== "off" ? { _meta: { "cognition.ai/midTurnPrompts": true } } : {}),
+              ...(capabilityMeta ? { _meta: JSON.parse(capabilityMeta) } : {}),
               ...(agentName ? { loadSession: true, sessionCapabilities: { resume: true }, auth: { logout: true } } : {}),
               ...(closesSessions || deletesSessions
-                ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}) } }
+                ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}),
+                  ...(mode === "background-wake" ? { ...(process.env.FAKE_ACP_NO_CLOSE === "1" ? {} : { close: {} }),
+                    ...(process.env.FAKE_ACP_NO_FORK === "1" ? {} : { fork: {} }) } : {}) } }
                 : {}),
               ...(acceptsImages ? { promptCapabilities: { image: true } } : {}),
               ...(mcpTransports.length ? { mcpCapabilities: { http: mcpTransports.includes("http"), sse: mcpTransports.includes("sse") } } : {}),
@@ -724,12 +1064,14 @@ function handle(msg: any) {
           : undefined,
         _meta: {
           modelState: { currentModelId: "fake-acp-model" },
+          ...(mode === "opencode-steer" && process.env.FAKE_ACP_STEERING !== "off" ? { steering: { supported: true } } : {}),
           ...(process.env.FAKE_ACP_GROK_VERSION ? { grokShell: true, agentVersion: process.env.FAKE_ACP_GROK_VERSION } : {}),
         },
       });
       break;
     }
     case "authenticate":
+      if (failRpc(msg)) break;
       if (mode === "authenticate-failed") {
         out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "Login expired" } });
         break;
@@ -760,28 +1102,54 @@ function handle(msg: any) {
       const offered = offeredAgents(servers);
       agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
       sessionMcp = acceptedMcp(servers);
+      holdSessionMcp();
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      const sm = sessionModesPayload();
       sessionsOpened += 1;
       const firstSession = process.env.FAKE_ACP_SESSION_ID ?? "fake-acp-session";
       liveSession = sessionsOpened === 1 ? firstSession : `${firstSession}-${sessionsOpened}`;
+      openCopies.set(liveSession, 1);
       resultAndConfigUpdates(msg.id, {
         sessionId: liveSession,
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
+        ...(sm ? { modes: sm } : {}),
       }, "session/new", liveSession);
+      if (mode === "hermes-steer") advertiseHermesCommands(liveSession);
       break;
     }
     case "session/close":
-      if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
-      else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
+      // A failed close leaves the session, its woken steps and its jobs exactly as they were.
+      if (process.env.FAKE_ACP_SESSION_CLOSE === "error") {
+        out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
+        break;
+      }
+      endWokenStep(msg.params?.sessionId);
+      openCopies.delete(String(msg.params?.sessionId));
+      if (process.env.FAKE_ACP_CLOSE_ENDS_JOBS === "1") {
+        const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
+        if (job) clearTimeout(job);
+        backgroundJobs.delete(String(msg.params?.sessionId));
+      }
+      if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
+      if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
       else result(msg.id, {});
       break;
-    case "session/delete":
+    case "session/delete": {
+      endWokenStep(msg.params?.sessionId);
+      const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
+      if (job) clearTimeout(job);
+      backgroundJobs.delete(String(msg.params?.sessionId));
+      if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
       result(msg.id, {});
+      break;
+    }
+    case "session/fork":
+      result(msg.id, { sessionId: `${msg.params?.sessionId}-fork` });
       break;
     case "session/load": {
       if (process.env.FAKE_ACP_LOAD_ERROR) {
@@ -810,11 +1178,25 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
-      if (!cachedLiveLoad) sessionMcp = acceptedMcp(msg.params?.mcpServers ?? []);
+      if (!cachedLiveLoad) { sessionMcp = acceptedMcp(msg.params?.mcpServers ?? []); holdSessionMcp(); }
       const opts = configOptions();
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
-      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
+      detachedSessions.delete(String(msg.params?.sessionId));
+      const copies = openCopies.get(String(msg.params?.sessionId)) ?? 0;
+      openCopies.set(String(msg.params?.sessionId), process.env.FAKE_ACP_COPY_LIVE_LOAD === "1" ? copies + 1 : 1);
+      for (let turn = 1; turn <= Number(process.env.FAKE_ACP_LOAD_REPLAY ?? 0); turn++) {
+        for (const [sessionUpdate, text] of [["user_message_chunk", `REPLAYED-USER-${turn}`], ["agent_message_chunk", `REPLAYED-AGENT-${turn}`]]) {
+          out({ jsonrpc: "2.0", method: "session/update", params: {
+            sessionId: msg.params.sessionId, ...(process.env.FAKE_ACP_LOAD_REPLAY_MARKED === "1" ? { _meta: { isReplay: true } } : {}),
+            update: { sessionUpdate, content: { type: "text", text } },
+          } });
+        }
+      }
+      if (process.env.FAKE_ACP_LOAD_UNANSWERED === "1") break;
+      const sm = sessionModesPayload();
+      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}), ...(sm ? { modes: sm } : {}) }, "session/load", msg.params.sessionId);
+      if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
     }
     case "session/resume": {
@@ -831,8 +1213,9 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      const sm = sessionModesPayload();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
-      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
+      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}), ...(sm ? { modes: sm } : {}) });
       break;
     }
     // droid sets model/autonomy here, not via argv. Recorded beside FAKE_ACP_DUMP; last writer wins.
@@ -846,6 +1229,9 @@ function handle(msg: any) {
         // Cursor's answer when handed an argv slug like `auto`.
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });
       }
+      if (msg.method === "session/set_model" && mode === "set-model-internal-error") {
+        return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error: model switch failed" } });
+      }
       const settingId = msg.method === "session/set_mode" ? "modeId" : "modelId";
       if (typeof msg.params?.sessionId !== "string" || typeof msg.params?.[settingId] !== "string") {
         out({
@@ -855,9 +1241,35 @@ function handle(msg: any) {
         });
         break;
       }
+      if (msg.method === "session/set_mode" && sessionModesList.length) {
+        if (!sessionModesList.includes(msg.params.modeId)) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: `Invalid params: unknown modeId "${msg.params.modeId}"` } });
+          break;
+        }
+        currentSessionMode = msg.params.modeId;
+      }
       configCalls.push({ method: msg.method, params: msg.params });
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+      }
+      if (msg.method === "session/set_mode" && !modeUpdateAfterSetModeSent && process.env.FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE) {
+        const [trigger, override] = process.env.FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE.split(":");
+        if (trigger && override && msg.params.modeId === trigger) {
+          modeUpdateAfterSetModeSent = true;
+          currentSessionMode = override;
+          const resp = { jsonrpc: "2.0", id: msg.id, result: {} };
+          const notif = { jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: override } } };
+          process.stdout.write(`${JSON.stringify(resp)}\n${JSON.stringify(notif)}\n`);
+          break;
+        }
+      }
+      if (msg.method === "session/set_model" && !modeUpdateOnSetModelSent && process.env.FAKE_ACP_MODE_UPDATE_ON_SET_MODEL) {
+        const override = process.env.FAKE_ACP_MODE_UPDATE_ON_SET_MODEL.trim();
+        if (override) {
+          modeUpdateOnSetModelSent = true;
+          currentSessionMode = override;
+          out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: override } } });
+        }
       }
       result(msg.id, {});
       break;
@@ -872,6 +1284,19 @@ function handle(msg: any) {
           writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
         }
         resultAndConfigUpdates(msg.id, process.env.FAKE_ACP_EMPTY_VARIANT_ACK ? {} : { configOptions: configOptions() }, "effort", msg.params.sessionId);
+        break;
+      }
+      if (configId === "reasoning_effort" && grokEffort && ["high", "medium", "low"].includes(value)) {
+        if (grokEffort === "refuse") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params: reasoning_effort" } });
+          break;
+        }
+        currentEffort = value;
+        configCalls.push({ method: msg.method, params: msg.params });
+        if (process.env.FAKE_ACP_DUMP) {
+          writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+        }
+        result(msg.id, { configOptions: configOptions() });
         break;
       }
       if (configId === "fast" && currentFast && (value === "true" || value === "false")) {
@@ -911,6 +1336,7 @@ function handle(msg: any) {
         break;
       }
       if (configId === "model" && value === process.env.FAKE_ACP_EXIT_ON_MODEL) process.exit(4);
+      if (configId === "model" && value === process.env.FAKE_ACP_HANG_ON_MODEL) break;
       if (configId !== "model" || !models.includes(value)) {
         out({
           jsonrpc: "2.0",
@@ -945,7 +1371,24 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_DUMP && process.env.FAKE_ACP_DUMP_PROMPT === "1") {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
+      appendAntigravitySteps(msg.params?.sessionId);
+      if (process.env.FAKE_ACP_PROMPT_STDERR) {
+        process.stderr.write(`${process.env.FAKE_ACP_PROMPT_STDERR}\n`);
+        if (process.env.FAKE_ACP_PROMPT_STDERR_THEN === "hang") return;
+      }
       if (failRpc(msg)) return;
+      if (mode === "hermes-steer") {
+        hermesPrompt(msg);
+        return;
+      }
+      if (mode === "opencode-steer" || mode === "devin-steer" || mode === "grok-steer") {
+        gatedPrompt(msg);
+        return;
+      }
+      if (mode === "grok-complete") {
+        grokCompletePrompt(msg);
+        return;
+      }
       if (process.env.FAKE_ACP_TOOL_LIMIT) {
         const limit = Number(process.env.FAKE_ACP_TOOL_LIMIT);
         const handshake = process.env.FAKE_ACP_MCP_HANDSHAKE ? JSON.parse(process.env.FAKE_ACP_MCP_HANDSHAKE) : GROK_MCP_HANDSHAKE;
@@ -963,7 +1406,10 @@ function handle(msg: any) {
         return;
       }
       if (process.env.FAKE_ACP_TEXT_REPLY !== undefined) {
-        out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
+        emitSessionReports();
+        for (let copy = openCopies.get(String(msg.params?.sessionId)) ?? 1; copy > 0; copy -= 1) {
+          out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
+        }
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 12, outputTokens: 4 } });
         return;
       }
@@ -1007,7 +1453,38 @@ function handle(msg: any) {
             ? { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 }, _meta: {} }
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
+        const idleMode = process.env.FAKE_ACP_IDLE_MODE_UPDATE;
+        if (idleMode && !idleModeUpdateSent) {
+          idleModeUpdateSent = true;
+          const sid = msg.params?.sessionId ?? liveSession;
+          setTimeout(() => {
+            currentSessionMode = idleMode;
+            out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: sid, update: { sessionUpdate: "current_mode_update", currentModeId: idleMode } } });
+          }, 10);
+        }
       };
+      const script = streamScript((Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join(""));
+      if (script) {
+        streamingPromptId = msg.id;
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { update: u } });
+        let tools = 0;
+        playStreamScript(script, {
+          cancelled: () => streamingPromptId !== msg.id,
+          chunk: (step, piece) => update({ sessionUpdate: step.think !== undefined ? "agent_thought_chunk" : "agent_message_chunk", content: { text: piece } }),
+          end: (step) => {
+            if (step.tool === undefined) return;
+            const id = `script-tool-${++tools}`;
+            update({ sessionUpdate: "tool_call", toolCallId: id, title: step.tool, rawInput: { command: step.tool } });
+            update({ sessionUpdate: "tool_call_update", toolCallId: id, status: "completed" });
+          },
+          done: (failure) => {
+            streamingPromptId = null;
+            if (failure) out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: failure } });
+            else complete();
+          },
+        });
+        return;
+      }
       if (mode === "quiet-then-answer") {
         const lines: string[] = process.env.FAKE_ACP_QWEN_LOG ? JSON.parse(process.env.FAKE_ACP_QWEN_LOG) : [];
         let logTimer: ReturnType<typeof setInterval> | null = null;
@@ -1072,6 +1549,47 @@ function handle(msg: any) {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
         complete();
+        return;
+      }
+      if (mode === "background-wake") {
+        // OpenCode 2.3.1+: a shell command still running at its timeout moves to the background, the prompt ends, and the
+        // command's finish later wakes a turn OpenCode streams as session/updates no session/prompt asked for.
+        const sessionId = String(msg.params?.sessionId);
+        if (detachedSessions.has(sessionId)) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params", data: { sessionId } } });
+          return;
+        }
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: u } });
+        if (backgroundWakePlayed) {
+          update({ sessionUpdate: "agent_message_chunk", content: { text: "second answer" } });
+          complete();
+          return;
+        }
+        backgroundWakePlayed = true;
+        update({ sessionUpdate: "tool_call", toolCallId: "tc-build", status: "in_progress", kind: "execute", title: "make", rawInput: { command: "make" } });
+        update({ sessionUpdate: "tool_call_update", toolCallId: "tc-build", status: "completed", rawOutput: { output: "Command moved to the background (shell ID: sh_1)." } });
+        update({ sessionUpdate: "agent_message_chunk", content: { text: "build started" } });
+        const entry: { job: ReturnType<typeof setTimeout> | null; step: ReturnType<typeof setInterval> | null } = { job: null, step: null };
+        backgroundJobs.set(sessionId, entry);
+        entry.job = setTimeout(() => {
+          entry.job = null;
+          let step = 0;
+          entry.step = setInterval(() => {
+            step += 1;
+            update({ sessionUpdate: "session_info_update", _meta: { "opencode/retry": null } });
+            update({ sessionUpdate: "agent_message_chunk", content: { text: `WOKEN step ${step}` } });
+            update({ sessionUpdate: "tool_call", toolCallId: `tc-woken-${step}`, status: "completed", kind: "execute", title: "make test", rawOutput: { output: "WOKEN ok" } });
+            if (process.env.FAKE_ACP_WOKEN_FILE) appendFileSync(process.env.FAKE_ACP_WOKEN_FILE, `${sessionId} ${step}\n`);
+          }, Number(process.env.FAKE_ACP_STEP_MS ?? 50));
+        }, Number(process.env.FAKE_ACP_WAKE_MS ?? 300));
+        if (JSON.stringify(msg.params?.prompt ?? []).includes("STOP_ME")) {
+          hangingPromptId = msg.id;
+          return;
+        }
+        complete();
+        if (process.env.FAKE_ACP_LATE_UPDATE === "1") {
+          setTimeout(() => update({ sessionUpdate: "tool_call_update", toolCallId: "tc-build", status: "completed" }), 50);
+        }
         return;
       }
       if (mode === "finished-tools") {
@@ -1229,8 +1747,8 @@ function handle(msg: any) {
         void (async () => {
           for (const call of calls) {
             const server = sessionMcp.find((entry) => entry.name === call.server);
-            if (!server?.command) throw new Error(`Fixture MCP server unavailable: ${call.server}`);
-            const text = await driveMcp({ command: server.command, args: server.args, env: server.env },
+            if (!server?.command && !server?.url) throw new Error(`Fixture MCP server unavailable: ${call.server}`);
+            const text = server.url ? await httpMcpCall(server, call.name, call.arguments) : await driveMcp({ command: server.command!, args: server.args, env: server.env },
               [{ name: call.name, args: () => call.arguments }], true);
             out({ jsonrpc: "2.0", method: "session/update", params: { update: {
               sessionUpdate: "agent_message_chunk", content: { text: `${call.name}: ${text}\n` },
@@ -1468,7 +1986,18 @@ function handle(msg: any) {
       complete();
       break;
     }
+    case "_session/steering":
+      sessionSteering(msg);
+      break;
     case "session/cancel":
+      if (gatedTurn) {
+        for (const id of gatedTurn.pending) result(id, { stopReason: "cancelled", _meta: {} });
+        gatedTurn = null;
+      }
+      if (streamingPromptId !== null) {
+        result(streamingPromptId, { stopReason: "cancelled", _meta: {} });
+        streamingPromptId = null;
+      }
       if (hangingPromptId !== null && process.env.FAKE_ACP_IGNORE_CANCEL !== "1") {
         result(hangingPromptId, { stopReason: process.env.FAKE_ACP_CANCEL_STOP_REASON ?? "cancelled", _meta: {} });
         if (hangKeepAlive) clearInterval(hangKeepAlive);

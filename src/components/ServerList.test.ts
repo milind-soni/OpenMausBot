@@ -72,10 +72,11 @@ it("the update note shows only for a server behind this app, with the command th
   expect(notes[0]!.textContent).toContain("Copy update command");
   await click(buttonIn(notes[0]!, "Hide this note"));
   expect(host.querySelector("[data-server-behind]")).toBeNull();
-  expect(updateCommand("docker", "0.1.147")).toBe("docker compose pull && docker compose up -d");
+  expect(updateCommand("docker", "0.1.147")).toBe("git pull && ./update.sh");
   expect(updateCommand("npx", "0.1.147")).toBe("npx openmausbot@0.1.147 serve");
   expect(updateCommand(null, "0.1.147")).toBe("npx openmausbot@0.1.147 serve");
   expect(updateCommand("global", "0.1.147")).toBe("npm install -g openmausbot@0.1.147");
+  expect(updateCommand("podman-service", "0.1.147")).toBe("~/.local/share/openmausbot/update.sh");
 });
 
 it("Pair again opens the Connect sheet with the address locked and the code field ready; Remove only asks main", async () => {
@@ -83,6 +84,7 @@ it("Pair again opens the Connect sheet with the address locked and the code fiel
   await click(buttonIn(row("mac").querySelector("[data-server-state]")!, "Pair again"));
   const form = document.querySelector('[data-place-add="own-server"]')!;
   expect(form.textContent).toContain("Pair again with Mac at home");
+  expect(host.contains(form), "the sheet sits on body, outside Settings' blurred pane that would clip it").toBe(false);
   const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
   expect([address.value, address.readOnly]).toEqual(["https://mac.tail1234.ts.net", true]);
   expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
@@ -101,33 +103,36 @@ it("main's word that a status changed is read at once", async () => {
   expect(row("mac").querySelector("[data-server-state]")).toBeNull();
 });
 
-it("a server of the person's own has \"Share this computer\" with its switch; Choose what it can use opens only while it is on", async () => {
-  const onShare = vi.fn();
-  root = createRoot(host);
-  const render = async (ownServers: Array<{ id: string; enabled: boolean; connected: boolean; paused: boolean }>) => {
-    await act(async () => { root!.render(createElement(ServerList, { ...props, ownServers, onShare })); });
+it("each server saved by hand has the one lend switch: one tap on, one tap off, Choose only while on, the reason where it can't", async () => {
+  const views: Record<string, DesktopLendView> = {
+    vps: { name: "hetzner-1", lendable: true, on: false, connected: false, paused: false },
+    mini: { name: "office-mini", lendable: false, why: "shared" },
+    mac: { name: "Mac at home", lendable: false, why: "not-owner" },
+    open: { name: "old box", lendable: false, why: "old" },
   };
-  await render([{ id: "vps", enabled: false, connected: false, paused: false }]);
-  const share = row("vps").querySelector("[data-server-share]")!;
-  expect(share.textContent).toContain("Share this computer");
-  expect(share.textContent).toContain("Let hetzner-1's bots use folders you choose, a terminal and the apps on your screen.");
-  expect(row("mini").querySelector("[data-server-share]"), "only servers of the person's own").toBeNull();
-  expect(row("cloud").querySelector("[data-server-share]")).toBeNull();
-  expect(buttonIn(share, "Choose what it can use")).toBeUndefined();
-  const toggle = share.querySelector("[role=switch]")!;
-  expect(toggle.getAttribute("aria-checked")).toBe("false");
-  expect(toggle.getAttribute("aria-label")).toBe("Share this computer with hetzner-1");
-  await click(toggle);
-  expect(onShare).toHaveBeenCalledWith("vps", true);
-
-  await render([{ id: "vps", enabled: true, connected: true, paused: false }]);
+  const lendComputer = {
+    state: vi.fn(async (id: string | null) => views[id!]!),
+    set: vi.fn(async (id: string | null, on: boolean) => { views[id!] = { ...(views[id!] as Extract<DesktopLendView, { lendable: true }>), on, connected: on }; return views[id!]!; }),
+    allowScreen: vi.fn(), wish: vi.fn(async () => true),
+  };
+  Object.assign(window, { ogb: { environments, workspaces, lendComputer } });
+  await mount();
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+  const lend = row("vps").querySelector("[data-lend-switch]")!;
+  expect(lend.textContent).toContain("Let hetzner-1’s bots use this computer");
+  expect(lend.textContent).toContain("Its bots can then see and use the apps on your screen while MausBot is open here.");
+  expect(row("cloud").querySelector("[data-lend-switch], [data-lend-reason]"), "My Cloud lends by its own rules").toBeNull();
+  expect(row("mini").querySelector("[data-lend-reason]")?.textContent).toBe("Bots on office-mini can’t use this computer: other people sign in to it too.");
+  expect(row("mac").querySelector("[data-lend-reason]")?.textContent).toBe("Bots on Mac at home can’t use this computer: this app isn’t paired with it as its owner.");
+  expect(row("open").querySelector("[data-lend-reason]")?.textContent).toBe("Update old box to let its bots use this computer.");
+  expect(buttonIn(lend, "Choose what it can use")).toBeUndefined();
+  await click(lend.querySelector("[role=switch]"));
+  expect(lendComputer.set).toHaveBeenCalledWith("vps", true);
   expect(row("vps").querySelector("[role=switch]")?.getAttribute("aria-checked")).toBe("true");
-  expect(row("vps").querySelector("[data-server-share]")?.textContent).toContain("hetzner-1's bots can use this computer while this app is open.");
+  expect(row("vps").querySelector("[data-lend-line]")?.textContent).toBe("On: hetzner-1’s bots can use the apps on your screen while MausBot is open here.");
   await click(buttonIn(row("vps"), "Choose what it can use"));
   expect(props.onComputerAccess).toHaveBeenCalledWith("vps");
   await click(row("vps").querySelector("[role=switch]"));
-  expect(onShare).toHaveBeenLastCalledWith("vps", false);
-
-  await render([{ id: "vps", enabled: true, connected: false, paused: true }]);
-  expect(row("vps").querySelector("[data-server-share]")?.textContent).toContain("Paused: hetzner-1's bots can't use this computer until you resume.");
+  expect(lendComputer.set).toHaveBeenLastCalledWith("vps", false);
+  expect(row("vps").querySelector("[role=switch]")?.getAttribute("aria-checked")).toBe("false");
 });

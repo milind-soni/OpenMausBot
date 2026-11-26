@@ -174,7 +174,46 @@ describe("team-wide settings", () => {
   it("is offered in the team menu only when the caller passes the owner's action", () => {
     const base = { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn() };
     expect(renderToStaticMarkup(createElement(TeamMenuItems, base))).not.toContain("Set for all bots");
-    expect(renderToStaticMarkup(createElement(TeamMenuItems, { ...base, onSetForAll: vi.fn() }))).toContain("Set for all bots in this department…");
+    const markup = renderToStaticMarkup(createElement(TeamMenuItems, { ...base, onSetForAll: vi.fn() }));
+    expect(markup).toContain("Set for all bots in this department…");
+  });
+
+  it("scopes team effort choices and model switches to per-model effortLevels, including ultra", () => {
+    const codex = engine("codex", "codex", ["gpt-5.4", "gpt-5.3"], {
+      capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+      models: {
+        default: "gpt-5.4",
+        options: [
+          { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+    } as Partial<InstanceInfo>);
+    const codexNoUltra = engine("codex", "codex", ["gpt-5.3"], {
+      capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+      models: {
+        default: "gpt-5.3",
+        options: [{ id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] }],
+      },
+    } as Partial<InstanceInfo>);
+    const ultraBot = bot("u", { modelSelection: { instanceId: "codex", model: "gpt-5.4", effort: "ultra" } });
+    const otherBot = bot("o", { modelSelection: { instanceId: "codex", model: "gpt-5.3" } });
+
+    expect(teamEffortChoices([ultraBot], [codex], EFFORT_LEVELS)).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    expect(teamEffortChoices([otherBot], [codexNoUltra], EFFORT_LEVELS)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+
+    expect(planTeamChange([ultraBot], [codex], { kind: "model", model: "gpt-5.3", effort: "ultra" })[0]).toMatchObject({
+      status: "skip",
+      reason: "Codex does not offer this effort level",
+    });
+    expect(planTeamChange([otherBot], [codex], { kind: "model", model: "gpt-5.4", effort: "ultra" })[0]).toMatchObject({
+      status: "apply",
+      patch: { modelSelection: { instanceId: "codex", model: "gpt-5.4", effort: "ultra" } },
+    });
+    expect(planTeamChange([ultraBot], [codex], { kind: "model", model: "gpt-5.3" })[0]).toMatchObject({
+      status: "apply",
+      patch: { modelSelection: { instanceId: "codex", model: "gpt-5.3" } },
+    });
   });
 });
 

@@ -1,22 +1,24 @@
 import { localizedTaskTitle } from "@/lib/task-title";
 import { ChevronRight, Lock, UserRound, Users } from "lucide-react";
-import type { ComponentProps } from "react";
+import { useMemo, type ComponentProps } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import type { Bot } from "@/state/store"; import { useStoreSelector } from "@/state/store-select";
 import { awayFromMainThread } from "@/state/thread-navigation";
 import { BotAvatar } from "./Avatar";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { BOT_PANEL_ID } from "./bot-panel/side-panel";
 import { sharedChatAudience } from "./TeamPrivateChatsLine";
+import { showsTabs, threadTabs } from "./thread-tabs";
+import { ThreadSwitcherPill } from "./ThreadSwitcherPill";
 
 /** The factory title a new conversation starts with. */
 const UNTITLED = "New thread";
 const CHEVRON_MOTION = "duration-[140ms] ease-[cubic-bezier(.22,1,.36,1)]";
 
-export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string; onlyPeopleAdded?: boolean } | null;
+export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string; onlyPeopleAdded?: boolean; sharedWith?: string } | null;
 
 const PRIVACY_ICONS = { private: Lock, ownHelper: UserRound, shared: Users } as const;
 
@@ -24,23 +26,24 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
   switch (privacy?.kind) {
     case "private": return t("team.privateHeader");
     case "ownHelper": return t("team.ownHelperHeader");
-    case "shared": return sharedChatAudience(privacy.team, privacy.onlyPeopleAdded);
+    case "shared": return sharedChatAudience(privacy.team, privacy.onlyPeopleAdded, privacy.sharedWith);
     default: return null;
   }
 }
 
-/** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. Away from
- * the bot's main conversation it also names the one on screen. A dot says another of the bot's conversations needs a
+/** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. With two
+ * threads or more it also names the one on screen, which opens the bot's threads to switch; with one, away from the bot's
+ * main conversation, it names that. A dot says another of the bot's conversations needs a
  * look; a team chat says who can read it with one quiet glyph. */
-export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
+export function ChatHeadPill({ bot, avatar, privacy, onToggle, switcher = false }: {
   bot: Bot;
+  switcher?: boolean;
   avatar: Pick<ComponentProps<typeof BotAvatar>, "state" | "motion" | "motionKey" | "animated">;
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
 }) {
-  const { state } = useStore();
-  const open = state.settingsOpen;
-  const elsewhere = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
+  const open = useStoreSelector((state) => state.settingsOpen), pendingQueued = useStoreSelector((state) => state.pendingQueued);
+  const elsewhere = sidebarBotActivityTasks(bot, pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
   const privacyLabel = privacyLabelOf(privacy);
   const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
@@ -48,6 +51,16 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
     : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
+  const tabs = useMemo(() => (switcher ? threadTabs(bot) : []), [switcher, bot.id, bot.threadId, bot.switchingTo, bot.mainThreadId, bot.tasks, bot.busy]);
+  if (showsTabs(tabs)) {
+    const head = <>
+      <BotAvatar bot={bot} size={28} {...avatar} />
+      <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
+      {privacyLabel && <span data-chathead-privacy={privacy?.kind} title={privacyLabel} className="flex shrink-0 text-ink-tertiary"><PrivacyIcon size={13} aria-hidden="true" /><span className="sr-only">{privacyLabel}</span></span>}
+      {elsewhere > 0 && <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />}
+    </>;
+    return <ThreadSwitcherPill bot={bot} tabs={tabs} head={<span className="flex min-w-0 items-center gap-2 pe-1">{head}</span>} label={label} panelOpen={open} onToggle={onToggle} />;
+  }
   return (
     <button
       type="button"
@@ -58,9 +71,9 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}
-      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[5.5px] pl-[5.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
     >
-      <BotAvatar bot={bot} size={24} {...avatar} />
+      <BotAvatar bot={bot} size={28} {...avatar} />
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
       {conversation && (
         <>
@@ -78,8 +91,9 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
         <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />
       )}
       {!open && !conversation && (
-        <span aria-hidden="true" data-chathead-chevron className="-ml-0.5 flex shrink-0">
-          <ChevronRight size={12} className={cn("shrink-0 text-ink-tertiary transition-transform group-hover:translate-x-0.5 group-focus-visible:translate-x-0.5", CHEVRON_MOTION)} />
+        // Hidden at rest and folded into the gap, so the pill stays tight; it slides in on hover or keyboard focus.
+        <span aria-hidden="true" data-chathead-chevron className={cn("-ml-2 flex w-0 shrink-0 overflow-hidden opacity-0 transition-[width,margin,opacity] group-hover:-ml-0.5 group-hover:w-3 group-hover:opacity-100 group-focus-visible:-ml-0.5 group-focus-visible:w-3 group-focus-visible:opacity-100", CHEVRON_MOTION)}>
+          <ChevronRight size={12} className="shrink-0 text-ink-tertiary" />
         </span>
       )}
     </button>

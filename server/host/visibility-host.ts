@@ -2,7 +2,10 @@
 // room or conversation change), the one check every request naming a bot, conversation, room, routine or file passes, and
 // the per-conversation filter a list uses. On a Team Cloud an admin is a viewer with a person too: every bot and room, but
 // only their own private chats (audience.ts).
-import { audienceEquals, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
+import { basename } from "node:path";
+
+import { baseBotId } from "../audience.ts";
+import { audienceEquals, audienceWithin, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
@@ -70,11 +73,23 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     return threads;
   }
 
+  /** On a Team Cloud a file a routine carries is refused when only routines hidden from the viewer use it and no
+   * conversation they read does. */
+  function routineFileShown(name: string, visible: VisibleSet): boolean {
+    if (!visible.filtersThreads) return true;
+    const users = (deps.routines()?.listRoutines() ?? []).filter((routine) => routine.attachments?.some((file) => basename(file.path) === name));
+    return !users.length || users.some((routine) => routineVisible(routine, visible)) || threadsUsingAttachment(name).some((threadId) => visible.thread(threadId));
+  }
+
   /** The one visibility check every member request naming a subject passes through (a team's admin's too). */
   function subjectVisible(subject: PathSubject, visible: VisibleSet): boolean {
     switch (subject.kind) {
-      case "bot":
-        return !store.bot(subject.id) || visible.bot(subject.id);
+      case "bot": {
+        // Security invariant: on a Team Cloud a bot hidden from the viewer and an id no bot has are refused here alike,
+        // before any route can answer them differently.
+        const bot = store.bot(subject.id) ?? (deps.team ? store.bot(baseBotId(subject.id)) : undefined);
+        return bot ? visible.bot(bot.id) : !deps.team;
+      }
       case "thread":
         return !threadOwner(subject.id) || visible.thread(subject.id);
       case "group":
@@ -88,7 +103,7 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
         return !run || routineRunVisible(run, visible);
       }
       case "attachment":
-        return visible.attachment(subject.name, threadsUsingAttachment);
+        return visible.attachment(subject.name, threadsUsingAttachment) && routineFileShown(subject.name, visible);
     }
   }
 
@@ -110,6 +125,21 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
   function roomFeedsBot(group: GroupRecord, bot: Pick<BotRecord, "visibility">): boolean {
     return roomFeeds([...roomMemberAudiences(group), group.audienceFloor], bot.visibility);
   }
+
+  function readableByThreadAudience(threadId: string, canRead: (otherThreadId: string) => boolean): (otherThreadId: string) => boolean {
+    const audienceOf = (id: string) => {
+      const group = store.groupByThread(id);
+      if (group) return narrowestAudience([...roomMemberAudiences(group), group.audienceFloor]);
+      const bot = store.botByThread(id);
+      return bot ? narrowestAudience([bot.visibility]) : null;
+    };
+    const audience = audienceOf(threadId);
+    return (other) => {
+      if (audience === null || !canRead(other)) return false;
+      const source = audienceOf(other);
+      return source !== null && audienceWithin(audience, source);
+    };
+  }
   /** A room's floor stays at the narrowest audience it ever had, set before a restricted bot can leave; only an admin's
    * explicit reset widens it. */
   function settleRoomFloor(group: GroupRecord): void {
@@ -119,5 +149,5 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     deps.store().patchGroup(group.id, { audienceFloor: next === "everyone" ? undefined : next });
   }
 
-  return { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, roomMemberAudiences, settleRoomFloor };
+  return { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, readableByThreadAudience, roomMemberAudiences, settleRoomFloor };
 }

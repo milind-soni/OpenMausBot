@@ -38,7 +38,7 @@ describe("browser authorization while the harness is responding", () => {
           harnessPort: upstreamPort,
           authenticate: (token) => token === "fixture-token" && valid
             ? { id: "fixture-phone", cloudDesktopAccess: false, browserControlAccess: allowed } : null,
-          redeem: () => ({ error: "offline fixture" }),
+          redeem: () => ({ error: "offline fixture", code: "pairing_code_wrong" }),
           serverName: () => "Synthetic computer",
         });
         const relay = createServer(handler);

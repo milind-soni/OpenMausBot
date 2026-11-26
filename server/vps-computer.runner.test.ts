@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { PassThrough, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,7 +15,7 @@ vi.mock("./procs.ts", async () => ({
   killCliTree: stopMock,
 }));
 
-import { defaultRunner, dockerCliInstallCommand } from "./vps-computer.ts";
+import { defaultRunner, dockerCliInstallCommand, VpsHostUnreachableError } from "./vps-computer.ts";
 import { resolveCliSpawn } from "./env-path.ts";
 
 type FakeChild = EventEmitter & {
@@ -42,6 +43,44 @@ describe("default VPS command runner", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("calls a host unreachable only when ssh itself says it never got there", async () => {
+    const transport = fakeChild();
+    const lost = defaultRunner(["info"]);
+    // Docker puts ssh's words first; a long tail after them must not hide them.
+    transport.stderr.write("error during connect: command [ssh -- vps docker system dial-stdio] has exited with exit status 255, " +
+      "stderr=ssh: connect to host vps port 22: Connection refused\n" + "debug1: retrying\n".repeat(200));
+    transport.emit("close", 1, null);
+    await expect(lost).rejects.toBeInstanceOf(VpsHostUnreachableError);
+
+    const remote = fakeChild();
+    const refused = defaultRunner(["info"]);
+    remote.stderr.write("error during connect: command [ssh -- vps docker system dial-stdio] has exited with exit status 255, stderr=dial-stdio is not allowed here");
+    remote.emit("close", 1, null);
+    const error = await refused.catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
+  });
+
+  it("keeps a command's own ssh-looking error output as its failure, not an unreachable host", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "sh", "-lc", "ssh example"]);
+    child.stdout.write("tried");
+    child.stderr.write("ssh: connect to host example port 22: Connection refused\n");
+    child.emit("close", 2, null);
+    const error = await failed.catch((failure: unknown) => failure);
+    expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
+    expect(error).toMatchObject({ exitCode: 2, stdout: "tried", stderr: "ssh: connect to host example port 22: Connection refused\n" });
+  });
+
+  it("keeps a failed command's exit status and output on the error", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "false"]);
+    child.stdout.write("partial");
+    child.stderr.write("boom");
+    child.emit("close", 3, null);
+    await expect(failed).rejects.toMatchObject({ message: "boom", exitCode: 3, stdout: "partial", stderr: "boom" });
   });
 
   it("collects output and resolves after the child closes", async () => {
@@ -118,7 +157,14 @@ describe("default VPS command runner", () => {
     const master = realSpawn(process.execPath, ["-e", idle], { detached: true, stdio: "ignore" });
     const masterClosed = new Promise<void>((resolve) => master.once("close", () => resolve()));
     let helper = 0;
-    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    // An exited process nothing has collected yet still answers kill(pid, 0); killCliTree counts it as stopped (procs.ts).
+    const alive = (pid: number) => {
+      try { process.kill(pid, 0); } catch { return false; }
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        return !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]);
+      } catch { return process.platform !== "linux"; }
+    };
     const result = defaultRunner(["info"], { timeoutMs: failure === "timeout" ? 1_000 : 20_000 });
     const rejected = expect(result).rejects.toThrow(failure === "timeout" ? "command timed out" : "stdin failed");
     try {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
@@ -7,6 +7,7 @@ import type { ModelSelection, ProviderSnapshot } from "./contracts.ts";
 import { Store, toWireTask, type BotRecord, type TaskRecord } from "./store.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const sonnet: ModelSelection = { instanceId: "claude", model: "claude-sonnet-5" };
 const opus: ModelSelection = { instanceId: "claude", model: "claude-opus-5" };
@@ -44,7 +45,7 @@ describe("threads follow their bot's model", () => {
     expect(ownModel(reloaded, bot.id, second.threadId)).toBeUndefined();
     reloaded.patchBot(bot.id, { modelSelection: opus });
     expect(runsOn(reloaded, bot.id, second.threadId)).toEqual(opus);
-    expect(JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"))[0].tasks
+    expect(readRegistry(DATA_DIR).bots[0].tasks
       .every((task: TaskRecord) => !("modelSelection" in task))).toBe(true);
   });
 
@@ -64,6 +65,23 @@ describe("threads follow their bot's model", () => {
     expect(runsOn(store, bot.id, picked.threadId)).toEqual(codex);
     expect(runsOn(store, bot.id, follower.threadId)).toEqual(opus);
     expect(ownModel(open(), bot.id, picked.threadId)).toEqual(codex);
+  });
+
+  it("a reasoning level saved as the bot's default from a thread reaches its followers and new threads, not a thread with its own level", () => {
+    const store = open();
+    const bot = store.createBot();
+    const picked = bot.threadId;
+    const follower = store.createTask(bot.id, "Follower")!;
+    const own = store.createTask(bot.id, "Own level")!;
+    store.switchTaskModel(bot.id, own.threadId, { ...sonnet, effort: "low" }, false, false);
+
+    store.switchTaskModel(bot.id, picked, { ...sonnet, effort: "high" }, true, false);
+    expect(store.bot(bot.id)!.modelSelection).toEqual({ ...sonnet, effort: "high" });
+    expect(ownModel(store, bot.id, picked)).toBeUndefined();
+    expect(runsOn(store, bot.id, follower.threadId)).toEqual({ ...sonnet, effort: "high" });
+    expect(runsOn(store, bot.id, own.threadId)).toEqual({ ...sonnet, effort: "low" });
+    expect(runsOn(store, bot.id, store.createTask(bot.id, "Fresh")!.threadId)).toEqual({ ...sonnet, effort: "high" });
+    expect(open().bot(bot.id)!.modelSelection).toEqual({ ...sonnet, effort: "high" });
   });
 
   it("picking the bot's own model in a thread is following the bot", () => {
@@ -97,13 +115,13 @@ describe("threads follow their bot's model", () => {
       unread: false, modelSelection: sonnet, resumeCursors: {}, createdAt: 1,
       tasks: [task("copy", { ...sonnet }), task("different", codex), task("other-effort", { ...sonnet, effort: "high" })],
     } as unknown as BotRecord;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([bot]));
+    writeRegistry(DATA_DIR, { bots: [bot] });
 
     const store = open();
     expect(ownModel(store, "legacy", "copy")).toBeUndefined();
     expect(ownModel(store, "legacy", "different")).toEqual(codex);
     expect(ownModel(store, "legacy", "other-effort")).toEqual({ ...sonnet, effort: "high" });
-    const saved = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"))[0].tasks as TaskRecord[];
+    const saved = readRegistry(DATA_DIR).bots[0].tasks as TaskRecord[];
     expect(saved.map((entry) => entry.modelSelection)).toEqual([undefined, codex, { ...sonnet, effort: "high" }]);
 
     store.patchBot("legacy", { modelSelection: codex });
@@ -123,7 +141,7 @@ describe("threads follow their bot's model", () => {
       unread: false, modelSelection: sonnet, resumeCursors: {}, createdAt: 1,
       tasks: [{ threadId: "copy", title: "copy", createdAt: 1, updatedAt: 1, resumeCursors: {}, modelSelection: { ...sonnet } }],
     };
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify([bot]));
+    writeRegistry(DATA_DIR, { bots: [bot] });
     expect(ownModel(open(), "legacy", "copy")).toBeUndefined();
   });
 

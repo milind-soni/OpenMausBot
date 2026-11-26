@@ -13,7 +13,10 @@ import {
   sweepManagedEndpointCleanup,
 } from "./endpoints";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
+import { sendActivityPush } from "./push-activity";
+import { CLOUD_HOME_PUSH_ROUTE, routeCloudHomePush } from "./push-cloud-homes";
 import { issueRelayToken, relayAdoption } from "./relay";
+import { releaseTunnels, tunnelReleaseHealth } from "./tunnel-release";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
 import {
   createInstallation,
@@ -71,7 +74,7 @@ async function route(
   config: ControlPlaneConfig,
   requestId: string,
   cloudflareFetch: CloudflareFetch,
-  apnsFetch: typeof fetch,
+  pushFetch: typeof fetch,
 ) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return preflight(request, config);
@@ -144,7 +147,16 @@ async function route(
     return unregisterPushDevice(request, env);
   }
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/send") {
-    return sendPush(request, env, apnsFetch, requestId);
+    return sendPush(request, env, pushFetch, requestId);
+  }
+  if (request.method === "POST" && url.pathname === "/v1/installations/self/push/activity") {
+    return sendActivityPush(request, env, pushFetch, requestId);
+  }
+
+  // A Cloud home's push calls, relayed by the Admin (push-cloud-homes.ts): its shared secret, not an installation.
+  const cloudHome = url.pathname.match(CLOUD_HOME_PUSH_ROUTE);
+  if (cloudHome) {
+    return routeCloudHomePush(request, env, pushFetch, requestId, cloudHome[1]!, cloudHome[2]!);
   }
 
   const rotate = url.pathname.match(ROTATE_ROUTE);
@@ -174,7 +186,7 @@ async function route(
 
 export function createWorker(
   cloudflareFetch: CloudflareFetch = fetch,
-  apnsFetch: typeof fetch = fetch,
+  pushFetch: typeof fetch = fetch,
 ) {
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -192,11 +204,13 @@ export function createWorker(
         // so a full quota never hides sign-in, recovery, or local pairing.
         const capacity = await capacityHealth(env, healthConfig, ctx).catch(() => null);
         const adoption = await relayAdoption(env).catch(() => null);
+        const release = await tunnelReleaseHealth(env, healthConfig).catch(() => null);
         return secureResponse(json({
           ok: true,
           service: "openmausbot-control-plane",
           ...(capacity === null ? {} : { capacity }),
           ...(adoption === null ? {} : { relayAdoption: adoption }),
+          ...(release === null ? {} : { tunnelRelease: release }),
         }), request, null, requestId);
       }
 
@@ -209,7 +223,7 @@ export function createWorker(
         }
         const boundedRequest = await withBoundedRequestBody(request);
         return secureResponse(
-          await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch, apnsFetch),
+          await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch, pushFetch),
           request,
           config,
           requestId,
@@ -245,6 +259,17 @@ export function createWorker(
         } catch {
           console.error(JSON.stringify({
             message: "managed endpoint tunnel scan failed",
+            requestId,
+            errorCode: "endpoint_internal",
+          }));
+        }
+        // Marks only, like the scan: tunnels the relay has replaced, and
+        // those a version cutoff ends. The sweep below removes them.
+        try {
+          await releaseTunnels(env, config, requestId);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint tunnel release failed",
             requestId,
             errorCode: "endpoint_internal",
           }));

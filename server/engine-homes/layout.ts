@@ -45,6 +45,8 @@ export interface EngineFolder {
   env?: string;
   home: string;
   shared: readonly string[];
+  /** The driver kinds whose engine signs in here; a bot box of any other engine never reads these files. */
+  drivers: readonly string[];
 }
 
 /** kimi-code 2.4.1 (resolveKimiCodeOAuthKey) names a kimi.ai sign-in after its region's OAuth host and API address. */
@@ -53,16 +55,16 @@ const KIMI_AI_SIGN_IN = `credentials/kimi-code-env-${createHash("sha256")
 
 /** File names as each engine's sign-in keeps them (the drivers' own sign-in checks read the same ones). */
 export const ENGINE_FOLDERS: readonly EngineFolder[] = [
-  { env: "CLAUDE_CONFIG_DIR", home: ".claude", shared: [".credentials.json"] },
-  { env: "CODEX_HOME", home: ".codex", shared: ["auth.json", "config.toml"] },
-  { env: "GROK_HOME", home: ".grok", shared: ["auth.json", "config.toml"] },
-  { env: "KIMI_CODE_HOME", home: ".kimi-code", shared: ["credentials/kimi-code.json", KIMI_AI_SIGN_IN, "config.toml"] },
-  { env: "DSH_HOME", home: ".dsh", shared: [".credentials.yaml", ".env"] },
-  { env: "FACTORY_HOME_OVERRIDE", home: "", shared: [".factory/auth.v2.file", ".factory/auth.v2.keyring", ".factory/settings.json"] },
-  { env: "XDG_CONFIG_HOME", home: ".config", shared: ["muse/auth.json"] },
-  { env: "XDG_DATA_HOME", home: ".local/share", shared: ["opencode/auth.json"] },
-  { home: ".gemini", shared: ["oauth_creds.json", "google_accounts.json", "settings.json"] },
-  { home: ".pi/agent", shared: ["auth.json"] },
+  { env: "CLAUDE_CONFIG_DIR", home: ".claude", shared: [".credentials.json"], drivers: ["claudeAgent"] },
+  { env: "CODEX_HOME", home: ".codex", shared: ["auth.json", "config.toml"], drivers: ["codex"] },
+  { env: "GROK_HOME", home: ".grok", shared: ["auth.json", "config.toml"], drivers: ["grokAgent"] },
+  { env: "KIMI_CODE_HOME", home: ".kimi-code", shared: ["credentials/kimi-code.json", KIMI_AI_SIGN_IN, "config.toml"], drivers: ["kimiAgent"] },
+  { env: "DSH_HOME", home: ".dsh", shared: [".credentials.yaml", ".env"], drivers: ["deepseekAgent"] },
+  { env: "FACTORY_HOME_OVERRIDE", home: "", shared: [".factory/auth.v2.file", ".factory/auth.v2.keyring", ".factory/settings.json"], drivers: ["droidAgent"] },
+  { env: "XDG_CONFIG_HOME", home: ".config", shared: ["muse/auth.json"], drivers: ["museCode"] },
+  { env: "XDG_DATA_HOME", home: ".local/share", shared: ["opencode/auth.json"], drivers: ["opencodeGo"] },
+  { home: ".gemini", shared: ["oauth_creds.json", "google_accounts.json", "settings.json"], drivers: ["geminiAgent"] },
+  { env: "PI_CODING_AGENT_DIR", home: ".pi/agent", shared: ["auth.json"], drivers: ["piAgent"] },
 ];
 
 /** Folder variables that move with HOME besides those above. */

@@ -44,7 +44,7 @@ const ROUTES: ReadonlySet<string> = new Set([
 /** Composio's meta tools that only describe tools; connecting an account waits for a person, so it is not here. */
 const DISCOVERY: ReadonlySet<string> = new Set(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS"]);
 /** A read verb does not make a tool safe here: a read on another app can take a URL and carry the run's text to it. */
-const READ_APPS = ["GMAIL_", "GOOGLECALENDAR_"] as const;
+const READ_APPS = ["GMAIL_", "OUTLOOK_", "GOOGLECALENDAR_"] as const;
 export const DRAFT_TOOL = "GMAIL_CREATE_EMAIL_DRAFT";
 /** Fields of a draft that would add someone the reply is not to. */
 const OTHER_RECIPIENTS = ["cc", "bcc", "extra_recipients", "recipients"] as const;
@@ -107,8 +107,23 @@ export function recordsAnswer(bytes: Uint8Array, contentType: string): Uint8Arra
     for (const part of content) if (isRecord(part) && typeof part.text === "string") part.text = recordsText("a connected app (Gmail or Google Calendar)", part.text);
     return JSON.stringify(frame);
   };
-  const wrapped = contentType.includes("text/event-stream")
-    ? text.split("\n").map((line) => (line.startsWith("data: ") ? `data: ${wrapFrame(line.slice(6))}` : line)).join("\n")
+  const wrapEvent = (block: string): string => {
+    const lines = block.split("\n");
+    const isData = (line: string) => line === "data" || line.startsWith("data:");
+    // SSE joins an event's data fields with LF and removes at most one space after each colon.
+    const data = lines.filter(isData).map((line) => line.slice(5).replace(/^ /, "")).join("\n");
+    const wrapped = wrapFrame(data);
+    if (wrapped === data) return block;
+    let emitted = false;
+    return lines.flatMap((line) => {
+      if (!isData(line)) return [line];
+      if (emitted) return [];
+      emitted = true;
+      return [`data: ${wrapped}`];
+    }).join("\n");
+  };
+  const wrapped = contentType.toLowerCase().includes("text/event-stream")
+    ? text.replace(/\r\n?/g, "\n").split("\n\n").map(wrapEvent).join("\n\n")
     : wrapFrame(text);
   return new TextEncoder().encode(wrapped);
 }

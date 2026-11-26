@@ -33,13 +33,13 @@ function viewMaker() {
   return { made, createView };
 }
 
-function world({ wanted = true, hidden = false, frame = true } = {}) {
+function world({ wanted = true, hidden = false, frame = true, openComputer = null } = {}) {
   const { win, page, children } = appWindow();
   const { made, createView } = viewMaker();
   const state = { wanted, hidden, changes: 0 };
   const prefs = { railHidden: () => state.hidden, setRailHidden: (value) => { state.hidden = value; }, windowFrame: () => frame };
   const rail = createChromeRail({ createView, preload: "/app/preload.cjs", args: () => ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"], url: () => RAIL,
-    wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; } });
+    wanted: () => state.wanted, prefs: () => prefs, changed: () => { state.changes++; }, openComputer });
   const handlers = new Map();
   rail.install({ handle: (channel, handler) => handlers.set(channel, handler) });
   /** The page beside the rail asks, from its main frame. */
@@ -150,6 +150,23 @@ test("only the page beside the rail, in its main frame, offers the button: never
     assert.throws(() => w.handlers.get("rail:hide")(event, true), /only available to the page beside the window's rail/);
   }
   assert.deepEqual([w.state.hidden, w.rail.shown()], [false, true], "nothing hidden, nothing kept");
+});
+
+test("Switch to This computer: only the page beside the rail may ask, and main gets a settings page's plain name or nothing", () => {
+  const opened = [];
+  const w = world({ openComputer: (page) => { opened.push(page); } });
+  w.rail.attach(w.win);
+  const [view] = w.made, other = appWindow().page;
+  for (const event of [{ sender: view.webContents, senderFrame: view.webContents.mainFrame }, { sender: w.page, senderFrame: { id: "an-iframe" } }, { sender: other, senderFrame: other.mainFrame }]) {
+    assert.throws(() => w.handlers.get("rail:open-computer")(event, "phone"), /only available to the page beside the window's rail/);
+  }
+  w.ask("rail:open-computer", "phone");
+  w.ask("rail:open-computer", "https://evil.example/");
+  w.ask("rail:open-computer", 7);
+  assert.deepEqual(opened, ["phone", "", ""]);
+  const bare = world();
+  bare.rail.attach(bare.win);
+  assert.throws(() => bare.ask("rail:open-computer", "phone"), /not available/, "without main's way there, nothing opens");
 });
 
 test("after the page moves on, a hidden rail waits a few seconds for the new page's button: this app's page keeps it hidden, an older one gets it back", (t) => {
@@ -310,16 +327,20 @@ test("the rail's own page keeps its size at any zoom of this app's page (Chromiu
 
 test("every page beside the rail, from any server, gets the button's bridge, learns only whether there is a rail to hide, and says when it draws the frame; the rail's own channels stay this app's", async () => {
   const remote = pageWithPreload("https://bots.example.test", "/", (channel) => (channel === "rail:offer" ? { available: "yes", hidden: 1, places: [{ id: "home" }] } : { available: true, hidden: true }));
-  assert.deepEqual(Object.keys(remote.bridge.rail), ["state", "drawsFrame", "setHidden", "onState"]);
+  assert.deepEqual(Object.keys(remote.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "openComputer"]);
   /** A value made in the page's own context, as this one sees it. */
   const plain = (value) => JSON.parse(JSON.stringify(value));
   assert.deepEqual(plain(await remote.bridge.rail.state()), { available: false, hidden: false }, "two plain answers, nothing else main might send");
   await assert.rejects(remote.bridge.rail.setHidden(true), /Choose to hide or show/, "a server's page hides it only from the person's click");
+  await assert.rejects(remote.bridge.rail.openComputer("phone"), /Choose Switch to This computer/, "a Cloud's page opens This computer only from the person's click");
   remote.navigator.userActivation.isActive = true;
   assert.deepEqual(plain(await remote.bridge.rail.setHidden(true)), { available: true, hidden: true });
   await remote.bridge.rail.drawsFrame();
   await remote.bridge.rail.drawsFrame(false);
-  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame", true], ["rail:draws-frame", false]]);
+  await remote.bridge.rail.openComputer("phone");
+  await remote.bridge.rail.openComputer("../../etc");
+  assert.deepEqual(plain(remote.invoked), [["rail:offer"], ["rail:hide", true], ["rail:draws-frame", true], ["rail:draws-frame", false], ["rail:open-computer", "phone"], ["rail:open-computer", ""]],
+    "only a settings page's plain name goes to main");
   const heard = [];
   const stop = remote.bridge.rail.onState((state) => heard.push(state));
   remote.hear("rail:state", { available: true, hidden: false, places: ["home"] });
@@ -327,7 +348,7 @@ test("every page beside the rail, from any server, gets the button's bridge, lea
   remote.hear("rail:state", { available: true, hidden: true });
   assert.deepEqual(plain(heard), [{ available: true, hidden: false }]);
   const local = pageWithPreload("http://127.0.0.1:8799", "/");
-  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "expand", "onSkin", "onFramed"]);
+  assert.deepEqual(Object.keys(local.bridge.rail), ["state", "drawsFrame", "setHidden", "onState", "openComputer", "expand", "onSkin", "onFramed"]);
   const framed = [];
   const unheard = local.bridge.rail.onFramed((value) => framed.push(value));
   local.hear("rail:framed", false);

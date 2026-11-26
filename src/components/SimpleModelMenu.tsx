@@ -1,14 +1,15 @@
 import { useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Lightbulb, Loader2, LogIn, RefreshCw, Search, Settings, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Lightbulb, Loader2, LogIn, RefreshCw, Search, Settings, Star, X } from "lucide-react";
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { MenuGroup, MenuModelRow, SimpleMenu } from "@/lib/simple-model-menu";
+import { favoriteKey, toggleFavoriteModel, useFavoriteModels } from "@/lib/favorite-models";
 import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { BotAvatar } from "./Avatar";
 import { InstanceProviderMark } from "./ProviderIcons";
-import { MENU_GUTTER, MENU_ICON, MENU_LABEL, MENU_LINE, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING, SIMPLE_MENU_META, SIMPLE_MENU_ROW } from "./menu-recipe";
+import { MENU_GUTTER, MENU_ICON, MENU_LABEL, MENU_LINE, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_TRAILING, SIMPLE_MENU_META, SIMPLE_MENU_ROW } from "./menu-recipe";
 import { effortLabel } from "./ModelPicker";
 
 export type SimpleThinking =
@@ -38,7 +39,7 @@ export interface SimpleModelMenuProps extends SimpleMenuActions {
 }
 
 const Gutter = ({ children }: { children?: ReactNode }) => <span className={MENU_GUTTER}>{children}</span>;
-const Forward = () => <ChevronRight size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />;
+const Forward = () => <ChevronRight size={16} className={MENU_TRAILING} aria-hidden="true" />;
 
 /** A model's name and its secondary label, each on its own line so a long name never eats the label beside it. */
 function RowLines({ label, children }: { label: ReactNode; children?: ReactNode }) {
@@ -50,29 +51,54 @@ function RowLines({ label, children }: { label: ReactNode; children?: ReactNode 
   );
 }
 
+/** Stays where it is when pressed: the row moves up the next time the menu opens, not under the pointer. The arrow away
+ * from the start of the line moves from its row to it and back (model-menu-keys.ts); it shows while either has keyboard focus. */
+export function FavoriteStar({ instanceId, model, name }: { instanceId: string; model: string; name: string }) {
+  const favorite = useFavoriteModels().has(favoriteKey(instanceId, model));
+  return (
+    <button
+      type="button"
+      data-model-favorite
+      tabIndex={-1}
+      aria-pressed={favorite}
+      aria-label={t(favorite ? "model.favorite.remove" : "model.favorite.add", { name })}
+      title={t(favorite ? "model.favorite.remove" : "model.favorite.add", { name })}
+      onClick={() => toggleFavoriteModel(instanceId, model)}
+      className={cn("absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-tertiary hover:text-ink",
+        favorite ? "opacity-100" : "opacity-0 group-hover/model:opacity-100 touch:opacity-100 focus-visible:opacity-100 peer-focus-visible/row:opacity-100")}
+    >
+      <Star size={13} aria-hidden="true" className={cn(favorite && "fill-current")} />
+    </button>
+  );
+}
+
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
-  const reason = row.blocked ? t("model.orgBlocked") : undefined;
+  const reason = row.blocked ? t(option.needsCliUpdate ? "chat.claudeUpdate.offer" : "model.orgBlocked") : undefined;
   return (
+    <div className="group/model relative">
     <button
       type="button"
       data-menu-row
       data-org-blocked={row.blocked || undefined}
       disabled={row.blocked}
       aria-pressed={row.current}
-      aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
-      title={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
+      aria-label={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
-      className={SIMPLE_MENU_ROW}
+      className={cn(SIMPLE_MENU_ROW, "peer/row pe-8")}
     >
       <Gutter />
       <RowLines label={row.label}>
         {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
+        {row.detail && <span data-simple-model-detail className={SIMPLE_MENU_META}>{row.detail}</span>}
         {reason && <span data-simple-org-blocked className={SIMPLE_MENU_META}>{reason}</span>}
       </RowLines>
       {row.current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
+    {!row.blocked && <FavoriteStar instanceId={instance.instanceId} model={option.id} name={modelOptionLabel(option)} />}
+    </div>
   );
 }
 
@@ -91,7 +117,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
       return (
         <button type="button" data-menu-row data-simple-set-up tabIndex={-1} onClick={(event) => props.onSetUp(instance, event.detail === 0)}
           title={t("model.simple.needsSetup", { name: group.account ?? group.provider })} className={MENU_ROW}>
-          <Gutter>{body.kind === "setUp" ? <Download size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /> : <LogIn size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" />}</Gutter>
+          <Gutter>{body.kind === "setUp" ? <Download size={16} className={MENU_ICON} aria-hidden="true" /> : <LogIn size={16} className={MENU_ICON} aria-hidden="true" />}</Gutter>
           <span className="min-w-0 flex-1 truncate">{body.kind === "setUp" ? t("model.simple.setUp") : t("model.simple.signIn")}</span>
           <Forward />
         </button>
@@ -109,7 +135,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
             <Gutter>
               {props.menu.busy
                 ? <Loader2 size={14} className="animate-spin text-ink-secondary" aria-hidden="true" />
-                : <RefreshCw size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" />}
+                : <RefreshCw size={16} className={MENU_ICON} aria-hidden="true" />}
             </Gutter>
             <span className="min-w-0 flex-1 truncate">{t("common.checkAgain")}</span>
           </button>
@@ -132,7 +158,7 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
           )}
           {body.signInForOwn && (
             <button type="button" data-menu-row data-simple-sign-in tabIndex={-1} onClick={(event) => props.onSetUp(instance, event.detail === 0)} className={MENU_ROW}>
-              <Gutter><LogIn size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>
+              <Gutter><LogIn size={16} className={MENU_ICON} aria-hidden="true" /></Gutter>
               <span className="min-w-0 flex-1 truncate">{t("model.simple.signInForOwn", { name: group.provider })}</span>
               <Forward />
             </button>
@@ -144,8 +170,8 @@ function GroupBody({ group, props }: { group: MenuGroup; props: SimpleModelMenuP
                 <Gutter />
                 <span className="min-w-0 flex-1 truncate">{body.toggle === "less" ? t("model.showSuggested") : t("model.showAll", { count: body.total })}</span>
                 {body.toggle === "less"
-                  ? <ChevronUp size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
-                  : <ChevronDown size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />}
+                  ? <ChevronUp size={16} className={MENU_TRAILING} aria-hidden="true" />
+                  : <ChevronDown size={16} className={MENU_TRAILING} aria-hidden="true" />}
               </button>
             </div>
           )}
@@ -168,12 +194,12 @@ function Thinking({ thinking, labelId }: { thinking: SimpleThinking; labelId: st
     <div data-simple-thinking className="flex flex-col">
       <button type="button" data-menu-row data-simple-thinking-toggle tabIndex={-1} aria-expanded={open} aria-controls={`${labelId}-steps`}
         onClick={() => setOpen(!open)} className={cn(MENU_ROW, open && "hover:bg-transparent focus:bg-transparent")}>
-        <Gutter><Lightbulb size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>
+        <Gutter><Lightbulb size={16} className={MENU_ICON} aria-hidden="true" /></Gutter>
         <span id={labelId} className="min-w-0 flex-1 truncate">{t("botSettings.simple.thinking")}</span>
         {!open && <span className="shrink-0 text-ink-secondary">{auto ? t("model.simple.auto") : effortLabel(levels.current!)}</span>}
         {open
-          ? <ChevronUp size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />
-          : <ChevronDown size={16} strokeWidth={MENU_STROKE} className={MENU_TRAILING} aria-hidden="true" />}
+          ? <ChevronUp size={16} className={MENU_TRAILING} aria-hidden="true" />
+          : <ChevronDown size={16} className={MENU_TRAILING} aria-hidden="true" />}
       </button>
       <div id={`${labelId}-steps`} hidden={!open}>
         <div data-simple-effort role="group" aria-labelledby={labelId} className="m-1 grid rounded-full bg-ink/[0.05] p-[3px]"
@@ -213,7 +239,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
     <div data-simple-model-menu className="flex min-h-0 flex-1 flex-col">
       {menu.search && (
         <div data-simple-model-search className="group/search flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 pl-3.5 pr-2">
-          <Search size={16} strokeWidth={MENU_STROKE} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
+          <Search size={16} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
           <input
             data-menu-search
             value={query}
@@ -225,7 +251,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
           {query && (
             <button type="button" aria-label={t("model.simple.clearSearch")} onClick={() => props.onQuery("")}
               className="flex size-5 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink">
-              <X size={14} strokeWidth={MENU_STROKE} aria-hidden="true" />
+              <X size={14} aria-hidden="true" />
             </button>
           )}
           {menu.results !== null && <span role="status" className="sr-only">{t("model.results", { count: menu.results })}</span>}
@@ -316,7 +342,7 @@ export function SimpleModelMenu(props: SimpleModelMenuProps) {
           )}
           {props.onManage && (
             <button type="button" data-menu-row data-simple-manage onClick={props.onManage} className={MENU_ROW}>
-              <Gutter><Settings size={16} strokeWidth={MENU_STROKE} className={MENU_ICON} aria-hidden="true" /></Gutter>
+              <Gutter><Settings size={16} className={MENU_ICON} aria-hidden="true" /></Gutter>
               <span className="min-w-0 flex-1 truncate">{t("model.simple.manage")}</span>
               <Forward />
             </button>

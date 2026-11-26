@@ -50,7 +50,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(MEMBER_A)).token!;
   cleo = (await team.pair(MEMBER_C)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
   const opened = async (token: string, title: string) => {
@@ -68,6 +68,16 @@ beforeAll(async () => {
 afterAll(async () => {
   await fx?.close();
   if (stub) rmSync(stub.dir, { recursive: true, force: true });
+});
+
+it("lets only the owner or an admin turn the browser's desktop view on, as every browser setting", async () => {
+  const set = (token: string, browserEngine: Record<string, unknown>) => team.as(token, "PATCH", "/api/config", { browserEngine });
+  expect((await set(ada, { cloudDisplay: true })).status).toBe(403);
+  expect((await set(ada, { idleTimeoutMinutes: 5 })).status).toBe(403);
+  const byAdmin = await set(admin, { cloudDisplay: true });
+  expect(byAdmin.status, JSON.stringify(byAdmin.body)).toBe(200);
+  const byOwner = await set(owner, { cloudDisplay: false });
+  expect(byOwner.status, JSON.stringify(byOwner.body)).toBe(200);
 });
 
 /** The live view's first answer: a refusal names its reason; an open view (a real browser) is cut off after its headers. */
@@ -145,7 +155,7 @@ it("pairs a member's phone with a code she made: her address and role, her chats
   expect(listed).toContain(adaThread);
   expect(listed).not.toContain(cleoThread);
   // A member makes nothing wider: the admins' pairing route stays theirs.
-  expect((await team.as(phone, "POST", "/api/bots", { name: "Nope" })).status).toBe(403);
+  expect((await team.as(phone, "POST", "/api/bots", { name: "Nope", computer: "cloud" })).status).toBe(403);
   expect((await team.as(ada, "POST", "/api/auth/pairing", {})).status).toBe(403);
   // An admin's code, from either route, carries the admin too.
   const bens = await team.as(admin, "POST", "/api/auth/pairing", { scopes: ["admin", "client"] });

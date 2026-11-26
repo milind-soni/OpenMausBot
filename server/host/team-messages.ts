@@ -26,6 +26,7 @@ import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../sto
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
+import { messagePersonTarget, type MessagePersonBotsDeps } from "./message-person-bots.ts";
 import { OUTSIDE_REFUSAL } from "./outside-fence.ts";
 import type { PlaceInbox } from "./place-inbox.ts";
 import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
@@ -66,8 +67,10 @@ export interface TeamMessagesDeps {
   notify(notification: Notification): void;
   /** The inbox of a place that is no team's. */
   place?: PlaceInbox | null;
+  /** Off a team: who `to` may name besides the bots here (message-person-bots.ts). */
+  named?: Omit<MessagePersonBotsDeps, "bots">;
   /** What the inbox needs from the server: whose asks are whose, hand-offs, a bot carrying on, the assistant's reads. */
-  inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed">> & {
+  inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed" | "delivered">> & {
     representative?: Omit<RepresentativeDeps, "timeZone"> & Partial<Pick<RepresentativeDeps, "timeZone">>;
   };
   now?: () => number;
@@ -206,6 +209,22 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     return { status: 200, text: `Passed on to ${to.name}'s inbox; they were notified. Only your message went, nothing else from here. Their answer comes back here, and you carry on from it.` };
   }
 
+  /** A board item's bot asks a teammate (by name or address, else by person key) in a room thread: the question reaches
+   * their inbox, from the bot, and their answer comes back to that thread. No hourly cap: a bot asks once per item turn. */
+  function ask(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): Passed & { person?: string } {
+    const at = where(botId, threadId);
+    if (!team || !at?.group) return { status: 403, text: "Only a bot in this room can ask from it." };
+    if (deps.confined?.(threadId)) return { status: 403, text: OUTSIDE_REFUSAL };
+    const found = to.name ? resolve(to.name) : { person: byKey(to.key) };
+    if ("error" in found) return { status: found.status, text: found.error };
+    const person = found.person;
+    if (!person) return { status: 404, text: "Nobody here was named, and nobody made this item: name the person to ask." };
+    if (!deps.sees(person).thread(threadId)) return { status: 403, text: `${person.name} can't see this room, so they can't answer here. Ask someone who can.` };
+    const delivered = inbox.deliver(person.key, { kind: "message", from: { name: at.bot.name, botId: at.bot.id }, to: "bot", origin: originOf(at, threadId), text: question, title, notify: "mention" });
+    if (!delivered) return { status: 409, text: `${person.name} has no inbox here yet, so the question waits in this thread for anyone who sees it.` };
+    return { status: 200, text: `Asked ${person.name} in their inbox.`, person: person.key };
+  }
+
   const handledTurns = new Set<string>();
   const mentionable = () => mentionablePeople(current().map((one) => ({ key: one.key, name: one.name })));
   const botNames = () => store.bots.filter((bot) => !bot.hidden).map((bot) => bot.name);
@@ -317,8 +336,14 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       if (!team && deps.place) {
         const body = placeBodySchema.safeParse(await ctx.readBody());
         if (!body.success) return ctx.json(ctx.res, 400, { error: `message_person needs message (up to ${MESSAGE_PERSON_MAX} characters).` });
+        const to = body.data.to ?? "";
+        const target = to ? messagePersonTarget({ bots: () => store.bots, personNames: deps.named?.personNames ?? (() => []), ...(deps.named?.elsewhere ? { elsewhere: deps.named.elsewhere } : {}) }, ctx.botId, ctx.threadId, to) : "person";
+        if (target !== "person" && target) return ctx.json(ctx.res, 409, { error: target.refusal });
         const sent = deps.place.message(ctx.botId, ctx.threadId, body.data.message);
-        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text: sent.text } : { error: sent.text });
+        // There is one person here: a name that is no bot's still reaches them, and the bot is told so, never left waiting on "Bob".
+        const shown = JSON.stringify(oneLine(to, 80));
+        const text = target === null && sent.status === 200 ? `No bot here is called ${shown}, and only the person you work for can be messaged from here, so this went to their own Inbox. ${sent.text}` : sent.text;
+        return ctx.json(ctx.res, sent.status, sent.status === 200 ? { text } : { error: sent.text });
       }
       if (!team || !deps.people) return ctx.json(ctx.res, 404, { error: "Passing a message to a person works only on a team's Cloud." });
       if (deps.confined?.(ctx.threadId)) return ctx.json(ctx.res, 403, { error: OUTSIDE_REFUSAL });
@@ -328,6 +353,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return ctx.json(ctx.res, passed.status, passed.status === 200 ? { text: passed.text } : { error: passed.text });
     },
     pass,
+    ask,
     inbox,
     /** Each teammate here and the tags that reach them ("@Ada", "@Ada Lovelace"); empty off a team. A bot sharing a tag
      * is never reached by it: a tie is the person's (shared/person-mention.ts). */
@@ -393,6 +419,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const me = sessionPerson(auth);
       return Boolean(team && me && inbox.markRead(me.key, id));
     },
+    /** The viewer read every line of their inbox; null for someone on a team without one. */
+    markAllRead(auth: RequestAuth): number | null {
+      if (!team && deps.place) return deps.place.markAllRead(auth);
+      const me = sessionPerson(auth);
+      return team && me ? inbox.markAllRead(me.key) : null;
+    },
     /** This person's Needs you lines: the messages in their inbox they have not opened, newest first. */
     needsYou(auth: RequestAuth): NeedsYouItem[] {
       const me = sessionPerson(auth);
@@ -419,7 +451,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return waiting ? { returned: false, open: { botId: waiting.botId, threadId: waiting.threadId } } : { returned: false };
     },
     /** A notification about to go out: an ask, a failure or a routine's report routed to a person reaches their inbox. */
-    route(notification: Notification, how: { routine?: boolean } = {}): Notification | null {
+    route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification | null {
       return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
     },
     stop(): void {

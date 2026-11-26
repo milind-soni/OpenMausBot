@@ -15,6 +15,8 @@ import {
   writeFileSync,
 } from "node:fs";
 
+import { timeBlocking } from "./perf/loop-stalls.ts";
+
 export type AtomicWriteOptions = {
   mode?: number;
   /** false skips the fsync. Default true. */
@@ -49,6 +51,10 @@ export function renameWithRetry(
 }
 
 export function writeFileAtomic(path: string, data: string | Uint8Array, options: AtomicWriteOptions = {}): void {
+  timeBlocking("saves", () => writeWhole(path, data, options));
+}
+
+function writeWhole(path: string, data: string | Uint8Array, options: AtomicWriteOptions): void {
   const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let fd: number | null = null;
   try {

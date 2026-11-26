@@ -28,6 +28,29 @@ pnpm exec vitest run shared/routine-schedule.test.ts server/routine-cron.e2e.tes
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/cron-routines-ui.e2e.test.ts
 ```
 
+## Editing long automation instructions
+
+`trigger_info action=list` keeps bounded instruction previews. Pass `trigger_id`
+to read one automation's complete instructions before editing; this applies to
+schedules, app events and webhooks. `instructionsTruncated` then reports false.
+Secrets remain redacted, and `instructionsRedacted` reports whether the saved
+text contains hidden content, including beyond a listing's preview. When true,
+a bot instruction replacement fails with HTTP 409 before any field or receipt
+changes. Ask the person to edit those instructions on the Automations page;
+other updates work when instructions are omitted. App-event bot replacements
+recheck inside the serialized write after any network or queue wait, so a
+concurrent direct edit that adds protected instructions is preserved.
+
+The disposable fake-engine fixture reads a long schedule and webhook through
+the real MCP tools, changes one sentence, and checks the full saved text and
+readback. It also checks hidden credentials, refused mixed-field replacements,
+and renames that preserve instructions. App-event coverage uses its real
+manager and a loopback broker stand-in; no real connected account is used.
+
+```sh
+pnpm exec vitest run server/trigger-instructions.e2e.test.ts server/trigger-tools.test.ts server/automation-instructions.test.ts server/routine-requests.test.ts server/webhook-requests.test.ts server/app-triggers.test.ts
+```
+
 ## Launch the isolated renderer
 
 Run the launcher directly so Ctrl-C reaches the fixture owner:
@@ -67,7 +90,7 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
    the card must become settled and exactly one matching routine must appear.
    Reloading must preserve both the routine and the card's settled state.
    Open that routine and run it. Its report lands in Pepper's main thread (the
-   open conversation the person last wrote in, here the source chat), not a new
+   one set as main, else Pepper's oldest open conversation), not a new
    "· Results" thread, as one Pepper message captioned with the routine's name,
    and the caption's **See run** leads to the isolated execution thread. See
    [automation reports](automation-reports.md) for quiet runs, questions and
@@ -119,12 +142,14 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
 
 Every routine reports into its bot's main thread unless the user chooses another
 destination, whether it was made in a chat, the editor or the API, and whether a
-teammate (such as a Chief) asked for it. The main thread is the open
-conversation a person last wrote in (until anyone has, the selected one, then
-the oldest); a bot with hidden threads opens there too. Conversations from
-before the server kept that take it, once on upgrade, from the newest line a
-person sent there from the app. Each run looks it up
-again, so the routine saves nothing and its results follow the person. A routine
+teammate (such as a Chief) asked for it. The main thread is the one the person set
+as main while it is open. A bot with none saved keeps the one it had: the open
+conversation a person last wrote in, else the oldest open one a person started,
+saved from then on as if chosen. Archiving or deleting the main thread passes it
+to the oldest open conversation a person started, and unarchiving does not take
+it back; a bot with hidden threads opens there too. Writing in another
+conversation never moves it. Each run looks it up
+again, so the routine saves nothing and its results follow the main thread. A routine
 still pointing at an automatic "<name> · Results" thread from an older version
 moves to the main thread on its next run; that thread and its reports stay. The
 oldest thread that v0.1.98 to v0.1.107 saved on routines as if it were chosen is
@@ -182,6 +207,16 @@ data. The server log and adjacent JSON remain. Close the dedicated browser tab;
 never kill processes by name or delete a broad temporary root.
 
 ## Automated regressions
+
+The automation notification regression creates a failed run followed by six
+successful runs, restarts the isolated server, and checks that the list explains
+the unread failure and the panel shows it beyond the five newest runs. Opening
+the panel marks the failure seen; a second restart must keep the dot cleared.
+It retains screenshots under `.omb-scratch/automations-journey/notification*`.
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/automations-journey.ui.e2e.test.ts -t explains.an.old.automation.notification
+```
 
 In the editor's Advanced section, recurring routines offer **Skip this
 occurrence** (the default) or **Queue one run**. The queued scheduled run waits

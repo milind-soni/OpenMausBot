@@ -5,14 +5,21 @@ import { accessSync, constants, readFileSync, statfsSync } from "node:fs";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import { PLACE_STATES } from "../shared/place-view.ts";
-import type { RoutineRunStatus } from "../shared/routines.ts";
 import { trialCreditKind } from "../shared/trial-credit.ts";
 import type { BoxReport } from "./bot-box/box.ts";
+import type { CloudBrowserReport } from "./cloud-browser/rails.ts";
 import type { RoomReport } from "./engine-memory.ts";
 import type { FirstHourReport } from "./host/first-hour.ts";
 import type { ValueReport } from "./host/value-ledger.ts";
 import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
+import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
+import { takeStartFailure } from "./engine-start-failures.ts";
+import { doctorSummary } from "./doctor/start.ts";
 import { classifyError } from "./drivers/retry.ts";
+import { storageHealth, type StorageReport } from "./perf/disk-usage.ts";
+import type { PerfHealth } from "./perf/perf-report.ts";
+import type { RoutineHealth } from "./routine-health.ts";
+import type { ScheduleSection } from "./routine-schedule-report.ts";
 import type { Message, StoreChange } from "./store.ts";
 
 /** The report's largest JSON body; incidents past it wait for the next poll. */
@@ -40,8 +47,18 @@ const STOP_CODES = new Set(["auth_required", "rpc_error", "shutdown_timeout", "p
 const GENERIC_STOPS = new Set(["rpc_error", "error", "failed", "error_during_execution", "exit_before_result"]);
 /** Engine stops that count as a failure even when no failed row was written for them. */
 const ROWLESS_STOPS = new Set(["shutdown_timeout", "auth_required", "update_required", "spawn_error", "rpc_error"]);
+/**
+ * An engine that did not start, by why, instead of the provider-looking code its words would get (`server_error`, `rpc_error`,
+ * `spawn_error`): the Cloud too busy to start it (the plain line busy-start.ts or procs.ts shows), its CLI missing, or the
+ * engine's or its provider's own refusal of the start (engine-start-failures.ts). A sign-in keeps `auth`/`auth_required`,
+ * which the Admin's engine-auth alert reads.
+ */
+export const START_CODES = { overloaded: "start_overloaded", notInstalled: "start_not_installed", provider: "start_provider" } as const;
+const START_NOTICES: ReadonlyMap<string, string> = new Map([["chat.notice.cloudOutOfCpu", START_CODES.overloaded], ["chat.notice.cloudBusyStart", START_CODES.overloaded],
+  ["chat.notice.outOfProcesses", START_CODES.overloaded]]);
 /** Causes the server writes itself, by fixed code. */
 const FIXED_CAUSES: ReadonlyArray<[RegExp, string]> = [
+  [/^`[^`\n]{1,200}` isn't installed, or isn't on this app's PATH$/, START_CODES.notInstalled],
   [/ran out of memory while \d+ tasks? ran at once/, "out_of_memory"],
   [/^Ran out of room, so I (closed the browser|stopped this task) to keep everything else running\./, "out_of_memory"],
   [/^no activity for \d+ minutes — the turn was stopped$/, "stalled"],
@@ -58,8 +75,8 @@ export interface HealthIncident {
   kind: HealthIncidentKind; code: string; engine: string | null;
   count: number; firstAt: number; lastAt: number; botId: string | null; threadId: string | null; seq: number;
 }
-export interface RoutineHealth { routineId: string; status: RoutineRunStatus; at: number; consecutiveFailures: number }
-export interface TurnRates { started15m: number; failed15m: number; started24h: number; failed24h: number }
+export type { RoutineHealth };
+export interface TurnRates { started15m: number; failed15m: number; started24h: number; failed24h: number; boot: number }
 interface Pending { at: number; botId: string | null; engine: string | null; fallback: string }
 
 /** A cause the server words itself, or the trial credit's refusal: its code needs no stop reason. */
@@ -86,7 +103,7 @@ const remember = <K, V>(map: Map<K, V>, key: K, value: V, cap: number) => {
 
 /**
  * Failed turns since boot, bucketed by kind, code and engine. Fed by one tap on the store (every failed-turn row, the one
- * place they are written) and the runtime bus (turn starts, stop reasons, engine kinds); routines by their runs.
+ * place they are written) and the runtime bus (turn starts, stop reasons, engine kinds).
  */
 export function createCloudHealthLedger(options: { botOf?: (threadId: string) => string | null; now?: () => number } = {}) {
   const now = options.now ?? Date.now;
@@ -97,9 +114,11 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
   const lastRowAt = new Map<string, number>();
   const engines = new Map<string, string>();
   const minutes = new Map<number, { started: number; failed: number }>();
-  const routines = new Map<string, RoutineHealth & { runId: string }>();
+  /** Turns started since boot: never falls, so the Admin keeps each hour's increase. */
+  let startedSinceBoot = 0;
 
   const tally = (at: number, field: "started" | "failed") => {
+    if (field === "started") startedSinceBoot += 1;
     const minute = Math.floor(at / MINUTE);
     const slot = minutes.get(minute) ?? { started: 0, failed: 0 };
     slot[field] += 1;
@@ -139,7 +158,7 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
   return {
     bootedAt,
     /** Every message the store appends; only failed-turn rows count. */
-    noteMessage(threadId: string, message: Pick<Message, "at" | "tool" | "from">) {
+    noteMessage(threadId: string, message: Pick<Message, "at" | "from"> & { tool?: Pick<NonNullable<Message["tool"]>, "name" | "ok" | "place" | "nameCode"> }) {
       const cause = message.tool?.ok === false ? failedTurnCause(message.tool.name) : null;
       if (cause === null) return;
       settle(threadId);
@@ -147,6 +166,11 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
       remember(lastRowAt, threadId, message.at, THREAD_CAP);
       const place = message.tool?.place?.state;
       if (place && PLACES.has(place)) return record("place", place, engine, message.at, botId, threadId);
+      const started = takeStartFailure(threadId, message.at), notice = message.tool?.nameCode ? START_NOTICES.get(message.tool.nameCode) : undefined;
+      if (notice) return record("turn", notice, engine, message.at, botId, threadId);
+      // A refused sign-in keeps its auth code whatever a start noted (the Admin's engine-auth alert reads it).
+      const signIn = message.tool?.nameCode === "chat.notice.engineSignedOut" || classifiedCode(cause) === "auth";
+      if (started && !signIn) return record("turn", started === "overloaded" ? START_CODES.overloaded : START_CODES.provider, engine, message.at, botId, threadId);
       const fixed = fixedCode(cause);
       if (fixed) return record("turn", fixed, engine, message.at, botId, threadId);
       if (pending.size >= PENDING_CAP) settle(pending.keys().next().value as string);
@@ -159,6 +183,9 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
         if (kind) remember(engines, event.threadId, kind, THREAD_CAP);
         tally(now(), "started");
       } else if (event.type === "turn.completed") {
+        // A start failure belongs to its own turn's failed row (written before this, on its runtime error): a turn that ended
+        // without one leaves nothing for a later turn's row.
+        takeStartFailure(event.threadId);
         if (pending.has(event.threadId)) return settle(event.threadId, event.stopReason);
         if (event.ok || !event.stopReason || !ROWLESS_STOPS.has(event.stopReason)) return;
         const at = now();
@@ -167,17 +194,6 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
         record("turn", event.stopReason, engines.get(event.threadId) ?? match(KIND, event.provider), at, options.botOf?.(event.threadId) ?? null, event.threadId);
       }
     },
-    noteRoutineRun(run: { id: string; routineId: string; status: RoutineRunStatus; finishedAt?: number }) {
-      if (!["completed", "failed", "missed", "cancelled"].includes(run.status)) return;
-      const routineId = match(ID, run.routineId);
-      if (!routineId) return;
-      const previous = routines.get(routineId);
-      if (previous?.runId === run.id && previous.status === run.status) return;
-      const failed = run.status === "failed" || run.status === "missed";
-      const sameRun = previous?.runId === run.id && (previous.status === "failed" || previous.status === "missed");
-      const consecutiveFailures = failed ? (previous?.consecutiveFailures ?? 0) + (sameRun ? 0 : 1) : run.status === "completed" ? 0 : previous?.consecutiveFailures ?? 0;
-      remember(routines, routineId, { routineId, runId: run.id, status: run.status, at: run.finishedAt ?? now(), consecutiveFailures }, ROUTINE_CAP);
-    },
     /** Buckets changed after `after` (a cursor from an earlier read of this boot; anything else reads from the start), oldest change first. */
     read(after: string | null | undefined) {
       settleStale();
@@ -185,13 +201,13 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
       const since = cursor && Number(cursor[1]) === bootedAt && Number(cursor[2]) <= seq ? Number(cursor[2]) : 0;
       const incidents = [...buckets.values()].filter((bucket) => bucket.seq > since).sort((a, b) => a.seq - b.seq).map((bucket) => ({ ...bucket }));
       const current = Math.floor(now() / MINUTE);
-      const turns: TurnRates = { started15m: 0, failed15m: 0, started24h: 0, failed24h: 0 };
+      const turns: TurnRates = { started15m: 0, failed15m: 0, started24h: 0, failed24h: 0, boot: startedSinceBoot };
       for (const [minute, slot] of minutes) {
         if (minute <= current - WINDOW_24H) continue;
         turns.started24h += slot.started; turns.failed24h += slot.failed;
         if (minute > current - WINDOW_15M) { turns.started15m += slot.started; turns.failed15m += slot.failed; }
       }
-      return { since, seq, incidents, turns, routines: [...routines.values()].map(({ runId: _runId, ...routine }) => routine) };
+      return { since, seq, incidents, turns };
     },
     cursor: (at: number) => `${bootedAt}.${at}`,
   };
@@ -246,13 +262,27 @@ export interface CloudHealthDeps {
   image: string | undefined;
   /** Null when connected apps are not set up here. */
   connectors: () => Promise<Record<string, { connected: boolean; pending?: boolean }>> | null;
-  browser: () => { available: boolean; installing: boolean; interrupted: number };
+  /** `cloudComputer`: a personal Cloud's bot browsers on their cloud computers today (server/cloud-browser/rails.ts):
+   * where sessions opened, resumes spent, and why a session stayed in the home, by reason name only. */
+  browser: () => { available: boolean; installing: boolean; interrupted: number; cloudComputer?: CloudBrowserReport | null };
   /** The bot box (server/bot-box): whether turns run boxed here, and the last self-check's count. */
   box?: () => BoxReport;
   /** A personal Cloud's milestones since its first boot, and the work its Chief did: times and counts only. */
   firstHour?: () => { firstHour?: FirstHourReport; value?: ValueReport };
   /** The last day's memory pressure (engine-memory.ts), where this home watches it. */
   room?: () => RoomReport;
+  /** Each routine's newest ended run and its failures in a row, from the saved run rows (routine-health.ts), at most `cap`. */
+  routines?: (cap: number) => RoutineHealth[];
+  /** What is due, what has not started and what last did (routine-schedule-report.ts), read from the scheduler each time; null while there is none. */
+  schedule?: () => ScheduleSection | null;
+  /** CPU steal and pressure, boot and wake times, and how long messages wait for their engine. */
+  speed?: CloudSpeed;
+  /** Turn phase timings, usage-limit holds, process buckets and event-loop lag: at most PERF_HEALTH_MAX_BYTES. A throw
+   * reads as null: the Admin restarts a home whose health read fails, so this optional part never fails it. */
+  perf?: () => PerfHealth | null;
+  /** What fills the volume (perf/disk-usage.ts), at most STORAGE_HEALTH_MAX_BYTES; the field is left out on a throw or null. */
+  storage?: () => StorageReport | null;
+  log?: (line: string) => void;
   now?: () => number;
 }
 
@@ -264,14 +294,40 @@ export function boxSummary(report: BoxReport | undefined): { box: BoxReport["box
   return { box: report.box, reason: report.reason, checks: report.checks ? `${report.checks.passed}/${report.checks.total}` : null, failed, boxed: report.boxed, refused: report.refused, broker, hardening: report.hardening };
 }
 
+/** The doctor's last run, as fixed codes and counts. */
+function doctorHealth() {
+  const summary = doctorSummary();
+  if (!summary) return null;
+  const ids = (list: string[]) => list.filter((id) => CODE.test(id)).slice(0, 20);
+  return { at: Date.parse(summary.at) || null, version: match(VERSION, summary.version), checked: summary.checked, fixed: ids(summary.fixed), problems: ids(summary.problems), thisStart: summary.thisStart };
+}
+
+/** What the scheduler says of itself, or `fallback` when asking it throws: the rest of the report is still answered. The log names no cause, which could quote a routine. */
+function guarded<T>(read: () => T, fallback: T): T {
+  try { return read(); } catch { console.error("cloud health: the scheduler's part of the report could not be read"); return fallback; }
+}
+
 /** The report's body, at most CLOUD_HEALTH_MAX_BYTES of JSON. */
 export function createCloudHealth(deps: CloudHealthDeps) {
   const now = deps.now ?? Date.now;
   const ledger = createCloudHealthLedger({ botOf: (threadId) => deps.store.botByThread(threadId)?.id ?? null, now });
-  deps.store.onChange((change) => { if (change.type === "message") ledger.noteMessage(change.threadId, change.message); });
-  deps.bus.subscribe((event) => ledger.noteEvent(event));
+  const speed = deps.speed ?? createCloudSpeed({ now });
+  deps.store.onChange((change) => { if (change.type === "message") { ledger.noteMessage(change.threadId, change.message); speed.noteMessage(change.threadId, change.message); } });
+  deps.bus.subscribe((event) => { ledger.noteEvent(event); speed.noteEvent(event); });
   const connectors = backgroundLookup(deps.connectors, CONNECTORS_TTL_MS, now);
   const version = match(VERSION, deps.version) ?? "unknown", image = match(IMAGE, deps.image);
+  const warnedAt = new Map<string, number>();
+  const leftOut = (part: string, error: unknown) => {
+    if (now() - (warnedAt.get(part) ?? -Infinity) < 60_000) return;
+    warnedAt.set(part, now());
+    (deps.log ?? console.warn)(`cloud health: ${part} left out: ${error instanceof Error ? error.name : "error"}`);
+  };
+  const perf = () => {
+    try { return deps.perf?.() ?? null; } catch (error) { leftOut("perf", error); return null; }
+  };
+  const storage = (): { storage?: StorageReport } => {
+    try { const report = deps.storage?.(); return report ? { storage: storageHealth(report) } : {}; } catch (error) { leftOut("storage", error); return {}; }
+  };
 
   const engines = () => {
     const used = new Set(deps.store.bots.flatMap((bot) => bot.modelSelection ? [bot.modelSelection.instanceId] : []));
@@ -290,16 +346,19 @@ export function createCloudHealth(deps: CloudHealthDeps) {
 
   return {
     ledger,
-    noteRoutineRun: ledger.noteRoutineRun,
+    speed,
     report(after: string | null | undefined) {
       const read = ledger.read(after);
       const memory = memoryBytes(), browser = deps.browser(), first = deps.firstHour?.();
       const base = {
         v: 1 as const, version, image, bootedAt: ledger.bootedAt, at: now(),
-        turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
-        browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
+        turns: read.turns, routines: guarded(() => deps.routines?.(ROUTINE_CAP) ?? [], []).filter((routine) => match(ID, routine.routineId)), schedule: guarded(() => deps.schedule?.() ?? null, null),
+        engines: engines(), connectors: connectorState(),
+        browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted, ...(browser.cloudComputer ? { cloudComputer: browser.cloudComputer } : {}) },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null,
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(), ...storage(),
+        // The data checks of this version's first start: check ids and counts (server/doctor/start.ts).
+        doctor: doctorHealth(),
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
       };
       let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { connectionFingerprints } from "./cloud-connections.ts";
 import { fingerprint, loginFingerprints } from "./cloud-send-verify.ts";
 import type { AppConfig } from "./config.ts";
-import { LoginStore } from "./login-store.ts";
+import { VaultStore } from "./vault-store.ts";
 import { parseTotpKey } from "./totp.ts";
 
 // Obvious fakes only.
@@ -14,7 +14,7 @@ const KEY = "sk-or-v1-fakeverify0000";
 const NONCE = "x".repeat(43);
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
-const store = () => { const dir = mkdtempSync(join(tmpdir(), "omb-verify-")); dirs.push(dir); return new LoginStore({ dataDir: dir }); };
+const store = () => { const dir = mkdtempSync(join(tmpdir(), "omb-verify-")); dirs.push(dir); return new VaultStore({ dataDir: dir }); };
 
 describe("credential fingerprints a move checks by", () => {
   it("are equal for the same login and token saved on two servers, and change with the secret or the nonce", () => {
@@ -34,6 +34,17 @@ describe("credential fingerprints a move checks by", () => {
     other.create({ site: "example.test", hosts: ["accounts.example.test"], exactHost: false, username: "alice", password: PASSWORD, totp: parseTotpKey("otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ")!, source: "settings", bots: "all" });
     expect(loginFingerprints(NONCE, other)["login:example.test|alice"], "another 2FA key is another login").not.toBe(loginFingerprints(NONCE, here)["login:example.test|alice"]);
     expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain(PASSWORD);
+  });
+
+  it("cover saved secrets by value under the key they travel by, never the value itself", () => {
+    const [here, there] = [store(), store()];
+    const id = "66666666-6666-4666-8666-666666666666";
+    here.receiveSecret({ id, name: "Stripe", value: "sk_fake-fingerprinted", source: "card", bots: ["a"] });
+    there.receiveSecret({ id, name: "Stripe (renamed there)", value: "sk_fake-fingerprinted", source: "settings", bots: "all" });
+    expect(loginFingerprints(NONCE, there)[`secret:${id}`]).toBe(loginFingerprints(NONCE, here)[`secret:${id}`]);
+    there.updateSecret(id, { value: "sk_fake-other" });
+    expect(loginFingerprints(NONCE, there)[`secret:${id}`]).not.toBe(loginFingerprints(NONCE, here)[`secret:${id}`]);
+    expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain("sk_fake");
   });
 
   it("cover keys, MCP servers' own secrets and the person's own connected-apps project, never a sign-in that moves once", () => {

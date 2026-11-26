@@ -6,7 +6,8 @@ import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } f
 import { basename, delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import type { StdioMcpSpec } from "./contracts.ts";
-import { addDisabledMcpServer, isRemoteMcpServer, parseStoredMcpServer, type DisabledMcpServerAdd, type StoredStdioMcpServer } from "./mcp-registry.ts";
+import { engineInstallRoots } from "./engine-roots.ts";
+import { addDisabledMcpServer, isRemoteMcpServer, parseStoredMcpServer, type DisabledMcpServerAdd, type StoredMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 /** What one server's files copied out of a conversation folder may add up to. */
@@ -54,6 +55,19 @@ export function botFolderUse(server: StdioMcpSpec, dataDir: string): BotFolderUs
     }
   }
   return botId ? { botId, temporary } : null;
+}
+
+/** A path of this server's that is in the data folder and is no bot's folder and no engine OpenMausBot installed: the
+ * server's own files (settings, sessions, saved logins), which no bot's command may name. */
+export function serverFileUse(server: StdioMcpSpec, dataDir: string): string | null {
+  const root = resolve(dataDir);
+  const open = [join(root, "workspaces"), join(root, "task-workspaces"), ...engineInstallRoots(root).map((path) => resolve(path))];
+  for (const value of values(server)) {
+    const full = resolve(value);
+    if (full !== root && segments(full, root) === null) continue;
+    if (!open.some((folder) => segments(full, folder) !== null)) return full;
+  }
+  return null;
 }
 
 /** Bytes and files under `path`, never following a link; null once past the limits. */
@@ -131,6 +145,11 @@ export type BotKept =
  * `boxed`: no bot reaches another's folders, so a server using this bot's files becomes its own, and one using another
  * bot's files is refused; unboxed, every bot reaches them and the server stays every bot's. */
 export function keepForBot(server: StoredStdioMcpServer, botId: string, dataDir: string, boxed: boolean): BotKept {
+  // Security: boxed, the data folder is not there for a bot; a command that names the server's own files is asking the
+  // server to show them (the box shows none of them, whatever a command line says: bot-box/plan.ts).
+  if (boxed && serverFileUse(server, dataDir)) {
+    return { ok: false, status: 400, error: "That command names a file of the server's own, which no bot can reach. Use files in your own folder." };
+  }
   const use = botFolderUse(server, dataDir);
   const theirs = use !== null && (use === "several" || use.botId !== botId);
   if (theirs && boxed) {
@@ -142,9 +161,16 @@ export function keepForBot(server: StoredStdioMcpServer, botId: string, dataDir:
   return { ok: true, server: boxed ? { ...kept.server, bot: botId } : kept.server, moved: kept.moved };
 }
 
+/** The bot keepForBot will make this server's own: boxed, one whose files are in only this bot's folders. */
+function ownerFor(server: StoredMcpServer, botId: string, dataDir: string, boxed: boolean): string | undefined {
+  if (!boxed || isRemoteMcpServer(server)) return undefined;
+  const use = botFolderUse(server, dataDir);
+  return use && use !== "several" && use.botId === botId ? botId : undefined;
+}
+
 /** A bot's mcp_server add: saved off first, its files kept as keepForBot says. */
 export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string, boxed: boolean): BotMcpServerAdd {
-  const added = addDisabledMcpServer(current, body);
+  const added = addDisabledMcpServer(current, body, (server) => ownerFor(server, botId, dataDir, boxed));
   if (!added.ok || isRemoteMcpServer(added.server)) return added;
   const kept = keepForBot(added.server, botId, dataDir, boxed);
   if (!kept.ok) return kept;
@@ -181,7 +207,7 @@ export function claimBotMcpServers(raw: Record<string, unknown> | undefined, dat
 export function withoutBotMcpServers(raw: Record<string, unknown> | undefined, botId: string): Record<string, unknown> | null {
   const kept = Object.entries(raw ?? {}).filter(([name, value]) => {
     const parsed = parseStoredMcpServer(name, value);
-    return !(parsed.ok && !isRemoteMcpServer(parsed.server) && parsed.server.bot === botId);
+    return !(parsed.ok && parsed.server.bot === botId);
   });
   return kept.length === Object.keys(raw ?? {}).length ? null : Object.fromEntries(kept);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ChatReasoningDetails, ChatToolCalls, MAX_REASONING_DETAIL_CHARS } from "./openai-chat-protocol.ts";
+import { ChatReasoningDetails, ChatToolCalls, MAX_REASONING_DETAIL_CHARS, toolArguments } from "./openai-chat-protocol.ts";
 
 const completeCall = {
   id: "call_echo",
@@ -16,6 +16,30 @@ describe("streamed chat tool calls", () => {
     calls.add([{ index: 0, id: null, function: { name: null, arguments: "{}" } }], true);
 
     expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
+  });
+
+  it("treats an empty-string id or type on a continuation chunk as absent (DashScope/Qwen)", () => {
+    const calls = new ChatToolCalls();
+    calls.add([{ index: 0, ...completeCall, function: { ...completeCall.function, arguments: "" } }], true);
+    calls.add([{ index: 0, id: "", type: "function", function: { arguments: "{" } }], true);
+    calls.add([{ index: 0, id: "", type: "", function: { name: "", arguments: "}" } }], true);
+
+    expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
+  });
+
+  it("still rejects a streamed call that never gets an id, and an id that changes", () => {
+    const noId = new ChatToolCalls();
+    noId.add([{ index: 0, id: "", type: "function", function: { name: "echo", arguments: "{}" } }], true);
+    expect(() => noId.finish("tool_calls", false)).toThrow(/incomplete or duplicate/);
+
+    const changed = new ChatToolCalls();
+    changed.add([{ index: 0, ...completeCall }], true);
+    expect(() => changed.add([{ index: 0, id: "call_other" }], true)).toThrow(/changed or omitted/);
+  });
+
+  it("still rejects an empty id in a whole, non-streamed reply", () => {
+    const calls = new ChatToolCalls();
+    expect(() => calls.add([{ ...completeCall, id: "" }], false)).toThrow(/changed or omitted/);
   });
 
   it("still rejects incomplete calls after null-only deltas", () => {
@@ -203,5 +227,26 @@ describe("streamed reasoning details", () => {
   it("still refuses reasoning details past the bound", () => {
     const details = new ChatReasoningDetails();
     expect(() => details.add(delta("x".repeat(MAX_REASONING_DETAIL_CHARS)))).toThrow(/exceeded the size limit/);
+  });
+});
+
+describe("rejected tool arguments", () => {
+  it("quotes a long cut-off call by its start and end, so the model sees the path and where it broke off", () => {
+    const text = `{"path":"notes/long.md","content":"${"x".repeat(5_000)}END`;
+    let message = "";
+    try { toolArguments(text); } catch (error) { message = (error as Error).message; }
+    expect(message.startsWith(`tool arguments are not complete JSON; you sent ${text.length} characters: {"path":"notes/long.md"`)).toBe(true);
+    expect(message.endsWith("xxEND")).toBe(true);
+    expect(message.length).toBeLessThan(1_200);
+  });
+
+  it("masks a secret before cutting, so one that crosses the cut never shows in part", () => {
+    const secret = "SYNTHETIC-SECRET-0123456789";
+    const text = `{"content":"${"x".repeat(480)}${secret}${"y".repeat(1_000)}`;
+    let message = "";
+    try { toolArguments(text, (raw) => raw.split(secret).join("[redacted]")); } catch (error) { message = (error as Error).message; }
+    expect(message.startsWith(`tool arguments are not complete JSON; you sent ${text.length} characters: `)).toBe(true);
+    expect(message).not.toContain("SYNTH");
+    expect(message).toContain("[red");
   });
 });

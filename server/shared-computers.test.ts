@@ -21,6 +21,34 @@ const nothingQueued = async (broker: SharedComputers, id: string) => {
   return poll;
 };
 describe("shared computer authority and lifecycle", () => {
+  it("a computer whose person changed is found under its new key after it connects again", () => {
+    const broker = new SharedComputers(id => id === "owner");
+    const computer = registration(); broker.register(computer, alice, secret);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(broker.list(alice.person)).toEqual([]);
+    expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
+    broker.close();
+  });
+  it("a computer whose person changed is no longer lent to its former person", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-lent-rekey-"));
+    const lent = new LentComputers(join(dir, "lent.json"));
+    const broker = new SharedComputers(id => id === "owner", lent);
+    const computer = registration(); broker.register(computer, alice, secret);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(lent.list(alice.person).map(record => [record.id, record.stoppedAt !== null])).toEqual([[computer.id, true]]);
+    expect(lent.list("p_lender").map(record => [record.id, record.stoppedAt])).toEqual([[computer.id, null]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it("a poll from a session that is now someone else drops the computer so it connects again", async () => {
+    const broker = new SharedComputers(id => id === "owner");
+    const computer = registration(); broker.register(computer, alice, secret);
+    await expect(broker.poll(computer.id, alice.session, secret, undefined, "p_lender")).rejects.toMatchObject({ status: 403 });
+    expect(broker.list(alice.person)).toEqual([]);
+    broker.register(computer, { session: alice.session, person: "p_lender" }, secret);
+    expect(broker.list("p_lender").map(entry => entry.id)).toEqual([computer.id]);
+    broker.close();
+  });
   it("requires both the owning paired session and the connector secret", async () => {
     const broker = new SharedComputers(id => id === "owner");
     const computer = registration(); broker.register(computer, alice, secret);
@@ -67,6 +95,22 @@ describe("shared computer authority and lifecycle", () => {
     broker.disconnect(computer.id, "owner", secret); await rejection;
     expect(broker.list(alice.person)).toEqual([]);
     await expect(broker.request(operation, alice.person, () => true)).rejects.toThrow(/offline/);
+    broker.close();
+  });
+  it("tells the computer which bot an action is for: its name and colour only", async () => {
+    const broker = new SharedComputers(() => true);
+    const computer = registration({ computer: true }); broker.register(computer, alice, secret);
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const bot = { id: "b1", name: "IT Support", color: "teal", soul: "private" };
+    const result = broker.request(operation, alice.person, () => true, bot);
+    const job = await broker.poll(computer.id, "owner", secret);
+    expect(job).toEqual({ id: job!.id, operation, by: { name: "IT Support", color: "teal" } });
+    broker.complete(computer.id, "owner", secret, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    const unnamed = broker.request(operation, alice.person, () => true);
+    const plain = await broker.poll(computer.id, "owner", secret);
+    expect(plain).toEqual({ id: plain!.id, operation });
+    broker.complete(computer.id, "owner", secret, plain!.id, {}); await unnamed;
     broker.close();
   });
   it("waits for a command as long as the command may run, and a non-command action still 45 seconds", async () => {
@@ -144,6 +188,27 @@ describe("shared computer authority and lifecycle", () => {
       expect("new_text" in job!.operation).toBe(sent);
       broker.close();
     }
+  });
+  it("sends an MCP call's caller only to a desktop that said it takes one, so an older desktop keeps running MCP calls", async () => {
+    const server = { name: "local", url: "http://127.0.0.1:19501/mcp", type: "http" as const, headers: {} };
+    const caller = { botId: "kiwi", threadId: "t-1" };
+    for (const [scopes, sent] of [[{ mcpServers: true as const }, false], [{ mcpServers: true as const, mcpCaller: true as const }, true]] as const) {
+      const broker = new SharedComputers(() => true);
+      const computer = { ...registration(), ...scopes }; broker.register(computer, alice, secret);
+      const call = broker.request({ computer_id: computer.id, action: "mcp_call", server, tool_name: "search", arguments: {}, caller }, alice.person, () => true);
+      call.catch(() => {});
+      const job = await broker.poll(computer.id, alice.session, secret);
+      expect(job!.operation.caller, JSON.stringify(scopes)).toEqual(sent ? caller : undefined);
+      expect("caller" in job!.operation).toBe(sent);
+      broker.close();
+    }
+    const broker = new SharedComputers(() => true);
+    const computer = { ...registration(), mcpServers: true as const, mcpCaller: true as const }; broker.register(computer, alice, secret);
+    const list = broker.request({ computer_id: computer.id, action: "mcp_tools", server, caller }, alice.person, () => true);
+    list.catch(() => {});
+    expect("caller" in (await broker.poll(computer.id, alice.session, secret))!.operation, "only a tool call names its caller").toBe(false);
+    broker.close();
+    expect(sharedComputerOperation.safeParse({ computer_id: computer.id, action: "mcp_call", server, tool_name: "x", caller }).success, "a bot's own operation can't name a caller").toBe(false);
   });
   it("turn cancellation rejects queued and already delivered actions", async () => {
     vi.useFakeTimers();
@@ -263,6 +328,45 @@ describe("owner partition (audit H1, H2)", () => {
     await expect(nothingQueued(broker, computer.id)).resolves.toBeNull();
     broker.close();
   });
+  it("a desktop that pairs again is used while its old sign-in is still live", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-repaired-"));
+    const broker = new SharedComputers(id => id === "old" || id === "new", new LentComputers(join(dir, "lent.json")));
+    const computer = registration({ computer: true });
+    broker.register(computer, { session: "old", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(40_001);
+    broker.register(computer, { session: "new", person: alice.person }, other);
+    expect(broker.known(alice.person)).toMatchObject([{ id: computer.id, online: true }]);
+    expect(broker.status(alice.person)).toMatchObject([{ id: computer.id, online: true }]);
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const result = broker.request(operation, alice.person, () => true);
+    const job = await broker.poll(computer.id, "new", other);
+    expect(job?.operation).toEqual(operation);
+    broker.complete(computer.id, "new", other, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  it("a poll that ends after the desktop pairs again does not hand the next job to the old registration", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const broker = new SharedComputers(id => id === "old" || id === "new");
+    const computer = registration({ computer: true });
+    broker.register(computer, { session: "old", person: alice.person }, secret);
+    const gone = new AbortController();
+    const dropped = broker.poll(computer.id, "old", secret, gone.signal);
+    await vi.advanceTimersByTimeAsync(5_000);
+    broker.register(computer, { session: "new", person: alice.person }, other);
+    await vi.advanceTimersByTimeAsync(1);
+    gone.abort();
+    await expect(dropped).resolves.toBeNull();
+    const operation = { computer_id: computer.id, action: "computer_tools" as const };
+    const result = broker.request(operation, alice.person, () => true);
+    const job = await broker.poll(computer.id, "new", other);
+    expect(job?.operation).toEqual(operation);
+    broker.complete(computer.id, "new", other, job!.id, { ok: true });
+    await expect(result).resolves.toEqual({ ok: true });
+    broker.close();
+  });
   it("a second session cannot squat a lent computer's id, even after its owner goes offline", async () => {
     vi.useFakeTimers();
     const broker = new SharedComputers(() => true);
@@ -348,6 +452,13 @@ describe("server-side scope check (audit M1)", () => {
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: randomUUID() })).toMatch(/not been shared/);
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id })).toBeNull();
     expect(sharedComputerScopeRefusal(lent, { action: "write_file", folder_id: writable.id })).toBeNull();
+  });
+  it("on the person's own Cloud, a folder that isn't lent says where it is lent from, and never asks a card that can't lend one", () => {
+    const refusal = sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: randomUUID() }, "ask_for_computer");
+    expect(refusal).toMatch(/^That folder isn't lent to this Cloud: use a folder_id list_shared_computers gives\./u);
+    expect(refusal).toContain("share it from the OpenMausBot desktop app, under Files");
+    expect(refusal).not.toContain("ask_for_computer");
+    expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id }, "ask_for_computer")).toBeNull();
   });
   it("edits, appends and deletes only in a folder lent with editing, and only on a desktop that takes them", () => {
     const current = registration({ folders: [readOnly, writable], fileEdits: true });
@@ -524,5 +635,45 @@ describe("MCP servers a lent computer runs for this server", () => {
     const closed = expect(blocked).rejects.toThrow(/Workspace stopped/);
     broker.close();
     await closed;
+  });
+});
+
+describe("the computer the person types on", () => {
+  it("is the online computer lent by the session that sent the line, put first; no other session or person sees it", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-typing-on-"));
+    const broker = new SharedComputers(() => true, new LentComputers(join(dir, "lent.json")));
+    const pc = { ...registration(), name: "WIN-1", platform: "win32" as const };
+    const laptop = { ...registration(), name: "UBUNTU-1", platform: "linux" as const };
+    broker.register(pc, { session: "pc", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(1_000);
+    broker.register(laptop, { session: "laptop", person: alice.person }, other);
+    const typing = (session?: string) => broker.known(alice.person, session).map(computer => [computer.name, computer.typing === true]);
+    expect(typing()).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    expect(typing("pc")).toEqual([["WIN-1", true], ["UBUNTU-1", false]]);
+    expect(typing("laptop")).toEqual([["UBUNTU-1", true], ["WIN-1", false]]);
+    expect(typing("phone")).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    expect(broker.known(bob.person, "pc")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(40_001);
+    expect(typing("pc")).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("is listed live when another computer with the same name holds the one record kept for that name", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-typing-same-name-"));
+    const broker = new SharedComputers(() => true, new LentComputers(join(dir, "lent.json")));
+    const first = { ...registration(), name: "PC", platform: "win32" as const };
+    const second = { ...registration(), name: "PC", platform: "win32" as const };
+    broker.register(first, { session: "first", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(1_000);
+    broker.register(second, { session: "second", person: alice.person }, other);
+    expect(broker.known(alice.person).map(computer => computer.id)).toEqual([second.id]);
+    expect(broker.known(alice.person, "first").map(computer => [computer.id, computer.typing === true, computer.online]))
+      .toEqual([[first.id, true, true], [second.id, false, true]]);
+    expect(broker.known(alice.person, "second").map(computer => [computer.id, computer.typing === true])).toEqual([[second.id, true]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

@@ -1,6 +1,5 @@
 // How many threads one bot runs at once.
-import { totalmem } from "node:os";
-
+import { boxMemory } from "./box-memory.ts";
 import { engineMemory } from "./engine-memory.ts";
 
 export const MAX_CONCURRENT_BOT_THREADS = 16;
@@ -10,7 +9,8 @@ const DEFAULT_THREADS_FLOOR = 3, BYTES_PER_DEFAULT_THREAD = 2 * 1024 ** 3;
 export interface BotThreadsHost { memoryGate: boolean; totalBytes: number; oneThreadPerBot: boolean }
 type SavedThreads = { threads?: { maxConcurrentPerBot?: number } };
 
-export const botThreadsHost = (oneThreadPerBot = false): BotThreadsHost => ({ memoryGate: engineMemory.enabled, totalBytes: totalmem(), oneThreadPerBot });
+/** The memory this server may use: its container's limit where one is set, not the machine's. */
+export const botThreadsHost = (oneThreadPerBot = false): BotThreadsHost => ({ memoryGate: engineMemory.enabled, totalBytes: boxMemory().bytes, oneThreadPerBot });
 
 export function defaultBotThreads(host: Pick<BotThreadsHost, "memoryGate" | "totalBytes"> = botThreadsHost()): number {
   if (host.memoryGate) return MAX_CONCURRENT_BOT_THREADS;

@@ -1,6 +1,6 @@
 import { approvalModeFor, approvalModeWidens, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { threadLinkUrl } from "../../shared/thread-link.ts";
-import type { WireBot, WireTask } from "../../shared/wire.ts";
+import type { TaskResponse, WireBot, WireTask } from "../../shared/wire.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import type { ModelSelection, ProviderInstance } from "../contracts.ts";
 import type { Coordinator } from "../coordinator.ts";
@@ -15,12 +15,13 @@ import { parseSurface } from "../surface.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
 import { titleConversationExcerpt, type ThreadTitleSource } from "../thread-title.ts";
 import type { MessagePage } from "./channels.ts";
-import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { bulkDeleteThreadIds, outsideClosedScope, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
-import { sawThread } from "../thread-presence.ts";
+import { madeThread, sawThread } from "../thread-presence.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -28,7 +29,7 @@ export interface TaskRouteDeps {
   store: Pick<Store,
     | "bot" | "bots" | "taskByThread" | "project" | "projectBotForTask" | "patchTask" | "patchProject" | "tasks"
     | "switchTaskModel" | "switchTask" | "retitleTask" | "reorderProjects" | "refreshTaskPermissions" | "messagesTail"
-    | "messagesFor" | "deleteTasks" | "deleteProject" | "createTask" | "createProject">;
+    | "messagesFor" | "deleteTasks" | "deleteProject" | "createTask" | "forkTask" | "createProject">;
   /** On a Cloud home only the owner changes how a bot asks for approval. */
   cloudHome: boolean;
   /** The desktop app owns this server, so a loopback caller is its owner. */
@@ -52,6 +53,7 @@ export interface TaskRouteDeps {
   supportsApprovalMode(selection: ModelSelection, mode: ApprovalMode): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   publicBot(bot: BotRecord): WireBot;
   wireBot(bot: BotRecord): WireBot;
   wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
@@ -72,6 +74,8 @@ export interface TaskRouteDeps {
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
   /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
+  /** A conversation's model changed (host/no-terminal.ts); `routinesFollow`: the bot's own model changed with it. */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
 }
 
 /** `deleteTasks`: the same deletion for the server's own use (a person leaving a Team Cloud, host/team-member-left.ts). */
@@ -79,7 +83,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
   const {
     store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
-    supportsApprovalMode, threadBusy, broadcast, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
+    supportsApprovalMode, threadBusy, broadcast, notificationListed, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
     revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
   } = deps;
@@ -161,6 +165,21 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       return json(res, method === "POST" ? 201 : 200, { project, bot: publicBot(bot) });
     }
 
+    m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/forks$/);
+    if (m && method === "POST") {
+      const bot = store.bot(m[1]);
+      if (!bot || !store.taskByThread(bot.id, m[2])) return json(res, 404, { error: "no such conversation" });
+      const fork = parseForkRequest(await readBody(req), true);
+      if (!fork) return json(res, 400, { error: "Provide a string messageId or set latest to true" });
+      const notYours = cloudThreadRefusal(auth, m[2]);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (threadBusy(bot.id, m[2])) return json(res, 409, FORK_BUSY);
+      const task = store.forkTask(bot.id, m[2], fork.messageId, fork.branchLeafId);
+      if (!task) return json(res, 404, fork.messageId === undefined ? FORK_NO_TEXT : { error: "no such completed message in this conversation" });
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
+      return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) } satisfies TaskResponse);
+    }
+
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks$/);
     if (m && method === "POST") {
       const body = await readBody(req);
@@ -194,11 +213,12 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd);
+      // Who opened it decides who may answer its cards on a shared workspace, and on a team who sees it at all.
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd,
+        auth.kind === "session" ? (created) => threadStarters.set(created.threadId, actorKey(auth)) : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
-      // Who opened it decides who may answer its cards on a shared workspace.
-      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
-      return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) });
+      madeThread(bot.id, task.threadId);
+      return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) } satisfies TaskResponse);
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/delete$/);
     if (m && method === "POST") {
@@ -210,8 +230,9 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const refused: BulkDeleteRefusal[] = [];
       for (const threadId of parsed.threadIds) {
         const refusal = deleteRefusal(auth, bot.id, threadId);
-        if (!refusal) allowed.push(threadId);
-        else refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        if (refusal) refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        else if (parsed.scope === "closed" && outsideClosedScope(store.taskByThread(bot.id, threadId))) refused.push({ threadId, reason: "not-closed" });
+        else allowed.push(threadId);
       }
       const result = deleteTasks(bot.id, allowed);
       if (!result) return json(res, 404, { error: "no such bot" });
@@ -232,8 +253,8 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
-      deps.threadRead?.(auth, m[2]);
-      readThreadNotifications(m[2], broadcast, auth);
+      // "seen=0": the page showed it by itself at launch; what waits there for the person stays unseen until they open it.
+      if (url.searchParams.get("seen") !== "0") { deps.threadRead?.(auth, m[2]); readThreadNotifications(m[2], broadcast, notificationListed(auth)); }
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
@@ -303,7 +324,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
         }
         const task = store.refreshTaskPermissions(profile.id, m[2]);
         if (!task) return json(res, 404, { error: "no such task" });
-        return json(res, 200, { task: wireTask(task, store.bot(profile.id)!.modelSelection), bot: publicBot(store.bot(profile.id)!) });
+        return json(res, 200, { task: wireTask(task, store.bot(profile.id)!.modelSelection), bot: publicBot(store.bot(profile.id)!) } satisfies TaskResponse);
       }
       const patch: Parameters<typeof store.patchTask>[2] = {};
       if (body.projectId !== undefined) {
@@ -388,7 +409,8 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
         ? store.switchTaskModel(m[1], m[2], patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true,
           { ...patch, ...hostedModels?.resetTask(current.modelSelection, patch.modelSelection) })!
         : store.patchTask(m[1], m[2], patch)!;
-      return json(res, 200, { task: wireTask(task, store.bot(m[1])!.modelSelection), bot: publicBot(store.bot(m[1])!) });
+      if (patch.modelSelection) deps.modelSwitched?.(m[1], m[2], current.modelSelection, patch.modelSelection, body.updateBotDefault === true);
+      return json(res, 200, { task: wireTask(task, store.bot(m[1])!.modelSelection), bot: publicBot(store.bot(m[1])!) } satisfies TaskResponse);
     }
     if (m && method === "DELETE") {
       const bot = store.bot(m[1]);

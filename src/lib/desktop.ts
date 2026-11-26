@@ -33,11 +33,12 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
   const platform = typeof window === "undefined" ? undefined : window.ogb?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
-  const fishListening = platform === "win32" || platform === "linux";
+  const isWindows = platform === "win32";
+  const fishListening = platform === "linux";
   const dictation: DesktopCapabilities["dictation"] = {
-    available: isMac || fishListening,
-    engine: isMac ? "apple-speech" : fishListening ? "fish-audio" : "none",
-    onDevice: isMac,
+    available: isMac || isWindows || fishListening,
+    engine: isMac ? "apple-speech" : isWindows ? "windows-speech" : fishListening ? "fish-audio" : "none",
+    onDevice: isMac || isWindows,
   };
   if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   return {

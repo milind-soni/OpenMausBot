@@ -9,6 +9,10 @@ export function appDocumentPath(threadId: string, messageId: string): string {
   return `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/app`;
 }
 
+export function appDownloadPath(threadId: string, messageId: string, rev: number): string {
+  return `${appDocumentPath(threadId, messageId)}/download?rev=${rev}`;
+}
+
 function appActionPath(botId: string, messageId: string, action: "rpc" | "context"): string {
   return `/api/bots/${encodeURIComponent(botId)}/apps/${encodeURIComponent(messageId)}/${action}`;
 }

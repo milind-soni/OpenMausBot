@@ -223,7 +223,7 @@ describe("chat rooms wait for a member busy elsewhere", { timeout: 45_000 }, () 
 
     try {
       await holdBusy(bee.id, "Bee, finish this first");
-      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "@Ace please bring Bee in" })).status).toBe(202);
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Ace, please bring Bee in" })).status).toBe(202);
       await releaseAfterRoomWait(room.id, bee.id, "Bee");
 
       await expect.poll(async () => {

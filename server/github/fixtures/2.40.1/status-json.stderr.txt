@@ -1,0 +1,8 @@
+unknown flag: --json
+
+Usage:  gh auth status [flags]
+
+Flags:
+  -h, --hostname string   Check a specific hostname's auth status
+  -t, --show-token        Display the auth token
+  

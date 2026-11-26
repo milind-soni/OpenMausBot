@@ -59,7 +59,7 @@ export function activePath(rows: readonly Message[], leaf: string | null): Messa
 
 /** A conversation's own context summary describes the other computer's session, so it is not added to one both have. */
 function withoutSummaries(thread: ThreadRows, have: ReadonlySet<string>): ThreadRows {
-  const dropped = new Map(thread.rows.filter((row) => !have.has(row.id) && row.kind === "compaction").map((row) => [row.id, row.parentId ?? null]));
+  const dropped = new Map(thread.rows.filter((row) => !have.has(row.id) && row.kind === "compaction" && !row.compaction?.fresh).map((row) => [row.id, row.parentId ?? null]));
   if (!dropped.size) return thread;
   const above = (id: string | null) => { for (let hops = 0; id !== null && dropped.has(id) && hops <= dropped.size; hops++) id = dropped.get(id)!; return id; };
   return {
@@ -229,7 +229,12 @@ function carryAttachment(data: string, dataDir: string, name: string): boolean {
 /** Owners first, so a conversation's rows never exist without its entry in the list. */
 export function applyChatMerge(store: ChatStore, plan: ChatMergePlan): void {
   const tasks = new Map<string, Array<TaskRecord | GroupTaskRecord>>();
-  for (const thread of plan.threads) if (thread.task) tasks.set(ownerKey(thread.owner), [...tasks.get(ownerKey(thread.owner)) ?? [], thread.task]);
+  for (const thread of plan.threads) {
+    if (!thread.task) continue;
+    const key = ownerKey(thread.owner), added = tasks.get(key);
+    if (added) added.push(thread.task);
+    else tasks.set(key, [thread.task]);
+  }
   for (const bot of store.bots) {
     const added = tasks.get(`bot:${bot.id}`);
     if (added) store.patchBot(bot.id, { tasks: [...bot.tasks ?? [], ...added as TaskRecord[]] });

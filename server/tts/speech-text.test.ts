@@ -57,6 +57,27 @@ describe("speakable", () => {
     expect(speakable("**Done** ✅ — [x] shipped the _thing_")).toBe("Done — shipped the thing");
   });
 
+  it.each([
+    ["Set API_KEY and API_URL before running the command.", "Set API_KEY and API_URL before running the command."],
+    ["Open my_config_file.json.", "Open my_config_file.json."],
+    ["Use snake_case here and _emphasis_ there.", "Use snake_case here and emphasis there."],
+    ["Set **API_KEY** and **API_URL**.", "Set API_KEY and API_URL."],
+    ["Run `npm run build_app` and set `API_KEY`.", "Run npm run build_app and set API_KEY."],
+    ["Use `*.ts` and `*.js` to match files.", "Use *.ts and *.js to match files."],
+    ["***Important***: __do _not_ change__ the name.", "Important: do not change the name."],
+  ])("removes only Markdown emphasis from %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
+  it.each([
+    ["See ![*diagram*](x.png).", "See. (image: diagram)."],
+    ["See ![**API_KEY**](x.png).", "See. (image: API_KEY)."],
+    ["See ![API_KEY](x.png).", "See. (image: API_KEY)."],
+    ["See ![](x.png).", "See. (an image)."],
+  ])("prepares the image description in %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
   it("gives a heading a full stop so the voice breathes", () => {
     expect(speakable("## Results\nAll green")).toBe("Results. All green");
   });
@@ -146,6 +167,48 @@ describe("toUtterances", () => {
     expect(capped).toEqual(toUtterances(text));
     expect(capped[0]).toContain("a".repeat(95));
   });
+
+  it.each(["漢".repeat(325), "日本語の文章を読み上げます。".repeat(40)])("bounds unspaced speech without dropping text", (text) => {
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 90 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(90);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320)).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps supplementary Unicode letters intact at an odd speech boundary", () => {
+    const text = "𠮷".repeat(95);
+    const out = toUtterances(text, { firstBlockMaxChars: 91 });
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => Buffer.from(piece).toString("utf8") === piece)).toBe(true);
+    expect(out.join("")).toBe(text);
+  });
+  it("keeps a terminal period attached to a word at either speech cap", () => {
+    const long = `${"a".repeat(320)}.`;
+    expect(toUtterances(long)).toEqual([long]);
+    const first = `${"a".repeat(90)}.`;
+    expect(toUtterances(first, { firstBlockMaxChars: 90 })).toEqual([first]);
+  });
+
+  it("does not turn punctuation around an indivisible word into an utterance", () => {
+    const text = `(${"a".repeat(320)}).`;
+    expect(toUtterances(text)).toEqual([text]);
+  });
+
+  it("caps a decomposed Katakana word without splitting its graphemes", () => {
+    const text = "カ\u3099".repeat(321);
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 91 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320 && /^(?:カ\u3099)+$/u.test(piece))).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps Latin words with combining marks indivisible", () => {
+    const text = `${"e\u0301".repeat(200)}.`;
+    expect(toUtterances(text, { firstBlockMaxChars: 91 })).toEqual([text]);
+  });
+
 });
 
 describe("narrateTool", () => {

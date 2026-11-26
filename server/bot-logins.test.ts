@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { browserMatesOf, loginHeldBackFor } from "../shared/logins.ts";
 import { BotLogins, cardLoginPlace, cardSignInElsewhere, observeSignInPage } from "./bot-logins.ts";
-import { LoginStore } from "./login-store.ts";
+import { TEAM_READER, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 
@@ -35,13 +35,13 @@ describe("a login saved from a sign-in card", () => {
 });
 
 describe("the bot's open page", () => {
-  it("is read as its host and whether it shows a password, username or email box, only for a page a login could be filled on", async () => {
+  it("is read as its host, its address without the query, and whether it shows a password, username or email box, only for a page a login could be filled on", async () => {
     page = new FakeLoginPage("https://login.microsoftonline.com/common/oauth2/authorize?client_id=x", LOGIN_FORM);
-    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.microsoftonline.com", signIn: true });
+    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.microsoftonline.com", page: "https://login.microsoftonline.com/common/oauth2/authorize", signIn: true });
     page.navigate("https://login.example.net/u/login/identifier", `<form><input name="username" autocomplete="username"><button>Continue</button></form>`);
-    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.example.net", signIn: true });
+    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.example.net", page: "https://login.example.net/u/login/identifier", signIn: true });
     page.navigate("https://example.com/dashboard", "<h1>Hello</h1>");
-    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "example.com", signIn: false });
+    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "example.com", page: "https://example.com/dashboard", signIn: false });
     page.navigate("http://example.com/login", LOGIN_FORM);
     expect(await observeSignInPage((args) => page!.engine(args))).toBeNull();
     expect(await observeSignInPage(async () => null)).toBeNull();
@@ -56,9 +56,9 @@ describe("a login kept to some bots, and bots that share a browser", () => {
     { id: "payroll", browserProfile: "finance" }, { id: "infra", browserProfile: "finance" }, { id: "notes" }, { id: "audit", browserProfile: null },
     { id: "scout", browserProfile: "guest" }, { id: "visitor", browserProfile: "guest" },
   ];
-  const onePassword = { fresh: async () => {}, sitesFor: () => [], candidates: () => [], markUsed: () => {} } as unknown as OnePasswordLogins;
+  const onePassword = { id: "1password", label: "1Password", fresh: async () => {}, items: () => [], read: async () => ({}), markUsed: () => {} } as unknown as OnePasswordLogins;
   const world = () => {
-    const store = new LoginStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
+    const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
     const logins = new BotLogins(store, onePassword, () => bots);
     const place = { site: "capacity.example", hosts: ["capacity.example"], exactHost: false };
     return { store, logins, place };
@@ -110,3 +110,40 @@ describe("a login kept to some bots, and bots that share a browser", () => {
   });
 });
 
+
+describe("the secrets a bot may use", () => {
+  it("are named from the Vault and any linked manager, never by value, and a linked one is read only when asked for", async () => {
+    const reads: string[] = [];
+    const held: string[] = [];
+    const provider = {
+      id: "fake", label: "Fake manager", fresh: async () => {}, markUsed: () => {},
+      items: () => [
+        { kind: "secret", id: "fake:1", name: "Deploy key", fields: ["user"], source: "linked", provider: "fake", bots: "all", readOnly: true },
+        { kind: "secret", id: "fake:2", name: "Payroll token", fields: [], source: "linked", provider: "fake", bots: ["payroll"], readOnly: true },
+        { kind: "login", id: "fake:3", site: "example.com", hosts: ["example.com"], exactHost: false, username: "u", hasTotp: false, source: "1password", bots: "all", createdAt: 0 },
+      ],
+      read: async (id: string, field?: string) => { reads.push(`${id}/${field ?? ""}`); return { value: `value-of-${id}-${field ?? "main"}` }; },
+    };
+    const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
+    store.saveSecret({ name: "Stripe key", value: "sk_fake-saved", source: "card", bots: ["notes"], refOnly: true });
+    const logins = new BotLogins(store, provider as unknown as OnePasswordLogins, () => [], (value) => held.push(value));
+    store.saveSecret({ name: "Ada's key", value: "sk_fake-ada-own", source: "card", bots: ["notes"], person: "p_ada0000000000000000000" });
+    expect(logins.secretNamesFor("notes", TEAM_READER)).toEqual([{ name: "Stripe key", refOnly: true }, { name: "Deploy key" }, { name: "Deploy key user" }]);
+    expect(logins.secretNamesFor("notes", { person: "p_ben0000000000000000000", team: true }), "never another member's own").toEqual([{ name: "Stripe key", refOnly: true }, { name: "Deploy key" }, { name: "Deploy key user" }]);
+    expect(logins.secretNamesFor("notes", { person: "p_ada0000000000000000000", team: true }).map((one) => one.name)).toContain("Ada's key");
+    expect(logins.secretNamesFor("payroll", TEAM_READER)).toEqual([{ name: "Deploy key" }, { name: "Deploy key user" }, { name: "Payroll token" }]);
+    expect(logins.sitesFor("notes")).toEqual([{ site: "example.com", hosts: ["example.com"], exactHost: false, username: "u" }]);
+    expect(await logins.linkedSecret("payroll token", "notes")).toBeNull();
+    expect(reads).toEqual([]);
+    const deploy = await logins.linkedSecret("deploy-key-user", "notes");
+    expect(deploy).toMatchObject({ name: "Deploy key user", value: "value-of-fake:1-user" });
+    expect(deploy!.id).toMatch(/^linked-[0-9a-f]{32}$/u);
+    expect(reads).toEqual(["fake:1/user"]);
+    expect(held).toEqual(["value-of-fake:1-user"]);
+    expect(logins.secretsPrompt("payroll", TEAM_READER), "a manager with no references").not.toContain("://");
+    const onePassword = { ...provider, id: "1password", resolve: () => null };
+    expect(new BotLogins(store, onePassword as unknown as OnePasswordLogins).secretsPrompt("payroll", TEAM_READER), "a bot that may use the manager's secrets").toContain("op://vault/item/field");
+    const none = new BotLogins(store, { ...onePassword, items: () => [] } as unknown as OnePasswordLogins);
+    expect(none.secretsPrompt("notes", TEAM_READER), "nothing from the manager for this bot").not.toContain("op://");
+  });
+});

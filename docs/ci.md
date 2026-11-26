@@ -1,8 +1,10 @@
 # CI job selection
 
 Every PR still runs the workflow, its `static` job and the `CI` gate: locale
-validation, lint, the CI-selection tests, the verification-documentation
-checks and the source guards always run. Selection never skips the entire
+validation, lint, the announcements file's check
+(`scripts/check-announcements.mjs`, which installs download from main within
+the hour, so it fails on any invalid edit), the CI-selection tests, the
+verification-documentation checks and the source guards always run. Selection never skips the entire
 workflow. The source guards are the tests that only read the source (the
 vocabulary and locale checks, the size and route ratchets, and the like): they
 take seconds, and they run in `static` as well as in the shards, so a change
@@ -22,7 +24,11 @@ too) into areas, and runs only the jobs some area can affect:
 | Windows computer control | the `electron/` modules that start computer control and lend a PC's screen: `cua`, `cua-failure`, `cua-connection`, `capabilities`, `screen-status`, `shared-cua-connection`, `shared-computer-access`, `lent-screen-tools`, `lent-screen-failures`, `paced-typing` | the same as server, and Windows CUA |
 | desktop | the rest of `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
 | control plane | `cloudflare/control-plane/` | the control-plane job |
+| announcements | `announcements/`: the cards file, its JSON Schema and pictures | nothing beyond `static`, which validates them |
 | everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
+
+`static` also validates `server/model-manifest/model-manifest.json` with `scripts/check-model-manifest.mjs`: installs
+download that file from main within hours of a change, so it is checked on every event and fails on any invalid edit.
 
 The build is the `build` job: typecheck, Electron syntax check and UI build,
 about three minutes, beside the shards rather than ahead of them. Several areas
@@ -95,17 +101,19 @@ run in the Windows Vitest/Electron jobs.
 ## Vitest shards
 
 The slowest shard sets how long a PR and a release wait. Linux and Windows run
-eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
+eight shards each, macOS five (the full lane only); `scripts/ci-scope.mjs`
 builds the matrix.
 
 **Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
 `OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
 Most of a shard's time is waiting on real servers and fake engines: one file at
 a time it took 16 minutes with the machine 70% idle, and four at a time 5.
-Windows and macOS shards, and every local run, still run one file at a time. So
+A Windows shard runs two files at a time: one at a time it took 9 to 14
+minutes and was the last job of every run that had one. macOS shards, and
+every local run, still run one file at a time. So
 that files side by side never share a port, each worker picks from its own
 (`server/testing/worker-port.ts`); a test that picks a port some other way can
-meet another file's. Four files share the runner's CPU, so test and hook
+meet another file's. Files share the runner's CPU, so test and hook
 timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
@@ -129,9 +137,12 @@ instead, slowest first, each to the shard with the least time so far. The
 times are `scripts/testing/vitest-shard-weights.json`: for each platform
 (`linux`, `win32`, `darwin`), each file's median seconds on that platform's
 runners, for every file over five seconds and every e2e file. A file not in it
-counts one second, or the median e2e time if it is an e2e file. Every file
-still runs exactly once, and each shard job logs a `duration-sequencer:` line
-with its share.
+counts one second, or the median e2e time if it is an e2e file. Shard 1 of
+each platform also runs the `node --test` suites after vitest, about two
+minutes on the macOS and Windows runners, so the sequencer starts that shard
+at those seconds (`NODE_TESTS_SECONDS`) and gives it that much less vitest.
+Every file still runs exactly once, and each shard job logs a
+`duration-sequencer:` line with its share.
 
 Refresh the times from a few recent nightly or manual runs (they have all
 three platforms) when shards drift apart:
@@ -158,6 +169,7 @@ For example, a full Windows shard 3/8 uses PowerShell syntax:
 ```powershell
 $env:OMB_VITEST_E2E = "host"
 $env:OMB_VITEST_SUBSET = ""
+$env:OMB_VITEST_WORKERS = "2"
 pnpm exec vitest run --shard=3/8
 ```
 
@@ -187,7 +199,7 @@ half hours. Now:
 
 - A PR runs the Vitest shards on Ubuntu (and Windows where its change can
   break Windows), a push to main or a merge group on Ubuntu and Windows; the
-  full lane adds four macOS shards, which run the host e2e files only. Only a
+  full lane adds five macOS shards, which run the host e2e files only. Only a
   couple of test blocks are macOS-only.
 - Every PR's, push's and merge group's macOS checks are one job: the
   packaged-server smoke and the Electron smokes.

@@ -11,6 +11,8 @@ import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "connector-proxy.ts");
+/** What the bridge lists when the connected-apps service does not answer discovery. */
+const SERVICE_TOOLS = ["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MULTI_EXECUTE_TOOL", "COMPOSIO_MANAGE_CONNECTIONS"];
 let child: ChildProcessWithoutNullStreams | null = null;
 let server: Server | null = null;
 
@@ -47,6 +49,47 @@ afterEach(async () => {
 });
 
 describe("connector MCP bridge", () => {
+  it("rejects unsafe numeric literals before forwarding calls and accepts the next safe request", async () => {
+    const calls: unknown[] = [];
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        calls.push(rpc.params.arguments);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "accepted" }] } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const unsafe = [
+      '{"id":9007199254740993}',
+      '{"id":-9007199254740993}',
+      '{"tools":[{"arguments":{"amount":1e400}}]}',
+      '{"tools":[{"arguments":{"amount":1e-400}}]}',
+      '{"amount":1.0000000000000001}',
+      '9007199254740993',
+    ];
+    for (const [index, args] of unsafe.entries()) {
+      const reply = nextJson(lines);
+      child!.stdin.write(`{"jsonrpc":"2.0","id":${index},"method":"tools/call","params":{"name":"FIXTURE_NUMBER","arguments":${args}}}\n`);
+      const refused = await reply;
+      expect(refused.id).toBe(index);
+      expect(refused.result.isError).toBe(true);
+      expect(refused.result.content[0].text).toMatch(/not sent.*numeric literal/);
+      expect(calls).toEqual([]);
+    }
+    const safe = { id: "9007199254740993", values: [Number.MAX_SAFE_INTEGER, -0.125, 1e-7, 42], code: "1e400" };
+    const reply = nextJson(lines);
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "FIXTURE_NUMBER", arguments: safe } })}\n`);
+    expect((await reply).result.isError).toBeUndefined();
+    expect(calls).toEqual([safe]);
+    const metadataReply = nextJson(lines);
+    child!.stdin.write('{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"FIXTURE_NUMBER","arguments":{"value":42},"_meta":{"arguments":{"limit":1e400}}}}\n');
+    expect((await metadataReply).result.isError).toBeUndefined();
+    expect(calls).toEqual([safe, { value: 42 }]);
+  });
+
   it("turns agent connection requests into authenticated chat-card requests", async () => {
     let received: any = null;
     const harness = await listen((request, response) => {
@@ -187,6 +230,23 @@ describe("connector MCP bridge", () => {
     );
   });
 
+  it("tells the bot when an app it asked to connect already has an account, so it can ask again with an alias", async () => {
+    const note = "Gmail is already connected (it has an account, or needs no sign-in), so its card shows it connected and no new account was added. "
+      + "To add another Gmail account, call COMPOSIO_MANAGE_CONNECTIONS again with toolkits: [{\"name\": \"gmail\", \"alias\": \"<a short name for the new account>\"}].";
+    const harness = await listen((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ messageIds: ["m1"], connectedNote: note, nothingToSignIn: true }));
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "bridge-secret", OMB_BOT_ID: "bot-1", OMB_THREAD_ID: "thread-1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["gmail"] } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toBe(
+      `OpenMausBot showed the user a card that gmail is already connected; no sign-in started. ${note} Do not end this turn: carry on now.`,
+    );
+  });
+
   it("offers auth_config_id on COMPOSIO_MANAGE_CONNECTIONS, whose Composio schema has none", async () => {
     const manage = {
       name: "COMPOSIO_MANAGE_CONNECTIONS",
@@ -200,10 +260,47 @@ describe("connector MCP bridge", () => {
     const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} })}\n`);
     const [listed, search] = (await nextJson(lines)).result.tools;
-    expect(listed.inputSchema.required).toEqual(["toolkits"]);
-    expect(Object.keys(listed.inputSchema.properties)).toEqual(["toolkits", "auth_config_id"]);
+    expect(listed.inputSchema.required).toBeUndefined();
+    expect(Object.keys(listed.inputSchema.properties)).toEqual(["toolkits", "auth_config_id", "find"]);
     expect(listed.inputSchema.properties.auth_config_id).toMatchObject({ type: "string", description: expect.stringContaining("(ac_…)") });
+    expect(listed.inputSchema.properties.find).toMatchObject({ type: "string", description: expect.stringContaining("spreadsheets") });
     expect(search).toEqual({ name: "COMPOSIO_SEARCH_TOOLS" });
+  });
+
+  it("answers a search of the catalog through the harness, and never sends it upstream", async () => {
+    const paths: string[] = [];
+    let body: any = null;
+    const harness = await listen((request, response) => {
+      let text = "";
+      request.on("data", (chunk) => { text += chunk; });
+      request.on("end", () => {
+        paths.push(request.url!);
+        body = JSON.parse(text);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ text: "- googlesheets: Google Sheets (not connected)." }));
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "token", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { find: "something for spreadsheets" } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toContain("googlesheets");
+    expect(paths).toEqual(["/api/internal/connectors/find"]);
+    expect(body).toEqual({ botId: "b1", threadId: "t1", query: "something for spreadsheets" });
+  });
+
+  it("raises the card when a bot names toolkits, even with a search beside them", async () => {
+    const paths: string[] = [];
+    const harness = await listen((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        paths.push(request.url!);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "token", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["gmail"], find: "mail" } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toContain("secure connection card for gmail");
+    expect(paths).toEqual(["/api/internal/connectors/request"]);
   });
 
   it("answers initialize locally so a missing or failing upstream cannot fail the MCP handshake", async () => {
@@ -226,6 +323,24 @@ describe("connector MCP bridge", () => {
     });
     expect(reply.result).not.toHaveProperty("isError");
     expect(reply.result).not.toHaveProperty("content");
+  });
+
+  it("answers a server/discover probe itself, without waiting on an upstream that never answers", async () => {
+    const asked: string[] = [];
+    const upstream = await listen((request) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => { asked.push(String(JSON.parse(body).method)); });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    // The probe the Antigravity CLI 1.5.16 sends first, verbatim.
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: { _meta: {
+      "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {}, url: {} }, roots: { listChanged: true } },
+      "io.modelcontextprotocol/clientInfo": { name: "antigravity-client", version: "v1.0.0" },
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    } } })}\n`);
+    expect(await nextJson(lines)).toEqual({ jsonrpc: "2.0", id: 1, error: { code: -32601, message: "Method not found: server/discover" } });
+    expect(asked).toEqual([]);
   });
 
   it("answers initialize after a bounded wait when the upstream stalls", async () => {
@@ -406,15 +521,155 @@ describe("connector MCP bridge", () => {
     expect(reply.result.tools).toEqual([{ name: "COMPOSIO_MANAGE_CONNECTIONS" }]);
   });
 
-  it("returns a JSON-RPC error, not a tools result, when a non-call relay fails", async () => {
+  it("lists its own tools within 3 s while connected apps stall, inside the strictest client's start-up wait", async () => {
+    // Antigravity's CLI 1.5.16 drops a stdio server for the whole session when its tool list is not back ~5 s after start.
+    const upstream = await listen((request) => { request.resume(); });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const started = Date.now();
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 42, method: "tools/list", params: {} })}\n`);
+    const reply = await nextJson(lines);
+    expect(Date.now() - started).toBeLessThan(4_500);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(expect.arrayContaining(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL"]));
+  }, 15_000);
+
+  it("keeps the MCP server available when connected apps are not configured", async () => {
     const lines = start({});
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} })}\n`);
     const reply = await nextJson(lines);
     expect(reply).toEqual({
       jsonrpc: "2.0",
       id: 3,
-      error: { code: -32000, message: "connected apps are unavailable" },
+      result: { tools: [] },
     });
+  });
+
+  it.each(["http", "rpc", "malformed", "disconnected"])("survives a cold-start %s outage and discovers tools after recovery", async (failure) => {
+    let offline = true;
+    let listings = 0;
+    let executions = 0;
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        if (rpc.method === "tools/call") {
+          executions += 1;
+          response.writeHead(500);
+          response.end();
+          return;
+        }
+        if (rpc.method !== "tools/list") {
+          response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: {} }));
+          return;
+        }
+        listings += 1;
+        if (offline) {
+          if (failure === "disconnected") return request.socket.destroy();
+          response.writeHead(failure === "http" ? 500 : 200);
+          response.end(failure === "rpc"
+            ? JSON.stringify({ jsonrpc: "2.0", id: rpc.id, error: { code: -32603, message: "Internal error" } })
+            : "unavailable");
+          return;
+        }
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [{ name: "GMAIL_FETCH_EMAILS" }] } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const ask = async (id: number, method: string, params = {}) => {
+      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      return nextJson(lines);
+    };
+    expect((await ask(1, "initialize")).result.serverInfo.name).toBe("openmausbot-connectors");
+    expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(SERVICE_TOOLS);
+    expect(listings).toBe(2);
+    const failedCall = await ask(3, "tools/call", { name: "GMAIL_FETCH_EMAILS", arguments: {} });
+    expect(failedCall.result.isError).toBe(true);
+    expect(executions).toBe(1);
+    offline = false;
+    expect((await ask(4, "tools/list")).result.tools).toEqual([{ name: "GMAIL_FETCH_EMAILS" }]);
+  });
+
+  it("bounds discovery when the connector service stops responding", async () => {
+    let listings = 0;
+    const upstream = await listen((request) => {
+      listings += 1;
+      request.resume();
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list" })}\n`);
+    const reply = await nextJson(lines);
+    expect(reply.id).toBe(5);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(SERVICE_TOOLS);
+    // A stalled service spends the whole listing budget on one ask; only a quick failure is asked again.
+    expect(listings).toBe(1);
+  });
+
+  it("still lists the service's own tools beside the Gmail and Calendar app tools when discovery fails, and sends their calls on", async () => {
+    let offline = true;
+    const calls: string[] = [];
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        if (offline) {
+          response.writeHead(503, { "content-type": "application/json" });
+          return response.end(JSON.stringify({ error: "connected apps are busy" }));
+        }
+        calls.push(rpc.params?.name);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "GOOGLESHEETS_BATCH_GET" }] } }));
+      });
+    });
+    const lines = start({
+      OMB_CONNECTOR_UPSTREAM_URL: upstream,
+      OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails", "googlecalendar.list_events"]),
+    });
+    const ask = async (id: number, method: string, params = {}) => {
+      child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      return nextJson(lines);
+    };
+    const listed = (await ask(1, "tools/list")).result.tools.map((tool: { name: string }) => tool.name);
+    expect(listed).toEqual([...SERVICE_TOOLS, "gmail_search_emails", "googlecalendar_list_events"]);
+    offline = false;
+    const found = await ask(2, "tools/call", { name: "COMPOSIO_SEARCH_TOOLS", arguments: { queries: [{ use_case: "read a Google Sheet" }] } });
+    expect(found.result.content[0].text).toBe("GOOGLESHEETS_BATCH_GET");
+    expect(calls).toEqual(["COMPOSIO_SEARCH_TOOLS"]);
+  });
+
+  it.each([
+    ["an HTTP refusal", 403, { error: "connected apps are not enabled for this bot" }],
+    ["a refusal answered as a result", 200, { jsonrpc: "2.0", id: 8, result: { content: [{ type: "text", text: "Only the member's own turn may use this." }], isError: true } }],
+  ])("lists nothing, once, after %s of the tool list", async (_case, status, body) => {
+    let listings = 0;
+    const upstream = await listen((request, response) => {
+      request.resume();
+      listings += 1;
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 8, method: "tools/list" })}\n`);
+    expect(await nextJson(lines)).toEqual({ jsonrpc: "2.0", id: 8, result: { tools: [] } });
+    expect(listings).toBe(1);
+  });
+
+  it("keeps a bot's grants on the service's own tools listed during a discovery outage", async () => {
+    const upstream = await listen((request, response) => {
+      request.resume();
+      response.writeHead(500);
+      response.end();
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, OMB_CONNECTOR_ALLOWED_TOOLS: "{}" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list" })}\n`);
+    expect((await nextJson(lines)).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["COMPOSIO_MANAGE_CONNECTIONS"]);
+  });
+
+  it("keeps locally defined app tools available during a discovery outage", async () => {
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: "", OMB_CONNECTOR_APP_TOOLS: JSON.stringify(["gmail.search_emails"]) });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 6, method: "tools/list" })}\n`);
+    const reply = await nextJson(lines);
+    expect(reply.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["gmail_search_emails"]);
   });
 
   it("filters a JSON tools/list response down to the bot's grants", async () => {
@@ -590,4 +845,49 @@ describe("connected-app tools by name", () => {
     expect(refused.result.content[1].text).toContain('Call it again with the arguments its schema names, for example {"code_to_execute":"…"} with your own values.');
     expect(refused.result.content[1].text).toContain("it says nothing about which apps or tools exist, so do not tell the person a tool is missing. Connected apps you can use: gemini, gmail.");
   });
+
+  it("preserves unsafe numeric text on the upstream wire and still fits safe numeric arguments", async () => {
+    const calls: Array<{ params?: { arguments?: unknown } }> = [];
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        calls.push(rpc);
+        response.writeHead(200, { "content-type": "application/json" });
+        if (rpc.method === "tools/list") {
+          response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: [
+            { name: "FIXTURE_NUMBER", inputSchema: { type: "object", properties: { value: { type: "number" }, payload: { type: "object" }, numbers: { type: "array", items: { type: "number" } }, labels: { type: "array", items: { type: "string" } }, queries: { type: "array", items: { type: "object", properties: { use_case: { type: "string" } }, required: ["use_case"] } } } } },
+            { name: "FIXTURE_INTEGER", inputSchema: { type: "object", properties: { value: { type: "integer" } } } },
+          ] } }));
+          return;
+        }
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "fixture reply" }] } }));
+      });
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const listReply = nextJson(lines);
+    child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
+    await listReply;
+
+    const tiny = "0." + "0".repeat(323) + "1";
+    const cases: Array<{ name: string; args: unknown; expected: unknown }> = [
+      { name: "FIXTURE_NUMBER", args: { value: tiny }, expected: { value: tiny } },
+      { name: "FIXTURE_INTEGER", args: { value: "1.0000000000000001" }, expected: { value: "1.0000000000000001" } },
+      { name: "FIXTURE_NUMBER", args: '{"value":9007199254740993}', expected: '{"value":9007199254740993}' },
+      { name: "FIXTURE_NUMBER", args: { payload: '{"value":1e400}' }, expected: { payload: '{"value":1e400}' } },
+      { name: "FIXTURE_NUMBER", args: { numbers: "[9007199254740993]" }, expected: { numbers: "[9007199254740993]" } },
+      { name: "FIXTURE_NUMBER", args: '{"value":4.2e1}', expected: { value: 42 } },
+      { name: "FIXTURE_INTEGER", args: { value: "42.0" }, expected: { value: 42 } },
+      { name: "FIXTURE_NUMBER", args: { labels: "9007199254740993" }, expected: { labels: ["9007199254740993"] } },
+      { name: "FIXTURE_NUMBER", args: { queries: "1e400" }, expected: { queries: [{ use_case: "1e400" }] } },
+    ];
+    for (const [index, sample] of cases.entries()) {
+      const reply = nextJson(lines);
+      child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: index + 2, method: "tools/call", params: { name: sample.name, arguments: sample.args } }) + "\n");
+      expect((await reply).id).toBe(index + 2);
+      expect(calls.at(-1)?.params?.arguments).toEqual(sample.expected);
+    }
+  });
+
 });

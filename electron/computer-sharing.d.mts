@@ -160,6 +160,8 @@ export function createComputerSharing(options: {
   revoke(env: Workspace): SharingState;
   /** `env` is a server of the person's own, checked now: its identity, else null. */
   ownServer(env: Workspace): Promise<Identity | null>;
+  /** Why `env` is not a server of the person's own, or null when it is. */
+  ownRefusal(env: Workspace): Promise<"team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | null>;
   /** A server of the person's own whose pairing here was never asked about: its identity, for the popup; null once asked;
    * false when it is not a server of the person's own. */
   ownOffer(env: Workspace): Promise<Identity | null | false>;
@@ -176,6 +178,7 @@ export function createComputerSharing(options: {
   /** Lending's last requests have been answered or have timed out; a Cloud's answer can re-issue its session cookie. */
   goodbyesDone(): Promise<unknown>;
   lendingToCloud(): boolean;
+  lendingSomewhere(): boolean;
   /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
   busy(): boolean;
   saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean; chrome?: boolean; terminal?: boolean }, version?: number): Promise<CloudLendingState>;

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { createServer as createTlsServer } from "node:tls";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { EmailError, openGuard, readsAsHeaders, safeAttachmentName, saveAttachment, testMailbox, testSending } from "./client.ts";
+import { EmailError, inboxEntry, openGuard, readsAsHeaders, safeAttachmentName, saveAttachment, testMailbox, testSending } from "./client.ts";
 
 const PASSWORD = "fake-password-never-to-be-sent";
 const root = mkdtempSync(join(tmpdir(), "omb-mail-client-"));
@@ -123,5 +123,18 @@ describe("an attachment's file", () => {
     expect(readFileSync(secret, "utf8"), "the link's target is untouched").toBe("keep");
     expect(saved).not.toBe(join(folder, "planted.pdf"));
     expect(readdirSync(folder).sort()).toEqual(["1-note.pdf", "1-planted.pdf", "note.pdf", "planted.pdf"]);
+  });
+});
+
+describe("an inbox entry for a one-time code", () => {
+  const internalDate = new Date("2026-11-10T10:00:00Z");
+
+  it("dates a message by when the server received it, not what the sender wrote", () => {
+    expect(inboxEntry({ uid: 1, internalDate, envelope: { from: [{ address: "a@acme.test" }], subject: "Code" } })).toEqual({ uid: 1, at: internalDate.getTime(), from: "a@acme.test", subject: "Code" });
+    expect(inboxEntry({ uid: 2, envelope: { from: [{ address: "a@acme.test" }] } }).at).toBe(0);
+  });
+
+  it("names no sender when a message claims several", () => {
+    expect(inboxEntry({ uid: 3, internalDate, envelope: { from: [{ address: "a@acme.test" }, { address: "x@evil.test" }] } }).from).toBe("");
   });
 });

@@ -106,7 +106,7 @@ const FILE_INPUT = `function () {
 /** Sets files on one <input type=file>. */
 export async function setInputFiles(frames: FrameTree, handle: NodeHandle, paths: readonly string[]): Promise<void> {
   checkUploadPaths(paths);
-  const input = await callOnNode<{ multiple: boolean; disabled: boolean } | null>(frames, handle, FILE_INPUT);
+  const input = await callOnNode<{ multiple: boolean; disabled: boolean } | null>(frames, handle, FILE_INPUT, [], { readOnly: true });
   if (!input) throw new DriverError("not-editable", "That element is not a file input. Pass the <input type=file>'s ref, or click the upload control and answer its picker.");
   if (input.disabled) throw new DriverError("not-editable", "That file input is disabled.");
   if (paths.length > 1 && !input.multiple) throw new DriverError("refused", "This file input accepts one file.");

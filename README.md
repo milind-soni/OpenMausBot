@@ -37,7 +37,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
   <img src="https://img.shields.io/github/v/release/milind-soni/OpenMausBot?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Ubuntu&labelColor=070707&color=e95420&cacheSeconds=300" alt="Download the latest OpenMausBot for Ubuntu (.deb)" height="40">
 </a>
 
-<sub>[latest release](https://github.com/milind-soni/OpenMausBot/releases/latest) &nbsp;·&nbsp; macOS: Apple silicon & Intel · signed & notarized .dmg &nbsp;·&nbsp; Windows: x64 installer &nbsp;·&nbsp; Ubuntu 24.04 x64: .deb or AppImage beta &nbsp;·&nbsp; [all releases](https://github.com/milind-soni/OpenMausBot/releases)</sub>
+<sub>[latest release](https://github.com/milind-soni/OpenMausBot/releases/latest) &nbsp;·&nbsp; macOS: Apple silicon & Intel · signed & notarized .dmg &nbsp;·&nbsp; Windows: x64 installer &nbsp;·&nbsp; Ubuntu 24.04 x64: .deb or AppImage beta &nbsp;·&nbsp; Fedora x64: .rpm &nbsp;·&nbsp; [all releases](https://github.com/milind-soni/OpenMausBot/releases)</sub>
 
 <br>
 
@@ -54,6 +54,18 @@ Talk to them like contacts. Watch them work. Approve what matters.
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/boat-logo-white.svg">
     <img src="docs/assets/sponsors/boat-logo.svg" alt="Boat (boat.dev)" height="34">
+  </picture>
+</a>
+
+<br>
+<br>
+
+<sub>Inference provider sponsor</sub>
+<br>
+<a href="https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sponsors/modelgo-logo-white.svg">
+    <img src="docs/assets/sponsors/modelgo-logo.svg" alt="ModelGo (modelgo.ai)" height="22">
   </picture>
 </a>
 
@@ -183,7 +195,7 @@ channel and its bots under a named context, then rename it or change its members
 
 ### ⚡ Fast decisions with Jev
 
-Add a Cloudflare Workers AI token with its account ID, a TypeSafe Jev key, or an OpenRouter key and model, in **Settings → Decision and extraction** and rooms set to **Auto** pick the bot
+Add a Cloudflare Workers AI token with its account ID, a TypeSafe Jev key, or an OpenRouter key and model, in **Settings › AI › Routing and extraction** and rooms set to **Auto** pick the bot
 that fits each un-mentioned message in a few hundred milliseconds, falling back to the room's lead whenever the decision model is off or unsure.
 See [docs/decision-model.md](docs/decision-model.md).
 
@@ -201,18 +213,15 @@ conversations, permissions, memory, or computer access. Browse the
 [open-source playbook repository](https://github.com/milind-soni/openmausbot-teams) or read its
 [portable format](https://github.com/milind-soni/openmausbot-teams/blob/main/FORMAT.md).
 
-### 🤝 Share a whole department
+### 🤝 Share a bot or a department
 
-Right-click a department and choose **Share department…** (or use **Templates → Share**) to save the whole department as one
-file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
-Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
-shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and
-computers never go in, and anything that looks like a secret is removed from the text. Whoever imports it
-gets new bots on Ask, skills switched off and routines paused. See [docs/team-sharing.md](docs/team-sharing.md).
-Desktops connected to an organization also get **Templates → From {Organization}**: the packages its Admin shares,
-added with one click, skills switched on. See [docs/org-library.md](docs/org-library.md).
-Your New bot defaults can travel too, as a **preset bot** that appears in New bot (in a team file, or on
-their own with **Share as preset…**). See [docs/presets.md](docs/presets.md).
+Ask a bot to share itself ("publish yourself to GitHub"), or open a department's **…** menu and choose **Share**. You
+get one card: the bots, their instructions, skills and pictures, group chats, routines (paused), the Chief of Staff and
+the apps they use, by name. Chats, memory, keys and connection addresses never go in. **Publish** sends it to the
+community repository on GitHub and gives you a link; **Save folder…** keeps it on your computer. Anyone adds it with
+**+ → Import…** and a link or a folder. See [docs/team-sharing.md](docs/team-sharing.md).
+Desktops connected to an organization also get the packages its Admin shares in **Templates**, added with one click,
+skills switched on. See [docs/org-library.md](docs/org-library.md).
 
 ### 🎧 Bots that talk back
 
@@ -260,10 +269,12 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
 | **Boat** ([boat.dev](https://boat.dev)) | Each bot's cloud computer · our sponsor |
+| **ModelGo** ([modelgo.ai](https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=readme&campaign_id=openmausbot&ad_group_id=readme)) | One API key for every model · our inference provider sponsor |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
 | **GitHub Sponsors** | One-time and monthly project support |
+| **Open Bot Avatar** ([github.com/DominikScholz/open-bot-avatar](https://github.com/DominikScholz/open-bot-avatar)) | The avatar engine and many of the bot avatars, by Dominik Scholz |
 
 ## How it works
 
@@ -333,11 +344,12 @@ See [Run OpenMausBot from scripts and CI](docs/headless-cli.md).
 |---|---|---|
 | **macOS** (Apple silicon) | [OpenMausBot.dmg](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.dmg) | Drag it to Applications, open it. Signed & notarized. |
 | **macOS** (Intel) | [OpenMausBot-intel.dmg](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-intel.dmg) | Same app, built for Intel Macs. Signed & notarized. |
-| **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. By default the app installs to `%LOCALAPPDATA%\Programs\OpenMausBot`, and every update goes back to the folder the installer recorded, so keep it where the installer put it: a copy moved by hand (for example from C: to D:) is left behind, and the next update lands in the recorded folder again. |
 | **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
+| **Fedora** (x64) | [OpenMausBot-x86_64.rpm](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) | Install with `cd ~/Downloads && sudo dnf install ./OpenMausBot-*.rpm` (works for both the stable-named and the versioned download). Community-supported; Ubuntu is the tested Linux. |
 
 See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
-Any desktop build can also pair as a client to another Windows, macOS, or Ubuntu host over Tailscale; see [desktop-to-desktop companion mode](docs/desktop-companion.md).
+Any desktop build can also open the bots of another Windows, macOS, or Ubuntu computer over Tailscale; see [open one computer's bots from another computer](docs/desktop-companion.md).
 
 
 **From source:**
@@ -360,19 +372,23 @@ Package the desktop application:
 ```sh
 pnpm package:mac      # macOS: DMG + ZIP; requires Swift/Xcode tools
 pnpm package:win      # Windows: installer + ZIP
-pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
+pnpm package:linux    # Linux x64: .deb + .rpm + AppImage + verified CUA runtime
 ```
 
 ### Desktop capability status
 
-| Capability | macOS | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
-|---|---|---|---|
-| Packaged app, embedded harness, local agent CLIs | Supported | Beta | Beta |
-| Composio and Boat/cloud computers | Supported | Beta | Beta |
-| Explicit preview-only local screen capture | Supported | Beta | Beta |
-| Bot control of this computer | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
-| Native on-device dictation | Supported | Planned | Planned |
-| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported |
+| Capability | macOS | Windows x64 | Ubuntu 24.04 Xorg | Ubuntu 24.04 Wayland |
+|---|---|---|---|---|
+| Packaged app, embedded harness, local agent CLIs | Supported | Supported | Beta | Beta |
+| Composio and Boat/cloud computers | Supported | Supported | Beta | Beta |
+| Explicit preview-only local screen capture | Supported | Unavailable | Beta | Beta |
+| Bot control of this computer | Supported | Supported | Beta, explicit opt-in | Disabled: Wayland safety gate (Omarchy with Cua's Hyprland plugin: experimental) |
+| Native on-device dictation | Supported | Unavailable | Planned | Planned |
+| Dictation and Take turns calls through Fish Audio (needs a Fish Audio key) | Not used, on-device instead | Supported | Supported | Supported |
+
+On Windows, choose **This computer** to let a bot control the local desktop. The packaged app includes its own
+CUA driver and SDK; a separate Cua installation is not required. Local bot control is available even though the
+preview-only screen capture above is unavailable. See [Computer use & browser use](docs/computer-use-integration.md).
 
 The Linux preview is user-initiated and never enables local bot control or Auto routing. On Xorg, the reviewed Cua
 Driver 0.41.3 runtime starts only after explicit opt-in and without its full-screen cursor overlay. On Wayland the
@@ -407,7 +423,7 @@ pnpm test          # unit, driver, API, and desktop capability tests
 pnpm build         # typecheck + production build
 pnpm check:electron # syntax-check Electron main/preload files
 pnpm package:win   # Windows installer + zip → release/
-pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
+pnpm package:linux # Linux x64 .deb + .rpm + AppImage → release/
 ```
 
 ### Triggers: schedules and webhooks
@@ -457,6 +473,7 @@ small; adding a provider is one file in [`server/drivers/`](server/drivers/) plu
 No code needed at all for your own engines: any ACP-speaking CLI or OpenAI-compatible endpoint
 plugs in through config — see [`docs/custom-engines.md`](docs/custom-engines.md).
 Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-servers.md`](docs/custom-mcp-servers.md).
+For configuration switches, defaults and model-call implications, see [Feature switches](docs/feature-flags.md).
 To run bots on OpenRouter, Fireworks AI, DeepSeek, Cline or your own OpenAI- or Anthropic-compatible provider,
 see [Other model providers](apps/docs/content/docs/providers/model-providers.mdx).
 
@@ -503,8 +520,13 @@ installation and pairing.
 
 Run `openmausbot setup` to reconfigure without resetting bots or conversations;
 the saved model default applies only to new bots. Native setup confirms provider
-sign-in; API setup asks before a potentially billable test message. API keys are
-saved as plaintext, not encrypted, in private `config.json` (`0600` on Unix).
+sign-in; API setup asks before a potentially billable test message. API keys
+from `openmausbot setup` and the server are saved as plaintext, not encrypted,
+in private `config.json` (`0600` on Unix). The packaged desktop app keeps your
+AI provider and service keys encrypted through the operating system instead;
+its `config.json` still holds OpenCode provider keys, keys given to one engine,
+and MCP header values in plaintext (a key a bot set from a secret card is kept
+in the Vault, and `config.json` holds only a pointer to it).
 See the [short setup guide](docs/cli-onboarding.md) for account differences,
 phone choices, credential storage, and cancellation.
 
@@ -512,7 +534,7 @@ For a server on a VPS or an always-on computer, run `npx openmausbot serve`
 with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
 `--domain` for a certificate on your own domain, `--tailscale` for your
 tailnet, `--lan` for this network only, or `--tunnel` (after
-`npx openmausbot login`) for a free MausBot web address. It prints one
+`npx openmausbot account login`) for a free MausBot web address. It prints one
 pairing link; paste it into the desktop app under **＋ → Connect to a
 server**. The short path for each install method (npx, Docker, a service) is
 at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from
@@ -529,6 +551,11 @@ in [LICENSING.md](LICENSING.md).
 Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
 the corresponding notices, license texts, source locations, and SBOM are in
 [`third_party/cua-driver/`](third_party/cua-driver/) and ship beside the native runtime.
+
+The bot avatar engine and avatar designs come from
+[Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar), Copyright (c) 2026 Dominik Scholz,
+used under the MIT License; its license and our changes are in
+[`packages/phone-protocol/src/open-bot-avatar/`](packages/phone-protocol/src/open-bot-avatar/).
 
 OpenMausBot is an independent, open-source project inspired by Grok Bot. It is
 not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark

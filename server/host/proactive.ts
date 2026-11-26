@@ -8,12 +8,12 @@ import { z } from "zod";
 
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
-import { connectorAccessDecision } from "../../shared/connector-scopes.ts";
+import { accountLimit, connectorAccessDecision } from "../../shared/connector-scopes.ts";
 import type { Notification } from "../../shared/notification.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { AppConfig } from "../config.ts";
-import { createConnectedReads, READ_APPS, type ReadApp } from "../connected-reads.ts";
+import { createConnectedReads, OUTLOOK_LIST_TOOL, READ_APPS, type ReadApp } from "../connected-reads.ts";
 import { evaluateConnectorTools } from "../connector-verdict.ts";
 import type { DecisionRow } from "../decision-log.ts";
 import type { ProviderAdapter } from "../contracts.ts";
@@ -34,7 +34,7 @@ export { WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
 export const WATCH_FILE = "watch.json";
 /** The engines whose every tool use outside a run's allowlist reaches OpenMausBot's answerer and is refused there. */
 const FENCED_ENGINES = new Set(["claudeAgent"]);
-const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
+const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", outlook: OUTLOOK_LIST_TOOL, googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 const MAX_HANDED = 50;
 const watchSchema = z.object({
@@ -98,12 +98,24 @@ export function createProactive(deps: ProactiveDeps) {
       const services = await composio.connectedServices(cfg);
       return Object.fromEntries(READ_APPS.map((app) => [app, services[app]?.connected === true])) as Record<ReadApp, boolean>;
     },
-    // Several accounts of one app: read the newest active one, as Composio refuses a read that names none.
-    accounts: async () => {
+    // Several accounts of one app: read the newest active one, as Composio refuses a read that names none. A bot limited
+    // to some accounts reads one of those, named even when it is the app's only one; with none of them active the read
+    // names the first anyway, so it is refused rather than run as another account, also while the lookup fails.
+    accounts: async (botId) => {
+      const scopes = botId ? store.bot(botId)?.connectorScopes : undefined;
       const services = await composio.connectedServices(cfg);
       return Object.fromEntries(READ_APPS.flatMap((app) => {
-        const active = (services[app]?.accounts ?? []).filter((one) => /^active$/i.test(one.status));
-        return active.length > 1 ? [[app, active[0]!.id]] : [];
+        const active = (services[app]?.accounts ?? []).filter((one) => /^active$/i.test(one.status)).map((one) => one.id);
+        const allowed = accountLimit(scopes, app);
+        if (allowed) return [[app, active.find((id) => allowed.includes(id)) ?? allowed[0]!]];
+        return active.length > 1 ? [[app, active[0]!]] : [];
+      }));
+    },
+    fallbackAccounts: (botId) => {
+      const scopes = botId ? store.bot(botId)?.connectorScopes : undefined;
+      return Object.fromEntries(READ_APPS.flatMap((app) => {
+        const allowed = accountLimit(scopes, app);
+        return allowed ? [[app, allowed[0]!]] : [];
       }));
     },
     relay: (payload, session, signal) => composio.relayMcp(cfg, payload as never, session, undefined, signal),
@@ -114,7 +126,9 @@ export function createProactive(deps: ProactiveDeps) {
     const bot = store.bot(botId);
     if (!bot || bot.composio === false || !composio.configured(cfg)) return false;
     const slug = READ_SLUG[app];
-    return connectorAccessDecision(bot.connectorScopes, [{ slug }], [...READ_APPS]).ok && evaluateConnectorTools([slug], bot.connectorTools, [...READ_APPS]).allowed;
+    // Its reads name one of its allowed accounts (accounts above), so the check names one too.
+    const account = accountLimit(bot.connectorScopes, app)?.[0];
+    return connectorAccessDecision(bot.connectorScopes, [{ slug, ...(account ? { account } : {}) }], [...READ_APPS]).ok && evaluateConnectorTools([slug], bot.connectorTools, [...READ_APPS]).allowed;
   }
   const fenced = (botId: string): boolean => {
     const bot = store.bot(botId);
@@ -132,7 +146,7 @@ export function createProactive(deps: ProactiveDeps) {
     store, dataDir: deps.dataDir, hosted: deps.team, watching, mainThread: deps.mainThread, threadBusy: deps.threadBusy, runs,
     needsYou: deps.needsYou, engineName: deps.engineName, hostTimeZone: deps.hostTimeZone, language: () => cfg.language,
     notify: (bot, threadId, detail) => deps.notify(briefNotification(bot, threadId, detail)),
-    session: () => (composio.configured(cfg) ? reads.session() : null),
+    session: () => (composio.configured(cfg) ? reads.session(owner()?.id) : null),
     address: () => checks.address(),
     failRun: (runId, why) => deps.routines()?.rejectResult(runId, why),
     keep: (key) => checks.commit(key),

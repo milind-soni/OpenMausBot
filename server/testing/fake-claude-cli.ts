@@ -15,8 +15,17 @@
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
 //   FAKE_CLAUDE_ELICIT  JSON request body: a "hang" turn (or a failing FAKE_CLAUDE_TRANSIENTS launch) first asks it
 //     as control_request "elicit-1"
+//   FAKE_CLAUDE_CONTEXT_USAGE  JSON answered to a get_context_usage control_request; unset, the request is refused as
+//     unsupported, like any other control_request
+//   FAKE_CLAUDE_CONTEXT_USAGE_LATE  1: the first get_context_usage is answered only when the next control_request arrives
 //   FAKE_CLAUDE_CONTROL_LOG  JSON-lines file every control_response the host writes is appended to
+//   FAKE_CLAUDE_MCP_RECONNECT  JSON-lines file: an mcp_reconnect control_request is appended to it and answered with
+//     success, as Claude Code 2.1.321 answers once the server is connected again; "refuse" answers it as a failure
+//   FAKE_CLAUDE_LAUNCHES  JSON-lines file every stream-json process appends its {pid, argv} to as it starts
+//   FAKE_CLAUDE_STARTUP_MS  ms a stream-json process takes to start up before it reads its input, as the real CLI takes
+//     seconds to load and connect its MCP servers
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
+//   FAKE_CLAUDE_SIGNED_OUT_FILE  path: while it exists, every turn answers as not-logged-in (a sign-in that lapses and comes back)
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
 //     calls a tool first
 //   FAKE_CLAUDE_GONE_AFTER_TURN  path: after the turn stop reading stdin, write <path>.closed, exit once <path> exists
@@ -25,6 +34,8 @@
 //   FAKE_CLAUDE_CACHE_READ_TOKENS  cache_read_input_tokens per model call (default 2)
 //   FAKE_CLAUDE_PING_DUMP  path for a keep-warm ping's {argv, env, prompt, mcpConfig, settings, systemPrompt}
 //   FAKE_CLAUDE_PING_USAGE  JSON usage for a keep-warm ping's result (default: warm read 150000, write 40)
+//   FAKE_CLAUDE_STARTS_MCP  comma list of --mcp-config command servers a fork (`--fork-session`) starts as it launches,
+//     before it answers and whatever its hooks say, as Claude Code 2.1.321 starts every listed one; each runs to its exit
 //   FAKE_CLAUDE_PING_RESULT  raw json result for a keep-warm ping
 //   FAKE_CLAUDE_TEXT_DUMP  FAKE_CLAUDE_DUMP for one-shot text runs
 //   FAKE_CLAUDE_TEXT_LOG  JSON-lines file every one-shot prompt is appended to
@@ -34,26 +45,33 @@
 //   FAKE_CLAUDE_CHECK  fail | hang: how the connection check answers (default OK)
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
+//   FAKE_CLAUDE_MARKERS_LATEST  1: reply and tool-call markers match only the prompt after its history block
 //   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?, hold?}] each turn calls before its reply (unset: one Bash call). A call
 //     with `hold` keeps running until FAKE_CLAUDE_RELEASE exists, sending a tool_progress every FAKE_CLAUDE_TOOL_PROGRESS_MS
 //     (default 30000) as 2.1.306 does; hold "busy" | "idle" | "network" also keeps a stand-in child process that burns CPU,
 //     sleeps, or holds a loopback TCP connection, as the call's command would
-//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
+//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none, or {"marker": [calls]} picked by the prompt
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: first take one screenshot through the `computer` MCP server
 //   FAKE_CLAUDE_CONNECT_APPS  toolkits (gmail,slack): first call COMPOSIO_MANAGE_CONNECTIONS via `composio`
 //   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, PostToolUseFailure for
 //     an ok:false call with its additionalContext echoed into the reply, Stop at the end)
+//   FAKE_CLAUDE_HOOKS_AFTER_TURN_MS  with FAKE_CLAUDE_HOOKS: run each `async` hook this many ms after its turn's result,
+//     as the CLI does when a hook's start outlasts the model's last reply (unset: async hooks run in place, like the rest)
 //   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_TURN_STATE  counter file keeping FAKE_CLAUDE_COMPACT's turn count across respawns
 //   FAKE_CLAUDE_CONTEXT_GROWTH  "<start>:<per turn>": a session starts at <start> tokens and each turn's work adds <per turn>,
 //     which that turn's model calls report as their prompt; kept per session in FAKE_CLAUDE_CONTEXT_STATE (a folder) across
 //     processes; a compaction leaves FAKE_CLAUDE_COMPACTED_TOKENS (default 30000)
+//   FAKE_CLAUDE_REJECT_AUTOCOMPACT  a file: --help still lists --autocompact, but a turn given it appends its argv
+//     there as a JSON line and exits 1 with "error: unknown option '--autocompact'" (a CLI that changed under a running app)
+//   FAKE_CLAUDE_REJECT_GATE  path: that refusal first writes `<path>.waiting`, then waits until <path> exists
 //   FAKE_CLAUDE_AUTOCOMPACT_AT  tokens: a turn that starts at or above it compacts first, as Claude Code does at its threshold
 //     (PreCompact, FAKE_CLAUDE_COMPACT_MS of nothing, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_COMPACT_MS  how long a compaction takes: that one, or a one-shot `/compact` on a fork
-//   FAKE_CLAUDE_COMPACT_DUMP  path: a one-shot `/compact` on a fork (`--resume S --fork-session`) writes its {argv, prompt,
+//   FAKE_CLAUDE_COMPACT_DUMP  path: a one-shot `/compact` on a fork (`--resume S --fork-session`) writes its {argv, env, prompt,
 //     systemPrompt, mcpConfig, settings} here and answers with a new session; FAKE_CLAUDE_COMPACT_RESULT is its raw answer
 //   FAKE_CLAUDE_CONTEXT_TOKENS  latest-prompt size reported in a scripted room-plan reply
 //   FAKE_CLAUDE_AUTH  in (default) | out | unsupported | malformed | inherited-api-key: what `auth status` says
@@ -62,6 +80,7 @@
 //     claude.ai link and writes it from the pasted code (`alice-…` signs in alice@example.com, `bad-…` is refused),
 //     `auth logout` removes it
 //   FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS  --model values where `--permission-mode auto` runs "default" (2.1.266)
+//   FAKE_CLAUDE_STEER_LOG  JSON-lines file every steered line's text is appended to
 //   FAKE_CLAUDE_LATE_STEER_GATE  path: a late steer runs as the next native turn (2.1.282), replying once it exists
 //   FAKE_CLAUDE_LATE_STEER_INIT_GATE  path: that late turn's `init` also waits for it
 //   FAKE_CLAUDE_LATE_STEER_SILENT  1: the late turn prints `init` and nothing else
@@ -90,7 +109,9 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { hookMatches, type FakeHookEvent } from "./claude-hook-matcher.ts";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
+import { playStreamScript, streamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const streamCadence = (() => {
@@ -100,6 +121,17 @@ const streamCadence = (() => {
   const parsed = { chars: Number(chars), ms: Number(ms) };
   return Number.isSafeInteger(parsed.chars) && parsed.chars > 0 && Number.isSafeInteger(parsed.ms) && parsed.ms >= 0 ? parsed : null;
 })();
+
+function startListedMcpServers(): void {
+  const names = (process.env.FAKE_CLAUDE_STARTS_MCP ?? "").split(",").filter(Boolean);
+  if (!names.length) return;
+  let servers: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }> = {};
+  try { servers = JSON.parse(readFileSync(argAfter("--mcp-config") ?? "", "utf8")).mcpServers ?? {}; } catch {}
+  for (const name of names) {
+    const server = servers[name];
+    if (server?.command) spawnSync(server.command, server.args ?? [], { env: { ...process.env, ...server.env }, input: "", timeout: 10_000 });
+  }
+}
 
 // Concurrent turns share a capture path: publish whole JSON in one rename.
 const writeDumpAtomic = (path: string, contents: string): void => {
@@ -175,10 +207,20 @@ const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
   }
 };
 const scriptedToolCallsAtStart = parseToolCalls(process.env.FAKE_CLAUDE_TOOL_CALLS);
-const turnToolCalls = (): ScriptedToolCall[] | null => {
+/** The file may also hold {"marker": [calls], …}: the first marker the turn's prompt contains picks its calls, so bots
+ * sharing one fake engine each play their own part; a prompt with none of them calls nothing. */
+const turnToolCalls = (prompt?: string): ScriptedToolCall[] | null => {
   const file = process.env.FAKE_CLAUDE_TOOL_CALLS_FILE;
   if (!file) return scriptedToolCallsAtStart;
-  try { return parseToolCalls(readFileSync(file, "utf8")) ?? []; } catch { return []; }
+  try {
+    const raw = readFileSync(file, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const hit = Object.entries(parsed as Record<string, unknown>).find(([marker]) => marker !== "" && (prompt ?? "").includes(marker));
+      return hit ? parseToolCalls(JSON.stringify(hit[1])) ?? [] : [];
+    }
+    return parseToolCalls(raw) ?? [];
+  } catch { return []; }
 };
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
@@ -217,15 +259,24 @@ const markerReplies = (() => {
     return null;
   }
 })();
+/** With FAKE_CLAUDE_MARKERS_LATEST=1, markers match only the newest message of a prompt that carries history or notes
+ * ahead of it, so an earlier turn's words never pick this turn's script. */
+const markerText = (text: string): string => {
+  if (process.env.FAKE_CLAUDE_MARKERS_LATEST !== "1") return text;
+  const at = text.lastIndexOf("[Now reply to the user's latest message:]");
+  if (at >= 0) return text.slice(at);
+  const sent = text.lastIndexOf("Current time when this message was sent:");
+  return sent < 0 ? text : text.slice(sent);
+};
 const replyForPrompt = (prompt: JsonValue): string[] | null => {
   if (!markerReplies) return null;
-  const text = steeredText(prompt);
+  const text = markerText(steeredText(prompt));
   const hit = markerReplies.find(([marker]) => marker !== "" && text.includes(marker));
   return hit ? [hit[1]] : null;
 };
 
 const argv = process.argv.slice(2);
-const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number }> }>> = (() => {
+const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean }> }>> = (() => {
   if (process.env.FAKE_CLAUDE_HOOKS !== "1") return {};
   const i = argv.indexOf("--settings");
   if (i === -1) return {};
@@ -236,21 +287,36 @@ const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; comma
     return {};
   }
 })();
-function runHooks(event: string, payload: Record<string, unknown>): string {
+const hooksAfterTurnMs = Number(process.env.FAKE_CLAUDE_HOOKS_AFTER_TURN_MS);
+const hooksAfterTurn: Array<() => Promise<unknown>> = [];
+let hookBatchesWaiting = 0;
+const runHooksAfterTurn = () => {
+  const due = hooksAfterTurn.splice(0);
+  if (!due.length) return;
+  hookBatchesWaiting += 1;
+  setTimeout(() => {
+    void Promise.all(due.map((run) => run())).then(() => {
+      hookBatchesWaiting -= 1;
+      finishIfDone();
+    });
+  }, hooksAfterTurnMs);
+};
+function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
+    if (!hookMatches(event, entry.matcher, payload)) continue;
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
-      const result = spawnSync(hook.command, hook.args ?? [], {
-        shell: !hook.args,
-        input: JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload }),
-        env: process.env,
-        timeout: ((hook.timeout ?? 5) + 1) * 1000,
-        stdio: ["pipe", "pipe", "pipe"],
-        encoding: "utf8",
-      });
-      stdout += result.stdout ?? "";
+      const input = JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload });
+      const options = { shell: !hook.args, env: process.env, timeout: ((hook.timeout ?? 5) + 1) * 1000 };
+      if (hook.async && hooksAfterTurnMs >= 0) {
+        hooksAfterTurn.push(() => new Promise((settled) => {
+          const child = spawn(hook.command!, hook.args ?? [], { ...options, stdio: ["pipe", "ignore", "ignore"] });
+          child.on("error", settled).on("close", settled);
+          child.stdin!.on("error", () => {}).end(input);
+        }));
+      } else stdout += spawnSync(hook.command, hook.args ?? [], { ...options, input, stdio: ["pipe", "pipe", "pipe"], encoding: "utf8" }).stdout ?? "";
     }
   }
   return stdout;
@@ -315,6 +381,15 @@ if (argv[0] === "--help") {
     `Usage: claude [options]\n\nOptions:\n  --model <model>  Model\n${has ? "  --autocompact <tokens>  Compaction window\n" : ""}  -h, --help  Display help\n`,
   );
   process.exit(0);
+}
+
+if (process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT && argv.includes("--autocompact")) {
+  const gate = process.env.FAKE_CLAUDE_REJECT_GATE;
+  if (gate) writeFileSync(`${gate}.waiting`, "");
+  while (gate && !existsSync(gate)) await new Promise((resolve) => setTimeout(resolve, 20));
+  appendFileSync(process.env.FAKE_CLAUDE_REJECT_AUTOCOMPACT, `${JSON.stringify(argv)}\n`);
+  process.stderr.write("error: unknown option '--autocompact'\n");
+  process.exit(1);
 }
 
 if (argv[0] === "update") {
@@ -388,6 +463,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     process.stdin.on("data", (chunk) => { input += chunk; });
     process.stdin.on("end", () => resolve(input));
   });
+  if (argv.includes("--fork-session")) startListedMcpServers();
   if (argv.includes("--fork-session") && prompt.trimStart().startsWith("/compact")) {
     const file = (flag: string) => {
       const path = argAfter(flag);
@@ -396,7 +472,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     };
     if (process.env.FAKE_CLAUDE_COMPACT_DUMP) {
       writeDumpAtomic(process.env.FAKE_CLAUDE_COMPACT_DUMP, JSON.stringify({
-        pid: process.pid, argv, prompt, cwd: process.cwd(), mcpConfig: JSON.parse(file("--mcp-config") ?? "null"),
+        pid: process.pid, argv, env: process.env, prompt, cwd: process.cwd(), mcpConfig: JSON.parse(file("--mcp-config") ?? "null"),
         settings: JSON.parse(file("--settings") ?? "null"), systemPrompt: file("--append-system-prompt-file"),
         hookEnv: Object.keys(process.env).filter((key) => key.startsWith("OMB_HOOK_")),
       }, null, 2));
@@ -471,8 +547,20 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     process.stderr.write("fake setup answers failed\n");
     process.exit(1);
   }
+  // Every new thread asks its engine for a title (server/thread-title-generate.ts), so that call stays out of the captures
+  // below unless a test answers it: by FAKE_CLAUDE_TEXT_FILE or a FAKE_CLAUDE_TEXT_ROUTES marker. Otherwise it fails at
+  // once and the thread keeps its first-message title. Answered, it still never overwrites the turn dump.
+  const titleCall = prompt.includes("Reply with only a short title: 3 to 6 words");
+  const routes = process.env.FAKE_CLAUDE_TEXT_ROUTES;
+  const routed = () => {
+    try { return Object.keys(JSON.parse(readFileSync(routes!, "utf8"))).some((marker) => prompt.includes(marker)); } catch { return false; }
+  };
+  if (titleCall && !process.env.FAKE_CLAUDE_TEXT_FILE && !(routes && routed())) {
+    process.stderr.write("fake title failed\n");
+    replyText("fake title failed", 1, null);
+  }
   // Background one-shots never overwrite the shared turn dump; FAKE_CLAUDE_TEXT_DUMP records them.
-  const upkeepCall = /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);
+  const upkeepCall = titleCall || /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);
   const oneShotDump = process.env.FAKE_CLAUDE_TEXT_DUMP ?? (upkeepCall ? undefined : process.env.FAKE_CLAUDE_DUMP);
   if (oneShotDump) {
     writeDumpAtomic(
@@ -524,6 +612,7 @@ const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read
   ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
 let launchFiles: Record<string, unknown> | null = null;
 let turnRunning = false;
+let lateContextAnswer: object | true | null = null;
 let steered: string[] = [];
 let steeredMessages: JsonValue[] = [];
 const replayUserMessages = argv.includes("--replay-user-messages");
@@ -603,7 +692,9 @@ const startLateTurn = (): boolean => {
 
 const finishIfDone = () => {
   if (turnRunning) return;
+  runHooksAfterTurn();
   if (startLateTurn()) return;
+  if (hookBatchesWaiting > 0) return;
   if (stdinEnded) process.exit(0);
   if (process.env.FAKE_CLAUDE_EXIT_AFTER_TURN === "1") process.stdout.write("", () => process.exit(0));
   const gone = process.env.FAKE_CLAUDE_GONE_AFTER_TURN;
@@ -1005,8 +1096,16 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.stdout.write("this is not json\n{broken\n");
   }
 
+  if (mode === "oauth-expired-result") {
+    out({ type: "result", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: "OAuth session expired. Please sign in again.", total_cost_usd: runningCost.total });
+    turnRunning = false;
+    finishIfDone();
+    return;
+  }
+
   // A signed-out CLI's frames, as Claude Code 2.1.296 sends them: only the frame's own error fields mark the failure.
-  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
+  const signedOutNow = Boolean(process.env.FAKE_CLAUDE_SIGNED_OUT_FILE && existsSync(process.env.FAKE_CLAUDE_SIGNED_OUT_FILE));
+  if (mode === "not-logged-in" || signedOutNow || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
     if (process.env.FAKE_CLAUDE_AUTH_AFTER_WORK === "1") out({
       type: "assistant", message: { model: "claude-fixture", content: [{ type: "tool_use", id: "before-sign-out", name: "Bash", input: { command: "pwd" } }] },
     });
@@ -1096,6 +1195,35 @@ const playTurn = (prompt: JsonValue, late = false) => {
     finishIfDone();
   };
 
+  const script = streamScript(promptText(prompt));
+  if (script) {
+    const streamEvent = (event: unknown) => out({ type: "stream_event", event, parent_tool_use_id: null, session_id: sessionId });
+    playStreamScript(script, {
+      cancelled: () => false,
+      chunk: (step, piece) => streamEvent({ type: "content_block_delta", index: 0,
+        delta: "think" in step ? { type: "thinking_delta", thinking: piece } : { type: "text_delta", text: piece } }),
+      end: (step) => {
+        if ("say" in step) out({ type: "assistant", message: { content: [{ type: "text", text: step.say }], usage } });
+        if (!("tool" in step)) return;
+        const id = `tu-${process.pid}-${++toolUseCount}`;
+        out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: step.tool } }], usage } });
+        out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: "ok" }] } });
+      },
+      done: (failure) => {
+        if (failure) {
+          out({ type: "assistant", message: { model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text: failure }] }, error: "unknown", is_api_error_message: true });
+          out({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: failure });
+          turnRunning = false;
+          finishIfDone();
+          return;
+        }
+        if (steered.length) out({ type: "assistant", message: { content: [{ type: "text", text: `Noted: ${steered.join(" | ")}` }], usage } });
+        finish();
+      },
+    });
+    return;
+  }
+
   if (mode === "slow-write") {
     const total = Number(process.env.FAKE_CLAUDE_WRITE_BYTES) || 16_384;
     const stepMs = Number(process.env.FAKE_CLAUDE_WRITE_STEP_MS) || 100;
@@ -1162,7 +1290,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     emitPart(0);
     return;
   }
-  const scriptedToolCalls = turnToolCalls();
+  const scriptedToolCalls = turnToolCalls(markerText(steeredText(prompt)));
   if (scriptedToolCalls?.some((call) => call.hold)) {
     playHeldCalls(scriptedToolCalls, usage, () => {
       for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
@@ -1230,8 +1358,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
       replaySteered();
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
-      const gate = process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
-      if (!lateContinuation && gate && readFileSync(gate, "utf8").trim() === "fail") {
+      if (!lateContinuation && finishGate && readFileSync(finishGate, "utf8").trim() === "fail") {
         out({ type: "result", is_error: true, stop_reason: "error", result: "fixture turn failed" });
         turnRunning = false;
         finishIfDone();
@@ -1256,6 +1383,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 };
 
+if (process.env.FAKE_CLAUDE_LAUNCHES) appendFileSync(process.env.FAKE_CLAUDE_LAUNCHES, `${JSON.stringify({ pid: process.pid, argv: process.argv.slice(2) })}\n`);
 let buf = "";
 process.stdin.on("data", (c) => {
   buf += c;
@@ -1274,6 +1402,23 @@ process.stdin.on("data", (c) => {
       if (process.env.FAKE_CLAUDE_CONTROL_LOG) appendFileSync(process.env.FAKE_CLAUDE_CONTROL_LOG, `${line}\n`);
       continue;
     }
+    const control = prompt as { type?: unknown; request_id?: unknown; request?: { subtype?: unknown } } | null;
+    if (control?.type === "control_request" && control.request?.subtype === "mcp_reconnect" && process.env.FAKE_CLAUDE_MCP_RECONNECT) {
+      const refused = process.env.FAKE_CLAUDE_MCP_RECONNECT === "refuse";
+      if (!refused) appendFileSync(process.env.FAKE_CLAUDE_MCP_RECONNECT, `${line}\n`);
+      out({ type: "control_response", response: refused ? { subtype: "error", request_id: control.request_id, error: "Server not connected" } : { subtype: "success", request_id: control.request_id } });
+      continue;
+    }
+    if (control?.type === "control_request") {
+      const usage = control.request?.subtype === "get_context_usage" ? process.env.FAKE_CLAUDE_CONTEXT_USAGE : undefined;
+      const answer = { type: "control_response", response: usage
+        ? { subtype: "success", request_id: control.request_id, response: JSON.parse(usage) }
+        : { subtype: "error", request_id: control.request_id, error: `Unsupported control request subtype: ${String(control.request?.subtype)}`, error_code: "unsupported_request" } };
+      if (usage && process.env.FAKE_CLAUDE_CONTEXT_USAGE_LATE === "1" && !lateContextAnswer) { lateContextAnswer = answer; continue; }
+      if (lateContextAnswer && lateContextAnswer !== true) { out(lateContextAnswer); lateContextAnswer = true; }
+      out(answer);
+      continue;
+    }
     if (turnRunning || lateTurnWaiting) {
       if (process.env.FAKE_CLAUDE_LATE_STEER_GATE) lateSteers.push(prompt);
       else {
@@ -1281,12 +1426,18 @@ process.stdin.on("data", (c) => {
         steeredMessages.push(prompt);
       }
       if (process.env.FAKE_CLAUDE_STEER_RECEIVED) writeFileSync(process.env.FAKE_CLAUDE_STEER_RECEIVED, "received");
+      if (process.env.FAKE_CLAUDE_STEER_LOG) appendFileSync(process.env.FAKE_CLAUDE_STEER_LOG, `${JSON.stringify(steeredText(prompt))}\n`);
     } else {
       playTurn(prompt);
       armSteerGate();
     }
   }
 });
+const startupMs = Number(process.env.FAKE_CLAUDE_STARTUP_MS);
+if (startupMs > 0) {
+  process.stdin.pause();
+  setTimeout(() => process.stdin.resume(), startupMs);
+}
 process.stdin.on("end", () => {
   stdinEnded = true;
   finishIfDone();

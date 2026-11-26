@@ -16,7 +16,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
-import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
+import { CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import type { RoutineSchedule } from "../shared/routines.ts";
 import { workerPort } from "./testing/worker-port.ts";
@@ -439,6 +439,27 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     }
   }, 30_000);
 
+  it("tells a Boat bot without Boat that the saved VPS is not chosen for it, instead of only asking for Boat", async () => {
+    await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      rmSync(gateFile, { force: true }); rmSync(`${acpDump}.mcp.json`, { force: true });
+      await api("PATCH", `/api/bots/${bot.id}`, { browser: false, computer: null, modelSelection: { instanceId: "vps", model: "fake-model" } });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the remote computer" })).status).toBe(202);
+      await until(async () => existsSync(`${acpDump}.mcp.json`), "the turn");
+      const agents = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8")).find((tool: { name: string }) => tool.name === "agents");
+      const token = agents.env.find((entry: { name: string }) => entry.name === "OMB_COMMS_TOKEN").value;
+      const availability = await (await fetch(`${BASE}/api/internal/computer/select`, { headers: { authorization: `Bearer ${token}` } })).json() as any;
+      const cloud = availability.options.find((option: any) => option.surface === "cloud");
+      expect(cloud.available).toBe(false);
+      expect(cloud.reason).toContain("production-vps");
+      expect(cloud.reason).toContain("Self-hosted VPS");
+    } finally {
+      writeFileSync(gateFile, "open");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+    }
+  }, 30_000);
+
   it.each(["stopped", "missing", "stopped-during-turn"])(
     "lets Auto discover a %s VPS and start or create it through its chat tool",
     async state => {
@@ -682,7 +703,7 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
         expect(await gate(checkMount)).toEqual({ held: false, helpOpen: false });
         const started = Date.now();
         const contended = await gate(refillMount);
-        expect(contended).toEqual({ held: true, helpOpen: false, blockedReason: CONTROL_BUSY });
+        expect(contended).toMatchObject({ held: true, helpOpen: false, blockedReason: expect.stringMatching(/^Another thread is using this computer\. This call was not performed\. No screen or app state was checked\. This turn is 1st in line/) });
         expect(controlRefusal(contended)).not.toBe(CONTROL_REFUSAL_PLAIN);
         expect(Date.now() - started).toBeGreaterThanOrEqual(CALL_WAIT_MS - 200);
         // The chip may add a queue position and an estimate; the holder it names is what is under test.

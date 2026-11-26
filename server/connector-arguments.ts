@@ -37,9 +37,35 @@ function soleStringField(node: Json | null, root: Json): string | null {
   return typeOf(resolved(node!.properties[keys[0]!], root)) === "string" ? keys[0]! : null;
 }
 
-function parsedJson(text: string): unknown {
+function decimalValue(text: string): string | null {
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
+  if (!match) return null;
+  const fraction = match[3] ?? "";
+  const coefficient = (match[2] + fraction).replace(/^0+/, "");
+  if (!coefficient) return "0";
+  const digits = coefficient.replace(/0+$/, "");
+  const exponent = Number(match[4] ?? "0") - fraction.length + coefficient.length - digits.length;
+  if (!Number.isSafeInteger(exponent)) return null;
+  return `${match[1]}${digits}e${exponent}`;
+}
+
+export function preservesNumericText(text: string, value: number): boolean {
+  if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) return false;
+  const original = decimalValue(text);
+  return original !== null && original === decimalValue(String(value));
+}
+
+const UNSAFE_JSON_NUMBER = Symbol("unsafe-json-number");
+
+function parsedJson(text: string, expectedShape: "object" | "array"): unknown {
   try {
-    return JSON.parse(text);
+    let unsafe = false;
+    const parsed = JSON.parse(text, (_key: string, value: unknown, context?: { source?: string }) => {
+      if (typeof value === "number" && (context?.source === undefined || !preservesNumericText(context.source, value))) unsafe = true;
+      return value;
+    });
+    if (expectedShape === "array" ? !Array.isArray(parsed) : !isObject(parsed)) return undefined;
+    return unsafe ? UNSAFE_JSON_NUMBER : parsed;
   } catch {
     return undefined;
   }
@@ -52,7 +78,8 @@ function coerce(value: unknown, node: Json | null, root: Json, path: string, cha
     const items = resolved(node!.items, root);
     const field = soleStringField(items, root);
     if (typeof value === "string") {
-      const parsed = parsedJson(value);
+      const parsed = parsedJson(value, "array");
+      if (parsed === UNSAFE_JSON_NUMBER) return value;
       if (Array.isArray(parsed)) {
         changed.push(`${path} from text to a list`);
         return parsed.map((item, index) => coerce(item, items, root, `${path}[${index}]`, []));
@@ -79,7 +106,8 @@ function coerce(value: unknown, node: Json | null, root: Json, path: string, cha
     return value;
   }
   if (type === "object") {
-    const parsed = typeof value === "string" ? parsedJson(value) : undefined;
+    const parsed = typeof value === "string" ? parsedJson(value, "object") : undefined;
+    if (parsed === UNSAFE_JSON_NUMBER) return value;
     if (isObject(parsed)) changed.push(`${path} from text to an object`);
     const object = isObject(parsed) ? parsed : value;
     if (!isObject(object) || !isObject(node!.properties)) return object;
@@ -88,8 +116,10 @@ function coerce(value: unknown, node: Json | null, root: Json, path: string, cha
       [key, key in properties ? coerce(item, resolved(properties[key], root), root, `${path}.${key}`, changed) : item]));
   }
   if ((type === "number" || type === "integer") && typeof value === "string" && /^-?\d+(?:\.\d+)?$/.test(value.trim())) {
+    const number = Number(value.trim());
+    if (!preservesNumericText(value.trim(), number) || (type === "integer" && !Number.isInteger(number))) return value;
     changed.push(`${path} as a number`);
-    return Number(value.trim());
+    return number;
   }
   if (type === "boolean" && (value === "true" || value === "false")) {
     changed.push(`${path} as ${value}`);
@@ -123,7 +153,8 @@ export function fitArguments(args: unknown, schema: unknown): { args: unknown; c
   const root = resolved(schema, isObject(schema) ? schema : {});
   if (!root || typeOf(root) !== "object" || !isObject(root.properties)) return { args, changed: [] };
   const changed: string[] = [];
-  const parsed = typeof args === "string" ? parsedJson(args) : args;
+  const parsed = typeof args === "string" ? parsedJson(args, "object") : args;
+  if (parsed === UNSAFE_JSON_NUMBER) return { args, changed: [] };
   if (typeof args === "string" && isObject(parsed)) changed.push("the arguments from text to an object");
   if (!isObject(parsed)) return { args, changed: [] };
   const properties = root.properties;

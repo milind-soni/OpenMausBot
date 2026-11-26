@@ -19,12 +19,12 @@ it("makes one conversation for a double or triple click on New conversation", as
   let dispatch!: Dispatch<Action>;
   function Capture() { dispatch = useStore().dispatch; return null; }
   renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
-  for (let click = 0; click < 3; click++) dispatch({ type: "newTask", botId: "bot" });
+  for (let click = 0; click < 3; click++) dispatch({ type: "newTask", botId: "bot", cwd: "/work" });
   await flush();
   expect(requests.mock.calls.filter(([path]) => path === CREATE)).toHaveLength(1);
   answer();
   await flush();
-  dispatch({ type: "newTask", botId: "bot" });
+  dispatch({ type: "newTask", botId: "bot", cwd: "/work" });
   await flush();
   expect(requests.mock.calls.filter(([path]) => path === CREATE)).toHaveLength(2);
 });
@@ -60,8 +60,8 @@ it("tells a click that came while the conversation was being made that it was ma
   function Capture() { dispatch = useStore().dispatch; return null; }
   renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
   const created = vi.fn();
-  dispatch({ type: "newTask", botId: "bot", onCreated: created });
-  dispatch({ type: "newTask", botId: "bot", onCreated: created });
+  dispatch({ type: "newTask", botId: "bot", cwd: "/work", onCreated: created });
+  dispatch({ type: "newTask", botId: "bot", cwd: "/work", onCreated: created });
   await flush();
   answer();
   await flush();

@@ -27,8 +27,12 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "routines and automations": ["routines.", "automations."],
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
-  "Apps": ["apps.", "connectors."],
+  "Apps": ["apps.", "connectors.", "githubSignIn."],
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
+  "Settings's pages, its search and Devices": [
+    "settings.page.", "settings.scope.", "settings.place.", "settings.glance.", "settings.overview.", "settings.search.", "phone.pair.", "phone.reach.",
+    "devicesPage.",
+  ],
   "the Usage page and its traces": ["trace.", "usage.page."],
 };
 
@@ -45,7 +49,7 @@ const EVERYDAY_KEYS: Record<string, readonly string[]> = {
     "botOverview.line.computer", "botOverview.line.privateWorkspace", "botOverview.preference.cloud", "botOverview.preference.vm",
     "botSettings.replyStyle.conversationalHint", "voice.engine",
   ],
-  "adding and sharing a bot": ["newBot.presetKeeps", "presetShare.never"],
+  "adding and sharing a bot": ["newBot.presetKeeps", "template.neverShared", "template.arrives"],
   "signing in to an AI, the Cloud's own sign-in included": [
     "engineSetup.claude.description", "engineSetup.claude.connectedAccount", "engineSetup.device.description", "engineSetup.device.security",
     "engineSetup.device.connectedAccount", "engineSetup.device.failed", "engineSetup.device.enableHint", "engineSetup.grok.description",
@@ -56,7 +60,7 @@ const EVERYDAY_KEYS: Record<string, readonly string[]> = {
   ],
   "the Settings pages Simple mode shows": [
     "settings.diagnostics.subtitle", "settings.diagnostics.elsewhere", "settings.import.appsSubtitle", "settings.profiles.temporaryHint",
-    "settings.profiles.myChromeUnavailable", "remote.serverPairing.cloudPersonal", "remote.serverPairing.error",
+    "settings.profiles.myChromeUnavailable", "remote.serverPairing.error",
   ],
 };
 
@@ -81,18 +85,17 @@ const PENDING_WORDS: readonly Word[] = [
 ];
 
 const ALLOWED: Record<string, string> = {
-  "settings.section.desktopWorkspaces": "the Servers page shares its name with the app menu's Server menu; both change with the one-workspace switcher",
-  "settings.section.thisServer": "the title of a person's own server's Phone & devices page, seen only on that server's own pages",
+  "grokMove.connect.where": "names the Server URL field of Grok Bot's own form, where the link is pasted",
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",
   "sidebar.update.howOther": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
   "sidebar.update.howOtherRestart": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
-  "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
   "botAccess.tools.syntax": "the tool names people type, such as mcp:SERVER:NAME",
   "chat.notice.modelServerStoppedAnswering": "the person's model server at a named host, not the app's internal server",
   "rail.local": "the owner's own name for the ＋ choice that adds a workspace of this computer's own",
   "rail.localNumbered": "a new workspace's first name, which the person may change, in the owner's word for it",
+  "devicesPage.map.servers": "the device map's narrow column header, which the owner asked to keep short; the list under it says your own servers",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();

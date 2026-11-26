@@ -10,6 +10,8 @@ const GREETINGS: { en: Greeting } & Record<string, Greeting> = {
   "pt-br": (name, person) => `Oi${person ? ` ${person}` : ""}, eu sou ${name}. O que você gostaria que eu fizesse?`,
   ko: (name, person) => `안녕하세요${person ? `, ${person}님` : ""}. 저는 ${name}입니다. 무엇을 도와드릴까요?`,
   "zh-tw": (name, person) => `嗨${person ? ` ${person}` : ""}，我是 ${name}。你想要我幫你做什麼？`,
+  zh: (name, person) => `你好${person ? ` ${person}` : ""}，我是 ${name}。你希望我帮你做什么？`,
+  it: (name, person) => `Ciao${person ? ` ${person}` : ""}, sono ${name}. Cosa vorresti che facessi?`,
 };
 
 /** What the bot says the moment Set me up is pressed: no model is asked, so it is written here. */
@@ -19,6 +21,8 @@ const SETUP_REQUEST_LINES: { en: string } & Record<string, string> = {
   "pt-br": "Ótimo. Me conte com suas palavras em que você gostaria de ajuda e eu me preparo para isso. Por exemplo: \"organize minha caixa de entrada toda manhã\" ou \"pesquise nossos concorrentes toda semana\".",
   ko: "좋아요. 도움이 필요한 일을 편하게 말씀해 주시면 거기에 맞게 제가 설정할게요. 예: \"매일 아침 받은편지함 정리해 줘\", \"매주 경쟁사 조사해 줘\".",
   "zh-tw": "好的。用你自己的話告訴我想要幫忙的事，我會照著設定好自己。例如：「每天早上整理我的收件匣」或「每週研究我們的競爭對手」。",
+  zh: "好的。用你自己的话告诉我需要帮忙的事，我会照此设置好自己。例如：“每天早上整理我的收件箱”或“每周调研我们的竞争对手”。",
+  it: "Perfetto. Dimmi con parole tue in cosa vorresti aiuto e mi configurerò di conseguenza. Per esempio: «ordina la mia posta in arrivo ogni mattina» o «studia i nostri concorrenti ogni settimana».",
 };
 
 /** The answers a blank bot's greeting offers on its setup card. Picking one sets the bot up for its words, as
@@ -34,6 +38,10 @@ const SETUP_CHOICES: { en: readonly string[] } & Record<string, readonly string[
     "예약, 쇼핑, 심부름", "데이터, 스프레드시트, 보고서"],
   "zh-tw": ["研究與深入探討主題", "幫我留意各種事情", "電子郵件、行事曆和訊息",
     "預約、購物和跑腿", "資料、試算表和報告"],
+  zh: ["研究和深入探讨主题", "帮我留意各种事情", "电子邮件、日历和消息",
+    "预订、购物和跑腿", "数据、电子表格和报告"],
+  it: ["Ricerca e approfondimento di argomenti", "Tenere d'occhio le cose per me", "Email, calendario e messaggi",
+    "Prenotazioni, acquisti e commissioni", "Dati, fogli di calcolo e report"],
 };
 
 export function setupChoices(language?: string): string[] {

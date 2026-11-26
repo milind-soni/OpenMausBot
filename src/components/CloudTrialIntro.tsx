@@ -6,8 +6,10 @@ import { t } from "@/lib/i18n";
 import { LINK, Tag } from "./cloud-buy/parts";
 import { NoticeCard, NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 
-export function CloudTrialIntroCard({ offer, onStart, onHowTo, onSignIn, onNotNow, onDismiss }: {
+export function CloudTrialIntroCard({ offer, botsHere = false, onStart, onHowTo, onSignIn, onNotNow, onDismiss }: {
   offer: CloudOffer;
+  /** This computer has bots of its own: the card says where a bot lives. */
+  botsHere?: boolean;
   onStart: () => void; onHowTo: () => void;
   onSignIn?: () => void;
   onNotNow: () => void; onDismiss: () => void;
@@ -16,7 +18,7 @@ export function CloudTrialIntroCard({ offer, onStart, onHowTo, onSignIn, onNotNo
   if (!view) return null;
   return <NoticeCard titleId="cloud-intro-title" notice="cloud-intro" icon={Cloud} title={t("cloudIntro.title")} onDismiss={onDismiss}>
     <Tag className="mt-2">{view.badge}</Tag>
-    <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}</p>
+    <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}{botsHere && <> <span data-cloud-one-place="">{t("cloudBuy.onePlace")}</span></>}</p>
     <ul className="mt-2 flex flex-col gap-1.5 text-[13px] text-ink">
       {view.points.map(point => <li key={point} className="flex items-start gap-2"><Check size={14} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />{point}</li>)}
     </ul>

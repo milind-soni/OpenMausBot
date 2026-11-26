@@ -4,18 +4,24 @@
 // reconnect opens with the newest size and cap, and OpenMausBot's own messages are passed on.
 
 import { t } from "./i18n";
+import { serverFetch } from "./relay-server";
+
+/** Refusals before open a client that was connected takes as its server restarting: about 45 s with the backoff. */
+const RESTART_RETRIES = 8;
 
 /** The browser's host cannot run Chrome until it is set up; the close reason names the fix. */
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
 export const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
 
-/** A sandbox has no command to run, only steps for an administrator; missing libraries have one. */
+/** A sandbox has no command to run, only steps for an administrator; missing libraries have one, a container a setting. */
 export type PreviewStreamHostSetup =
   | { readonly need: "sandbox" }
-  | { readonly need: "libraries"; readonly command: string };
+  | { readonly need: "libraries" | "container"; readonly command: string };
 
 /** The server's LIBRARIES_COMMAND and SANDBOX_STEPS_URL: a close reason is too short to carry the link. */
 export const PREVIEW_STREAM_LIBRARIES_COMMAND = "sudo openmausbot browser install --with-deps";
+/** What a container's operator sets to run its browser without Chrome's own sandbox. */
+export const PREVIEW_STREAM_SANDBOX_OFF = "OMB_BROWSER_SANDBOX=0";
 export const PREVIEW_STREAM_SANDBOX_STEPS_URL =
   "https://github.com/milind-soni/OpenMausBot/blob/main/docs/deploy-vps.md#ubuntu-2404-browser-sandbox";
 
@@ -104,6 +110,11 @@ export type PreviewStreamInput =
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string }
   | { readonly type: "viewport"; readonly setting: PreviewViewportSetting }
   | { readonly type: "zoom"; readonly factor: number }
+  /** The installed extensions, for the Extensions menu; an extension's own page opens by its id only. */
+  | { readonly type: "extensions" }
+  | { readonly type: "openExtension"; readonly id: string }
+  /** The desktop app shows its native view of this browser over the panel: no frames are needed until it hides. */
+  | { readonly type: "covered"; readonly covered: boolean }
   | {
       readonly type: "mouse";
       readonly action: "move" | "down" | "up";
@@ -180,7 +191,7 @@ export async function uploadPreviewStreamFiles(
 ): Promise<void> {
   const body = new FormData();
   for (const file of files) body.append("file", file, file.name ?? "file");
-  const response = await fetch(chooser.uploadUrl, {
+  const response = await serverFetch(chooser.uploadUrl, {
     method: "POST",
     body,
     credentials: chooser.credentials ? "include" : "omit",
@@ -277,7 +288,7 @@ export interface PreviewStreamClient {
 /** A viewer that may operate sizes the page while it watches, and may restart or wake it; the person holding the browser
  * hands it back from any of their views; everything else needs control. */
 const allowed = (input: PreviewStreamInput, control: PreviewStreamControl): boolean =>
-  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || input.type === "wake"
+  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || input.type === "wake" || input.type === "covered"
   || (input.type === "releaseControl" && control.owned === true) || control.controller === "you";
 
 const ACK_MESSAGE = JSON.stringify({ type: "ack" });
@@ -287,6 +298,7 @@ export function createPreviewStreamClient(
 ): PreviewStreamClient {
   let cap = { width: target.maxWidth, height: target.maxHeight };
   let size = target.width !== undefined && target.height !== undefined ? { width: target.width, height: target.height } : null;
+  let covered = false;
   const streamUrl = () => {
     const query = new URLSearchParams({
       maxWidth: String(Math.max(1, Math.round(cap.width))),
@@ -303,6 +315,9 @@ export function createPreviewStreamClient(
   let socket: WebSocket | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let failures = 0;
+  /** A socket of this client opened once: a later refusal before open is the server restarting, for a while. */
+  let everOpened = false;
+  let unreachable = 0;
   let control: PreviewStreamControl | null = null;
   let fileChooser: string | null = null;
 
@@ -316,6 +331,8 @@ export function createPreviewStreamClient(
     ws.addEventListener("open", () => {
       if (socket !== ws) return;
       opened = true;
+      everOpened = true;
+      unreachable = 0;
       events.onConnectedChange(true);
     });
     ws.addEventListener("message", (event) => {
@@ -431,6 +448,8 @@ export function createPreviewStreamClient(
         // A size or cap the viewer asked for while this socket was opening reaches the server now.
         if (first && canOperate && cap !== opening.cap) ws.send(JSON.stringify({ type: "frameCap", maxWidth: cap.width, maxHeight: cap.height }));
         if (first && canOperate && size && size !== opening.size) ws.send(JSON.stringify({ type: "resize", ...size }));
+        // Each socket is a new view on the server, which starts uncovered.
+        if (first && canOperate && covered) ws.send(JSON.stringify({ type: "covered", covered: true }));
         events.onControl?.(nextControl);
       } else if (typeof type === "string") {
         events.onMessage?.(message as Record<string, unknown>);
@@ -453,8 +472,10 @@ export function createPreviewStreamClient(
         events.onHostSetup?.(decodeHostSetup(event.reason));
         return;
       }
-      // Rejected upgrades surface as 1006 before open for both cookies and tickets.
-      if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006)) {
+      // Rejected upgrades surface as 1006 before open for both cookies and tickets; so does a server that is restarting,
+      // which a client that was connected waits out before taking it as a refusal.
+      const restarting = !opened && event.code === 1006 && everOpened && ++unreachable <= RESTART_RETRIES;
+      if (event.code === 1008 || event.code === 4401 || (!opened && event.code === 1006 && !restarting)) {
         stopped = true;
         events.onUnauthorized();
         return;
@@ -470,6 +491,7 @@ export function createPreviewStreamClient(
     send: (input) => {
       if (input.type === "resize") size = { width: input.width, height: input.height };
       else if (input.type === "frameCap") cap = { width: input.maxWidth, height: input.maxHeight };
+      else if (input.type === "covered") covered = input.covered;
       if (socket?.readyState !== WebSocket.OPEN) return false;
       if (!control?.canOperate) return false;
       if (!allowed(input, control)) return false;
@@ -543,13 +565,17 @@ export function createPreviewFramePainter(
 const decodeHostSetup = (reason: string): PreviewStreamHostSetup => {
   try {
     // An older server's command for either need was `openmausbot browser setup`, which never existed.
-    if ((JSON.parse(reason) as { need?: unknown }).need === "libraries") return { need: "libraries", command: PREVIEW_STREAM_LIBRARIES_COMMAND };
+    const need = (JSON.parse(reason) as { need?: unknown }).need;
+    if (need === "libraries") return { need, command: PREVIEW_STREAM_LIBRARIES_COMMAND };
+    if (need === "container") return { need, command: PREVIEW_STREAM_SANDBOX_OFF };
   } catch {}
   return { need: "sandbox" };
 };
 
-/** What a viewer tells the person; beside it, the libraries `command` ready to copy or a link to the sandbox steps. */
+/** What a viewer tells the person; beside it, the `command` ready to copy or a link to the sandbox steps. */
 export const previewStreamHostSetupMessage = (setup: PreviewStreamHostSetup) =>
   setup.need === "sandbox"
     ? "This server's host blocks the sandbox its browser runs in. An administrator can allow it for one copy of Chrome with these steps, then try again:"
+    : setup.need === "container"
+    ? "Chrome's sandbox can't start in this server's container. Its operator can set this to run the browser without it and rely on the container's isolation, then restart OpenMausBot:"
     : "This server's host is missing libraries its browser needs. Run this once on the host, then try again:";

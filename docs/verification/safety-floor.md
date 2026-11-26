@@ -64,7 +64,7 @@ pnpm exec vitest run server/auto-approve.test.ts server/command-allowlist.e2e.te
   record the answer. Codex at Full access accepts a request inside the
   driver; with the floor on it raises a never-list command as a request
   instead, carrying the exact command, and goes on accepting every other one.
-  An ACP agent's kept "Always allow this session" repeats for an ordinary
+  An ACP agent's kept "Allow for this session" repeats for an ordinary
   command and asks again for a never-list one, and a legacy full-auto
   instance does not answer one by itself. Two cases join the driver to the
   fold's own check: a Codex request with no working directory and an ACP

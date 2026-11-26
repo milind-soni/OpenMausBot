@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { readSessionState } from "./session";
+import { forgetSharedSession } from "./session-reuse";
 
 export const SESSION_ENDED_REASON = "Your session ended. Pair this device again to keep using it.";
 const ENDED_KEY = "omb.session-ended";
@@ -10,6 +11,7 @@ const listeners = new Set<() => void>();
 
 /** A request was refused (401/403): asks the server once whether this device is still signed in. */
 export function noteRefusedRequest(): void {
+  forgetSharedSession();
   if (ended || checking) return;
   checking = readSessionState().then((state) => {
     if (state.kind !== "unauthenticated") return;

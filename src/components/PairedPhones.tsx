@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
@@ -19,118 +18,83 @@ export function phoneSubtitle(device: PhoneDevice, connected: boolean, e2eEnable
   if (device.route) parts.push(t("remote.devices.connected", { route: t(ROUTE_LABEL[device.route]) }));
   else if (connected) parts.push(e2eEnabled && !device.e2eAt ? t("remote.devices.connectedLegacy") : t("remote.devices.connectedNow"));
   else parts.push(t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) }));
-  if (e2eEnabled && device.routes === "local") parts.push(t("remote.devices.localOnly"));
+  if (e2eEnabled && device.routes === "local") parts.push(t("remote.devices.homeOrPrivate"));
   return parts.join(" · ");
 }
 
-export function PhoneRow({ device, connected, state, c, onRemoved, defaultOpen = false }: {
-  device: PhoneDevice;
-  connected: boolean;
-  state: CompanionState;
-  c: PhoneSetupController;
-  onRemoved: (name: string) => void;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const e2eEnabled = state.e2e?.enabled === true;
-  const live = connected || Boolean(device.route);
-  return (
-    <li className="border-t border-hairline/30 first:border-t-0">
-      <div className="flex items-center gap-2.5 px-3 py-3">
-        <span className="flex size-3 shrink-0 items-center justify-center" title={phoneSubtitle(device, connected, e2eEnabled)}>
-          <span className={`size-2 rounded-full ${live ? "bg-success" : "bg-ink-tertiary/40"}`} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[14px] font-medium text-ink">{device.name}</div>
-          <div className="truncate text-[12px] text-ink-secondary">{phoneSubtitle(device, connected, e2eEnabled)}</div>
-          {c.account?.paused && <div className="truncate text-[12px] text-ink-secondary">{t("remote.devices.paused")}</div>}
-        </div>
-        <button
-          onClick={() => setOpen((value) => !value)}
-          aria-expanded={open}
-          aria-label={t("remote.devices.more", { name: device.name })}
-          className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control"
-        >
-          <MoreHorizontal size={15} />
-        </button>
-      </div>
-      {open && (
-        <div className="flex flex-col gap-3 border-t border-hairline/30 px-3 py-3">
-          {e2eEnabled && (
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[12px] text-ink">{t("remote.devices.connectFrom")}</div>
-              <div role="radiogroup" aria-label={t("remote.devices.connectFrom")} className="flex rounded-lg bg-inset p-0.5 text-[12px]">
-                {(["any", "local"] as const).map((routes) => (
-                  <button
-                    key={routes}
-                    role="radio"
-                    aria-checked={(device.routes ?? "any") === routes}
-                    disabled={c.busy}
-                    onClick={() => void c.act((companion) => (companion.routes ? companion.routes(device.id, routes) : companion.state()))}
-                    className={`rounded-md px-2.5 py-1 ${(device.routes ?? "any") === routes ? "bg-card text-ink shadow-sm" : "text-ink-secondary"}`}
-                  >
-                    {routes === "any" ? t("remote.devices.anywhere") : t("remote.devices.localOnly")}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[12px] text-ink">{t("remote.devices.allowView")}</div>
-              <div className="mt-0.5 text-[11px] text-ink-secondary">{t("remote.devices.allowViewDetail")}</div>
-            </div>
-            <Switch
-              checked={device.cloudDesktopAccess}
-              aria-label={t("remote.devices.viewAria", { name: device.name })}
-              disabled={c.busy}
-              onClick={() => void c.act((companion) => companion.cloudDesktop(device.id, !device.cloudDesktopAccess))}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-[12px] text-ink">{t("remote.devices.allowBrowser")}</div>
-              <div className="mt-0.5 text-[11px] text-ink-secondary">{t("remote.devices.allowBrowserDetail")}</div>
-            </div>
-            <Switch
-              checked={device.browserControlAccess === true}
-              aria-label={t("remote.devices.browserAria", { name: device.name })}
-              disabled={c.busy}
-              onClick={() => void c.act((companion) => companion.browserControl(device.id, !device.browserControlAccess))}
-            />
-          </div>
-          <button
-            disabled={c.busy}
-            onClick={() => void c.act((companion) => companion.revoke(device.id)).then(() => onRemoved(device.name))}
-            aria-label={t("remote.devices.remove", { name: device.name })}
-            className="self-start text-[12px] text-danger hover:underline disabled:opacity-40"
-          >
-            {t("remote.devices.removePhone")}
-          </button>
-        </div>
-      )}
-    </li>
-  );
+/** "Same Wi-Fi · ● Connected", "Anywhere · ● Connected", "Last seen 2 hours ago": the route first, then a 6 px dot. */
+export function PhoneStatus({ device, connected }: { device: PhoneDevice; connected: boolean }) {
+  const route = device.route === "wifi" ? t("devices.route.wifi") : device.route === "relay" ? t("remote.devices.anywhere") : device.route === "tailscale" ? "Tailscale" : null;
+  if (!route && !connected) return <>{t("remote.devices.lastSeen", { when: relative(device.lastSeenAt) })}</>;
+  return <>{route && <>{route}{" · "}</>}<span aria-hidden="true" className="mr-1.5 inline-block size-1.5 rounded-full bg-success align-middle" />{t("remote.devices.connectedNow")}</>;
 }
 
-/** One grouped card: a dot, the name and one line per phone. Remove acts at once. */
-export function PairedPhones({ c, state }: { c: PhoneSetupController; state: CompanionState }) {
-  const [removed, setRemoved] = useState<string | null>(null);
-  const connected = new Set(state.connectedDeviceIds ?? []);
-  if (state.devices.length === 0 && !removed) return null;
+/** A paired phone's own controls, in its details: where it may connect from, cloud desktops and the browser, and Pair
+ * again for one with an older app. */
+export function PhoneControls({ device, c, onPairAgain, onChanged }: { device: PhoneDevice; c: PhoneSetupController; onPairAgain?: () => void; onChanged?: () => void }) {
+  const act = (ask: Parameters<PhoneSetupController["act"]>[0]) => void c.act(ask).then(() => onChanged?.());
+  const e2eEnabled = c.state?.e2e?.enabled === true;
+  const retired = c.account?.tunnelRetired && !device.e2eAt;
   return (
-    <>
-      {state.devices.length > 0 && (
-        <ul className="rounded-xl border border-hairline/40 bg-card">
-          {sortPhones(state.devices, connected).map((device) => (
-            <PhoneRow key={device.id} device={device} connected={connected.has(device.id)} state={state} c={c} onRemoved={setRemoved} />
-          ))}
-        </ul>
+    <div data-phone-controls={device.id} className="flex flex-col gap-3">
+      {c.account?.paused && <p className="text-[12px] leading-4 text-ink-secondary">{t("remote.devices.paused")}</p>}
+      {retired && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="flex min-w-0 flex-1 items-start gap-1.5 text-[12px] leading-4 text-warning" data-phone-retired="" title={t("remote.devices.retired")}>
+            <span aria-hidden="true" className="mt-[5px] size-1.5 shrink-0 rounded-full bg-warning" />
+            <span>{t("remote.devices.retiredShort")}</span>
+          </p>
+          {onPairAgain && <button type="button" className="ui-button shrink-0" data-pair-again="" onClick={onPairAgain}>{t("remote.devices.pairAgain")}</button>}
+        </div>
       )}
-      {removed && (
-        <div role="status" className="mt-2 text-[12px] text-ink-secondary">{t("remote.devices.removed", { name: removed })}</div>
+      {e2eEnabled && (
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[14px] leading-5 text-ink">{t("remote.devices.connectFrom")}</div>
+          <div role="radiogroup" aria-label={t("remote.devices.connectFrom")} className="inline-flex h-7 items-center rounded-full bg-ink/[0.05] p-0.5">
+            {(["any", "local"] as const).map((routes) => (
+              <button
+                key={routes}
+                type="button"
+                role="radio"
+                aria-checked={(device.routes ?? "any") === routes}
+                disabled={c.busy}
+                data-phone-routes={routes}
+                onClick={() => act((companion) => (companion.routes ? companion.routes(device.id, routes) : companion.state()))}
+                className={`h-6 cursor-pointer rounded-full px-3 text-[13px] leading-5 ${(device.routes ?? "any") === routes ? "bg-menu font-medium text-ink shadow-[inset_0_0_0_0.5px_var(--settings-edge)]" : "text-ink-secondary"}`}
+              >
+                {routes === "any" ? t("remote.devices.anywhere") : t("remote.devices.homeOrPrivate")}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
-    </>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[14px] leading-5 text-ink">{t("remote.devices.desktopsTitle")}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">{t("remote.devices.desktopsLine")}</div>
+        </div>
+        <Switch
+          checked={device.cloudDesktopAccess}
+          aria-label={t("remote.devices.desktopsAria", { name: device.name })}
+          disabled={c.busy}
+          data-phone-cloud-desktop=""
+          onClick={() => act((companion) => companion.cloudDesktop(device.id, !device.cloudDesktopAccess))}
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[14px] leading-5 text-ink">{t("remote.devices.browserTitle")}</div>
+          <div className="mt-0.5 text-[13px] leading-[18px] text-ink-secondary">{t("remote.devices.browserLine")}</div>
+        </div>
+        <Switch
+          checked={device.browserControlAccess === true}
+          aria-label={t("remote.devices.browserUseAria", { name: device.name })}
+          disabled={c.busy}
+          data-phone-browser=""
+          onClick={() => act((companion) => companion.browserControl(device.id, !device.browserControlAccess))}
+        />
+      </div>
+    </div>
   );
 }
 

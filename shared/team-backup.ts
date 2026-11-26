@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mascotFaceColorSchema } from "./bot-avatar.ts";
+import { mascotBodyColorSchema, mascotFaceColorSchema, mascotMaterialSchema } from "./bot-avatar.ts";
 
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
@@ -122,6 +122,8 @@ const backupSchema = z.object({
     mascotExpression: z.string().max(80).optional(),
     mascotBody: z.string().max(40).optional(),
     mascotFaceColor: mascotFaceColorSchema.optional(),
+    mascotBodyColor: mascotBodyColorSchema.optional(),
+    mascotMaterial: mascotMaterialSchema.optional(),
     chiefOfStaff: z.boolean(),
     hidden: z.boolean(),
     playbooks: z.array(playbook).max(200),
@@ -149,7 +151,7 @@ const backupSchema = z.object({
     target: z.enum(["bot", "room-goal"]), botId: key, groupId: key.optional(),
     runOn: z.enum(["maus", "cloud"]), schedule,
     durationMinutes: z.number().finite().positive(),
-    timeoutMinutes: z.number().int().min(5).max(240).optional(),
+    timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
     checks: z.array(z.enum(["calendar", "mail", "runs"])).max(3).optional(),
     access: z.literal("read-and-draft").optional(),
     deliver: z.literal("brief").optional(),

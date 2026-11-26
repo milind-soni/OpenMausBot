@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
+import { retryOnWindowsFileLock, transientWindowsFileError } from "./antigravity-runtime.ts";
 
 const UNPACK_PREFIX = "_MEI";
 const CLAIM_PREFIX = ".omb-removing-";
@@ -246,21 +247,45 @@ async function claimAndRemove(directory: string, countBytes: boolean): Promise<n
   }
   const { bytes } = countBytes ? await folderBytes(claimed) : { bytes: 0 };
   try {
-    await rm(claimed, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    // Retry the whole folder, never inside it: Node's maxRetries repeats at every folder level, so one file it
+    // may never delete (EPERM on Windows) is tried (retries+1)^depth times while abandoned siblings keep running.
+    await retryOnWindowsFileLock(() => rm(claimed, { recursive: true, force: true }), {
+      attempts: 4,
+      delayMs: 200,
+      retryable: retryableRemoveError,
+    });
     return bytes;
   } catch {
     return null;
   }
 }
 
-const sweeps = new Map<string, Promise<number>>();
+/** Node's own rm retries also covered running out of file handles; keep that for the whole-folder retry. */
+function retryableRemoveError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null ? Reflect.get(error, "code") : undefined;
+  return code === "EMFILE" || code === "ENFILE" || transientWindowsFileError(error);
+}
 
-/** Touches nothing outside dataDir/tmp/agy/<instance>. */
+const sweeps = new Map<string, Promise<number>>();
+const sweepsAfter = new Map<string, Promise<number>>();
+
+/** Touches nothing outside dataDir/tmp/agy/<instance>. A sweep asked for while one runs scans again once it ends, since a
+ * folder whose process ended during that scan was already passed over; every such request shares that one scan. */
 export function sweepAntigravityTemp(instanceId: string, options: AntigravityTempOptions = {}): Promise<number> {
   const dataDir = options.dataDir ?? DATA_DIR;
   const key = antigravityTempDir(dataDir, instanceId);
   const running = sweeps.get(key);
-  if (running) return running;
+  if (running) {
+    let after = sweepsAfter.get(key);
+    if (!after) {
+      after = running.catch(() => 0).then(() => {
+        sweepsAfter.delete(key);
+        return sweepAntigravityTemp(instanceId, options);
+      });
+      sweepsAfter.set(key, after);
+    }
+    return after;
+  }
   const sweep = (async () => {
     const isAlive = options.isAlive ?? processIsAlive;
     let removed = 0;

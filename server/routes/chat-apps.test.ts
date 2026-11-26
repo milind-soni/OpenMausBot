@@ -112,6 +112,30 @@ describe("GET /api/threads/:threadId/messages/:messageId/app", () => {
   });
 });
 
+describe("GET /api/threads/:threadId/messages/:messageId/app/download", () => {
+  it("hands a bot's page over as an opaque download, never as a page to render", async () => {
+    const { bot, page, base } = await fixture();
+    const response = await fetch(`${base}/api/threads/${bot.threadId}/messages/${page()}/app/download`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("content-disposition")).toMatch(/^attachment; filename="Hello\.html"/);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-security-policy")).toBe("sandbox");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.text()).toContain("<p>Hello</p>");
+  });
+
+  it("refuses a folder page with files beside it, an MCP app, another conversation's row and a bad version", async () => {
+    const { bot, other, get, page, mcpRow, folderPage } = await fixture();
+    const id = page();
+    const path = (threadId: string, messageId: string) => `/api/threads/${threadId}/messages/${messageId}/app/download`;
+    expect((await get(path(bot.threadId, await folderPage(bot.threadId)))).body).toMatchObject({ errorKey: "serverError.page.downloadHasFiles" });
+    expect((await get(path(bot.threadId, mcpRow()))).status).toBe(409);
+    expect((await get(path(other.threadId, id))).status).toBe(404);
+    expect((await get(`${path(bot.threadId, id)}?rev=x`)).status).toBe(400);
+  });
+});
+
 describe("POST /api/bots/:botId/apps/:messageId/context", () => {
   it("keeps the app's context on its row", async () => {
     const { store, bot, post, page } = await fixture();

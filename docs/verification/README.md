@@ -56,10 +56,10 @@ Use only mapped, tested commands:
 - [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Bots changing app settings, and the guards Full access cannot skip](app-settings.md)
 - [Gmail draft creation, send approval and revision](gmail-drafts.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
 - [The safety floor: a never-list no grant can allow](safety-floor.md)
-- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Computer panel focus hand-off](computer-panel-focus.md)
@@ -68,9 +68,13 @@ Use only mapped, tested commands:
 - [Native dictation retention and send-to-stop](dictation.md)
 - [Proactive routines and the brief](proactive-routines.md)
 - [Waits: tell me when, with no AI while waiting](waits.md)
+- [Check-backs: a bot comes back later by itself](check-backs.md)
+- [Hand-off status: who's working on what](handoff-status.md)
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
 - [Pages and apps in a room](room-pages.md)
+- [Published apps](published-apps.md)
+- [Included app hosting](included-hosting.md)
 - [The Inbox on every plan](inbox.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
@@ -81,12 +85,15 @@ Use only mapped, tested commands:
 - [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
 - [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
+- [Pi shell timeout bounds and recovery after tool errors](pi-shell-timeouts.md)
 - [Cline engine and native loopback qualification](cline.md)
+- [Grok steering a running turn](grok-steering.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
 - [Codex browser routing and native search](codex-browser-routing.md)
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
+- [Kimi subscription and Platform model selection](kimi-models.md)
 - [Team backups](team-backups.md)
 - [Sharing a whole team](team-sharing.md)
 - [The organization library](org-library.md)
@@ -101,6 +108,7 @@ Use only mapped, tested commands:
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
 - [Who can see, chat with and change each team bot](team-bot-access.md)
+- [The Team Board with a real model](team-board.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
@@ -141,6 +149,11 @@ and a synthetic OAuth provider in a disposable workspace.
 The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
+
+The [bot contact cards fixture](bot-contact-cards.md) checks the AgentMail,
+AgentPhone, Vapi and Telnyx cards: a pasted key that is refused, replaced and
+deleted on Disconnect, kept in a header and out of every listing, against a
+loopback stand-in for Vapi.
 
 The [Postiz fixture](postiz.md) checks the Apps page's Postiz card in the Social
 category: Postiz Cloud's sign-in and an API key for a person's own Postiz, the
@@ -217,6 +230,11 @@ instructions, history restore, skill/memory refresh, and stale-response isolatio
 The [hosted Slack management fixture](hosted-slack-management.md) checks the
 agent settings link to Admin: hosted-only availability, the member-readable
 route module, and stale-response isolation.
+
+The [Slack for Team Clouds fixture](team-slack.md) checks a Slack message handed over with a member's own session:
+a channel's shared conversation, a direct message's private chat, who may ask and stop, and the signed reports a
+stand-in Admin takes; and the same on a My Cloud, where both are the owner's ordinary conversations. It reaches no
+Slack workspace and no real Admin.
 
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
@@ -333,6 +351,9 @@ desktop routing, cancellation, and computer authority cleanup.
 The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
 voice selection and WAV synthesis against an offline provider in an isolated
 server, with manual steps for real Google access and playback.
+The [DeepSeek speech fixture](deepseek-speech.md) checks the shared DeepSeek
+key, the Stella/Tide choice, WAV synthesis and DeepSeek transcription against an
+offline provider in an isolated server.
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility

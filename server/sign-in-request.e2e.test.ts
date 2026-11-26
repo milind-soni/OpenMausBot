@@ -12,7 +12,7 @@ const ASKED_REPLY = "I asked you to sign in to example.com; I will continue once
 const SIGNED_IN_REPLY = "You are signed in, so I opened the dashboard.";
 
 /** A server whose bot asks for a sign-in on its first turn and reports the dashboard on its second. */
-async function signInFixture() {
+async function signInFixture(ask: Record<string, unknown> = { site: "https://www.example.com/dashboard", reason: "The dashboard is behind a login." }) {
   const tools = mkdtempSync(join(tmpdir(), "omb-sign-in-e2e-"));
   const binaryPath = join(tools, "agent-browser");
   // Answers the saved-login check the mount makes; every other command succeeds silently.
@@ -40,7 +40,7 @@ async function signInFixture() {
     const bot = (await api("POST", "/api/bots", { name: "Signer" })).body.bot;
     expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser" })).status).toBe(200);
     writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [
-      { steps: [{ tool: "request_sign_in", arguments: { site: "https://www.example.com/dashboard", reason: "The dashboard is behind a login." } }],
+      { steps: [{ tool: "request_sign_in", arguments: ask }],
         reply: ASKED_REPLY },
       { reply: SIGNED_IN_REPLY },
     ] } }));
@@ -113,6 +113,37 @@ it.skipIf(process.platform === "win32")("a reply in the chat answers the sign-in
       .toMatchObject({ status: 409, body: { error: "this sign-in request was already answered in the chat" } });
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(evidence()).toHaveLength(2);
+  } finally {
+    await close();
+  }
+}, 90_000);
+
+it.skipIf(process.platform === "win32")("hands one step to the person with the bot's instruction, and resumes the bot with done, the note and a request to look again", async () => {
+  const instruction = "Solve the human check on the open page.";
+  const { bot, api, evidence, messages, send, wait, stream, close } = await signInFixture({ instruction, kind: "captcha", target: "browser" });
+  try {
+    await send("Check my example.com dashboard.");
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(1);
+    const call = evidence()[0].evidence.find((entry: any) => entry.step?.tool === "request_sign_in");
+    expect(call.response.result.isError).toBeFalsy();
+    expect(call.response.result.content[0].text).toContain(`Waiting for the person. Asked them on your built-in browser: ${JSON.stringify(instruction)} The request expires in 30 minutes.`);
+
+    await expect.poll(async () => (await messages()).some((message) => message.text === ASKED_REPLY), { timeout: 15_000 }).toBe(true);
+    const cards = (await messages()).filter((message) => message.kind === "signin");
+    expect(cards).toHaveLength(1);
+    expect(cards[0].signIn).toMatchObject({ instruction, need: "captcha", place: "browser", site: "", url: "" });
+    expect(cards[0].signIn.expiresAt).toBeGreaterThan(Date.now() + 25 * 60_000);
+    const notices = stream.frames.filter((frame) => frame.kind === "notify" && frame.notification?.kind === "sign-in");
+    expect(notices.map((frame) => [frame.notification.title, frame.notification.body])).toEqual([["Signer is waiting for you", instruction]]);
+    expect(await wait()).toBe("needs-user");
+
+    expect(await api("POST", `/api/bots/${bot.id}/sign-in-cards/${cards[0].id}/done`, { threadId: bot.threadId, note: "Ticked the box twice" }))
+      .toMatchObject({ status: 200, body: { done: true, resumed: true } });
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(2);
+    expect(asked(evidence()[1])).toContain("outcome done");
+    expect(asked(evidence()[1])).toContain("Ticked the box twice");
+    expect(asked(evidence()[1])).toContain("Re-read the page first");
+    expect((await messages()).find((message) => message.id === cards[0].id)?.signIn).toMatchObject({ done: true, resumed: true, note: "Ticked the box twice" });
   } finally {
     await close();
   }

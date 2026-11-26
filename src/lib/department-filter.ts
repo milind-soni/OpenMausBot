@@ -2,7 +2,7 @@ import type { Bot } from "@/state/store";
 
 export const GENERAL_DEPARTMENT = "\u0000general";
 
-export function filterableDepartments(bots: readonly Bot[], order: readonly string[]): { names: string[]; hasGeneral: boolean } {
+export function filterableDepartments(bots: readonly Pick<Bot, "hidden" | "section">[], order: readonly string[]): { names: string[]; hasGeneral: boolean } {
   const visible = bots.filter((bot) => !bot.hidden);
   const used = new Set(visible.map((bot) => bot.section).filter((name): name is string => Boolean(name)));
   return { names: order.filter((name) => used.has(name)), hasGeneral: visible.some((bot) => !bot.section) };

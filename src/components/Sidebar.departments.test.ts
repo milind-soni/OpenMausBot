@@ -38,6 +38,7 @@ vi.mock("./DesktopCapabilities", async () => {
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
@@ -48,10 +49,11 @@ import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId } from "@/lib/sideb
 import { SIDEBAR_DENSITY_KEY } from "@/lib/sidebar-preferences";
 import { PHONE_LAYOUT } from "@/lib/use-media-query";
 import { BotContextMenu, BotListItem, Sidebar, TeamMenuItems } from "./Sidebar";
+const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { NEW_DEPARTMENT } from "./SidebarBotDrag";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { TeamDialog } from "./TeamDialog";
+import { TeamDialog } from "./lazy-screens";
 
 const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
   id, threadId: `${id}-thread`, name: id, title: "", description: "", notifications: true,
@@ -73,7 +75,7 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
 }
 function render() {
   fixture.index = 0;
-  const root = Sidebar({ open: false, onClose: () => {} }) as ReactElement<Props>;
+  const root = drawSidebar({ open: false, onClose: () => {} }) as ReactElement<Props>;
   return [root, ...nodes(root.props.children)];
 }
 const rows = () => render().filter((node) => node.type === BotListItem).map((node) => node.props as unknown as RowProps);
@@ -348,24 +350,24 @@ describe("bots that are working or waiting on the person", () => {
     fixture.state = { ...fixture.state, bots: fixture.state.bots.map((item) => (item.id === id ? { ...item, ...extra } : item)) };
   };
 
-  it("move to the top of their own list, in the person's order, and go back when done", () => {
+  it("keep their place in their own list while they work or wait, and after", () => {
     busy("cleo", { busy: true });
     busy("bea", { activity: "waiting-on-you" });
     busy("echo", { busy: true });
-    expect(listed()).toEqual(["bea", "cleo", "atlas", "echo", "dodo"]);
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
     busy("cleo", { busy: false });
     busy("bea", { activity: "idle" });
     busy("echo", { busy: false });
     expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
   });
 
-  it("count a working thread, but not a wait on a teammate", () => {
+  it("keep their place for a working thread too", () => {
     busy("cleo", { tasks: [{ threadId: "c1", title: "Run", createdAt: 1, busy: true } as Task] });
     busy("bea", { waitingForTeammates: true });
-    expect(listed()).toEqual(["cleo", "atlas", "bea", "dodo", "echo"]);
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
   });
 
-  it("never store the shown order: Alt+Up/Down and drops use the person's own order", () => {
+  it("Alt+Up/Down and drops use the person's own order, a working bot in its place", () => {
     busy("cleo", { busy: true });
     row("atlas").botDrag!.step("atlas", 1);
     expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);

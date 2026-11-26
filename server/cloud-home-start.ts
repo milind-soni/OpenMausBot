@@ -13,9 +13,10 @@ import {
 } from "./cloud-home.ts";
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
+import { BROWSER_CGROUP_ENV, prepareBrowserCgroup, spawnInCgroup } from "./browser/memory-cgroup.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
-import { OOM_SCORE, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
-import { restartPolicy } from "./restart.ts";
+import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
+import { restartLine, restartPolicy } from "./restart.ts";
 
 const SERVICE_USER = "maus";
 const SECRETS_FD = 3;
@@ -33,15 +34,40 @@ export function passwdIds(passwd: string, name: string): { uid: number; gid: num
  * gives the server belongs here too (docker-image.test.ts checks): without OMB_DUCKDB_DIR the server found neither the
  * 1Password SDK nor DuckDB, which the image keeps in /app/duckdb, and said 1Password was "not available in this build". */
 const SERVER_ENV_NAMES = new Set([
+  // Antigravity accounts with no runtime of their own run Google's native CLI (server/drivers/antigravity-cli-install.ts):
+  // the Admin or a test home sets it, and without the name here a Cloud home could never turn it on.
+  "OMB_ANTIGRAVITY_NATIVE_CLI",
   "PATH", "SHELL", "HOSTNAME", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "NO_COLOR", "NODE_ENV", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
   "AGENT_BROWSER_EXECUTABLE_PATH", "OMB_STATIC_DIR", "OMB_DATA_DIR", "OMB_DUCKDB_DIR",
   "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
-  "OMB_CLOUD_TEAM_ID", "OMB_CLOUD_TEAM_NAME", "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_CLOUD_X_URL", "OMB_TTS_DEFAULT_VOICE",
-  "OMB_COMPOSIO_BROKER_URL",
+  "OMB_CLOUD_TEAM_ID", "OMB_CLOUD_TEAM_NAME", "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_CLOUD_X_URL", "OMB_CLOUD_HOSTING_URL", "OMB_TTS_DEFAULT_VOICE",
+  "OMB_COMPOSIO_BROKER_URL", "OMB_COMPOSIO_BROKER",
+  // Ended engine sessions' prune (server/host/engine-session-sweep.ts), off unless the Admin sets it.
+  "OMB_ENGINE_SESSION_SWEEP",
+  // The addresses a home answered at before it moved to another provider, which still forward to it.
+  "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
+  "OMB_CACHE_ROOT",
+  // Their cap (server/cache-sweep/limits.ts): the sweeper's switch, off unless the Admin turns it on, and the caps' overrides.
+  "OMB_CACHE_SWEEP", "OMB_CACHE_CAP_TOOLS", "OMB_CACHE_CAP_APP",
+  // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
+  "OMB_IMAGE_ENGINES",
+  // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
+  "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP", "OMB_THREAD_LOG_CUT",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.
+  "OMB_TASK_WORKSPACE_RETENTION",
+  // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
+  "OMB_CONVERSATION_FOLDER_CLEANUP",
+  // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
+  "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
+  // The idle reclaim's switch (server/host/idle-reclaim.ts): off, report or remove, set per home by the Admin.
+  "OMB_IDLE_RECLAIM",
+  // The full tool results' day-old sweep (server/host/tool-results-sweep.ts), off unless the Admin sets it.
+  "OMB_TOOL_RESULTS_SWEEP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
@@ -70,6 +96,32 @@ export function edgeTerminatesTls(env: NodeJS.ProcessEnv): boolean {
   const raw = env.OMB_CLOUD_EDGE_TLS?.trim() ?? "";
   if (raw !== "" && raw !== "0" && raw !== "1") invalidEdge("OMB_CLOUD_EDGE_TLS must be 1 (the home serves HTTPS on its own domain) or 0");
   return raw === "1";
+}
+
+/** ZeroSSL's ACME directory: Caddy makes the account there itself from an address, so the fallback needs no sign-up or key. */
+const ZEROSSL_ACME_DIRECTORY = "https://acme.zerossl.com/v2/DV90";
+/** The fallback account's address, as the Caddy option it becomes: plain ASCII, nothing Caddy would read as more. */
+const ACME_EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+/**
+ * What Caddyfile.tls gets for OMB_CLOUD_EDGE_CERT_ISSUERS, when the home ends TLS itself: nothing (Caddy's default, Let's
+ * Encrypt alone) until OMB_CLOUD_EDGE_ACME_EMAIL names the account for a fallback CA. Then Let's Encrypt first and ZeroSSL
+ * after it, tried only when Let's Encrypt has just refused that certificate (50 new ones a week per registered domain).
+ * Let's Encrypt keeps today's account, which has no address; only the fallback gets it. Either certificate stays on the
+ * volume and is served and renewed from there, whichever CA issued it. OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY=1 uses the
+ * fallback alone: for a live check that it issues (the Admin never sets it).
+ */
+export function edgeCertIssuers(env: NodeJS.ProcessEnv): string {
+  const email = env.OMB_CLOUD_EDGE_ACME_EMAIL?.trim() ?? "";
+  const only = env.OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY?.trim() ?? "";
+  if (only !== "" && only !== "0" && only !== "1") invalidEdge("OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY must be 1 (only the fallback CA issues, for a live check of it) or 0");
+  if (!email) {
+    if (only === "1") invalidEdge("OMB_CLOUD_EDGE_ACME_FALLBACK_ONLY needs OMB_CLOUD_EDGE_ACME_EMAIL: the fallback CA's account address");
+    return "";
+  }
+  if (email.length > 254 || !ACME_EMAIL.test(email)) invalidEdge("OMB_CLOUD_EDGE_ACME_EMAIL must be one plain address, such as certificates@example.com");
+  const fallback = `cert_issuer acme ${ZEROSSL_ACME_DIRECTORY} {\n\temail ${email}\n}`;
+  return only === "1" ? fallback : `cert_issuer acme\n${fallback}`;
 }
 
 /**
@@ -225,7 +277,7 @@ export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.
     // A plan whose home sleeps: requests wait this long for the server while it starts (deploy/fly/Caddyfile). Unset: 0s.
     OMB_CLOUD_EDGE_HOLD: edgeHold(env.OMB_CLOUD_EDGE_HOLD),
     ...edgeClientAddress(env),
-    ...(edgeTerminatesTls(env) ? { OMB_CLOUD_EDGE_STORAGE: edgeCertificateStorage(home) } : {}),
+    ...(edgeTerminatesTls(env) ? { OMB_CLOUD_EDGE_STORAGE: edgeCertificateStorage(home), OMB_CLOUD_EDGE_CERT_ISSUERS: edgeCertIssuers(env) } : {}),
   };
   return { server, edge, edgeFiles: edgeConfigFiles(env), tunnelToken: edgeTunnelToken(env), secrets: cloudHomeSecrets(env), dropped };
 }
@@ -367,6 +419,8 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   const env = root ? { ...processEnv, ...readCloudSecretsFile(home) } : processEnv;
   const config = cloudHomeConfiguration(env);
   if (!config) throw new Error("This image runs a My Cloud machine for MausBot Cloud; set its boot contract (docs/cloud-pro.md).");
+  // Linux hands orphans to process 1, and Node waits only for the children it started.
+  if (process.pid === 1) console.warn("cloud home: this supervisor is process 1, so nothing collects the processes bots leave behind and they pile up as zombies. Keep the image's entrypoint (tini), or start the container with --init.");
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const { server, edge, edgeFiles, tunnelToken, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
@@ -377,6 +431,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
     if (protectSupervisor()) console.log("cloud home: the supervisor is never stopped for memory");
+    protectInit();
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
     if (stat.uid !== ids.uid || stat.gid !== ids.gid) chownSync(home, ids.uid, ids.gid);
@@ -404,29 +459,40 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   }
   // Names only, never values: what the server does not get from here.
   if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
+  // The bots' Chrome under a memory limit the kernel enforces (browser/memory-cgroup.ts); the server is started in its own
+  // leaf beside it. Root only: nothing changes where it can't be set up.
+  const browserLimit = ids && process.platform === "linux" ? prepareBrowserCgroup(env, boxMemory().bytes, ids) : null;
+  if (browserLimit) console.log(`cloud home: ${browserLimit.line}`);
+  const browserGroup = browserLimit?.group ?? null;
+  if (browserGroup) server[BROWSER_CGROUP_ENV] = browserGroup.browsers;
+  const inServerGroup = <T>(start: () => T): T => browserGroup ? spawnInCgroup(browserGroup.server, browserGroup.base, start) : start();
   const children: ChildProcess[] = [];
-  let stopping = false;
+  let stopping = false, restartTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = (failed: boolean) => {
     if (stopping) return;
     stopping = true;
+    if (restartTimer) clearTimeout(restartTimer);
     process.exitCode = failed ? 1 : 0;
     for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
     const force = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill("SIGKILL"); }, 20_000);
     force.unref();
   };
-  const watch = (child: ChildProcess, again?: (code: number | null) => boolean) => {
+  const watch = (child: ChildProcess, again?: (code: number | null, signal: NodeJS.Signals | null) => boolean) => {
     children.push(child);
     child.once("error", () => stop(true));
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       children.splice(children.indexOf(child), 1);
-      if (!again?.(code)) stop(true);
+      if (!again?.(code, signal)) stop(true);
     });
   };
   const policy = restartPolicy();
   const runServer = () => {
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code) => {
-      if (!policy.again(code, stopping)) return false;
-      runServer();
+    if (stopping) return;
+    watch(inServerGroup(() => spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids))), (code, signal) => {
+      if (!policy.again(code, stopping, signal)) return false;
+      console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
+      if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());
+      else runServer();
       return true;
     });
   };

@@ -1,6 +1,8 @@
-import type { WireBot } from "../../shared/wire.ts";
-import type { BotLimit } from "../host/starter-bot-limit.ts";
+import { z } from "zod";
+
+import type { BotCreateResponse, WireBot } from "../../shared/wire.ts";
 import { freshLook } from "../bot-look.ts";
+import { LINK_PREFIX } from "../bot-link/protocol.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { parseVisibility } from "../bot-visibility.ts";
@@ -12,7 +14,7 @@ import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import { journalMemoryWrite } from "../memory-journal.ts";
 import { resolveBotCreationDefaults } from "../new-bot-defaults.ts";
 import { PRESET_UNAVAILABLE_MESSAGE, applyPresetToBot, presetOffered, type OrgInstallStatus, type PresetStore } from "../presets.ts";
-import { adminOnlyBotSetting, clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
+import { adminOnlyBotSetting, memberBotCreateViolation, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
@@ -20,6 +22,8 @@ import type { TeamPeople } from "../team-people.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
+import { botLimitRefusal } from "../bot-limit.ts";
+import { arrivalMark, personalTeam } from "../bot-moves.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
@@ -33,8 +37,12 @@ export interface BotCreateRouteDeps {
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
+  /** The place a new bot works on when neither its request nor the New bot defaults name one: on the desktop app,
+   * This computer, where it can use the person's own files and apps; undefined (Auto) everywhere else. */
+  newBotComputer?(selection: ModelSelection): "local" | undefined;
   maxWorkspaceBots: number;
-  botLimit: Pick<BotLimit, "refusal">;
+  /** Whether this bot is paused: a Starter Cloud keeps only so many awake, and one made past them starts paused. */
+  paused(botId: string): boolean;
   cloudOwnerKey: string | null;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   cloudRoutineAuthors: ReturnType<typeof createCloudRoutineAuthors> | null;
@@ -48,19 +56,36 @@ export interface BotCreateRouteDeps {
   team?: { name: string; people: Pick<TeamPeople, "has"> } | null;
   /** Starts writing personal answers for a new bot's setup card; never awaited. */
   personaliseSetupCard?(bot: BotRecord): void;
+  /** The Chief of Staff of a scope changed: these bots' flags did. */
+  chiefChanged?(changed: readonly BotRecord[]): void;
+  /** The request may make a bot that arrives by a move (`arriving`): the app's own main process on this computer, or My
+   * Cloud's owner on My Cloud (index.ts cloudSendOwner); never on a team's Cloud. */
+  movesIn?(auth: RequestAuth): boolean;
 }
+
+const arrivingSchema = z.object({ team: z.object({ id: z.string().regex(/^[\w-]{1,128}$/u).refine(personalTeam), name: z.string().trim().min(1).max(80) }) }).strict();
 
 const OWN_ID = /^[\w-]{8,128}$/;
 
 /** A bot sent from the person's other computer keeps its id and its conversation's, so later sends and Bring newer
- * chats find it. Only ids in the server's own form, and only while nothing here uses them. */
-export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bot" | "botByThread" | "groupByThread">): { id?: string; threadId?: string } | { error: string } {
+ * chats find it. Only ids in the server's own form, and only while nothing here uses them, compared as the roster compares
+ * them: exact case, and case-insensitively too. A bot whose id differs from one here only by case could otherwise be
+ * brought in beside it, and every id a teammate writes would then be ambiguous between the two. */
+export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bot" | "botByThread" | "groupByThread"> & { bots: ReadonlyArray<Pick<BotRecord, "id">> }): { id?: string; threadId?: string } | { error: string } {
   const { id, threadId } = body;
   if (id === undefined && threadId === undefined) return {};
   if (typeof id !== "string" || !OWN_ID.test(id) || (threadId !== undefined && (typeof threadId !== "string" || !OWN_ID.test(threadId)))) {
     return { error: "id and threadId must be ids of letters, digits, - and _ (8 to 128)" };
   }
+  // This place admits no id shaped like another place's address (`link-<place key>-<id there>`): everything that settles
+  // an address reads such an id as a bot elsewhere, so no bot here may carry one. In any case, as this route compares
+  // ids case-insensitively too.
+  if (id.toLowerCase().startsWith(LINK_PREFIX)) {
+    return { error: `id must not begin with "${LINK_PREFIX}": that is how a bot in another place is addressed here` };
+  }
   if (store.bot(id) || store.botByThread(id) || store.groupByThread(id)) return { error: "a bot with this id already exists here" };
+  const folded = id.toLowerCase();
+  if (store.bots.some(bot => bot.id.toLowerCase() === folded)) return { error: "a bot with this id already exists here" };
   if (threadId !== undefined && (threadId === id || store.bot(threadId) || store.botByThread(threadId) || store.groupByThread(threadId))) {
     return { error: "this conversation id is already used here" };
   }
@@ -88,11 +113,31 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
       }
+      // A bot arriving by a move (bot-moves.ts) is made held, hidden and taking no turn, so it is never live here beside
+      // the place it comes from, not even until the move holds it.
+      const { arriving: askedArrival, ...unmarked } = body as Record<string, unknown>;
+      body = unmarked;
+      let arriving: z.infer<typeof arrivingSchema> | null = null;
+      if (askedArrival !== undefined) {
+        if (!deps.movesIn?.(auth)) return json(res, 403, { error: "forbidden: only a move makes a bot that arrives" });
+        const parsed = arrivingSchema.safeParse(askedArrival);
+        if (!parsed.success || typeof unmarked.id !== "string") return json(res, 400, { error: "send arriving: { team: { id, name } } with the bot's own id" });
+        arriving = parsed.data;
+        // It brings its own settings; nothing of this place's New bot defaults (a routine, say) is added to it.
+        body = { ...unmarked, useDefaults: false };
+      }
       if (req.headers["x-openmausbot-companion"] === "1") {
         const field = adminOnlyBotSetting(askedSettings(body));
         if (field) {
           return json(res, 403, { error: `forbidden: a paired device may say who a new bot is and how it looks, not "${field}"; set that on the host computer` });
         }
+      }
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        if (!deps.team || auth.session.membershipAuthority !== "team" || !auth.session.email) return json(res, 403, { error: "forbidden: this session lacks the admin scope" });
+        const field = memberBotCreateViolation(body);
+        if (field) return json(res, 403, { error: `forbidden: "${field}" is an admin's to set` });
+        // The saved New bot defaults are an admin's choices, some of them an admin's alone to make.
+        body = { ...body, useDefaults: false };
       }
       const kept = keptBotIds(body, store);
       if ("error" in kept) return json(res, kept.error.includes("already") ? 409 : 400, { error: kept.error });
@@ -100,12 +145,6 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       body = rest;
       const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
       const settings = template.profile;
-      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
-        const field = clientBotPatchViolation(settings);
-        if (field || body.preset !== undefined || template.skills.length || template.routines.length || Object.keys(template.memory).length) {
-          return json(res, 403, { error: "Creating a bot with these defaults needs the admin scope" });
-        }
-      }
       if (body.preset !== undefined && (typeof body.preset !== "string" || !/^[\w-]{1,64}$/.test(body.preset))) {
         return json(res, 400, { error: "preset must be a preset id from New bot" });
       }
@@ -182,11 +221,8 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
       // The capacity check sits beside the synchronous write, after every await.
       if (store.bots.length >= MAX_WORKSPACE_BOTS) {
-        return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
+        return json(res, 409, { error: botLimitRefusal(MAX_WORKSPACE_BOTS) });
       }
-      // A bot with its own id is arriving from the person's other computer: a move never loses a bot to a plan's limit.
-      const overPlan = kept.id ? null : deps.botLimit.refusal();
-      if (overPlan) return json(res, 409, overPlan);
       // Apply the audience before creation can announce the bot to members.
       const created = body.visibility === undefined ? null : parseVisibility(body.visibility);
       if (created && !created.ok) return json(res, 400, { error: created.error });
@@ -197,21 +233,24 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
         toolScope: settings.toolScope ?? undefined, color: settings.color ?? look?.color, mascotBody: settings.mascotBody ?? look?.mascotBody,
         ...(deps.team && creator ? { createdBy: creator } : {}), ...(reportsTo ? { reportsTo } : {}),
-        ...(created?.ok ? { visibility: created.visibility } : {}) }, kept.id ? { ...kept, seedMessages: false } : {});
-      const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
-      try {
+        ...(created?.ok ? { visibility: created.visibility } : {}) }, { ...(kept.id ? { ...kept, seedMessages: false } : {}), settle: (made) => {
         const { chiefOfStaff: _chief, managedSections: _managed, toolScope: _toolScope, ...ordinary } = settings;
-        store.patchBot(bot.id, {
+        store.patchBot(made.id, {
           // Store creation completed the workspace defaults (effort included): the rest of the template must not undo them.
-          ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
+          ...ordinary, name: made.name, section, modelSelection: made.modelSelection,
           mascotExpression: ordinary.mascotExpression ?? undefined,
           avatarUrl: ordinary.avatarUrl || undefined,
-          computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
-          peers: ordinary.peers ?? undefined, mcpServers: ordinary.mcpServers ?? undefined,
+          // Auto with Approve for me stays Auto: This computer with it needs the warning only the bot's Settings shows.
+          computer: ordinary.computer ?? (ordinary.computer === undefined && ordinary.approvalMode !== "auto" ? deps.newBotComputer?.(selection) : undefined), cwd: checkedCwd.cwd ?? undefined,
+          mcpServers: ordinary.mcpServers ?? undefined,
           browserProfile: ordinary.browserProfile || undefined,
           voiceNoteEveryReply: ordinary.voiceNoteEveryReply ?? undefined,
           autoApprove: ordinary.approvalMode === "auto",
-        });
+          ...(arriving ? { movedTo: arrivalMark(arriving.team, Date.now()), hidden: true } : {}),
+        } as Partial<BotRecord>);
+      } });
+      const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
+      try {
         const presetSkills = new Set(preset?.preset.skills ?? []);
         const presetNotes = new Set(Object.keys(preset?.preset.seed?.memory ?? {}));
         for (const [file, text] of Object.entries(template.memory)) {
@@ -253,7 +292,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (settings.chiefOfStaff) {
         try {
           store.patchBot(bot.id, { managedSections: settings.managedSections ?? [] });
-          store.setChiefOfStaff(bot.id);
+          deps.chiefChanged?.(store.setChiefOfStaff(bot.id) ?? []);
         } catch {
           warnings.push("Bot created; review its Chief of Staff setting before delegating work.");
         }
@@ -264,13 +303,13 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       deps.personaliseSetupCard?.(bot);
       return json(res, 201, {
-        ...(warnings.length ? { warnings } : {}),
+        ...(warnings.length ? { warnings } : {}), ...(deps.paused(bot.id) ? { paused: true } : {}),
         bot: {
           ...wireBot(bot),
           messages: store.messagesFor(bot.threadId),
           activeLeafId: store.activeLeaf(bot.threadId),
         },
-      });
+      } satisfies BotCreateResponse<ReturnType<typeof store.messagesFor>[number]>);
     }
     return PASS;
   };

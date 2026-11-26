@@ -34,6 +34,11 @@ describe("Mac local computer status", () => {
     expect(markup).not.toContain("Relaunch MausBot</button>");
   });
 
+  it("offers no permission repair on a Mac too old for the driver", () => {
+    fixture.localComputer = { available: false, status: "unavailable", reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 15 Sequoia or later." } as DesktopCapabilities["localComputer"];
+    expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");
+  });
+
   it("does not offer host repair actions to a remote renderer", () => {
     fixture.localComputer = { available: false, status: "unavailable", reasonCode: "remote-server" } as DesktopCapabilities["localComputer"];
     expect(renderToStaticMarkup(createElement(MacLocalControl))).toBe("");

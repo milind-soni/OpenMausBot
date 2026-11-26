@@ -5,14 +5,13 @@ import type { ToolScope } from "./tool-scope";
 /** Data shared by the default template and an individual creation draft. */
 export type BotDefaultsProfile = Partial<Pick<WireBot,
   "name" | "title" | "description" | "soul" | "notifications" | "avatarUrl" | "avatarCrop" |
-  "mascotBody" | "mascotFaceColor" | "color" | "voice" | "speakReplies" | "section" | "modelSelection" |
+  "mascotBody" | "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "color" | "voice" | "speakReplies" | "section" | "modelSelection" |
   "cloudBackend" | "autoStartVps" | "approvalMode" | "alwaysAllow" | "chiefOfStaff" |
-  "managedSections" | "approvePeerComms" | "composio" | "browser" | "voiceNotes"
+  "managedSections" | "composio" | "browser" | "voiceNotes"
 >> & {
   mascotExpression?: string | null;
   computer?: WireBot["computer"] | null;
   cwd?: string | null;
-  peers?: string[] | null;
   browserProfile?: string | null;
   mcpServers?: string[] | null;
   toolScope?: ToolScope | null;

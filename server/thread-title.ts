@@ -1,12 +1,32 @@
+import { AUTHORITY } from "./provenance-label.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
 import { toolResultPrefix } from "./tool-results.ts";
 
 export const UNTITLED_TASK = "New task";
 
+const PASTE_WRAPPER_LINE = /^\s*<\/?pasted-text(?:\s+index="\d+")?\s*>\s*$/i;
+/** OpenMausBot's own note that opens a delivered line ([From <who> · <what> · <authority>], provenance-label.ts). */
+const LEADING_FROM_NOTE = new RegExp(`^\\[From [^\\]\\n]* · [^\\]\\n]* · (?:${Object.values(AUTHORITY).join("|")})(?: — [^\\]\\n]*)?\\]`, "u");
+
+/** A line is named by what it says, not by the note saying who sent it; a line that is only a note gives UNTITLED_TASK. */
 export function titleFromMessage(text: string): string {
-  const line = text.trim().split("\n")[0]!.trim();
+  const lines = text.trim().replace(LEADING_FROM_NOTE, "").trim().split("\n");
+  // A message that opens with a paste is named by the pasted text, not the wrapper the composer puts around it.
+  const opensWithPaste = PASTE_WRAPPER_LINE.test(lines[0]!) && /<\/pasted-text>/i.test(text);
+  const line = opensWithPaste ? firstPastedLine(lines) : lines[0]!.trim();
   return line.length > 48 ? `${toolResultPrefix(line, 47)}…` : line || UNTITLED_TASK;
+}
+
+/** The first non-empty line inside a pasted-text block; attachment tags between blocks are skipped. */
+function firstPastedLine(lines: string[]): string {
+  let inPaste = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (PASTE_WRAPPER_LINE.test(line)) inPaste = !line.startsWith("</");
+    else if (inPaste && line) return line;
+  }
+  return "";
 }
 
 export const TITLE_INPUT_MAX_CHARS = 1_500;

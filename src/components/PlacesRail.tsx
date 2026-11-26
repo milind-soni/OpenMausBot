@@ -3,7 +3,7 @@
 // the person's own a server and a workspace of this computer's own with a name of its own a laptop, so each reads at a
 // glance. Main lists the places and opens one by its id; the rail never names an address. A right-click on a tile (or its
 // row past eight) opens that place's menu: a workspace of this computer's own is renamed, recoloured or removed there (asked
-// first); for the rest, its colour, changed
+// first); a server saved by hand is renamed there too (on this computer only); for the rest, its colour, changed
 // here for every place whatever its server runs, Remove from list for a Cloud of the person's own that ended or was
 // never paid for (asked first; main takes it off their list on the Admin), and Make … my home for a server of theirs that
 // main says this computer's bots may move to (one tap: main starts the move). With several accounts signed in here, the tiles
@@ -19,7 +19,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/relative-time";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
-import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, usePlaces, type RailPlace } from "@/lib/places";
+import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, renamePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { AccountsSheet, switchNote } from "./AccountMenu";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
@@ -109,7 +109,7 @@ export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: n
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
     className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
     style={{ width: size, height: size, borderRadius: tileRadius(size), fontSize: Math.round(size * 0.4), ...(color ? { background: cloudColorFill(color) } : {}) }}>
-    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} strokeWidth={1.75} /> : placeInitials(place.name)}
+    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} /> : placeInitials(place.name)}
   </span>;
 }
 
@@ -149,17 +149,17 @@ export function topWithin(element: HTMLElement, rail: HTMLElement): number {
 
 /** A place's tile: its mark, with a pill on the rail's edge for the place on screen (a short one on hover), and its dots,
  * badge and progress round it, all inside the rail. */
-function PlaceTile({ place, canPair, onOpen, onMenu }: { place: RailPlace; canPair: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
+function PlaceTile({ place, canPair, pending, onOpen, onMenu }: { place: RailPlace; canPair: boolean; pending: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
   const label = placeLabel(place), acts = placeActs(place, canPair);
-  return <button type="button" aria-label={tileLabel(place)} title={label} aria-current={place.active ? "page" : undefined} aria-disabled={acts ? undefined : true}
-    data-rail-place={place.id} data-rail-kind={place.kind} onClick={() => { if (acts) onOpen(place); }} onContextMenu={menuOpener(place, onMenu)}
+  return <button type="button" aria-label={tileLabel(place)} title={label} aria-current={place.active ? "page" : undefined} aria-disabled={acts ? undefined : true} aria-busy={pending || undefined}
+    data-rail-place={place.id} data-rail-kind={place.kind} data-rail-pending={pending ? "" : undefined} onClick={() => { if (acts) onOpen(place); }} onContextMenu={menuOpener(place, onMenu)}
     className={cn("group/tile relative shrink-0 rounded-[8px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
       !acts && cn("cursor-default", !place.offline && "opacity-75"))}>
     <span aria-hidden="true" data-rail-pill={place.active ? "page" : acts ? "hover" : undefined}
       className={cn("pointer-events-none absolute -left-1.5 top-1/2 w-[3px] -translate-y-1/2 rounded-r-full bg-ink transition-[height,opacity] duration-150 motion-reduce:transition-none",
         place.active ? "h-4" : acts ? "h-2 opacity-0 group-hover/tile:opacity-100" : "hidden")} />
     <PlaceMark place={place} />
-    {(place.progress !== undefined || place.settling !== undefined) && <ProgressRing value={place.progress} waiting={place.waiting === true || place.settling !== undefined} />}
+    {(place.progress !== undefined || place.settling !== undefined || pending) && <ProgressRing value={place.progress} waiting={place.waiting === true || place.settling !== undefined || pending} />}
     {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-danger" />}
     {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-1 -top-1 size-2.5 rounded-full border-2 border-(--rail-surface) bg-accent" />}
     <KindBadge place={place} />
@@ -211,7 +211,7 @@ function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => 
       {busy ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin motion-reduce:animate-none" /> : <House size={15} aria-hidden="true" className="mt-0.5 shrink-0" />}
       <span className="flex min-w-0 flex-col text-start">
         <span className="text-[13px] text-ink">{t("rail.makeHome", { name: place.name })}</span>
-        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })}</span>
+        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })} {t("rail.makeHomeDataStays", { name: place.name })}</span>
       </span>
     </button>
     {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{said}</p>}
@@ -231,8 +231,8 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
-  if (!paint && !place.removable && !place.makeHome) return null;
+  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[data-rail-rename], [role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
+  if (!paint && !place.removable && !place.makeHome && !place.renames) return null;
   const name = place.kind === "computer" ? computerName(place) : place.name;
   const choose = (swatch: CloudSwatch) => {
     if (!paint || paint.locked || pending || swatch === paint.swatch) return;
@@ -247,6 +247,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
+    {place.renames && <div className="px-0.5 pt-1"><RenameRow current={place.name} save={(next) => renamePlace(place.id, next)} onSaved={onClose} /></div>}
     {paint && <>
       <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
       <div className="px-2 pb-1.5 pt-0.5">
@@ -262,19 +263,20 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
 
 const rowText = (place: RailPlace) => [placeStatus(place, Date.now()), place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ");
 
-/** Rename in a workspace's menu: its name in a field, saved on Enter or Save; Escape or Cancel leaves it as it was. */
-function RenameRow({ place, onSaved }: { place: RailPlace; onSaved: () => void }) {
+/** Rename in a place's menu (a workspace of this computer's own, or a server saved by hand): its name in a field, saved on
+ * Enter or Save by `save`; Escape or Cancel leaves it as it was. */
+function RenameRow({ current, save: saveName, onSaved }: { current: string; save: (name: string) => Promise<"saved" | "name" | "taken" | "failed">; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<"taken" | "failed" | null>(null);
-  const start = () => { setName(computerName(place)); setSaid(null); setEditing(true); };
+  const start = () => { setName(current); setSaid(null); setEditing(true); };
   const save = () => {
     const next = name.trim();
     if (!next || busy) return;
-    if (next === computerName(place)) { setEditing(false); return; }
+    if (next === current) { setEditing(false); return; }
     setBusy(true); setSaid(null);
-    void editLocal(place.id, { name: next }).then((outcome) => {
+    void saveName(next).then((outcome) => {
       setBusy(false);
       if (outcome === "saved") { setEditing(false); onSaved(); return; }
       setSaid(outcome === "taken" ? "taken" : "failed");
@@ -344,7 +346,7 @@ function LocalMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
-    <div className="px-0.5 pt-1"><RenameRow place={place} onSaved={onClose} /></div>
+    <div className="px-0.5 pt-1"><RenameRow current={computerName(place)} save={(next) => editLocal(place.id, { name: next })} onSaved={onClose} /></div>
     <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
     <div className="px-2 pb-1.5 pt-0.5" data-rail-local-color>
       <SwatchRadios value={(pending === undefined ? swatch : pending) ?? "slate"} onChange={choose} label={t("placeLook.aria", { name })} offset="menu" none />
@@ -382,6 +384,10 @@ function MorePlaces({ places, canPair, onOpen, onMenu, onClose }: { places: Rail
   </div>;
 }
 
+/** The place on screen as the rail should mark it: the one just clicked, from that very click, if there is one. */
+export const markingClicked = (places: RailPlace[], clicked: string | null): RailPlace[] => (clicked === null ? places
+  : places.map(({ active: _active, ...place }) => (place.id === clicked ? { ...place, active: true as const } : place)));
+
 /** `chrome`: the window's own rail (ChromeRail), drawn whatever the window's width, whose sheets ask main for the whole
  * window while open. Without it, a rail drawn on a page from a list main gave that page: wide windows only. */
 export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
@@ -396,7 +402,13 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const [accounts, setAccounts] = useState<{ adding: string | null; note: string | null } | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  // The place last clicked, until main lists it on screen: the one still marked meanwhile can be clicked to stay.
+  // The place last clicked and the one on screen when it was, from the click until main is done with it: another click
+  // replaces it at once, whether it goes elsewhere or back to the place on screen.
+  const [clicked, setClicked] = useState<{ id: string; from: string | null } | null>(null);
+  const lastClick = useRef<{ id: string; from: string | null } | null>(null);
+  const clicks = useRef(0);
+  const click = (next: { id: string; from: string | null } | null) => { lastClick.current = next; setClicked(next); };
+  // The place last asked for, until main lists it on screen: the one still marked meanwhile can be clicked to stay.
   const asked = useRef<string | null>(null);
   useEffect(() => { if (asked.current && state.places.find((place) => place.id === asked.current)?.active) asked.current = null; }, [state.places]);
   const navRef = useRef<HTMLElement>(null);
@@ -409,20 +421,27 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     window.addEventListener("mousedown", away);
     return () => window.removeEventListener("mousedown", away);
   }, [more, menu]);
-  const covering = more || adding || connecting !== null || menu !== null || accounts !== null;
+  const going = clicked && clicked.id !== clicked.from ? state.places.find((place) => place.id === clicked.id) ?? null : null;
+  const veil = chrome && going?.settling === undefined ? going : null;
+  const covering = more || adding || connecting !== null || menu !== null || accounts !== null || veil !== null;
   useEffect(() => { if (chrome) void window.ogb?.rail?.expand?.(covering)?.catch(() => {}); }, [chrome, covering]);
   if (!state.places.length) return null;
   const bridge = window.ogb?.workspaces;
   const open = (place: RailPlace) => {
     if (!place.opens) { if (place.pairs) setConnecting(place.name); return; }
-    if (place.active && (asked.current === null || asked.current === place.id)) return;
+    const onScreen = state.places.find((entry) => entry.active)?.id ?? null;
+    if (place.id === lastClick.current?.id || (place.id === onScreen && (asked.current === null || asked.current === place.id))) return;
     asked.current = place.id;
+    const mine = ++clicks.current;
+    click({ id: place.id, from: onScreen });
+    const done = () => { if (mine === clicks.current) click(null); };
     track("rail_place_opened", { kind: place.kind });
-    void bridge?.open?.(place.id).then((said) => {
+    void Promise.resolve(bridge?.open?.(place.id)).then((said) => {
+      done();
       if (!said) return;
       if (said.outcome === "sign-in") setAccounts({ adding: said.email ?? place.email ?? "", note: null });
       else { const note = switchNote(said); if (note) setAccounts({ adding: null, note }); }
-    }, () => {});
+    }, done);
   };
   const framed = windowFramed(capabilities), draggable = capabilities.windowChrome !== "native";
   // In a framed window the rail is part of the frame: the window's own rail runs the full height, its top in the frame's
@@ -433,7 +452,8 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   // SAFETY: Electron's -webkit-app-region is not in React's CSSProperties type; the renderer accepts it as an inline style.
   const drag = draggable ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
-  const shown = shownPlaces(state.places);
+  const places = markingClicked(state.places, clicked?.id ?? null);
+  const shown = shownPlaces(places);
   const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair || state.add.organization === true || state.add.account === true || state.add.local === true;
   const addLabel = t(state.add.local ? "rail.addAny" : "rail.add");
   // The menu opens next to the tile or row it was asked from (measured now, while that row is there), within the rail.
@@ -441,7 +461,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     const nav = navRef.current;
     setMenu({ place, top: nav ? Math.max(8, Math.min(topWithin(from, nav) - 6, nav.clientHeight - 200)) : 8 });
   };
-  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
+  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail data-look="rail" style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
       framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-r-[0.5px] border-edge" : "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />
@@ -449,7 +469,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>
       {shown.map((place, at) => <li key={place.id} className="flex flex-col items-center gap-2">
         {startsGroup(shown, at) && <span role="separator" data-rail-divider className="h-px w-4 bg-hairline" />}
-        <PlaceTile place={place} canPair={canPair} onOpen={open} onMenu={openMenu} />
+        <PlaceTile place={place} canPair={canPair} pending={place.id === going?.id} onOpen={open} onMenu={openMenu} />
       </li>)}
     </ul>
     <div className="relative mt-2 flex flex-col items-center gap-2 pb-3" style={noDrag} ref={moreRef}>
@@ -458,7 +478,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
         className="grid size-6 place-items-center rounded-[8px] text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
         <MoreHorizontal size={13} aria-hidden="true" />
       </button>}
-      {more && <MorePlaces places={state.places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
+      {more && <MorePlaces places={places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
       {canAdd && <button type="button" aria-label={addLabel} title={addLabel} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
         className="grid size-6 place-items-center rounded-[8px] border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         <Plus size={13} aria-hidden="true" />
@@ -471,5 +491,9 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     {adding && <PlaceAddSheet choices={state.add} places={state.places} onClose={() => setAdding(false)} onAccount={() => { setAdding(false); setAccounts({ adding: "", note: null }); }} />}
     {accounts && <AccountsSheet adding={accounts.adding} note={accounts.note} onClose={() => setAccounts(null)} />}
     {connecting !== null && <PlaceAddSheet choices={state.add} connect={{ name: connecting }} onClose={() => setConnecting(null)} />}
+    {veil && <div role="status" data-rail-veil style={drag} className="absolute inset-y-0 left-full z-40 flex w-[calc(100vw-2.25rem)] flex-col items-center justify-center gap-3 bg-panel text-[13px] text-ink-secondary">
+      <PlaceMark place={veil} size={40} />
+      <span>{state.switching?.id === veil.id && state.switching.waking ? t("homeScreen.waking") : t("homeScreen.openingNamed", { name: veil.kind === "computer" ? computerName(veil) : veil.name })}</span>
+    </div>}
   </nav>;
 }

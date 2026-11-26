@@ -3,7 +3,6 @@ import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
 import { setLocale } from "../i18n";
 import { Speaker } from "./index";
-import { toUtterances } from "../../../server/tts/speech-text";
 import { userError } from "../../../server/user-errors";
 
 class FakeAudio {
@@ -195,8 +194,7 @@ describe("coded voice refusals", () => {
   ])("shows an oversized prepared utterance refusal in %s", async (locale, expected) => {
     setLocale(locale);
     const text = "Tudo bem. ".repeat(80);
-    const utterances = toUtterances(text);
-    expect(utterances.some((utterance) => utterance.length > 500)).toBe(true);
+    const utterances = [text.trim()];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => String(input).endsWith("/prepare")
       ? json({ ready: true, utterances })
       : Response.json(userError("serverError.voice.utteranceTooLong"), { status: 413 })));
@@ -479,6 +477,28 @@ describe("prefetch window", () => {
     await speaking;
 
     expect(captions).toEqual(["B0", "B1", "B2"]);
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("starts rendering a streamed block while the block before it is still playing", async () => {
+    installTts([]);
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+    stream.push("B0");
+    await vi.waitFor(() => expect(synthOrder).toEqual(["B0"]));
+    gates[0]!.respond(clip());
+    await vi.waitFor(() => expect(playedUrls).toEqual(["blob:block-1"]));
+
+    stream.push("B1");
+    await vi.waitFor(() => expect(synthOrder).toEqual(["B0", "B1"]));
+
+    gates[1]!.respond(clip());
+    FakeAudio.latest!.onended?.();
+    await vi.waitFor(() => expect(playedUrls).toEqual(["blob:block-1", "blob:block-2"]));
+    const ending = stream.end();
+    FakeAudio.latest!.onended?.();
+    await ending;
+
     expect(speaker.state).toEqual({ status: "idle" });
   });
 

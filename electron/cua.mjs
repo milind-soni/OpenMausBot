@@ -8,11 +8,15 @@ import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
 import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 import { driverFailure } from "./cua-failure.mjs";
+import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
+import { watchDriver } from "./cua-watch.mjs";
+import { missingPermissions } from "./lent-screen-failures.mjs";
 
 const { localOnly } = localOriginModule;
 
@@ -28,7 +32,7 @@ const {
   reapStaleAppImageCuaBundles,
   stageAppImageCuaBundle,
 } = require("./cua-linux-bundle.cjs");
-const { driverBlocked, linuxLocalControlSupport } = require("./capabilities.cjs");
+const { driverBlocked, linuxLocalControlSupport, macDriverUnsupported } = require("./capabilities.cjs");
 const { probeCuaHyprlandPlugin } = require("./cua-hyprland.cjs");
 
 const INSTALLED_DRIVER = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
@@ -47,11 +51,13 @@ const WIN_INSTALLED_DRIVERS = [
   path.join(app.getPath("home"), "AppData", "Local", "Programs", "CuaDriver", "cua-driver.exe"),
 ];
 let embeddedHost = null;
+let embeddedGeneration = null;
 let startupAbort = null;
 /** On Windows a start that failed for a reason that passes (a slow first start while the system scans the new helper)
  * is tried again by itself after these waits; a blocked or missing helper is not. */
 const RETRY_AFTER_MS = [15_000, 60_000];
 let retryTimer = null;
+let driverWatch = null;
 let lifecycleGeneration = 0;
 let macRetry = null;
 let linuxRuntime = null;
@@ -65,6 +71,17 @@ const connectionStore = createCuaConnectionStore({
 });
 const localComputerGrant = createLocalComputerGrant({
   connection: () => connectionStore.get(),
+  log: (line) => console.error(`[cua] ${line}`),
+});
+const helperRestarts = createHelperRestarts({
+  restart: async () => {
+    if (process.platform === "linux") return (await (await ensureLinuxRuntime()).retry())?.status === "ready";
+    const connection = await startCua({ attempt: RETRY_AFTER_MS.length });
+    if (connection?.mode === "embedded" || connection?.mode === "standalone") return true;
+    return driverBlocked(connection?.reason) || missingPermissions(connection?.reason).length > 0 ? "needs-person" : false;
+  },
+  // Linux already published its own unavailable record: a legacy-shaped one would not fit its schema.
+  report: (reason) => { if (process.platform !== "linux") persistAndNotify({ mode: "unavailable", reason }); },
   log: (line) => console.error(`[cua] ${line}`),
 });
 
@@ -110,7 +127,10 @@ async function loadLinuxRuntime() {
       getUserData: () => app.getPath("userData"),
       connectionStore,
       bundledDriverPath,
-      onChange: (connection) => notifyState(connection),
+      onChange: (connection) => {
+        notifyState(connection);
+        followLinuxConnection(helperRestarts, connection);
+      },
     });
   } catch (error) {
     console.error("[cua] Bundled Linux driver failed integrity validation:", error);
@@ -240,6 +260,12 @@ async function attachStandalone(signal) {
   };
 }
 
+function embeddedSocketPath() {
+  if (process.platform === "win32") return `\\\\.\\pipe\\cua-omb-${process.pid}`;
+  const preferred = path.join(os.tmpdir(), `cua-omb-${process.pid}.sock`);
+  return preferred.length < 100 ? preferred : `/tmp/cua-omb-${process.pid}.sock`;
+}
+
 async function startEmbedded(binary, signal) {
   // The packaged app ships no general node_modules, so a bare package import only works in dev.
   const sdk = await loadEmbeddedSdk();
@@ -256,11 +282,24 @@ async function startEmbedded(binary, signal) {
     }
   }
   // The native SDK owns the child lifecycle but exposes no windowsHide option.
-  const host = new sdk.EmbeddedCuaDriverHost(resolveEmbeddedDriverBinary(binary), HOST_BUNDLE_ID);
+  const host = sdk.EmbeddedCuaDriverHost.withOptions({
+    binaryPath: resolveEmbeddedDriverBinary(binary),
+    hostBundleId: HOST_BUNDLE_ID,
+    // The SDK's default socket has the start's random id in it; a fixed one stays valid for a bridge that outlives a restart.
+    socketPath: embeddedSocketPath(),
+    approveCapabilityManifest: false,
+    approveSessionPolicy: false,
+    dangerouslyBypassApprovals: false,
+    environment: [],
+    inheritStderr: true,
+    noOverlay: false,
+    captureStderr: false,
+  });
   try {
     const conn = await host.start({ signal });
     signal.throwIfAborted();
     embeddedHost = host;
+    embeddedGeneration = conn.generation;
     return {
       mode: "embedded",
       socketPath: conn.socketPath,
@@ -280,6 +319,8 @@ async function startEmbedded(binary, signal) {
 
 export async function startCua({ attempt = 0 } = {}) {
   if (process.platform === "linux") return (await ensureLinuxRuntime()).initialize();
+  const tooOld = macDriverUnsupported(process.platform, os.release());
+  if (tooOld) return persistAndNotify({ mode: "unavailable", ...tooOld });
   clearTimeout(retryTimer);
   retryTimer = null;
   lifecycleGeneration++;
@@ -337,11 +378,48 @@ export async function startCua({ attempt = 0 } = {}) {
   }
 
   signal.throwIfAborted();
+  if (nextConnection.mode === "embedded") watchEmbeddedHost(embeddedHost, embeddedGeneration);
+  if (nextConnection.mode === "embedded" || nextConnection.mode === "standalone") helperRestarts.started();
   if (process.platform === "win32" && nextConnection.mode === "unavailable" && !driverBlocked(nextConnection.reason) && attempt < RETRY_AFTER_MS.length) {
     retryTimer = setTimeout(() => { retryTimer = null; void startCua({ attempt: attempt + 1 }).catch(() => {}); }, RETRY_AFTER_MS[attempt]);
     retryTimer.unref?.();
   }
+  watchMacDriver(nextConnection);
   return persistAndNotify(nextConnection);
+}
+
+function watchEmbeddedHost(host, generation) {
+  const gone = (detail) => {
+    // An exit we asked for is not a crash: stopCua forgets the host first.
+    if (host !== embeddedHost) return;
+    embeddedHost = null;
+    embeddedGeneration = null;
+    void host.stop().catch(() => {}).finally(() => host.uniffiDestroy?.());
+    helperRestarts.exited(detail);
+  };
+  void host.waitForExit(generation).then(
+    (exit) => gone(`code ${exit?.code ?? "none"}`),
+    (error) => gone(driverFailure(error)),
+  );
+}
+
+/** A Mac driver that stopped answering without exiting, or a standalone one whose exit nothing here sees, counts as one that
+ * died: the helper's bounded restarts take it from there (cua-restart.mjs), the same as an embedded host that exited. */
+function watchMacDriver(connection) {
+  driverWatch?.stop();
+  driverWatch = null;
+  if (process.platform !== "darwin" || (connection.mode !== "embedded" && connection.mode !== "standalone")) return;
+  const host = connection.mode === "embedded" ? embeddedHost : null;
+  driverWatch = watchDriver({ alive: () => socketAlive(connection.socketPath), restart: () => {
+    if (host) {
+      // Already gone and handled by the exit watch, or replaced since.
+      if (host !== embeddedHost) return;
+      embeddedHost = null;
+      embeddedGeneration = null;
+      void host.stop().catch(() => {}).finally(() => host.uniffiDestroy?.());
+    }
+    helperRestarts.exited("its socket stopped answering");
+  } });
 }
 
 export async function cuaPermissionsStatus() {
@@ -362,8 +440,11 @@ export async function cuaPermissionsStatus() {
 }
 
 export async function stopCua() {
+  helperRestarts.reset();
   clearTimeout(retryTimer);
   retryTimer = null;
+  driverWatch?.stop();
+  driverWatch = null;
   lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = null;
@@ -377,6 +458,7 @@ export async function stopCua() {
   }
   const host = embeddedHost;
   embeddedHost = null;
+  embeddedGeneration = null;
   if (host) {
     try {
       await host.stop();
@@ -404,7 +486,7 @@ function restartCua() {
       return {
         enabled: ready,
         status: ready ? "ready" : "error",
-        reasonCode: ready ? undefined : "permissions-required",
+        reasonCode: ready ? undefined : connection?.reasonCode ?? "permissions-required",
         message: connection?.reason,
       };
     } catch (error) {
@@ -425,6 +507,7 @@ function restartCua() {
 export async function requestComputerUse() {
   if (process.platform === "darwin" || process.platform === "win32") return restartCua();
   if (process.platform !== "linux") return null;
+  helperRestarts.reset();
   try {
     await (await ensureLinuxRuntime({ recheck: true })).enable();
   } catch (error) {
@@ -445,6 +528,7 @@ export function registerCuaIpc() {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
+    helperRestarts.reset();
     try {
       await (await ensureLinuxRuntime({ recheck: true })).enable();
     } catch (error) {
@@ -456,6 +540,7 @@ export function registerCuaIpc() {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
+    helperRestarts.reset();
     try {
       await (await ensureLinuxRuntime()).disable();
     } catch (error) {
@@ -468,6 +553,7 @@ export function registerCuaIpc() {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
+    helperRestarts.reset();
     try {
       await (await ensureLinuxRuntime({ recheck: true })).retry();
     } catch (error) {

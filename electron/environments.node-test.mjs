@@ -105,7 +105,7 @@ test("native workspace choices use saved IDs and connect opens settings without 
   const calls = [];
   const items = env.workspaceMenuTemplate(state, { onSwitch: (id) => calls.push(["switch", id]), onConnect: () => calls.push(["settings"]), onForget: (id) => calls.push(["forget", id]) });
   assert.equal(items.find((item) => item.id === "workspace-cloud").checked, true);
-  assert.equal(items.find((item) => item.id === "workspace-connect").label, "Connect to a server…");
+  assert.equal(items.find((item) => item.id === "workspace-connect").label, "Connect to another computer…");
   items.find((item) => item.id === "workspace-local").click();
   items.find((item) => item.id === "workspace-connect").click();
   items.find((item) => item.id === "workspace-forget").click();
@@ -475,4 +475,16 @@ test("the Server menu lists the workspaces of this computer's own and offers a n
   homeItems.find((item) => item.id === "workspace-local-default").click();
   assert.deepEqual(calls, [["local", "work"], ["new"], ["local", "default"]]);
   assert.equal(env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {} }).some((item) => String(item.id).startsWith("workspace-new-local")), false, "only where main offers it");
+});
+
+test("withPlaceName gives a saved server a name kept on this computer; this computer's own, an unknown id or a blank name change nothing", () => {
+  const state = { environments: [{ id: "vps", kind: "remote", name: "ubuntu-lan", origin: "https://vps.example" },
+    { id: "lab", kind: "local", name: "Lab", dataDir: "/tmp/lab" }], activeId: "vps" };
+  const named = env.withPlaceName(state, "vps", "  Home   server ");
+  assert.deepEqual(named.environments[0], { id: "vps", kind: "remote", name: "Home server", origin: "https://vps.example" }, "trimmed, spaces folded, origin kept");
+  assert.equal(named.activeId, "vps");
+  assert.equal(named.environments[1], state.environments[1]);
+  assert.equal(env.withPlaceName(named, "vps", "Home server"), named, "the same state when nothing changes");
+  assert.equal(env.withPlaceName(state, "vps", "x".repeat(80)).environments[0].name.length, 60, "capped like every saved name");
+  for (const [id, name] of [["vps", "   "], ["lab", "Office"], ["gone", "Office"]]) assert.equal(env.withPlaceName(state, id, name), null, `${id} ${JSON.stringify(name)}`);
 });

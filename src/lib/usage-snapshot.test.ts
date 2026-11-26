@@ -276,6 +276,44 @@ describe("the daily usage snapshot", () => {
     expect(sent).toMatchObject({ cloud_plan: "unknown", bots: 9, key_count: 9 });
   });
 
+  it("waits for this computer's saved sign-in to be read before it names the plan", async () => {
+    const { snapshot } = await freshModules();
+    const states = [{ status: "signed-out", message: "restoring" }, { status: "signed-out", message: "restoring" }, { status: "signed-out" }];
+    const waits: number[] = [];
+    await snapshot.sendDailySnapshot(hostileState(), hostileSources({ cloudAccount: { state: async () => states.shift() as never } }), DAY,
+      async (ms) => void waits.push(ms), () => 0);
+    expect(waits).toEqual([5_000, 5_000]);
+    expect(snapshots()[0]).toMatchObject({ cloud_plan: "none" });
+  });
+
+  it("gives up waiting after half a minute and says the plan is unknown", async () => {
+    const { snapshot } = await freshModules();
+    const waits: number[] = [];
+    let clock = 0;
+    await snapshot.sendDailySnapshot(hostileState(), hostileSources({ cloudAccount: { state: async () => ({ status: "signed-out", message: "restoring" }) } }), DAY,
+      async (ms) => { waits.push(ms); clock += ms; }, () => clock);
+    expect(waits).toHaveLength(5);
+    expect(snapshots()[0]).toMatchObject({ cloud_plan: "unknown" });
+  });
+
+  it("counts slow reads of the sign-in toward that half minute", async () => {
+    const { snapshot } = await freshModules();
+    let clock = 0, reads = 0;
+    await snapshot.sendDailySnapshot(hostileState(), hostileSources({
+      cloudAccount: { state: async () => { reads++; clock += 4_000; return { status: "signed-out", message: "restoring" }; } },
+    }), DAY, async (ms) => { clock += ms; }, () => clock);
+    expect(clock).toBeLessThanOrEqual(30_000 + 4_000);
+    expect(reads).toBe(4);
+    expect(snapshots()[0]).toMatchObject({ cloud_plan: "unknown" });
+  });
+
+  it("leaves the plan out on a page with no way to ask it", async () => {
+    const { snapshot } = await freshModules();
+    await snapshot.sendDailySnapshot(hostileState(), hostileSources({ cloudAccount: null, cloudPlan: null }), DAY);
+    expect(snapshots()[0]).not.toHaveProperty("cloud_plan");
+    expect(snapshots()[0]).not.toHaveProperty("cloud_trial");
+  });
+
   it("reads the plan from a Cloud page's own bridge, and leaves out what only this computer knows", async () => {
     const { snapshot } = await freshModules();
     const sources = hostileSources({
@@ -389,6 +427,13 @@ describe("the Cloud plan", () => {
     expect(cloudPlanFromAccount({ status: "signed-out" })).toEqual({ plan: "none" });
     for (const status of ["connecting", "reauth-required", "unavailable"] as const) expect(cloudPlanFromAccount({ status }), status).toEqual({ plan: "unknown" });
     expect(cloudPlanFromAccount(null)).toEqual({ plan: "unknown" });
+    const account = { id: HOSTILE, email: `${HOSTILE}@example.com` };
+    for (const status of ["connecting", "reauth-required", "unavailable"] as const) {
+      expect(cloudPlanFromAccount({ status, account, lastPlan: { tier: "max", active: true } }), status).toEqual({ plan: "max" });
+      expect(cloudPlanFromAccount({ status, account, lastPlan: { tier: "max", active: false } }), status).toEqual({ plan: "none" });
+      expect(cloudPlanFromAccount({ status, account, lastPlan: { active: true } }), status).toEqual({ plan: "pro" });
+      expect(cloudPlanFromAccount({ status, account }), status).toEqual({ plan: "none" });
+    }
     const connected = (patch: Record<string, unknown>, extra: Record<string, unknown> = {}) => cloudPlanFromAccount({ status: "connected", entitlement: entitlement(patch), ...extra } as never);
     expect(connected({})).toEqual({ plan: "pro", trial: false });
     expect(connected({ tier: "personal" }, { trial })).toEqual({ plan: "personal", trial: true });

@@ -7,7 +7,7 @@ import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import type { Routine } from "../../src/lib/routines.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -26,6 +26,7 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
     try { fixture = JSON.parse(output); return Boolean(fixture.ui); } catch { return false; }
   }, { timeout: 600_000 }).toBe(true);
   const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", fixture.ui, ...args]) as Promise<Record<string, any>>;
+  await ui("eval", "--js", ENABLE_ADVANCED_UI);
   const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
   const click = async (name: string) => {
     await evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent === ${JSON.stringify(name)})?.scrollIntoView({ block: 'center' })`);

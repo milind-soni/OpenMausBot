@@ -368,6 +368,9 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
     const answer = 'data: {"choices":[{"index":0,"delta":{"content":"Done."}}]}\n\n'
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const emptyArgumentsToolCall = (id: string, name: string, argumentsText: string) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: argumentsText } }] } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
     const run = async (replies: string[], rounds?: number, integrations?: SendTurnInput["integrations"]) => {
       const bodies: any[] = [];
       vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
@@ -399,6 +402,13 @@ describe("createOpenAIChatRuntime tool approvals", () => {
         .toEqual({ requests: 4, corrective: 1, ok: false, stopReason: "tool_error" });
     }, 20_000);
 
+    it.each(["", " \t\n "])("treats whitespace-only tool arguments as an empty object (%j)", async (argumentsText) => {
+      expect(await run([
+        emptyArgumentsToolCall("c1", "fx_write", argumentsText),
+        answer,
+      ], undefined, { custom: { fx: toolServer() } })).toMatchObject({ requests: 2, ok: true });
+    }, 20_000);
+
     it("keeps the failure when the bot answers the round without running a tool", async () => {
       expect(await run([toolCall("c1", "nope"), answer, answer], 1))
         .toEqual({ requests: 3, corrective: 1, ok: false, stopReason: "tool_error" });
@@ -424,6 +434,56 @@ describe("createOpenAIChatRuntime tool approvals", () => {
         .toEqual({ requests: 3, corrective: 0, ok: false, stopReason: "tool_error" });
     }, 20_000);
   });
+
+  it.each([
+    ["not JSON", '{"path":"a.md","content":"cut off', "{}", 'tool arguments are not complete JSON; you sent 33 characters: {"path":"a.md","content":"cut off'],
+    ["a JSON array", '[{"path":"a.md"}]', "{}", 'tool arguments must be a JSON object; you sent 17 characters: [{"path":"a.md"}]'],
+    ["empty", "", "{}", undefined],
+    ["blank", "   ", "{}", undefined],
+    ["led by a byte-order mark", '\uFEFF{"n":1}', '{"n":1}', undefined],
+    // The API key ("synthetic") crosses the 500-character cut: it is masked first, so no part of it is quoted back.
+    ["long and holding the API key across the cut", `{"content":"${"x".repeat(484)}synthetic${"y".repeat(1_000)}`, "{}",
+      `tool arguments are not complete JSON; you sent 1505 characters: {"content":"${"x".repeat(484)}[red … ${"y".repeat(500)}`],
+  ])("replays a call whose arguments are %s as valid JSON, so a strict provider takes the next request", async (_kind, badArguments, replayedArguments, toolError) => {
+    const call = (id: string, argumentsText: string) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name: "fx_write", arguments: argumentsText } }] } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const replies = [call("c1", badArguments), call("c2", "{}"),
+      'data: {"choices":[{"index":0,"delta":{"content":"Written."}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'];
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      const replayed = body.messages.flatMap((message: any) => message.tool_calls ?? []);
+      if (replayed.some((toolCall: any) => { try { JSON.parse(toolCall.function.arguments); return false; } catch { return true; } })) {
+        return new Response(JSON.stringify({ error: { message: "Assistant tool call function.arguments must be valid JSON", type: "invalid_request_error" } }), { status: 400 });
+      }
+      return new Response(replies[bodies.length - 1], { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "badargs", displayName: "Synthetic", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "synthetic" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "badargs", text: "Write the file.", approvalMode: "full", integrations: { custom: { fx: toolServer() } },
+      });
+      await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+      expect(bodies).toHaveLength(3);
+      expect(bodies[1].messages.find((message: any) => message.tool_calls)?.tool_calls[0].function.arguments).toBe(replayedArguments);
+      if (toolError) {
+        expect(JSON.parse(bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "c1")?.content).result)
+          .toBe(toolError);
+      }
+      expect((events.find((event) => event.type === "turn.completed") as any).ok).toBe(true);
+    } finally {
+      await instance.dispose();
+    }
+  }, 20_000);
 
   it("completes the turn when a question goes unanswered, without tainting the final answer", async () => {
     const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
@@ -855,6 +915,28 @@ describe("createOpenAIChatRuntime refused tool calls", () => {
     expect(events.find((event) => event.type === "runtime.error")?.message).toMatch(/^The model tried to use a tool it was not given \("JSON"\)/);
   });
 
+  // oMLX's in-stream frame when a local model writes a tool call it cannot parse.
+  const omlxFailure = (code: string) => sse(`data: ${JSON.stringify({ error: {
+    message: "Model output contains an unrecoverable tool call. Previously delivered tool calls must not be executed again on retry.",
+    type: "server_error", param: null, code,
+  } })}\n\ndata: [DONE]\n\n`);
+
+  it.each(["invalid_tool_call", "incomplete_tool_call"])("sends the request again when oMLX reports %s mid-stream", async (code) => {
+    let requests = 0;
+    const events = await runTurn(() => ++requests === 1 ? omlxFailure(code) : answer());
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, delayMs: 0, reason: "tool_use_failed" });
+    expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  });
+
+  it("stops after three oMLX tool call failures and says nothing ran", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, omlxFailure("invalid_tool_call")));
+    expect(requests).toBe(3);
+    expect(events.find((event) => event.type === "runtime.error")?.message).toMatch(/^The model made a tool call the provider rejected\. Nothing ran\./);
+  });
+
   it("does not resend other provider errors", async () => {
     let requests = 0;
     const events = await runTurn(() => (requests++, sse(`data: ${JSON.stringify({ error: { ...refusal, code: "invalid_request_error" } })}\n\n`)));
@@ -924,7 +1006,7 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
     await vi.waitFor(() => {
       if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
-    });
+    }, { timeout: 10_000 });
     stop();
     return events;
   };
@@ -961,5 +1043,118 @@ describe("createOpenAIChatRuntime rejected keys", () => {
     await turn(instance);
     expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: true });
     await instance.dispose();
+  }, 20_000);
+});
+
+describe("createOpenAIChatRuntime transient retries", () => {
+  // Like runTurn, but the turn waits out the retry backoff before it completes.
+  const runRetryTurn = async (respond: () => Response, apiUrl = "https://api.example.com/v1") => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
+      String(url).endsWith("/chat/completions") ? respond() : new Response("", { status: 404 })));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: apiUrl, apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await instance.dispose();
+    return events;
+  };
+  const rateLimited = () => new Response(JSON.stringify({ error: { message: "Rate limit reached", code: "rate_limit_exceeded" } }), { status: 429 });
+  const answer = () => sse('data: {"choices":[{"index":0,"finish_reason":"stop","delta":{"content":"Hello!"}}]}\n\ndata: [DONE]\n\n');
+
+  it("does not retry a turn the liveness notice stopped", async () => {
+    // A local server on port 503: the notice names its host, and the bare "503" in it must not
+    // read as a 5xx status. The completions POST hangs until the notice aborts it, like a frozen
+    // server; the /models probe fails so the watcher fires.
+    vi.stubEnv("OPENMAUS_OPENAI_COMPAT_PROBE_MS", "200");
+    let requests = 0;
+    try {
+      vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: { signal?: AbortSignal }) => {
+        // The probe and the Ollama check fail at once, so neither waits out its timeout.
+        if (String(url).endsWith("/v1/models") || String(url).endsWith("/api/version")) throw new Error("fetch failed");
+        requests++;
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal!.reason ?? new DOMException("aborted", "AbortError")), { once: true });
+        });
+      }));
+      const instance = await OpenAICompatDriver.create({
+        instanceId: "compat-liveness", displayName: "Compat", enabled: true,
+        config: OpenAICompatDriver.decodeConfig({ url: "http://127.0.0.1:503/v1", apiKeyEnv: "K", model: "m" }),
+        environment: { K: "secret" },
+      });
+      const events: RuntimeEvent[] = [];
+      instance.adapter.onEvent((event) => events.push(event));
+      await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+      await vi.waitFor(() => {
+        if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+      }, { timeout: 10_000 });
+      await instance.dispose();
+      expect(requests).toBe(1);
+      expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("stopped answering") });
+      expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }, 20_000);
+
+  it("does not retry a 409 whose body only looks like a server failure", async () => {
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
+      // Creation fetches /models for the catalog; only the completions POST counts.
+      if (String(url).endsWith("/v1/models")) return new Response("", { status: 404 });
+      requests++;
+      return new Response(JSON.stringify({ error: { message: "max 500 tokens" } }), { status: 409, headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat-409", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 5_000 });
+    expect(requests).toBe(1);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("HTTP 409") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    await instance.dispose();
   });
+
+  it("retries a 409 from api.openai.com, then answers", async () => {
+    let requests = 0;
+    const conflict = () => new Response(JSON.stringify({ error: { message: "conflict with the current resource state" } }), { status: 409 });
+    const events = await runRetryTurn(() => ++requests === 1 ? conflict() : answer(), "https://api.openai.com/v1");
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, reason: "server_error" });
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "Hello!" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("retries a 429 from an OpenAI-compatible endpoint, then answers", async () => {
+    let requests = 0;
+    const events = await runRetryTurn(() => ++requests === 1 ? rateLimited() : answer());
+    expect(requests).toBe(2);
+    expect(events.find((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1, reason: "rate_limited" });
+    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "Hello!" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("gives up after three 429s and reports the last one", async () => {
+    let requests = 0;
+    const events = await runRetryTurn(() => (requests++, rateLimited()));
+    expect(requests).toBe(3);
+    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(2);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("HTTP 429") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  }, 20_000);
 });

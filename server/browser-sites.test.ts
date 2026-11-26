@@ -56,8 +56,8 @@ describe("a profile's signed-in sites, from its saved session", () => {
     expect(await listSignedInSites(target, stopped)).toEqual({
       running: false,
       sites: [
-        { site: "example.com", cookies: 1, storage: 1 },
-        { site: "wikipedia.org", cookies: 2, storage: 0 },
+        { site: "example.com", cookies: 1, storage: 1, direct: true },
+        { site: "wikipedia.org", cookies: 2, storage: 0, direct: true },
       ],
     });
   });
@@ -74,10 +74,34 @@ describe("a profile's signed-in sites, from its saved session", () => {
       [cookie(".google.com"), cookie("accounts.google.com"), cookie("mail.google.com"), cookie("www.bbc.co.uk"), cookie("app.example.org"), cookie("127.0.0.1")],
       [{ origin: "https://docs.google.com", localStorage: [{ name: "a", value: "b" }] }, { origin: "https://empty.example.org", localStorage: [] }],
     )).toEqual([
-      { site: "127.0.0.1", cookies: 1, storage: 0 },
-      { site: "app.example.org", cookies: 1, storage: 0 },
-      { site: "google.com", cookies: 3, storage: 1 },
-      { site: "www.bbc.co.uk", cookies: 1, storage: 0 },
+      { site: "127.0.0.1", cookies: 1, storage: 0, direct: true },
+      { site: "app.example.org", cookies: 1, storage: 0, direct: true },
+      { site: "google.com", cookies: 3, storage: 1, direct: true },
+      { site: "www.bbc.co.uk", cookies: 1, storage: 0, direct: true },
+    ]);
+  });
+
+  it("tells a site the browser opened from ads and trackers that only set cookies from other sites' pages", () => {
+    const cookie = (domain: string, sameSite?: string) => ({ name: "id", value: "1", domain, path: "/", ...(sameSite ? { sameSite } : {}) });
+    expect(signedInSites(
+      [
+        cookie(".doubleclick.net", "None"),
+        cookie(".pubmatic.com", "None"), cookie("pubmatic.com", "None"),
+        cookie("github.com", "Lax"), cookie(".github.com", "None"),
+        cookie("slack.com", "Strict"),
+        cookie("legacy.example", undefined),
+        cookie(".linkedin.com", "None"),
+        cookie(".youtube.com", "none"),
+      ],
+      [{ origin: "https://www.linkedin.com", localStorage: [{ name: "a", value: "b" }] }],
+    )).toEqual([
+      { site: "doubleclick.net", cookies: 1, storage: 0, direct: false },
+      { site: "github.com", cookies: 2, storage: 0, direct: true },
+      { site: "legacy.example", cookies: 1, storage: 0, direct: true },
+      { site: "linkedin.com", cookies: 1, storage: 1, direct: true },
+      { site: "pubmatic.com", cookies: 2, storage: 0, direct: false },
+      { site: "slack.com", cookies: 1, storage: 0, direct: true },
+      { site: "youtube.com", cookies: 1, storage: 0, direct: false },
     ]);
   });
 
@@ -95,7 +119,7 @@ describe("signing a stopped browser out", () => {
     writeFileSync(join(directory, "work-work.json.enc"), SAVED_BY_ENGINE);
     writeFileSync(`${current}.previous`, SAVED_BY_ENGINE);
     const result = await signOutOfSites(target, "wikipedia.org", stopped);
-    expect(result).toEqual({ running: false, sites: [{ site: "example.com", cookies: 1, storage: 1 }] });
+    expect(result).toEqual({ running: false, sites: [{ site: "example.com", cookies: 1, storage: 1, direct: true }] });
     for (const path of [current, join(directory, "work-work.json.enc")]) {
       const state = saved(path);
       expect(state.cookies.map((cookie: { domain: string }) => cookie.domain)).toEqual(["www.example.com"]);
@@ -181,7 +205,7 @@ describe("signing a running browser out", () => {
     const chrome = await fakeChrome([cookie("SID", ".google.com"), cookie("sid", "www.example.com")], { "https://mail.google.com": "t" });
     expect(await listSignedInSites(target, { engine: chrome.engine })).toEqual({
       running: true,
-      sites: [{ site: "google.com", cookies: 1, storage: 1 }, { site: "www.example.com", cookies: 1, storage: 0 }],
+      sites: [{ site: "google.com", cookies: 1, storage: 1, direct: true }, { site: "www.example.com", cookies: 1, storage: 0, direct: true }],
     });
     expect(chrome.calls).toEqual([]);
   });
@@ -194,7 +218,7 @@ describe("signing a running browser out", () => {
       { "https://en.wikipedia.org": "w", "https://example.com": "e" },
     );
     const result = await signOutOfSites(target, "wikipedia.org", { engine: chrome.engine });
-    expect(result).toEqual({ running: true, sites: [{ site: "example.com", cookies: 1, storage: 1 }, { site: "google.com", cookies: 1, storage: 0 }] });
+    expect(result).toEqual({ running: true, sites: [{ site: "example.com", cookies: 1, storage: 1, direct: true }, { site: "google.com", cookies: 1, storage: 0, direct: true }] });
     expect(chrome.jar.map((entry) => entry.domain)).toEqual(["www.example.com", ".google.com"]);
     expect(chrome.calls.filter((call) => call.method === "Network.deleteCookies").map((call) => call.params))
       .toEqual([{ name: "sid", domain: ".wikipedia.org", path: "/" }, { name: "sid", domain: "en.wikipedia.org", path: "/" }]);
@@ -234,7 +258,7 @@ describe("signing a running browser out", () => {
     const withProfile = { ...target, env: { ...target.env, AGENT_BROWSER_PROFILE: kept } };
     expect(await listSignedInSites(withProfile, deps)).toMatchObject({ running: false });
     expect(lifecycle).toEqual([]);
-    expect(await signOutOfSites(withProfile, "wikipedia.org", deps)).toEqual({ running: false, sites: [{ site: "www.example.com", cookies: 1, storage: 0 }] });
+    expect(await signOutOfSites(withProfile, "wikipedia.org", deps)).toEqual({ running: false, sites: [{ site: "www.example.com", cookies: 1, storage: 0, direct: true }] });
     expect(lifecycle).toEqual(["start", "stop"]);
     expect(chrome.jar.map((entry) => entry.domain)).toEqual(["www.example.com"]);
     expect(saved().cookies.map((entry: { domain: string }) => entry.domain)).toEqual(["www.example.com"]);

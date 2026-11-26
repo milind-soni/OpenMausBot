@@ -1,6 +1,6 @@
 // The one setup suggestion to add a helper-model key: on a desktop or free install with Gmail connected and no decision
 // model, the proactive bot posts ONE short card in its chat ("Want me to sort your email for free?") with Add key, which
-// opens Settings → Decision and extraction on the device, and Not now. Never on Cloud, where the keys come with the plan.
+// opens Settings › AI › Routing and extraction on the device, and Not now. Never on Cloud, where the keys come with the plan.
 // Not now is kept and the card never comes back, until the person connects another inbox: then at most once more. A
 // card left unanswered is never posted again. It is a suggestion, not an approval: nothing waits on it.
 import { readFileSync } from "node:fs";

@@ -2,7 +2,7 @@
 // still validates every call against its own full schema.
 type Json = Record<string, unknown>;
 
-export type ToolSchemaProfileId = "moonshot";
+export type ToolSchemaProfileId = "moonshot" | "gemini";
 
 export interface ToolSchemaProfile {
   id: ToolSchemaProfileId;
@@ -12,6 +12,9 @@ export interface ToolSchemaProfile {
   maxDepth: number;
   /** The engine inlines local `$ref`s before it sends, so the inlined form is what the provider measures. */
   measureInlined: boolean;
+  /** A whole tool list's byte budget for a CLI that shows the model every MCP tool eagerly and silently drops the
+   * largest ones once the turn's whole tool JSON passes a character budget. */
+  maxListBytes?: number;
 }
 
 const PROFILES: Record<ToolSchemaProfileId, ToolSchemaProfile> = {
@@ -20,6 +23,11 @@ const PROFILES: Record<ToolSchemaProfileId, ToolSchemaProfile> = {
   // https://github.com/morluto/rea/issues/3654. Depth 30 is walle's default (https://github.com/MoonshotAI/walle/blob/main/conf.go).
   // Kimi Code inlines every local $ref first (normalizeKimiToolSchema in MoonshotAI/kimi-code packages/kosong).
   moonshot: { id: "moonshot", provider: "Kimi", maxSchemaBytes: 12_000, maxDepth: 30, measureInlined: true },
+  // The Antigravity and Gemini CLIs hand the model every MCP tool eagerly and drop the largest ones, largest first, once
+  // the turn's whole tool JSON passes a character budget (about 64K, measured in milind-soni/OpenMausBot#7341): the
+  // agents list alone is about 76K, so its largest tools go missing without any refusal. The budget leaves headroom under
+  // it for the person's own MCP servers; the server still validates every call against its own full schema.
+  gemini: { id: "gemini", provider: "Gemini", maxSchemaBytes: 2_000, maxDepth: 20, measureInlined: false, maxListBytes: 56_000 },
 };
 
 export const TOOL_SCHEMA_PROFILE_ENV = "OMB_TOOL_SCHEMA_PROFILE";
@@ -44,6 +52,7 @@ const OPENROUTER_HOST = /(?:^|\.)openrouter\.ai$/;
 export function toolSchemaProfileFor(target: { engine?: string; url?: string; model?: string }): ToolSchemaProfile | undefined {
   const host = hostOf(target.url);
   if (target.engine === "kimiAgent" || MOONSHOT_HOST.test(host)) return PROFILES.moonshot;
+  if (target.engine === "antigravityAgent" || target.engine === "geminiAgent") return PROFILES.gemini;
   if (OPENROUTER_HOST.test(host) && /^moonshotai\//i.test(target.model ?? "")) return PROFILES.moonshot;
   return undefined;
 }
@@ -58,8 +67,8 @@ export function schemaBytes(value: unknown): number {
   return Buffer.byteLength(text) + 5 * (text.match(/[<>&]/g)?.length ?? 0) + 3 * (text.match(/[\u2028\u2029]/g)?.length ?? 0);
 }
 
-const MAP_SLOTS = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions"] as const;
-const NESTED_SLOTS = ["additionalProperties", "items", "additionalItems", "contains", "propertyNames", "unevaluatedProperties", "unevaluatedItems"] as const;
+const MAP_SLOTS = ["properties", "patternProperties", "dependencies", "dependentSchemas", "$defs", "definitions"] as const;
+const NESTED_SLOTS = ["additionalProperties", "items", "additionalItems", "contains", "propertyNames", "contentSchema", "unevaluatedProperties", "unevaluatedItems"] as const;
 const NESTED_LISTS = ["prefixItems", "items"] as const;
 /** Alternatives describe the same value, so they sit at its depth. */
 const ALTERNATIVE_LISTS = ["anyOf", "oneOf", "allOf"] as const;
@@ -170,6 +179,34 @@ function valueType(value: unknown): string {
   return typeof value === "object" ? "object" : typeof value;
 }
 
+function hasReferencedType(node: Json, root: Json): boolean {
+  const seen = new Set<Json>();
+  let current = node;
+  while (typeof current.$ref === "string" && !seen.has(current)) {
+    seen.add(current);
+    const target = pointer(root, current.$ref);
+    if (!isObject(target)) return false;
+    if ("type" in target) return true;
+    current = target;
+  }
+  return false;
+}
+
+/** Kimi Code 2.7.2 tries to infer a single type from each untyped enum, even for a nullable field. */
+function withTypedMixedEnums(schema: Json): Json {
+  const copy = structuredClone(schema);
+  let changed = false;
+  walk(copy, 0, (node) => {
+    if ("type" in node || !Array.isArray(node.enum) || hasReferencedType(node, copy)) return;
+    const types = new Set(node.enum.map(valueType));
+    if (types.has("number")) types.delete("integer");
+    if (types.size < 2) return;
+    node.type = [...types];
+    changed = true;
+  });
+  return changed ? copy : schema;
+}
+
 function typesOf(node: Json, root: Json, hops = 0): string[] {
   if (hops > 16) return [];
   if (typeof node.type === "string") return [node.type];
@@ -228,7 +265,7 @@ function topLevelOnly(schema: Json, descriptionChars: number): Json {
   return { type: "object", properties, ...(required.length ? { required } : {}), additionalProperties: true };
 }
 
-/** kept: as the server sent it. trimmed: every field and constraint kept, fewer words. loosened: fields deeper in are
+/** kept: every field, constraint and annotation kept. trimmed: every field and constraint kept, fewer words. loosened: fields deeper in are
  * left to the tool's description. minimal: only the top-level fields. dropped: not even those fit. */
 export type SchemaFit =
   | { outcome: "kept"; schema: Json; bytes: number }
@@ -237,12 +274,13 @@ export type SchemaFit =
 
 /** Least loss first, stopping at the first form that fits. */
 export function fitToolSchema(schema: Json, profile: ToolSchemaProfile): SchemaFit {
-  const measured = profile.measureInlined ? inlineRefs(schema) : schema;
-  const from = schemaBytes(measured ?? schema);
-  if (measured && fits(measured, profile)) return { outcome: "kept", schema, bytes: from };
+  const typed = profile.id === "moonshot" ? withTypedMixedEnums(schema) : schema;
+  const measured = profile.measureInlined ? inlineRefs(typed) : typed;
+  const from = schemaBytes(measured ?? typed);
+  if (measured && fits(measured, profile)) return { outcome: "kept", schema: typed, bytes: from };
   const fitted = (outcome: "trimmed" | "loosened" | "minimal", form: Json): SchemaFit => ({ outcome, schema: form, bytes: schemaBytes(form), from });
 
-  const working = structuredClone(measured ?? schema);
+  const working = structuredClone(measured ?? typed);
   if (measured) {
     stripAnnotations(working);
     if (fits(working, profile)) return fitted("trimmed", working);
@@ -262,4 +300,59 @@ export function fitToolSchema(schema: Json, profile: ToolSchemaProfile): SchemaF
     if (fits(top, profile)) return fitted("minimal", top);
   }
   return { outcome: "dropped", bytes: schemaBytes(topLevelOnly(working, 0)), from };
+}
+
+/** A whole tool list fitted under `profile.maxListBytes`, undefined when the profile sets no budget. Least loss first,
+ * applied to every tool's schema until the list fits: fewer words deep in, then fewer words, then deep fields collapsed
+ * into typed placeholders, then only the top-level fields. Every tool keeps its name, its own description and its
+ * `required` fields; the server still validates every call against the tool's own full schema. */
+export function fitToolListForBudget<Tool extends { name: string; inputSchema?: unknown }>(
+  tools: readonly Tool[],
+  profile: ToolSchemaProfile | undefined,
+  log?: (line: string) => void,
+): Tool[] {
+  if (!profile?.maxListBytes) return [...tools];
+  const list = [...tools];
+  const schemaOf = (tool: Tool) => isObject(tool.inputSchema) ? (structuredClone(tool.inputSchema) as Json) : undefined;
+  const schemas = new Map(list.map((tool) => [tool, schemaOf(tool)]));
+  const bytesOf = (item: { name: string; inputSchema?: unknown }) =>
+    Buffer.byteLength(JSON.stringify({ ...item, inputSchema: schemas.get(item as Tool) ?? item.inputSchema }) ?? "");
+  // Each tool's size is measured again only when its own schema changes, so a long list is not re-measured per step.
+  const sizes = new Map(list.map((tool) => [tool, bytesOf(tool)]));
+  let total = [...sizes.values()].reduce((sum, bytes) => sum + bytes, 0);
+  const from = total;
+  if (from <= profile.maxListBytes) return list;
+  const budget: number = profile.maxListBytes;
+  const shrink = (tool: Tool, schema: Json, step: (schema: Json) => void) => {
+    step(schema);
+    const bytes = bytesOf(tool);
+    total += bytes - sizes.get(tool)!;
+    sizes.set(tool, bytes);
+    return total <= budget;
+  };
+  const steps: ReadonlyArray<(schema: Json) => void> = [
+    (schema) => { for (let depth = schemaDepth(schema); depth >= 3; depth -= 1) shortenDescriptions(schema, depth, 0); },
+    (schema) => shortenDescriptions(schema, 0, 300),
+    (schema) => { for (let depth = schemaDepth(schema); depth >= 2; depth -= 1) collapseAt(schema, depth); },
+    (schema) => shortenDescriptions(schema, 0, 120),
+    (schema) => replace(schema, topLevelOnly(schema, 120)),
+    (schema) => replace(schema, topLevelOnly(schema, 0)),
+  ];
+  outer: for (const step of steps) {
+    for (const tool of list) {
+      const schema = schemas.get(tool);
+      if (schema && shrink(tool, schema, step)) break outer;
+    }
+  }
+  const fitted = list.map((tool) => {
+    const schema = schemas.get(tool);
+    return schema ? { ...tool, inputSchema: schema } : tool;
+  });
+  log?.(`fitted the tool list to ${profile.provider}'s list budget (${from} → ${total} bytes)`);
+  return fitted;
+
+  function replace(schema: Json, top: Json): void {
+    for (const key of Object.keys(schema)) delete schema[key];
+    Object.assign(schema, top);
+  }
 }

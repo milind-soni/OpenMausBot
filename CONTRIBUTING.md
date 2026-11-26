@@ -12,8 +12,10 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
   on the server, one store, one event bus. Don't introduce a dependency where thirty lines of code
   will do. New runtime dependencies need a reason in the PR description.
 - **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
-- **UI changes need screenshots.** Before/after images in the PR body; video for anything animated.
-  Match the existing palette and tone in [`src/styles.css`](src/styles.css).
+- **UI changes follow [`DESIGN.md`](DESIGN.md).** Tokens, type, spacing, components, words and
+  states. Before/after screenshots in Midnight and Daylight go in the PR body; video for anything animated.
+  With `pnpm dev` running, `pnpm shots '/room-card-preview.html?state=memory' --name before` saves them at
+  390, 768 and 1440 wide in both skins to `shots/`.
 
 ## Dev setup
 
@@ -36,7 +38,7 @@ pnpm test:watch    # same, in watch mode
 pnpm check:electron # syntax-check the plain JS Electron entrypoints
 
 pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
-pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
+pnpm package:linux # Linux x64 .deb + .rpm + AppImage; no Swift required
 ```
 
 To reproduce a failing CI test job, follow [Vitest shards](docs/ci.md#vitest-shards).
@@ -59,12 +61,12 @@ app and AppImage, routes `click` and `type_text` through the overlay-free bundle
 fail-closed Wayland CUA smoke,
 and produces one release artifact containing:
 
-- the versioned `.deb` and AppImage;
-- stable `OpenMausBot-amd64.deb` and `OpenMausBot.AppImage` copies used by the latest-download links;
+- the versioned `.deb`, `.rpm` and AppImage;
+- stable `OpenMausBot-amd64.deb`, `OpenMausBot-x86_64.rpm` and `OpenMausBot.AppImage` copies used by the latest-download links;
 - `SHA256SUMS-ubuntu-x64.txt` covering both versioned and stable names.
 
 Before publishing, confirm that `package.json` has the release version and dispatch the workflow against the same
-commit used for the other platforms. Attach all five Ubuntu files to the matching release in the separate
+commit used for the other platforms. Attach all seven Linux files to the matching release in the separate
 [OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases). Then verify the checksum
 file and install the `.deb` plus launch the AppImage in a clean Ubuntu 24.04 x86_64 GNOME environment. Never combine
 packages built from different commits under one version.
@@ -106,6 +108,122 @@ House rules for tests:
   that way.
 - Fake CLI shebang scripts must be launched through `spawnCli`/`execCli`, which resolve them through
   Node on Windows. Only gate a test when the behavior itself is genuinely platform-specific.
+
+## Changing how data is stored
+
+**The rule: what version N writes, version N-1 can read.** A self-hosted server
+is updated with a way back: the updater keeps a copy of the data, and when the
+new version does not come up it puts the old version and the copy back. A
+server that was rolled back by hand, or a Cloud moved back one release, starts
+the old version on data the new one has already touched. That must work.
+
+The data folder says which format it is in: `data-format.json`
+(`{ "format": 1, "writtenBy": "0.1.152", … }`), written at start by
+[`server/data-format.ts`](server/data-format.ts). Two numbers in that file
+describe a version: `writes`, the format it leaves the folder in, and `reads`,
+the newest format it understands. A server whose `reads` is below the folder's
+format refuses to start, before it creates, migrates or locks anything, with
+one line that says which version wrote the data and what to do. A folder with
+no marker is format 1.
+
+Most changes need no new format. These are fine in one release, and are how
+every migration so far works:
+
+- a new file, table, index or nullable column; a new optional field in a JSON
+  file whose older readers ignore fields they do not know;
+- a one-time fill of a new field, guarded by a marker file or by the field
+  being absent.
+
+A change needs a new format when the previous release, started on the changed
+data, would fail, lose something, or quietly undo it. Typical cases: a file or
+folder moves or is renamed; a field older code relies on changes meaning or
+goes away; a value older code deletes because it does not recognise it (the
+store's start-up clean-up of `bots.json` does this); the `version` of a JSON
+store goes up (older code treats a higher version as unreadable and starts
+empty); a table changes in a way an older `INSERT` or `SELECT` breaks on.
+
+Such a change ships in **two releases**:
+
+1. **Read it first.** Add the code that reads the new format beside the old,
+   keep writing the old one, and raise `reads` by one. Release.
+2. **Write it one release later.** Start writing the new format and raise
+   `writes` to match. The release before can already read it.
+
+**Clouds need one more step.** The Cloud Admin keeps its own list of data
+formats (`DATA_FORMATS` in the `openmaus-cloud` repo's
+`server/cloud-home-image.ts`): for each format, its first reader and first
+writer release. With it, a Cloud below the reader updates to the reader first,
+and a failed update never rolls a Cloud back to a version that refuses its
+data. Add the new format there, and deploy the Admin, **before** the release
+that raises `writes` is published.
+
+For Vault values over 4 KiB, **Prepare next release** advances `writes` to 2
+when the preceding published release's tag confirms format 2 read support.
+
+The rule is between one release and the next. The stable channel may skip
+releases, so going back from one stable version to the one before it can cross
+both steps; there the updater's copy of the data is the way back, and the
+marker makes the old version say so instead of running on data it would
+damage.
+
+`server/data-format.test.ts` fails the build on any other step. It compares
+the two numbers with `server/data-format-released.json`, the numbers of the
+last release, which **Prepare next release** records with the version bump
+(`scripts/record-data-format.mjs`); do not edit that file by hand. Raising
+`writes` past what the last release reads fails with the two steps spelled
+out.
+
+What exists today, all of it format 1: the server has no numbered migrations.
+Each store repairs or extends its own files when it opens them, and decides
+by looking (a column that is missing, a legacy file that is still there, a
+marker file such as `thread-model-copies-cleared`), so every one of them is
+safe to run twice. Most are additive: the SQLite `ADD COLUMN`s and
+`CREATE … IF NOT EXISTS` in `server/message-db.ts`, `server/cloud-sync-store.ts`
+and `server/runtime/store.ts`, and the field fills in `server/store.ts`. A few
+are one-way moves from formats that predate every supported version (JSON
+transcripts into `messages.db`, per-bot skills into the library, engine
+sessions into `engine-homes/`, the old data folder's rename). They stay as
+they are. The marker does not replace them; it adds the one thing they cannot
+do, which is to stop an older version at the door.
+
+**What the marker protects.** Once a release writes format 2, it stops
+older servers that cannot read it. Unrecorded format changes can still
+cause data loss on rollback:
+
+- Many JSON stores accept only `"version": 1` and throw, or start empty, on
+  anything else: among them `server/command-allowlist.ts`, `server/fleet.ts`,
+  `server/bot-directory.ts`, `server/data/sheet.ts`, `server/pages/store.ts`,
+  `server/sentinel/store.ts` and `server/boat-delete-journal.ts`. A release
+  that raised one of those versions without raising `writes` would pass every
+  check here, and the release before it would start on that data and drop it.
+- The SQLite databases (`messages.db`, `runtime.db`, the cloud-sync store)
+  have no `PRAGMA user_version`. Their schema is judged by looking for
+  columns, so a change an older `INSERT` or `SELECT` breaks on is not seen.
+- Nothing ties a store's `version` or a schema change to `DATA_FORMAT`. The
+  rule holds only when whoever makes the change raises the numbers; review is
+  the only check.
+- The marker is one number for the whole folder. A workspace backup does not
+  carry it (it describes the folder it is in), so a backup a newer version
+  made, restored into an older server, is not stopped by it.
+- A marker that cannot be read (empty or full of NULs after a power loss, not
+  readable by the server's user) counts as format 1 while `writes` is 1, and
+  a marker that cannot be written is said in the log and skipped: while a
+  version writes nothing newer, the check must never be the reason a healthy
+  install does not start. Once `writes` is 2, an unreadable marker, or one
+  that cannot be written, stops startup before any store opens.
+
+For the rule to hold by itself, these would have to change:
+
+1. A test that fails when a store's `version`, a JSON store's shape or a
+   database's tables change without a change to `DATA_FORMAT`: every store's
+   version and every table's columns, recorded in the tree and compared.
+2. A store that meets a `version` higher than it knows refuses to start, with
+   the same plain line, instead of starting empty, so a missed bump stops the
+   server rather than losing the data.
+3. `PRAGMA user_version` on each SQLite database, raised with its schema and
+   checked when it opens.
+4. A workspace backup that records the format it was made in, and a restore
+   that refuses it in a server whose `reads` is lower.
 
 ## Adding a provider driver
 
@@ -293,7 +411,7 @@ Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they 
 - [ ] New server behavior has a test; driver changes keep the contract tests green
 - [ ] No `dist-server/` churn, no lockfile churn beyond your actual dependency change
 - [ ] macOS-only code is platform-gated; nothing breaks the packaged app
-- [ ] UI changes include before/after screenshots
+- [ ] UI changes follow [`DESIGN.md`](DESIGN.md) and include before/after screenshots
 
 By contributing you agree your contributions are licensed under the
 [Apache License, Version 2.0](LICENSE).

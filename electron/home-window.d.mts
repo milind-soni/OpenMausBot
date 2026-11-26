@@ -1,13 +1,18 @@
 /** What this computer's screen says while the window can't show the place. `reason`: the Admin's words on why My Cloud
  * doesn't answer, in English; `cause`: the same as a code the page says in its own language; `machine`: a plan
  * problem's state; `other`: another MausBot Cloud account is signed in; `name`: the team whose Cloud is being opened
- * (absent for My Cloud). */
+ * or the server of the person's own a frozen copy goes back to (absent for My Cloud). */
 export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
-  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
+  /** `network`: My Cloud's page has failed to connect from this computer to its address (`host`) for about a minute while the
+   * Admin knows of nothing wrong. `retryAt`: the Admin asked this app to wait (429), and it tries again by itself then. */
+  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" | "network"; host?: string; retryAt?: number }
   | { screen: "signin"; other?: true }
+  /** An operation of the Admin's own has the place down now (an update, resize, move, restore or start): what it is, and when
+   * it is usually back, as the Admin says (cloud-operation.mjs). The window looks again by itself; nothing to press. */
+  | { screen: "working"; operation: import("./cloud-operation.mjs").CloudOperation }
   /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
   /** A Cloud the session's list says isn't running, so nothing looks up its address: it has ended (`deleteAt`: when its kept
@@ -20,8 +25,9 @@ export interface HomeBridge {
   /** This computer's screen only. */
   state(): Promise<HomeView>;
   onState(callback: (view: HomeView) => void): () => void;
-  /** This computer's screen only: look again now. */
-  retry(): Promise<HomeView>;
+  /** This computer's screen only: look again now. `pressed`: the person pressed Try again, which no wait for the next
+   * sign-in code holds except the Admin's own 429. */
+  retry(pressed?: boolean): Promise<HomeView>;
   /** This computer's screen only, once the person said yes there: the Cloud it shows leaves their list (absent: an older app). */
   remove?(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
   /** This device's MausBot Cloud sign-in, again; on My Cloud's page only from the person's click. */
@@ -30,6 +36,9 @@ export interface HomeBridge {
   repair(): Promise<void>;
   /** My Cloud's own page only: the window reloaded it just now for its newer version. */
   updating?: boolean;
+  /** The place's own page only (absent elsewhere, and in an app before it): what the Admin says has it down now, with a team's or
+   * other Cloud's `name`, or null. */
+  operation?(): Promise<(import("./cloud-operation.mjs").CloudOperation & { name?: string }) | null>;
 }
 
 export type Home = ({ kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true })
@@ -62,6 +71,10 @@ export declare const TEAM_RENEW_RETRY_MS: number;
 export declare const FRESH_MS: number;
 export declare const NAME_WAIT_MS: number;
 export declare const NAME_RETRY_MS: readonly number[];
+export declare const PAIR_RETRY_MS: readonly number[];
+export declare const PAIR_LIMIT_MS: number;
+export declare const PAIR_FLOOR_MS: number;
+export declare const NETWORK_HINT_MS: number;
 export function nameNotFound(code: number): boolean;
 export function createReadyClock(input?: { store?: { read(): unknown; write(value: unknown): void } | null; now?(): number }): { seen(state: unknown): void; fresh(origin: string | null): boolean };
 export function splashText(status: "opening" | "waking", name?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string;
@@ -80,6 +93,8 @@ export interface HomeWindow {
   profile(): string | null;
   opensNow(ask: "cloud" | { team: string } | { cloud: string }): boolean | null;
   cancel(): void;
+  stopOpening(): void;
+  stay(): void;
   openCloud(open?: "phone" | null): Promise<unknown>;
   /** Remove from list from this computer's screen: the Cloud it shows leaves the person's list. */
   remove(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
@@ -91,7 +106,7 @@ export interface HomeWindow {
   placeOrigin(): string | null;
   current(): Home;
   shown(): HomePlace | null;
-  retry(): Promise<unknown>;
+  retry(input?: { pressed?: boolean }): Promise<unknown>;
   signIn(): Promise<void>;
   repair(): Promise<void>;
   changed(): Promise<void>;
@@ -99,6 +114,7 @@ export interface HomeWindow {
   navigated(url: string): void;
   failed(url: string, code?: number): boolean;
   homePage(event: unknown): boolean;
+  operation(): Promise<(import("./cloud-operation.mjs").CloudOperation & { name?: string }) | null>;
   /** Asked once by the home page as it loads: the window reloaded it just now for its newer version. */
   updating(event: unknown): boolean;
   screenPage(event: unknown): boolean;

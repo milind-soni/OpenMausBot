@@ -69,6 +69,19 @@ describe("transcriptLookups", () => {
     expect(transcriptLookups([digest], [digest]).retryableId).toBeUndefined();
   });
 
+  it("keeps Retry on a turn its AI's sign-out stopped, past the notice about that sign-in", () => {
+    const failed = msg("e", { kind: "activity", tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true }, at: 40, parentId: "f" });
+    const signedOut = msg("n", { kind: "activity", tool: { name: "notice: Claude is signed out on this computer.", ok: true, setup: true }, at: 41, parentId: "e" });
+    const signedIn = msg("n", { kind: "activity", tool: { name: "notice: Claude is signed in again.", nameCode: "chat.notice.signedInAgain", nameParams: { engine: "Claude" }, ok: true }, at: 41, parentId: "e" });
+    const turnDigest = msg("d2", { kind: "digest", text: "turn failed", at: 42, parentId: "n" });
+    for (const notice of [signedOut, signedIn]) {
+      const path = [root, q3, a3, follow, failed, notice, turnDigest];
+      expect(transcriptLookups(path, path).retryableId).toBe("e");
+    }
+    const partlyRan = msg("p", { kind: "activity", tool: { name: "notice: switched to Codex. Part of your request had already run, so it was not sent again.", nameCode: "chat.notice.backupAlreadyRan", nameParams: { name: "Codex" }, ok: false }, at: 41, parentId: "e" });
+    expect(transcriptLookups([root, follow, failed, partlyRan], [root, follow, failed, partlyRan]).retryableId).toBe("p");
+  });
+
   it("keeps Retry on the last conversational row when a live call's record follows it", () => {
     const record = msg("call", {
       kind: "call",
@@ -146,5 +159,18 @@ describe.each([
       expect(localDay(after.getTime()) - localDay(before.getTime())).toBe(2);
       expect(localDay(new Date(year!, month!, day!, 0, 30).getTime()) - localDay(new Date(year!, month!, day! - 1, 23, 30).getTime())).toBe(1);
     }
+  });
+});
+
+describe("newChatHintId", () => {
+  const summary = msg("sum", { kind: "compaction", compaction: { summary: "s", firstKeptId: "", foldedThroughId: "a", tokensBefore: 1, by: "harness" } });
+  const engine = msg("eng", { kind: "compaction", engineCompaction: true });
+  const fresh = msg("fresh", { kind: "compaction", compaction: { summary: "", firstKeptId: "", foldedThroughId: "a", tokensBefore: 0, by: "person", fresh: true } });
+  const reply = msg("r", { text: "hi" });
+  it("marks only the newest compaction, and none once the chat started fresh", () => {
+    expect(transcriptLookups([reply], [reply]).newChatHintId).toBeUndefined();
+    expect(transcriptLookups([summary, reply, engine, reply], [summary, reply, engine, reply]).newChatHintId).toBe("eng");
+    expect(transcriptLookups([engine, summary, reply], [engine, summary, reply]).newChatHintId).toBe("sum");
+    expect(transcriptLookups([summary, fresh, reply], [summary, fresh, reply]).newChatHintId).toBeUndefined();
   });
 });

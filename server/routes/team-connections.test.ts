@@ -7,7 +7,7 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { TeamConnectionsHost } from "../host/team-connections-host.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { PeopleConnections } from "../team-connections.ts";
+import { APP_SLUG, PeopleConnections } from "../team-connections.ts";
 import { createTeamConnectionRoutes, type TeamConnectionRouteDeps } from "./team-connections.ts";
 
 const URL_A = "https://mail.example.com/mcp";
@@ -71,4 +71,11 @@ it.each(["", 123])("refuses a malformed expected URL (%s)", async (url) => {
   const { people, save } = setup();
   expect((await save({ value: KEY, url })).status).toBe(400);
   expect(people.key(PERSON, "mail", URL_A)).toBeNull();
+});
+
+it.each(["_1password", "_" + "a".repeat(63)])("accepts team app slug %s", (slug) => {
+  expect(APP_SLUG.test(slug)).toBe(true);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(65)])("rejects invalid team app slug %s", (slug) => {
+  expect(APP_SLUG.test(slug)).toBe(false);
 });

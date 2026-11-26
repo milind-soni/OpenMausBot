@@ -3,6 +3,7 @@
 import type { EngineCap } from "../engine-memory.ts";
 import type { HandoffLimit } from "../coordinator.ts";
 import type { StarterAwake } from "./starter-awake.ts";
+import { PAUSED_RUN_ROUTINE_TURNS_ONLY } from "./starter-routine-wake.ts";
 
 /** Turns a Starter Cloud runs at once, Cloud-wide. */
 export const STARTER_RUNNING_TURNS = 2;
@@ -16,8 +17,11 @@ export interface StarterCaps {
   handoffs: HandoffLimit;
   /** What the app shows: the limits, and when work was last refused for one. Undefined off Starter. */
   status(): { running: number; waiting: number; refusedAt?: number; refused?: PlanLimitReason } | undefined;
-  /** The words a paused bot's turn is refused with, in the person's language; null when the bot is awake. */
-  pausedText(botId: string, language: string | undefined): string | null;
+  /** The words a paused bot's turn is refused with, in the person's language; null when the bot is awake, or when the turn is in
+   * the conversation of a routine run of that bot under way (a routine always runs for a bot only the plan's limit paused). */
+  pausedText(botId: string, language: string | undefined, threadId?: string, routineTurn?: boolean): string | null;
+  /** What a bot that just made this one is told when it starts paused; null when it is awake. */
+  createdPaused(botId: string): string | null;
 }
 
 export function createStarterCaps(deps: {
@@ -25,7 +29,11 @@ export function createStarterCaps(deps: {
   awake: StarterAwake;
   /** Whether this thread's running turn waits on hand-offs it made. */
   waitsOnOthers(threadId: string): boolean;
+  /** Whether a burst's lane runs this thread: it has a limit of its own. */
+  laneOwned?(threadId: string): boolean;
   botName(botId: string): string | undefined;
+  /** This thread is the conversation of a routine run of this bot that is under way. */
+  routineThread?(botId: string, threadId: string): boolean;
   /** The paused bot's line in this language. */
   pausedLine(language: string | undefined, limit: number): string;
   now?: () => number;
@@ -40,7 +48,7 @@ export function createStarterCaps(deps: {
     return words;
   };
   return {
-    engine: { most: () => (deps.starter() ? STARTER_RUNNING_TURNS : undefined), waitsOnOthers: deps.waitsOnOthers },
+    engine: { most: () => (deps.starter() ? STARTER_RUNNING_TURNS : undefined), waitsOnOthers: deps.waitsOnOthers, ...(deps.laneOwned ? { laneOwned: deps.laneOwned } : {}) },
     handoffs: {
       refusal(botId, open) {
         if (!deps.starter()) return null;
@@ -55,8 +63,15 @@ export function createStarterCaps(deps: {
       },
     },
     status: () => (deps.starter() ? { running: STARTER_RUNNING_TURNS, waiting: STARTER_WAITING_HANDOFFS, ...(last ? { refusedAt: last.at, refused: last.reason } : {}) } : undefined),
-    pausedText(botId, language) {
-      return deps.starter() && deps.awake.isPaused(botId) ? deps.pausedLine(language, deps.awake.limit() ?? 0) : null;
+    createdPaused(botId) {
+      if (!deps.starter() || !deps.awake.isPaused(botId)) return null;
+      return `@${deps.botName(botId) ?? "The new bot"} was created, and is paused: this Cloud's Starter plan keeps ${deps.awake.limit()} bots awake, so it takes no work yet. `
+        + "Tell the person in one line: they can choose which bots stay awake, or upgrade this Cloud to wake them all. Do not hand it work until then.";
+    },
+    pausedText(botId, language, threadId, routineTurn) {
+      const runsThere = threadId !== undefined && deps.routineThread?.(botId, threadId) && (routineTurn === true || !PAUSED_RUN_ROUTINE_TURNS_ONLY);
+      if (!deps.starter() || !deps.awake.isPaused(botId) || runsThere) return null;
+      return deps.pausedLine(language, deps.awake.limit() ?? 0);
     },
   };
 }

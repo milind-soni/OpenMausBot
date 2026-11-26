@@ -7,15 +7,20 @@ export const LIVE_MODEL = "gpt-live-1";
 const OPENAI_BASE = "https://api.openai.com";
 export const DEFAULT_LIVE_VOICE = "marin";
 export const MAX_SDP_BYTES = 64 * 1024;
-export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
+export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → AI → Other services.";
 export const LIVE_NEEDS_AZURE = "Live calls through Azure OpenAI need the resource endpoint, the GPT-Live deployment name and its key. Add them in Call settings.";
+export const LIVE_NEEDS_FISH = "Live calls through Fish Audio use your Fish Audio API key. Add it in Settings → AI → Other services.";
+export const LIVE_NEEDS_GEMINI = "Live calls through Gemini use your Gemini API key. Add it in Settings → AI → Other services.";
+export const LIVE_NEEDS_CUSTOM = "Live calls through a custom endpoint need its address and its own key. Add them in Call settings.";
+export const LIVE_NEEDS_ELEVENLABS = "Live calls through ElevenLabs use your ElevenLabs API key. Add it in Settings → AI → Other services.";
 
 /** The client's data channel is untrusted: it may only hang up; every append goes over the sideband.
  * Exception: Azure OpenAI refuses `session.client`, so an Azure call goes without this list and its caller's channel keeps
  * Azure's default events. Read that as: the caller may send session or item events and receive events holding the bot's
  * instructions (not checked against Azure itself). So an Azure call is only for an admin or the owner of a single-owner
  * server, never another team Member, a shared workspace's non-admin or anyone else: azureLiveCallRefusal in live-access.ts,
- * asked by LiveCallController.start. */
+ * asked by LiveCallController.start. A custom endpoint gets the list, but nothing here checks that it keeps to it, so its
+ * calls have the same limit. */
 export const LIVE_DATA_CHANNEL = {
   allowed_client_events: ["session.close"],
   allowed_server_events: [
@@ -38,18 +43,20 @@ const AZURE_HOST_SUFFIXES = [
   ".azure-api.net",
 ] as const;
 const AZURE_DEPLOYMENT = /^[A-Za-z0-9][\w.-]{0,63}$/;
+const CUSTOM_MODEL = /^[A-Za-z0-9][\w.:/-]{0,63}$/;
 
 /** Where a Live call's session is created and its sideband attached. Never carries the key. */
 export interface LiveEndpoint {
   provider: LiveProvider;
   /** The versioned API root, e.g. `https://api.openai.com/v1` or `https://my-res.openai.azure.com/openai/v1`. */
   apiBase: string;
-  /** The OpenAI model id, or the Azure deployment name. */
+  /** The OpenAI model id, the Azure deployment name, the Fish Audio agent id or ElevenLabs agent id ('' until one is set up) or the Gemini Live model id. */
   model: string;
 }
 
 export function liveProviderName(provider: LiveProvider): string {
-  return provider === "azure" ? "Azure OpenAI" : "OpenAI";
+  return provider === "azure" ? "Azure OpenAI" : provider === "fish" ? "Fish Audio" : provider === "gemini" ? "Gemini" : provider === "elevenlabs" ? "ElevenLabs"
+    : provider === "custom" ? "The custom endpoint" : "OpenAI";
 }
 
 /** Only a loopback http URL is accepted, read at call time. */
@@ -90,6 +97,34 @@ export function azureLiveEndpoint(endpoint: string | undefined, deployment: stri
   return root && model ? { provider: "azure", apiBase: `${root}/v1`, model } : null;
 }
 
+/** The versioned API root of a custom OpenAI-compatible endpoint as people paste it (`https://gateway.example.com/v1`, bare, or
+ * with `/live/sessions`): https on any host, or http only on this computer's loopback, since the key is sent there; null for
+ * anything else, or for an address with a user name, password, query or fragment. */
+export function customLiveApiBase(raw: string | undefined): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw?.trim() ?? "");
+  } catch {
+    return null;
+  }
+  if (url.username || url.password || url.search || url.hash) return null;
+  const loopback = url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return null;
+  const path = url.pathname.replace(/\/+$/, "").replace(/\/live\/sessions$/i, "");
+  return `${url.origin}${/\/v1$/i.test(path) ? path : `${path}/v1`}`;
+}
+
+export function customLiveModel(raw: string | undefined): string | null {
+  const name = raw?.trim() || LIVE_MODEL;
+  return CUSTOM_MODEL.test(name) ? name : null;
+}
+
+export function customLiveEndpoint(endpoint: string | undefined, model: string | undefined): LiveEndpoint | null {
+  const apiBase = customLiveApiBase(endpoint);
+  const name = customLiveModel(model);
+  return apiBase && name ? { provider: "custom", apiBase, model: name } : null;
+}
+
 export function liveSessionsUrl(endpoint: LiveEndpoint = openAiLiveEndpoint()): string {
   return `${endpoint.apiBase}/live/sessions`;
 }
@@ -98,7 +133,7 @@ export function liveAttachUrl(sessionId: string, endpoint: LiveEndpoint = openAi
   return `${endpoint.apiBase.replace(/^http/, "ws")}/live/sessions/${encodeURIComponent(sessionId)}/attach`;
 }
 
-/** Azure OpenAI takes a resource key in `api-key`; OpenAI takes a bearer token. */
+/** Azure OpenAI takes a resource key in `api-key`; OpenAI and Fish Audio take a bearer token. */
 export function liveAuthHeaders(provider: LiveProvider, key: string): Record<string, string> {
   return provider === "azure" ? { "api-key": key } : { authorization: `Bearer ${key}` };
 }
@@ -113,6 +148,8 @@ export interface LiveBot {
   name: string;
   title?: string;
   description?: string;
+  /** The voice the bot speaks with in chat; an ElevenLabs Live call uses it when it is an ElevenLabs voice id. */
+  voice?: string;
 }
 
 export interface LiveHistoryMessage {
@@ -177,9 +214,19 @@ const HANG_UP_LEAD = /^(?:(?:um+|uh+|er+|so|well|ok|okay|alright|all right|great
 // "hang up the poster" never match, and neither does anything a page, file or bot said.
 const HANG_UP = /^(?:(?:please|you can|you may|go ahead and|can you|could you|would you|will you|let's|let us)[\s,]+)*(?:hang\s+up(?:\s+(?:the|this)\s+(?:call|phone))?|end\s+(?:(?:the|this|our)\s+)?call)(?:[\s,.!]+(?:now|please|thanks|thank you|bye|goodbye))*[\s.!?]*$/i;
 
+// Chinese has no word boundaries, so a hang-up request must match the whole utterance.
+// 嗯 mm, 好/好的 okay, 行/可以 sure, 那 then, 就这样 that's all, 没事了 nothing else.
+// 谢谢 thanks, 再见 goodbye, 拜拜 bye.
+const ZH_HANG_UP_LEAD = /^(?:(?:嗯|ok(?:ay)?|好的?|行|可以|那|就[这這][样樣]|[没沒]事了|[谢謝]{2}|再[见見]|拜拜)[\s,，、。.!！]*)+/i;
+// 请/麻烦 please, 你/您 you, 可以 can, 帮我 help me, 就 just, 吧/了 soften or mark the end of the request.
+// 挂断/挂掉/挂了/挂机 hang up, 挂吧 go ahead and hang up, 电话 phone, 挂电话/挂断电话/挂掉电话 hang up the phone.
+// 把电话挂了/把电话挂断/把电话挂掉 hang up the phone, 结束通话 end the call, 结束这次通话/结束本次通话 end this call.
+const ZH_HANG_UP = /^(?:[请請]|麻[烦煩]|你|您|可以|[帮幫]我|就)*(?:[挂掛](?:[断斷掉了机機吧](?:[电電][话話])?|[电電][话話])|把[电電][话話][挂掛][了断斷掉]|[结結]束(?:[这這]次|本次)?通[话話])[吧了]?(?:[\s,，、。.!！]*(?:[谢謝]{2}|再[见見]|拜拜))*[\s,，、。.!！]*$/;
+
 /** True only when the person's own words on a Live call are a clear request to hang up. */
 export function spokenHangUp(text: string): boolean {
-  return HANG_UP.test(text.trim().replace(/[\u2018\u2019]/g, "'").replace(HANG_UP_LEAD, ""));
+  return HANG_UP.test(text.trim().replace(/[\u2018\u2019]/g, "'").replace(HANG_UP_LEAD, ""))
+    || ZH_HANG_UP.test(text.trim().replace(ZH_HANG_UP_LEAD, ""));
 }
 
 export function liveInitialInput(history: LiveHistoryMessage[]) {
@@ -221,7 +268,7 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   const endpoint = input.endpoint ?? openAiLiveEndpoint();
   const provider = liveProviderName(endpoint.provider);
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError(`Add an ${provider} API key to use Live calls.`, 409);
+  if (!key) throw new LiveSessionError(endpoint.provider === "custom" ? LIVE_NEEDS_CUSTOM : `Add an ${provider} API key to use Live calls.`, 409);
   if (!input.sdp.trim() || Buffer.byteLength(input.sdp) > MAX_SDP_BYTES) {
     throw new LiveSessionError("The call could not start: the connection offer was invalid.", 400);
   }
@@ -243,8 +290,8 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
     response = await (input.fetchImpl ?? fetch)(liveSessionsUrl(endpoint), {
       method: "POST",
       headers: { ...liveAuthHeaders(endpoint.provider, key), "content-type": "application/json" },
-      // fetch drops `authorization` on a redirect to another host, but keeps `api-key`.
-      ...(endpoint.provider === "azure" ? { redirect: "error" as const } : {}),
+      // fetch drops `authorization` on a redirect to another host, but keeps `api-key`; a custom endpoint is not followed anywhere else either.
+      ...(endpoint.provider === "azure" || endpoint.provider === "custom" ? { redirect: "error" as const } : {}),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(input.timeoutMs ?? CREATE_TIMEOUT_MS),
     });
@@ -256,9 +303,10 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
     );
   }
   if (!response.ok) {
-    const failure = await response.json().catch(() => null) as { error?: { param?: unknown } } | null;
+    const failure = await response.json().catch(() => null) as { error?: { param?: unknown; code?: unknown } } | null;
     const param = typeof failure?.error?.param === "string" ? failure.error.param : undefined;
-    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider), response.status === 429 ? 429 : 502);
+    const code = typeof failure?.error?.code === "string" ? failure.error.code : undefined;
+    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider, code), response.status === 429 ? 429 : 502);
   }
   const payload = await response.json().catch(() => null) as { session?: { id?: unknown }; transport?: { sdp?: unknown } } | null;
   const sessionId = payload?.session?.id;
@@ -269,7 +317,8 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   return { sessionId, sdp };
 }
 
-export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai"): string {
+/** `code` is the provider's `error.code`: OpenAI answers 429 `insufficient_quota` when the account has no credit left, which waiting never fixes. */
+export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai", code?: string): string {
   const name = liveProviderName(provider);
   if (status === 400) {
     return param && /voice/i.test(param)
@@ -281,10 +330,16 @@ export function liveErrorMessage(status: number, param?: string, provider: LiveP
     if (status === 403) return "This Azure OpenAI resource refused the call. Check its network rules and that the key belongs to it.";
     if (status === 404) return "Azure OpenAI has no GPT-Live deployment by that name on this resource. Check the endpoint and the deployment name.";
     if (status === 429) return "Azure OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
+  } else if (provider === "custom") {
+    if (status === 401) return "The custom endpoint rejected the key. Check the key saved for it.";
+    if (status === 403) return "The custom endpoint refused the call. Check that its key may start Live calls.";
+    if (status === 404) return "The custom endpoint has no Live calls at this address (POST …/v1/live/sessions) or no model by that name. Check the endpoint and the model.";
+    if (status === 429) return "The custom endpoint is limiting Live sessions right now. Try again in a moment.";
   } else {
     if (status === 401) return "OpenAI rejected the API key. Check the key for Live calls.";
     if (status === 403) return "This OpenAI project has no access to GPT-Live. Check the project's model access and billing.";
     if (status === 404) return "GPT-Live is not available for this OpenAI project.";
+    if (status === 429 && code === "insufficient_quota") return "This OpenAI account has no credit left for Live calls. Add credit or raise the spending limit in OpenAI's billing settings, then call again.";
     if (status === 429) return "OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
   }
   if (status >= 500) return `${name} had a problem starting the call. Try again in a moment.`;

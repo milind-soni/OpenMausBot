@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstanceInfo, ModelSelection } from "@/state/store";
+import { favoriteKey, favoriteModels, forgetFavoriteModelsForTest, toggleFavoriteModel } from "./favorite-models";
 import { modelName, simpleModelMenu, SIMPLE_SEARCH_AFTER } from "./simple-model-menu";
 
 vi.hoisted(() => {
@@ -50,6 +51,66 @@ const rows = (built: Menu, index = 0) => {
   return body.kind === "models" ? body.rows.map((row) => row.label) : [];
 };
 const body = (built: Menu, index = 0) => built.groups[index]!.body;
+
+describe("a starred model", () => {
+  const stored = new Map<string, string>();
+  beforeEach(() => {
+    stored.clear();
+    forgetFavoriteModelsForTest();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });
+  });
+
+  it("comes first among its provider's suggestions, and counts against them", () => {
+    toggleFavoriteModel("claude", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Haiku 5", "Fable 5.1", "Fable 5", "Opus 5.5"]);
+  });
+
+  it("stays out of another provider, and goes back when unstarred", () => {
+    toggleFavoriteModel("codex", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
+    toggleFavoriteModel("claude", "haiku-5");
+    toggleFavoriteModel("claude", "haiku-5");
+    expect(rows(menu([claude()]))).toEqual(["Fable 5.1", "Fable 5", "Opus 5.5", "Opus 5"]);
+  });
+
+  it("survives a reload, and a saved list that makes no sense counts as none", () => {
+    toggleFavoriteModel("claude", "haiku-5");
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().has(favoriteKey("claude", "haiku-5"))).toBe(true);
+    stored.set("omb-favorite-models", "{not json");
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().size).toBe(0);
+    stored.set("omb-favorite-models", JSON.stringify({ a: 1 }));
+    forgetFavoriteModelsForTest();
+    expect(favoriteModels().size).toBe(0);
+  });
+});
+
+describe("Ollama in the Simple model menu", () => {
+  const ollama = engine("openaiCompat", "openai-compat", "Ollama", "api", [
+    { id: "llama3.2:latest", label: "llama3.2:latest", custom: true, local: { bytes: 2_019_393_189, parameters: "3.2B", quantization: "Q4_K_M", tools: true } },
+    { id: "gemma2:2b", label: "gemma2:2b", custom: true, local: { bytes: 912_000_000, parameters: "2.6B", tools: false } },
+  ], { serverKind: "ollama" });
+
+  it("is headed Ollama, with no API key, and says what each pulled model is", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "" } });
+    expect(built.groups.map((group) => group.label)).toEqual(["Ollama"]);
+    const body = built.groups[0]!.body;
+    expect(body.kind === "models" && body.rows.map((row) => [row.label, row.detail])).toEqual([
+      ["llama3.2:latest", "3.2B · Q4_K_M · 2 GB"],
+      ["gemma2:2b", "2.6B · 912 MB · No tools"],
+    ]);
+  });
+
+  it("says what the selected model is too", () => {
+    const built = menu([ollama], { selection: { instanceId: "openaiCompat", model: "gemma2:2b" } });
+    expect(built.current).toMatchObject({ label: "gemma2:2b", meta: "2.6B · 912 MB · No tools", title: "Ollama · gemma2:2b · 2.6B · 912 MB · No tools" });
+  });
+
+  it("keeps the API key heading for another OpenAI-compatible server", () => {
+    expect(menu([openaiKey]).groups.map((group) => group.label)).toEqual(["OpenAI · API key"]);
+  });
+});
 
 describe("the Simple model menu", () => {
   it("puts the current model on top, then the rest of its provider under a heading, in short names", () => {
@@ -241,6 +302,25 @@ describe("the Simple model menu", () => {
   });
 });
 
+describe("a model that needs a newer CLI", () => {
+  const gated = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, needsCliUpdate: "2.1.321" } : option);
+  const pick = (model: string) => ({ instanceId: "claude", model });
+  const menuOn = (model: string) => simpleModelMenu({
+    instances: [claude({}, gated)], listed: [claude({}, gated)], selection: pick(model),
+    bot: { name: "Scout", selection: pick(model) }, query: "", expanded: new Set(["claude"]), probing: new Set(), loading: false,
+  });
+
+  it("stays listed but cannot be picked", () => {
+    const body = menuOn("sonnet-5").groups[0]!.body;
+    if (body.kind !== "models") throw new Error("expected the models");
+    expect(body.rows.filter((row) => row.blocked).map((row) => row.option.id)).toEqual(["opus-5-5"]);
+  });
+
+  it("offers the update on the current row instead of failing the turn", () => {
+    expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Update Claude" });
+  });
+});
+
 describe("a model the organization turned off", () => {
   const blockedModels = claudeModels.map((option) => option.id === "opus-5-5" ? { ...option, orgBlocked: true as const } : option);
   const pick = (model: string) => ({ instanceId: "claude", model });
@@ -259,6 +339,25 @@ describe("a model the organization turned off", () => {
   it("says so on the current row, with nothing to set up", () => {
     expect(menuOn("opus-5-5").current).toMatchObject({ warning: true, blocked: true, meta: "Turned off by your organization" });
     expect(menuOn("sonnet-5").current?.blocked).toBeUndefined();
+  });
+});
+
+describe("custom ACP engine with a discovered catalog", () => {
+  // A customAcp engine (e.g. Devin) ships a discovered catalog whose options are NOT marked
+  // `custom`; the menu must list them instead of collapsing to hand-added models only.
+  const devin = engine("devin", "customAcp", "Devin", "custom", [
+    { id: "agent-default", label: "Agent default", custom: true },
+    { id: "swe-2-high", label: "SWE-2", variants: [{ id: "medium", label: "Medium" }, { id: "high", label: "High" }, { id: "max", label: "Max" }] },
+    { id: "deepseek-v4-1-flash-high", label: "DeepSeek V4.1 Flash" },
+  ]);
+  const devinSelection: ModelSelection = { instanceId: "devin", model: "swe-2-high", variant: "high" };
+
+  it("lists discovered catalog models alongside hand-added ones", () => {
+    const built = menu([devin], { selection: devinSelection, bot: { name: "Pepper", selection: devinSelection } });
+    const labels = rows(built);
+    expect(labels).toContain("SWE-2");
+    expect(labels).toContain("DeepSeek V4.1 Flash");
+    expect(labels).toContain("Agent default");
   });
 });
 

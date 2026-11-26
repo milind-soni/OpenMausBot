@@ -5,6 +5,7 @@ import type { Bot } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
+  selectedId: null as string | null,
   effects: [] as Array<() => void | (() => void)>,
   portal: null as { node: ReactElement<{ ref: RefObject<HTMLDivElement | null> }>; target: unknown } | null,
 }));
@@ -24,7 +25,7 @@ vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [bot, { ...bot, id: "other" }] }, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, selectedId: fixture.selectedId, bots: [bot, { ...bot, id: "other" }] }, dispatch: vi.fn() }) };
 });
 
 const { BotContextMenu } = await import("./Sidebar");
@@ -37,6 +38,7 @@ const bot: Bot = {
 const listeners = new Map<string, () => void>();
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.selectedId = null;
   fixture.effects = [];
   fixture.portal = null;
   listeners.clear();
@@ -111,6 +113,13 @@ describe("bot actions menu viewport placement", () => {
     expect(negative.style).toEqual({ top: "8px", left: "8px" });
   });
 
+  it("lets Simple pin or unpin a bot first, and offers no folders", () => {
+    const html = render();
+    expect(html.indexOf(t("sidebar.bot.pin"))).toBeGreaterThan(-1);
+    expect(html.indexOf(t("sidebar.bot.pin"))).toBeLessThan(html.indexOf(t("sidebar.copyConversationId")));
+    for (const key of ["folder.new", "task.folder.new"] as const) expect(html, key).not.toContain(`>${t(key)}<`);
+  });
+
   it("keeps Advanced's flat list of bot actions, drawn on the shared menu sheet", () => {
     fixture.advanced = true;
     const html = render();
@@ -131,5 +140,20 @@ describe("bot actions menu viewport placement", () => {
     setTeamPeople(null);
     fixture.effects = [];
     expect(render()).toContain(t("sidebar.bot.makeChief"));
+  });
+
+  it("shows the platform New thread shortcut hint only for the selected bot", () => {
+    expect(render()).not.toContain("<kbd");
+    fixture.selectedId = bot.id;
+    const win = globalThis.window as unknown as { ogb?: { platform?: string } };
+    for (const advanced of [false, true]) {
+      fixture.advanced = advanced;
+      for (const [platform, expected] of [["darwin", "⌘ ⇧ N"], ["win32", "Ctrl Shift N"], ["linux", "Ctrl Shift N"]] as const) {
+        win.ogb = { platform };
+        const html = render();
+        expect(html).toContain("<kbd");
+        expect(html).toContain(expected);
+      }
+    }
   });
 });

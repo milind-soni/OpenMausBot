@@ -65,6 +65,7 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
     // The public catalog needs no key, so it proves nothing; `self=true` answers 401 for an absent or invalid Bearer token.
     const res = await fetch(`${API}/model?page_size=1&self=true`, {
       headers: { authorization: `Bearer ${key}` },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
     if (res.ok) return { ok: true };
@@ -79,6 +80,7 @@ async function fishGet(key: string, path: string): Promise<{ status: number; bod
   try {
     response = await fetch(`${API}${path}`, {
       headers: { authorization: `Bearer ${key}` },
+      redirect: "error",
       signal: AbortSignal.timeout(20_000),
     });
   } catch {
@@ -178,6 +180,7 @@ export async function synthesize(
   voiceId: string,
   key: string,
   model: FishTtsModel = DEFAULT_FISH_MODEL,
+  signal?: AbortSignal,
 ): Promise<Audio> {
   let res: Response;
   try {
@@ -197,7 +200,8 @@ export async function synthesize(
         mp3_bitrate: 64,
         latency: "normal",
       }),
-      signal: AbortSignal.timeout(60_000),
+      redirect: "error",
+      signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
     });
   } catch {
     throw new Error("Couldn't reach Fish Audio to generate speech — check your connection.");
@@ -218,6 +222,7 @@ export async function transcribe(audio: Uint8Array, mime: string, key: string): 
       method: "POST",
       headers: { authorization: `Bearer ${key}`, model: "transcribe-1-pro" },
       body: form,
+      redirect: "error",
       signal: AbortSignal.timeout(60_000),
     });
   } catch {

@@ -1,13 +1,15 @@
 import type { Message } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
-import { lastNonReceipt } from "@/lib/receipts";
+import { isReceipt } from "@/lib/receipts";
 import { noticeText } from "@/lib/activity-text";
 import type { ServerTextParams } from "../../shared/server-text";
+import { signInNotice } from "../../shared/sign-in-notice";
 
 export interface TranscriptLookups {
   editVersions(message: Message): readonly Message[] | undefined;
   replyTarget(message: Message): Message | undefined;
   retryableId: string | undefined;
+  newChatHintId: string | undefined;
 }
 
 export function transcriptLookups(all: readonly Message[], branch: readonly Message[]): TranscriptLookups {
@@ -22,7 +24,8 @@ export function transcriptLookups(all: readonly Message[], branch: readonly Mess
     else forks.set(parent, [message]);
   }
   for (const siblings of forks.values()) siblings.sort((a, b) => a.at - b.at);
-  const retryableId = lastNonReceipt(branch)?.id;
+  const retryableId = branch.findLast((message) => !isReceipt(message) && !signInNotice(message))?.id;
+  const lastCompaction = branch.findLast((message) => message.kind === "compaction");
   return {
     editVersions(message) {
       if (message.role !== "user" || message.kind !== "text") return undefined;
@@ -31,6 +34,7 @@ export function transcriptLookups(all: readonly Message[], branch: readonly Mess
     },
     replyTarget: (message) => (message.replyToId ? byId.get(message.replyToId) : undefined),
     retryableId,
+    newChatHintId: lastCompaction && !lastCompaction.compaction?.fresh ? lastCompaction.id : undefined,
   };
 }
 

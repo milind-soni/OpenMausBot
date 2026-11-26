@@ -5,6 +5,7 @@
 // computer go of an app event My Cloud now collects. Admin scope; My Cloud takes an item only over its owner's session.
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -13,13 +14,14 @@ import type { MoveKind } from "../electron/cloud-send-parts.mjs";
 import type { AppTrigger } from "../shared/app-triggers.ts";
 import { canonicalJson } from "../shared/package-format.ts";
 import { isSkillName } from "../shared/skill-md.ts";
-import type { InstalledPlaybook, InstalledPackageMetadata } from "../shared/wire.ts";
+import { EFFORT_LEVELS, type InstalledPlaybook, type InstalledPackageMetadata } from "../shared/wire.ts";
+import { isModelVariant } from "./contracts.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
-import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
+import { keptDefaultBot, retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
 import { watchAsMade } from "./host/default-watch.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -35,11 +37,11 @@ import { restorePaths, validRelative } from "./workspace-backup-paths.ts";
 const SHARED_ROOT = "/omb-data";
 const FINISHED = new Set(["completed", "failed", "cancelled", "missed"]);
 const KIND_BODY_MAX = 8 * 1024 * 1024;
-const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity", "modelSelection",
+const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity", "sameConversation", "modelSelection",
   "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt", "checks", "access", "deliver"] as const;
 const CALL_FIELDS = ["name", "description", "botIds", "schedule", "durationMinutes", "attachments", "roomId", "createdAt"] as const;
-const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId", "createdAt"] as const;
-const APP_EVENT_FIELDS = ["name", "prompt", "botId", "runOn", "app", "event", "accountId", "config", "filter", "sourceThreadId"] as const;
+const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "payloadFilter", "maxPendingRuns", "sameConversation", "resultsThreadId", "createdAt"] as const;
+const APP_EVENT_FIELDS = ["name", "prompt", "botId", "runOn", "app", "event", "accountId", "config", "filter", "sourceThreadId", "sameConversation"] as const;
 /** Prose that may name this computer's data folder. */
 const TEXTS = ["prompt", "description", "output", "error"] as const;
 export const MOVE_BOT_FIELDS: readonly string[] = Object.values(MOVE_BOT_PARTS).flat();
@@ -245,7 +247,10 @@ const botFieldsSchema = z.object({
   pinned: z.boolean().nullable().optional(),
   chiefOfStaff: z.boolean().nullable().optional(),
   managedSections: z.array(z.string().trim().max(60)).max(100).nullable().optional(),
-  fallback: z.array(z.object({ instanceId: z.string().regex(/^[\w.-]{1,128}$/u), model: z.string().min(1).max(500) })).max(5).nullable().optional(),
+  fallback: z.array(z.object({
+    instanceId: z.string().regex(/^[\w.-]{1,128}$/u), model: z.string().min(1).max(500),
+    effort: z.enum(EFFORT_LEVELS).optional(), variant: z.string().refine(isModelVariant).optional(),
+  }).refine((entry) => entry.effort === undefined || entry.variant === undefined)).max(5).nullable().optional(),
   projects: z.array(z.object({ id: z.string().regex(/^[\w-]{1,128}$/u), name: z.string().min(1).max(80), emoji: z.string().max(16).optional() }).passthrough()).max(200).nullable().optional(),
   playbooks: z.array(playbookSchema).max(50).nullable().optional(),
   installedPackage: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -265,7 +270,7 @@ const librarySkillSchema = z.object({ text: z.string().max(512 * 1024), entry: z
 
 /** My Cloud sets a bot's move-only fields as they are on this computer: absent ones it clears, its own projects it keeps
  * beside the ones that arrive, and an engine, team or library skill it lacks it leaves out. */
-function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
+function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown, source: ArrivingSource = {}): void {
   const bot = deps.store.bot(id) ?? refuse(409, "This bot is not on My Cloud yet.");
   const parsed = botFieldsSchema.safeParse(raw);
   if (!parsed.success) refuse(400, "send the bot's fields as this computer holds them");
@@ -291,12 +296,25 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
   }
   if (Object.hasOwn(fields, "chiefOfStaff") && fields.chiefOfStaff !== true) patch.chiefOfStaff = fields.chiefOfStaff ?? undefined;
   if (fields.chiefOfStaff === true) delete patch.hidden;
+  // A bot coming back here (bot-moves.ts) stays hidden until it arrived: its archived switch waits on its hold till then.
+  // It never takes this place's Chief's crown or MausBot mark: those stay where they are (a Chief does not move back).
+  const coming = (bot.movedTo as { back?: true } | undefined)?.back === true;
+  if (coming) {
+    if (Object.hasOwn(patch, "hidden")) (patch as Record<string, unknown>).movedTo = { ...bot.movedTo, archived: patch.hidden === true };
+    for (const key of ["hidden", "chiefOfStaff", "managedSections"] as const) delete patch[key];
+    deps.store.patchBot(id, patch);
+    return;
+  }
   deps.store.patchBot(id, patch);
-  if (fields.chiefOfStaff === true) {
+  // A MausBot arriving where the person's own MausBot stays (takeArrivingDefaultBot) doesn't take the crown from this
+  // place's Chief, whichever bot that is, also when a later pass sends its Chief fields without its MausBot mark.
+  const keepsCrown = (fields.defaultBot || source.defaultBot) && keptDefaultBot(deps.store, id)
+    && deps.store.bots.some((other) => other.id !== id && other.chiefOfStaff);
+  if (fields.chiefOfStaff === true && !keepsCrown) {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
-  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id);
+  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id, source.computer);
   retireUnusedStarter(deps.store, deps.dataDir);
 }
 
@@ -322,14 +340,14 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
     held.runs.push(...arriving.filter((run) => !have.has(run.id)));
     return [adopted];
   });
-  if (adopted) deps.ownRoutine?.(adopted, owner.person);
+  if (adopted && !owner.here) deps.ownRoutine?.(adopted, owner.person);
   deps.arrived?.();
 }
 
-async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner): Promise<void> {
+async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, runs: unknown, from: string, owner: CloudOwner, source: ArrivingSource = {}): Promise<void> {
   if (!record(raw) && kind !== "bot") refuse(400, "send the item's record");
   const same = (value: unknown) => record(value) && (value.id === undefined || value.id === id);
-  if (kind === "bot") return applyBotFields(deps, id, raw);
+  if (kind === "bot") return applyBotFields(deps, id, raw, source);
   if (kind === "routine") return adoptRoutine(deps, raw, runs, from, owner);
   if (!same(raw) && kind !== "imported-skill" && kind !== "library-skill") refuse(400, "the record names another item");
   if (kind === "call") {
@@ -376,7 +394,15 @@ async function adopt(deps: MoveKindsDeps, kind: Kind, id: string, raw: unknown, 
   }
 }
 
-const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional() });
+const putSchema = z.object({ v: z.literal(1), key: z.string().max(200), dataDir: z.string().min(1).max(4096), record: z.unknown(), runs: z.array(z.unknown()).max(2_000).optional(),
+  computer: z.string().max(120).optional(), sourceDefault: z.boolean().optional() });
+
+type ArrivingSource = { computer?: string; defaultBot?: boolean };
+
+/** This computer's name as a person knows it, which a MausBot that moves away is named for when the place it goes keeps its own. */
+function thisComputerName(): string {
+  return (process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname()).replace(/\.local$/iu, "").slice(0, 120);
+}
 
 /** False when the path is not this route. */
 export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, method, url, auth, json, readBody }: RouteContext): Promise<boolean> {
@@ -387,7 +413,7 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
       const key = parseKey(url.searchParams.get("key"));
       const found = key && kindRecord(deps, key.kind, key.id);
       if (!found) json(res, 404, { error: "not here" });
-      else json(res, 200, { v: 1, dataDir: deps.dataDir, ...found });
+      else json(res, 200, { v: 1, dataDir: deps.dataDir, ...(key.kind === "bot" ? { computer: thisComputerName() } : {}), ...found });
       return true;
     }
     if (method === "PUT") {
@@ -396,7 +422,7 @@ export async function moveKindsRoute(deps: MoveKindsDeps, { req, res, path, meth
       const body = putSchema.safeParse(await readBody(req, KIND_BODY_MAX));
       const key = body.success ? parseKey(body.data.key) : null;
       if (!body.success || !key) { json(res, 400, { error: "send { v: 1, key, dataDir, record }" }); return true; }
-      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner);
+      await adopt(deps, key.kind, key.id, body.data.record, body.data.runs, body.data.dataDir, owner, { computer: body.data.computer, defaultBot: body.data.sourceDefault });
       json(res, 200, { v: 1, ok: true });
       return true;
     }

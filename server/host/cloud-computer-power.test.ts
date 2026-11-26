@@ -111,6 +111,17 @@ describe("cloud computer power", () => {
     expect(logs).toEqual(["cloud computer bot-a: asleep after 600s idle"]);
   });
 
+  it("says the browser sandbox's real idle time when it sleeps, not the computers' window", async () => {
+    fake.states.set("browser", "ready");
+    power.used("browser", 3 * MINUTE);
+    await vi.advanceTimersByTimeAsync(2 * MINUTE);
+    power.used("browser", 1_000);
+    // The shorter window never cuts the 3 minutes asked at the start: it sleeps then, a minute after its last use.
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    expect(sleeps()).toEqual(["browser"]);
+    expect(logs).toEqual(["the Cloud's browser sandbox: asleep after 60s idle"]);
+  });
+
   it("counts the window from the end of a turn, however long the turn ran", async () => {
     fake.states.set("bot-a", "ready");
     power.attached(turn("t1"), "bot-a");
@@ -522,6 +533,45 @@ describe("cloud computer power", () => {
       for (const owner of ["paused", "unscheduled", "elsewhere"]) power.used(owner);
       await vi.advanceTimersByTimeAsync(10 * MINUTE);
       expect(sleeps().sort()).toEqual(["elsewhere", "paused", "unscheduled"]);
+    });
+  });
+  describe("a computer the provider calls ready", () => {
+    type Wait = { woke?: boolean; onPhase?: (phase: "waking" | "restoring") => void };
+    const withReadiness = (awaitAnswer: (boxId: string, opts: Wait) => Promise<{ ok: true; waitedMs: number } | { ok: false; phase: "waking" | "restoring"; waitedMs: number }>) =>
+      createCloudComputerPower({
+        cfg: { box: { token: "box_test" } }, busy: () => false, claim: () => () => {}, owners: () => [], routines: () => [], routineComputer: () => null,
+        broadcast: () => {}, log: () => {}, readiness: { awaitAnswer: (_cfg, boxId, opts = {}) => awaitAnswer(boxId, opts) },
+      });
+
+    it("has to answer before the turn uses it: one this process woke is asked afresh, one already on is asked as usual", async () => {
+      const asked: Array<[string, boolean]> = [];
+      const local = withReadiness(async (boxId, opts) => { asked.push([boxId, opts.woke === true]); return { ok: true, waitedMs: 0 }; });
+      fake.states.set("asleep", "archived");
+      fake.states.set("awake", "ready");
+      const woken = await local.start(bot("asleep"), turn("t1"));
+      await local.answering(woken!.id);
+      await local.answering(woken!.id);
+      const on = await local.start(bot("awake"), turn("t2"));
+      await local.answering(on!.id);
+      expect(asked).toEqual([[boxIdOf("asleep"), true], [boxIdOf("asleep"), false], [boxIdOf("awake"), false]]);
+      local.close();
+    });
+
+    it("fails the start in passing words when it stays silent, never as a computer that did not start", async () => {
+      const { cloudRefusal } = await import("../../shared/place-view.ts");
+      const { cloudFailureOf } = await import("../boat-limit.ts");
+      const { transientClaimFailure } = await import("../auto-vm-claims.ts");
+      for (const phase of ["waking", "restoring"] as const) {
+        const local = withReadiness(async (_boxId, opts) => { opts.onPhase?.(phase); return { ok: false, phase, waitedMs: 90_000 }; });
+        let restoring = 0;
+        const error = await local.answering("bx_silent", { woke: true, onRestoring: () => { restoring++; } }).catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(Error);
+        expect(transientClaimFailure(error)).toBe(true);
+        expect(cloudRefusal(cloudFailureOf(error), true).state).toBe("cc-unavailable");
+        expect(cloudRefusal(cloudFailureOf(error), false).state).toBe("cc-unavailable");
+        expect(restoring).toBe(phase === "restoring" ? 1 : 0);
+        local.close();
+      }
     });
   });
 });

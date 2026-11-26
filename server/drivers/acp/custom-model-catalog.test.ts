@@ -1,8 +1,15 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DISCOVERY_CLIENT_NAME, discoverAcpModels, resolveCustomAcpModels } from "./custom-model-catalog.ts";
+import {
+  acpDiscoveryProblem, AcpDiscoveryRpcError, AcpDiscoveryTimeoutError, DISCOVERY_CLIENT_NAME, discoverAcpModels, discoveryCutShort,
+  resolveCustomAcpModels,
+} from "./custom-model-catalog.ts";
+import { classifyDevinError } from "./devin.ts";
+
+const FAKE_ACP_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 
 /** Lets a test see a process that reports it would not stop; the real stop still runs. */
 const stop = vi.hoisted(() => ({ refuses: false }));
@@ -213,5 +220,70 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
       { id: "plain-model", label: "plain-model" },
       { id: "good-model", label: "Good Model" },
     ]);
+  });
+});
+
+describe("a model list whose per-model effort reads are cut short (shared fake ACP CLI)", () => {
+  const MODELS = Array.from({ length: 6 }, (_, index) => `fixture-model-${index}`);
+  const EFFORTS = [{ value: "low", name: "Low" }, { value: "high", name: "High" }];
+  const env = (extra: Record<string, string>) => ({
+    ...process.env, FAKE_ACP_MODELS: MODELS.join(","),
+    FAKE_ACP_VARIANTS: JSON.stringify(Object.fromEntries(MODELS.map((model) => [model, { currentValue: "low", options: EFFORTS }]))),
+    ...extra,
+  });
+  // As Devin's driver reads it: its own default first, then each model with the efforts it offers.
+  const DEVIN_LIKE = { passthrough: { id: "agent-default", label: "Default" }, variantLimit: 128, maxModels: 4096 };
+  const withEfforts = (catalog: { options: Array<{ id: string; variants?: unknown[] }> }) =>
+    catalog.options.filter((option) => option.variants?.length).map((option) => option.id);
+
+  it("keeps every listed model when the whole read runs out of time, with efforts only for the models it reached", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_HANG_ON_MODEL: MODELS[3] }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, timeoutMs: 5_000 });
+    expect(catalog.default).toBe("agent-default");
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
+    expect(withEfforts(catalog)).toEqual(MODELS.slice(0, 3));
+    expect(catalog.options.find((option) => option.id === MODELS[1])?.variants).toEqual([{ id: "low", label: "Low" }, { id: "high", label: "High" }]);
+    expect(discoveryCutShort(catalog)).toBe(true);
+  }, 20_000);
+
+  it("keeps every listed model, and reads the rest, when one switch takes longer than a request may", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_HANG_ON_MODEL: MODELS[2] }), FAKE_ACP_CLI, [], { ...DEVIN_LIKE, requestTimeoutMs: 5_000 });
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
+    expect(withEfforts(catalog)).toEqual(MODELS.filter((model) => model !== MODELS[2]));
+    expect(discoveryCutShort(catalog)).toBe(true);
+  }, 20_000);
+
+  it("keeps every listed model when the agent exits partway through the switches", async () => {
+    const catalog = await discoverAcpModels(env({ FAKE_ACP_EXIT_ON_MODEL: MODELS[3] }), FAKE_ACP_CLI, [], DEVIN_LIKE);
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS]);
+    expect(withEfforts(catalog)).toEqual(MODELS.slice(0, 3));
+    expect(discoveryCutShort(catalog)).toBe(true);
+  });
+
+  it("marks nothing when every switch answered, or when a model was refused", async () => {
+    const catalog = await discoverAcpModels(env({}), FAKE_ACP_CLI, [], DEVIN_LIKE);
+    expect(withEfforts(catalog)).toEqual(MODELS);
+    expect(discoveryCutShort(catalog)).toBe(false);
+    const fixture = await fake();
+    const refused = await resolveCustomAcpModels(fixture.env, fixture.config);
+    expect(discoveryCutShort(refused)).toBe(false);
+  });
+
+  it("still fails when time runs out before the agent has listed its models, and names it a timeout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "omb-catalog-silent-"));
+    scratch.push(dir);
+    const cli = join(dir, "silent.mjs");
+    await writeFile(cli, "process.stdin.resume();\n");
+    const error = await discoverAcpModels(process.env, `${JSON.stringify(process.execPath)} ${JSON.stringify(cli)}`, [], { requestTimeoutMs: 500 })
+      .then(() => undefined, (failure: unknown) => failure);
+    expect(error).toBeInstanceOf(AcpDiscoveryTimeoutError);
+    expect(acpDiscoveryProblem(error)).toBe("timedOut");
+  }, 20_000);
+
+  it("names a refused sign-in only when the engine's own classifier reads it as one", () => {
+    const loggedOut = new AcpDiscoveryRpcError(-32000, "Please log in to use Devin. Use `/login` to authenticate again.");
+    expect(acpDiscoveryProblem(loggedOut, classifyDevinError)).toBe("signedOut");
+    expect(acpDiscoveryProblem(loggedOut)).toBe("failed");
+    expect(acpDiscoveryProblem(new AcpDiscoveryRpcError(-32603, "Internal error"), classifyDevinError)).toBe("failed");
+    expect(acpDiscoveryProblem(new Error("ACP agent closed during model discovery."), classifyDevinError)).toBe("failed");
   });
 });

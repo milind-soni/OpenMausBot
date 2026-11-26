@@ -5,12 +5,12 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AudioLines, Check, ChevronDown, Loader2, Phone, PhoneOff, X } from "lucide-react";
 
 import { useShowThreads } from "@/lib/thread-preferences";
-import { openBot, useStore, visibleMessages, type Bot } from "@/state/store";
+import { openBot, useStore, visibleMessages, type Bot } from "@/state/store"; import { isNewChatThread } from "@/state/new-chat";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
-import { NO, YES } from "../../shared/call-consent";
+import { chineseConsent, NO, YES } from "../../shared/call-consent";
 import { dismissStartPrompt, hangUpLiveCall, isLiveCallRunning, startLiveCall, useLiveMedia } from "@/lib/live-call-media";
 import { t } from "@/lib/i18n";
 import { speaker } from "@/lib/tts";
@@ -27,22 +27,31 @@ import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
-import { fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
-import { VoiceSetupDialog } from "./VoiceSetupDialog";
+import { CALL_ENDPOINT_MS, callSpeechEndNote, listensHere, missingListenKey, speechBridge } from "@/lib/speech";
+import { VoiceSetupDialog } from "./lazy-screens";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
-const CALL_ENDPOINT_MS = 850;
 
 /** `panel`: the small round button beside the bot in its panel, with no chevron. It leaves the composer's + menu to the
  * composer's own button: two buttons answering it would start two calls. */
 export type CallButtonPlacement = "header" | "composer" | "panel";
 
+/** Each bot's Live start from a blank chat, kept outside the button: making the conversation changes the chat's thread,
+ * which remounts the composer and the button inside it. */
+const liveStarts = new Map<string, { request: number; waiting: number }>();
+function liveStartOf(botId: string): { request: number; waiting: number } {
+  let pending = liveStarts.get(botId);
+  if (!pending) liveStarts.set(botId, (pending = { request: 0, waiting: 0 }));
+  return pending;
+}
+
 /** `fill` (Simple composer): a round button in that colour with its glyph in `ink`, and no chevron; the + menu picks the
  * call mode. */
 /** `inverse` (phone composer): a round ink-coloured button with an app-coloured glyph: white on Midnight, dark on Meadow. */
-export function CallButton({ bot, placement = "header", fill, ink, inverse }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean }) {
+/** `modeMenu: false` drops the call-mode chevron beside the button, for a composer whose + menu offers the modes. */
+export function CallButton({ bot, placement = "header", fill, ink, inverse, modeMenu }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean; modeMenu?: boolean }) {
   const { state } = useStore();
   return (
     <CallTargetButton
@@ -50,6 +59,7 @@ export function CallButton({ bot, placement = "header", fill, ink, inverse }: { 
       fill={fill}
       ink={ink}
       inverse={inverse}
+      modeMenu={modeMenu}
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
@@ -75,11 +85,13 @@ export function CallTargetButton({
   fill,
   ink = "#ffffff",
   inverse,
+  modeMenu = true,
 }: {
   placement?: CallButtonPlacement;
   fill?: string;
   ink?: string;
   inverse?: boolean;
+  modeMenu?: boolean;
   targetId: string;
   targetName: string;
   threadId?: string;
@@ -103,7 +115,7 @@ export function CallTargetButton({
   const active = onCall || onLiveCall;
   const remoteClient = globalThis.window?.ogb?.remoteClient?.active === true;
   const capabilityHelp = capabilitiesReady
-    ? callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart), fishListeningReady(state.config))
+    ? callCapabilityHelp(capabilities, Boolean(speechBridge(state.config)?.speechStart), missingListenKey(capabilities, state.config))
     : null;
   const supported = capabilitiesReady && !capabilityHelp;
   const localVoice = localSystemVoiceActive();
@@ -138,7 +150,7 @@ export function CallTargetButton({
   const keyId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
-  const round = Boolean(fill) || Boolean(inverse) || placement === "panel";
+  const round = Boolean(fill) || Boolean(inverse) || placement === "panel" || !modeMenu;
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
@@ -175,12 +187,26 @@ export function CallTargetButton({
 
   useEffect(() => () => dismissStartPrompt(targetId), [targetId]);
 
+  // A Live call from a blank chat starts once its conversation is made and its held settings are saved; a later start
+  // or a Turns call cancels it, and pressing Live again meanwhile waits for that same start.
+  useEffect(() => { if (onCall) liveStartOf(targetId).request++; }, [onCall, targetId]);
   const start = (next: CallMode) => {
     setHelpOpen(false);
     setMenuOpen(false);
+    const pending = liveStartOf(targetId);
+    if (next === "live" && pending.waiting && pending.waiting === pending.request) return;
+    const request = ++pending.request;
     if (next === "live" && liveThreadId !== undefined) {
       onStart("live");
-      void startLiveCall({ botId: targetId, threadId: liveThreadId });
+      const live = (thread: string) => {
+        if (pending.waiting === request) pending.waiting = 0;
+        if (pending.request === request) void startLiveCall({ botId: targetId, threadId: thread, provider: state.config?.live?.provider });
+      };
+      if (isNewChatThread(liveThreadId)) {
+        pending.waiting = request;
+        const failed = () => { if (pending.waiting === request) pending.waiting = 0; };
+        dispatch({ type: "makeNewChat", botId: targetId, threadId: liveThreadId, onMade: live, onError: failed });
+      } else live(liveThreadId);
       return;
     }
     if (!turnsReady) {
@@ -281,7 +307,7 @@ export function CallTargetButton({
       >
         {active
           ? <PhoneOff size={composer || round ? 15 : 17} />
-          : composer ? fill ? <AudioLines size={15} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
+          : composer ? fill ? <AudioLines size={16} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
@@ -407,6 +433,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
   onChoose: (mode: CallMode) => void;
   onClose: () => void;
 }) {
+  const { state } = useStore();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
@@ -444,7 +471,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
             <span className="min-w-0 flex-1">
               <span className={cn("block text-[14px] leading-[18px]", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
               <span className="mt-0.5 block text-[12px] leading-[1.4] text-ink-secondary">
-                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome })}
+                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome, config: state.config })}
               </span>
             </span>
             {mode === entry.id && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
@@ -468,13 +495,15 @@ export function CallOverlay({ bot }: { bot: Bot }) {
 }
 
 function Call({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  // One bridge for the whole call: a voice change mid-call must not stop or hear through another.
+  const [bridge] = useState(() => speechBridge(state.config));
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const pushToTalk = usePushToTalk(bot.id, phase === "listening", () => {
+  const pushToTalk = usePushToTalk(bot.id, bridge, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
   });
 
@@ -514,20 +543,20 @@ function Call({ bot }: { bot: Bot }) {
   }, []);
 
   const hush = useCallback(() => {
-    void speechBridge()?.speechStop();
-  }, []);
+    void bridge?.speechStop();
+  }, [bridge]);
 
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== bot.id) return;
     move("listening");
     setHeard("");
     setNote(null);
-    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote(t("call.turns.micFailed"));
       }
     });
-  }, [bot.id, move]);
+  }, [bridge, bot.id, move]);
 
   const say = useCallback(
     async (text: string) => {
@@ -562,7 +591,6 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   useEffect(() => {
-    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
@@ -583,8 +611,10 @@ function Call({ bot }: { bot: Bot }) {
           hush();
           return;
         }
-        if (YES.test(said) || NO.test(said)) {
-          const allow = YES.test(said);
+        // English is read exactly as before; chineseConsent only adds the Chinese answers.
+        const decision = YES.test(said) ? "allow" : NO.test(said) ? "deny" : chineseConsent(said);
+        if (decision) {
+          const allow = decision === "allow";
           if (allow && open.skill) {
             setHeard("");
             void sayThenListen("Open this chat to review the complete skill before approving it. You can say no now to deny it.");
@@ -643,13 +673,7 @@ function Call({ bot }: { bot: Bot }) {
       }
       if (code === 1) {
         setNote(
-          message ?? t(reason === "helper-build-failed"
-            ? "call.turns.helperBuildFailed"
-            : reason === "dictation-disabled"
-              ? "composer.dictation.disabled"
-              : reason === "speech-not-authorized"
-                ? "call.turns.speechNotAuthorized"
-                : "composer.dictation.failed"),
+          message ?? t(callSpeechEndNote(reason)),
         );
         return;
       }
@@ -660,10 +684,10 @@ function Call({ bot }: { bot: Bot }) {
     return () => {
       offTranscript();
       offEnd();
-      void speechBridge()?.speechStop();
+      void bridge.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id, bot.threadId, dispatch, hush, listen, move, sayThenListen]);
+  }, [bot.id, bot.threadId, bridge, dispatch, hush, listen, move, sayThenListen]);
 
   useEffect(() => {
     // The card may be resolved elsewhere (the approval UI, another client) while this call is open.

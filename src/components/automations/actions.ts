@@ -8,10 +8,11 @@ import type { RoutineRun } from "@/lib/routines";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { loadWebhookCredentials, removeWebhookCredential, saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import type { WebhookCredential } from "@/lib/webhooks";
-import { api, openBotThread, useStore } from "@/state/store";
+import { api, openBotThread } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
 
 export function useAutomationActions() {
-  const { state, dispatch } = useStore();
+  const store = useStoreRef(), dispatch = store.dispatch;
   const showThreads = useShowThreads();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -79,9 +80,15 @@ export function useAutomationActions() {
   });
 
   const openRun = (automation: Automation, run: RoutineRun | undefined) => {
-    const bot = state.bots.find((candidate) => candidate.id === automation.botId);
+    const bot = store.state().bots.find((candidate) => candidate.id === automation.botId);
     if (bot && run?.threadId) openBotThread(dispatch, bot, run.threadId, showThreads);
   };
 
-  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun };
+  /** Stops a run that waits on the person, for when the question it waits on was settled somewhere else. */
+  const cancelRun = (automation: Automation, run: RoutineRun) => attempt(`cancel:${automation.id}`, async () => {
+    const response = await api(`/api/routine-runs/${run.id}/cancel`, { method: "POST" });
+    if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
+  });
+
+  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun, cancelRun };
 }

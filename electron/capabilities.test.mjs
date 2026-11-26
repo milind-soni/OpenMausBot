@@ -7,6 +7,7 @@ const {
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,
+  macDriverUnsupported,
   nativeDesktopActions,
 } = require("./capabilities.cjs");
 const readyConnection = (mode = "embedded") => ({
@@ -19,12 +20,14 @@ describe("desktop capabilities", () => {
       appleMediaPermissions: false,
       applePrivacySettings: false,
       appleSpeech: false,
+      windowsSpeech: false,
     });
-    expect(nativeDesktopActions("win32")).toEqual(nativeDesktopActions("linux"));
+    expect(nativeDesktopActions("win32")).toEqual({ ...nativeDesktopActions("linux"), windowsSpeech: true });
     expect(nativeDesktopActions("darwin")).toEqual({
       appleMediaPermissions: true,
       applePrivacySettings: true,
       appleSpeech: true,
+      windowsSpeech: false,
     });
   });
 
@@ -126,12 +129,11 @@ describe("desktop capabilities", () => {
     expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
-  it.each(["win32", "linux"])("listens through Fish Audio on %s, but not from a server's page", (platform) => {
-    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual({
-      available: true,
-      engine: "fish-audio",
-      onDevice: false,
-    });
+  it.each([
+    ["win32", { available: true, engine: "windows-speech", onDevice: true }],
+    ["linux", { available: true, engine: "fish-audio", onDevice: false }],
+  ])("listens on %s, but not from a server's page", (platform, dictation) => {
+    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual(dictation);
     expect(desktopCapabilities({ platform, remote: true }).dictation).toEqual({
       available: false,
       engine: "none",
@@ -215,6 +217,29 @@ describe("desktop capabilities", () => {
       session: "headless",
       reasonCode: "headless-session",
     });
+  });
+
+  it("keeps Fedora's GNOME Wayland blocked and points it to a cloud desktop, not Ubuntu on Xorg", () => {
+    const wayland = { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" };
+    const fedora = linuxLocalControlSupport("linux", { ...wayland, XDG_CURRENT_DESKTOP: "GNOME", XDG_SESSION_DESKTOP: "gnome" });
+    expect(fedora).toMatchObject({ available: false, session: "wayland", reasonCode: "linux-wayland-seat-safety-blocked" });
+    expect(fedora.message).not.toMatch(/Ubuntu/);
+    expect(fedora.message).toMatch(/Fedora, use a cloud desktop/);
+    const ubuntu = linuxLocalControlSupport("linux", { ...wayland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME" });
+    expect(ubuntu.message).toBe(
+      "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.",
+    );
+
+    const blocked = { mode: "unavailable", reasonCode: "linux-wayland-seat-safety-blocked" };
+    const capabilitiesFor = (env, remote = false) =>
+      desktopCapabilities({ platform: "linux", env: { ...wayland, ...env }, localConnection: blocked, remote }).localComputer;
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "GNOME" }).ubuntuDesktop).toBe(false);
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "ubuntu:GNOME" }).ubuntuDesktop).toBe(true);
+    expect(capabilitiesFor({ XDG_CURRENT_DESKTOP: "GNOME" }, true).ubuntuDesktop).toBeUndefined();
+    expect(capabilitiesFor({}).ubuntuDesktop).toBeUndefined();
+    expect(linuxLocalControlSupport("linux", wayland).message).toMatch(/Ubuntu on Xorg/);
+    expect(desktopCapabilities({ platform: "linux", env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" } }).localComputer)
+      .not.toHaveProperty("ubuntuDesktop");
   });
 
   describe("Omarchy (Hyprland) detection matrix", () => {
@@ -359,6 +384,26 @@ describe("desktop capabilities", () => {
       support: "unsupported",
       session: "wayland",
       compositor: "gnome-mutter",
+    });
+  });
+});
+
+describe("Mac driver support", () => {
+  it("names macOS 14 and older as too old for the driver, before it is loaded", () => {
+    const tooOld = { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 15 Sequoia or later." };
+    expect(macDriverUnsupported("darwin", "21.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "20.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "23.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "24.0.0")).toBeNull();
+    expect(macDriverUnsupported("darwin", "25.0.0")).toBeNull();
+    expect(macDriverUnsupported("win32", "10.0.19045")).toBeNull();
+    expect(macDriverUnsupported("darwin", "")).toBeNull();
+  });
+
+  it("keeps the too-old code for the page", () => {
+    const localConnection = { mode: "unavailable", ...macDriverUnsupported("darwin", "21.6.0") };
+    expect(desktopCapabilities({ platform: "darwin", localConnection }).localComputer).toMatchObject({
+      available: false, reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 15 Sequoia or later.",
     });
   });
 });

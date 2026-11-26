@@ -33,8 +33,13 @@ describe("data helpers", () => {
   });
 
   it("copies as TSV and Markdown without breaking the shape", () => {
-    expect(tsv(["a", "b"], [["x\ty", null], [1, true]])).toBe("a\tb\nx y\t\n1\ttrue");
+    expect(tsv(["a", "b"], [["x\ty", null], [1, true]])).toBe('a\tb\n"x\ty"\t\n1\ttrue');
     expect(markdownTable(["a|b", "c"], [["x|y", "z\nw"]])).toBe("| a\\|b | c |\n| --- | --- |\n| x\\|y | z w |");
+  });
+
+  it("quotes TSV headers and cells without losing tabs, line endings or quotes", () => {
+    expect(tsv(['a\tb', 'say "yes"'], [['line one\r\nline two', '"quoted"'], ["", "plain"]]))
+      .toBe('"a\tb"\t"say ""yes"""\n"line one\r\nline two"\t"""quoted"""\n\tplain');
   });
 
   it("gives numbers narrow columns and text wide ones", () => {

@@ -11,23 +11,27 @@ export interface TopicMove {
   aliases: string[];
 }
 
+const PERSON_RULE = /^(?:always|never|don[’']?t|do not|from now on|every time|whenever)\b/i;
+
 export function organizeCandidates(text: string, today: string, core: ReadonlySet<string>): MemoryEntryLine[] {
   return parseMemoryEntries(text)
-    .filter((e) => !e.struck && !isExpired(e, today) && !core.has(factIdentity(e.body)) && !alwaysCore(e.body))
+    .filter((e) => !e.struck && !isExpired(e, today) && !core.has(factIdentity(e.body)) && !alwaysCore(e.body) && !PERSON_RULE.test(e.body.trim()))
     .slice(0, PROMPT_ENTRIES);
 }
 
-export function organizePrompt(candidates: readonly MemoryEntryLine[], topics: string): string {
+export function organizePrompt(candidates: readonly MemoryEntryLine[], topics: string, today?: string): string {
   return [
     `${ORGANIZE_MARKER}. You have no tools. Read only what is below.`,
     "",
-    "An assistant's core notebook, loaded into every conversation, holds these numbered lines:",
-    candidates.map((e, index) => `[${index}] ${e.body}`).join("\n") || "(nothing)",
+    `An assistant's core notebook, loaded into every conversation, holds these numbered lines${today ? ` (today is ${today})` : ""}:`,
+    candidates.map((e, index) => `[${index}] ${e.body} (noted ${e.date})`).join("\n") || "(nothing)",
     "",
     `Topic files it already keeps:\n${topics.trim() || "(none yet)"}`,
     "",
     "Core, never moved: facts about the person themselves that matter in any conversation — their name, where they live now, their company and role, their diet, allergies and health needs, how they like to be spoken to, and standing decisions.",
     "Move a line only when it is detail about a particular subject: another person (\"asha\"), a project or client, a trip or a place, likes and dislikes in one domain (\"food\"). Reuse an existing topic name when one fits; otherwise name a new one in one or two words.",
+    `Also move a work log that is finished or stale: a progress or status line about one task, ticket, pull request, release, deploy or errand that is done, merged, shipped or cancelled, or that was noted more than two weeks ago and has not changed since. File it under its project's topic when one fits, otherwise under "work-log".`,
+    "Never move a rule or preference the person gave (\"always…\", \"never…\", \"from now on…\"), even when it names a project.",
     "When in doubt, keep the line in the notebook.",
     "For each line to move, give its number, the topic, and aliases: two to five other words someone might use when asking about that subject.",
     "Answer with one JSON object and nothing else:",
@@ -72,13 +76,15 @@ export function parseMoves(text: string, candidates: readonly MemoryEntryLine[])
 }
 
 export function applyMoves(text: string, moves: readonly TopicMove[]): { text: string; byTopic: Map<string, { lines: string[]; aliases: string[] }> } {
-  const drop = new Set(moves.map((move) => move.entry.line));
+  const lines = text.split("\n");
+  const drop = new Set<number>();
   const byTopic = new Map<string, { lines: string[]; aliases: string[] }>();
   for (const move of moves) {
+    for (let line = move.entry.line; line < move.entry.end; line++) drop.add(line);
     const group = byTopic.get(move.topic) ?? { lines: [], aliases: [] };
-    group.lines.push(move.entry.raw);
+    group.lines.push(lines.slice(move.entry.line, move.entry.end).join("\n"));
     for (const alias of move.aliases) if (!group.aliases.includes(alias)) group.aliases.push(alias);
     byTopic.set(move.topic, group);
   }
-  return { text: text.split("\n").filter((_, index) => !drop.has(index)).join("\n"), byTopic };
+  return { text: lines.filter((_, index) => !drop.has(index)).join("\n"), byTopic };
 }

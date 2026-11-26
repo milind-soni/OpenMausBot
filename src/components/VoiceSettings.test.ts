@@ -83,13 +83,13 @@ describe("VoiceSettings", () => {
     expect(onPatch).not.toHaveBeenCalled();
   });
 
-  it("lays the seven voice services out four to a row, OpenAI beside the other online services", async () => {
+  it("lays the eight voice services out four to a row, OpenAI beside the other online services", async () => {
     fixture.api.mockResolvedValue({ voices: [] });
     await render(bot("pepper"), vi.fn());
     const radios = [...host.querySelectorAll<HTMLElement>('[role="radiogroup"] [role="radio"]')];
-    expect(radios.map((radio) => radio.textContent)).toEqual(["ElevenLabs", "Fish Audio", "OpenAI", "Grok (xAI)", "Gemini", "Built-in Mac voices", "Chatterbox (local)"]);
+    expect(radios.map((radio) => radio.textContent)).toEqual(["ElevenLabs", "Fish Audio", "OpenAI", "Grok (xAI)", "Gemini", "Built-in Mac voices", "Chatterbox (local)", "DeepSeek"]);
     expect(radios.map((radio) => radio.className.match(/col-span-\d/)?.[0])).toEqual([
-      "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1",
+      "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1", "col-span-1",
     ]);
   });
 });
@@ -137,6 +137,51 @@ describe("OpenAI voice settings", () => {
 });
 
 
+describe("DeepSeek voice settings", () => {
+  const deepseekRadio = () => [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((radio) => radio.textContent === "DeepSeek")!;
+  const STELLA_TIDE = { voices: [{ id: "stella", label: "Stella (female)" }, { id: "tide", label: "Tide (male)" }] };
+
+  it("chooses Stella for a bot whose voice belongs to another service", async () => {
+    fixture.api.mockResolvedValue({ tts: { provider: "deepseek", configured: true }, voices: [] });
+    const onPatch = vi.fn();
+    await render({ ...bot("pepper"), voice: "elevenlabs-voice" }, onPatch);
+    await act(async () => deepseekRadio().click());
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { provider: "deepseek" } }) });
+    expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "stella" });
+  });
+
+  it("keeps a saved Tide choice", async () => {
+    fixture.api.mockResolvedValue({ voices: [] });
+    const onPatch = vi.fn();
+    await render({ ...bot("pepper"), voice: "tide" }, onPatch);
+    await act(async () => deepseekRadio().click());
+    expect(onPatch).not.toHaveBeenCalled();
+  });
+
+  it("offers Stella and Tide and saves the pick", async () => {
+    fixture.config = { tts: { provider: "deepseek", configured: true, ready: true, voice: "stella" } };
+    fixture.api.mockResolvedValue(STELLA_TIDE);
+    const onPatch = vi.fn();
+    await render({ ...bot("pepper"), voice: "stella" }, onPatch);
+    const picker = host.querySelector<HTMLSelectElement>("select[data-voice-picker]")!;
+    expect([...picker.options].map((option) => option.textContent)).toEqual(expect.arrayContaining(["Stella (female)", "Tide (male)"]));
+    expect(picker.value).toBe("stella");
+    await act(async () => { picker.value = "tide"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(onPatch).toHaveBeenCalledWith({ voice: "tide" });
+  });
+
+  it("points a missing key at the existing DeepSeek key, says it also listens, and asks for no second key", async () => {
+    fixture.config = { tts: { provider: "deepseek", configured: false } };
+    fixture.api.mockResolvedValue({ voices: [] });
+    await render(bot("pepper"), vi.fn());
+    expect(host.textContent).toContain("Add a DeepSeek API key");
+    expect(host.textContent).toContain("speech-to-text");
+    expect(host.querySelector("[data-keys-link=\"deepseek\"]")).not.toBeNull();
+    expect(host.querySelector('input[type="password"]')).toBeNull();
+  });
+});
+
+
 it("sets the default voice even when the provider broadcast arrives before the save response", async () => {
   let resolve!: (v: unknown) => void;
   fixture.api.mockImplementation((path) => path === "/api/config" ? new Promise((done) => { resolve = done; }) : Promise.resolve({ voices: [] }));
@@ -167,4 +212,21 @@ it("keeps a voice selected before the pending provider save completes, even befo
   await act(async () => { picker.value = "cedar"; picker.dispatchEvent(new Event("change", { bubbles: true })); });
   await act(async () => resolve({ tts: { provider: "openai", configured: true } }));
   expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "cedar" });
+});
+
+it("lets a saved Chatterbox server address be cleared", async () => {
+  fixture.config = { tts: { provider: "chatterbox", configured: true, baseUrl: "http://127.0.0.1:4123", model: "" } };
+  fixture.api.mockResolvedValue({ tts: { provider: "chatterbox", configured: false, baseUrl: "", model: "" } });
+  await render(bot("pepper"), vi.fn());
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="Chatterbox server address"]')!;
+  const save = host.querySelector<HTMLButtonElement>('input[aria-label="Chatterbox server address"] + button')!;
+  expect(input.value).toBe("http://127.0.0.1:4123");
+  expect(save.disabled).toBe(false);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(save.disabled).toBe(false);
+  await act(async () => { save.click(); });
+  expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "", model: "" } }) });
 });

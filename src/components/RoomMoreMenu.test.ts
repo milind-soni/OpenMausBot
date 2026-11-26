@@ -9,6 +9,7 @@ const fixture = vi.hoisted(() => {
   return {
     threadsShown: false,
     findOpen: false,
+    feed: false,
     menus: [] as { ariaLabel: string; items: SidebarMenuItem[]; trigger: string }[],
     dispatch: vi.fn(),
     find: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.threadsShown }));
+vi.mock("./room-feed/use-room-feed", () => ({ useRoomFeed: () => fixture.feed }));
 vi.mock("@/lib/chat-find", () => ({ requestChatFind: fixture.find, useChatFindOpen: () => fixture.findOpen }));
 vi.mock("@/lib/export-transcript", () => ({
   copyTranscriptToClipboard: fixture.copy,
@@ -62,6 +64,7 @@ const item = (group: Group, key: string) => menuOf(group).items.find((entry) => 
 beforeEach(() => {
   fixture.threadsShown = false;
   fixture.findOpen = false;
+  fixture.feed = false;
   fixture.dispatch.mockClear();
   fixture.find.mockClear();
   fixture.copy.mockClear();
@@ -87,6 +90,14 @@ describe("RoomMoreMenu, the Room panel's round ⋯", () => {
     expect(menuOf(used).items.map((entry) => entry.key)).toEqual(["find", "new-thread", "threads", "copy", "download", "turn-limit", "usage"]);
     expect(menuOf(room()).items.find((entry) => entry.key === "new-thread")).toMatchObject({ label: "New thread", heading: "Threads", separatorBefore: true });
     expect(menuOf(room()).items.find((entry) => entry.key === "copy")).toMatchObject({ label: "Copy as Markdown", heading: "Share", separatorBefore: true });
+  });
+
+  it("with the room as its feed, leaves what acts on one thread to that thread's own menu beside the feed", () => {
+    fixture.feed = true;
+    fixture.findOpen = true;
+    const used = room({ usage: { input: 1200, output: 300, costUsd: 0.42, turns: 2 } });
+    expect(menuOf(used).items.map((entry) => entry.key)).toEqual(["new-thread", "threads", "usage"]);
+    expect(menuOf(used).trigger).not.toContain("text-accent");
   });
 
   it("opens the room's find bar for the thread on screen", () => {

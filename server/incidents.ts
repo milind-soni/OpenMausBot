@@ -1,4 +1,6 @@
 import type { WireMessage as Message } from "../shared/wire.ts";
+import { envWhole } from "./env-limits.ts";
+import { HOST_FAULT_WHY, hostFaultOf, retryCannotFix } from "./host-fault.ts";
 import { withoutDeliveredNote } from "./peer-provenance.ts";
 import { AUTHORITY, fromNoteWith, HARNESS_WHO } from "./provenance-label.ts";
 import { botOwner } from "../shared/bot-owner.ts";
@@ -25,6 +27,9 @@ export interface Incident {
   title?: string | null;
   room?: string | null;
   detail: string;
+  /** The failure's own words and stop reason, when `detail` adds anything to them (a routine's name): only these are
+   * read for what kind of failure it was. */
+  failure?: { text: string; stopReason?: string | null };
   lastRequest?: string | null;
   lastReply?: string | null;
 }
@@ -62,6 +67,32 @@ export const AUTO_RETRY_LEAD = `${RETRY_LEAD}OpenMausBot, automatically`;
 export const INCIDENT_RETRY_LIMIT = 2;
 export const INCIDENT_HARD_LIMIT = 5;
 export const INCIDENT_WINDOW_MS = 60 * 60_000;
+
+export const CHIEF_INCIDENT_TURNS_PER_HOUR = 6;
+
+/** OMB_CHIEF_INCIDENT_TURNS_PER_HOUR, a whole number from 1; anything else leaves the default. */
+export const chiefIncidentTurnsPerHour = (env: NodeJS.ProcessEnv = process.env): number =>
+  envWhole(env.OMB_CHIEF_INCIDENT_TURNS_PER_HOUR, CHIEF_INCIDENT_TURNS_PER_HOUR);
+
+/** The incident turns each Chief started within the last hour, across all the threads it hears about. */
+export class ChiefIncidentBudget {
+  private readonly at = new Map<string, number[]>();
+  private readonly options: { now?: () => number; limit?: () => number };
+
+  constructor(options: { now?: () => number; limit?: () => number } = {}) {
+    this.options = options;
+  }
+
+  /** Counts one more incident turn for `chiefId`; null when it has had its hour's share, with when the oldest one leaves the hour. */
+  take(chiefId: string): { until: number } | null {
+    const now = this.options.now?.() ?? Date.now();
+    const recent = (this.at.get(chiefId) ?? []).filter((time) => now - time < INCIDENT_WINDOW_MS);
+    this.at.set(chiefId, recent);
+    if (recent.length >= (this.options.limit ?? chiefIncidentTurnsPerHour)()) return { until: recent[0]! + INCIDENT_WINDOW_MS };
+    recent.push(now);
+    return null;
+  }
+}
 
 export interface IncidentCount {
   count: number;
@@ -172,7 +203,10 @@ export function incidentText(incident: Incident, count: IncidentCount, retry?: I
   if (count.count > 1) lines.push(`This is the ${ordinal(count.count)} incident on that thread within the hour.`);
   if (retry && "retried" in retry) lines.push("OpenMausBot already retried this run once by itself; the failure above is how that retry ended.");
   else if (retry) lines.push(`OpenMausBot did not retry it: ${retry.notRetried}.`);
-  lines.push(count.mayRetry
+  const fault = hostFaultOf(incident.failure?.text ?? incident.detail, incident.failure?.stopReason);
+  lines.push(fault && retryCannotFix(fault)
+    ? `A retry cannot fix this: ${HOST_FAULT_WHY[fault]}, and starting the run again would meet the same fault. Do not call retry_thread or hand the work on again. Say in one or two plain sentences what is blocking and what the person should do, then stop.`
+    : count.mayRetry
     ? [
       "Decide, in this order:",
       "1. If the cause is something only the person can fix — a sign-in, a missing credential, an unanswered question, a setting — say so here in one or two plain sentences and stop.",
