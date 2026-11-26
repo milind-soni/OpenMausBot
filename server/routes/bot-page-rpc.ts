@@ -1,13 +1,15 @@
-// mausbot.data and mausbot.state for a bot's own page, on its rpc route once the route has checked the bot, the
-// conversation and the row. Each answers only for what the page's current version declared (show_html `uses`).
-import { APP_LIMITS, type AppUse } from "../../shared/app.ts";
-import { pageUseRefusal, RPC_HOST_REFUSED, RPC_INVALID_PARAMS, type PageRpcMethod } from "../../shared/app-frame/bridge.ts";
+// mausbot.data, mausbot.state and mausbot.connectors for a bot's own page, on its rpc route once the route has checked the
+// bot, the conversation and the row. Each answers only for what the page's current version declared (show_html `uses`).
+import { APP_LIMITS } from "../../shared/app.ts";
+import { pageConnectorTarget, pageMethodUse, pageUseRefusal, RPC_HOST_REFUSED, RPC_INVALID_PARAMS, type PageRpcMethod } from "../../shared/app-frame/bridge.ts";
 import type { ChatApps } from "../chat-apps.ts";
+import type { ConnectorGate } from "../connector-gate.ts";
 import { boundRows } from "../data/tools.ts";
 import { DataFailure, type DataEngine, type RunResult } from "../data/types.ts";
 
 export interface PageRpcDeps {
-  apps: Pick<ChatApps, "declaredUses" | "states" | "paused">;
+  apps: Pick<ChatApps, "declaredUses" | "declaredConnectors" | "states" | "paused">;
+  connectors?: ConnectorGate;
   data?: Pick<DataEngine, "unavailable" | "forBot">;
   /** True when the person switched this bot's Data tools off. */
   dataOff?(botId: string): boolean;
@@ -89,8 +91,34 @@ async function query(deps: PageRpcDeps, botId: string, params: Record<string, un
   }
 }
 
-export async function pageRpc(deps: PageRpcDeps, call: { botId: string; threadId: string; messageId: string; method: PageRpcMethod; params: Record<string, unknown> }): Promise<PageRpcAnswer> {
-  const use: AppUse = call.method === "mausbot/data/query" ? "data" : "state";
+/** Who is looking at the page: the person whose own connections its connector calls use, and whether the bot runs changes
+ * without asking in this conversation. */
+export interface PageViewer {
+  person: string | null;
+  fullAccess(): boolean;
+}
+
+async function connectors(deps: PageRpcDeps, call: PageCall): Promise<PageRpcAnswer> {
+  const declared = deps.apps.declaredConnectors(call.threadId, call.messageId);
+  if (!declared.length) return refuse(409, pageUseRefusal("connectors", false));
+  if (!deps.connectors || !call.viewer) return refuse(503, "This page cannot reach connected apps on this computer.");
+  const caller = {
+    botId: call.botId, person: call.viewer.person, declared, fullAccess: call.viewer.fullAccess, engaged: call.params.engaged === true,
+    audit: { label: `page ${call.messageId}`, key: `${call.threadId}:${call.messageId}`, threadId: call.threadId },
+  };
+  if (call.method === "mausbot/connectors/list") return answer({ connectors: await deps.connectors.list(caller) });
+  const target = pageConnectorTarget(call.params, declared);
+  if (!target) return refuse(400, "mausbot.connectors.call needs (connector or server, tool name, arguments object).", RPC_INVALID_PARAMS);
+  const result = await deps.connectors.call(caller, target, call.params.arguments);
+  if (!result.ok) return refuse(result.status, result.message, result.status === 400 ? RPC_INVALID_PARAMS : RPC_HOST_REFUSED);
+  return answer({ result: result.result, ...(result.truncated ? { truncated: true } : {}) });
+}
+
+type PageCall = { botId: string; threadId: string; messageId: string; method: PageRpcMethod; params: Record<string, unknown>; viewer?: PageViewer };
+
+export async function pageRpc(deps: PageRpcDeps, call: PageCall): Promise<PageRpcAnswer> {
+  const use = pageMethodUse(call.method);
+  if (use === "connectors") return connectors(deps, call);
   if (!deps.apps.declaredUses(call.threadId, call.messageId).includes(use)) return refuse(409, pageUseRefusal(use, false));
   if (call.method === "mausbot/data/query") return query(deps, call.botId, call.params);
   const { states } = deps.apps;

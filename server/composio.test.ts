@@ -72,7 +72,7 @@ let emptyConnectedAccounts = false;
 let connectedAccountsOverride: Array<{ id: string; alias?: string; status?: string; toolkit: { slug: string } }> | null = null;
 // The grant editor's tools/list fixture: null keeps the legacy one-frame
 // {source:"broker"} answer the relayMcp tests assert on.
-let brokerMcpTools: Array<{ name: string; description?: string }> | null = null;
+let brokerMcpTools: Array<{ name: string; description?: string; annotations?: Record<string, unknown> }> | null = null;
 let brokerToolsListFail = false;
 // What /broker/v1/connectors/connected serves; null falls back to github
 // only, the state the existing validation tests were written against.
@@ -1542,6 +1542,26 @@ describe("connector tool inventory", () => {
         bland_ai: [{ name: "BLAND_AI_MAKE_CALL", description: "place a call" }],
         github: [{ name: "GITHUB_CREATE_ISSUE", description: "open an issue" }],
       });
+    } finally {
+      brokerMcpTools = null;
+      brokerConnectedServicesBody = null;
+      setManagedBrokerAccess(null);
+    }
+  });
+
+  it("marks a tool read-only only when its own listing says it reads and does not destroy", async () => {
+    setManagedBrokerAccess({ url: origin + "/broker", token: "f".repeat(64) });
+    brokerConnectedServicesBody = { services: { gmail: { connected: true, status: "ACTIVE" } } };
+    brokerMcpTools = [
+      { name: "GMAIL_SEND_EMAIL", annotations: { readOnlyHint: true } },
+      { name: "GMAIL_FETCH_EMAILS" },
+      { name: "GMAIL_LIST_LABELS", annotations: { readOnlyHint: true, destructiveHint: true } },
+      { name: "GMAIL_GET_PROFILE", annotations: { readOnlyHint: "yes" } },
+    ];
+    try {
+      await expect(listConnectorTools({})).resolves.toEqual({ gmail: [
+        { name: "GMAIL_FETCH_EMAILS" }, { name: "GMAIL_GET_PROFILE" }, { name: "GMAIL_LIST_LABELS" }, { name: "GMAIL_SEND_EMAIL", readOnly: true },
+      ] });
     } finally {
       brokerMcpTools = null;
       brokerConnectedServicesBody = null;

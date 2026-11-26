@@ -515,6 +515,8 @@ export async function validateConnectorGrants(
 export interface ConnectorToolListing {
   name: string;
   description?: string;
+  /** The tool's own listing says it only reads: annotations.readOnlyHint, and not destructiveHint. */
+  readOnly?: true;
 }
 
 /** The picker offers exactly what a granted bot's bridge would see. */
@@ -618,7 +620,10 @@ function connectorToolListing(tool: unknown): ConnectorToolListing | null {
   const trimmed = typeof description === "string"
     ? description.replace(/\s+/g, " ").trim().slice(0, TOOL_DESCRIPTION_MAX)
     : "";
-  return trimmed ? { name, description: trimmed } : { name };
+  const annotations = (tool as { annotations?: unknown }).annotations;
+  const hints = annotations && typeof annotations === "object" && !Array.isArray(annotations) ? annotations as { readOnlyHint?: unknown; destructiveHint?: unknown } : {};
+  const readOnly = hints.readOnlyHint === true && hints.destructiveHint !== true ? { readOnly: true as const } : {};
+  return { name, ...(trimmed ? { description: trimmed } : {}), ...readOnly };
 }
 
 async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, ConnectorToolListing[]>> {
