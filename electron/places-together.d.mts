@@ -37,6 +37,9 @@ export interface PlacesTogetherState {
   on: boolean;
   /** The place whose page asked. */
   here: BotHome;
+  /** While the switch is on: the person's home place (My Cloud once their bots moved there), the same on both pages. The
+   * one list shows its bots first and the other place's second, whichever page is open. Absent from older apps: this computer. */
+  home?: BotHome;
   /** The other place's bots while the switch is on. `state`: how that place is doing: asleep, waking and offline keep the
    * bots it gave last; "signin" is a My Cloud this window has not signed in to yet, which lists none. */
   other: { home: BotHome; state: "ready" | "loading" | "asleep" | "waking" | "offline" | "signin"; bots: PlaceBotRow[]; newBot?: boolean } | null;

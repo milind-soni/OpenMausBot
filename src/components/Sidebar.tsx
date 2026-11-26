@@ -73,7 +73,7 @@ import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
-import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceLine } from "./OtherPlaceBots"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, NO_MENU, otherPlaceDispatch, ownRows, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots, withOtherPlace } from "@/lib/place-rows"; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
+import { useCloudOwner } from "./CloudOwner"; import { SidebarPlaces, usePlaceParts } from "./SidebarPlaces"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, NO_MENU, otherPlaceDispatch, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots } from "@/lib/place-rows"; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerPickerHost } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople"; import { SidebarInboxRow } from "./SidebarInboxRow"; import { TeamSideSwitch, useTeamSideLists } from "./TeamSideSwitch"; import { SidebarActiveThreads } from "./SidebarActiveThreads"; import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned"; import { useInboxSupport } from "@/state/inbox";
 import { TeamMenuItems } from "./SidebarTeamMenu";
@@ -1089,9 +1089,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere();
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), placeParts = usePlaceParts(placed, q);
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
-  const saved = withOtherPlace(simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null }, placed);
+  const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
   // as a move to the top or into an Unread list. Only a pin, a drag, Alt+Up/Down or a move to a department moves a row.
   const floats = () => false;
@@ -1100,7 +1100,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
   const sectionNames = sectionsInUse([...(state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase())), ...botDrag.pending], [...filed, ...sectionedRooms]);
-  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: ownRows(inPlace.unsectionedBots), sectioned: inPlace.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
+  const drops = botDrag.arrange({ enabled: (sections.interactive || density === "icons") && !phone, withinList: density === "icons", main: inPlace.unsectionedBots, sectioned: inPlace.sectionedBots, departments: sectionNames, bots: state.bots, taken: departmentNames(state), floats });
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins && !simpleDesk ? [PINNED_SECTION_ID] : []),
     ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),
@@ -1355,7 +1355,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
-          {sectionIds.map((id, index) => {
+          <SidebarPlaces parts={placeParts} placed={placed} own={matchingBots} row={(bot) => <BotListItem key={bot.id} {...botRow(bot)} />} query={query} density={density} simple={simple} rail={rail} interactive={layoutInteractive} collapsed={sectionCollapsed} toggle={toggleSection}>{sectionIds.map((id, index) => {
             const sectionName = userSectionName(id);
             const sectionChiefItems = sectionName
               ? sectionChiefs.filter((bot) => bot.section === sectionName)
@@ -1377,7 +1377,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                   : sectionName
                     ? sectionedBots.filter((bot) => bot.section === sectionName)
                     : [];
-            const headless = simple && id === BOTS_SECTION_ID && index === 0;
+            const headless = (simple || placeParts !== null) && id === BOTS_SECTION_ID && index === 0;
             const collapsed = !headless && sectionCollapsed(id);
             const queued = collapsed ? [...sectionChiefItems, ...sectionBotItems].flatMap((bot) =>
               sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.queued).map((task) => `${bot.name}: ${task.title}`)) : [];
@@ -1456,8 +1456,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                 {layout.dropLine(id, "after")}
               </div>
             );
-          })}
-          <OtherPlaceLine query={query} icons={density === "icons"} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          })}</SidebarPlaces>
+          <MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}

@@ -417,7 +417,9 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       if (!active()) return { v: 1, available: available(), on: isOn(), here, other: null, ...notice };
       watch();
       void refresh(otherHome(here));
-      return { v: 1, available: true, on: true, here, other: otherOf(here), ...notice };
+      // The person's home place, the same on both pages: the one list puts its bots first wherever the window is.
+      const home = String(computer()).startsWith("profile:") ? "cloud" : "computer";
+      return { v: 1, available: true, on: true, here, home, other: otherOf(here), ...notice };
     },
     /** The switch. Off forgets every list. Turned on from Settings on this computer's page, whose words say so, it also
      * lets My Cloud run commands here (`turnedOn`), so the two places work as one with one switch; the person turns that

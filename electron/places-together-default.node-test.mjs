@@ -272,6 +272,16 @@ test("the notice says this computer's workspace now starts with the app only to 
   assert.equal(computerHome.together.state("computer").profileHome, undefined);
 });
 
+test("both pages hear the same home place, so the one list keeps one order wherever the window is; none with the switch off", () => {
+  const computerHome = setup({ deps: { computer: () => "computer:/data" } });
+  assert.equal(computerHome.together.state("computer").home, "computer");
+  assert.equal(computerHome.together.state("cloud").home, "computer");
+  const cloudHome = setup({ deps: { computer: () => "profile:default" } });
+  assert.equal(cloudHome.together.state("computer").home, "cloud");
+  assert.equal(cloudHome.together.state("cloud").home, "cloud");
+  assert.equal(setup({ saved: { v: 1, on: false } }).together.state("computer").home, undefined);
+});
+
 test("a switch file that is not JSON at all is off and quiet until the person turns the switch in Settings, which keeps the bad file beside it and writes a good one; a newer version's file stays untouched", async (t) => {
   const { mkdtempSync, readdirSync, readFileSync: read, rmSync, writeFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

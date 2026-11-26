@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { setLocale } from "./i18n";
-import { isPlacedBot, otherPlaceDispatch, useOtherPlaceBots, ownRows, placedBot, placedLine, placeMark, placeOfHome, resetPlaceRowsForTest, withOtherPlace, type Place } from "./place-rows";
+import { isPlacedBot, otherPlaceDispatch, useOtherPlaceBots, placedBot, placedLine, placeHeading, placeMark, placeOfHome, placeParts, resetPlaceRowsForTest, type Place } from "./place-rows";
 import { resetPlacesTogetherForTest, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
 import { partitionSidebarBots, sidebarBotRows } from "./sidebar-layout";
 
@@ -76,45 +76,38 @@ describe("a row of the other place as a bot of the one list", () => {
   });
 });
 
-describe("one list: the other place's rows among this place's own", () => {
-  const list = (bots: Bot[], placed: Bot[]) => {
-    const parts = withOtherPlace(partitionSidebarBots(bots), placed.filter(isPlacedBot));
-    return sidebarBotRows(parts, (bot) => Boolean(bot.busy) || bot.activity === "waiting-on-you");
-  };
+describe("one list: each place in a part of its own, in one order on both pages", () => {
+  const order = (here: "computer" | "cloud", home: "computer" | "cloud" | null) => placeParts(here, home, true)!.map((part) => `${part.home}${part.own ? " (own)" : ""}`);
 
-  it("joins the main list after this place's own, and working bots of either place float to the top together", () => {
-    const placed = [placedBot(row("cloud", "scout"), "ready"), placedBot(row("cloud", "atlas", { working: true }), "ready")];
-    const rows = list([own("chief", { chiefOfStaff: true }), own("git"), own("ledger", { busy: true })], placed);
-    expect(rows.unsectionedBots.map((bot) => bot.id)).toEqual(["ledger", "cloud:atlas", "git", "cloud:scout"]);
+  it("lists the person's home place first and the other second, whichever page is open, so a click to the other page moves no part", () => {
+    expect(order("computer", "computer")).toEqual(["computer (own)", "cloud"]);
+    expect(order("cloud", "computer")).toEqual(["computer", "cloud (own)"]);
+    expect(order("cloud", "cloud")).toEqual(["cloud (own)", "computer"]);
+    expect(order("computer", "cloud")).toEqual(["cloud", "computer (own)"]);
+    const places = (here: "computer" | "cloud", home: "computer" | "cloud") => placeParts(here, home, true)!.map((part) => part.home);
+    expect(places("computer", "computer")).toEqual(places("cloud", "computer"));
+    expect(places("computer", "cloud")).toEqual(places("cloud", "cloud"));
   });
 
-  it("this place's Chief keeps its place; the other place's Chief is a row, so both are listed", () => {
-    const parts = withOtherPlace(partitionSidebarBots([own("chief", { chiefOfStaff: true }), own("git")]), [placedBot(row("cloud", "maus", { chief: true }), "ready")]);
-    expect(parts.unsectionedChief?.id).toBe("chief");
-    expect(parts.unsectionedBots.map((bot) => bot.id)).toEqual(["git", "cloud:maus"]);
+  it("this computer comes first from an app that does not say which place is home", () => {
+    expect(order("computer", null)).toEqual(["computer (own)", "cloud"]);
+    expect(order("cloud", null)).toEqual(["computer", "cloud (own)"]);
   });
 
-  it("unread rows of both places go into one Unread group, newest first, by each row's own time", () => {
-    const placed = [placedBot(row("cloud", "old", { unread: true, lastAt: 100 }), "ready"), placedBot(row("cloud", "new", { unread: true, lastAt: 900 }), "ready"), placedBot(row("cloud", "read"), "ready")];
-    const mid = own("mid", { unread: true, messages: [{ id: "m", role: "bot", kind: "text", text: "hi", at: 500 } as Bot["messages"][number]] });
-    const rows = list([mid, own("quiet")], placed);
-    expect(rows.unreadBots.map((bot) => bot.id)).toEqual(["cloud:new", "mid", "cloud:old"]);
-    expect(rows.unreadCount).toBe(3);
-    expect(rows.unsectionedBots.map((bot) => bot.id)).toEqual(["quiet", "cloud:read"]);
+  it("no parts while the one list is off, or while the other place has no row and no line to show: the sidebar is as it was", () => {
+    expect(placeParts(null, null, true)).toBeNull();
+    expect(placeParts(null, "computer", true)).toBeNull();
+    expect(placeParts("computer", "computer", false)).toBeNull();
   });
 
-  it("a drag or Alt+Up/Down arranges and saves this place's own rows only", () => {
-    const placed = placedBot(row("cloud", "scout"), "ready");
-    const rows = list([own("a"), own("b")], [placed]);
-    expect(rows.inPlace.unsectionedBots.map((bot) => bot.id)).toEqual(["a", "b", "cloud:scout"]);
-    expect(ownRows(rows.inPlace.unsectionedBots).map((bot) => bot.id)).toEqual(["a", "b"]);
-    const plain = [own("a")];
-    expect(ownRows(plain)).toBe(plain);
+  it("each heading names its place in the person's language", () => {
+    expect([placeHeading("computer"), placeHeading("cloud")]).toEqual(["On this computer", "On My Cloud"]);
   });
 
-  it("with no rows of the other place, the parts are handed back as they were", () => {
-    const parts = partitionSidebarBots([own("a")]);
-    expect(withOtherPlace(parts, [])).toBe(parts);
+  it("the other place's rows stay out of this place's own parts, so a drag or Alt+Up/Down never meets one and no bot is listed twice", () => {
+    const rows = sidebarBotRows(partitionSidebarBots([own("chief", { chiefOfStaff: true }), own("a"), own("b")]), () => false, false);
+    expect(rows.inPlace.unsectionedBots.map((bot) => bot.id)).toEqual(["a", "b"]);
+    expect(rows.unsectionedBots.some(isPlacedBot)).toBe(false);
   });
 });
 

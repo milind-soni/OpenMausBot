@@ -1,8 +1,8 @@
-// The end of the one list, while "This computer and My Cloud together" is on: the other place's bots are rows among this
-// place's own (src/lib/place-rows.ts), so this says something only when that place has no rows to show: My Cloud not
-// signed in to yet, or a place that is asleep or can't be reached with nothing kept from before. One quiet line in the
-// list's secondary text, not a card or a banner; it opens My Cloud where there is something to do there. Nothing while
-// the first read is under way, nothing with the switch off, and nothing on My Cloud's page, which lists its own bots only.
+// The other place's part of the one list, while "This computer and My Cloud together" is on: under its heading, the other
+// place's rows (src/lib/place-rows.ts), or, when that place has no rows to show, this: My Cloud not signed in to yet, or a
+// place that is asleep or can't be reached with nothing kept from before. One quiet line in the list's secondary text,
+// not a card or a banner; it opens My Cloud where there is something to do there. Nothing while the first read is under
+// way, and nothing with the switch off.
 import { Cloud, CloudMoon, CloudOff, MonitorOff } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -26,6 +26,9 @@ function saidOf(state: PlacesTogetherState | null): Said | null {
   const said = `${other.home}:${other.state}`;
   return said in SAID ? said as Said : null;
 }
+
+/** What the other place's line says now, or null while it says nothing (its heading then waits for rows). */
+export const useOtherPlaceSaid = (): string | null => usePlacesTogetherPart(saidOf);
 
 /** My Cloud's page, opened from this computer's page (main's own switch, which wakes it as opening it always does). */
 const openMyCloud = () => (window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudSendPage?.openMyCloud);
