@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { CloudHomeConfig } from "./cloud-home.ts";
 import { isTeamRole } from "./cloud-team.ts";
 import type { SessionRegistry } from "./sessions.ts";
+import { cloudSignedTimestamp } from "./cloud-clock.ts";
 
 /** On the Admin; must match openmaus-cloud's TEAM_ROSTER_MACHINE_PATH. */
 export const TEAM_ROSTER_ADMIN_PATH = "/api/cloud/machines/team-member";
@@ -58,7 +59,7 @@ export function startTeamRoster(options: TeamRosterOptions): TeamRoster {
     const emails = options.sessions.membersToVouch(TEAM_ROSTER_MAX);
     if (!emails.length) return;
     const body = JSON.stringify({ v: 1, emails });
-    const timestamp = String(Math.floor(now() / 1000)), nonce = randomBytes(18).toString("base64url");
+    const timestamp = cloudSignedTimestamp(now()), nonce = randomBytes(18).toString("base64url");
     let response: Response;
     try {
       response = await fetcher(`${options.adminOrigin}${TEAM_ROSTER_ADMIN_PATH}`, { method: "POST", redirect: "error", cache: "no-store", body, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: {

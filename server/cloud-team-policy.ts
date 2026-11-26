@@ -16,6 +16,7 @@ import type { ManagedDesktopPolicy, ManagedPolicy } from "./managed-policy.ts";
 import { CLI_LOGIN_PATH } from "../shared/cli-login.ts";
 import { TEAM_PHONE_PAIRING_PATH } from "./routes/team-phone.ts";
 import type { SessionRegistry } from "./sessions.ts";
+import { cloudSignedTimestamp } from "./cloud-clock.ts";
 
 export const TEAM_POLICY_SCHEMA = 1;
 /** On the Admin; must match openmaus-cloud's TEAM_POLICY_MACHINE_PATH. */
@@ -176,7 +177,7 @@ export function startTeamPolicyClient(options: TeamPolicyClientOptions): TeamPol
   /** One signed ask, which also reports what is in force here. A failure changes nothing: what is held stays. */
   const ask = async (): Promise<void> => {
     const body = JSON.stringify({ v: 1, loaded: held ? { fingerprint: held.fingerprint, version: held.version } : null, problem });
-    const timestamp = String(Math.floor(now() / 1000)), nonce = randomBytes(18).toString("base64url");
+    const timestamp = cloudSignedTimestamp(now()), nonce = randomBytes(18).toString("base64url");
     let response: Response;
     try {
       response = await fetcher(`${options.adminOrigin}${TEAM_POLICY_ADMIN_PATH}`, { method: "POST", redirect: "error", cache: "no-store", body, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: {
