@@ -182,6 +182,8 @@ export interface SettingsIndexEntry {
   jump?: "apps" | "automations" | "shortcuts" | "bot";
   /** where Simple mode shows this row, when that is another page than Advanced's (General's language on This app) */
   simple?: { page: SettingsPageId; anchor?: string };
+  /** for bots only, in English: what the row is and the state it depends on, when its path alone would mislead */
+  note?: string;
 }
 
 const desk = (ctx: SettingsContext) => ctx.desktop && !ctx.client;
@@ -234,7 +236,8 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "bring-in", page: "transfer", anchor: "bring-in", labelKey: "settings.data.bringIn", synonyms: ["import", "move from", "bring"] },
   { id: "backup-export", page: "transfer", anchor: "take-out", labelKey: "backup.export", sectionKey: "settings.data.takeOut", topFor: ["backup", "backups", "export"], synonyms: ["full backup", "download"] },
   { id: "take-out", page: "transfer", anchor: "take-out", labelKey: "settings.data.takeOut", synonyms: ["export", "backup"] },
-  { id: "move", page: "transfer", anchor: "move", labelKey: "settings.data.move", when: hereOnly, topFor: ["keep here", "move back", "bring back", "move to cloud"] },
+  { id: "move", page: "transfer", anchor: "move", labelKey: "settings.data.move", when: hereOnly, topFor: ["keep here", "move back", "bring back", "move to cloud"],
+    note: "it is the switch \"Keep this computer's bots on this computer\", shown only with a My Cloud of the person's own; off, this computer's bots move there. A Team plan's Cloud is a team, not My Cloud: there is no one-step move into it, and this computer's bots stay and keep working here. To bring bots from another app into the team, switch to the team's Cloud and use its Settings → Import & export → Bring things in (Move from Grok Bot, or From your AI apps). Never suggest Import backup on a team's Cloud: it replaces everything there" },
   { id: "storage", page: "data", anchor: "storage", labelKey: "settings.data.storage", synonyms: ["attachments", "clear attachments", "event log", "cleanup", "retention"] },
   { id: "activity", page: "data", anchor: "activity", labelKey: "settings.section.activity", when: browserAdmin, topFor: ["activity", "audit", "audit log"], synonyms: ["history", "who did what"] },
   { id: "members", page: "people", anchor: "members", labelKey: "settings.people.members", synonyms: ["invite", "roles", "admins"] },
