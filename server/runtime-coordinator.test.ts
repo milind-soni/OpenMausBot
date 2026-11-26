@@ -996,6 +996,35 @@ describe("RuntimeCoordinator: a Stop's cause reaches the close of each thread it
       } finally { await removeTempDir(dir); }
     }
   });
+  it("gives what a stopped hand-off handed on the person's hour, leaves the rest of its thread's queue alone, and closes it at once for a system stop", async () => {
+    for (const [stop, due] of [["person", 1_000 + STOP_GRACE_MS], ["system", 1_000]] as const) {
+      const w = world(hold);
+      const close = closing(w, { tester: "builder" });
+      const { node: a } = send(w, chief, "gen-1", undefined, builder, "Build it");
+      const { node: c } = send(w, { botId: "scout", threadId: "scout-chat" }, "gen-2", undefined, builder, "Build the other one");
+      w.coordinator.tick();
+      const { node: b } = send(w, builder, "gen-1", a.id, tester, "Test it");
+      w.host.busyAnswer = node => node.botId === "tester";
+      w.coordinator.tick();
+      expect(w.coordinator.node(a.id)?.status).toBe("running");
+      expect(w.coordinator.node(b.id)?.status).toBe("queued");
+      expect(w.coordinator.node(c.id)?.status).toBe("queued");
+      // Like the real host: the aborted turn stops its teammate's whole thread, with no cause of its own.
+      const run = w.host.runs.find(r => r.node.id === a.id)!;
+      run.signal.addEventListener("abort", () => w.coordinator.stopAwaitingDirect(run.node.threadId), { once: true });
+      if (stop === "person") expect(w.coordinator.stopHandoff(a.id)).toBe("stopped");
+      else w.coordinator.cancelDirect("builder-work", SYSTEM_STOP.bot);
+      await flush();
+      expect(w.coordinator.node(b.id)).toMatchObject({ status: "cancelled", result: "Stopped with the request it was for" });
+      expect(close.closesAt(builder)).toBe(due);
+      expect(close.closesAt(tester)).toBe(due);
+      if (stop === "person") {
+        expect(w.coordinator.node(c.id)?.status).toBe("queued");
+        expect(w.host.reports.map(r => r.child.id)).not.toContain(c.id);
+      }
+      close.dispose();
+    }
+  });
 });
 
 describe("RuntimeCoordinator: the person stops one hand-off", () => {
@@ -1264,7 +1293,7 @@ describe("RuntimeCoordinator: a stop the system made is never remembered as the 
   it("takes a coordinated turn's own abort within the person's Stop of one hand-off as that stop, sparing the rest of the queue", async () => {
     const w = world(hold);
     const { node: first } = send(w, chief, "gen-1", undefined, builder, "Build it");
-    const { node: second } = send(w, { botId: "tester", threadId: "tester-chat" }, "gen-2", undefined, builder, "Build the other one");
+    const { node: second } = send(w, { botId: "scout", threadId: "scout-chat" }, "gen-2", undefined, builder, "Build the other one");
     w.coordinator.tick();
     await tick();
     const run = w.host.runs.find(r => r.node.id === first.id)!;

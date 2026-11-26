@@ -664,11 +664,12 @@ export class Runtime {
     this.touch(n);
   }
 
-  /** Cancel this node and everything under it; abort running turns. */
+  /** Cancel this node and everything under it; abort running turns. A stop ends the node before what it handed on, so
+   * each report under it already finds whose stop it was up the line. */
   cancel(id: string, reason = STOPPED_BY_USER, outcome: "stopped" | "failed" = "stopped"): void {
     const n = this.store.get(id);
     if (!n) return;
-    this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.cancelTree(n, reason, "cancelled", "stopped"));
+    this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.stopTree(n, reason));
   }
 
   /** The person stopped the requester's conversation, and stop means stop: everything it handed out ends with it, work
