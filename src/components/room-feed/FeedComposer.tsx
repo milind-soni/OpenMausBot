@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { focusFeedComposer, takeFeedComposerWanted } from "@/lib/room-feed";
 import type { Bot, Group } from "@/state/store";
 import { useStoreDispatch } from "@/state/store-select";
 import { RoomComposer } from "../bot-access/RoomComposer";
@@ -21,6 +22,9 @@ export function FeedComposer({ group, members, onPending, onStarted }: {
     const failed = () => { action.onError?.(); onPending(null); };
     void startFeedThread({ ...action, onError: failed }, dispatch).then((threadId) => { if (threadId) onStarted(threadId); });
   }, [dispatch, onPending, onStarted]);
+  useEffect(() => {
+    if (takeFeedComposerWanted(group.id)) requestAnimationFrame(() => focusFeedComposer(group.id));
+  }, [group.id]);
   return (
     <div data-room-feed-composer="">
       <RoomComposer group={draft} members={members} onSendGroup={send} />

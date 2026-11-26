@@ -12,8 +12,11 @@ const SENDER_NAME = "json_extract(json, '$.sender.name')";
 /** SQLite takes the bare columns of a MIN() aggregate from the row that holds the minimum. */
 const FIRSTS = `SELECT thread_id AS threadId, MIN(rowid) AS row, at, role, substr(text, 1, ${ROOM_THREAD_FIRST_CHARS + 1}) AS text, ` +
   `${BOT} AS botId, ${SENDER_ID} AS senderId, ${SENDER_NAME} AS senderName ${LINES} GROUP BY thread_id`;
-const SPEAKERS = `SELECT thread_id AS threadId, role, ${BOT} AS botId, ${SENDER_ID} AS senderId, ${SENDER_NAME} AS senderName, ` +
-  `COUNT(*) AS lines, MAX(rowid) AS lastRow, MAX(at) AS lastAt ${LINES} GROUP BY thread_id, role, botId, senderId, senderName`;
+/** Each line's speaker is read out of its JSON once, in a materialized step, before grouping: grouping on the
+ * json_extract calls themselves parses every line's JSON several times, about three times slower on long answers. */
+const SPEAKERS = `WITH spoken AS MATERIALIZED (SELECT thread_id AS threadId, role, ${BOT} AS botId, ${SENDER_ID} AS senderId, ` +
+  `${SENDER_NAME} AS senderName, rowid AS row, at ${LINES}) SELECT threadId, role, botId, senderId, senderName, COUNT(*) AS lines, ` +
+  `MAX(row) AS lastRow, MAX(at) AS lastAt FROM spoken GROUP BY threadId, role, botId, senderId, senderName`;
 
 type Who = { role: string; botId: string | null; senderId: string | null; senderName: string | null };
 type FirstRow = Who & { threadId: string; row: number; at: number; text: string | null };

@@ -46,6 +46,10 @@ function place(label: string, bots: Bot[], version?: number) {
   const threads = new Set<string>();
   /** Each work thread this place opened for a far bot: the job it was opened with names it. */
   const opened: Array<{ threadId: string; title: string; from: string; brief: string }> = [];
+  /** Each hand-off from the far place this place's bot took, as its main chat is told of it. */
+  const handed: Array<{ botId: string; threadId: string; from: { botId: string; name: string }; text: string }> = [];
+  /** Set to make writing the hand-off line throw, as a full disk would. */
+  const handedFails = { on: false };
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
   const sent: Array<{ recipient: string; threadId: string; roomId?: string }> = [];
   const results: Array<{ thread: string; name: string; status: string; result: string }> = [];
@@ -107,7 +111,7 @@ function place(label: string, bots: Bot[], version?: number) {
       dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full", paused: (bot) => Boolean((bot as Bot).paused), acceptRefusal: (bot) => (bot as Bot).farWorkRefused ?? null,
       ...(options.tell ? { tellAfterMs: options.tell.afterMs, tellWithinMs: options.tell.withinMs } : {}),
       openThread: (bot, title, opener, brief) => { const id = `${bot.id}-work-${++openedCount}`; threads.add(id); opened.push({ threadId: id, title, from: opener.name, brief }); return id; },
-      hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
+      hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam", handed: (input) => { if (handedFails.on) throw new Error("the line could not be written"); handed.push(input); },
       sentRow: (input) => { sent.push({ recipient: input.recipient.name, threadId: input.threadId, ...(input.roomId ? { roomId: input.roomId } : {}) }); },
       resultRow: (parent, child, name) => { results.push({ thread: parent.threadId, name, status: child.status, result: child.result }); for (const listener of resultListeners) listener(); },
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
@@ -194,7 +198,7 @@ function place(label: string, bots: Bot[], version?: number) {
   }
 
   const api = {
-    dir, bots, runs, sent, results, requests, opened, boot, listen, unplug, shutdown, handOff, keep, ledger,
+    dir, bots, runs, sent, results, requests, opened, handed, handedFails, boot, listen, unplug, shutdown, handOff, keep, ledger,
     nextResult(): Promise<void> {
       return new Promise((resolve) => {
         const listener = () => { resultListeners.delete(listener); resolve(); };
@@ -404,6 +408,21 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => computer.results.length === 2, "the second result is back");
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst").map((run) => run.threadId)).toEqual(["cloud-analyst-work-1", "cloud-analyst-work-1"]);
     expect(cloud.opened).toEqual([{ threadId: "cloud-analyst-work-1", title: "@Writer · work", from: "Writer", brief: "Count the orders" }]);
+    // One line per hand-off in the Cloud bot's main chat, each pointing at the thread its work ran in.
+    expect(cloud.handed).toEqual([
+      { botId: "cloud-analyst", threadId: "cloud-analyst-work-1", from: { botId: expect.stringContaining("local-writer"), name: "Writer" }, text: "Count the orders" },
+      { botId: "cloud-analyst", threadId: "cloud-analyst-work-1", from: { botId: expect.stringContaining("local-writer"), name: "Writer" }, text: "Now the refunds" },
+    ]);
+    expect(computer.handed).toEqual([]);
+  });
+
+  it("a hand-off line that cannot be written never stops the work it records", async () => {
+    const { computer, cloud } = await two();
+    cloud.handedFails.on = true;
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders"));
+    await until(() => computer.results.length === 1, "the result is back");
+    expect(computer.results[0]).toMatchObject({ status: "completed", result: "cloud-analyst did: Count the orders" });
+    expect(cloud.handed).toEqual([]);
   });
 
   it("a call that got one instruction-only local refusal and one real refusal from the other place fails, and says why", async () => {
@@ -931,6 +950,8 @@ describe("the link between a computer and its Cloud", () => {
     expect(turns[1]!.text).not.toContain("how many orders");
     expect(turns[1]!.threadId).toBe(turns[0]!.threadId);
     expect(computer.said(room.id).at(-1)).toBe("Analyst: 3 returns.");
+    // A room turn is not a hand-off to the bot: its main chat gets no line for it.
+    expect(cloud.handed).toEqual([]);
     // A report made twice, as after a restart between the two, leaves one line.
     const child = computer.coordinator.all().find((node) => node.botId === onCloud("cloud-analyst") && node.status === "completed")!;
     expect(computer.rooms.reply(child, undefined, "Analyst")).toBe(true);
