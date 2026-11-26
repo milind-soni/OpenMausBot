@@ -63,10 +63,11 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
     const env = saved(id);
     const mine = await requireOwnOrFlag(env);
     const info = mine ? null : await sharing().identity(env);
-    const grant = { folders: await validate(input?.folders), terminal: input?.terminal === true, computer: input?.computer === true };
+    // Edits on the home folder or the system drive are kept only because confirmServerAccess asks about them first.
+    const grant = { folders: await validate(input?.folders, { homeEdits: true }), terminal: input?.terminal === true, computer: input?.computer === true };
     if (!(await dialogs.confirmServerAccess(env, grant))) return null;
     saved(id);
-    return mine ? sharing().lendOwn(env, grant) : sharing().save(env, grant, info);
+    return mine ? sharing().lendOwn(env, grant, { homeEdits: true }) : sharing().save(env, grant, info, { homeEdits: true });
   }));
   /** Settings → Servers: each server of the person's own, and how lending to it is. */
   ipcMain.handle("sharing:servers", guard("sharing:servers", async () => {

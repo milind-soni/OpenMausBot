@@ -90,7 +90,7 @@ import environmentsModule from "./environments.cjs";
 import { pairingPageUrl, vouchForPlainHttpServers } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
-import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
+import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { isSystemDrive } from "./shared-drives.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
 import { createHostScreenLease } from "./host-screen-lease.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { reviveAfterFailedSwitch, switchLocalEnvironment } from "./environment-switch.mjs";
@@ -2620,7 +2620,7 @@ const announceAddedCloud = createAddedCloudNotice({ t: nativeT, Notification, fo
 installPlaceLook({ ipcMain, guard: workspaceOnly, place: () => savedPlace(environmentsState), session: () => ({ clouds: desktopRemoteAccess ? null : cloudAccount?.state().clouds ?? null, homeOrigin: myCloud() }),
   setColor: (id, swatch) => ensureCloudAccount().setCloudColor(id, swatch), save: (id, color) => persistEnvironments(withPlaceColor(environmentsState, id, color)),
   rail: { owns: event => chromeRail.owns(event), places: railList, saved: id => savedPlace(environmentsState, id) }, t: nativeT });
-const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, t: nativeT });
+const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, isSystemDrive, t: nativeT });
 // Settings → Servers' computer access, and the popup after pairing a server of the person's own (server-lending.mjs).
 const serverLending = installServerLending({ ipcMain, guard: localWorkspaceOnly, sharing: sharingController, dialogs: lendingDialogs, validate: validateSharedFolders, dialog, window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
   saved: savedWorkspace, candidate: lendableServer, flag: refreshSharedComputersAllowed, environments: () => environmentsState.environments, active: () => activeEnvironment(environmentsState), openSettings: openWorkspaceSettings, t: nativeT, log: slog, screen: screenControl.now, allowScreen: screenControl.start, local: event => cloudPageAsking(event) === "local", page: event => { const env = activeEnvironment(environmentsState); return env?.origin && env.kind !== "local" && activePageOrigin(event) === env.origin ? env : null; } });

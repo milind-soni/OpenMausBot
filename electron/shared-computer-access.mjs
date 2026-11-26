@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
@@ -57,6 +58,22 @@ function editedText(current, oldText, newText) {
 }
 const absent = error => error.code === "ENOENT" || error.code === "ENOTDIR";
 const identify = async candidate => { const info = await fs.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
+
+/** Where `target` is inside the home folder, "/"-separated ("" for the home folder itself), or null outside it. By
+ * {dev, ino}, as the home boundary is, so another spelling of the same folder (8.3 names, case) is no way around it. */
+async function insideHomePath(target, home = os.homedir()) {
+  let homeIdentity;
+  try { homeIdentity = await identify(await fs.realpath(home)); } catch (error) { if (absent(error)) return null; throw error; }
+  const { root } = path.parse(target);
+  const parts = target.slice(root.length).split(path.sep).filter(Boolean);
+  let current = root;
+  for (let index = 0; index <= parts.length; index++) {
+    try { if ((await identify(current)) === homeIdentity) return parts.slice(index).join("/"); }
+    catch (error) { if (absent(error)) return null; throw error; }
+    if (index < parts.length) current = path.join(current, parts[index]);
+  }
+  return null;
+}
 
 /** {dev, ino}, never path text; a root a fresh install has not created yet is skipped. */
 export async function protectedIdentities(roots) {
@@ -311,6 +328,11 @@ export async function executeSharedOperation(grant, operation, signal, cua, lent
   if (changes && folder.write !== true) throw new Error("This folder is read-only");
   if (changes && insideGitInternals(folder.path, operation.path ?? "")) throw new Error(GIT_INTERNALS);
   if (changes && folder.home === true && insideHomeSettings(operation.path ?? "")) throw new Error(HOME_SETTINGS);
+  // The whole system drive holds the home folder too: the same files stay out of reach through it.
+  if (changes && folder.system === true) {
+    const inHome = await insideHomePath(target);
+    if (inHome !== null && insideHomeSettings(inHome)) throw new Error(HOME_SETTINGS);
+  }
   let data;
   if (write) {
     if (typeof operation.content !== "string") throw new Error("Give file content to write");

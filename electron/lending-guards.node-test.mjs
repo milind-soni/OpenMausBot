@@ -449,3 +449,23 @@ test("a Windows path in a failure collapses to its file name before it leaves th
   });
   assert.equal(text(results[0]), "cannot open state.json: denied");
 });
+
+test("direct executor: through the whole system drive, the home folder's hidden files, Library and AppData stay unchangeable", async t => {
+  const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-drive-home-")));
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  t.after(async () => {
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    await rm(home, { recursive: true, force: true });
+  });
+  process.env.HOME = home; process.env.USERPROFILE = home;
+  const drive = path.parse(home).root;
+  const folder = { id: randomUUID(), name: drive, path: drive, write: true, system: true };
+  const grant = { enabled: true, folders: [folder], terminal: false, computer: false };
+  const inHome = relative => [...path.relative(drive, home).split(path.sep), ...relative.split("/")].join("/");
+  const run = operation => executeSharedOperation(grant, { folder_id: folder.id, ...operation }, new AbortController().signal);
+  for (const candidate of [".bashrc", ".ssh/authorized_keys", "AppData/Roaming/x.txt", "library/LaunchAgents/x.plist"]) {
+    await assert.rejects(run({ action: "write_file", path: inHome(candidate), content: "x" }), /hidden files, Library and AppData/, candidate);
+  }
+  await run({ action: "write_file", path: inHome("Documents/plan.txt"), content: "fine" });
+  assert.equal(await readFile(path.join(home, "Documents", "plan.txt"), "utf8"), "fine");
+});
