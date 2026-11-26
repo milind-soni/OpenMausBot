@@ -183,7 +183,7 @@ describe("board dispatcher", () => {
     expect(state(item.threadId)).toMatchObject({ state: "working", attempts: 1 });
   });
 
-  it("looks at nothing while the switch is off", async () => {
+  it("looks at nothing off a Team Cloud", async () => {
     const { h, dispatcher, add, pastQuiet } = harness({ on: false });
     add("Hidden");
     pastQuiet();
