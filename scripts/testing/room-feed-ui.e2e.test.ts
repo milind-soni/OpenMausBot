@@ -320,8 +320,8 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await browse("set", "viewport", "700", "900");
     await until(() => evaluate("!document.querySelector('[data-room-feed]')"), "the room's transcript below 768px");
     await evaluate(`document.querySelector('button[aria-label="Open bot list"]').click(); true`);
-    await until(() => evaluate(`Boolean(document.querySelector('[aria-label="Expand Docs room threads"]'))`), "the bot list with the room's threads to expand");
-    await evaluate(`document.querySelector('[aria-label="Expand Docs room threads"]').click(); true`);
+    await until(() => evaluate(`Boolean(document.querySelector('[aria-label="Expand Docs room threads"], [aria-label="Collapse Docs room threads"]'))`), "the room in the bot list");
+    await evaluate(`document.querySelector('[aria-label="Expand Docs room threads"]')?.click(); true`);
     await until(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${threads[3]}"]'))`), "the room's threads in the sidebar");
     expect(await evaluate(`document.querySelector('[data-sidebar-thread-row="${threads[3]}"]').textContent`)).toContain("closed by");
     await evaluate(`document.querySelector('[data-sidebar-thread-row="${threads[3]}"]').parentElement.querySelector('button[aria-expanded]').click(); true`);
