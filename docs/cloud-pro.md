@@ -2031,7 +2031,9 @@ restart fixes it. The Admin also sets such a clock from outside. `server/cloud-c
   valid yet for it.
 - **Who sets it.** Only the root supervisor (`server/cloud-clock-keeper.ts`),
   which measures again by itself and then runs `date -u -s`, forward only, for
-  an error of 30 s or more. The server writes a payload-free `check` line to
+  an error of 30 s or more. The true time is anchored on the monotonic clock as
+  its measurement starts, and it steps only if the wall clock is still 30 s or
+  more behind at that moment (the platform may set it right meanwhile). The server writes a payload-free `check` line to
   it on an inherited pipe (`OMB_CLOUD_CLOCK_FD`); whatever is written there
   can make it look at most once a minute, never pick a time. It needs
   CAP_SYS_TIME: a home that runs as its own VM has it; a Docker container

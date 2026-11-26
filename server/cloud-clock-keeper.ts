@@ -60,6 +60,8 @@ export function createClockKeeper(options: {
 
   const run = async () => {
     checkedAt = clocks.mono();
+    // The true time is anchored on the monotonic clock as the measurement starts: the platform may set the wall clock meanwhile.
+    const wallAt = clocks.wall(), monoAt = clocks.mono();
     const verdict = await measureClock(options.origins, fetcher, clocks);
     if (verdict.state !== "agreed") { log(`cloud home: clock not checked (${verdict.state === "disagree" ? "the hosts disagree" : "too few hosts answered"}); left as it is`); return; }
     const minutes = Math.round(Math.abs(verdict.offsetMs) / 60_000);
@@ -75,8 +77,12 @@ export function createClockKeeper(options: {
       if (!toldCannot) { toldCannot = true; options.log(`cloud home: the clock is ${minutes} min behind and this machine can't set it (no CAP_SYS_TIME); a restart sets it`); }
       return;
     }
-    // This clock now plus the measured error: the true time at the moment it is set.
-    const result = set(clocks.wall() + verdict.offsetMs);
+    // The true time now, from the anchor and the monotonic clock, never from the wall clock as it reads now (which something may
+    // have set right during the measurement: adding the error to it again would leave the clock ahead). Stepped only when the
+    // wall clock is still CLOCK_STEP_MS or more behind it at this moment; never backward.
+    const target = wallAt + verdict.offsetMs + (clocks.mono() - monoAt);
+    if (target - clocks.wall() < CLOCK_STEP_MS) { log("cloud home: the clock was set right meanwhile; left as it is"); return; }
+    const result = set(target);
     lastLine = "";
     if (result.ok) options.log(`cloud home: the clock was ${minutes} min behind (${verdict.readings.length} hosts agree); set forward`);
     else { canSet = false; options.log(`cloud home: the clock is ${minutes} min behind and could not be set (${result.why}); a restart sets it`); }

@@ -229,6 +229,36 @@ describe("what can't move the clock", () => {
     expect(lines.at(-1)).toMatch(/360 min behind \(2 hosts agree\); set forward/);
   });
 
+  it("a clock the platform sets right during the measurement is not stepped again (no overshoot), and a partial one gets the true time", async () => {
+    // Six hours behind; the platform puts the wall clock right while the hosts are being asked.
+    const w = world(), set: number[] = [], lines: string[] = [];
+    w.suspend(SIX_HOURS);
+    let corrected = false;
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      // After every request went out, before the answers are read.
+      const answer = await w.fetcher(input, init);
+      await Promise.resolve();
+      if (!corrected) { corrected = true; w.state.wall = w.state.truth; }
+      return answer;
+    }) as typeof fetch;
+    await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: fetcher, clocks: w.clocks, log: (line) => lines.push(line), set: (ms) => { set.push(ms); return { ok: true }; } }).check();
+    expect(set).toEqual([]);
+    expect(lines.at(-1)).toMatch(/set right meanwhile/);
+    // Corrected only part of the way (to an hour behind) meanwhile: stepped to the true time, not six hours past it.
+    const p = world(), partial: number[] = [];
+    p.suspend(SIX_HOURS);
+    let once = false;
+    const halfway = (async (input: string | URL | Request, init?: RequestInit) => {
+      const answer = await p.fetcher(input, init);
+      await Promise.resolve();
+      if (!once) { once = true; p.state.wall = p.state.truth - 3_600_000; }
+      return answer;
+    }) as typeof fetch;
+    await createClockKeeper({ origins: [ADMIN, ACCOUNTS, RELAY], canSet: true, fetch: halfway, clocks: p.clocks, log: () => {}, set: (ms) => { partial.push(ms); return { ok: true }; } }).check();
+    expect(partial).toHaveLength(1);
+    expect(Math.abs(partial[0]! - p.state.truth)).toBeLessThanOrEqual(1_000);
+  });
+
   it("an error larger than any suspend (two weeks) is not believed: nothing set, nothing let through on it", async () => {
     const w = world(), home = homeClock(w), set: number[] = [], lines: string[] = [];
     w.suspend(CLOCK_MAX_STEP_MS + 86_400_000);
