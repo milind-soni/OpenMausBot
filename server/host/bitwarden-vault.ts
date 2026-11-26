@@ -221,9 +221,12 @@ export class BitwardenLogins implements VaultProvider {
     if (this.disconnecting) return this.disconnecting;
     const generation = ++this.generation;
     this.connecting = null;
+    const inFlightUnlock = this.unlocking?.promise ?? null;
     this.unlocking = null;
     const pending = (async () => {
-      if (this.signedInAs !== null || this.session) await this.run(["logout"]).catch(() => null);
+      if (inFlightUnlock) await inFlightUnlock.catch(() => null);
+      if (this.generation !== generation) return;
+      if (inFlightUnlock || this.signedInAs !== null || this.session) await this.run(["logout"]).catch(() => null);
       if (this.generation === generation) {
         this.clear();
         this.signedInAs = null;

@@ -503,5 +503,42 @@ describe("Bitwarden through its command line tool", () => {
     await dupVault.refresh(CREDENTIALS);
     expect(findLinkedSecret([dupVault], "bw://Deploy/password", "pepper")).toBeNull();
     expect(await readLinkedSecret(findLinkedSecret([dupVault], "bw://i-deploy-web/password", "pepper")!)).toBe("web-deploy-password");
+
+    // (f) Disconnect during initial in-flight login waits for login to settle before logout and forgetAppData().
+    let releaseLogin!: () => void;
+    let onLogin!: () => void;
+    const loginStarted = new Promise<void>((resolve) => { onLogin = resolve; });
+    const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+    let loginDiscCreds: typeof CREDENTIALS | null = CREDENTIALS;
+    let loginForgotten = 0;
+    const loginCalls: string[] = [];
+    const loginVault = new BitwardenLogins({
+      credentials: () => loginDiscCreds,
+      forgetAppData: () => { loginForgotten++; },
+      run: async (args) => {
+        const cmd = args[0] === "login" ? "login --apikey" : args[0]!;
+        loginCalls.push(cmd);
+        if (args[0] === "status") return { code: 0, stdout: JSON.stringify({ status: "unauthenticated" }), stderr: "", timedOut: false };
+        if (args[0] === "login") {
+          onLogin();
+          await loginGate;
+          return { code: 0, stdout: "", stderr: "", timedOut: false };
+        }
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    const initialConnect = loginVault.refresh(CREDENTIALS);
+    await loginStarted;
+    loginDiscCreds = null;
+    const pendingLoginDisc = loginVault.disconnect();
+    await Promise.resolve();
+    expect(loginForgotten).toBe(0);
+    expect(loginCalls).not.toContain("logout");
+    releaseLogin();
+    await expect(initialConnect).rejects.toThrow("Bitwarden could not be read");
+    await pendingLoginDisc;
+    expect(loginCalls).toContain("logout");
+    expect(loginForgotten).toBe(1);
+    expect(loginVault.status()).toEqual({ connected: false });
   });
 });
