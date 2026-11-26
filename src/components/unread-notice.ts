@@ -51,17 +51,19 @@ const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.l
 
 /** The sidebar's Unread filter: how many bots show unread or wait on the person, and while it is open, those bots in a
  * fixed order. The open bot stays listed until another conversation is open. Nothing is saved; it starts closed.
- * While `paused` (a search narrows `bots`), it keeps what it had, so the bots the search left out come back in place. */
+ * While `paused` (a search narrows `bots`), its order holds and the bots the search left out keep their last times, so
+ * they come back in place; the open bot it keeps still follows each change of conversation. */
 export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null, paused = false) {
   const [open, setOpen] = useState(false);
   const since = unreadFilterSince(bots, waiting);
   const shown = bots.find((bot) => bot.id === openId);
   const chat = shown?.switchingTo ?? shown?.threadId;
   const [seen, setSeen] = useState<{ since: ReadonlyMap<string, number>; held: UnreadHold | null; order: string[] }>({ since, held: null, order: [] });
-  const held = open ? nextUnreadHold(seen.held, openId, seen.since, chat) : null;
-  const order = open ? unreadFilterOrder(seen.order, since, held) : [];
-  if (!paused && (held !== seen.held || !sameTimes(since, seen.since) || !sameIds(order, seen.order))) setSeen({ since, held, order });
   const byId = new Map(bots.map((bot) => [bot.id, bot]));
+  const known = paused ? new Map([...[...seen.since].filter(([id]) => !byId.has(id)), ...since]) : since;
+  const held = open ? nextUnreadHold(seen.held, openId, seen.since, chat) : null;
+  const order = !open ? [] : paused ? seen.order : unreadFilterOrder(seen.order, since, held);
+  if (held !== seen.held || !sameTimes(known, seen.since) || !sameIds(order, seen.order)) setSeen({ since: known, held, order });
   return {
     open,
     count: since.size,
