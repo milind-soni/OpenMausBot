@@ -124,6 +124,12 @@ describe("the composer's context button", () => {
     expect(panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!.disabled).toBe(false);
   });
 
+  it("offers neither action while a thread switch is pending", async () => {
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { switchingTo: "t2" }) });
+    await press(trigger());
+    expect([...panel()!.querySelectorAll("button")].map((button) => button.disabled)).toEqual([true, true]);
+  });
+
   it("takes the focus when it opens, on no action yet, and gives it back to the button on Escape", async () => {
     await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
     trigger().focus();

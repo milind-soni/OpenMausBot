@@ -265,7 +265,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         const selected = state.bots.find((bot) => bot.id === state.selectedId && !bot.hidden);
         if (
           !e.repeat && selected && chatBot && state.activeView === "chat"
-          && selected.yourAccess !== "view" && startFreshRefusal(chatBot) === null
+          && selected.yourAccess !== "view" && !chatBot.switchingTo && startFreshRefusal(chatBot) === null
           && !freshPending.current.has(selected.id)
         ) {
           e.preventDefault();

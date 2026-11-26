@@ -73,6 +73,7 @@ it("leaves the shortcut alone while busy, empty, already fresh, read-only or wit
     { bots: [{ ...bot, messages: [] }] },
     { bots: [{ ...bot, messages: [text, fresh], activeLeafId: "m2" }] },
     { bots: [{ ...bot, yourAccess: "view" as const }] },
+    { bots: [{ ...bot, switchingTo: "other" }] },
     { activeView: "routines" as const },
     { shortcutsOpen: true },
   ]) {

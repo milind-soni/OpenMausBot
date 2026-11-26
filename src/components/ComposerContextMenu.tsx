@@ -147,7 +147,7 @@ function ChatContext({ bot, reading, breakdown, detailed, onDone }: { bot: Bot; 
   const messages = visibleMessages(bot);
   const rows = contextRows(breakdown);
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
-  const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart;
+  const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart && !bot.switchingTo;
   return (
     <>
       <div className={MENU_LABEL}>{t("contextMenu.title")}</div>

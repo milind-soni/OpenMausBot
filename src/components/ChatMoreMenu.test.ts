@@ -115,6 +115,11 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(menuOf(createElement(ChatMoreMenu, { bot: fresh })).items.find((one) => one.key === "start-fresh")!.disabled).toBe(true);
   });
 
+  it("does not start fresh while a thread switch is pending", () => {
+    const item = menuOf(createElement(ChatMoreMenu, { bot: { ...bot, switchingTo: "other" } })).items.find((one) => one.key === "start-fresh")!;
+    expect(item.disabled).toBe(true);
+  });
+
   it("starts a new thread with the bot and displays the platform shortcut hint", () => {
     const win = globalThis.window as { ogb?: { platform?: string } };
     try {
