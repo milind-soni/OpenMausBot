@@ -1,0 +1,67 @@
+#!/bin/sh
+# Nightly core backup of the anant OpenMausBot data volume to Cloudflare R2.
+# Keeps three objects, anant-core-0/1/2.tgz, each night overwriting the oldest.
+# The archive holds engine sign-ins and paired-device sessions: the bucket must stay private.
+set -eu
+
+VOLUME=openmausbot_data
+CONTAINER=openmausbot-omb-1
+BUCKET=anant-backup
+ENV_FILE=/etc/mausbot/r2-backup.env
+WORK=/var/lib/anant-backup
+RCLONE_IMAGE=rclone/rclone:1.68.2
+
+src=$(docker volume inspect -f '{{.Mountpoint}}' "$VOLUME")
+slot=$(( $(date -u +%s) / 86400 % 3 ))
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+
+umask 077
+rm -rf "$WORK/stage" "$WORK/out"
+mkdir -p "$WORK/stage" "$WORK/out"
+
+rsync -a --delete \
+  --exclude=/.openmausbot/task-workspaces --exclude=/.openmausbot/attachments \
+  --exclude=/.openmausbot/agent-browser-profiles --exclude=/.openmausbot/tools \
+  --exclude=/.openmausbot/cache --exclude=/.openmausbot/providers --exclude=/.openmausbot/native \
+  --exclude=/.npm --exclude=/.cache --exclude=/Downloads --exclude=/.agent-browser/tmp \
+  --exclude='*.db' --exclude='*.sqlite' --exclude='*.sqlite3' \
+  --exclude='*-wal' --exclude='*-shm' --exclude='*.sock' \
+  "$src/" "$WORK/stage/"
+
+# SQLite files are copied through the online backup API so a live server yields consistent copies.
+dbs=$(cd "$src" && find . \( -path ./.openmausbot/task-workspaces -o -path ./.openmausbot/attachments \
+  -o -path ./.openmausbot/agent-browser-profiles -o -path ./.openmausbot/tools -o -path ./.openmausbot/cache \
+  -o -path ./.openmausbot/providers -o -path ./.openmausbot/native -o -path ./.npm -o -path ./.cache \) -prune \
+  -o \( -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \) -type f -print)
+docker exec "$CONTAINER" rm -rf /tmp/anant-db-snap
+printf '%s\n' $dbs | docker exec -i "$CONTAINER" node -e '
+const { DatabaseSync, backup } = require("node:sqlite");
+const fs = require("node:fs"), path = require("node:path");
+const run = async () => {
+  for (const rel of fs.readFileSync(0, "utf8").split("\n").filter(Boolean)) {
+    const dest = path.join("/tmp/anant-db-snap", rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    const db = new DatabaseSync(path.join("/data", rel), { readOnly: true });
+    await backup(db, dest);
+    db.close();
+  }
+};
+run().catch((e) => { console.error(e); process.exit(1); });'
+docker cp "$CONTAINER:/tmp/anant-db-snap/." "$WORK/stage/"
+docker exec "$CONTAINER" rm -rf /tmp/anant-db-snap
+
+archive="$WORK/out/anant-core-$slot.tgz"
+tar -czf "$archive" -C "$WORK/stage" .
+printf 'created %s\nslot %s\n' "$stamp" "$slot" > "$WORK/out/anant-core-$slot.txt"
+
+if [ "${1:-}" = "--local-only" ]; then
+  tar -tzf "$archive" | grep -E '(messages|runtime)\.db$'
+  echo "$stamp local test archive $archive $(du -h "$archive" | cut -f1), not uploaded"
+  exit 0
+fi
+
+docker run --rm --env-file "$ENV_FILE" -v "$WORK/out:/b:ro" "$RCLONE_IMAGE" \
+  copy /b "r2:$BUCKET" --s3-no-check-bucket --include "anant-core-$slot.*"
+
+echo "$stamp uploaded anant-core-$slot.tgz $(du -h "$archive" | cut -f1)"
+rm -rf "$WORK/stage" "$WORK/out"

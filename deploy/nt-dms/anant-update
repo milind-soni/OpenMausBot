@@ -1,0 +1,177 @@
+#!/bin/bash
+# Update the anant OpenMausBot deployment to the newest commit of the fork's main branch.
+#
+#   anant-update            build and switch to origin/main if it is newer than what runs
+#   anant-update <commit>   build and switch to that commit
+#   anant-update --rollback switch back to the release that ran before the current one
+#   anant-update --status   show what runs and which releases are kept
+#
+# Each release lives in /opt/openmausbot/releases/<commit> with its own images
+# (openmausbot-server:<commit>, openmausbot-local:<commit>); /opt/openmausbot/current points at
+# the running one and every release shares /opt/openmausbot/shared/.env. A switch that does not
+# come up healthy, on the expected version, with the bots' sandbox self-check passing, is put back
+# on the previous release automatically.
+set -euo pipefail
+
+REPO=https://github.com/tanlull/OpenMausBot.git
+BRANCH=main
+BASE=/opt/openmausbot
+RELEASES=$BASE/releases
+SHARED_ENV=$BASE/shared/.env
+PUBLIC_URL=https://anant.nttan.com
+CONTAINER=openmausbot-omb-1
+KEEP=3
+# Box checks that only warn (docs/deploy-vps.md, "The bots' sandbox").
+BOX_WARN_ONLY='keyring-denied hostname-private cpu-list-readable egress-metadata-refused egress-public-allowed'
+
+log() { printf '%s %s\n' "$(TZ=Asia/Bangkok date '+%F %T')" "$*"; }
+die() { log "ERROR: $*"; exit 1; }
+
+current_commit() { basename "$(readlink -f "$BASE/current" 2>/dev/null)" 2>/dev/null || true; }
+previous_commit() { cat "$BASE/previous" 2>/dev/null || true; }
+
+compose_in() {
+  local commit=$1; shift
+  (cd "$RELEASES/$commit" && \
+    OMB_BASE_IMAGE="openmausbot-server:$commit" OMB_LOCAL_IMAGE="openmausbot-local:$commit" \
+    docker compose "$@")
+}
+
+wait_healthy() {
+  local status=""
+  for _ in $(seq 1 60); do
+    status=$(docker inspect -f '{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || true)
+    [ "$status" = healthy ] && return 0
+    sleep 5
+  done
+  log "server status after 5 minutes: ${status:-missing}"
+  return 1
+}
+
+verify() {
+  local commit=$1 expected running report failed
+  expected=$(grep -m1 '"version"' "$RELEASES/$commit/package.json" | sed -E 's/.*"([0-9][^"]*)".*/\1/')
+  wait_healthy || return 1
+  running=$(curl -fsS -m 15 "$PUBLIC_URL/.well-known/openmausbot/environment" \
+    | sed -E 's/.*"version":"([^"]*)".*/\1/') || { log "public address does not answer"; return 1; }
+  [ "$running" = "$expected" ] || { log "public address runs $running, expected $expected"; return 1; }
+  report=""
+  for _ in $(seq 1 12); do
+    # Exits non-zero when any check fails, warn-only ones included; the JSON report decides.
+    report=$(docker exec "$CONTAINER" node dist-server/bot-box/box-check.js 2>/dev/null || true)
+    case "$report" in *'"failed":'*) break ;; esac
+    report=""
+    sleep 10
+  done
+  [ -n "$report" ] || { log "bots' sandbox self-check gave no answer for 2 minutes"; return 1; }
+  failed=$(printf '%s' "$report" | docker exec -i "$CONTAINER" node -e '
+    let s = ""; process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      const r = JSON.parse(s.slice(s.indexOf("{"))), warn = new Set(process.argv[1].split(" "));
+      console.log(r.failed.filter((id) => !warn.has(id)).join(" "));
+    });' "$BOX_WARN_ONLY") || { log "could not read the sandbox self-check"; return 1; }
+  [ -z "$failed" ] || { log "bots' sandbox checks failed: $failed"; return 1; }
+  log "running $expected ($commit), healthy, sandbox checks pass"
+}
+
+switch_to() {
+  local commit=$1
+  compose_in "$commit" up -d --remove-orphans --wait --wait-timeout 300 \
+    || log "compose did not report $commit healthy within 5 minutes"
+  ln -sfn "$RELEASES/$commit" "$BASE/current.new" && mv -Tf "$BASE/current.new" "$BASE/current"
+}
+
+prune() {
+  local keep_list
+  keep_list=$( { current_commit; previous_commit; ls -1t "$RELEASES"; } | awk 'NF && !seen[$0]++' | head -n "$KEEP")
+  for dir in "$RELEASES"/*; do
+    local c; c=$(basename "$dir")
+    if ! grep -qx "$c" <<<"$keep_list"; then
+      rm -rf "$dir"
+      docker rmi "openmausbot-local:$c" "openmausbot-server:$c" >/dev/null 2>&1 || true
+      log "removed old release $c"
+    fi
+  done
+}
+
+status() {
+  log "current:  $(current_commit)"
+  log "previous: $(previous_commit)"
+  log "kept:     $(ls -1t "$RELEASES" | tr '\n' ' ')"
+  curl -fsS -m 15 "$PUBLIC_URL/.well-known/openmausbot/environment" | sed -E 's/.*"version":"([^"]*)".*/running version \1\n/'
+}
+
+rollback() {
+  local from to
+  from=$(current_commit); to=$(previous_commit)
+  [ -n "$to" ] && [ -d "$RELEASES/$to" ] || die "no previous release to go back to"
+  log "rolling back $from -> $to"
+  switch_to "$to"
+  echo "$from" > "$BASE/previous"
+  verify "$to" || die "the previous release did not come up either; restore data from R2 (anant-core-*.tgz)"
+}
+
+update() {
+  local target=${1:-} from
+  if [ -z "$target" ]; then
+    target=$(git ls-remote "$REPO" "refs/heads/$BRANCH" | cut -f1)
+  elif [ ${#target} -lt 40 ]; then
+    # GitHub fetches a commit by its full id only.
+    target=$(curl -fsS -m 20 "https://api.github.com/repos/tanlull/OpenMausBot/commits/$target" \
+      | sed -nE 's/^  "sha": "([0-9a-f]{40})",?$/\1/p' | head -1)
+  fi
+  [ ${#target} -eq 40 ] || die "could not resolve the commit to deploy"
+  from=$(current_commit)
+  if [ "${target:0:10}" = "$from" ]; then log "already running $from, nothing to do"; return 0; fi
+
+  local dir=$RELEASES/${target:0:10}
+  if [ ! -d "$dir" ]; then
+    log "fetching $target"
+    rm -rf "$dir.tmp"
+    git init -q "$dir.tmp"
+    git -C "$dir.tmp" fetch -q --depth 1 "$REPO" "$target" 2>/dev/null \
+      || git -C "$dir.tmp" fetch -q --depth 1 "$REPO" "$BRANCH"
+    git -C "$dir.tmp" checkout -q FETCH_HEAD
+    full=$(git -C "$dir.tmp" rev-parse HEAD)
+    case "$full" in "$target"*) ;; *) rm -rf "$dir.tmp"; die "fetched $full, not $target";; esac
+    rm -rf "$dir.tmp/.git"
+    mv "$dir.tmp" "$dir"
+    echo "$BRANCH $full" > "$dir/DEPLOYED_FROM"
+  fi
+  target=$(basename "$dir")
+  ln -sfn "$SHARED_ENV" "$dir/.env"
+
+  log "building $target ($(grep -m1 '"version"' "$dir/package.json" | tr -d ' ,'))"
+  (cd "$dir" && docker build -q --target server -t "openmausbot-server:$target" .) >/dev/null
+  compose_in "$target" build -q omb
+
+  log "backing up core data to R2 before switching"
+  /usr/local/sbin/anant-backup || die "backup failed, nothing switched"
+
+  log "switching $from -> $target"
+  switch_to "$target"
+  [ -n "$from" ] && echo "$from" > "$BASE/previous"
+  if verify "$target"; then
+    docker tag "openmausbot-local:$target" openmausbot-local:latest
+    prune
+    log "update done"
+  else
+    [ -n "$from" ] || die "update failed and there is no previous release to go back to"
+    log "update failed, going back to $from"
+    switch_to "$from"
+    echo "$target" > "$BASE/previous"
+    verify "$from" || die "rollback to $from did not come up healthy either"
+    die "update to $target failed; still running $from"
+  fi
+}
+
+[ "$(id -u)" = 0 ] || die "run as root: sudo anant-update"
+mkdir -p "$RELEASES"
+exec 9>"$BASE/.update.lock"
+flock -n 9 || die "another update is running"
+
+case "${1:-}" in
+  --status) status ;;
+  --rollback) rollback ;;
+  -h|--help) sed -n '2,14p' "$0" ;;
+  *) update "${1:-}" ;;
+esac

@@ -1,0 +1,2 @@
+# anant OpenMausBot core backup to R2, 03:00 Asia/Bangkok (20:00 UTC)
+0 20 * * * root /usr/local/sbin/anant-backup >> /var/log/anant-backup.log 2>&1
