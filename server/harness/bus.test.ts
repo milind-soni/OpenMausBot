@@ -454,11 +454,17 @@ describe("EventBus", () => {
 
   it("reads its bounds from the environment, falling back on unusable values", () => {
     expect(eventLogLimits({
-      OMB_EVENT_LOG_BATCH_LINES: "512",
-      OMB_EVENT_LOG_QUEUE_EVENTS: "0",
-      OMB_EVENT_LOG_QUEUE_BYTES: "-5",
-      OMB_EVENT_LOG_DRAIN_THREADS: "eight",
-    })).toEqual({ batchLines: 512, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 8 });
+      OMB_EVENT_LOG_BATCH_LINES: "128",
+      OMB_EVENT_LOG_QUEUE_EVENTS: "512",
+      OMB_EVENT_LOG_QUEUE_BYTES: "1048576",
+      OMB_EVENT_LOG_DRAIN_THREADS: "3",
+    })).toEqual({ batchLines: 128, queueEvents: 512, queueBytes: 1024 * 1024, drainThreads: 3 });
+    expect(eventLogLimits({
+      OMB_EVENT_LOG_BATCH_LINES: "0",
+      OMB_EVENT_LOG_QUEUE_EVENTS: "-5",
+      OMB_EVENT_LOG_QUEUE_BYTES: "eight",
+      OMB_EVENT_LOG_DRAIN_THREADS: "2.5",
+    })).toEqual({ batchLines: 64, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 8 });
     expect(eventLogLimits({
       OMB_EVENT_LOG_BATCH_LINES: "999999",
       OMB_EVENT_LOG_QUEUE_EVENTS: "999999999999",
