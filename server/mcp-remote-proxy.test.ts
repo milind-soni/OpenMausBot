@@ -17,6 +17,7 @@ import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-serv
 import { makeTestTls, TEST_TLS_HOST } from "./testing/test-tls.ts";
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { whopLikeCatalog } from "./testing/whop-like-catalog.ts";
+import { definitionListBytes, toolListShareProfile, type ListedTool } from "./tool-list-budget.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
@@ -740,5 +741,28 @@ describe("remote MCP tool directory", () => {
     const [code] = await once(child!, "close");
     expect(code).toBe(1);
     expect(fake.seenHeaders).toEqual([]);
+  });
+  it("fits tools/list to an OMB_TOOL_SCHEMA_PROFILE listShare without dropping remote tools", async () => {
+    const verboseCatalog = Array.from({ length: 6 }, (_, index) => ({
+      name: `remote_op_${index}`,
+      description: `Remote API operation ${index}. ` + "documentation ".repeat(25),
+      inputSchema: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          query: { type: "string", description: "Query text. " + "explanation ".repeat(20) },
+          page: { type: "integer", description: "Page number. " + "explanation ".repeat(20) },
+        },
+        required: ["query"],
+      },
+    }));
+    fake = await startFakeHttpMcp({ tools: verboseCatalog });
+    const share = 1600;
+    const descriptor = mcpStdioServer(spec(fake.url))!;
+    start({ ...descriptor, env: { ...descriptor.env, [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(share) } });
+    await initialize();
+    const listed = (await request("tools/list")).result.tools as ListedTool[];
+    expect(listed.map((tool) => tool.name)).toEqual(verboseCatalog.map((tool) => tool.name));
+    expect(definitionListBytes(listed)).toBeLessThanOrEqual(share);
   });
 });

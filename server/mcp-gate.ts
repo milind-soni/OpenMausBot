@@ -14,7 +14,8 @@ import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured 
 import { descendantsOf, signalTree, stopTree, type TreeProcess } from "./proc-descendants.ts";
 import { killCliTree } from "./procs.ts";
 import { readStdioLines } from "./stdio-lines.ts";
-import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { toolListShare, toolsForShareProfile, type ListedTool } from "./tool-list-budget.ts";
+import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 
 type Json = Record<string, unknown>;
@@ -45,6 +46,7 @@ const BUDGET = Number.isFinite(rawBudget) && rawBudget >= 0 ? rawBudget : DEFAUL
 const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
 const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
+const RAW_SCHEMA_PROFILE = process.env[TOOL_SCHEMA_PROFILE_ENV];
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const TOOL_LIMIT = toolLimitFromEnv(process.env);
 
@@ -406,6 +408,10 @@ readStdioLines(child.stdout, (line) => {
     const tools = result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME);
     if (result.nextCursor === undefined) tools.push(QUERY_TOOL);
     result.tools = tools;
+  }
+  if (toolListShare(RAW_SCHEMA_PROFILE) !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
+    const logFit = (note: string) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`);
+    result.tools = [...toolsForShareProfile(result.tools as ListedTool[], RAW_SCHEMA_PROFILE, logFit)];
   }
   if (TOOL_LIMIT !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result)) {
     message.result = capToolListResult(result, TOOL_LIMIT, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));

@@ -7,6 +7,7 @@ import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
+import { definitionListBytes, toolListShareProfile, type ListedTool } from "./tool-list-budget.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
@@ -890,4 +891,35 @@ describe("connected-app tools by name", () => {
     }
   });
 
+  it("fits tools/list to an OMB_TOOL_SCHEMA_PROFILE listShare without dropping tools", async () => {
+    const verboseTools = Array.from({ length: 6 }, (_, index) => ({
+      name: `APP_TOOL_${index}`,
+      description: `Detailed operational description for connector tool ${index}. ` + "extra details ".repeat(25),
+      inputSchema: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          target_id: { type: "string", description: "Target identifier. " + "notes ".repeat(20) },
+          limit: { type: "integer", description: "Max rows to fetch. " + "notes ".repeat(20) },
+        },
+        required: ["target_id"],
+      },
+    }));
+    const upstream = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const rpc = JSON.parse(body);
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { tools: verboseTools } }));
+      });
+    });
+    const share = 1800;
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(share) });
+    const listReply = nextJson(lines);
+    child!.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) + "\n");
+    const listed = (await listReply).result.tools as ListedTool[];
+    expect(listed.map((tool) => tool.name)).toEqual(verboseTools.map((tool) => tool.name));
+    expect(definitionListBytes(listed)).toBeLessThanOrEqual(share);
+  });
 });

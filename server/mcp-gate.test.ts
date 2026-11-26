@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
+import { definitionListBytes, toolListShareProfile, type ListedTool } from "./tool-list-budget.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -545,5 +546,27 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     start({}, selected, SCOPED_UPSTREAM);
     send({ jsonrpc: "2.0", id: 1, method: "peek" });
     expect(JSON.parse(await nextLine()).result).toEqual({ scope: null, upstreamOnly: "yes" });
+  });
+  it("fits tools/list to an OMB_TOOL_SCHEMA_PROFILE listShare through the gate", async () => {
+    const catalog = {
+      tools: Array.from({ length: 6 }, (_, index) => ({
+        name: `gated_tool_${index}`,
+        description: `Gated tool description ${index}. ` + "details ".repeat(25),
+        inputSchema: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            target: { type: "string", description: "Target path. " + "extra ".repeat(20) },
+          },
+          required: ["target"],
+        },
+      })),
+    };
+    const share = 2000;
+    start(catalog, { [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(share) }, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+    const listed = JSON.parse(await nextLine()).result.tools as ListedTool[];
+    expect(listed.map((tool) => tool.name)).toEqual([...catalog.tools.map((tool) => tool.name), "query_result"]);
+    expect(definitionListBytes(listed)).toBeLessThanOrEqual(share);
   });
 });

@@ -28,7 +28,8 @@ import {
 import { APP_ONLY_REFUSAL, AppObserver, REMOTE_MCP_APPS_ENV, UI_EXTENSION, modelVisible, parseAppMount } from "./mcp-app-observer.ts";
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
-import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { toolsListResultForShareProfile } from "./tool-list-budget.ts";
+import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 import { readStdioLines } from "./stdio-lines.ts";
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
@@ -110,6 +111,7 @@ const observer = (() => {
 })();
 const HANDSHAKE = observer?.mount.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {};
 const appOnly = new Set<string>();
+const RAW_SCHEMA_PROFILE = process.env[TOOL_SCHEMA_PROFILE_ENV];
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const TOOL_LIMIT = toolLimitFromEnv(process.env);
 const logFit = (line: string) => { process.stderr.write(`mcp-remote-proxy: ${line}\n`); };
@@ -341,7 +343,10 @@ async function handle(message: Json): Promise<void> {
   try {
     const result = directory ? await directed(message, signal) : await upstream(message.method, message.params, signal);
     if (message.method === "initialize") initialized = true;
-    send({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? capToolListResult(fitToolListResult(result, SCHEMA_PROFILE, logFit), TOOL_LIMIT, logFit) : result });
+    const listed = message.method === "tools/list"
+      ? capToolListResult(toolsListResultForShareProfile(fitToolListResult(result, SCHEMA_PROFILE, logFit), RAW_SCHEMA_PROFILE, logFit), TOOL_LIMIT, logFit)
+      : result;
+    send({ jsonrpc: "2.0", id: message.id, result: listed });
   } catch (failure) {
     // Transport failures may carry URLs or header values: never relayed.
     let code = -32603;

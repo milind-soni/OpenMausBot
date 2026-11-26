@@ -23,6 +23,7 @@ import { agentsToolList } from "./agents-mcp.ts";
 import { antigravityCliToolBudget } from "./antigravity-acp.ts";
 import { acpSessionMcpServers } from "./own-mcp-http.ts";
 import { sessionToolShares, withSessionToolShares } from "./own-mcp-session-budget.ts";
+import { gateServer } from "../mcp-gate-config.ts";
 import { acpMcpServers, type AcpMcpServer } from "./turn-mcp.ts";
 
 const GOLDEN = join(dirname(fileURLToPath(import.meta.url)), "agents-catalog-goldens", "antigravity-cli.tools-list.json");
@@ -243,3 +244,53 @@ describe("on Antigravity, beside the Gemini engines' schema profile", () => {
   });
 });
 
+
+describe("connected apps, remote MCP and gated own servers in a session budget", () => {
+  it("reserves budget shares for connector-proxy and mcp-remote-proxy without breaking sessions without them", () => {
+    const composio: AcpMcpServer = {
+      name: "composio",
+      command: process.execPath,
+      args: [SPAWNED_PROXIES.connectors],
+      env: pairs({ [TOOL_SCHEMA_PROFILE_ENV]: "gemini" }),
+    };
+    const remote: AcpMcpServer = {
+      name: "docs",
+      command: process.execPath,
+      args: [SPAWNED_PROXIES.mcpRemote],
+      env: pairs({ [TOOL_SCHEMA_PROFILE_ENV]: "gemini" }),
+    };
+    const servers = [agentsServer(CHIEF), harnessServer("browser"), composio, remote, notes];
+    const shared = withSessionToolShares(servers, ANTIGRAVITY_CLI_TOOL_BUDGET);
+
+    const ownShares = shared.slice(0, 2).map((server) => toolListShare(envOf(server)[TOOL_SCHEMA_PROFILE_ENV]));
+    const extShares = shared.slice(2, 4).map((server) => toolListShare(envOf(server)[TOOL_SCHEMA_PROFILE_ENV]));
+    expect(ownShares.every((share) => typeof share === "number" && share > 0)).toBe(true);
+    expect(extShares.every((share) => typeof share === "number" && share >= 5000)).toBe(true);
+    expect([...ownShares, ...extShares].reduce((sum, share) => sum + share!, 0)).toBeLessThanOrEqual(ANTIGRAVITY_CLI_TOOL_BUDGET);
+    expect(shared[4]).toBe(notes);
+  });
+
+  it("recognizes own servers wrapped inside a tool-selection mcp-gate", () => {
+    const rawAgents = agentsServer(CHIEF);
+    const gated = gateServer({
+      name: "agents",
+      server: { command: rawAgents.command, args: rawAgents.args, env: envOf(rawAgents) },
+      threadId: "t-scoped",
+      budget: 0,
+      toolScope: { allow: ["mcp:agents:read"] },
+      schemaProfile: "gemini",
+    })!;
+    const wrapped: AcpMcpServer = { name: "agents", command: gated.command, args: gated.args, env: pairs(gated.env) };
+    const shared = withSessionToolShares([wrapped, notes], ANTIGRAVITY_CLI_TOOL_BUDGET);
+
+    const share = toolListShare(envOf(shared[0]!)[TOOL_SCHEMA_PROFILE_ENV]);
+    expect(share).toBe(ANTIGRAVITY_CLI_TOOL_BUDGET);
+    expect(shared[1]).toBe(notes);
+  });
+
+  it("allocates budget to external proxies even when no own servers are present", () => {
+    const composio: AcpMcpServer = { name: "composio", command: process.execPath, args: [SPAWNED_PROXIES.connectors], env: [] };
+    const shared = withSessionToolShares([composio], ANTIGRAVITY_CLI_TOOL_BUDGET);
+    expect(toolListShare(envOf(shared[0]!)[TOOL_SCHEMA_PROFILE_ENV])).toBe(ANTIGRAVITY_CLI_TOOL_BUDGET);
+  });
+});
