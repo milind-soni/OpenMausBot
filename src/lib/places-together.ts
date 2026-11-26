@@ -76,6 +76,12 @@ export function useTogetherNoticeDue(): boolean | null {
   return hasBridge ? due : false;
 }
 
+/** The notice of the default was drawn on this computer before and never closed: main still calls it due, and calls the
+ * list on with no choice of the person's, which only a drawn notice does (electron/places-together.mjs). */
+export function useTogetherNoticeDrawn(): boolean {
+  return usePlacesTogetherPart((state) => state?.notice === true && state.on === true);
+}
+
 /** The notice was drawn: main turns the default on from now (it never does before). */
 export async function togetherNoticeShown(): Promise<void> {
   const page = bridge();
@@ -87,6 +93,13 @@ export async function togetherNoticeShown(): Promise<void> {
 /** The person closed the notice or used one of its switches: it never shows again. */
 export function togetherNoticeDone(): void {
   void bridge()?.noticeDone?.().catch(() => {});
+}
+
+/** What's new showed the notice's slide: the default is on from now, as the drawn notice turns it, and the corner notice
+ * never shows for this account, as when it is closed. */
+export async function togetherSlideShown(): Promise<void> {
+  await togetherNoticeShown();
+  togetherNoticeDone();
 }
 
 /** The notice's own switch for "Let My Cloud's bots run commands on this computer": what main says it is now. */

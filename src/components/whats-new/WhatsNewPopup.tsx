@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Cloud, Monitor, X } from "lucide-react";
 import cloudDark from "@/assets/whats-new/cloud-dark.mp4";
 import cloudDarkStill from "@/assets/whats-new/cloud-dark.webp";
 import cloudLight from "@/assets/whats-new/cloud-light.mp4";
@@ -20,7 +20,9 @@ import { newCloudUrl, startTeamUrl, type PlanSlide, type WhatsNewAction, type Wh
 import type { LocaleKey } from "@/locales";
 import { MODELGO_URL } from "../../../shared/modelgo";
 import { CLOSE, PRIMARY, QUIET, SHEET } from "../cloud-buy/parts";
+import { BotAvatar } from "../Avatar";
 import { LinkButton, NotNowButton } from "../NoticeCard";
+import { TogetherChoice } from "../TogetherChoice";
 
 export const WHATS_NEW_POPUP = "[data-whats-new]";
 
@@ -28,12 +30,19 @@ const WORDS: Record<WhatsNewSlide, { title: LocaleKey; body: LocaleKey }> = {
   pro: { title: "whatsNew.cloud.title", body: "whatsNew.cloud.body" },
   team: { title: "whatsNew.team.title", body: "whatsNew.team.bodyInbox" },
   modelgo: { title: "modelgoOffer.title", body: "modelgoOffer.line" },
+  together: { title: "together.notice.title", body: "together.notice.body" },
+  cloudNews: { title: "whatsNew.cloudNews.title", body: "whatsNew.cloudNews.body" },
+  teamNews: { title: "whatsNew.teamNews.title", body: "whatsNew.teamNews.body" },
 };
+/** Slides that only tell: their last slide ends with Got it instead of Not now alone. */
+const TELLING: readonly WhatsNewSlide[] = ["together", "cloudNews", "teamNews"];
 type Clip = { video: string; still: string };
 /** `focus`: where a clip's pointer clicks, kept in view when a taller slide crops the clip's sides. */
-const PICTURES: Record<WhatsNewSlide, { label: LocaleKey; focus: string; dark: Clip; light: Clip }> = {
-  pro: { label: "whatsNew.cloud.videoLabel", focus: "object-[50%_50%]", dark: { video: cloudDark, still: cloudDarkStill }, light: { video: cloudLight, still: cloudLightStill } },
-  team: { label: "whatsNew.team.videoLabel", focus: "object-[40%_50%]", dark: { video: teamDark, still: teamDarkStill }, light: { video: teamLight, still: teamLightStill } },
+const CLOUD_CLIP = { label: "whatsNew.cloud.videoLabel", focus: "object-[50%_50%]", dark: { video: cloudDark, still: cloudDarkStill }, light: { video: cloudLight, still: cloudLightStill } } as const;
+const TEAM_CLIP = { label: "whatsNew.team.videoLabel", focus: "object-[40%_50%]", dark: { video: teamDark, still: teamDarkStill }, light: { video: teamLight, still: teamLightStill } } as const;
+const PICTURES: Record<Exclude<WhatsNewSlide, "together">, { label: LocaleKey; focus: string; dark: Clip; light: Clip }> = {
+  pro: CLOUD_CLIP, cloudNews: CLOUD_CLIP,
+  team: TEAM_CLIP, teamNews: TEAM_CLIP,
   modelgo: { label: "modelgoOffer.videoLabel", focus: "object-[80%_50%]", dark: { video: modelgoDark, still: modelgoDarkStill }, light: { video: modelgoLight, still: modelgoLightStill } },
 };
 const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff", "whatsNew.team.accessUse"];
@@ -47,6 +56,27 @@ const controls = (popup: Element | null) => [...(popup?.querySelectorAll<HTMLEle
  * every slide is one height, cropping the clip's sides around where it clicks. It plays only on the slide on screen;
  * elsewhere, and wherever motion is reduced, its still. */
 function Picture({ slide, active }: { slide: WhatsNewSlide; active: boolean }) {
+  if (slide === "together") return <TogetherPicture />;
+  return <ClipPicture slide={slide} active={active} />;
+}
+
+/** Bots of both places in one list, as the sidebar now shows them: drawn, not a clip, so it is the same in every language. */
+const TOGETHER_ROWS = [["Ledger", "orange", "computer"], ["Scout", "blue", "cloud"], ["Git Tasks", "teal", "computer"], ["Atlas", "green", "cloud"]] as const;
+function TogetherPicture() {
+  return <div data-whats-new-picture="together" aria-hidden="true" className="relative grid aspect-[2/1] shrink-0 grow place-items-center overflow-hidden bg-ink/[0.035] [@media(max-height:600px)]:hidden">
+    <div className="flex w-[64%] min-w-[220px] flex-col gap-0.5 rounded-xl border-[0.5px] border-ink/10 bg-app p-1.5 shadow-sm">
+      {TOGETHER_ROWS.map(([name, color, home]) => <div key={name} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-ink">
+        <BotAvatar bot={{ name, color }} size={20} state="happy" animated={false} label="" />
+        <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+        <span className="flex shrink-0 items-center gap-1 text-[11px] text-ink-tertiary">
+          {home === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}{t(home === "cloud" ? "cloudSetup.myCloud" : "rail.thisComputer")}
+        </span>
+      </div>)}
+    </div>
+  </div>;
+}
+
+function ClipPicture({ slide, active }: { slide: Exclude<WhatsNewSlide, "together">; active: boolean }) {
   const scheme = useColorScheme();
   const { label, focus, ...clips } = PICTURES[slide], clip = clips[scheme === "dark" ? "dark" : "light"];
   const fill = cn("absolute inset-0 size-full select-none object-cover", focus);
@@ -115,6 +145,7 @@ export function WhatsNewPopup({ view, report, onBuy, onAddKey, onDone }: {
       <button type="button" className={cn(PRIMARY, "ui-button-lg")} onClick={() => buy("pro")}>{t("cloudBuy.card.get", { plan: view.plans.pro?.name ?? "Pro" })}</button>
       <LinkButton url={newCloudUrl(view.staging)} label={t("whatsNew.cloud.see")} className={cn(QUIET, "ui-button-lg gap-1.5")} onOpened={() => end("see_cloud")} />
     </>
+    : TELLING.includes(of) ? (of === view.slides[count - 1] ? <button type="button" data-whats-new-got-it className={cn(PRIMARY, "ui-button-lg")} onClick={() => end("got_it")}>{t("together.notice.done")}</button> : null)
     : of === "modelgo" ? <>
       <LinkButton url={MODELGO_URL} label={t("modelgoOffer.getKey")} className={cn(PRIMARY, "ui-button-lg gap-1.5")} onOpened={() => end("get_key")} />
       {view.addKey && onAddKey && <button type="button" className={cn(QUIET, "ui-button-lg")} onClick={() => { end("add_key"); onAddKey(); }}>{t("modelgoOffer.addKey")}</button>}
@@ -130,7 +161,7 @@ export function WhatsNewPopup({ view, report, onBuy, onAddKey, onDone }: {
       className={cn(SHEET, "group/sheet animate-pop-in relative flex max-h-full w-full max-w-[520px] flex-col overflow-hidden outline-none")}>
       <div className="grid min-h-0 overflow-y-auto overflow-x-hidden">
         {view.slides.map((of, index) => {
-          const here = index === at;
+          const here = index === at, shown = actions(of);
           return <section key={of} role="group" aria-label={t("whatsNew.slideOf", { n: index + 1, count })} inert={!here} data-whats-new-slide={of}
             className={cn("flex flex-col [grid-area:1/1] transition-[opacity,transform,visibility] duration-300 ease-out motion-reduce:transition-none",
               here ? "visible translate-x-0 opacity-100" : cn("invisible opacity-0", index < at ? "-translate-x-6 rtl:translate-x-6" : "translate-x-6 rtl:-translate-x-6"))}>
@@ -140,11 +171,12 @@ export function WhatsNewPopup({ view, report, onBuy, onAddKey, onDone }: {
               <h2 id={titleId(of)} tabIndex={-1} className="mt-1 text-[19px] font-semibold leading-6 tracking-[-0.012em] text-ink outline-none! [text-wrap:balance]">{t(WORDS[of].title)}</h2>
               <p className="mt-2 text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{t(WORDS[of].body)}</p>
               {of === "modelgo" && <p data-modelgo-sponsor className="mt-1 text-[12px] leading-4 text-ink-tertiary">{t("modelgoOffer.sponsor")}</p>}
+              {of === "together" && <div className="mt-3"><TogetherChoice id="whats-new-together" /></div>}
               {of === "team" && <ul className="mt-3 flex flex-col gap-1.5 text-[13px] leading-[18px] text-ink">
                 {TEAM_POINTS.map(point => <li key={point} className="flex items-start gap-2"><Check size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-tertiary" aria-hidden="true" />{t(point)}</li>)}
               </ul>}
-              <div className="mt-5 flex flex-wrap items-start gap-2">{actions(of)}</div>
-              {of !== "modelgo" && view.plans[of] && <p className="mt-2.5 text-[12px] leading-4 text-ink-tertiary">{view.plans[of]!.terms}</p>}
+              {shown && <div className={cn("flex flex-wrap items-start gap-2", of === "together" ? "mt-2" : "mt-5")}>{shown}</div>}
+              {(of === "pro" || of === "team") && view.plans[of] && <p className="mt-2.5 text-[12px] leading-4 text-ink-tertiary">{view.plans[of]!.terms}</p>}
             </div>
           </section>;
         })}

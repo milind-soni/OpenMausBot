@@ -8,9 +8,11 @@ import { reportModelgoOffer, type ModelgoOfferAction } from "@/lib/modelgo-offer
 import { WHATS_NEW_NOTICE } from "@/lib/notices";
 import type { TeamsAction } from "@/lib/teams-whats-new";
 
-/** The plan slides, then the sponsor's. */
+/** The plan slides, then the sponsor's. With the notice of "This computer and My Cloud together", its slide comes first,
+ * and someone the plan slides don't sell to is told what is new instead: `cloudNews` for a Cloud they have, `teamNews` for a
+ * team they are in. */
 export type PlanSlide = "pro" | "team";
-export type WhatsNewSlide = PlanSlide | "modelgo";
+export type WhatsNewSlide = PlanSlide | "modelgo" | "together" | "cloudNews" | "teamNews";
 /** Who the account is to MausBot Cloud: no plan, a plan of its own, in a team, or something else (being bought, needing
  * attention, not checked). Null until the sign-in is restored and checked. */
 export type WhatsNewAudience = "none" | "own" | "team" | "other";
@@ -83,21 +85,39 @@ export function whatsNewView(account: CloudAccountState | null, offer: CloudOffe
 }
 
 /**
+ * Whether What's new carries the slide of "This computer and My Cloud together": where its corner notice would show (this
+ * computer's own page, never a branded build's), while main calls it due (`due`, null until main answers) and it was
+ * never drawn on screen before (`drawn`: an earlier launch showed the corner notice, which stays the one it gets). `kept`:
+ * this page's carousel already showed the slide, which stays in it however main's answer reads now.
+ */
+export function togetherSlideDue({ here, due, drawn, kept }: { here: boolean; due: boolean | null; drawn: boolean; kept: boolean }): boolean | null {
+  if (kept) return true;
+  if (!here || due === false) return false;
+  return due === null ? null : !drawn;
+}
+
+/**
  * What's new with all three slides, for everyone once: the new Cloud where `plans` (whatsNewView, "none" where this page
  * can't sell a plan) has it; Team where `team` starts or grows one (a member of a team is only told, so has no slide), unless
  * the Admin's offer was read and sells no Team plan (`teamSold` false); the sponsor's where `modelgo`.
+ * `together` (togetherSlideDue): the notice of "This computer and My Cloud together" first, then the new Cloud and Team
+ * again, though `seen` (What's new was seen already, which drops the sponsor's): for whom they sell nothing, what is new
+ * on the Cloud they have (everyone with this notice has one) and in the team they are in.
  */
-export function whatsNewCarousel({ plans, team, teamSold, modelgo, addKey, staging = false }: {
+export function whatsNewCarousel({ plans, team, teamSold, modelgo, addKey, staging = false, together = false, seen = false }: {
   plans: WhatsNewView | "loading" | "none"; team: TeamsAction | null; teamSold?: boolean; modelgo: boolean; addKey: boolean; staging?: boolean;
+  together?: boolean; seen?: boolean;
 }): WhatsNewView | "loading" | "none" {
+  if (seen && !together) return "none";
   if (plans === "loading") return "loading";
   const sold = typeof plans === "object" ? plans : null;
   const teamSlide: WhatsNewTeam | null = !team || team.kind === "got-it" || (team.kind === "start" && teamSold === false) ? null
     : team.kind === "invite" ? { kind: "invite", url: team.url } : { kind: "start", inApp: team.inApp };
   const slides: WhatsNewSlide[] = [
-    ...(sold?.slides.includes("pro") ? ["pro" as const] : []),
-    ...(teamSlide ? ["team" as const] : []),
-    ...(modelgo ? ["modelgo" as const] : []),
+    ...(together ? ["together" as const] : []),
+    ...(sold?.slides.includes("pro") ? ["pro" as const] : together ? ["cloudNews" as const] : []),
+    ...(teamSlide ? ["team" as const] : together && team?.kind === "got-it" ? ["teamNews" as const] : []),
+    ...(modelgo && !seen ? ["modelgo" as const] : []),
   ];
   if (!slides.length) return "none";
   const teamTerms = teamSlide?.kind !== "start" ? null : sold?.plans.team ?? { name: "Team", terms: t("teamsNew.price") };
@@ -108,7 +128,7 @@ export function whatsNewCarousel({ plans, team, teamSold, modelgo, addKey, stagi
   };
 }
 
-export type WhatsNewAction = "seen" | "next" | "back" | "get_pro" | "see_cloud" | "start_team" | "invite" | "get_key" | "add_key" | "not_now" | "close";
+export type WhatsNewAction = "seen" | "next" | "back" | "got_it" | "get_pro" | "see_cloud" | "start_team" | "invite" | "get_key" | "add_key" | "not_now" | "close";
 
 const SPONSOR_STEPS: Partial<Record<WhatsNewAction, ModelgoOfferAction>> = { seen: "shown", get_key: "get_key", add_key: "add_key", not_now: "not_now", close: "close" };
 

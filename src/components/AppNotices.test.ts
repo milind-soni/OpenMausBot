@@ -32,7 +32,7 @@ vi.mock("./whats-new/TeamPicture", () => ({ TeamPicture: () => null }));
 // Who MausBot belongs to: unknown (as before the session answers) unless a test says otherwise.
 vi.mock("@/lib/default-bot", async original => ({ ...await original<typeof import("@/lib/default-bot")>(), useViewerEmail: () => f.viewerEmail }));
 vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ brand: { name: "OpenMausBot" }, source: f.brand, file: "" }), productName: () => "MausBot" }));
-vi.mock("./Avatar", async original => ({ ...await original<typeof import("./Avatar")>(), MausAvatar: () => null }));
+vi.mock("./Avatar", async original => ({ ...await original<typeof import("./Avatar")>(), MausAvatar: () => null, BotAvatar: () => null }));
 vi.mock("./lazy-screens", async original => ({ ...await original<typeof import("./lazy-screens")>(), GrokMoveDialog: () => "THE MOVE DIALOG" }));
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapshot: { state: string; authenticated?: boolean } }) =>
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
@@ -1919,57 +1919,123 @@ describe("bots together by default", () => {
   beforeEach(() => { saved = undefined; reads = []; lent = false; lends = []; resetPlacesTogetherForTest(); });
   afterEach(() => resetPlacesTogetherForTest());
 
-  it("once, on this computer's page, for a person who never chose: drawing it turns the list on, lends nothing and reads nothing of My Cloud yet", async () => {
-    returning(); storage.set(CLOUD_INTRO, "1");
+  const CORNER = 'data-notice="together-default"', SLIDE = 'data-whats-new-slide="together"';
+  const team = { id: "t1", name: "Design Studio", role: "member" as const, machine: null };
+  /** What's new of the release before (0.1.182's) not seen yet on this desktop: an updater from 0.1.181. */
+  const whatsNewUnseen = () => { desk = desktopMachine(); storage.delete(WHATS_NEW_NOTICE); storage.delete(MODELGO_OFFER_NOTICE); };
+
+  it("updater from 0.1.181: one centred carousel in the update's own launch, the notice's slide first, then the Cloud's and the team's news, then the sponsor's", async () => {
+    returning(); whatsNewUnseen(); account = paid({ teams: [team] });
     const together = install();
-    expect(together.on()).toBe(false);
     const html = await launch();
-    expect(html).toContain('data-notice="together-default"');
+    expect(slidesOf(html)).toEqual(["together", "cloudNews", "teamNews", "modelgo"]);
+    expect(html).toContain('data-whats-new="together"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).not.toContain(CORNER);
     expect(html).toContain("Your bots are in one list now");
     expect(html).toContain("Let your Clouds&#x27; bots run commands on this computer");
-    expect(html).not.toContain(STAR);
-    expect(together.on()).toBe(true);
+    expect(html).toContain("What&#x27;s new on your Cloud");
+    expect(html).toContain("What&#x27;s new for your team");
+    expect(html, "nothing sold to someone with a plan and a team").not.toContain("Get Pro");
+    expect(html).not.toContain("Start a Team");
+    expect(together.on(), "shown: the default is on, as the corner notice's drawing turns it").toBe(true);
     expect(lends, "the default never lends commands").toEqual([]);
     expect(reads.filter(read => !read.startsWith("computer")), "no read of My Cloud at the start").toEqual([]);
-    press("Got it");
-    expect(await settle()).not.toContain('data-notice="together-default"');
+    expect(await settle(), "kept on screen though main no longer calls the notice due").toContain(SLIDE);
+    press("Not now");
+    expect(await settle()).not.toContain(CORNER);
     resetPlacesTogetherForTest();
-    expect(await launch(), "closed: never again").not.toContain('data-notice="together-default"');
+    const next = await relaunch();
+    expect(next, "the slide was the notice: never in the corner after").not.toContain(CORNER);
+    expect(next).not.toContain(SLIDE);
     expect(together.on(), "and it stays on").toBe(true);
   });
 
-  it("never in the launch What's new or the Cloud card takes: it waits for a later launch", async () => {
-    returning();
+  it("updater from 0.1.181 with no Cloud plan of the kind sold here: the selling Cloud and Team slides, unchanged, after the notice's", async () => {
+    returning(); whatsNewUnseen(); account = signedOut;
+    offer = { ...PLAIN_OFFER, plans: [...PLAIN_OFFER.plans, { tier: "team", label: "Team", amount: 4000, trialDays: 3 }] };
     install();
     const html = await launch();
-    expect(html).not.toContain('data-notice="together-default"');
+    expect(slidesOf(html)).toEqual(["together", "pro", "team", "modelgo"]);
+    expect(html).toContain("Meet the new MausBot Cloud");
+    expect(html).toContain("Start a Team");
+  });
+
+  it("updater from 0.1.182 who saw What's new but never the notice: the carousel once more, with the notice, the Cloud and the team, not the sponsor again", async () => {
+    returning(); account = paid({ teams: [team] });
+    install();
+    const html = await launch();
+    expect(slidesOf(html)).toEqual(["together", "cloudNews", "teamNews"]);
+    expect(html).not.toContain(CORNER);
+    expect(html, "the last slide ends with Got it").toContain("data-whats-new-got-it");
+    press("Got it");
+    expect(await settle()).toBe("");
+    resetPlacesTogetherForTest();
+    const next = await relaunch();
+    expect(next).not.toContain(SLIDE);
+    expect(next).not.toContain(CORNER);
+  });
+
+  it("updater from 0.1.182 whose corner notice was already drawn: never the slide; the corner notice as before until it is closed", async () => {
+    returning(); storage.set(CLOUD_INTRO, "1"); account = paid({ teams: [team] });
+    saved = { v: 1, noticed: { a: NOW - DAY } };
+    const together = install();
+    expect(together.on(), "drawn on 0.1.182: on already").toBe(true);
+    const html = await launch();
+    expect(html).not.toContain(SLIDE);
+    expect(html).not.toContain("data-whats-new");
+    expect(html).toContain(CORNER);
+    whatsNewUnseen(); install(); resetPlacesTogetherForTest();
+    const unseen = await relaunch();
+    expect(slidesOf(unseen), "What's new as main has it for a plan and a team, without the notice's slide").toEqual(["modelgo"]);
+  });
+
+  it("fresh install: What's new does not show in its first chat's launch, so the corner notice does, and the slide never follows", async () => {
+    whatsNewUnseen(); account = paid({ teams: [team] }); storage.set(CLOUD_INTRO, "1");
+    f.state.bots = [{ tasks: [{ threadId: "first", usage: { turns: 0 } }] }];
+    install();
+    const html = await launch();
+    expect(html).not.toContain("data-whats-new");
+    expect(html).toContain(CORNER);
+    press("Got it");
+    f.state.bots = structuredClone(FIRST_REPLY);
+    resetPlacesTogetherForTest();
+    const next = await relaunch();
+    expect(next).not.toContain(SLIDE);
+    expect(next).not.toContain(CORNER);
   });
 
   it("no suggestion to move bots to My Cloud goes ahead of it: not while it is due, nor while main has not said whether it is", async () => {
     returning(); storage.set(CLOUD_INTRO, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1");
     desk.handlers.set("two-places:state", async () => ({ suggest: { key: "cloud:mine", name: "My Cloud", kind: "cloud" } }));
     desk.handlers.set("places-together:state", () => new Promise(() => {}));
-    expect(await launch(), "main has not said yet").not.toContain('data-notice="two-places"');
+    const waiting = await launch();
+    expect(waiting, "main has not said yet").not.toContain('data-notice="two-places"');
+    expect(waiting, "nor What's new, which may carry the notice").not.toContain("data-whats-new");
     resetPlacesTogetherForTest();
     install();
     const due = await launch();
     expect(due).not.toContain('data-notice="two-places"');
-    expect(due).toContain('data-notice="together-default"');
+    expect(due).toContain(SLIDE);
   });
 
-  it("never for a person who chose either way, nor on My Cloud's page", async () => {
+  it("not eligible: never the slide nor the corner notice for a person who chose either way, on My Cloud's page, and no slide on a branded build's", async () => {
     returning();
     saved = { v: 1, on: false };
     install();
-    expect(await launch()).not.toContain('data-notice="together-default"');
+    for (const html of [await launch()]) { expect(html).not.toContain(CORNER); expect(html).not.toContain(SLIDE); }
     saved = { v: 1, on: true };
     resetPlacesTogetherForTest();
     install();
-    expect(await launch()).not.toContain('data-notice="together-default"');
+    for (const html of [await launch()]) { expect(html).not.toContain(CORNER); expect(html).not.toContain(SLIDE); }
     saved = undefined;
     resetPlacesTogetherForTest();
     install();
     showWindow(MY_CLOUD);
-    expect(await launch()).not.toContain('data-notice="together-default"');
+    for (const html of [await launch()]) { expect(html).not.toContain(CORNER); expect(html).not.toContain(SLIDE); }
+    showWindow(LOCAL_ORIGIN); f.brand = "file";
+    resetPlacesTogetherForTest();
+    install();
+    expect(await launch()).not.toContain(SLIDE);
   });
 });
