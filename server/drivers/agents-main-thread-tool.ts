@@ -25,7 +25,7 @@ export async function callSetMainThreadTool(args: Json, context: ToolCallContext
 export const SET_MAIN_THREAD_TOOL_DEFINITION = {
   name: SET_MAIN_THREAD_TOOL,
   description:
-    "Set your main thread (where your automations and briefs report) to one of your own open threads, or clear it back to the default. Only when the person or your instructions ask. Not a teammate's, room's, automation run's or archived thread.",
+    "Set or clear your own main thread (where your automations and briefs report). Only when the person or your instructions ask.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
