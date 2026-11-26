@@ -98,8 +98,8 @@ export function MoveChooser({ onClose, team }: { onClose: () => void; team?: Tea
           const on = chosen.has(bot.id) && !bot.stays;
           return <li key={bot.id}>
             <button type="button" role="checkbox" aria-checked={on} disabled={Boolean(bot.stays)} data-move-bot={bot.id} onClick={() => toggle(bot.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-start text-[14px] enabled:hover:bg-raised disabled:text-ink-tertiary">
-              <span className="min-w-0 flex-1 truncate" dir="auto">{bot.name}</span>
-              {bot.stays && <span data-move-bot-stays={bot.stays} className="shrink-0 text-[12px]">{t(STAYS_HERE[bot.stays])}</span>}
+              <span className={bot.stays ? "min-w-0 max-w-[50%] shrink-0 truncate" : "min-w-0 flex-1 truncate"} dir="auto">{bot.name}</span>
+              {bot.stays && <span data-move-bot-stays={bot.stays} className="min-w-0 flex-1 truncate text-end text-[12px]" title={t(STAYS_HERE[bot.stays])}>{t(STAYS_HERE[bot.stays])}</span>}
               {on && <Check size={15} aria-hidden="true" />}
             </button>
           </li>;
