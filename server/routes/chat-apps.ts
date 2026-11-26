@@ -51,6 +51,8 @@ export interface ChatAppRouteDeps {
     mayAct(auth: RequestAuth, botId: string): boolean;
     /** Would a turn of this bot in this conversation run a change without asking. */
     fullAccess(botId: string, threadId: string): boolean;
+    /** A conversation whose turns are confined (a guest's, a read-and-draft run's): its pages call no connected apps. */
+    confined?(threadId: string): boolean;
   };
 }
 
@@ -142,6 +144,9 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       const linked = deps.connectors;
       if (connectorCall && linked && !linked.mayAct(auth, bot.id)) {
         return json(res, 403, { error: { code: RPC_HOST_REFUSED, message: `Only someone who can chat with ${bot.name} can use this page's connected apps.` } });
+      }
+      if (connectorCall && linked?.confined?.(threadId)) {
+        return json(res, 403, { error: { code: RPC_HOST_REFUSED, message: "In this conversation, pages cannot use connected apps." } });
       }
       if (!pageRate.take(`${threadId}:${row.id}`)) return json(res, 429, { error: { code: -32000, message: "Too many calls from this page. Wait a moment." } });
       const answer = await pageRpc({

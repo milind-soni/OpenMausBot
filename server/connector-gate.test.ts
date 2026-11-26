@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import { APP_LIMITS, type AppConnectorUse } from "../shared/app.ts";
-import { createConnectorGate, fitResult, type AppInstallation, type ConnectorCaller, type GateBot, type GateServers, type OpenedServer } from "./connector-gate.ts";
+import { bindConnectorGate, createConnectorGate, fitResult, type AppInstallation, type ConnectorCaller, type GateBot, type GateServers, type OpenedServer } from "./connector-gate.ts";
 import type { DecisionRow } from "./decision-log.ts";
 
 type Json = Record<string, unknown>;
@@ -14,7 +14,7 @@ function executed(slug: string, data: unknown, successful = true, error?: string
   return { content: [{ type: "text", text: JSON.stringify(body) }] };
 }
 
-function installation(id: string, options: { connected?: boolean; accounts?: Array<{ id: string; status: string }>; readOnly?: string[]; answer?: (frame: Json) => Json | Promise<Json>; hang?: boolean } = {}) {
+function installation(id: string, options: { connected?: boolean; accounts?: Array<{ id: string; status: string }>; readOnly?: string[]; answer?: (frame: Json) => Json | Promise<Json>; hang?: boolean; status?: number } = {}) {
   const frames: Array<{ frame: Json; session: string | undefined }> = [];
   const value: AppInstallation = {
     id,
@@ -26,6 +26,7 @@ function installation(id: string, options: { connected?: boolean; accounts?: Arr
       if (frame.method === "initialize") return { status: 200, bytes: new TextEncoder().encode(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result: {} })), transportSessionId: `${id}-session` };
       if (frame.method !== "tools/call") return { status: 202, bytes: new Uint8Array() };
       if (options.hang) await new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      if (options.status) return { status: options.status, bytes: new Uint8Array() };
       const params = frame.params as { arguments: { tools: Array<{ tool_slug: string }> } };
       const result = options.answer ? await options.answer(frame) : executed(params.arguments.tools[0]!.tool_slug, { messages: [{ id: "m1", subject: "Hi" }] });
       return { status: 200, bytes: new TextEncoder().encode(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result })) };
@@ -187,6 +188,27 @@ describe("a connected app's tool, called outside a turn", () => {
     expect(await slow.gate.call(caller(), { connector: "gmail", tool: "GMAIL_FETCH_EMAILS" }, {})).toEqual({ ok: false, reason: "timeout", status: 504, message: "The call ran past 0 seconds." });
   });
 
+  it("holds every read the checks make to the time limit too", async () => {
+    const shared = installation("shared");
+    const stalled = { ...shared, value: { ...shared.value, readOnlyTools: () => new Promise<ReadonlySet<string>>(() => {}) } };
+    const { gate, rows } = fixture({ shared: stalled, callMs: 30 });
+    expect(await gate.call(caller(), { connector: "gmail", tool: "GMAIL_FETCH_EMAILS" }, {})).toMatchObject({ ok: false, reason: "timeout", status: 504 });
+    expect(shared.calls()).toEqual([]);
+    expect(rows[0]).toMatchObject({ decision: "auto-denied", summary: expect.stringContaining(": timeout (gmail)") });
+  });
+
+  it("sends a call that may change something once, and sends a read again on a fresh session when the first try fails", async () => {
+    const down = fixture({ shared: installation("shared", { status: 502, readOnly: [] }) });
+    expect(await down.gate.call(caller({ engaged: true }), { connector: "gmail", tool: "GMAIL_TRASH_MESSAGE" }, {})).toMatchObject({ ok: false, reason: "unavailable" });
+    expect(down.shared.calls()).toHaveLength(1);
+    // Sent, so recorded as allowed, with what came of it.
+    expect(down.rows[0]).toMatchObject({ decision: "auto-approved", summary: expect.stringContaining(": ran, unavailable (gmail)") });
+    const read = fixture({ shared: installation("shared", { status: 502 }) });
+    expect(await read.gate.call(caller(), { connector: "gmail", tool: "GMAIL_FETCH_EMAILS" }, {})).toMatchObject({ ok: false, reason: "unavailable" });
+    expect(read.shared.calls()).toHaveLength(2);
+    expect(read.shared.frames.filter((one) => one.frame.method === "initialize")).toHaveLength(2);
+  });
+
   it("limits calls per page and per bot and app", async () => {
     const { gate } = fixture();
     const page = caller();
@@ -208,6 +230,16 @@ describe("a connected app's tool, called outside a turn", () => {
     ]);
     expect(lines).toEqual([expect.stringMatching(/^page m9 bot=b1 gmail tool=GMAIL_FETCH_EMAILS → ok \d+ms$/), expect.stringMatching(/^page m9 bot=b1 gmail tool=GMAIL_ADD_LABEL_TO_EMAIL → needs-click \d+ms$/)]);
     expect(JSON.stringify([rows, lines])).not.toContain("secret words");
+  });
+
+  it("is callable by server code with a declaration of its own and a fixed caller", async () => {
+    const { gate, shared } = fixture();
+    const { declared: _declared, ...identity } = caller();
+    const call = bindConnectorGate(gate, identity);
+    expect(await call([GMAIL], "gmail", "GMAIL_FETCH_EMAILS", {})).toMatchObject({ ok: true });
+    expect(await call([], "gmail", "GMAIL_FETCH_EMAILS", {})).toMatchObject({ ok: false, reason: "not-declared" });
+    expect(await call([GMAIL], "mcp:notes", "search", {})).toMatchObject({ ok: false, reason: "not-declared" });
+    expect(shared.calls()).toHaveLength(1);
   });
 
   it("lists the declared tools with whether each app is connected for this person", async () => {

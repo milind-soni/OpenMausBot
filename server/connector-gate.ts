@@ -175,7 +175,8 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
   const callMs = deps.callMs ?? APP_LIMITS.pageConnectorMs;
   const appLabelOf = (toolkit: string) => deps.apps?.label?.(toolkit) ?? appLabel(toolkit);
 
-  const audit = (caller: ConnectorCaller, bot: GateBot | undefined, target: ConnectorTarget, answer: GateAnswer, started: number): GateAnswer => {
+  /** `sent`: the call passed every check and went out, so it is recorded as allowed whatever came back. */
+  const audit = (caller: ConnectorCaller, bot: GateBot | undefined, target: ConnectorTarget, answer: GateAnswer, started: number, sent: boolean): GateAnswer => {
     const where = "server" in target ? `mcp:${target.server}` : target.connector;
     // Every call is recorded; its arguments and answer never are.
     log(`${caller.audit.label} bot=${caller.botId} ${where} tool=${target.tool.slice(0, 128)} → ${answer.ok ? "ok" : answer.reason} ${now() - started}ms`);
@@ -184,8 +185,8 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
       botId: caller.botId,
       ...(bot ? { botName: bot.name } : {}),
       tool: target.tool,
-      summary: `${caller.audit.label}: ${answer.ok ? "ran" : answer.reason} (${where})`.slice(0, 240),
-      decision: answer.ok ? "auto-approved" : "auto-denied",
+      summary: `${caller.audit.label}: ${answer.ok ? "ran" : sent ? `ran, ${answer.reason}` : answer.reason} (${where})`.slice(0, 240),
+      decision: answer.ok || sent ? "auto-approved" : "auto-denied",
       source: "connector-scope",
       rule: `outside-turn:${where}`,
     });
@@ -235,7 +236,7 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
     return init.transportSessionId;
   }
 
-  async function callApp(caller: ConnectorCaller, target: { connector: string; tool: string }, args: Json, signal: AbortSignal): Promise<GateAnswer> {
+  async function callApp(caller: ConnectorCaller, target: { connector: string; tool: string }, args: Json, signal: AbortSignal, sent: () => void): Promise<GateAnswer> {
     const { connector: toolkit, tool } = target;
     const label = appLabelOf(toolkit);
     const bot = deps.bot(caller.botId);
@@ -265,12 +266,14 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
     const { frame } = appFrame(tool, args, account, Math.floor(Math.random() * 1e9));
     const send = async (fresh: boolean) => {
       const transport = await session(installation, signal, fresh);
+      sent();
       return installation.relay(frame, transport, signal);
     };
-    let sent = await send(false);
-    if (sent.status !== 200) sent = await send(true);
-    if (sent.status !== 200) return refusal("unavailable", 502, `${label} could not be reached. Try again in a moment.`);
-    const answer = parseMcpResponse(new TextDecoder().decode(sent.bytes), frame.id);
+    let relayed = await send(false);
+    // A call that may have changed something is never sent twice.
+    if (relayed.status !== 200 && readOnly) relayed = await send(true);
+    if (relayed.status !== 200) return refusal("unavailable", 502, `${label} could not be reached. Try again in a moment.`);
+    const answer = parseMcpResponse(new TextDecoder().decode(relayed.bytes), frame.id);
     if (!answer) return refusal("unavailable", 502, `${label} sent no answer.`);
     const error = isRecord(answer.error) ? answer.error.message : undefined;
     if (typeof error === "string") return refusal("tool-failed", 502, failureText(label, error));
@@ -287,7 +290,7 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
     }
   }
 
-  async function callServer(caller: ConnectorCaller, target: { server: string; tool: string }, args: Json, signal: AbortSignal): Promise<GateAnswer> {
+  async function callServer(caller: ConnectorCaller, target: { server: string; tool: string }, args: Json, signal: AbortSignal, sent: () => void): Promise<GateAnswer> {
     const { server: name, tool } = target;
     const bot = deps.bot(caller.botId);
     const toolGranted = (one: GateBot | undefined) => Boolean(one && canUseMcpServer(one.toolScope, name) && allowsTool(one.toolScope, { kind: "mcp", server: name, name: tool }));
@@ -311,6 +314,7 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
       if (!caller.engaged) return refusal("needs-click", 403, NEEDS_CLICK(caller, server.label));
     }
     if (!toolGranted(deps.bot(caller.botId))) return refusal("not-granted", 403, `${bot.name} is no longer allowed ${tool} on ${name}.`);
+    sent();
     const answer = await server.call(tool, args, signal);
     if (!answer.ok) return refusal("tool-failed", 502, failureText(server.label, answer.text));
     if (answer.body.isError === true) return refusal("tool-failed", 502, failureText(server.label, contentText(answer.body)));
@@ -320,7 +324,8 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
   async function call(caller: ConnectorCaller, target: ConnectorTarget, args: unknown): Promise<GateAnswer> {
     const started = now();
     const bot = deps.bot(caller.botId);
-    const done = (answer: GateAnswer) => audit(caller, bot, target, answer, started);
+    let sent = false;
+    const done = (answer: GateAnswer) => audit(caller, bot, target, answer, started, sent);
     const declared = caller.declared.some((group) => ("server" in target
       ? "server" in group && group.server === target.server
       : "connector" in group && group.connector === target.connector) && group.tools.includes(target.tool));
@@ -335,8 +340,14 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
       return done(refusal("rate-limited", 429, `Too many calls to ${"server" in target ? target.server : appLabelOf(target.connector)} from ${caller.what ?? "this page"}'s bot. Wait a minute.`));
     }
     const signal = AbortSignal.timeout(callMs);
+    // The time limit holds for every read the checks make too, not only for the call itself.
+    const expired = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    const went = () => { sent = true; };
     try {
-      const answer = "server" in target ? await callServer(caller, target, given, signal) : await callApp(caller, target, given, signal);
+      const answer = await Promise.race([
+        "server" in target ? callServer(caller, target, given, signal, went) : callApp(caller, target, given, signal, went),
+        expired,
+      ]);
       if (!answer.ok) return done(answer);
       const fitted = fitResult(answer.result, APP_LIMITS.pageConnectorResultBytes);
       return done({ ok: true, result: fitted.value, ...(fitted.truncated ? { truncated: true as const } : {}) });
@@ -362,4 +373,11 @@ export function createConnectorGate(deps: ConnectorGateDeps): ConnectorGate {
   }
 
   return { call, list };
+}
+
+/** The gate as a caller with a fixed identity sees it: one call names its declaration, the connected app (or "mcp:<server>")
+ * and the tool. */
+export function bindConnectorGate(gate: ConnectorGate, caller: Omit<ConnectorCaller, "declared">) {
+  return (declaration: readonly AppConnectorUse[], connector: string, tool: string, args: unknown): Promise<GateAnswer> =>
+    gate.call({ ...caller, declared: declaration }, connector.startsWith("mcp:") ? { server: connector.slice(4), tool } : { connector, tool }, args);
 }

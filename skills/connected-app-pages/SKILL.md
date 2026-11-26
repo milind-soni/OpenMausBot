@@ -27,39 +27,42 @@ Use the exact tool names you would call yourself; check one you have not used. `
 - `await mausbot.connectors.call("gmail", "GMAIL_FETCH_EMAILS", { max_results: 10 })`: the tool's answer, the same
   data you would get. A very large answer comes back cut to its first items. Pass values as arguments only.
 
-A tool that only reads runs on load. A tool that changes something (sends, labels, moves, deletes, creates) runs only
-from a click handler, and only when you are at Full access: below it, or when you ask before sending, the call is
-refused with a sentence that says to ask you in the chat. Each call is checked against your access to that app as it
-is now, recorded, and limited: about 30 calls a minute per page, a minute each, 64 KB of arguments. A call that is refused rejects with a
-plain sentence: show it in the page.
+A tool whose own listing marks it read-only runs on load. Any other tool (sends, labels, moves, deletes, creates) runs
+only from a click handler, and only when you are at Full access: below it, or when you ask before sending, the call is
+refused with a sentence that says to ask you in the chat. When an app's listing does not mark its reads, even a read
+needs a click and Full access: load on a button then. Each call is checked against your access to that app as it is
+now, recorded, and limited: about 30 calls a minute per page, a minute each, 64 KB of arguments. A call that is
+refused rejects with a plain sentence: show it in the page.
 
 ## Example: recent mail, with one button that changes something
 
 ```html
-<ul id="list">Loading…</ul><p id="note"></p>
+<button id="load">Show my inbox</button><ul id="list"></ul><p id="note"></p>
 <script>
 const note = (text) => { document.getElementById("note").textContent = text; };
 async function load() {
   const [gmail] = await mausbot.connectors.list();
   if (!gmail.connected) return note(`Connect ${gmail.label} in Apps to see your mail here.`);
-  const data = await mausbot.connectors.call("gmail", "GMAIL_FETCH_EMAILS", { max_results: 10, query: "in:inbox" });
+  const data = await mausbot.connectors.call("gmail", "GMAIL_FETCH_EMAILS", { user_id: "me", query: "in:inbox", max_results: 10 });
   const list = document.getElementById("list");
   list.innerHTML = "";
   for (const mail of data.messages ?? []) {
     const row = document.createElement("li");
     row.textContent = `${mail.sender ?? ""}: ${mail.subject ?? "(no subject)"} `;
-    const done = document.createElement("button");
-    done.textContent = "Archive";
-    done.onclick = () => mausbot.connectors.call("gmail", "GMAIL_MODIFY_THREAD_LABELS", { thread_id: mail.threadId, remove_label_ids: ["INBOX"] })
-      .then(() => row.remove(), (error) => note(error.message));
-    row.append(done);
+    const reply = document.createElement("button");
+    reply.textContent = "Draft a thank-you";
+    reply.onclick = () => mausbot.connectors.call("gmail", "GMAIL_CREATE_EMAIL_DRAFT", {
+      user_id: "me", recipient_email: mail.sender, subject: `Re: ${mail.subject}`, body: "Thank you!", thread_id: mail.threadId,
+    }).then(() => { reply.textContent = "Drafted"; }, (error) => note(error.message));
+    row.append(reply);
     list.append(row);
   }
 }
 load().catch((error) => note(error.message));
+document.getElementById("load").onclick = () => load().catch((error) => note(error.message));
 </script>
 ```
 
-Show it with `uses: ["gmail:GMAIL_FETCH_EMAILS", "gmail:GMAIL_MODIFY_THREAD_LABELS"]`. Archive works only at Full
-access; say so in one line when you are not. A published page cannot call connected apps: keep these pages in the chat.
+Show it with `uses: ["gmail:GMAIL_FETCH_EMAILS", "gmail:GMAIL_CREATE_EMAIL_DRAFT"]`. The draft button works only at
+Full access; say so in one line when you are not. The arguments are the tool's own, as you would send them. A published page cannot call connected apps: keep these pages in the chat.
 In a room, pages cannot call them either.

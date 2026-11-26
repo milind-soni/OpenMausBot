@@ -46,7 +46,7 @@ function installations() {
   return { sent, make, calls: () => sent.filter((one) => one.frame.method === "tools/call") };
 }
 
-async function fixture(options: { threadVisible?: ChatAppRouteDeps["threadVisible"]; threadRefusal?: ChatAppRouteDeps["threadRefusal"]; mayAct?: (auth: RequestAuth) => boolean; full?: boolean } = {}) {
+async function fixture(options: { threadVisible?: ChatAppRouteDeps["threadVisible"]; threadRefusal?: ChatAppRouteDeps["threadRefusal"]; mayAct?: (auth: RequestAuth) => boolean; full?: boolean; confined?: (threadId: string) => boolean } = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const other = store.createBot({ name: "Other" });
@@ -69,6 +69,7 @@ async function fixture(options: { threadVisible?: ChatAppRouteDeps["threadVisibl
       person: (auth) => (auth.kind === "session" ? auth.session.id : null),
       mayAct: (auth) => options.mayAct?.(auth) ?? true,
       fullAccess: () => options.full === true,
+      ...(options.confined ? { confined: options.confined } : {}),
     },
   })];
   const server = createServer(async (req, res) => {
@@ -171,5 +172,9 @@ describe("mausbot.connectors on the rpc route", () => {
     expect(await rpc(id, "mausbot/connectors/list", {}, bot, home, "reader")).toEqual({ status: 403, body: { error: { code: -32000, message: "Only someone who can chat with Scout can use this page's connected apps." } } });
     expect((await rpc(id, "mausbot/connectors/call", READ, bot, home, "guest")).status).toBe(403);
     expect(fake.sent).toEqual([]);
+    const confined = await fixture({ confined: () => true });
+    expect(await confined.rpc(confined.show({ uses: ["gmail:GMAIL_FETCH_EMAILS"] }), "mausbot/connectors/call", READ))
+      .toEqual({ status: 403, body: { error: { code: -32000, message: "In this conversation, pages cannot use connected apps." } } });
+    expect(confined.fake.sent).toEqual([]);
   });
 });
