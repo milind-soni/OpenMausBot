@@ -47,12 +47,11 @@ function trackedNames(src: string): Set<string> {
     for (const api of APIS) names.add(`${match[1]}.${api}`);
   }
   for (let round = 0; round < 3; round++) {
-    const bare = (identifier: string | undefined): boolean =>
-      identifier !== undefined && new RegExp(`^(${[...names].join("|")})$`).test(identifier);
+    const bare = (identifier: string | undefined): boolean => identifier !== undefined && names.has(identifier);
     const aliased = (name: string | undefined, rhs: string | undefined): void => {
       if (name && !names.has(name) && bare(rhs)) names.add(name);
     };
-    for (const m of src.matchAll(/(?:const|let)\s+(\w+)(?:\s*:[^=]+)?\s*=\s*promisify\((\w+)\)/g)) aliased(m[1], m[2]);
+    for (const m of src.matchAll(/(?:const|let)\s+(\w+)(?:\s*:[^=]+)?\s*=\s*promisify\(([\w$.]+)\)/g)) aliased(m[1], m[2]);
     for (const m of src.matchAll(/(?:const|let)\s+(\w+)(?:\s*:[^=]+)?\s*=\s*(?:[\w$.]+\s*\?\?\s*)?(\w+)\s*(?![\w(=])/g)) aliased(m[1], m[2]);
     for (const m of src.matchAll(/(?<![\w.=])(\w+)\s*=\s*(?!=)(\w+)\s*(?![\w(=])/g)) aliased(m[1], m[2]);
   }
@@ -181,8 +180,11 @@ describe("windows console hiding", () => {
     ['import { spawn as start } from "node:child_process"; start("cmd.exe");', "start"],
     ['import * as cp from "node:child_process"; cp.spawn("cmd.exe");', "cp.spawn"],
     ['import { execFile } from "node:child_process"; const run = promisify(execFile); run("cmd.exe");', "run"],
+    ['import * as cp from "node:child_process"; const run = promisify(cp.execFile); run("cmd.exe", [], { windowsHide: false });', "run"],
   ])("detects an unhidden child process through imported bindings", (src, api) => {
-    expect(callSites(src, trackedNames(src)).map((site) => site.api)).toContain(api);
+    const site = callSites(src, trackedNames(src)).find((candidate) => candidate.api === api);
+    expect(site).toBeDefined();
+    expect(site && hidesConsole(site.text)).toBe(false);
   });
 
   it.each([
