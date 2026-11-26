@@ -9591,7 +9591,7 @@ async function runClaimedGroupMemberTurn(
   assertWithinBudget(cfg, DATA_DIR); if (!operation?.continuesRun) usageCapGate.assertTurn(bot.id, personWaitingInRoom(operation, routineTriggerOf(threadId)), threadLanguage(threadId));
   assertModelVariantSupported(turnSelection, instance.adapter.capabilities);
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
-  const roomSkills = roomSkillsTurn(skillAuthoringClaim, hop, bot.id, { allowed: skillAuthoringEnabled(cfg) && !cardContinuation, canWrite: instance.adapter.capabilities.agentsMcp === true });
+  const roomSkills = roomSkillsTurn(skillAuthoringClaim, hop, bot.id, { allowed: skillAuthoringEnabled(cfg) && !cardContinuation, canWrite: instance.adapter.capabilities.agentsMcp === true, personStarted: operation?.personStarted === true });
   const skillAuthoring = roomSkills.writes;
   if (instance.adapter.capabilities.agentsMcp === true) {
     integrations.agents = agentsIntegration(bot.id, threadId, hop, skillAuthoring, internalGeneration, orchestration?.roomHandoffId, supportsWorkspaceFiles(instance.driverKind));
