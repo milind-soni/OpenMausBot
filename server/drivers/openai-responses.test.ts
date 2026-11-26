@@ -473,6 +473,30 @@ describe("what Responses can answer", () => {
     expect(textOf(seen, "assistant_text")).toBe("Half and half.");
   });
 
+  it("replays a cut message when only its reasoning item finished", async () => {
+    let responses = 0;
+    const f = await fixture(onResponses((response) => {
+      responses += 1;
+      if (responses === 1) {
+        const reasoning = reasoningItem();
+        events(response, [
+          created,
+          { type: "response.reasoning_summary_text.delta", item_id: "rs_1", output_index: 0, summary_index: 0, delta: "Thinking it over." },
+          done(reasoning, 0),
+          textDelta("Half"),
+          { type: "response.incomplete", response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [reasoning, messageItem("Half")], usage } },
+        ]);
+        return;
+      }
+      answer(response, " and half.");
+    }));
+    const { end, events: seen } = await f.turn();
+    expect(end).toMatchObject({ ok: true });
+    const continuation = f.calls.at(-1)!;
+    expect(continuation.body.input.filter((item: any) => item.type === "message" && item.content?.[0]?.text === "Half")).toHaveLength(1);
+    expect(textOf(seen, "assistant_text")).toBe("Half and half.");
+  });
+
   it("refuses a tool call cut off by an incomplete response without running it", async () => {
     const f = await fixture(onResponses((response) => {
       events(response, [done(callItem()), { type: "response.incomplete", response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [callItem()] } }]);

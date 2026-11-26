@@ -1166,6 +1166,10 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     `data: ${JSON.stringify({ choices: [{ index: 0, delta }] })}\n\n`
     + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 4 } })}\n\n`;
   const text = (value: string, finishReason: string) => stream({ content: value }, finishReason);
+  const json = (value: string, finishReason: string) => new Response(JSON.stringify({
+    choices: [{ index: 0, message: { role: "assistant", content: value }, finish_reason: finishReason }],
+    usage: { prompt_tokens: 10, completion_tokens: 4 },
+  }), { headers: { "content-type": "application/json" } });
   const textOf = (events: RuntimeEvent[]) =>
     events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_text").map((event) => event.text);
 
@@ -1200,6 +1204,24 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
       : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
     expect(shown.join("")).not.toContain("abcdefgh");
     expect(shown.join("")).not.toContain("12345678");
+  });
+
+  it("carries the held suffix of a reply that arrived as JSON, not a stream", async () => {
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1 ? json("This is", "length") : json(" complete.", "stop"),
+      "openai-compat",
+      { MINIMAX_API_KEY: "secret12345678" },
+    );
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["This is complete."]);
+    const bodies = vi.mocked(fetch).mock.calls
+      .filter(([url]) => String(url).endsWith("/chat/completions"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: unknown }> });
+    expect(bodies[1]!.messages.slice(-2)).toEqual([
+      { role: "assistant", content: "This is" },
+      { role: "user", content: LENGTH_CONTINUATION },
+    ]);
   });
 
   it("still fails a length finish with no text", async () => {

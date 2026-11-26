@@ -675,7 +675,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               // A continuation resumes the same text, so a held credential prefix crosses over instead of being shown.
               delta("", "assistant_text", !willContinue);
               delta("", "reasoning_text", true);
-              carried = willContinue ? pending.assistant_text : "";
+              carried = willContinue ? maskSecrets(prefix + completion.text, false).held : "";
               break;
             } catch (value) {
               const error = asError(value);

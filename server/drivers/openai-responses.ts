@@ -197,8 +197,8 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
     }
   };
   const finish = (response: Record<string, unknown> | undefined) => {
-    if (!done.size && Array.isArray(response?.output)) {
-      for (const [position, item] of response.output.entries()) if (object(item)) finishItem(item as ResponseItem, position);
+    if (Array.isArray(response?.output)) {
+      for (const [position, item] of response.output.entries()) if (object(item) && !done.has(position)) finishItem(item as ResponseItem, position);
     }
     const used = object(response?.usage);
     const cachedInput = object(used?.input_tokens_details)?.cached_tokens;
