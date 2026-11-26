@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Model Context Protocol (MCP) server for OpenMausBot over JSON-RPC 2.0 stdio,
 // for external agents (Hermes, Claude Desktop, Cursor, etc.).
-import readline from "node:readline";
 import { allowedServerOrigin, EXAMPLE_ADDRESS } from "../electron/server-address.mjs";
 import { isRecord, projectMessage } from "./mcp-message-projection.ts";
+import { readStdioLines } from "../server/stdio-lines.ts";
 
 /** A server's base URL: https anywhere, http only on loopback or a private network (LAN, Tailscale). */
 export function validateBaseUrl(url: string): string {
@@ -214,7 +214,7 @@ export const TOOLS: McpToolDefinition[] = [
         section: { type: "string", description: "Optional sidebar section." },
         instance_id: { type: "string", description: "Optional provider instance ID; model is required with it." },
         model: { type: "string", description: "Optional exact model ID; instance_id is required with it." },
-        effort: { type: "string", enum: ["none", "low", "medium", "high", "xhigh", "max"] },
+        effort: { type: "string", enum: ["none", "low", "medium", "high", "xhigh", "max", "ultra"] },
       },
       required: ["name"],
       additionalProperties: false,
@@ -416,7 +416,7 @@ export const TOOLS: McpToolDefinition[] = [
         task_id: { type: "string", description: "Optional owned task/thread ID. Omit to change the bot's default and selected task model." },
         instance_id: { type: "string", description: "The configured provider instance ID." },
         model: { type: "string", description: "The exact model ID exposed by that instance." },
-        effort: { type: "string", enum: ["none", "low", "medium", "high", "xhigh", "max"] },
+        effort: { type: "string", enum: ["none", "low", "medium", "high", "xhigh", "max", "ultra"] },
       },
       required: ["bot_id", "instance_id", "model"],
       additionalProperties: false,
@@ -713,11 +713,11 @@ async function checkedModelSelection(
   if (!instance) throw new ToolInputError(`model instance not found: ${instanceId}`);
   if (instance.snapshot?.state !== "available") throw new ToolInputError(`model instance is unavailable: ${instanceId}`);
   const models = isRecord(instance.models) ? instance.models : {};
-  const offered = records(models.options).map((option) => option.id).filter((id) => typeof id === "string");
-  if (models.default !== model && !offered.includes(model)) {
+  const match = records(models.options).find((option) => option.id === model);
+  if (models.default !== model && !match) {
     throw new ToolInputError(`model '${model}' is not offered by instance '${instanceId}'`);
   }
-  const efforts = Array.isArray(instance.capabilities?.effortLevels) ? instance.capabilities.effortLevels : [];
+  const efforts = Array.isArray(match?.effortLevels) ? match.effortLevels : Array.isArray(instance.capabilities?.effortLevels) ? instance.capabilities.effortLevels : [];
   if (effort && !efforts.includes(effort)) {
     throw new ToolInputError(`effort '${effort}' is not offered by instance '${instanceId}'`);
   }
@@ -1368,15 +1368,9 @@ export async function processMcpMessage(
  * resolves): what `pnpm mcp`, dist-server/mcp-server.js and `openmausbot mcp` run. */
 export function runStdio(): Promise<void> {
   log("OpenMausBot MCP server running on stdio");
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: false,
-  });
-
   const activeRequests = new Set<Promise<void>>();
 
-  rl.on("line", (line) => {
+  return new Promise((closed) => readStdioLines(process.stdin, (line) => {
     const task = (async () => {
       try {
         const response = await processMcpMessage(line);
@@ -1391,9 +1385,7 @@ export function runStdio(): Promise<void> {
     task.finally(() => {
       activeRequests.delete(task);
     });
-  });
-
-  return new Promise((closed) => rl.on("close", async () => {
+  }, async () => {
     for (const controller of activeMcpControllers) {
       controller.abort(new DOMException("Request cancelled", "AbortError"));
     }
@@ -1401,7 +1393,7 @@ export function runStdio(): Promise<void> {
       await Promise.allSettled(Array.from(activeRequests));
     }
     // Do not force an exit here: stdout may still be flushing the final
-    // JSON-RPC frame. With stdin and readline closed, Node exits naturally
+    // JSON-RPC frame. With stdin closed, Node exits naturally
     // once that buffered write has drained.
     process.exitCode = 0;
     closed();

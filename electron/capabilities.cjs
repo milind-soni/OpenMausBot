@@ -1,4 +1,4 @@
-const { PLUGIN_REQUIRED_MESSAGE, isHyprlandSession } = require("./cua-hyprland.cjs");
+const { PLUGIN_REQUIRED_MESSAGE, desktopNames, isHyprlandSession } = require("./cua-hyprland.cjs");
 
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
 const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
@@ -13,6 +13,7 @@ function nativeDesktopActions(platform) {
     appleMediaPermissions: appleNative,
     applePrivacySettings: appleNative,
     appleSpeech: appleNative,
+    windowsSpeech: normalizedPlatform(platform) === "win32",
   });
 }
 
@@ -24,6 +25,14 @@ function linuxSession(platform, env) {
   if (declared === "x11" || declared === "xorg") return "x11";
   if (env.DISPLAY) return "x11";
   return "headless";
+}
+
+/** Ubuntu names itself in the desktop variables ("ubuntu:GNOME"); its sign-in screen offers "Ubuntu on Xorg". Other
+ * Wayland desktops, such as Fedora's GNOME, may have no Xorg session at all. */
+function ubuntuDesktop(env) {
+  const names = desktopNames(env);
+  // Without either variable the desktop is unknown; keep the Ubuntu wording.
+  return names.length ? names.includes("ubuntu") : undefined;
 }
 
 /** `hyprlandPlugin` is what `probeCuaHyprlandPlugin` found: "active" or anything else. */
@@ -55,8 +64,10 @@ function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
       available: false,
       session,
       reasonCode: "linux-wayland-seat-safety-blocked",
-      message:
-        "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.",
+      message: ubuntuDesktop(env) !== false
+        ? "Local control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer."
+        : "Local control is not available on Wayland yet. Sign out and choose an Xorg session if your sign-in screen " +
+          "offers one; on a desktop without one, such as Fedora, use a cloud desktop instead.",
     });
   }
   return Object.freeze({
@@ -65,6 +76,13 @@ function linuxLocalControlSupport(platform, env, { hyprlandPlugin } = {}) {
     reasonCode: "headless-session",
     message: "Local control needs an active Ubuntu Xorg desktop session.",
   });
+}
+
+/** macOS 14 and older (Darwin before 24): the driver links ScreenCaptureKit classes added in 14 and 15 and fails to load, so it is never tried there. */
+function macDriverUnsupported(platform, release) {
+  const darwinMajor = Number(String(release).split(".")[0]);
+  if (platform !== "darwin" || !darwinMajor || darwinMajor >= 24) return null;
+  return { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 15 Sequoia or later." };
 }
 
 /** Computer control's helper is gone, or the system refused to run it: access denied (os error 5), or Windows Security
@@ -137,12 +155,14 @@ function desktopCapabilities({
     screenPreview.reasonCode =
       hostPlatform === "linux" ? "headless-session" : "unsupported-platform";
   }
-  // Off the Mac the page listens itself and Fish Audio turns each clip into text (src/lib/fish-speech.ts).
-  const fishListening = hostPlatform === "win32" || hostPlatform === "linux";
+  // Windows listens through its own recognizer (speech-helper-windows.ps1). On Linux the page listens itself and Fish
+  // Audio turns each clip into text (src/lib/fish-speech.ts).
+  const isWindows = hostPlatform === "win32";
+  const fishListening = hostPlatform === "linux";
   const dictation = {
-    available: isMac || fishListening,
-    engine: isMac ? "apple-speech" : fishListening ? "fish-audio" : "none",
-    onDevice: isMac,
+    available: isMac || isWindows || fishListening,
+    engine: isMac ? "apple-speech" : isWindows ? "windows-speech" : fishListening ? "fish-audio" : "none",
+    onDevice: isMac || isWindows,
   };
   if (!dictation.available) dictation.reasonCode = "unsupported-platform";
   const localComputer = {
@@ -187,6 +207,10 @@ function desktopCapabilities({
       (hostPlatform === "darwin" || hostPlatform === "win32"
         ? driverBlocked(localConnection?.reason) ? "cua-driver-blocked" : "cua-driver-unavailable"
         : "unsupported-platform");
+  }
+  // The Wayland block names the way out: "Ubuntu on Xorg" on Ubuntu, a cloud desktop where there may be no Xorg.
+  if (!remote && localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
+    localComputer.ubuntuDesktop = ubuntuDesktop(env);
   }
 
   if (remote) {
@@ -247,5 +271,6 @@ module.exports = {
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,
+  macDriverUnsupported,
   nativeDesktopActions,
 };

@@ -1,4 +1,4 @@
-import { AppWindow, FolderOpen, Globe, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
+import { AppWindow, FolderOpen, FolderTree, Globe, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -47,12 +47,13 @@ function NavRow({
       aria-current={active ? "page" : undefined}
       className={cn(
         "relative flex items-center rounded-xl transition-colors",
-        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-left",
-        active ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+        // A labelled row follows the bot rows: a 16px icon, a 10px gap, a regular 14/20 label and the ink hover.
+        rail ? "size-9 shrink-0 justify-center" : iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-2.5 px-3 py-1.5 text-left",
+        active ? "bg-raised text-ink" : "text-ink hover:bg-ink/[0.06]",
       )}
     >
       {icon(active)}
-      {!iconsOnly && <span className="flex-1 truncate text-[14px] font-medium leading-5">{label}</span>}
+      {!iconsOnly && <span className="flex-1 truncate text-[14px] leading-5">{label}</span>}
       {attention && (
         <span
           data-testid="routines-attention"
@@ -80,7 +81,7 @@ export function SidebarAppsButton() {
         state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
       )}
     >
-      <Puzzle size={18} />
+      <Puzzle size={16} />
     </button>
   );
 }
@@ -122,7 +123,8 @@ export function SidebarFooterNav({
   const iconsOnly = density === "icons";
   const toolsLayout = useSidebarToolsLayout();
   const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
-  const iconSize = iconsOnly && !rail ? 20 : 18;
+  // 16 in rows, toolbars and 36px buttons; the avatars-only column's 46px buttons keep 20.
+  const iconSize = iconsOnly && !rail ? 20 : 16;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
   const automationsNeedYou = useAutomationsNeedYou();
   const automationsRow = <NavRow
@@ -181,6 +183,16 @@ export function SidebarFooterNav({
         icon={(active) => <Rocket size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "showPublishedApps" })}
       />
+      {state.config?.team && (
+        <NavRow
+          id="team-files"
+          label={t("sidebar.nav.teamFiles")}
+          iconsOnly={iconsOnly || toolbar}
+          active={state.activeView === "team-files"}
+          icon={(active) => <FolderTree size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showTeamFiles" })}
+        />
+      )}
       {advanced && webPanels.map((panel) => (
         <NavRow
           key={panel.id}

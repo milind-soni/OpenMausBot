@@ -1,4 +1,4 @@
-import type { LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenCredentials, BitwardenSecretsCredentials, BitwardenSecretsStatus, BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
 
@@ -26,6 +26,30 @@ export async function disconnectOnePassword(): Promise<OnePasswordStatus> {
   return (await api<{ onePassword: OnePasswordStatus }>("/api/logins/1password", { method: "DELETE" })).onePassword;
 }
 
+export async function connectBitwarden(credentials: BitwardenCredentials): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "POST", body: JSON.stringify(credentials) })).bitwarden;
+}
+
+export async function refreshBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden/refresh", { method: "POST", body: "{}" })).bitwarden;
+}
+
+export async function disconnectBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "DELETE" })).bitwarden;
+}
+
+export async function connectBitwardenSecrets(credentials: BitwardenSecretsCredentials): Promise<BitwardenSecretsStatus> {
+  return (await api<{ bitwardenSecrets: BitwardenSecretsStatus }>("/api/logins/bitwarden-secrets", { method: "POST", body: JSON.stringify(credentials) })).bitwardenSecrets;
+}
+
+export async function refreshBitwardenSecrets(): Promise<BitwardenSecretsStatus> {
+  return (await api<{ bitwardenSecrets: BitwardenSecretsStatus }>("/api/logins/bitwarden-secrets/refresh", { method: "POST", body: "{}" })).bitwardenSecrets;
+}
+
+export async function disconnectBitwardenSecrets(): Promise<BitwardenSecretsStatus> {
+  return (await api<{ bitwardenSecrets: BitwardenSecretsStatus }>("/api/logins/bitwarden-secrets", { method: "DELETE" })).bitwardenSecrets;
+}
+
 export async function addLogin(site: string, fields: LoginFieldsInput, bots: LoginBots, exactHost = false): Promise<LoginSummary> {
   return (await api<{ login: LoginSummary }>("/api/logins", {
     method: "POST",
@@ -33,10 +57,11 @@ export async function addLogin(site: string, fields: LoginFieldsInput, bots: Log
   })).login;
 }
 
-export async function changeLogin(id: string, change: { password?: string; totp?: string; removeTotp?: boolean; bots?: LoginBots; exactHost?: boolean }): Promise<LoginSummary> {
+export async function changeLogin(id: string, change: { site?: string; password?: string; totp?: string; removeTotp?: boolean; bots?: LoginBots; exactHost?: boolean }): Promise<LoginSummary> {
   return (await api<{ login: LoginSummary }>(`/api/logins/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({
+      ...(change.site === undefined ? {} : { site: change.site }),
       ...(change.password ? { password: change.password } : {}),
       ...(change.removeTotp ? { totp: null } : change.totp?.trim() ? { totp: change.totp } : {}),
       ...(change.bots ? { bots: change.bots } : {}),

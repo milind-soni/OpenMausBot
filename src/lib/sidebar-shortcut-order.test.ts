@@ -73,3 +73,12 @@ describe("nextShortcutBot", () => {
     expect(nextShortcutBot([], "a", 1)).toBeUndefined();
   });
 });
+
+describe("the one list", () => {
+  it("rows of the other place are not numbered: ⌘1…⌘9 go through this page's own bots in the order shown", () => {
+    const root = document.createElement("div");
+    root.innerHTML = ["cloud:tech", "git", "cloud:scout", "ledger", "computer:x"].map((id) => `<div data-sidebar-bot-row="${id}"></div>`).join("");
+    expect(shownBotIds(root)).toEqual(["git", "ledger"]);
+    expect(shortcutBots([{ id: "ledger" }, { id: "git" }], shownBotIds(root)).map((bot) => bot.id)).toEqual(["git", "ledger"]);
+  });
+});

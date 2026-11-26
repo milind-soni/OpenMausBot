@@ -264,8 +264,11 @@ describe("CI concurrency", () => {
     });
     // The build job runs where the scope selects it, and static holds only what is quick and always runs.
     expect(workflow.jobs.build.if).toBe(`contains(needs.static.outputs.jobs, '"build"')`);
-    expect((workflow.jobs.build.steps as { run?: string }[]).map((step) => step.run).filter(Boolean))
-      .toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
+    const buildRuns = (workflow.jobs.build.steps as { run?: string }[]).map((step) => step.run).filter(Boolean);
+    expect(buildRuns.slice(0, 4)).toEqual(["pnpm install --frozen-lockfile", "pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]);
+    // Then the one test that needs root on a real kernel (the browsers' memory limit), which fails rather than skips there.
+    expect(buildRuns).toHaveLength(5);
+    expect(buildRuns[4]).toMatch(/sudo setpriv .*--bounding-set=-sys_admin.*OMB_CGROUP_TEST=require .*vitest run server\/browser\/memory-cgroup\.linux\.test\.ts/s);
     for (const run of ["pnpm typecheck", "pnpm check:electron", "pnpm exec vite build"]) {
       expect((workflow.jobs.static.steps as { run?: string }[]).some((step) => step.run === run), run).toBe(false);
     }
@@ -275,19 +278,29 @@ describe("CI concurrency", () => {
     )).toBe(true);
     for (const [name, job] of Object.entries(workflow.jobs) as [string, { needs?: string | string[]; if?: string }][]) {
       if (["static", "gate"].includes(name)) continue;
-      // The one deploy job: after the control-plane checks, on main pushes only. It is
-      // not part of the merge gate.
+      // The one deploy job: after the control-plane checks, on main's pushes and its nightly
+      // run only. It is not part of the merge gate.
       if (name === "deploy-composio-broker") {
         expect(job.needs).toEqual(["control-plane"]);
-        expect(job.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/main'");
+        expect(job.if).toBe("(github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'");
         expect(workflow.jobs.gate.needs).not.toContain(name);
-        // Without the Cloudflare token the deploy is skipped with a warning, not failed:
-        // every step after the token check waits on it.
+        // Without the Cloudflare token a fork skips the deploy with a warning; this repository
+        // fails, so a deploy that never happens shows. Every step after the check waits on it.
         const [check, ...rest] = job.steps as { id?: string; if?: string; env?: Record<string, string>; run?: string }[];
         expect(check.id).toBe("token");
-        expect(check.env).toEqual({ CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}" });
+        expect(check.env).toEqual({
+          CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}",
+          UPSTREAM: "${{ github.repository == 'milind-soni/OpenMausBot' }}",
+        });
         expect(check.run).toContain("::warning");
+        expect(check.run).toMatch(/elif \[ "\$UPSTREAM" = "true" \]; then\n\s*echo "::error[^\n]*\n\s*exit 1\n/);
         for (const step of rest) expect(step.if).toBe("steps.token.outputs.present == 'true'");
+        // The deploy stops while a database migration is unapplied, and names the commit it deploys.
+        const migrations = rest.findIndex((step) => step.run?.includes("d1 migrations list openmausbot-composio --remote"));
+        const deployStep = rest.find((step) => (step as { uses?: string }).uses?.startsWith("cloudflare/wrangler-action@")) as { with?: Record<string, string> } | undefined;
+        expect(migrations).toBeGreaterThan(-1);
+        expect(migrations).toBeLessThan(rest.indexOf(deployStep as never));
+        expect(deployStep?.with?.command).toContain('--message "main ${{ github.sha }}');
         // The broker is typechecked and tested in the same checkout it deploys.
         const runs = rest.map((step) => step.run);
         const deploy = rest.findIndex((step) => (step as { uses?: string }).uses?.startsWith("cloudflare/wrangler-action@"));

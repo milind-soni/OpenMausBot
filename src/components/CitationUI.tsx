@@ -6,8 +6,10 @@ import {
   CITATION_MAX_COMMENT_LENGTH,
   CITATION_MAX_QUOTE_LENGTH,
   citationAttachment,
+  createCitationTextSelector,
   withCitationComment,
   type CitationAttachment,
+  type CitationSource,
 } from "@/lib/citations";
 import { captureCitationSelection, citationShortcutHint, citationTabShortcut, isCitationShortcut } from "@/lib/citations-dom";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
@@ -24,6 +26,19 @@ function place(element: HTMLElement, point: Point): void {
 
 function focusComposer(): void {
   requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
+}
+
+const CITATION_POPOVER = "popover-surface fixed z-50 rounded-xl border border-hairline/50 bg-menu p-3 text-start text-ink shadow-2xl shadow-black/50";
+const CITATION_NOTE = "text-[12px] leading-4";
+const CITATION_BUTTON = "ui-button touch:min-h-10";
+
+function CitationQuote({ quote, className }: { quote: string; className: string }) {
+  return (
+    <>
+      <div className={cn(CITATION_NOTE, "mb-1 text-ink-tertiary")}>{t("chat.citation.quoted")}</div>
+      <div dir="auto" data-citation-quote className={cn("overflow-y-auto whitespace-pre-wrap border-s-2 border-hairline ps-3 text-[13px] leading-[18px] text-ink-secondary [overflow-wrap:anywhere]", className)}>{quote}</div>
+    </>
+  );
 }
 
 function CitationEditor({
@@ -63,7 +78,7 @@ function CitationEditor({
       ref={ref}
       role="dialog"
       aria-label={t("chat.citation.commentDialog")}
-      className="fixed z-50 w-[min(28rem,calc(100vw-1rem))] rounded-xl border border-hairline/50 bg-panel p-3 text-ink shadow-2xl"
+      className={cn(CITATION_POPOVER, "w-[min(28rem,calc(100vw-1rem))]")}
       style={point}
       onKeyDown={(event) => {
         event.stopPropagation();
@@ -73,10 +88,7 @@ function CitationEditor({
         }
       }}
     >
-      <div className="mb-2 max-h-36 overflow-auto rounded-lg border border-hairline/30 bg-inset px-3 py-2">
-        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{t("chat.citation.quoted")}</div>
-        <pre dir="auto" className="whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed">{citation.quote}</pre>
-      </div>
+      <CitationQuote quote={citation.quote} className="max-h-36" />
       <textarea
         ref={inputRef}
         dir="auto"
@@ -92,12 +104,12 @@ function CitationEditor({
             if (!tooLong) onSave(withCitationComment(citation, comment));
           }
         }}
-        className="w-full resize-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] outline-none focus:border-accent"
+        className="mt-3 block w-full resize-none rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[13px] leading-[18px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent aria-invalid:border-danger"
       />
-      {tooLong && <p role="status" className="mt-1 text-[11px] text-danger">{t("chat.citation.commentTooLong", { count: CITATION_MAX_COMMENT_LENGTH.toLocaleString(intlLocale()) })}</p>}
-      <div className="mt-2 flex justify-end gap-2">
-        <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
-        <button type="button" disabled={tooLong} onClick={() => onSave(withCitationComment(citation, comment))} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">{t("common.save")}</button>
+      {tooLong && <p role="status" className={cn(CITATION_NOTE, "mt-1 text-danger")}>{t("chat.citation.commentTooLong", { count: CITATION_MAX_COMMENT_LENGTH.toLocaleString(intlLocale()) })}</p>}
+      <div className="mt-3 flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className={CITATION_BUTTON}>{t("common.cancel")}</button>
+        <button type="button" disabled={tooLong} onClick={() => onSave(withCitationComment(citation, comment))} className={cn(CITATION_BUTTON, "ui-button-primary")}>{t("common.save")}</button>
       </div>
     </div>,
     document.body,
@@ -195,29 +207,76 @@ export function CitationSelectionToolbar({
       }}
     />;
   }
-  const tooLong = captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH;
-  const shortcut = citationShortcutHint(isMac);
+  return <CiteButton
+    buttonRef={buttonRef}
+    point={captured.point}
+    tooLong={captured.citation.quote.length > CITATION_MAX_QUOTE_LENGTH}
+    shortcut={{ hint: citationShortcutHint(isMac), keys: isMac ? "Meta+L" : "Control+L" }}
+    onCite={() => setEditing(true)}
+    onDismiss={() => setCaptured(null)}
+  />;
+}
+
+function CiteButton({ buttonRef, point, tooLong, shortcut, onCite, onDismiss }: {
+  buttonRef: RefObject<HTMLButtonElement | null>;
+  point: Point;
+  tooLong: boolean;
+  shortcut?: { hint: string; keys: string };
+  onCite: () => void;
+  onDismiss: () => void;
+}) {
+  const hint = !tooLong && shortcut;
   return createPortal(
     <button
       ref={buttonRef}
       type="button"
       disabled={tooLong}
       aria-label={t(tooLong ? "chat.citation.tooLongLabel" : "chat.citation.citeLabel")}
-      aria-keyshortcuts={tooLong ? undefined : isMac ? "Meta+L" : "Control+L"}
-      title={tooLong ? undefined : `${t("chat.citation.citeLabel")} (${shortcut})`}
+      aria-keyshortcuts={hint ? hint.keys : undefined}
+      title={tooLong ? undefined : hint ? `${t("chat.citation.citeLabel")} (${hint.hint})` : t("chat.citation.citeLabel")}
       onPointerDown={(event) => event.preventDefault()}
-      onClick={() => setEditing(true)}
+      onClick={onCite}
       onKeyDown={(event) => {
-        if (event.key === "Escape") { event.preventDefault(); setCaptured(null); }
+        if (event.key === "Escape") { event.preventDefault(); onDismiss(); }
       }}
       className="fixed z-50 flex items-center gap-1.5 rounded-full border border-hairline/50 bg-panel px-3 py-1.5 text-[12px] font-medium text-ink shadow-lg disabled:text-danger"
-      style={captured.point}
+      style={point}
     >
       <Quote size={13} aria-hidden="true" /> {t(tooLong ? "chat.citation.shorten" : "chat.citation.cite")}
-      {!tooLong && <kbd aria-hidden="true" className="font-sans text-[11px] font-normal text-ink-secondary">{shortcut}</kbd>}
+      {hint && <kbd aria-hidden="true" className="font-sans text-[11px] font-normal text-ink-secondary">{hint.hint}</kbd>}
     </button>,
     document.body,
   );
+}
+
+/** Cite for text the person selected inside a page in chat. The page reports the selection, so its keys stay
+ * the page's own: no shortcut here. Once the card is open it stays, as chat's does, whatever the page selects. */
+export function PageCitationButton({ selection, source, onAdd, onDismiss }: {
+  selection: { text: string; point: Point } | null;
+  source: Omit<CitationSource, "start" | "end" | "prefix" | "suffix">;
+  onAdd: (citation: CitationAttachment) => void;
+  onDismiss: () => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [editing, setEditing] = useState<{ citation: CitationAttachment; point: Point } | null>(null);
+  const point = editing ? null : selection?.point;
+  useLayoutEffect(() => {
+    if (!point) return;
+    const update = () => { if (buttonRef.current) place(buttonRef.current, point); };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [point]);
+  if (editing) {
+    const done = () => { setEditing(null); onDismiss(); focusComposer(); };
+    return <CitationEditor citation={editing.citation} point={editing.point} onCancel={done} onSave={(saved) => { onAdd(saved); done(); }} />;
+  }
+  if (!selection) return null;
+  const cite = () => {
+    const selector = createCitationTextSelector(selection.text, 0, selection.text.length);
+    if (selector) setEditing({ citation: citationAttachment(source, selector), point: selection.point });
+  };
+  return <CiteButton buttonRef={buttonRef} point={selection.point} tooLong={selection.text.length > CITATION_MAX_QUOTE_LENGTH} onCite={cite} onDismiss={onDismiss} />;
 }
 
 export function CitationBadge({
@@ -285,7 +344,7 @@ export function CitationBadge({
         <div
           role="dialog"
           aria-label={t("chat.citation.details")}
-          className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-xl border border-hairline/50 bg-panel p-3 text-left text-ink shadow-2xl"
+          className={cn(CITATION_POPOVER, "w-[min(30rem,calc(100vw-1rem))]")}
           style={point}
           ref={(element) => {
             detailsRef.current = element;
@@ -295,16 +354,13 @@ export function CitationBadge({
             if (event.key === "Escape") { event.preventDefault(); setOpen(false); restoreTriggerFocus(); }
           }}
         >
-          <div className="max-h-56 overflow-auto rounded-lg bg-inset px-3 py-2">
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">{t("chat.citation.quoted")}</div>
-            <pre dir="auto" className="whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed">{citation.quote}</pre>
-          </div>
-          {citation.comment && <div className="mt-2 text-[12px]"><span className="font-semibold">{t("chat.citation.comment")}</span> <span className="whitespace-pre-wrap">{citation.comment}</span></div>}
-          {unavailable && <p role="status" className="mt-2 text-[11px] text-warning">{t("chat.citation.unavailable")}</p>}
+          <CitationQuote quote={citation.quote} className="max-h-56" />
+          {citation.comment && <div dir="auto" className="mt-3 text-[13px] leading-[18px] [overflow-wrap:anywhere]"><span className="font-medium">{t("chat.citation.comment")}</span> <span className="whitespace-pre-wrap">{citation.comment}</span></div>}
+          {unavailable && <p role="status" className={cn(CITATION_NOTE, "mt-2 text-warning")}>{t("chat.citation.unavailable")}</p>}
           <div className="mt-3 flex justify-end gap-2">
-            {onNavigate && <button type="button" onClick={() => { void onNavigate().then((found) => { setUnavailable(!found); if (found) setOpen(false); }); }} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] hover:bg-raised">{t("chat.citation.goToSource")}</button>}
-            {onChange && <button type="button" onClick={() => { setOpen(false); setEditing(true); }} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] hover:bg-raised">{t("chat.citation.editComment")}</button>}
-            <button type="button" onClick={() => { setOpen(false); restoreTriggerFocus(); }} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-white">{t("common.close")}</button>
+            {onNavigate && <button type="button" onClick={() => { void onNavigate().then((found) => { setUnavailable(!found); if (found) setOpen(false); }); }} className={CITATION_BUTTON}>{t("chat.citation.goToSource")}</button>}
+            {onChange && <button type="button" onClick={() => { setOpen(false); setEditing(true); }} className={CITATION_BUTTON}>{t("chat.citation.editComment")}</button>}
+            <button type="button" onClick={() => { setOpen(false); restoreTriggerFocus(); }} className={CITATION_BUTTON}>{t("common.close")}</button>
           </div>
         </div>,
         document.body,

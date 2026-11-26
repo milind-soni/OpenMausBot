@@ -4,6 +4,9 @@
   "0.1.136"
  ],
  "paths": [
+  "alwaysOnHome",
+  "alwaysOnHome.set",
+  "alwaysOnHome.state",
   "androidDevice",
   "androidDevice.frame",
   "androidDevice.input",
@@ -36,6 +39,7 @@
   "cloudAccount.refresh",
   "cloudAccount.reopen",
   "cloudAccount.reopenCheckout",
+  "cloudAccount.resetSaved",
   "cloudAccount.setLook",
   "cloudAccount.sheet",
   "cloudAccount.signInAgain",
@@ -246,6 +250,7 @@
   "workspaces",
   "workspaces.add",
   "workspaces.color",
+  "workspaces.homeOffers",
   "workspaces.line",
   "workspaces.look",
   "workspaces.makeHome",

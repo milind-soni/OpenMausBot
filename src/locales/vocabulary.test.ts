@@ -160,7 +160,7 @@ describe("one name per thing", () => {
     expect([myCloud, thisComputer, serverMenuLocal]).toEqual([e["cloudSetup.myCloud"], "place.local", "place.local"]);
     type Text = (key: string) => string;
     const label = (key: string) => (text: Text) => text(key);
-    const settings = (section: string) => (text: Text) => `${text("settings.title")} → ${text(section)}`;
+    const settings = (...sections: string[]) => (text: Text) => [text("settings.title"), ...sections.map(text)].join(" → ");
     const withoutEllipsis = (key: string) => (text: Text) => text(key).replace(/…$/, "");
     const pointers: Array<[string, Array<(text: Text) => string>]> = [
       ["cloudAccount.onCloudSignIn", [label("cloudAccount.signInAgain")]],
@@ -171,8 +171,8 @@ describe("one name per thing", () => {
       ["native.dialog.unreachable.detail", [label("native.menu.server")]],
       ["native.boot.folderMissing.body", [label("native.menu.server")]],
       ["native.boot.unhealthy.body", [label("native.menu.server")]],
-      ["native.dialog.connectFailed.detail", [withoutEllipsis("native.menu.connect")]],
-      ["native.dialog.share.detail", [settings("settings.app.computers")]],
+      ["native.dialog.connectFailed.detailOther", [withoutEllipsis("native.menu.connectOther")]],
+      ["native.dialog.share.detail", [settings("settings.page.app", "settings.app.computers")]],
     ];
     const staleIn = (text: Text, prefix: string) => pointers.flatMap(([key, labels]) => labels.map((of) => of(text))
       .filter((shown) => !text(key).includes(shown)).map((shown) => `${prefix}${key} → ${shown}`));

@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -159,6 +159,41 @@ posixOnly("work digest e2e (every fake engine)", () => {
     const echoed = replies.at(-1)!.text!;
     expect(echoed).toContain("did in an earlier turn");
     expect(echoed).toContain("retry.ts");
+    await removeTempDir(project);
+  }, 60_000);
+
+  it("reads a project that holds a repository when the bot is set to it, and checkpoints the first turn on the folder as that turn finds it", async () => {
+    for (const left of [gate(), started()]) rmSync(left, { force: true });
+    const project = mkdtempSync(join(tmpdir(), "omb-digest-seeded-"));
+    writeFileSync(join(project, "README.md"), "hello");
+    mkdirSync(join(project, ".git"));
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "gated", model: "fake-model" } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${created.id}`, { cwd: project })).status).toBe(200);
+
+    // no message yet: the folder is read into the bot's checkpoint, and no snapshot is taken
+    const shadows = join(home, ".openmausbot", "checkpoints", created.id);
+    // A shadow is made as <name>.<pid>.new and renamed into place, and the read-ahead stages the folder after that: wait for
+    // the staged folder in the shadow itself, not for the first index that appears (the draft's, before the rename).
+    const shadow = () => (existsSync(shadows) ? readdirSync(shadows) : []).filter((name) => !name.endsWith(".new")).map((name) => join(shadows, name, ".git")).find((dir) => existsSync(join(dir, "index")));
+    const shadowGit = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", env: { ...process.env, GIT_DIR: shadow()! } }).trim();
+    // The shadow can still be moving into place as it is read: a git that finds no repository there is "not yet".
+    const staged = () => { try { return shadowGit("ls-files") !== ""; } catch { return false; } };
+    await waitFor(async () => shadow() !== undefined && staged(), "the project to be read ahead of the first message");
+    expect(shadowGit("ls-files")).toBe("README.md");
+    expect(shadowGit("log", "--format=%s")).toBe("checkpoint base");
+
+    // the person edits the folder outside the app after it was read; the turn's own snapshot has that edit
+    writeFileSync(join(project, "notes.md"), "written by the person");
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "raise the retry limit" })).status).toBe(202);
+    await waitFor(async () => existsSync(started()), "the gated turn to reach the engine");
+    expect(shadowGit("show", "HEAD:notes.md")).toBe("written by the person");
+    writeFileSync(join(project, "retry.ts"), "export const RETRY_LIMIT = 5;");
+    writeFileSync(gate(), "go");
+    await waitFor(() => settled(created.id), "the gated turn to settle");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: Msg) => m.kind === "digest"), "digest with files");
+    const digest: Msg = (await getBot(created.id)).messages.find((m: Msg) => m.kind === "digest");
+    expect(digest.digest?.files).toMatchObject({ added: ["retry.ts"], changed: [] });
     await removeTempDir(project);
   }, 60_000);
 });

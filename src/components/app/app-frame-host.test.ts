@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { APP_SAMPLES } from "../../../shared/app-samples";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
+import { APP_SELECTION_CHARS } from "../../../shared/app-frame/helper";
 import { APP_FRAME_SANDBOX, createAppIframe, mountAppFrame, trackAppEngagement, type AppFrameAdapter } from "./app-frame-host";
 
 const doc = botHtmlDocument({ messageId: "m1", rev: 0, html: APP_SAMPLES.counter!.html });
@@ -112,6 +113,108 @@ describe("the bridge on the desktop", () => {
     send({ jsonrpc: "2.0", id: request.id, result: {} });
     await done;
     expect(container.querySelector("iframe")).toBeNull();
+  });
+});
+
+describe("text the person selects in a page", () => {
+  const SELECTION = "mausbot/notifications/selection";
+
+  function page(over: { doc?: typeof doc } = {}) {
+    const onSelection = vi.fn();
+    const host = mountAppFrame({ container, doc: over.doc ?? doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onSelection });
+    const view = host.iframe.contentWindow!;
+    const send = (data: unknown, source: unknown = view) => window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
+    const select = (params: Record<string, unknown>, source?: unknown) => send({ jsonrpc: "2.0", method: SELECTION, params }, source);
+    const initialize = () => {
+      send({ jsonrpc: "2.0", id: 1, method: "ui/initialize", params: {} });
+      send({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} });
+    };
+    const engage = async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+      host.iframe.focus();
+      host.iframe.dispatchEvent(new Event("focus"));
+      await tick();
+    };
+    vi.spyOn(host.iframe, "getBoundingClientRect").mockReturnValue({ left: 100, top: 50, right: 700, bottom: 250, width: 600, height: 200, x: 100, y: 50, toJSON() {} } as DOMRect);
+    return { host, onSelection, select, initialize, engage };
+  }
+
+  it("is passed on in the window's coordinates, and as null once it is gone", async () => {
+    const { host, onSelection, select, initialize, engage } = page();
+    select({ text: "before it started", left: 1, bottom: 2 });
+    initialize();
+    await engage();
+    select({ text: "Total: 42", left: 12, bottom: 30 });
+    select({ text: "" });
+    expect(onSelection.mock.calls).toEqual([[{ text: "Total: 42", left: 112, bottom: 80 }], [null]]);
+    host.destroy();
+  });
+
+  it("is dropped when the person did not make it, it is malformed or too long, or it comes from another window", async () => {
+    const { host, onSelection, select, initialize, engage } = page();
+    initialize();
+    select({ text: "unprompted", left: 0, bottom: 0 });
+    await engage();
+    select({ text: "x".repeat(APP_SELECTION_CHARS + 1), left: 0, bottom: 0 });
+    select({ text: 42, left: 0, bottom: 0 });
+    select({ text: "ok", left: Number.NaN, bottom: 0 });
+    select({ text: "ok", left: 0 });
+    select({ text: "ok", left: 0, bottom: 0 }, window);
+    expect(onSelection).not.toHaveBeenCalled();
+    host.destroy();
+  });
+
+  it("is never offered in a room, where a page may not message", async () => {
+    const roomDoc = botHtmlDocument({ messageId: "m1", rev: 0, html: APP_SAMPLES.counter!.html, room: true });
+    const { host, onSelection, select, initialize, engage } = page({ doc: roomDoc });
+    initialize();
+    await engage();
+    select({ text: "Total: 42", left: 0, bottom: 0 });
+    select({ text: "" });
+    expect(onSelection).not.toHaveBeenCalled();
+    host.destroy();
+  });
+});
+
+describe("a page's word on whether it opens with a heading", () => {
+  const HEADING = "mausbot/notifications/heading";
+
+  it("is passed on each time the page says it, and only from the page's own window", () => {
+    const onHeading = vi.fn();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onHeading });
+    const send = (data: unknown, source: unknown = host.iframe.contentWindow) => window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: true } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: false } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: null } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: "yes" } });
+    send({ jsonrpc: "2.0", method: HEADING, params: {} });
+    send({ jsonrpc: "2.0", id: 4, method: HEADING, params: { heading: true } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: true } }, window);
+    expect(onHeading.mock.calls).toEqual([[true], [false], [null]]);
+    host.destroy();
+  });
+
+  it("is taken from the page's size report too, after the size", () => {
+    const calls: unknown[] = [];
+    const frame = { ...adapter(), resize: vi.fn((height: number) => { calls.push(height); }) };
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: frame, onHeading: (heading) => { calls.push(heading); } });
+    const send = (data: object) => window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", ...data }, source: host.iframe.contentWindow as MessageEventSource }));
+    send({ id: 1, method: "ui/initialize", params: {} });
+    send({ method: "ui/notifications/initialized", params: {} });
+    send({ method: "ui/notifications/size-changed", params: { height: 240, heading: false } });
+    send({ method: "ui/notifications/size-changed", params: { height: 260 } });
+    send({ method: "ui/notifications/size-changed", params: { height: 280, heading: null } });
+    expect(calls).toEqual([240, false, 260, 280]);
+    host.destroy();
+  });
+
+  it("is passed on once however often the page repeats it", () => {
+    const onHeading = vi.fn();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onHeading });
+    const say = (heading: boolean | null) => window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: HEADING, params: { heading } }, source: host.iframe.contentWindow as MessageEventSource }));
+    for (const heading of [null, null, true, true, true, false, false, null, true]) say(heading);
+    expect(onHeading.mock.calls).toEqual([[null], [true], [false], [null], [true]]);
+    host.destroy();
   });
 });
 

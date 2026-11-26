@@ -80,13 +80,19 @@ export function isBrowserControlAccess(method: string, path: string): boolean {
 /** Every request the iOS app makes, and nothing else. Paths arrive undecoded
  * and are anchored at both ends, so an encoded traversal fails to match. */
 const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
-  // Configured-or-not booleans, never keys; the write side is refused below.
+  // Configured-or-not booleans, never keys.
   { method: "GET", path: /^\/api\/config$/ },
+  // The harness takes only provider keys from a paired device; every other setting stays on the host.
+  { method: "PUT", path: /^\/api\/config$/ },
+  { method: "POST", path: /^\/api\/keys\/test$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
   // The harness refuses it while any Claude turn runs. Instance ids may carry
   // dots, so a dots-only segment is refused outright.
   { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/claude-update$/ },
+  // Engine sign-in. The harness refuses browser-based methods from a paired device. Dots-only ids are refused as above.
+  { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/auth\/(?:start|complete|cancel|sign-out)$/ },
+  { method: "GET", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/auth\/status$/ },
   { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned: the proxy answers it locally.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
@@ -132,6 +138,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Names and on/off only. The MCP settings list, which carries commands and
   // addresses, stays closed.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
+  // Read-only: a bot's skills by name, with what each is for and whether it is on. Adding, editing and switching them
+  // stay on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/skills$/ },
   // The bot's Data, read-only: the sheet and tables, a page of rows (a POST
   // only for its body), a chart card's picture. Running SQL stays on the host.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/data$/ },
@@ -190,6 +199,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/attachments$/ },
   // The harness honors Range on voice notes so a phone player can seek.
   { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3|wav)$/i },
+  // Discarding a file before it is sent. The harness records which device uploaded each file and deletes only that
+  // device's own, and only while no message uses it.
+  { method: "DELETE", path: /^\/api\/attachments\/[\w-]+\.[A-Za-z0-9]{1,10}$/ },
   // Raw upload, capped and stored under a generated filename by the harness.
   { method: "POST", path: /^\/api\/files$/ },
 
@@ -211,6 +223,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/phones\/self$/ },
   { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
   { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+  // The phone's closed-app alert registration: its own device token, never another phone's.
+  { method: "PUT", path: /^\/api\/push\/device$/ },
+  { method: "GET", path: /^\/api\/push\/device$/ },
+  { method: "DELETE", path: /^\/api\/push\/device$/ },
+  { method: "PUT", path: /^\/api\/push\/activity$/ },
+  { method: "GET", path: /^\/api\/push\/activity$/ },
+  { method: "DELETE", path: /^\/api\/push\/activity$/ },
 
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.
@@ -262,7 +281,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
     // Losing the phone must not mean losing the ability to lock it out.
     error: "Remote access settings are managed on the host computer",
   },
-  { path: /^\/api\/config$/, error: "API keys can only be changed on your computer" },
+  { path: /^\/api\/config$/, error: "this setting is changed on your computer" },
   { path: /^\/api\/local-computer(\/|$)/, error: "the Local VM is set up on your computer" },
   {
     // Creating one exposes an endpoint to the internet.

@@ -142,7 +142,10 @@ export function fitToolListResult(result: unknown, profile: ToolSchemaProfile | 
 }
 
 /** Every listed schema gets a plain object root; under a profile each is also fitted to it. */
-export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void): {
+/** `ownTools`: listed after the child's on its last page, in place of any child tool of the same name. */
+/** `fitted`: a last step over each whole list (a single page), after the profile's. */
+export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void, ownTools: readonly JsonObject[] = [],
+  fitted: (tools: unknown[]) => unknown[] = (tools) => tools): {
   observeRequest: (line: string) => void;
   rewriteResponse: (line: string) => string;
 } {
@@ -173,13 +176,18 @@ export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (lin
       if (!isObject(frame) || "method" in frame || !pending.delete(idKey(frame.id))) return line;
       if (!isObject(frame.result) || !Array.isArray(frame.result.tools)) return line;
 
-      const listed: unknown[] = frame.result.tools;
-      const tools = profile ? fitToolList(listed, profile, log) : listed.map((tool: unknown) => {
+      const own = frame.result.nextCursor ? [] : ownTools;
+      const ownNames = new Set(ownTools.map((tool) => tool.name));
+      const listed: unknown[] = ownNames.size
+        ? [...frame.result.tools.filter((tool: unknown) => !isObject(tool) || !ownNames.has(tool.name)), ...own]
+        : frame.result.tools;
+      const profiled = profile ? fitToolList(listed, profile, log) : listed.map((tool: unknown) => {
         if (!isObject(tool)) return tool;
         const inputSchema = providerSafeInputSchema(tool.inputSchema);
         return inputSchema === tool.inputSchema ? tool : { ...tool, inputSchema };
       });
-      const changed = tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
+      const tools = frame.result.nextCursor ? profiled : fitted(profiled);
+      const changed = own.length > 0 || listed.length !== frame.result.tools.length || tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
       return changed ? JSON.stringify({ ...frame, result: { ...frame.result, tools } }) : line;
     },
   };

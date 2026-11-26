@@ -31,7 +31,7 @@ describe("call capability guidance", () => {
       available: true,
       engine: "apple-speech",
       onDevice: true,
-    }), true, false)).toBeNull();
+    }), true, null)).toBeNull();
   });
 
   it("says where taking turns works on a server's page in the Mac app, with no trip there", () => {
@@ -40,7 +40,7 @@ describe("call capability guidance", () => {
       engine: "none",
       onDevice: false,
       reasonCode: "remote-server",
-    }), false, false);
+    }), false, null);
     expect(help).toEqual({
       label: "Calls where you take turns work with bots on this Mac",
       reason: "They listen with your Mac's own speech recognition, which only bots on this Mac can use.",
@@ -54,7 +54,7 @@ describe("call capability guidance", () => {
       engine: "none",
       onDevice: false,
       reasonCode: "remote-server",
-    }, platform), false, false);
+    }, platform), false, null);
     expect(help).toEqual({
       label: "Calls where you take turns work with bots on this computer",
       reason: "They listen from this computer's own window, so only bots on this computer can use them.",
@@ -67,7 +67,7 @@ describe("call capability guidance", () => {
       engine: "none",
       onDevice: false,
       reasonCode: "desktop-app-required",
-    }, "other"), false, false);
+    }, "other"), false, null);
     expect(help).toEqual({
       label: "Calls where you take turns need the desktop app",
       reason: "They listen from this computer, so they need MausBot on a Mac, Windows or Linux computer.",
@@ -80,18 +80,18 @@ describe("call capability guidance", () => {
       engine: "none",
       onDevice: false,
       reasonCode: "unsupported-platform",
-    }, "win32"), false, false);
+    }, "win32"), false, null);
     expect(help?.label).toBe("Calls where you take turns need the desktop app");
     expect(help).not.toHaveProperty("action");
   });
 
   it("keeps Take turns off on Windows until a Fish Audio key is saved, and says where to add one", () => {
     const fish = capabilities({ available: true, engine: "fish-audio", onDevice: false }, "win32");
-    expect(callCapabilityHelp(fish, true, false)).toEqual({
+    expect(callCapabilityHelp(fish, true, "fish")).toEqual({
       label: "Add a Fish Audio or ElevenLabs key to take turns on calls",
-      reason: "On this computer, Take turns hears you through Fish Audio or ElevenLabs speech-to-text. Add either key in Settings → API keys.",
+      reason: "On this computer, Take turns hears you through Fish Audio or ElevenLabs speech-to-text. Add either key in Settings → AI → Other services.",
     });
-    expect(callCapabilityHelp(fish, true, true)).toBeNull();
+    expect(callCapabilityHelp(fish, true, null)).toBeNull();
   });
 
   it("distinguishes a broken local speech service from an unsupported device", () => {
@@ -99,7 +99,7 @@ describe("call capability guidance", () => {
       available: true,
       engine: "apple-speech",
       onDevice: true,
-    }), false, false)).toEqual({
+    }), false, null)).toEqual({
       label: "Calls aren't available right now",
       reason: "The speech service is unavailable in this app build. Restart or update MausBot.",
     });

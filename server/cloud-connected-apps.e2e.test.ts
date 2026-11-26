@@ -5,13 +5,14 @@ import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { CLOUD_CONNECTED_APPS_FILE } from "./cloud-connected-apps.ts";
+import { CATALOG_FILE } from "./composio-catalog.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -20,6 +21,7 @@ const HOST = "omb-t-0123456789ab.fly.dev";
 const secret = randomBytes(32).toString("base64url");
 const brokerToken = randomBytes(32).toString("hex");
 const CATALOG = ["outlook", "linkedin", "calendly", "gmail", "slack"];
+let serviceCatalog = CATALOG;
 
 let broker: Server;
 let brokerUrl = "";
@@ -115,8 +117,8 @@ beforeAll(async () => {
       if (req.method === "GET" && url.pathname === "/v1/me") return send(200, { installationId: "install-cloud" });
       if (req.method === "GET" && url.pathname === "/v1/catalog") {
         return send(200, {
-          items: CATALOG.map((slug) => ({ slug, name: slug, meta: { description: `${slug} tools`, logo: "" } })),
-          total_items: CATALOG.length, current_page: 1, total_pages: 1,
+          items: serviceCatalog.map((slug) => ({ slug, name: slug, meta: { description: `${slug} tools`, logo: "" } })),
+          total_items: serviceCatalog.length, current_page: 1, total_pages: 1,
         });
       }
       send(404, { error: "not found" });
@@ -186,6 +188,49 @@ describe("connected apps on a Cloud home", { timeout: 90_000 }, () => {
     expect(since).toContainEqual({ method: "GET", path: "/v1/me", bearer: `Bearer ${brokerToken}` });
     expect(since.filter((call) => call.path === "/v1/installations")).toEqual([]);
     expect(brokerCalls.filter((call) => call.path === "/v1/installations")).toHaveLength(1);
+  });
+
+  it("after a restart answers the catalog from the data folder, reads an old one again behind the answer, and tells the open window", async () => {
+    const file = join(dataDir, CATALOG_FILE);
+    const slugs = (body: { cards: Array<{ slug: string }> }) => body.cards.map((card) => card.slug);
+    const catalogReads = (since: number) => brokerCalls.slice(since).filter((call) => call.path === "/v1/catalog").length;
+    expect(existsSync(file)).toBe(true);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(file, "utf8")).not.toContain(brokerToken);
+
+    await waitForExit(child!, { signal: "SIGTERM" });
+    child = null;
+    let before = brokerCalls.length;
+    await boot();
+    expect(slugs(await catalog())).toEqual(CATALOG);
+    expect(catalogReads(before)).toBe(0);
+
+    await waitForExit(child!, { signal: "SIGTERM" });
+    child = null;
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), at: 0 }), { mode: 0o600 });
+    serviceCatalog = [...CATALOG, "notion"];
+    before = brokerCalls.length;
+    await boot();
+    const closed = new AbortController();
+    let heard = "";
+    try {
+      const events = await fetch(`${base}/api/events`, {
+        headers: { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", authorization: `Bearer ${ownerToken}` },
+        signal: closed.signal,
+      });
+      expect(events.status).toBe(200);
+      void (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of events.body!) heard += decoder.decode(chunk as Uint8Array, { stream: true });
+      })().catch(() => {});
+      expect(slugs(await catalog())).toEqual(CATALOG);
+      await expect.poll(() => heard.includes('"kind":"apps-catalog"'), { timeout: 15_000, interval: 100 }).toBe(true);
+      expect(slugs((await api("GET", "/api/connectors/catalog")).body)).toEqual([...CATALOG, "notion"]);
+      expect(catalogReads(before)).toBe(1);
+    } finally {
+      closed.abort();
+      serviceCatalog = CATALOG;
+    }
   });
 
   it("while the service will not register it, still starts, and says the included service is unavailable instead of asking for a key", async () => {

@@ -9,6 +9,7 @@ import { readFileSync, rmSync } from "node:fs";
 import type { IncomingHttpHeaders, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
+import { cloudClockWoke } from "./cloud-clock.ts";
 
 /** Why a home is not idle, as fixed codes (the Admin keeps the latest one for its operator page). */
 export type CloudPowerBusy = "turn" | "run" | "handoff" | "live-call" | "computer" | "maintenance" | "recent-activity" | "recent-work" | "just-woke" | "due-soon";
@@ -75,7 +76,7 @@ export const CLOUD_BACKGROUND_HEADER = "x-omb-background";
 export const CLOUD_POWER_HEADER = "x-omb-cloud-power";
 const MARKER = "cloud-sleep.json";
 /** Long-polls and streams that stay open by design: never "in flight" work. */
-const HELD = [/^\/api\/events$/, /^\/api\/sync\/changes$/, /^\/api\/shared-computers\/asks$/, /^\/api\/shared-computers\/[\w-]+\/(?:poll|link)$/];
+const HELD = [/^\/api\/events$/, /^\/api\/sync\/changes$/, /^\/api\/shared-computers\/asks$/, /^\/api\/shared-computers\/[\w-]+\/(?:poll|link)$/, /^\/api\/bot-link\/sync$/];
 
 /** The answer a held poll (Files sync, lending) gets once the home agreed to sleep: the desktop pauses until it wakes. */
 export function answerAsleep(res: ServerResponse, json: (res: ServerResponse, status: number, body: unknown) => void) {
@@ -121,7 +122,11 @@ export function createCloudPower(options: {
   let wokeAt = bootedAt, lastActivityAt: number | null = null, lastWorkAt: number | null = null;
   /** The last wake from sleep; null while this process has only ever booted normally. */
   let sleptUntil: number | null = options.bootedFromSleep ? bootedAt : null;
-  if (options.bootedFromSleep) options.onWoke?.();
+  /** A wake: the Admin hears (`onWoke`), and the home's clock is measured again (server/cloud-clock.ts): a resume may have left it
+   * behind, and a clock the supervisor just set forward is a jump like a resume's. */
+  // The clock first: its measurement is what the wake notice waits for before it is signed (cloud-woke.ts).
+  const woke = () => { cloudClockWoke(); options.onWoke?.(); };
+  if (options.bootedFromSleep) woke();
   /** The first request since `wokeAt` (`arrived`), and whether one came. */
   let wokeBy: CloudPowerReport["wokeBy"] = null, wokeSeen = false, bootWake = Boolean(options.bootedFromSleep);
   let sleepingSince: number | null = null, inFlight = 0;
@@ -160,7 +165,7 @@ export function createCloudPower(options: {
     bootWake = false;
     sleptUntil = at;
     endSleep();
-    options.onWoke?.();
+    woke();
   };
   /** Samples work (so "finished two minutes ago" needs no hook in every kind of work) and notices a resume. */
   const tick = () => {
@@ -248,3 +253,9 @@ export type CloudPower = ReturnType<typeof createCloudPower>;
 let registered: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null = null;
 export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null) { registered = power; }
 export const cloudPowerNow = () => registered;
+
+/** A read the client marked as background, on a home that agreed to sleep: it gets `answerAsleep` and nothing more, so a
+ * list kept fresh in the background never holds the home awake or finds it half asleep. A person's own request never does. */
+export function backgroundWhileAsleep(path: string, headers: Record<string, string | string[] | undefined>): boolean {
+  return Boolean(registered?.sleeping()) && !countsAsActivity(path, headers);
+}

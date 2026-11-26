@@ -4,9 +4,9 @@ import path from "node:path";
 import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import { allowedServerOrigin } from "./server-address.mjs";
+import { allowedServerOrigin } from "./server-address.mjs"; import { ownServerRefusal } from "./own-server-refusal.mjs";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError, validCommandSeconds } from "./shared-computer-access.mjs";
-import { createLentMcp, LENT_MCP_ACTIONS, ownPorts, validLentMcpServer } from "./lent-mcp.mjs";
+import { createLentMcp, LENT_MCP_ACTIONS, ownPorts, validLentMcpJob } from "./lent-mcp.mjs";
 import { sharedCuaConnection } from "./shared-cua-connection.mjs";
 export { sharedCuaConnection };
 import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
@@ -110,7 +110,7 @@ export async function validateSharedFolders(folders, { homeEdits = false } = {})
   return result;
 }
 
-const JOB_KEYS = new Set(["computer_id", "action", "folder_id", "path", "content", "encoding", "expected_sha256", "old_text", "new_text", "command", "timeout_seconds", "tool_name", "arguments", "server"]);
+const JOB_KEYS = new Set(["computer_id", "action", "folder_id", "path", "content", "encoding", "expected_sha256", "old_text", "new_text", "command", "timeout_seconds", "tool_name", "arguments", "server", "caller"]);
 const JOB_ACTIONS = new Set(["list_files", "read_file", "write_file", "edit_file", "append_file", "delete_file", "run_command", "computer_tools", "computer_call", ...LENT_MCP_ACTIONS]);
 const optionalText = (value, max) => value === undefined || (typeof value === "string" && value.length <= max);
 /** Refuses malformed input only; the grant still decides whether the operation is allowed. */
@@ -125,7 +125,7 @@ export function validSharedOperation(operation, computerId) {
     (operation.expected_sha256 === undefined || (typeof operation.expected_sha256 === "string" && /^[a-f0-9]{64}$/.test(operation.expected_sha256))) &&
     optionalText(operation.command, 8000) && validCommandSeconds(operation.timeout_seconds) && optionalText(operation.tool_name, 256) &&
     (operation.arguments === undefined || (Boolean(operation.arguments) && typeof operation.arguments === "object" && !Array.isArray(operation.arguments))) &&
-    (LENT_MCP_ACTIONS.has(operation.action) ? validLentMcpServer(operation.server) : operation.server === undefined);
+    validLentMcpJob(operation);
 }
 
 export function cloudLendingVerdict(binding, current, env) {
@@ -148,9 +148,9 @@ export function ownServerSession(auth) {
 }
 
 /** What a Cloud that keeps MCP servers for this computer hears: it runs them, and which installs here it is. */
-const lendsMcp = environments => {
+const lendsMcp = (environments, caller) => {
   const ids = Array.isArray(environments) ? environments.filter(uuid).slice(0, 8) : [];
-  return { mcpServers: true, ...(ids.length ? { environments: ids } : {}) };
+  return { mcpServers: true, ...(ids.length ? { environments: ids } : {}), ...(caller ? { mcpCaller: true } : {}) };
 };
 
 /** A Cloud grant lends the internet connection unless it was unticked: one kept without `internet` lends it too. */
@@ -283,9 +283,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       lending: lent.map(env => env.id),
       clouds: (paused ? [...ownClouds(), ...environments().filter(env => records[env.id]?.own && records[env.id].enabled === true)] : lent).map(env => env.name),
       // Lent, but the Cloud hasn't accepted this computer yet (or lost it): the menu must not say it can use it. A
-      // sleeping My Cloud still can; it wakes when a bot needs this computer.
+      // sleeping My Cloud still can; it wakes when a bot needs this computer. Such a Cloud takes it as the one typed on (typing); a server of their own doesn't.
       waiting: lent.filter(env => !status.get(env.id)?.connected && status.get(env.id)?.problem !== "asleep").map(env => env.name),
-      ...(problems.length ? { problems } : {}),
+      ...(problems.length ? { problems } : {}), ...(lent.some(env => records[env.id]?.cloud && !ownHomeId(env) && (status.get(env.id)?.connected || status.get(env.id)?.problem === "asleep")) ? { typing: true } : {}),
       using: using.map(env => env.name),
       ...(bots.length ? { bots } : {}),
       paused,
@@ -417,7 +417,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     // A server of the person's own says what it takes from them in their own sign-in's answer (`lending`), never before pairing.
     const offered = { ...descriptor.capabilities, ...(ownServerSession(auth) && auth.lending && typeof auth.lending === "object" ? auth.lending : {}) };
     if (required && offered.sharedComputers !== true) throw new Error(UPDATE_SERVER);
-    return { supported: offered.sharedComputers === true, auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: offered.lendingDetails === true, link: offered.deviceLink === true, chrome: offered.myChromeLink === true, timeouts: offered.commandTimeouts === true, long: offered.longCommands === true, edits: offered.fileEdits === true, asks: offered.computerAsks === true, mcp: offered.lentMcp === true };
+    return { supported: offered.sharedComputers === true, auth, info: { sessionId: auth.id, environmentId: descriptor.environmentId }, details: offered.lendingDetails === true, link: offered.deviceLink === true, chrome: offered.myChromeLink === true, timeouts: offered.commandTimeouts === true, long: offered.longCommands === true, edits: offered.fileEdits === true, asks: offered.computerAsks === true, mcp: offered.lentMcp === true, caller: offered.mcpCaller === true };
   };
   const identity = async env => {
     await requireEnabled();
@@ -430,8 +430,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
    * server the move chose (lending-target.mjs `own:<environment id>`). */
   const ownHomeId = env => { const current = cloud(env); return current?.origin === env.origin && current.accountId?.startsWith("own:") ? current.accountId.slice(4) : null; };
   /** What the server says it takes, remembered for its connect; a server of the person's own never gets the device link. */
-  const takes = (env, { details, link, chrome: takesChrome, timeouts, long, edits, mcp }) => {
-    for (const [set, on] of [[supportsDetails, details], [supportsLink, link], [supportsChrome, takesChrome], [supportsTimeouts, timeouts], [supportsLong, long], [supportsEdits, edits], [supportsMcp, mcp]]) {
+  const takes = (env, { details, link, chrome: takesChrome, timeouts, long, edits, mcp, caller }) => {
+    for (const [set, on] of [[supportsDetails, details], [supportsLink, link], [supportsChrome, takesChrome], [supportsTimeouts, timeouts], [supportsLong, long], [supportsEdits, edits], [supportsMcp, mcp], [supportsMcpCaller, caller]]) {
       if (on) set.add(env.id); else set.delete(env.id);
     }
   };
@@ -446,13 +446,13 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
   /** This desktop's sign-in on a server of the person's own, checked now (ownServerSession). */
   const ownIdentity = async env => {
     const described = await describe(env, false);
-    if (!ownServerSession(described.auth)) throw Object.assign(new Error(t("native.lend.notOwnServer")), { problem: "not-own" });
-    if (!described.supported) throw new Error(UPDATE_SERVER);
+    if (!ownServerSession(described.auth)) throw Object.assign(new Error(t("native.lend.notOwnServer")), { problem: "not-own", why: ownServerRefusal(described.auth) ?? "not-owner" });
+    if (!described.supported) throw Object.assign(new Error(UPDATE_SERVER), { why: "old" });
     takes(env, { ...described, link: false, chrome: false });
     return described.info;
   };
-  /** The Clouds that keep MCP servers for this computer to run. */
-  const supportsMcp = new Set();
+  /** The Clouds that keep MCP servers for this computer to run, and those that say which bot and conversation made a call. */
+  const supportsMcp = new Set(), supportsMcpCaller = new Set();
   const supportsDetails = new Set();
   const supportsLink = new Set();
   /** The Clouds that take the person's Chrome over the device link. */
@@ -539,7 +539,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
             ...(supportsTimeouts.has(env.id) ? { commandTimeouts: true } : {}),
             ...(supportsLong.has(env.id) ? { longCommands: true } : {}),
             ...(supportsEdits.has(env.id) ? { fileEdits: true } : {}),
-            ...((grant.cloud || grant.own) && supportsMcp.has(env.id) ? lendsMcp(localEnvironments()) : {}),
+            ...((grant.cloud || grant.own) && supportsMcp.has(env.id) ? lendsMcp(localEnvironments(), supportsMcpCaller.has(env.id)) : {}),
           }, signal, grant.secret);
           if (signal.aborted) break;
           status.set(env.id, { connected: true });
@@ -865,7 +865,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
     },
     /** Whether `env` is a server of the person's own, checked now: its identity, or null (not paired as its admin, a team
      * or Cloud, too old to take a lent computer, or not answering). */
-    ownServer: env => ownIdentity(env).catch(() => null),
+    ownServer: env => ownIdentity(env).catch(() => null), /** Why `env` is not a server of the person's own: ownServerRefusal's word, "old", or "unreachable". */ ownRefusal: env => ownIdentity(env).then(() => null, error => error?.why ?? "unreachable"),
     /** A server of the person's own whose pairing here was never asked about: its identity, for the popup; null once the
      * person answered for this pairing (a grant they allowed carries over to a new pairing of that same server); false
      * when it is not a server of their own. */
@@ -899,8 +899,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       if (lent?.enabled !== true || !Array.isArray(lent.folders)) return { off: true };
       return { lendingId: lent.id, folders: lent.folders.map(({ id, path: where, name, write }) => ({ id, path: where, name, write: write === true })), protectedPaths: protectedRoots, ...(paused ? { paused: true } : {}) };
     },
-    /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. */
-    lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)),
+    /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. `lendingSomewhere`: anything is lent now. */
+    lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)), lendingSomewhere: () => summary().lending.length > 0,
     /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
     busy: () => summary().busy !== null,
     saveCloud,
@@ -932,7 +932,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       wakeAsking();
     },
     resume: () => resumeLending(),
-    /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
+    terminalOn: () => terminalAccount !== null && terminalAccount === signedInAccount(), // lendTerminal(on): whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too.
     lendTerminal(on) {
       const account = on === true ? signedInAccount() : null;
       if (closed || terminalAccount === account) return;

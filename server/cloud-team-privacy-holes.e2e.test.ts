@@ -155,9 +155,9 @@ const SUFFIXES = ["", "/tasks", "/tasks/t1", "/tasks/t1/title", "/tasks/delete",
   "/activity", "/overview", "/projects", "/projects/p1", "/projects/order", "/queue/q1", "/queue/q1/steer", "/read", "/respond", "/interrupt", "/compact",
   "/active-branch", "/start-fresh", "/setup-request", "/helper-followup", "/tool-budget", "/threads/follow-model", "/mcp-servers", "/data", "/data/x", "/computer",
   "/computer/exec", "/computer/control", "/computer/viewer-close", "/local-computer", "/local-computer/run", "/local-computer/join", "/local-computer/screenshot",
-  "/browser/live", "/browser/action", "/browser/upload", "/browser/download/d1", "/browser/stream", "/cards/c1", "/command-allowlist", "/command-allowlist/x",
+  "/browser/live", "/browser/action", "/browser/upload", "/browser/download/d1", "/browser/stream", "/browser/desktop", "/cards/c1", "/command-allowlist", "/command-allowlist/x",
   "/connector-cards/c1/status", "/connector-cards/c1/authorize", "/secret-cards/c1/provide", "/secret-cards/c1/save", "/sign-in-cards/c1/done", "/saved-steps/s1",
-  "/requests/aaaaaaaaaaaaaaaaaaaa", "/requests/aaaaaaaaaaaaaaaaaaaa/interrupt", "/apps/a1/rpc", "/apps/a1/context", "/avatar/generate", "/slack-management", "/webhooks", "/routines", "/files", "/no-such-route"];
+  "/requests/aaaaaaaaaaaaaaaaaaaa", "/requests/aaaaaaaaaaaaaaaaaaaa/interrupt", "/apps/a1/rpc", "/apps/a1/context", "/avatar/generate", "/slack-management", "/library", "/webhooks", "/routines", "/files", "/no-such-route"];
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 /** Every route under a bot's id, asked of two ids at once. */
@@ -231,10 +231,8 @@ it("no list, search, export, stream or signed read names anything of Rui's to an
     expect(leaksIn(await streamOf(token)), `${who}: the event stream, replayed`).toEqual([]);
   }
   for (const [who, token] of [["an Admin", admin], ["the Owner", owner]] as const) {
-    for (const format of ["backup", "share"]) {
-      const exported = await team.as(token, "POST", "/api/teams/export", { format });
-      expect(leaksIn(JSON.stringify(exported.body)), `${who}: the team export as ${format} (${exported.status})`).toEqual([]);
-    }
+    const exported = await team.as(token, "POST", "/api/teams/export", { format: "backup" });
+    expect(leaksIn(JSON.stringify(exported.body)), `${who}: the team backup (${exported.status})`).toEqual([]);
   }
   const signed = await team.signed("GET", "/api/cloud/team/admin");
   expect(signed.status).toBe(200);

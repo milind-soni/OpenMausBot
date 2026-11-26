@@ -22,11 +22,25 @@ it("forks bot and room conversations through the public API and keeps a fork aft
   try {
     const bot = (await runControlOmb(["new-bot", "--name", "Fork Tester", "--url", url]) as any).bot;
     const sourceThreadId = bot.activeTaskId as string;
+    const botForkPath = `/api/bots/${bot.id}/tasks/${sourceThreadId}/forks`;
+    const blankThread = await api("POST", `/api/bots/${bot.id}/tasks`, { select: false });
+    expect(blankThread.status).toBe(201);
+    expect(await api("POST", `/api/bots/${bot.id}/tasks/${blankThread.body.task.threadId}/forks`, { latest: true })).toMatchObject({
+      status: 404, body: { errorKey: "serverError.forkNoText" },
+    });
+    for (const invalid of [{}, { latest: false }, { latest: true, messageId: "ambiguous" }]) {
+      expect((await api("POST", botForkPath, invalid)).status).toBe(400);
+    }
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Plan the release", threadId: sourceThreadId })).status).toBe(202);
     await expect.poll(async () => (await messages(sourceThreadId)).some((message) => message.role === "bot" && message.kind === "text" && message.text?.includes("hello from fake claude")), { timeout: 20_000 }).toBe(true);
-    const anchor = (await messages(sourceThreadId)).find((message) => message.role === "user" && message.text === "Plan the release")!;
+    await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id)?.busy, { timeout: 20_000 }).toBe(false);
+    const transcript = await messages(sourceThreadId);
+    const anchor = transcript.find((message) => message.role === "user" && message.text === "Plan the release")!;
+    const latest = transcript.findLast((message) => message.role === "bot" && message.kind === "text")!;
     const notificationsBeforeFork = (await api("GET", "/api/notifications")).body.notifications.map((entry: { id: string }) => entry.id);
-    const forked = await api("POST", `/api/bots/${bot.id}/tasks/${sourceThreadId}/forks`, { messageId: anchor.id });
+    const latestFork = await api("POST", botForkPath, { latest: true });
+    expect(latestFork).toMatchObject({ status: 201, body: { task: { origin: { threadId: sourceThreadId, messageId: latest.id } } } });
+    const forked = await api("POST", botForkPath, { messageId: anchor.id });
     expect(forked.status).toBe(201);
     expect((await api("GET", "/api/notifications")).body.notifications.map((entry: { id: string }) => entry.id)).toEqual(notificationsBeforeFork);
     const forkThreadId = forked.body.task.threadId as string;
@@ -46,6 +60,22 @@ it("forks bot and room conversations through the public API and keeps a fork aft
     const imageMessage = (await messages(sourceThreadId)).find((message) => message.role === "user" && message.text?.includes("dot.png"))!;
     const imageFork = await api("POST", `/api/bots/${bot.id}/tasks/${sourceThreadId}/forks`, { messageId: imageMessage.id });
     expect(imageFork.status).toBe(201);
+    expect((await api("POST", `/api/bots/${bot.id}/messages/${anchor.id}/edit`, {
+      text: "Alternate release plan", threadId: sourceThreadId,
+    })).status).toBe(202);
+    await expect.poll(async () => (await messages(sourceThreadId)).some((message) =>
+      message.role === "user" && message.text === "Alternate release plan"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id)?.busy, { timeout: 20_000 }).toBe(false);
+    // Keep the server on the alternate version, as when /active-branch is still in flight.
+    expect(await api("POST", botForkPath, { latest: true, branchLeafId: latest.id })).toMatchObject({
+      status: 201, body: { task: { origin: { threadId: sourceThreadId, messageId: latest.id } } },
+    });
+    const unpinned = await api("POST", botForkPath, { latest: true });
+    expect(unpinned.status).toBe(201);
+    expect(unpinned.body.task.origin.messageId).not.toBe(latest.id);
+    expect(await api("POST", botForkPath, { latest: true, branchLeafId: "missing" })).toMatchObject({
+      status: 404, body: { errorKey: "serverError.forkNoText" },
+    });
     expect((await api("DELETE", `/api/bots/${bot.id}/tasks/${sourceThreadId}`)).status).toBe(200);
     expect((await messages(forkThreadId)).some((message) => message.id === anchor.id)).toBe(true);
     const inheritedImage = await fetch(url + `/api/threads/${imageFork.body.task.threadId}/messages/${imageMessage.id}/file`, {
@@ -62,12 +92,17 @@ it("forks bot and room conversations through the public API and keeps a fork aft
 
     const room = (await runControlOmb(["new-channel", "--name", "Fork Room", "--members", bot.id, "--url", url]) as any).channel;
     const roomThreadId = room.activeTaskId as string;
+    const roomForkPath = `/api/groups/${room.id}/tasks/${roomThreadId}/forks`;
     expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Room question", threadId: roomThreadId })).status).toBe(202);
     await expect.poll(async () => (await messages(roomThreadId)).some((message) => message.role === "bot" && message.kind === "text"), { timeout: 20_000 }).toBe(true);
     const roomAnchor = (await messages(roomThreadId)).find((message) => message.role === "user" && message.text === "Room question")!;
-    const roomFork = await api("POST", `/api/groups/${room.id}/tasks/${roomThreadId}/forks`, { messageId: roomAnchor.id });
+    const roomFork = await api("POST", roomForkPath, { messageId: roomAnchor.id });
     expect(roomFork.status).toBe(201);
     expect(roomFork.body.task.origin).toEqual({ threadId: roomThreadId, messageId: roomAnchor.id });
+    const roomLatest = (await messages(roomThreadId)).findLast((message) => message.role === "bot" && message.kind === "text")!;
+    expect(await api("POST", roomForkPath, { latest: true })).toMatchObject({
+      status: 201, body: { task: { origin: { threadId: roomThreadId, messageId: roomLatest.id } } },
+    });
     expect((await api("POST", `/api/groups/${room.id}/read`)).status).toBe(200);
     expect((await api("POST", `/api/groups/${room.id}/read`, { threadId: roomFork.body.task.threadId })).status).toBe(200);
     expect((await api("DELETE", `/api/groups/${room.id}/tasks/${roomThreadId}`)).status).toBe(200);

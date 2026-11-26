@@ -3,7 +3,7 @@
 import { allowedServerOrigin } from "./server-address.mjs";
 
 export const RECONNECT = Object.freeze({ baseMs: 2_000, capMs: 300_000, healthyMs: 60_000, cantReachAfterMs: 120_000, timeoutMs: 15_000, refocusMs: 5_000 });
-const INSTALLS = new Set(["npx", "global", "docker", "source"]);
+const INSTALLS = new Set(["npx", "global", "docker", "source", "podman-service"]);
 
 /** Equal jitter: half of the doubled wait for sure, the other half at random, never past the cap. */
 export function reconnectDelay(attempt, random = Math.random, { baseMs, capMs } = RECONNECT) {
@@ -114,6 +114,10 @@ export function createServerStatus({ entries, check, appVersion, onChange = () =
       if (now() - lastRefocus < RECONNECT.refocusMs) return;
       lastRefocus = now();
       for (const row of rows.values()) if (failing(row)) void look(row);
+    },
+    /** The saved servers it checks, `{ id, origin }`, whether or not they were looked at yet. */
+    saved() {
+      return entries().filter((entry) => entry.origin).map(({ id, origin }) => ({ id, origin }));
     },
     list() {
       return [...rows.values()].map((row) => ({ id: row.id, state: row.state, since: row.since, version: row.version, behind: versionBehind(row.version, appVersion), install: row.install }));

@@ -224,13 +224,13 @@ describe("Computer panel tabs", () => {
   it("shows Screen, Browser, Data and Files in Simple mode, and Android after Screen while a phone is connected", () => {
     expect(tabs(render(makeBot()))).toEqual(["Screen", "Browser", "Data", "Files"]);
     fixture.android = true;
-    expect(tabs(render(makeBot()))).toEqual(["Screen", "Android", "Browser", "Data", "Files"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Phone", "Browser", "Data", "Files"]);
   });
 
   it("keeps the Advanced tabs unchanged", () => {
     fixture.advanced = true;
     fixture.android = true;
-    expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Android", "Browser", "Data"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Phone", "Browser", "Data"]);
     fixture.config = {};
     fixture.android = false;
     expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Browser", "Data"]);
@@ -684,5 +684,21 @@ describe("Technical controls", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateBot", botId: "scout", patch: { autoStartVps: true } });
     (simple.button("Show advanced controls")!.props.onClick as () => void)();
     expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("the real panel carries the lend switch (LendComputerSwitch.dom.test.ts covers what it shows)", () => {
+  it("mounts LendHere under the screen, asking for the app's line only while the bot is set to This computer", async () => {
+    const { LendHere } = await import("./LendComputerSwitch");
+    fixture.localComputer = { available: false, support: "unsupported", enabled: false, status: "unavailable", reasonCode: "remote-server" };
+    fixture.seed = { phase: "local-unavailable", resolved: { botId: "scout", threadId: "thread-scout", computer: "local", cloudBackend: "box" } };
+    const onLocal = render(makeBot({ computer: "local" })).nodes.filter((node) => node.type === LendHere);
+    expect(onLocal).toHaveLength(1);
+    expect(onLocal[0]!.props.appNeeded).toBe(true);
+    fixture.values.length = 0; fixture.own = 0;
+    fixture.seed = { phase: "auto-unavailable", resolved: { botId: "scout", threadId: "thread-scout", computer: undefined, cloudBackend: "box" } };
+    const onAuto = render(makeBot()).nodes.filter((node) => node.type === LendHere);
+    expect(onAuto).toHaveLength(1);
+    expect(onAuto[0]!.props.appNeeded).toBe(false);
   });
 });

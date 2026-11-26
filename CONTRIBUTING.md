@@ -14,6 +14,8 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
 - **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
 - **UI changes follow [`DESIGN.md`](DESIGN.md).** Tokens, type, spacing, components, words and
   states. Before/after screenshots in Midnight and Daylight go in the PR body; video for anything animated.
+  With `pnpm dev` running, `pnpm shots '/room-card-preview.html?state=memory' --name before` saves them at
+  390, 768 and 1440 wide in both skins to `shots/`.
 
 ## Dev setup
 
@@ -36,7 +38,7 @@ pnpm test:watch    # same, in watch mode
 pnpm check:electron # syntax-check the plain JS Electron entrypoints
 
 pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
-pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
+pnpm package:linux # Linux x64 .deb + .rpm + AppImage; no Swift required
 ```
 
 To reproduce a failing CI test job, follow [Vitest shards](docs/ci.md#vitest-shards).
@@ -59,12 +61,12 @@ app and AppImage, routes `click` and `type_text` through the overlay-free bundle
 fail-closed Wayland CUA smoke,
 and produces one release artifact containing:
 
-- the versioned `.deb` and AppImage;
-- stable `OpenMausBot-amd64.deb` and `OpenMausBot.AppImage` copies used by the latest-download links;
+- the versioned `.deb`, `.rpm` and AppImage;
+- stable `OpenMausBot-amd64.deb`, `OpenMausBot-x86_64.rpm` and `OpenMausBot.AppImage` copies used by the latest-download links;
 - `SHA256SUMS-ubuntu-x64.txt` covering both versioned and stable names.
 
 Before publishing, confirm that `package.json` has the release version and dispatch the workflow against the same
-commit used for the other platforms. Attach all five Ubuntu files to the matching release in the separate
+commit used for the other platforms. Attach all seven Linux files to the matching release in the separate
 [OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases). Then verify the checksum
 file and install the `.deb` plus launch the AppImage in a clean Ubuntu 24.04 x86_64 GNOME environment. Never combine
 packages built from different commits under one version.
@@ -147,6 +149,17 @@ Such a change ships in **two releases**:
 2. **Write it one release later.** Start writing the new format and raise
    `writes` to match. The release before can already read it.
 
+**Clouds need one more step.** The Cloud Admin keeps its own list of data
+formats (`DATA_FORMATS` in the `openmaus-cloud` repo's
+`server/cloud-home-image.ts`): for each format, its first reader and first
+writer release. With it, a Cloud below the reader updates to the reader first,
+and a failed update never rolls a Cloud back to a version that refuses its
+data. Add the new format there, and deploy the Admin, **before** the release
+that raises `writes` is published.
+
+For Vault values over 4 KiB, **Prepare next release** advances `writes` to 2
+when the preceding published release's tag confirms format 2 read support.
+
 The rule is between one release and the next. The stable channel may skip
 releases, so going back from one stable version to the one before it can cross
 both steps; there the updater's copy of the data is the way back, and the
@@ -173,9 +186,9 @@ sessions into `engine-homes/`, the old data folder's rename). They stay as
 they are. The marker does not replace them; it adds the one thing they cannot
 do, which is to stop an older version at the door.
 
-**What the marker protects today: nothing yet.** Both numbers are 1 and no
-version writes format 2, so the marker has never stopped a server, and a
-rollback of one release can still lose data without it noticing:
+**What the marker protects.** Once a release writes format 2, it stops
+older servers that cannot read it. Unrecorded format changes can still
+cause data loss on rollback:
 
 - Many JSON stores accept only `"version": 1` and throw, or start empty, on
   anything else: among them `server/command-allowlist.ts`, `server/fleet.ts`,
@@ -194,8 +207,10 @@ rollback of one release can still lose data without it noticing:
   made, restored into an older server, is not stopped by it.
 - A marker that cannot be read (empty or full of NULs after a power loss, not
   readable by the server's user) counts as format 1 while `writes` is 1, and
-  a marker that cannot be written is said in the log and skipped: the check
-  must never be the reason a healthy install does not start.
+  a marker that cannot be written is said in the log and skipped: while a
+  version writes nothing newer, the check must never be the reason a healthy
+  install does not start. Once `writes` is 2, an unreadable marker, or one
+  that cannot be written, stops startup before any store opens.
 
 For the rule to hold by itself, these would have to change:
 

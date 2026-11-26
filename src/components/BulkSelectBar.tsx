@@ -8,12 +8,12 @@ export type BulkDeleteResult = { responses: DeleteResponse[]; error?: string };
 type Selection = ReadonlySet<string>;
 
 /** One request per chunk, in order; a failed chunk stops the rest, and earlier chunks stay deleted. */
-export async function deleteThreadsInBulk(owner: { botId: string } | { groupId: string }, threadIds: string[], dispatch: (action: Action) => void): Promise<BulkDeleteResult> {
+export async function deleteThreadsInBulk(owner: { botId: string } | { groupId: string }, threadIds: string[], dispatch: (action: Action) => void, scope: "all" | "closed" = "all"): Promise<BulkDeleteResult> {
   const url = "botId" in owner ? `/api/bots/${owner.botId}/tasks/delete` : `/api/groups/${owner.groupId}/tasks/delete`;
   const responses: DeleteResponse[] = [];
   try {
     for (const part of chunkIds(threadIds)) {
-      const response = await api<DeleteResponse & { bot?: BotAnnouncement; group?: Partial<Group> & { id: string } }>(url, { method: "POST", body: JSON.stringify({ threadIds: part }) });
+      const response = await api<DeleteResponse & { bot?: BotAnnouncement; group?: Partial<Group> & { id: string } }>(url, { method: "POST", body: JSON.stringify(scope === "closed" ? { threadIds: part, scope } : { threadIds: part }) });
       responses.push(response);
       if (response.bot) dispatch({ type: "botPatched", bot: response.bot });
       if (response.group) dispatch({ type: "groupPatched", group: response.group });
@@ -24,6 +24,30 @@ export async function deleteThreadsInBulk(owner: { botId: string } | { groupId: 
     dispatch({ type: "error", message });
     return { responses, error: message };
   }
+}
+
+export type BulkRetitleResult = { named: number; failed: number; error?: string };
+
+/** One thread at a time, like the menu's Regenerate title; a thread that fails keeps its title and the rest still go. */
+export async function retitleThreadsInBulk(botId: string, threadIds: string[]): Promise<BulkRetitleResult> {
+  const outcome: BulkRetitleResult = { named: 0, failed: 0 };
+  for (const threadId of threadIds) {
+    try {
+      await api(`/api/bots/${botId}/tasks/${threadId}/title`, { method: "POST" });
+      outcome.named++;
+    } catch (error) {
+      outcome.failed++;
+      outcome.error ??= error instanceof Error ? error.message : String(error);
+    }
+  }
+  return outcome;
+}
+
+export function bulkRetitleOutcome(outcome: BulkRetitleResult): string {
+  return [
+    t("task.bulk.retitleResult", { count: outcome.named }),
+    outcome.failed > 0 ? t("task.bulk.retitleFailed", { count: outcome.failed, message: outcome.error ?? "" }) : null,
+  ].filter(Boolean).join(" ");
 }
 
 export function bulkDeleteBody(rows: readonly SelectableRow[], selected: Selection, freshConversation: boolean): string {
@@ -42,6 +66,7 @@ export function bulkDeleteOutcome(outcome: BulkDeleteResult): string {
     t("task.bulk.result", { count: done.deleted }),
     done.busy > 0 ? t("task.bulk.resultBusy", { count: done.busy }) : null,
     done.missing > 0 ? t("task.bulk.resultMissing", { count: done.missing }) : null,
+    done.notClosed > 0 ? t("task.bulk.resultNotClosed", { count: done.notClosed }) : null,
     outcome.error ? t("task.bulk.resultError", { message: outcome.error }) : null,
   ].filter(Boolean).join(" ");
 }
@@ -87,7 +112,7 @@ export function BulkSelectFilters({ rows, selected, now, onChange, onDone }: {
   </div>;
 }
 
-export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation, onChange, onDelete }: {
+export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation, onChange, onDelete, onRetitle }: {
   rows: readonly SelectableRow[];
   selected: Selection;
   /** A channel must keep one thread; omit for no limit. */
@@ -96,13 +121,25 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
   freshConversation: boolean;
   onChange: Dispatch<SetStateAction<Selection>>;
   onDelete: (threadIds: string[]) => Promise<BulkDeleteResult>;
+  /** Names each selected thread from its conversation; omit where threads can't be renamed that way. */
+  onRetitle?: (threadIds: string[]) => Promise<BulkRetitleResult>;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [retitling, setRetitling] = useState(false);
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const count = selected.size;
   const overLimit = maxDeletable !== undefined && count > maxDeletable;
   const body = bulkDeleteBody(rows, selected, freshConversation);
+  const retitle = () => {
+    if (!onRetitle) return;
+    setRetitling(true);
+    setResult(null);
+    void onRetitle([...selected]).then((outcome) => {
+      setResult(bulkRetitleOutcome(outcome));
+      setRetitling(false);
+    });
+  };
   const run = () => {
     const ids = [...selected];
     setPending(true);
@@ -121,9 +158,13 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
     </span>
     <div className="flex items-center gap-2">
       <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">{t("task.bulk.selected", { count })}</span>
-      <button type="button" disabled={count === 0 || pending} onClick={() => onChange(clearSelection())}
+      <button type="button" disabled={count === 0 || pending || retitling} onClick={() => onChange(clearSelection())}
         className="rounded-md px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">{t("task.bulk.cancel")}</button>
-      <button type="button" disabled={count === 0 || overLimit || pending} aria-busy={pending || undefined} onClick={() => setConfirming(true)}
+      {onRetitle && <button type="button" disabled={count === 0 || pending || retitling} aria-busy={retitling || undefined} onClick={retitle}
+        className="rounded-md px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised disabled:opacity-40">
+        {retitling ? t("task.bulk.retitling") : t("task.bulk.retitle")}
+      </button>}
+      <button type="button" disabled={count === 0 || overLimit || pending || retitling} aria-busy={pending || undefined} onClick={() => setConfirming(true)}
         className="rounded-md bg-danger px-2.5 py-1 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-40">
         {pending ? t("task.bulk.deleting") : t("task.bulk.delete", { count })}
       </button>
@@ -133,7 +174,7 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
   </div>;
 }
 
-export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canSelect, onShowAll, maxDeletable, freshConversation, onDelete }: {
+export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canSelect, onShowAll, onShowFewer, maxDeletable, freshConversation, onDelete, onRetitle }: {
   bulk: ReturnType<typeof useBulkSelect>;
   rows: readonly SelectableRow[];
   selected: Selection;
@@ -141,17 +182,21 @@ export function ThreadListFooter({ bulk, rows, selected, total, canShowAll, canS
   canShowAll: boolean;
   canSelect: boolean;
   onShowAll: () => void;
+  /** Offered instead of "Show all" while a remembered full list is on and the short list would hide threads. */
+  onShowFewer?: () => void;
   maxDeletable?: number;
   freshConversation: boolean;
   onDelete: (threadIds: string[]) => Promise<BulkDeleteResult>;
+  onRetitle?: (threadIds: string[]) => Promise<BulkRetitleResult>;
 }) {
   if (bulk.active) {
-    return <BulkSelectBar rows={rows} selected={selected} maxDeletable={maxDeletable} freshConversation={freshConversation} onChange={bulk.setSelected} onDelete={onDelete} />;
+    return <BulkSelectBar rows={rows} selected={selected} maxDeletable={maxDeletable} freshConversation={freshConversation} onChange={bulk.setSelected} onDelete={onDelete} onRetitle={onRetitle} />;
   }
-  if (!canShowAll && !canSelect) return null;
+  if (!canShowAll && !onShowFewer && !canSelect) return null;
   const link = "inline-flex h-7 items-center text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink";
   return <div className="flex items-center justify-between pl-6 pr-2">
-    {canShowAll ? <button type="button" onClick={onShowAll} className={link}>{t("task.showAll", { count: total })}</button> : <span />}
+    {canShowAll ? <button type="button" onClick={onShowAll} className={link}>{t("task.showAll", { count: total })}</button>
+      : onShowFewer ? <button type="button" data-sidebar-show-fewer onClick={onShowFewer} className={link}>{t("task.showFewer")}</button> : <span />}
     {canSelect && <button type="button" onClick={bulk.start} className={link}>{t("task.bulk.select")}</button>}
   </div>;
 }

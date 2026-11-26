@@ -85,6 +85,26 @@ describe("parseRunCommand", () => {
     "cat scripts/x.ts",
     "git log --oneline",
     "git -C repo status --short",
+    "git branch",
+    "git branch -avv",
+    "git branch --list 'release/*'",
+    "git branch --contains HEAD",
+    "git branch --format '%(refname:short)'",
+    "git branch --sort -committerdate",
+    "git -c color.ui=always branch --show-current",
+    "git tag",
+    "git tag -ln2 'v*'",
+    "git tag --verify v1.2.3",
+    "git tag -v v1.2.3",
+    "git tag --sort version:refname",
+    "git tag --format '%(refname:short)'",
+    "git tag --points-at HEAD",
+    "git remote -v",
+    "git remote show origin",
+    "git remote get-url --push origin",
+    "git reflog HEAD",
+    "git reflog show main",
+    "git reflog show delete",
     "gh pr view 12",
     "gh api repos/o/r/pulls/1",
     "grep -rn foo src",
@@ -104,6 +124,24 @@ describe("parseRunCommand", () => {
   it.each([
     [PUSH, "git push"],
     ["git -C repo commit -m x", "git commit"],
+    ["git branch release", "git branch"],
+    ["git branch -D obsolete", "git branch"],
+    ["git branch -rd origin/obsolete", "git branch"],
+    ["git branch -m renamed", "git branch"],
+    ["git branch --unset-upstream", "git branch"],
+    ["git branch --set-upstream-to=origin/main", "git branch"],
+    ["git -c color.ui=always -C repo branch --copy main release", "git branch"],
+    ["git branch --format '%(refname:short)' release", "git branch"],
+    ["git tag v1.2.3", "git tag"],
+    ["git tag -am release v1.2.3", "git tag"],
+    ["git tag --delete v1.2.3", "git tag"],
+    ["git tag --sort version:refname v1.2.3", "git tag"],
+    ["git remote add upstream https://example.com/upstream.git", "git remote"],
+    ["git remote set-url origin https://example.com/fork.git", "git remote"],
+    ["git remote remove upstream", "git remote"],
+    ["git remote update --prune", "git remote"],
+    ["git reflog expire --expire=now --all", "git reflog"],
+    ["git reflog delete HEAD@{1}", "git reflog"],
     ["gh release create v1 --notes x", "gh release"],
     ["gh api -X POST repos/o/r/issues -f title=x", "gh api"],
     ["gh api --method DELETE repos/o/r/issues/1", "gh api"],
@@ -168,6 +206,18 @@ describe("nameIsCommand", () => {
 });
 
 describe("runSteps", () => {
+  it("keeps the tag creation needed before publishing a release", () => {
+    const steps = runSteps([
+      ask("Publish the release"),
+      claude("git tag --list", true),
+      claude("git tag v1.2.3", true),
+      claude("git push origin v1.2.3", true),
+    ]);
+    expect(steps.map((step) => step.command)).toEqual(["git tag v1.2.3", "git push origin v1.2.3"]);
+    expect(showRun(steps)).toBe(true);
+    expect(skillPrompt(steps)).toContain("git tag v1.2.3");
+  });
+
   it("lists every command from every driver shape, in order, reads left out, control-CLI steps verified", () => {
     const steps = runSteps([
       ask("verify the fixture"),

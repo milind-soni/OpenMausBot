@@ -37,6 +37,7 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
   const raw = value as Record<string, unknown>;
   if (raw.state !== "available" && raw.state !== "unavailable") return null;
   const update = strings(raw.update, ["title", "message", "command"] as const);
+  const skipServerInstall = (raw.update as { serverInstall?: unknown } | null | undefined)?.serverInstall === false;
   const warning = strings(raw.warning, ["title", "message"] as const);
   const signedInAs = account(raw.account);
   return {
@@ -46,10 +47,13 @@ export function snapshotFrom(value: unknown): ProviderSnapshot | null {
     ...(flag(raw.chatgptPlan) ? { chatgptPlan: raw.chatgptPlan } : {}),
     // Until the start-up read reaches it, OpenCode on its free models alone still ranks and reads as the backup it is.
     ...(flag(raw.freeFallback) ? { freeFallback: raw.freeFallback } : {}),
+    // Installed but not yet confirmed (probe-hold.ts): a restart on a busy machine starts from that, not from nothing.
+    ...(raw.unverified === true && raw.state === "available" ? { unverified: true as const } : {}),
+    ...(raw.busy === true && raw.state === "unavailable" ? { busy: true as const } : {}),
     ...(text(raw.authenticationUnavailableReason) ? { authenticationUnavailableReason: raw.authenticationUnavailableReason } : {}),
     ...(signedInAs ? { account: signedInAs } : {}),
     ...(text(raw.version) || raw.version === null ? { version: raw.version } : {}),
-    ...(update ? { update } : {}),
+    ...(update ? { update: { ...update, ...(skipServerInstall ? { serverInstall: false as const } : {}) } } : {}),
     ...(raw.billing === "metered" || raw.billing === "subscription" ? { billing: raw.billing } : {}),
     ...(warning ? { warning } : {}),
   };

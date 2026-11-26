@@ -156,7 +156,7 @@ describe("ChatGPT plan accounts over isolated HTTP", () => {
     ] as const) {
       const refused = await api("POST", "/api/instances/chatgpt/auth/start", {}, { ...owner, [header]: value });
       expect(refused.status).toBe(403);
-      expect(refused.body.error).toContain("computer running OpenMausBot");
+      expect(refused.body.error).toMatch(/^Continue with ChatGPT on the computer running \S+: this sign-in finishes in a browser there\./);
       expect(refused.body).not.toHaveProperty("auth");
     }
   });

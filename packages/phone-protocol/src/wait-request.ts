@@ -4,9 +4,11 @@ export interface WaitLine {
   status: "fired" | "expired" | "stopped";
 }
 
-/** `WireMessage.wait`: set on the line a wait posted when it ended. */
+/** `WireMessage.wait` and `WireMessage.waitId`: the lines a wait wrote. */
 export interface WaitLineField {
   wait?: WaitLine;
+  /** On a wait follow-up's line: that wait's id, so the chat names it when two waits write the same words. */
+  waitId?: string;
 }
 
 /** A wait with a follow-up a bot set up from chat (wait_until, `OptionCardData.waitRequest`); its Cancel stops it until it settles. */

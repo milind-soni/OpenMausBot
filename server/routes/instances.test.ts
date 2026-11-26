@@ -51,11 +51,16 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth =
   const routes = [createInstanceRoutes(deps)];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const handled = await dispatchRoutes(routes, {
-      req, res, url, path: url.pathname, method: req.method ?? "GET",
-      auth, json, readBody,
-    });
-    if (!handled) json(res, 404, { from: "inline routes" });
+    try {
+      const handled = await dispatchRoutes(routes, {
+        req, res, url, path: url.pathname, method: req.method ?? "GET",
+        auth, json, readBody,
+      });
+      if (!handled) json(res, 404, { from: "inline routes" });
+    } catch (error) {
+      const status = (error as { status?: unknown })?.status;
+      json(res, typeof status === "number" ? status : 500, { error: error instanceof Error ? error.message : String(error) });
+    }
   });
   servers.push(server);
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
@@ -71,7 +76,7 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth =
     await call("GET", "/api/instances");
     return fake.probes.length;
   };
-  return { sign, call, probesAfterList, base, fake };
+  return { sign, call, probesAfterList, base, fake, registry };
 }
 
 describe("engine sign-in routes", () => {
@@ -101,6 +106,60 @@ describe("engine sign-in routes", () => {
 
     await call("POST", "/api/instances/a/auth/sign-out", {});
     expect(await probesAfterList()).toBe(5);
+  });
+});
+
+const phoneHeaders = { "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" };
+
+describe("browser sign-in from a paired phone", () => {
+  const start = (base: string, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+
+  it("is refused with the instruction to use the computer, while a code sign-in and the desktop itself are not", async () => {
+    const phone: RequestAuth = { kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" };
+    const onPhone = await serve({}, phone);
+    const desktop = await serve();
+    const instance = (served: typeof onPhone) => served.registry.get("a") as { authenticationMethod?: string };
+
+    instance(onPhone).authenticationMethod = "browser";
+    const refused = await start(onPhone.base);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { error: string }).error).toMatch(/happens in a browser on the computer/);
+
+    instance(onPhone).authenticationMethod = "browser-pkce";
+    const pkce = await start(onPhone.base);
+    expect(pkce.status).toBe(403);
+    const pkceError = ((await pkce.json()) as { error: string }).error;
+    expect(pkceError).toMatch(/Continue with ChatGPT on the computer/);
+    expect(pkceError).not.toMatch(/hosted-app approval/);
+
+    // A Cloud's added ChatGPT account signs in by device code (no browser callback), from any browser.
+    instance(onPhone).authenticationMethod = undefined;
+    expect((await start(onPhone.base)).status).toBe(200);
+
+    instance(onPhone).authenticationMethod = "code";
+    expect((await start(onPhone.base)).status).toBe(200);
+
+    instance(desktop).authenticationMethod = "browser";
+    // The standalone companion has no desktop token: its phone is plain loopback carrying only the companion's mark.
+    expect((await start(desktop.base, phoneHeaders)).status).toBe(403);
+    expect((await start(desktop.base)).status).toBe(200);
+  });
+});
+
+describe("whose sign-in it is", () => {
+  it("gives a phone its own, so it never resumes or cancels the computer's", async () => {
+    const { base } = await serve();
+    const start = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/start`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: "{}" });
+    const cancel = (headers: Record<string, string> = {}) =>
+      fetch(`${base}/api/instances/a/auth/cancel`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ flowId: "flow-1" }) });
+
+    expect((await start()).status).toBe(200);
+    expect((await start(phoneHeaders)).status).toBe(409);
+    expect((await cancel(phoneHeaders)).status).toBe(404);
+    expect((await start()).status).toBe(200);
+    expect((await cancel()).status).toBe(200);
   });
 });
 
@@ -356,5 +415,27 @@ describe("looking for Ollama", () => {
     expect((await fetch(`${shell.base}/api/instances/ollama?url=${encodeURIComponent("http://127.0.0.1:9")}`)).status).toBe(403);
     const hosted = await serve({ hostedModels: true });
     expect((await fetch(`${hosted.base}/api/instances/ollama`)).status).toBe(403);
+  });
+});
+
+describe("the body a route reads", () => {
+  const post = (base: string, path: string, size: number) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: "x".repeat(size) }),
+    });
+
+  it("is capped on the sign-in completion, CLI probe and Claude update routes", async () => {
+    const { base } = await serve();
+    for (const [path, size] of [
+      ["/api/instances/a/auth/complete", 9_000],
+      ["/api/cli-test", 5_000],
+      ["/api/instances/a/claude-update", 5_000],
+    ] as const) {
+      const response = await post(base, path, size);
+      expect(response.status, path).toBe(413);
+      expect(((await response.json()) as { error?: string }).error, path).toBe("body too large");
+    }
   });
 });

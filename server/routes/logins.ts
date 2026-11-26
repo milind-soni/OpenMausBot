@@ -1,13 +1,15 @@
 // No answer ever carries a password, a 2FA key or the token: a saved secret is only ever replaced.
-import { LOGIN_FIELD_MAX, loginPlace, normalizeLoginHost, type LoginBots, type LoginSummary, type OnePasswordStatus } from "../../shared/logins.ts";
+import { LOGIN_FIELD_MAX, loginPlace, normalizeLoginHost, type BitwardenCredentials, type BitwardenSecretsCredentials, type BitwardenSecretsStatus, type BitwardenStatus, type LoginBots, type LoginSummary, type OnePasswordStatus } from "../../shared/logins.ts";
+import { parseAccessToken } from "../host/bitwarden-secrets-api.ts";
+import { bitwardenServerUrl } from "../host/bitwarden-vault.ts";
 import type { LoginPatch, NewLogin } from "../vault-store.ts";
 import { parseTotpKey, type TotpKey } from "../totp.ts";
-import { PASS, type RouteHandler } from "./table.ts";
+import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export interface LoginRouteDeps {
   list(): LoginSummary[];
   create(input: NewLogin): LoginSummary;
-  update(id: string, patch: LoginPatch): LoginSummary | null;
+  update(id: string, patch: LoginPatch): LoginSummary | null | "taken";
   remove(id: string): boolean;
   botExists(id: string): boolean;
   onePassword: {
@@ -25,6 +27,62 @@ export interface LoginRouteDeps {
      * unless `keep` leaves the items not named as they are. */
     setItemGrants(grants: Record<string, LoginBots>, keep?: boolean): void;
   };
+  /** Absent where Bitwarden is not offered. */
+  bitwarden?: {
+    status(): BitwardenStatus;
+    list(): LoginSummary[];
+    /** Rejects with words for the person when Bitwarden refuses them; nothing is kept then. */
+    connect(credentials: BitwardenCredentials): Promise<BitwardenStatus>;
+    refresh(): Promise<BitwardenStatus>;
+    disconnect(): Promise<BitwardenStatus>;
+  };
+  /** Absent where Bitwarden Secrets Manager is not offered. */
+  bitwardenSecrets?: {
+    status(): BitwardenSecretsStatus;
+    list(): LoginSummary[];
+    /** Rejects with words for the person when Bitwarden refuses the token; nothing is kept then. */
+    connect(credentials: BitwardenSecretsCredentials): Promise<BitwardenSecretsStatus>;
+    refresh(): Promise<BitwardenSecretsStatus>;
+    disconnect(): BitwardenSecretsStatus;
+  };
+}
+
+const BITWARDEN = "/api/logins/bitwarden";
+
+/** What an admin pastes to connect Bitwarden, checked; a message for the first thing that is not right. */
+export function parseBitwardenCredentials(body: unknown): { ok: true; value: BitwardenCredentials } | { ok: false; error: string } {
+  const field = (name: string) => (body && typeof body === "object" && typeof (body as Record<string, unknown>)[name] === "string" ? ((body as Record<string, string>)[name]).trim() : "");
+  const serverUrl = bitwardenServerUrl(field("serverUrl"));
+  if (!serverUrl) return { ok: false, error: LOGIN_ERRORS.bitwardenServer };
+  const clientId = field("clientId"), clientSecret = field("clientSecret");
+  if (!/^user\.[\w-]{1,100}$/u.test(clientId)) return { ok: false, error: LOGIN_ERRORS.bitwardenClientId };
+  if (!clientSecret || clientSecret.length > 256 || /\s/u.test(clientSecret)) return { ok: false, error: LOGIN_ERRORS.bitwardenClientSecret };
+  const password = body && typeof body === "object" && typeof (body as Record<string, unknown>).password === "string" ? (body as Record<string, string>).password : "";
+  if (!password || password.length > 1024) return { ok: false, error: LOGIN_ERRORS.bitwardenPassword };
+  return { ok: true, value: { serverUrl, clientId, clientSecret, password } };
+}
+
+/** What an admin pastes to connect Bitwarden Secrets Manager, checked; a message for the first thing that is not right. */
+export function parseBitwardenSecretsCredentials(body: unknown): { ok: true; value: BitwardenSecretsCredentials } | { ok: false; error: string } {
+  const field = (name: string) => (body && typeof body === "object" && typeof (body as Record<string, unknown>)[name] === "string" ? ((body as Record<string, string>)[name]).trim() : "");
+  const serverUrl = bitwardenServerUrl(field("serverUrl"));
+  if (!serverUrl) return { ok: false, error: LOGIN_ERRORS.bitwardenServer };
+  const accessToken = field("accessToken");
+  if (!parseAccessToken(accessToken)) return { ok: false, error: LOGIN_ERRORS.bitwardenAccessToken };
+  return { ok: true, value: { serverUrl, accessToken } };
+}
+
+const BITWARDEN_SECRETS = "/api/logins/bitwarden-secrets";
+
+async function bitwardenSecretsRoute({ req, res, path, method, json, readBody }: RouteContext, deps: LoginRouteDeps["bitwardenSecrets"]): Promise<void> {
+  if (!deps) return json(res, 404, { error: "not found" });
+  if (path === `${BITWARDEN_SECRETS}/refresh` && method === "POST") return json(res, 200, { bitwardenSecrets: await deps.refresh() });
+  if (path === BITWARDEN_SECRETS && method === "DELETE") return json(res, 200, { bitwardenSecrets: deps.disconnect() });
+  if (path !== BITWARDEN_SECRETS || method !== "POST") return json(res, 405, { error: "method not allowed" });
+  const parsed = parseBitwardenSecretsCredentials(await readBody(req, 16_384));
+  if (!parsed.ok) return json(res, 400, { error: parsed.error });
+  try { return json(res, 200, { bitwardenSecrets: await deps.connect(parsed.value) }); }
+  catch (error) { return json(res, 400, { error: error instanceof Error && error.message ? error.message : LOGIN_ERRORS.bitwardenAccessToken }); }
 }
 
 const ONE_PASSWORD = "/api/logins/1password";
@@ -46,6 +104,14 @@ export const LOGIN_ERRORS = {
   notServiceAccount: "That is not a 1Password service account token: those start with ops_. Make one in 1Password under Developer → Service accounts. A Connect token, an account password or a Secret Key does not work here.",
   exactHost: "exactHost must be true or false.",
   readOnly: "This login is in 1Password. Change or remove it there.",
+  taken: "A login with this username is already saved for that site. Change or delete that one instead.",
+  bitwardenReadOnly: "This login is in Bitwarden. Change or remove it there.",
+  bitwardenServer: "Enter the Bitwarden server's address, starting with https://, such as https://vault.bitwarden.com.",
+  bitwardenClientId: "Paste the account's client_id from Bitwarden's Account settings → Security → Keys → View API key. It starts with user.",
+  bitwardenClientSecret: "Paste the account's client_secret from the same place, on its own.",
+  bitwardenPassword: "Enter the account's master password.",
+  bitwardenSecretsReadOnly: "This login is in Bitwarden Secrets Manager. Change or remove it there.",
+  bitwardenAccessToken: "Paste a machine account's access token from Bitwarden Secrets Manager → Machine accounts → Access tokens. It starts with 0.",
 } as const;
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -83,11 +149,14 @@ export function isJson(req: { headers: Record<string, string | string[] | undefi
 }
 
 export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
-  return async ({ req, res, path, method, json, readBody }) => {
+  return async (ctx) => {
+    const { req, res, path, method, json, readBody } = ctx;
     if (path !== "/api/logins" && !path.startsWith("/api/logins/")) return PASS;
     res.setHeader("cache-control", "no-store");
     if (path === "/api/logins" && method === "GET") {
-      return json(res, 200, { logins: [...deps.list(), ...deps.onePassword.list()], onePassword: deps.onePassword.status() });
+      return json(res, 200, { logins: [...deps.list(), ...deps.onePassword.list(), ...(deps.bitwarden?.list() ?? []), ...(deps.bitwardenSecrets?.list() ?? [])],
+        onePassword: deps.onePassword.status(), ...(deps.bitwarden ? { bitwarden: deps.bitwarden.status() } : {}),
+        ...(deps.bitwardenSecrets ? { bitwardenSecrets: deps.bitwardenSecrets.status() } : {}) });
     }
     // JSON only, so a form posted from another local page cannot add or change one.
     if (method !== "GET" && method !== "DELETE" && !isJson(req)) return json(res, 415, { error: "content-type must be application/json" });
@@ -101,6 +170,17 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
       catch (error) { return json(res, 400, { error: error instanceof Error && error.message ? error.message : LOGIN_ERRORS.token }); }
     }
     if (path === `${ONE_PASSWORD}/refresh` && method === "POST") return json(res, 200, { onePassword: await deps.onePassword.refresh() });
+    if (path === BITWARDEN_SECRETS || path.startsWith(`${BITWARDEN_SECRETS}/`)) return bitwardenSecretsRoute(ctx, deps.bitwardenSecrets);
+    if (path === BITWARDEN || path.startsWith(`${BITWARDEN}/`)) {
+      if (!deps.bitwarden) return json(res, 404, { error: "not found" });
+      if (path === `${BITWARDEN}/refresh` && method === "POST") return json(res, 200, { bitwarden: await deps.bitwarden.refresh() });
+      if (path === BITWARDEN && method === "DELETE") return json(res, 200, { bitwarden: await deps.bitwarden.disconnect() });
+      if (path !== BITWARDEN || method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const parsed = parseBitwardenCredentials(await readBody(req, 16_384));
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      try { return json(res, 200, { bitwarden: await deps.bitwarden.connect(parsed.value) }); }
+      catch (error) { return json(res, 400, { error: error instanceof Error && error.message ? error.message : LOGIN_ERRORS.bitwardenPassword }); }
+    }
     if (path === ONE_PASSWORD && method === "DELETE") return json(res, 200, { onePassword: deps.onePassword.disconnect() });
     const vault = VAULT.exec(path);
     if (vault && method === "PATCH") {
@@ -155,6 +235,8 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
     }
     const id = path.slice("/api/logins/".length);
     if (/^1password(?::|%3a)/iu.test(id)) return json(res, 409, { error: LOGIN_ERRORS.readOnly });
+    if (/^bitwarden(?::|%3a)/iu.test(id)) return json(res, 409, { error: LOGIN_ERRORS.bitwardenReadOnly });
+    if (/^bitwarden-secrets(?::|%3a)/iu.test(id)) return json(res, 409, { error: LOGIN_ERRORS.bitwardenSecretsReadOnly });
     if (!ID.test(id)) return json(res, 404, { error: "no such login" });
     if (method === "DELETE") {
       return deps.remove(id) ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such login" });
@@ -169,12 +251,16 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
     const bots = parseBots(body.bots, deps.botExists);
     if (!bots.ok) return json(res, 400, { error: bots.error });
     if (body.exactHost !== undefined && typeof body.exactHost !== "boolean") return json(res, 400, { error: LOGIN_ERRORS.exactHost });
+    const site = body.site === undefined ? undefined : normalizeLoginHost(body.site);
+    if (site === null) return json(res, 400, { error: LOGIN_ERRORS.site });
     const login = deps.update(id, {
+      ...(site === undefined ? {} : { site }),
       ...fields.value,
       ...(totp.value === undefined ? {} : { totp: totp.value }),
       ...(bots.value === undefined ? {} : { bots: bots.value }),
       ...(body.exactHost === undefined ? {} : { exactHost: body.exactHost }),
     });
+    if (login === "taken") return json(res, 409, { error: LOGIN_ERRORS.taken });
     return login ? json(res, 200, { login }) : json(res, 404, { error: "no such login" });
   };
 }

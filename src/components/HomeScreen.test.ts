@@ -63,3 +63,19 @@ it("a Cloud that isn't running says what it is in plain words with its one actio
     for (const words of Object.values(homeScreenText({ screen, name: "Client B", deleteAt: day }, now))) expect(String(words)).not.toMatch(/—|\bVM\b|engine|ctx|server/i);
   }
 });
+
+it("My Cloud this computer couldn't connect to names its address and what may be in the way, with Try again", () => {
+  expect(homeScreenText({ screen: "offline", cause: "network", host: "omb-t-1.fly.dev" })).toMatchObject({
+    title: "Can't reach My Cloud right now.", action: "retry",
+    reason: "This computer couldn't connect to omb-t-1.fly.dev. If My Cloud opens on another device or network, check whether a VPN, firewall or DNS filter here blocks that address.",
+  });
+});
+
+it("an Admin that asked the app to wait says when it tries again by itself, and nothing once that time has passed", () => {
+  const now = new Date(2026, 10, 20, 15, 0).getTime(), at = new Date(2026, 10, 20, 15, 5).getTime();
+  const time = new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(new Date(at));
+  expect(homeScreenText({ screen: "offline", retryAt: at }, now)).toMatchObject({
+    action: "retry", reason: `MausBot Cloud asked this app to wait before it signs in to My Cloud again. The app tries again by itself at ${time}.`,
+  });
+  expect(homeScreenText({ screen: "offline", retryAt: at }, at + 1).reason).toBeNull();
+});

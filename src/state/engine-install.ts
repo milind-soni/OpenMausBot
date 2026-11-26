@@ -7,7 +7,7 @@ export interface EngineInstall {
   docsUrl?: string;
   signInCommand?: string;
   needsNode?: boolean;
-  managed?: { label: string; downloadBytes: number };
+  managed?: { label: string; downloadBytes: number; sizeUnknown?: true };
   server?: { package?: string; standalone?: { version: string; downloadBytes: number } };
   settings?: "connections";
   /** The CLI runs the copy OpenMausBot installed, which the person's terminal does not reach: set up in the app, not there. */

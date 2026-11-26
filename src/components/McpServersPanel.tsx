@@ -138,6 +138,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   /** A failed card action belongs to that card alone: the cards share one instance, and `error` shows on every one. */
   const [cardFailure, setCardFailure] = useState<{ id: HostedMcpAppId; message: string } | null>(null);
   const [keys, setKeys] = useState<Partial<Record<HostedMcpAppId, string>>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const hostedOf = (server: McpServerListing) => isRemoteMcpListing(server) ? hostedMcpApp(server) : undefined;
@@ -162,6 +163,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const generation = ++loadGeneration.current;
     setBusy("load");
     setError(null);
+    setLoadError(null);
     return api("/api/mcp/servers")
       .then((result) => {
         if (generation === loadGeneration.current) {
@@ -170,7 +172,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         }
       })
       .catch((cause) => {
-        if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
+        if (generation === loadGeneration.current) setLoadError(cause instanceof Error ? cause.message : String(cause));
       })
       .finally(() => {
         if (generation === loadGeneration.current) setBusy(null);
@@ -622,6 +624,17 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
 
   if (hostedCards) {
     const own = hostedCards.ownServers;
+    if (loadError !== null && servers === null) {
+      if (!own && !HOSTED_MCP_APPS.some((app) => hostedCards.shown(app.id))) return null;
+      return (
+        <div className="col-span-full flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg bg-danger/10 px-3 py-2">
+          <p role="alert" className="min-w-0 break-words text-[13px] text-danger">{t("mcp.loadAppsFailed", { reason: loadError })}</p>
+          <button type="button" onClick={() => void load()} disabled={busy !== null} className="rounded-full bg-control px-3 py-1 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40">
+            {t("connectors.action.retry")}
+          </button>
+        </div>
+      );
+    }
     return <>
       {HOSTED_MCP_APPS.map((app) => <div key={app.id} className={hostedCards.shown(app.id) ? "contents" : "hidden"}>{renderHostedCard(app)}</div>)}
       {own && servers?.filter((server) => server.enabled && ownMcpServer(server) && own.shown(server)).map((server) => renderOwnServer(server, own.manage))}
@@ -629,6 +642,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   }
 
   const visibleServers = servers?.filter((server) => !hideHosted || ownMcpServer(server));
+  const panelError = loadError ?? error;
 
   return (
     <section
@@ -659,7 +673,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
               disabled={busy !== null || (restricted && !policy?.mcp.allowlist.length)}
               title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
               onClick={() => openEditor("new")}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-control/80 px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40"
             >
               <Plus size={14} /> {t(embedded ? "apps.mcp.add" : "mcp.addServer")}
             </button>
@@ -671,7 +685,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
           <McpServerEditor key={`${editing}${fixingKeys ? ":keys" : ""}`} server={editingServer} fixKeys={fixingKeys} taken={(servers ?? []).map((server) => server.name)} team={Boolean(store.config?.team)}
             busy={busy !== null} onCancel={closeEditor} onSubmit={(items) => void (editing === "new" ? addServers(items) : saveEdit(items))} />
         )}
-        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key, error.params)}</div>}
+        {panelError && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof panelError === "string" ? panelError : t(panelError.key, panelError.params)}</div>}
         {notice && <div role="status" className="mt-3 rounded-lg bg-success/10 px-3 py-2 text-[12px] text-success">{t(notice.key, {
           ...notice.params,
           ...(notice.stateKey ? { state: t(notice.stateKey) } : {}),
@@ -683,7 +697,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         </div>
 
         {servers === null ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /> {t("mcp.loading")}</div>
+          <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /><span>{t("mcp.loading")}</span></div>
         ) : visibleServers?.length === 0 && !editing ? (
           <div className="mt-5 flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-hairline/60 text-center">
             <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><ServerCog size={21} /></div>

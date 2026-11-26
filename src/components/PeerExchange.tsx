@@ -38,18 +38,19 @@ export const PEER_HOW = {
   ask_bot: "chat.peer.asked",
 } as const satisfies Record<PeerLine["delivery"], string>;
 
-/** The folded request: one line, opened by a click. */
-export function PeerCompactRow({ preview, onOpen }: { preview: string; onOpen: () => void }) {
+/** A folded message: one line, opened by a click, with `label` before the preview. */
+export function PeerCompactRow({ preview, onOpen, label, testId = "peer-compact" }: { preview: string; onOpen: () => void; label?: string; testId?: string }) {
   return (
     <button
       type="button"
       onClick={onOpen}
       title={t("chat.showFull")}
-      data-testid="peer-compact"
+      data-testid={testId}
       className="flex w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] items-center gap-1.5 rounded-xl bg-card px-3 py-1.5 text-left text-[14px] text-ink-secondary hover:text-ink"
     >
       <ChevronRight size={14} className="shrink-0" />
-      <span className="truncate">{preview}</span>
+      {label && <span className="shrink-0 font-medium">{label}</span>}
+      <span className={label ? "min-w-0 truncate" : "truncate"}>{preview}</span>
     </button>
   );
 }
@@ -124,6 +125,25 @@ export function PeerExchangeView({ lines, peerName, peerBot, botName, self, onCl
           })}
         </ol>
       </aside>
+    </div>
+  );
+}
+
+export function PeerLabel({ peer, bots }: { peer: PeerLine; bots: readonly Bot[] }) {
+  const author = authorOf(bots, peer);
+  const how = t(PEER_HOW[peer.delivery]);
+  return (
+    <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
+      <BotAvatar
+        bot={author ?? { name: peer.name, color: "blue" }}
+        state={normalizeState(author?.mascotExpression) ?? "happy"}
+        size={20}
+        motion="none"
+        motionKey={0}
+        animated={false}
+      />
+      <span className={cn("text-[13px] font-semibold", author ? "bot-identity" : "text-ink-secondary")} data-bot-color={author?.color}>{peer.name}</span>
+      <span className="text-[12px] text-ink-tertiary">· {how}</span>
     </div>
   );
 }

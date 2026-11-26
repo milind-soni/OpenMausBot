@@ -90,6 +90,23 @@ export interface ActiveTheme {
   id: string | null;
   theme: ThemeFile | null;
 }
+/** How many of a person's look changes are kept to go back to. */
+export const LOOK_HISTORY_LIMIT = 30;
+/** What one look change did: a theme made, edited or deleted while worn, a theme or built-in skin worn, back to the
+ * default look, or earlier changes gone back on. */
+export const LOOK_CHANGE_KINDS = ["made", "edited", "deleted", "wore", "skin", "default", "undid"] as const;
+export interface LookChange {
+  kind: (typeof LOOK_CHANGE_KINDS)[number];
+  /** The theme's name, or the built-in skin's id. */
+  name?: string;
+  /** undid: how many changes it went back on. */
+  count?: number;
+}
+/** GET /api/themes/history, newest first; POST it `{ index }` to go back to how things looked right after that change. */
+export interface ThemeHistoryItem extends LookChange {
+  index: number;
+  at: string;
+}
 export const THEME_EXPORT_VERSION = 1;
 /** One file: the theme with its files inlined as data: addresses. */
 export const themeExportSchema = z.object({
@@ -195,6 +212,7 @@ export function rehomeThemeCss(css: string, fromId: string, toId: string): strin
  */
 export const THEME_HOOKS = [
   { selector: '[data-look="app"]', what: "the whole window, behind everything" },
+  { selector: '[data-look="window"]', what: "the desktop app's rounded card holding the sidebar and chat (not in the web app)" },
   { selector: '[data-look="rail"]', what: "the rail of places down the side (desktop app)" },
   { selector: '[data-look="sidebar"]', what: "the sidebar" },
   { selector: '[data-look="sidebar-bot"]', what: "a bot's row in the sidebar" },
@@ -202,6 +220,7 @@ export const THEME_HOOKS = [
   { selector: "[data-avatar]", what: 'every face: a bot\'s or a person\'s; [data-avatar="picture"|"mascot"|"initials"], [data-avatar-kind="bot"|"person"]' },
   { selector: '[data-look="chat-header"]', what: "the bar at the top of a chat" },
   { selector: '[data-look="chat"]', what: "the chat area, behind the messages" },
+  { selector: '[data-look="chat-backdrop"]', what: "an empty layer filling the chat area under everything in it, never scrolling, never clicked: for backgrounds and animations (its ::before and ::after too)" },
   { selector: '[data-look="message-user"]', what: "a row with your own message" },
   { selector: '[data-look="message-bot"]', what: "a row with a bot's message" },
   { selector: '[data-look="user-bubble"]', what: "your own message's bubble" },
@@ -234,7 +253,7 @@ export function themeGuide(): string {
     "A theme restyles MausBot's desktop app and web app for the person who asked, in every window they have open. Phones keep their own look.",
     "",
     "Colours first. `canvas` (hex) is the base background and `accent` (hex) the highlight; the app derives its surfaces, lines and text from them.",
-    "`skin` picks the built-in skin underneath, so anything the theme leaves out comes from it. `colors` sets single roles; `light` and `dark` hold canvas, accent and colors used only in that mode.",
+    "`skin` picks the built-in skin underneath, so anything the theme leaves out comes from it. `colors` sets single roles; `light` and `dark` hold canvas, accent and colors used only in that mode. With both `light` and `dark`, and `skin` left out or set to \"system\", \"daylight\" or \"midnight\", the person's Light or dark choice in Settings picks the mode; otherwise `skin` or a top-level `canvas` fixes it.",
     `Roles: ${THEME_COLOR_ROLES.map((role) => `${role} (${THEME_ROLE_HELP[role]})`).join("; ")}.`,
     "`font` is a font-family list. Bundled: \"Geist Variable\", \"Inter Variable\", \"Geist Mono Variable\". A font installed on the computer works by name, and a font file can be a theme file loaded with @font-face.",
     "",
@@ -242,14 +261,23 @@ export function themeGuide(): string {
     "The app's own rules can be more specific; add !important when a rule has no effect. Respect @media (prefers-reduced-motion: reduce) for big animations.",
     "Never the internet: @import, image-set(), image(), src() and url() to any other address are removed, and so is any value with a backslash escape outside a string.",
     `url() may name a theme file (${THEME_ASSET_PREFIX}<theme id>/<file>), a data: address or an #id.`,
-    "Theme files: add_theme_asset copies an image (png, jpg, webp, gif, avif, svg; animated is fine) or a font (woff2, woff, ttf, otf) from your workspace or this conversation's attachments into a theme, up to 10 MB each. It answers with the url() to use.",
+    "Theme files: add_theme_asset copies an image (png, jpg, webp, gif, avif, svg; animated is fine) or a font (woff2, woff, ttf, otf) from your workspace or this conversation's attachments into a theme, up to 10 MB each, and answers with the url() to use. path: a file of yours, or an attachment by its path or file name; left out, the latest picture attached here. id: left out, the theme the person wears, or with none worn a new theme over their built-in skin, worn once you set_theme it. HEIC photos and larger files are refused: if you have a shell, convert first (sips -s format jpeg -Z 2560 in.heic --out out.jpg on a Mac) and pass the new file. An SVG you write in your workspace is a theme file too; its own SMIL or CSS animation plays as a background, but repaints every frame and ignores reduced motion: prefer the recipes below.",
+    "",
+    "Backgrounds: style [data-look=\"chat-backdrop\"] and its ::before and ::after; it sits under the messages, stays put while they scroll, and never takes a click. Keep text readable: lay the canvas colour over a picture (62%, as below, keeps text readable over any picture in light and dark), and keep patterns and animations faint. Animate only transform and opacity, slowly; the app stops them when the person asks for reduced motion. Known-good, to adapt:",
+    '- Picture: [data-look="chat-backdrop"] { background: linear-gradient(color-mix(in srgb, var(--color-app) 62%, transparent), color-mix(in srgb, var(--color-app) 62%, transparent)), url("/api/theme-assets/<id>/<file>") center / cover no-repeat; }',
+    '- Moving gradient: [data-look="chat-backdrop"]::before { content: ""; position: absolute; inset: -50%; background: conic-gradient(from 0deg, #1d3557, #e63946, #f1faee, #1d3557); opacity: 0.25; animation: bg-turn 60s linear infinite; } @keyframes bg-turn { to { transform: rotate(1turn); } }',
+    '- Drifting pattern: [data-look="chat-backdrop"]::after { content: ""; position: absolute; inset: -40px 0 0; background: url("data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'40\' height=\'40\'><circle cx=\'20\' cy=\'20\' r=\'2\' fill=\'%23888\'/></svg>"); opacity: 0.35; animation: bg-drift 8s linear infinite; } @keyframes bg-drift { to { transform: translateY(40px); } }',
+    '- The whole window instead: the same background on [data-look="app"] (with !important), then [data-look="window"], [data-look="chat"] { background: transparent !important; } [data-look="sidebar"], [data-look="rail"] { background: color-mix(in srgb, var(--color-panel) 80%, transparent) !important; }',
     "",
     "Stable selectors (other class names change between releases, so never rely on them):",
     ...THEME_HOOKS.map((hook) => `- ${hook.selector}: ${hook.what}`),
     "",
-    "Calls: theme (optional id: also return that saved theme). set_theme with id and theme (the theme as JSON) saves and wears it; with only id it wears a saved theme, a built-in skin, or none. add_theme_asset with id and path.",
+    "Calls: theme (optional id: also return that saved theme). set_theme with id and theme (the theme as JSON) saves and wears it; with only id it wears a saved theme, a built-in skin, or none. add_theme_asset with path and id (both optional).",
+    `theme_history lists the person's last ${LOOK_HISTORY_LIMIT} look changes, newest first, each with its index and the look right after it. undo_theme goes back: steps (default 1) undoes that many changes; index returns to the look right after that entry, theme file and all. An undo is itself a change, so undoing it again is a redo.`,
     "",
     "You cannot see the result. Make one small change at a time, then ask the person how it looks.",
-    `Undo: set_theme with a built-in skin id, or "none" to drop the custom theme; the card in the conversation also has Undo. If a theme hides what the person needs, tell them: ${SHORTCUT} resets to the default look, and opening the app with ?${SAFE_LOOK_PARAM} in its address starts it without the theme.`,
+    "Going back: \"undo that\", \"go back\", \"go back two changes\", \"how it was before\" → undo_theme with steps. \"The purple one from earlier\", \"the one from this morning\" → theme_history, then undo_theme with that index.",
+    "\"Revert\" or \"reset\" to the original, default or normal look → set_theme with id \"none\". Wear a built-in skin only when the person names one.",
+    `If a theme hides what the person needs, tell them: ${SHORTCUT} resets to the default look, and opening the app with ?${SAFE_LOOK_PARAM} in its address starts it without the theme. The card in the conversation has Undo too.`,
   ].join("\n");
 }

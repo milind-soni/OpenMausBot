@@ -15,7 +15,9 @@ import { isNativeSkillEnabled } from "../native-skill-choices.ts";
 import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, projectSkillsPrompt, readNativeSkillFile, type NativeSkill } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
-import { librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { librarySkillFilePath, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { findWorkflowSkill, skillBurgerEnabled, workflowSkillsPrompt } from "../skill-burger/store.ts";
+import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -29,7 +31,7 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { claudeUserSkillsEnabled } from "../turn-settings.ts";
+import { claudeUserSkillsEnabled, settingsTurnFields } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
 import { supportsWorkspaceFiles, TASK_WORKSPACES_DIR } from "../workspace.ts";
 
@@ -51,6 +53,12 @@ type ReceiptArgs = {
   };
 };
 
+
+/** A burger's inputs and the values it was saved with, so a run takes this request's values and says when it reuses one. */
+function burgerInputs(workflow: { args: Record<string, { default?: unknown }> }): string {
+  const args = Object.entries(workflow.args).slice(0, 8);
+  return args.length ? ` Its inputs: ${args.map(([arg, value]) => `${arg}${value.default === undefined ? "" : ` (saved: ${JSON.stringify(value.default).slice(0, 80)})`}`).join(", ")}; a run without one uses the saved value.` : "";
+}
 export interface SkillsLibraryHostDeps {
   store: Store;
   cfg: AppConfig;
@@ -112,6 +120,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
   };
+  /** The files beside the SKILL.md readBotSkillFile reads, from the same copy: none for a skill shared from this
+   * computer, null when they changed since they came in. */
+  const readBotSkillFiles = (bot: BotRecord, name: string): StoredSkillFiles => {
+    if (readSkillFile(bot.id, name) !== null) return ownSkillFiles(bot.id, name);
+    if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return librarySkillFiles(name);
+    return [];
+  };
 
   const shareBotsNow = (): ShareBot[] =>
     store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: bot.section, assignedSkills: bot.assignedSkills, visibility: bot.visibility }));
@@ -134,6 +150,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills ?? [];
   const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
     skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
+  const turnSkillFiles = (bot: BotRecord, threadId: string, instance?: TurnInstance): string[] => {
+    const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
+    const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
+    return [...new Set([...enabledSkillFiles(bot.id, names, assigned).values(),
+      ...importsFor(bot, conversationSkills(bot, threadId), instance).map((skill) => skill.file),
+      ...importsFor(bot, assigned, instance).map((skill) => skill.file)])];
+  };
 
   const engineOf = (instance: TurnInstance | undefined): SkillTurnEngine | undefined => {
     if (!instance) return undefined;
@@ -276,6 +299,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   return {
     listBotSkills,
     readBotSkillFile,
+    readBotSkillFiles,
 
     mode,
 
@@ -292,13 +316,24 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       const thread = threadId ?? bot.threadId;
       const project = thread ? projectInUse(bot, thread, cwd, instance, assigned) : [];
       return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
-        importedSkillsPrompt(listed, available.length - listed.length) + projectSkillsPrompt(project);
+        importedSkillsPrompt(listed, available.length - listed.length) + projectSkillsPrompt(project) +
+        (skillsLibraryEnabled(cfg) || !skillBurgerEnabled(cfg) ? "" : workflowSkillsPrompt(bot.id, undefined, new Set(listSkills(bot.id).map((skill) => skill.name)))); // with the library on, saved workflows are every-bot library skills already
     },
 
     /** The imported skills a turn links into its task folder: the same ones its index lists, so an engine that loads
      * skill folders by itself sees no more than the prompt does. */
     turnImports(bot: BotRecord, threadId: string, instance?: TurnInstance): ImportedSkillView[] {
       return listedImports(bot, importsFor(bot, conversationSkills(bot, threadId), instance));
+    },
+
+    turnSkillFiles,
+
+    /** `cwd`: the turn's folder, whose project skills win over the person's own of the same name. */
+    turnSettings(bot: BotRecord, threadId: string, instance: TurnInstance, restrictsMcp: boolean, cwd?: string) {
+      return {
+        ...settingsTurnFields(cfg, DATA_DIR, restrictsMcp, undefined, cwd),
+        ...(instance.driverKind === "antigravityAgent" ? { skillFiles: turnSkillFiles(bot, threadId, instance) } : {}),
+      };
     },
 
     /** Each `/name` called for one of the bot's own, library or imported skills, one its engine loads by itself, or one its
@@ -323,7 +358,11 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
         add(nativesFor(bot, threadId, instance, cwd).filter((skill) => !switched.has(skill.name) && isNativeSkillEnabled(bot.id, skill.name)));
       }
       if (files.size < mentioned.length) add(projectInUse(bot, threadId, cwd, instance, assigned).filter((skill) => !skill.modelOnly));
-      return skillCommandTurnText(text, files, typed, ownStart);
+      // A Skill Burger runs exactly with run_workflow, from any bot.
+      const burgers = !skillBurgerEnabled(cfg) ? [] : mentioned.flatMap((name) => { const found = !files.has(name) && findWorkflowSkill(bot.id, name); return found ? [{ name, found }] : []; });
+      for (const { name } of burgers) if (!files.has(name)) files.set(name, librarySkillFilePath(name));
+      const expanded = skillCommandTurnText(text, files, typed, ownStart);
+      return burgers.length ? `${expanded}\n\n${burgers.map(({ name, found }) => `/${name} is a saved Skill Burger: run it with the run_workflow tool (name "${name}"), filling its args from the request, rather than by hand.${burgerInputs(found.workflow)}`).join(" ")}` : expanded;
     },
 
     shareNote(bot: BotRecord, threadId: string, enabled: boolean): TurnShareNote {

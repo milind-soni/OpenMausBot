@@ -9,6 +9,7 @@ import { addHeldSecretScrubber, redactSecretsInText } from "../shared/redact.ts"
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import { HeldSecrets, LOGINS_FILE, LOGINS_KEY_FILE, MEMBER_SECRETS_FILE, TEAM_READER, VaultStore, secretForms } from "./vault-store.ts";
 import { parseTotpKey } from "./totp.ts";
+import { VAULT_VALUE_MAX_BYTES } from "./vault/value-limits.ts";
 
 // Obvious fakes only: nothing here is anyone's real login.
 const PASSWORD = "fake-Pa55word&<\"quoted\">";
@@ -141,6 +142,8 @@ describe("the saved logins store", () => {
     expect(store.remove(login.id)).toBe(true);
     expect(store.secretValues()).toEqual([]);
     expect(store.update("missing", { password: "x-x-x-x" })).toBeNull();
+    const wide = store.create({ ...loginPlace("example.com", ["example.com", "login.microsoftonline.com"]), username: "wide", password: "fake-wide-pass", source: "settings", bots: "all" });
+    expect(store.update(wide.id, { site: "login.microsoftonline.com", password: "fake-wide-two" })).toMatchObject({ site: "example.com", hosts: ["example.com", "login.microsoftonline.com"] });
   });
 
   it("keeps the 1Password token in the same sealed file, and which bots each vault is for across reconnects", () => {
@@ -169,6 +172,46 @@ describe("the saved logins store", () => {
 
 describe("the Vault's saved secrets", () => {
   const STRIPE = "sk_test_fake-vault-secret-1";
+
+  it("opens a Vault with 64 KiB values and preserves them when it saves another change", () => {
+    const person = "p_ada0000000000000000000";
+    const member = { person, team: false };
+    const largeValue = "fixture-".repeat(8_192);
+    const store = new VaultStore({ dataDir: dir });
+    const login = store.create({ ...at("example.com"), username: "alice", password: PASSWORD, source: "settings", bots: "all" });
+    const small = store.saveSecret({ name: "Small secret", value: STRIPE, source: "settings", bots: "all" });
+    const teamSecret = { ...small, id: "large-team", name: "Large team secret", value: largeValue };
+    const memberSecret = { ...teamSecret, id: "large-member", name: "Large member secret", person };
+    const key = readFileSync(join(dir, LOGINS_KEY_FILE), "utf8").trim();
+    const file = join(dir, LOGINS_FILE);
+    const disk = JSON.parse(decryptBrowserState(readFileSync(file), key));
+    disk.secrets.push(teamSecret);
+    writeFileSync(file, encryptBrowserState(JSON.stringify(disk), key));
+    writeFileSync(join(dir, MEMBER_SECRETS_FILE), encryptBrowserState(JSON.stringify({ version: 1, secrets: [memberSecret] }), key));
+
+    const reopened = new VaultStore({ dataDir: dir });
+    expect(reopened.list()).toEqual([login]);
+    expect(reopened.listSecrets(TEAM_READER).map(({ id }) => id)).toEqual([teamSecret.id, small.id]);
+    expect(reopened.listSecrets(member)).toMatchObject([{ id: memberSecret.id }]);
+    expect(JSON.stringify(reopened.listSecrets(member))).not.toContain("fixture-");
+    expect(reopened.updateSecret(small.id, { name: "Renamed secret" })).toMatchObject({ name: "Renamed secret" });
+    const afterSave = new VaultStore({ dataDir: dir });
+    expect(afterSave.secret(teamSecret.id)?.value === largeValue).toBe(true);
+    expect(afterSave.secret(memberSecret.id)?.value === largeValue).toBe(true);
+    expect(afterSave.list()).toEqual([login]);
+  });
+
+  it("enforces the UTF-8 byte limit for newly saved, received and replaced values", () => {
+    const store = new VaultStore({ dataDir: dir });
+    const value = "🔑".repeat(VAULT_VALUE_MAX_BYTES / 4);
+    const input = { name: "Fixture secret", value, source: "settings", bots: "all" } as const;
+    const saved = store.saveSecret(input);
+    const tooLarge = value + "x";
+    expect(() => store.saveSecret({ ...input, value: tooLarge })).toThrow(RangeError);
+    expect(() => store.receiveSecret({ ...input, id: saved.id, value: tooLarge })).toThrow(RangeError);
+    expect(() => store.updateSecret(saved.id, { value: tooLarge })).toThrow(RangeError);
+    expect(new VaultStore({ dataDir: dir }).secret(saved.id)?.value).toBe(value);
+  });
 
   it("live in the same sealed file beside the logins, still version 1, which the previous release reads without losing a login", () => {
     const store = new VaultStore({ dataDir: dir, now: () => 5 });
@@ -260,6 +303,18 @@ describe("a Team Cloud member's own secrets", () => {
     expect(store.listSecrets({ person: BEN, team: true }).map((one) => one.id)).toEqual([team.id]);
     expect(store.listSecrets({ person: BEN, team: false })).toEqual([]);
     expect(store.listSecrets({ person: ADA, team: false }).map((one) => one.id)).toEqual([ada.id]);
+  });
+
+  it("win over the team's secret of the same name in that person's turns, saved in the same millisecond or before it", () => {
+    let at = 5;
+    const store = new VaultStore({ dataDir: dir, now: () => at });
+    const team = store.saveSecret({ name: "Stripe secret key", value: "sk_test_fake-team", source: "settings", bots: ["pepper"] });
+    const ada = own(store);
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: ADA, team: true })?.id).toBe(ada.id);
+    at = 6;
+    store.updateSecret(team.id, { value: "sk_test_fake-team-2" });
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: ADA, team: true })?.id).toBe(ada.id);
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: BEN, team: true })?.id).toBe(team.id);
   });
 
   it("are another secret than the team's or another member's of the same name, and are never replaced from elsewhere", () => {
@@ -391,5 +446,32 @@ describe("the held-secret scrubber", () => {
       expect(redactSecretsInText("555123")).toBe("••••••");
     } finally { remove(); }
     expect(redactSecretsInText("My password is fake-hunter2, enjoy.")).toBe("My password is fake-hunter2, enjoy.");
+  });
+});
+
+describe("a pasted GitHub token", () => {
+  // Assembled here: it only has to look like one.
+  const token = ["github", "pat", "11FIXTURE0", "z".repeat(40)].join("_");
+  const member = `p_${"a".repeat(22)}`;
+
+  it("is kept sealed per sign-in, masked like every saved secret, never listed and never a bot's", () => {
+    const store = new VaultStore({ dataDir: dir });
+    store.setGithubToken("owner", { token, login: "octo-fixture" });
+    store.setGithubToken(member, { token: `${token}m`, login: "member-login" });
+    expect(readFileSync(join(dir, LOGINS_FILE), "utf8")).not.toContain(token);
+    const again = new VaultStore({ dataDir: dir });
+    expect(again.githubToken("owner")).toEqual({ token, login: "octo-fixture" });
+    expect(again.githubToken(member)?.login).toBe("member-login");
+    expect(again.secretValues()).toEqual(expect.arrayContaining([token, `${token}m`]));
+    expect(again.listSecrets(TEAM_READER)).toEqual([]);
+    expect(again.listSecrets({ person: member, team: false })).toEqual([]);
+    expect(again.secretNamesFor("bot-a", TEAM_READER)).toEqual([]);
+    expect(new HeldSecrets(again).scrub(`clone with ${token} please`)).not.toContain(token);
+
+    again.forgetPerson(member);
+    expect(again.githubToken(member)).toBeNull();
+    expect(again.githubToken("owner")?.token).toBe(token);
+    again.setGithubToken("owner", null);
+    expect(new VaultStore({ dataDir: dir }).githubToken("owner")).toBeNull();
   });
 });

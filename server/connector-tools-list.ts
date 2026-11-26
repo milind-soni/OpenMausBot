@@ -34,12 +34,16 @@ export function parseMcpResponse(text: string, id: unknown): Record<string, unkn
   return frames.filter(candidate).at(-1) ?? frames.map(diagnostic).filter((frame) => frame !== null).at(-1) ?? null;
 }
 
-const lastToolsLists = new Map<string, unknown>();
+const lastToolsLists = new Map<string, Map<string | undefined, unknown>>();
 
-function toolsListId(payload: unknown): { id: unknown } | null {
+function toolsListId(payload: unknown): { id: unknown; cursor: string | undefined } | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
-  const frame = payload as { method?: unknown; id?: unknown };
-  return frame.method === "tools/list" && frame.id !== undefined ? { id: frame.id } : null;
+  const frame = payload as { method?: unknown; id?: unknown; params?: unknown };
+  if (frame.method !== "tools/list" || frame.id === undefined) return null;
+  if (frame.params !== undefined && (!frame.params || typeof frame.params !== "object" || Array.isArray(frame.params))) return null;
+  const cursor = (frame.params as { cursor?: unknown } | undefined)?.cursor;
+  if (cursor !== undefined && typeof cursor !== "string") return null;
+  return { id: frame.id, cursor };
 }
 
 function toolsResult(text: string, id: unknown): unknown {
@@ -61,7 +65,8 @@ export async function withToolsListFallback(
 ): Promise<Response> {
   const request = toolsListId(payload);
   if (!request) return send();
-  const cached = lastToolsLists.get(backend);
+  const pagesAtStart = lastToolsLists.get(backend);
+  const cached = pagesAtStart?.get(request.cursor);
   const fallback = () => Response.json({ jsonrpc: "2.0", id: request.id, result: cached });
   let response: Response;
   try {
@@ -72,7 +77,18 @@ export async function withToolsListFallback(
   }
   if (response.ok) {
     const result = toolsResult(await response.clone().text(), request.id);
-    if (result !== undefined) lastToolsLists.set(backend, result);
+    if (result !== undefined) {
+      if (request.cursor === undefined) {
+        lastToolsLists.set(backend, new Map([[undefined, result]]));
+      } else {
+        const pages = lastToolsLists.get(backend);
+        if (pages === pagesAtStart || (pagesAtStart === undefined && !pages?.has(undefined))) {
+          const current = pages ?? new Map<string | undefined, unknown>();
+          current.set(request.cursor, result);
+          lastToolsLists.set(backend, current);
+        }
+      }
+    }
   } else if (cached !== undefined && (response.status >= 500 || response.status === 429)) {
     await response.body?.cancel();
     return fallback();

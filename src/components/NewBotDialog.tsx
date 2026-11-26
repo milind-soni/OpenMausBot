@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
-import { api, BotEditorStore, useStore, type Bot } from "@/state/store";
+import { api, BotEditorStore, useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import { BotCreationDraft, EMPTY_BOT_DEFAULTS } from "@/lib/bot-creation-draft";
 import { createConfiguredBot, preparedBotTemplate } from "@/lib/create-configured-bot";
 import { BOT_ROLES, roleProfilePatch } from "@/lib/bot-roles";
-import { readyBot, readyBotTemplate } from "@/lib/ready-bots";
+import { checkerTemplate, readyBot, readyBotTemplate } from "@/lib/ready-bots";
+import { modelName } from "@/lib/simple-model-menu";
 import { chosenPreset, presetDraftPatch, presetGroups, presetPictureFile, presetSummaryLines, type BotPreset } from "@/lib/bot-presets";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -29,7 +30,6 @@ import { inputCls } from "./bot-settings/field";
 import { RoutineEditor } from "./RoutinesPage";
 import { Layer, useIsTopLayer } from "./Layer";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import { SharePresetDialog } from "./SharePresetDialog";
 import { SettingRow, SettingsLinkRow } from "./SettingsPrimitives";
 import { Select } from "./Select";
 
@@ -79,15 +79,19 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   const dialog = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const [checkerModel, setCheckerModel] = useState<{ other: ModelSelection | null; start: ModelSelection } | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
-    void api<BotDefaultsAnswer>("/api/bot-defaults")
+    const ready = defaultsMode || !readyBotId ? undefined : readyBot(readyBotId);
+    void api<BotDefaultsAnswer & { checkerModelSelection?: ModelSelection | null }>(`/api/bot-defaults${ready?.checker ? "?checker=1" : ""}`)
       .then(result => {
         if (cancelled) return;
         const defaults = startingTemplate(result, !defaultsMode);
-        const ready = defaultsMode || !readyBotId ? undefined : readyBot(readyBotId);
-        const next = new BotCreationDraft(ready ? readyBotTemplate(defaults, ready) : defaults, () => render(value => value + 1));
+        const template = ready ? readyBotTemplate(defaults, ready) : defaults;
+        const start = ready?.checker ? checkerTemplate(template, result.checkerModelSelection) : template;
+        const next = new BotCreationDraft(start, () => render(value => value + 1));
         if (ready) next.role = ready.id;
+        if (ready?.checker && start.profile.modelSelection) setCheckerModel({ other: result.checkerModelSelection ?? null, start: start.profile.modelSelection });
         setDraft(next);
         setReady(true);
       }).catch(cause => { if (!cancelled) setError(String(cause)); });
@@ -166,6 +170,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
         <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
+        {ready && checkerModel !== undefined && <CheckerModelLine bot={bot} {...checkerModel} instances={parent.state.instances} />}
         {team && !defaultsMode && teamName && <WhoCanUse team={teamName} everyone={everyone} disabled={saving} onChange={setEveryone} />}
         {choosesVisibility && (
           <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
@@ -219,6 +224,17 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
       <LocalComputerAutoWarning open={warning === "local"} onCancel={() => setWarning(null)} onConfirm={() => { draft.consent.acknowledgeLocalAuto = true; setWarning(null); void save(); }} />
     </div>
   </div>;
+}
+
+/** Which AI a checker from Templates checks on: another provider's, or, with no other ready, the same one. Only while the
+ * review is still on the model it started on: once the person picks another, the picker says which. */
+export function CheckerModelLine({ bot, other, start, instances }: { bot: Bot; other: ModelSelection | null; start: ModelSelection; instances: readonly InstanceInfo[] }) {
+  const selection = bot.modelSelection;
+  if (selection.instanceId !== start.instanceId || selection.model !== start.model) return null;
+  const model = modelName(instances.find(instance => instance.instanceId === selection.instanceId), selection.model);
+  return <p data-new-bot-checker-model={other ? "other" : "same"} className="px-5 pt-3 text-[13px] text-ink-secondary">
+    {other ? t("readyBots.checker.otherAi", { name: bot.name, model }) : t("readyBots.checker.sameAi", { name: bot.name })}
+  </p>;
 }
 
 /** A team bot is its maker's until they share it; this is the one place to share it with everyone from the start. */
@@ -364,21 +380,14 @@ function DraftRoutines({ draft }: { draft: BotCreationDraft }) {
 
 export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
   const [open, setOpen] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const dialogs = <>
-    {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
-    {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
-  </>;
-  // One control per row: the defaults open their editor; sharing them as a preset is a row of its own.
+  const dialogs = open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />;
   if (simple) return <>
     <SettingsLinkRow title={t("newBot.defaults")} subtitle={t("settings.newBot.defaultsLine")} onClick={() => setOpen(true)} data={{ "data-new-bot-defaults": "" }} />
-    <SettingRow title={t("newBot.sharePresetRow")}><button type="button" className="ui-button" data-new-bot-share="" onClick={() => setSharing(true)}>{t("newBot.shareAction")}</button></SettingRow>
     {dialogs}
   </>;
 
   const content = <>
     <div className="flex shrink-0 gap-2">
-      <button type="button" onClick={() => setSharing(true)} className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.sharePreset")}</button>
       <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
     </div>
     {dialogs}

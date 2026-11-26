@@ -10,7 +10,6 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
   return {
     botId: "bot-voice",
     threadId: "thread-voice",
-    depth: 0,
     externalRuntime: false,
     sharedComputers: false,
     client: {
@@ -218,6 +217,34 @@ describe("mcp_server", () => {
   });
 });
 
+describe("skill_manage", () => {
+  it("names the arguments it takes when the action is wrong, and shows a SKILL.md when one is missing, before anything is sent", async () => {
+    const sent: unknown[] = [];
+    const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
+    expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
+      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source, all_bots.',
+      isError: true,
+    });
+    expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
+    expect(sent).toEqual([]);
+  });
+
+  it("sends import with only its source, so the app fetches the skill and it gets the same card as create", async () => {
+    const sent: Array<{ path: string; body: any }> = [];
+    const ctx = context({ client: { api: async (path, init) => { sent.push({ path, body: JSON.parse(String(init?.body)) }); return { name: "pdf" }; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
+    expect((await callTool("skill_manage", { action: "import" }, ctx)).text).toContain("skill_manage needs source");
+    const result = await callTool("skill_manage", { action: "import", source: "https://skills.sh/acme/skills/pdf" }, ctx);
+    expect(result.text).toContain("A confirmation card is now visible to the user for new skill “pdf”.");
+    expect(sent).toEqual([{ path: "/api/internal/skills/stage", body: expect.objectContaining({ action: "import", skill_md: "", source: "https://skills.sh/acme/skills/pdf" }) }]);
+  });
+
+  it("tells bots they can import a skill from GitHub or skills.sh", () => {
+    const tool = availableTools({ ...catalogProfileFromEnv({}), skillAuthoring: true }).find((entry) => entry.name === "skill_manage");
+    expect(tool?.description).toContain("import one from GitHub or skills.sh");
+    expect(tool?.inputSchema.properties).toMatchObject({ action: { enum: expect.arrayContaining(["import"]) } });
+  });
+});
+
 describe("app_settings", () => {
   it("posts the action, id and value and returns the route's text or refusal", async () => {
     const calls: Array<{ path: string; method?: string; body: unknown }> = [];
@@ -415,6 +442,25 @@ describe("memory_update", () => {
     expect(isForgotten("The person likes long replies")).toBe(true);
   });
 
+  it("reads a blank old_text on append or prefer as left out, since neither uses it", async () => {
+    const bot = "bot-memory-blank-old-text";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    for (const old_text of ["", "  ", null]) {
+      const saved = await callTool("memory_update", { action: "append", text: `Exam on Friday ${JSON.stringify(old_text)}`, old_text, until: "2026-12-01" }, ctx);
+      expect(saved.isError, saved.text).toBeFalsy();
+    }
+    expect(readMemoryFile(bot).text).toContain("Exam on Friday \"\"");
+    expect(await callTool("memory_update", { action: "replace", old_text: "", text: "x" }, ctx)).toMatchObject({ isError: true, text: expect.stringContaining("old_text must not be empty") });
+  });
+
+  it("says old_text is not used with append instead of a generic error, and saves nothing", async () => {
+    const bot = "bot-memory-append-old-text";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    const refused = await callTool("memory_update", { action: "append", old_text: "exam", text: "Exam on Friday" }, ctx);
+    expect(refused).toEqual({ isError: true, text: "memory_update was not run: old_text is not used with append. Leave it out to add a new note, or use replace or supersede to change the passage it names." });
+    expect(readMemoryFile(bot).text).not.toContain("Exam on Friday");
+  });
+
   it("removes a whole dated entry when only its fact is named, never leaving a note with a date and no text", async () => {
     const bot = "bot-memory-remove";
     writeMemoryFile(bot, '- 2026-10-27 · from chat "Remember" (noticed) · The person prefers short answers\n- Keep this unique fact.\n');
@@ -508,15 +554,68 @@ describe("coordinate_bots", () => {
     const calls: Array<{ path: string; body: any }> = [];
     const result = await callTool("coordinate_bots", args, context({
       client: {
-        api: async (path, init) => {
+        apiResponse: async (path, init) => {
           calls.push({ path, body: JSON.parse(String(init?.body)) });
-          return { id: "a1" };
+          return { ok: true, status: 200, body: { receipts: [{ botId: "bot-scout", outcome: "queued", detail: "handed to the coordinator", requestId: "a1" }] } };
         },
-        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+        api: async () => { throw new Error("coordinate_bots reads its answer through apiResponse"); },
       },
     }));
     return { result, calls };
   }
+
+  it("passes files on as given, and refuses a files value that is not a short list of paths", async () => {
+    const { result, calls } = await coordinate({ ...BASE, files: ["report.pdf", "/home/cua/workspace/chart.png"] });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]!.body).toEqual({ botIds: ["bot-scout"], message: "Review the draft.", files: ["report.pdf", "/home/cua/workspace/chart.png"] });
+    for (const blank of [[], [""], null, ""]) expect((await coordinate({ ...BASE, files: blank })).calls[0]!.body, JSON.stringify(blank)).not.toHaveProperty("files");
+    for (const files of ["report.pdf", [1], ["a", "b", "c", "d", "e", "f"]]) {
+      const refused = await coordinate({ ...BASE, files });
+      expect(refused.result.isError, JSON.stringify(files)).toBe(true);
+      expect(refused.calls).toEqual([]);
+    }
+  });
+
+  it("sends a 6,000-character brief whole, and refuses only past the engine's limit", async () => {
+    const brief = "x".repeat(6_000);
+    const { result, calls } = await coordinate({ ...BASE, message: brief });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]!.body.message).toBe(brief);
+    const long = await coordinate({ ...BASE, message: "x".repeat(12_001) });
+    expect(long.result.isError).toBe(true);
+    expect(long.result.text).toContain("message takes at most 12000 characters");
+    expect(long.calls).toEqual([]);
+  });
+
+  it("reads a refusal that only says nothing is left to do as a result, not as a failed call", async () => {
+    const detail = "nothing of Scout's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+    const body = { receipts: [{ botId: "bot-scout", outcome: "failed", detail, instructionOnly: true }], error: detail, instructionOnly: true };
+    const result = await callTool("coordinate_bots", { ...BASE, answers: "a1" }, context({
+      client: { apiResponse: async () => ({ ok: false, status: 409, body }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toBe(detail);
+  });
+
+  it("does not fail the call when every refusal in the batch only says there is nothing left to do", async () => {
+    const one = "nothing of Scout's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+    const two = "nothing of Atlas's waits on an answer as a2: it was answered or its work ended. Send it without answers if it still needs doing";
+    const receipts = [{ botId: "bot-scout", outcome: "failed", detail: one, instructionOnly: true }, { botId: "bot-atlas", outcome: "failed", detail: two, instructionOnly: true }];
+    const result = await callTool("coordinate_bots", { ...BASE, bot_ids: ["bot-scout", "bot-atlas"], answers: "a1" }, context({
+      client: { apiResponse: async () => ({ ok: false, status: 409, body: { receipts, error: `${one}; ${two}`, instructionOnly: true } }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toBe(`${one}; ${two}`);
+  });
+
+  it("still fails the call on a refusal that says something went wrong", async () => {
+    const detail = 'No bot with id "bot-ghost" — call list_bots and copy the exact id from the result';
+    const result = await callTool("coordinate_bots", BASE, context({
+      client: { apiResponse: async () => ({ ok: false, status: 403, body: { receipts: [], error: detail } }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(detail);
+  });
 
   it("drops an empty-string group_id instead of posting it", async () => {
     const { result, calls } = await coordinate({ ...BASE, group_id: "" });
@@ -582,6 +681,23 @@ it("falls back to a nonblank camelCase groupId when group_id is blank", async ()
     const { result, calls } = await coordinate({ ...BASE, group_id: "room-9", groupId: "room-9" });
     expect(result.isError).toBeFalsy();
     expect(calls[0].body.groupId).toBe("room-9");
+  });
+});
+
+describe("assignment_status", () => {
+  const stub = (status: number, body: Record<string, unknown>) => context({
+    client: { apiResponse: async () => ({ ok: false, status, body }), api: async () => ({}) },
+  });
+
+  it("answers an id sent this turn as an instruction, and keeps a real failure a failure", async () => {
+    const text = "Assignment asg-1 was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.";
+    const answer = await callTool("assignment_status", { id: "asg-1" }, stub(409, { error: text, sentThisTurn: true }));
+    expect(answer.isError).toBeUndefined();
+    expect(answer.text).toBe(text);
+    expect((await callTool("assignment_status", { id: "asg-1" }, stub(409, { error: text }))).isError).toBe(true);
+    const unknown = await callTool("assignment_status", { id: "asg-2" }, stub(404, { error: "unknown assignment id" }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("No assignment asg-2 is known here");
   });
 });
 
@@ -660,5 +776,17 @@ describe("reset_cloud_computer", () => {
     expect(tool({})).toBeUndefined();
     expect(Object.keys(tool({ OMB_MEETINGS: "1" })?.inputSchema.properties ?? {})).toEqual(["why"]);
     expect(Object.keys(tool({ OMB_MEETINGS: "1", OMB_CHIEF_OF_STAFF: "1" })?.inputSchema.properties ?? {})).toEqual(["why", "for_bot_id"]);
+  });
+});
+
+describe("list_bots", () => {
+  const elsewhere = "The person's bots in their other places, which can't be reached from here: Ziggy (on My Cloud). If asked for one, say where it lives.";
+  const list = (answer: Record<string, unknown>) => callTool("list_bots", {}, context({ client: { api: async () => answer, apiResponse: async () => ({ ok: true, status: 200, body: answer }) } }));
+
+  it("names the bots of the person's other places after the ones here, so none of them is taken for no such bot", async () => {
+    const result = await list({ bots: [{ id: "bot-scout", name: "Scout", model: "m", status: "available" }], elsewhere });
+    expect(result.text).toMatch(/^Bots you can reach .*\n- Scout \[id: bot-scout, model: m\]\n\n.*resume you automatically\.\n\nThe person's bots in their other places/su);
+    expect((await list({ bots: [], elsewhere })).text).toBe(`No other bots you can reach yet.\n\n${elsewhere}`);
+    expect((await list({ bots: [] })).text).toBe("No other bots you can reach yet.");
   });
 });

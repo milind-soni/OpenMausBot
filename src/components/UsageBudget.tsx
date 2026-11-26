@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { formatUsd } from "@/lib/usage";
 import { Card } from "./SettingsPrimitives";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export interface BudgetState {
   month: string;
@@ -32,7 +33,7 @@ export function budgetTone(state: BudgetState | null): "quiet" | "warning" | "da
 }
 
 export function BudgetCard({ budget }: { budget: BudgetState | null }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const saved = state.config?.budgets ?? {};
   const [monthly, setMonthly] = useState(saved.monthlyUsd === undefined ? "" : String(saved.monthlyUsd));
   const [warnAt, setWarnAt] = useState(saved.warnAtPercent === undefined ? "80" : String(saved.warnAtPercent));
@@ -111,7 +112,7 @@ function rowsFrom(prices: Record<string, ModelPrice> | undefined): PriceRow[] {
 }
 
 export function PricesCard() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const saved = state.config?.billing;
   const [currency, setCurrency] = useState(saved?.currency ?? "USD");
   const [rows, setRows] = useState<PriceRow[]>(rowsFrom(saved?.prices));
@@ -193,7 +194,7 @@ export function PricesCard() {
 }
 
 export function UsageBudgetCards({ budget }: { budget: BudgetState | null }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const budgets = entitledTo(state.config, "budgets");
   const billing = entitledTo(state.config, "billing");
   if (!budgets && !billing) return null;

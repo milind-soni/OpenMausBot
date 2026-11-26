@@ -2,7 +2,6 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import { bridgedCallTarget } from "./drivers/agents-bridge.ts";
@@ -12,9 +11,12 @@ import { directoryCallTarget, isDirectoryTool } from "./mcp-directory.ts";
 import { QUERY_TOOL, QUERY_TOOL_NAME, ResultStore, answerQuery, describeShape, exampleQuery } from "./mcp-shape.ts";
 import { fitToolList } from "./mcp-tool-schema.ts";
 import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured } from "./mcp-trim.ts";
+import { descendantsOf, signalTree, stopTree, type TreeProcess } from "./proc-descendants.ts";
 import { killCliTree } from "./procs.ts";
+import { readStdioLines } from "./stdio-lines.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsListResultForSessionShare } from "./tool-list-share.ts";
 
 type Json = Record<string, unknown>;
 
@@ -223,6 +225,9 @@ if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
 const childEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.env };
 for (const key of Object.keys(childEnv)) if (key.startsWith("OMB_GATE_")) delete childEnv[key];
+// The gate fits and records the list; a relay behind it doing so too would record the fitted list as the full one.
+delete childEnv[TOOL_LIST_SHARE_ENV];
+delete childEnv[TOOL_LIST_RECORD_ENV];
 
 // CreateProcess cannot exec an npm .cmd shim or a node-shebang script, and a shell would re-interpret JSON argv.
 const resolved = resolveCliSpawn(spec.command, spec.args ?? []);
@@ -234,22 +239,41 @@ const child = spawn(resolved.command, resolved.args, {
   ...(process.platform === "win32" ? { windowsHide: true } : {}),
 });
 
-// The real server must not outlive a killed gate, and on Windows only taskkill /T reaps a tree.
-let reaping = false;
-const reapChild = () => {
-  if (reaping) return;
-  reaping = true;
-  void killCliTree(child);
+// The real server must not outlive its gate: a launcher (npx, a shell) does not pass a signal on to what it started, so
+// each process below the gate is signalled itself. On Windows only taskkill /T reaps a tree.
+const END_OF_INPUT_GRACE_MS = 5_000;
+const TREE_STOP_GRACE_MS = 1_500;
+const tree: TreeProcess[] = [];
+const captureTree = () => {
+  if (!child.pid) return;
+  const seen = new Set(tree.map((one) => `${one.pid}:${one.start}`));
+  for (const one of descendantsOf(child.pid)) {
+    if (!seen.has(`${one.pid}:${one.start}`)) tree.push(one);
+  }
 };
-process.on("SIGTERM", () => {
-  reapChild();
-  process.exit(0);
+let stopping: Promise<void> | undefined;
+const stopUpstream = (): Promise<void> => stopping ??= (async () => {
+  captureTree();
+  if (process.platform === "win32") {
+    await killCliTree(child, TREE_STOP_GRACE_MS);
+    return;
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+  await stopTree(tree, TREE_STOP_GRACE_MS);
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+})();
+const leave = (code: number) => void stopUpstream().finally(() => process.exit(code));
+process.on("SIGTERM", () => leave(0));
+process.on("SIGINT", () => leave(0));
+process.on("exit", () => {
+  if (stopping) return;
+  if (process.platform === "win32") void killCliTree(child);
+  else {
+    captureTree();
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    signalTree(tree, "SIGTERM");
+  }
 });
-process.on("SIGINT", () => {
-  reapChild();
-  process.exit(0);
-});
-process.on("exit", reapChild);
 
 child.on("error", (error) => {
   process.stderr.write(`mcp-gate(${NAME}): could not start ${resolved.command}: ${String(error)}\n`);
@@ -268,7 +292,7 @@ function callTarget(name: string, args: unknown): string | undefined {
 /** JSON-RPC string and numeric IDs are separate, even when their text is equal. */
 const pending = new Map<string, Pending>();
 
-createInterface({ input: process.stdin }).on("line", (line) => {
+readStdioLines(process.stdin, (line) => {
   let message: Json | undefined;
   if (line.trim()) {
     try {
@@ -327,9 +351,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   child.stdin.write(`${line}\n`);
 });
-process.stdin.on("end", () => child.stdin.end());
+process.stdin.on("end", () => {
+  child.stdin.end();
+  captureTree();
+  setTimeout(() => leave(0), END_OF_INPUT_GRACE_MS);
+});
 
-createInterface({ input: child.stdout }).on("line", (line) => {
+readStdioLines(child.stdout, (line) => {
   if (!line.trim()) return;
   let message: Json | undefined;
   try {
@@ -378,11 +406,16 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   if (SCHEMA_PROFILE && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
     result.tools = fitToolList(result.tools, SCHEMA_PROFILE, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
-  if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools) && result.nextCursor === undefined) {
-    result.tools = [...result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME), QUERY_TOOL];
+  if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
+    const tools = result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME);
+    if (result.nextCursor === undefined) tools.push(QUERY_TOOL);
+    result.tools = tools;
   }
   if (TOOL_LIMIT !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result)) {
     message.result = capToolListResult(result, TOOL_LIMIT, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
+  }
+  if (request?.kind === "list" && message.error === undefined) {
+    message.result = toolsListResultForSessionShare(message.result, process.env, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
   if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
   if (request?.kind === "call" && request.trim && isRecord(result)) {
@@ -399,4 +432,4 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 });
 
-child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+child.on("exit", (code, signal) => leave(code ?? (signal ? 1 : 0)));

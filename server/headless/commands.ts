@@ -42,7 +42,7 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   if (tooOld) problems.push(`OpenMausBot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
   if (isOmb && !availableCount) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
   if (session?.kind === "session" && typeof session.expiresAt === "number" && session.expiresAt - Date.now() < 14 * DAY) {
-    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with openmausbot connect`);
+    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: sign in again with openmausbot login (a script: openmausbot token create)`);
   }
   const browser = config?.browserEngine ?? null;
   if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `openmausbot browser install`)" : ""}`);
@@ -73,9 +73,14 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
 export async function doctor(ctx: VerbContext): Promise<VerbOutcome> {
   if (ctx.flags.host === true) {
     if (flag(ctx.flags, "wait") !== undefined || flag(ctx.flags, "url") !== undefined) throw usageError("doctor --host checks this machine: drop --wait and --url");
+    if (ctx.flags.data === true || ctx.flags.fix === true) throw usageError("doctor --host and doctor --data are two runs");
     return (await import("./host-doctor.ts")).hostDoctor(ctx);
   }
-  if (flag(ctx.flags, "data-dir") !== undefined || flag(ctx.flags, "domain") !== undefined) throw usageError("--data-dir and --domain go with doctor --host");
+  if (ctx.flags.data === true || ctx.flags.fix === true) {
+    if (["wait", "url", "port", "token-file", "domain"].some((name) => flag(ctx.flags, name) !== undefined)) throw usageError("doctor --data checks this computer's data folder: drop --wait, --url, --port, --token-file and --domain");
+    return (await import("../doctor/command.ts")).dataDoctor(ctx);
+  }
+  if (flag(ctx.flags, "data-dir") !== undefined || flag(ctx.flags, "domain") !== undefined) throw usageError("--data-dir goes with doctor --host or doctor --data, --domain with doctor --host");
   const raw = flag(ctx.flags, "wait");
   const deadline = Date.now() + (raw ? parseDuration(raw, "--wait") : 0);
   for (;;) {
@@ -93,14 +98,15 @@ export async function doctor(ctx: VerbContext): Promise<VerbOutcome> {
 }
 
 export async function list(ctx: VerbContext): Promise<VerbOutcome> {
-  const tool = ctx.verb === "bots" ? "list_bots" : ctx.verb === "channels" ? "list_channels" : "list_available_models";
+  const bots = ctx.verb === "bots" || ctx.verb === "bots list";
+  const tool = bots ? "list_bots" : ctx.verb === "channels" ? "list_channels" : "list_available_models";
   const result = await (await ctx.client()).tool(tool, {});
-  const human = ctx.verb === "bots"
+  const human = bots
     ? (result.bots as Rec[]).map((bot) => `${bot.name}${bot.title ? ` — ${bot.title}` : ""} · ${bot.section ? `team ${bot.section}` : "no team"}${bot.chiefOfStaff ? " · Chief of Staff" : ""} · ${bot.activity === "waiting-on-you" ? "waiting on you" : bot.busy ? "working" : bot.waitingForTeammates ? "waiting on teammates" : "idle"} · id ${bot.id}`)
     : ctx.verb === "channels"
       ? (result.channels as Rec[]).map((room) => `${room.name} · ${room.memberIds?.length ?? 0} members · ${room.working ? "working" : "idle"} · id ${room.id}`)
       : (result.instances as Rec[]).map((instance) => `${instance.instanceId} · ${instance.snapshot?.state ?? "unknown"}${instance.models?.default ? ` · default ${instance.models.default}` : ""}${Array.isArray(instance.models?.options) ? ` · ${instance.models.options.length} models` : ""}`);
-  return { result, exitCode: EXIT.done, human: human.length ? human : [`No ${ctx.verb === "models" ? "engines" : ctx.verb} yet.`] };
+  return { result, exitCode: EXIT.done, human: human.length ? human : [`No ${ctx.verb === "models" ? "engines" : bots ? "bots" : ctx.verb} yet.`] };
 }
 
 export async function messages(ctx: VerbContext): Promise<VerbOutcome> {
@@ -205,9 +211,7 @@ export async function newChannel(ctx: VerbContext): Promise<VerbOutcome> {
 
 export async function setModel(ctx: VerbContext): Promise<VerbOutcome> {
   const selection = modelArgs(ctx, true);
-  const explicit = flag(ctx.flags, "bot")?.trim();
-  const target = explicit ? { type: "bot" as const, id: explicit, ...(flag(ctx.flags, "task") ? { taskId: flag(ctx.flags, "task")!.trim() } : {}) }
-    : await resolveTarget(ctx, ctx.positionals[0], "bot");
+  const target = await resolveTarget(ctx, ctx.positionals[0], "bot");
   const args = { bot_id: target.id, ...(target.taskId ? { task_id: target.taskId } : {}), ...selection };
   const preview = dryRun(ctx, "set_bot_model", args);
   if (preview) return preview;
@@ -216,13 +220,14 @@ export async function setModel(ctx: VerbContext): Promise<VerbOutcome> {
 }
 
 export async function edit(ctx: VerbContext): Promise<VerbOutcome> {
-  const explicit = flag(ctx.flags, "bot")?.trim();
+  const named = Boolean(flag(ctx.flags, "bot") ?? flag(ctx.flags, "channel") ?? flag(ctx.flags, "thread"));
   const [first, second] = ctx.positionals;
-  const target: Target | undefined = explicit ? { type: "bot", id: explicit, ...(flag(ctx.flags, "task") ? { taskId: flag(ctx.flags, "task")!.trim() } : {}) } : undefined;
-  if (!target && !first) throw usageError("a bot is required", "openmausbot edit BOT --message ID TEXT, or --bot ID");
+  if (named && second !== undefined) throw usageError("edit with a named target takes at most one message argument",
+    "openmausbot edit --thread ID --message ID TEXT, or edit BOT --message ID TEXT");
+  if (!named && !first) throw usageError("a bot is required", "openmausbot edit BOT --message ID TEXT, or --bot ID or --thread ID");
   const messageId = requiredFlag(ctx.flags, "message");
-  const text = await readMessage(ctx, target ? first : second);
-  const resolved = target ?? await resolveTarget(ctx, first, "bot");
+  const text = await readMessage(ctx, named ? first : second);
+  const resolved = await resolveTarget(ctx, named ? undefined : first, "bot");
   const args = { bot_id: resolved.id, message_id: messageId, text, ...(resolved.taskId ? { task_id: resolved.taskId } : {}) };
   const preview = dryRun(ctx, "edit_bot_message", args);
   if (preview) return preview;

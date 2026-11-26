@@ -77,7 +77,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     const b = (await control("new-bot", "--name", "Engineer", "--section", "Engineering") as any).bot;
 
     await click("New or share");
-    await click("Create department");
+    await click("Add department");
     await type("Department name", "Delivery");
     await click("Create department");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Delivery"');
@@ -136,7 +136,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
       };
       return true;
     })()`);
-    await click("New Bot");
+    await click("New bot");
     let created: { id: string; name: string };
     await expect.poll(async () => {
       created = (await ui("eval", "--js", "window.createdTeamMember ?? null")).result;

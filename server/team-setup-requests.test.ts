@@ -11,7 +11,7 @@ import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { DirectApply } from "./direct-apply.ts";
 
-function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>) {
+function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean }>, newBotApproval?: () => "ask" | "auto" | "full" | undefined) {
   const bots: BotRecord[] = [];
   const messages: Array<{ id: string; role?: string; card?: OptionCardData }> = [];
   const teams = ["", "Work", "Engineering", "Private"];
@@ -23,7 +23,7 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   };
   const chief = bot("Clive", { chiefOfStaff: true, managedSections: ["Engineering"] });
   const peer = bot("Ada");
-  const apply = vi.fn((request: TeamSetupRequest): TeamSetupResult => {
+  const apply = vi.fn((request: TeamSetupRequest, _approval?: string): TeamSetupResult => {
     const result: TeamSetupResult = { state: "applied", newTeams: request.newTeams, bots: request.operations.map((op) => {
       const target = bots.find((item) => item.id === op.botId) ?? bot(op.botId);
       Object.assign(target, op.fields);
@@ -54,11 +54,16 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
   const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, deletionRefusal, autoApply, validateChange,
+    mcpServerProblem: (name, botId) => {
+      const servers: Record<string, { bot?: string }> = { hindsight: {}, linear: {}, "clive-notes": { bot: "Clive" } };
+      if (!servers[name]) return "no such server";
+      return !servers[name].bot || servers[name].bot === botId ? null : "that server belongs to another bot";
+    },
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
       return current?.approvalMode === "full" && selection.instanceId !== current.modelSelection.instanceId ? "Existing permissions are incompatible" : null;
     },
-    ...(caps ? { driverCapabilities: (instanceId: string) => caps[instanceId] } : {}),
+    ...(caps ? { driverCapabilities: (instanceId: string) => caps[instanceId] } : {}), ...(newBotApproval ? { newBotApproval } : {}),
   });
   const propose = (operations: unknown[], newTeams: string[] = []) => service.propose({ botId: chief.id, threadId: chief.threadId, plan: { reason: "Requested specialist setup", operations, newTeams } });
   const submit = (operations: unknown[], newTeams: string[] = []) => service.submit({ botId: chief.id, threadId: chief.threadId, plan: { reason: "Requested specialist setup", operations, newTeams } });
@@ -69,6 +74,13 @@ const specialist = (key: string, section: string, modelSelection = { instanceId:
   fields: { name: key, title: "Specialist", soul: "Finish the assigned work.", section, modelSelection } });
 
 describe("reviewed Chief team setup", () => {
+  it("applies a reviewed setup with the saved New bot level for the bots it creates", async () => {
+    const h = harness(undefined, () => "auto");
+    const request = h.propose([specialist("Analyst", "Engineering")]);
+    expect((await h.resolve(request.requestId))?.result.state).toBe("applied");
+    expect(h.apply).toHaveBeenCalledWith(expect.objectContaining({ requestId: request.requestId }), "auto");
+  });
+
   it("reviews promotion in an authorized team without changing anything on denial", async () => {
     const h = harness(); h.peer.section = "Engineering";
     const before = structuredClone(h.store.bots);
@@ -97,6 +109,16 @@ describe("reviewed Chief team setup", () => {
     expect(card.detail).toContain("Default AI and model");
     expect(card.detail).not.toContain("peer coordination");
     expect(card.detail).not.toContain("approval levels");
+  });
+  it("explains at proposal time that a team listed as new already exists, instead of the stale-card message", async () => {
+    const h = harness();
+    const before = h.messages.length;
+    expect(() => h.propose([specialist("Mira", "Private")], ["Private"]))
+      .toThrow(/^Team "Private" already exists, so it can't be a new team\. That is the Private department, which Clive is not in charge of\. .*Nothing was proposed\.$/);
+    expect(() => h.propose([specialist("Mira", "Engineering")], ["Engineering"]))
+      .toThrow(/^Team "Engineering" already exists, so it can't be a new team\. Leave it out of newTeams and use it as an existing team\. Nothing was proposed\.$/);
+    await expect(h.submit([specialist("Mira", "Private")], ["Private"])).rejects.toThrow(/already exists/);
+    expect(h.messages.length).toBe(before);
   });
   it("creates a Chief in a new team and permits explicit replacement regardless of operation order", async () => {
     const h = harness();
@@ -206,6 +228,13 @@ describe("reviewed Chief team setup", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { [field]: true } }])).toThrow();
     expect(h.messages).toHaveLength(0);
+  });
+  it("names where an unknown key is and what that level takes", () => {
+    const h = harness();
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { model: "gpt" } }]))
+      .toThrow(/^operations\.0\.fields: Unrecognized key: "model"\. It takes chiefOfStaff, name, title, description, soul, soulAppend, cwd, section, modelSelection, mcpServers\.$/);
+    expect(() => h.service.propose({ botId: h.chief.id, threadId: h.chief.threadId, plan: { reason: "Requested", operations: [{ action: "update", botId: h.peer.id, fields: { title: "Lead" } }], teams: [] } }))
+      .toThrow(/^Unrecognized key: "teams"\. It takes reason, newTeams, operations\.$/);
   });
   it("rejects unknown models, foreign teams, missing specialists and duplicate names", () => {
     const h = harness();
@@ -584,6 +613,44 @@ describe("team setup that applies on its own", () => {
     expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "applied", applied: true, result: { error: expect.stringContaining("could not be added") } });
     expect(h.chief.lastTeamSetupReceipt?.result.state).toBe("applied");
     expect(h.apply).toHaveBeenCalledTimes(1);
+    expect(h.messages).toHaveLength(0);
+  });
+});
+
+describe("a bot's MCP servers in team setup", () => {
+  it("applies under Full Access like the plan's other changes, and Undo gives back every enabled server", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["linear", "hindsight", "linear"] } }]);
+    expect(response).toMatchObject({ applied: true, state: "applied" });
+    expect(response.detail).toContain("MCP servers it can use: every enabled server → linear, hindsight");
+    expect(response.detail).toContain("Other execution permissions are unchanged.");
+    expect(h.peer.mcpServers).toEqual(["linear", "hindsight"]);
+    expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: response.requestId })).toMatchObject({ state: "undone" });
+    expect(Array.isArray(h.apply.mock.calls.at(-1)![0].operations[0].fields.mcpServers)).toBe(false);
+  });
+  it("waits on the person's card below Full Access, like the plan's other changes, then applies the list they confirmed", async () => {
+    const h = harness();
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }]);
+    expect(response).toMatchObject({ applied: false, state: "pending" });
+    expect(h.apply).not.toHaveBeenCalled();
+    expect(h.messages[0].card?.options).toEqual(["Apply setup", "Cancel"]);
+    expect(await h.resolve(response.requestId)).toMatchObject({ result: { state: "applied" } });
+    expect(h.peer.mcpServers).toEqual(["hindsight"]);
+  });
+  it("cancels when the bot's list changed after the card was shown", async () => {
+    const h = harness();
+    const card = h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }]);
+    h.peer.mcpServers = ["linear"];
+    expect((await h.resolve(card.requestId))?.result.state).toBe("cancelled");
+    expect(h.peer.mcpServers).toEqual(["linear"]);
+  });
+  it("refuses a new bot, an unknown server, another bot's own server, and a busy bot", () => {
+    const h = harness();
+    expect(() => h.propose([{ ...specialist("Mira", "Work"), fields: { ...specialist("Mira", "Work").fields, mcpServers: ["hindsight"] } }])).toThrow(/existing bot/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["nope"] } }])).toThrow(/no such server/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["clive-notes"] } }])).toThrow(/another bot/);
+    h.peer.busy = true;
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }])).toThrow(/Stop @Ada/);
     expect(h.messages).toHaveLength(0);
   });
 });

@@ -8,11 +8,12 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
-import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
-import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
+import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type BitwardenCredentials, type BitwardenSecretsCredentials, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
+import { VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import type { TotpKey } from "./totp.ts";
+import { STORED_VAULT_VALUE_MAX_BYTES, VAULT_VALUE_MAX_BYTES } from "./vault/value-limits.ts";
 
 export const LOGINS_FILE = "logins.json.enc";
 export const LOGINS_KEY_FILE = "logins-key";
@@ -28,6 +29,12 @@ const totpSchema = z.object({
 });
 
 const botsSchema = z.union([z.literal("all"), z.array(z.string())]);
+
+function checkNewSecretValue(value: string): void {
+  if (Buffer.byteLength(value) > VAULT_VALUE_MAX_BYTES) {
+    throw new RangeError(`A new Vault secret value can be at most ${VAULT_VALUE_MAX_BYTES} bytes.`);
+  }
+}
 
 // The previous release reads `version: 1` records by `host` alone and replaces a file it cannot parse, so every record
 // keeps `host` (its first sign-in host) and the version stays 1: going back a release never loses a saved login.
@@ -50,7 +57,7 @@ const diskLoginSchema = z.object({
 const diskSecretSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(VAULT_SECRET_NAME_MAX),
-  value: z.string().min(1).max(SECRET_VALUE_MAX_BYTES),
+  value: z.string().min(1).refine((value) => Buffer.byteLength(value) <= STORED_VAULT_VALUE_MAX_BYTES),
   source: z.enum(["card", "settings"]),
   bots: botsSchema,
   refOnly: z.literal(true).optional(),
@@ -65,6 +72,10 @@ const fileSchema = z.object({
   logins: z.array(diskLoginSchema),
   secrets: z.array(diskSecretSchema).optional(),
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
+  /** Bitwarden's server address, API key and master password, read only by its command line tool's environment. */
+  bitwarden: z.object({ serverUrl: z.string().min(1), clientId: z.string().min(1), clientSecret: z.string().min(1), password: z.string().min(1), connectedAt: z.number() }).optional(),
+  /** Bitwarden Secrets Manager's server address and a machine account's access token. */
+  bitwardenSecrets: z.object({ serverUrl: z.string().min(1), accessToken: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
   /** 1Password item (`<vault id>:<item id>`) → the bots that may use it, ahead of its vault's choice. Kept across reconnects. */
@@ -72,6 +83,9 @@ const fileSchema = z.object({
   /** Security: MCP server name → the items whose `vault:<id>` that server may read. Written only when a bot's secretRef
    * is redeemed into the server (or a move carries the server), so a pointer planted in config.json reads nothing. */
   mcpKeys: z.record(z.string(), z.array(z.string().min(1))).optional(),
+  /** A pasted GitHub token per sign-in (`owner`, or a Team Cloud member's person key): server-side git and GitHub calls
+   * only (server/github/sign-in.ts), never a bot's, never listed with the saved secrets. */
+  github: z.record(z.string(), z.object({ token: z.string().min(1), login: z.string(), savedAt: z.number() })).optional(),
 });
 
 const memberSecretsSchema = z.object({
@@ -127,6 +141,8 @@ export interface NewLogin extends LoginPlace {
 }
 
 export interface LoginPatch {
+  /** A new host for the login: its site becomes that host's, and its sign-in hosts just that host. */
+  site?: string;
   username?: string;
   password?: string;
   totp?: TotpKey | null;
@@ -290,12 +306,15 @@ export class VaultStore {
     return summarizeLogin(login);
   }
 
-  update(id: string, patch: LoginPatch): LoginSummary | null {
+  /** "taken" when the login would move onto a site where the same account is already saved. */
+  update(id: string, patch: LoginPatch): LoginSummary | null | "taken" {
     const data = this.read();
     const current = data.logins.find((login) => login.id === id);
     if (!current) return null;
+    const moved = patch.site !== undefined && !current.hosts.includes(patch.site);
     const next: StoredLogin = {
       ...current,
+      ...(moved ? loginPlace(patch.site!, [], current.exactHost) : {}),
       ...(patch.username === undefined ? {} : { username: patch.username }),
       ...(patch.password === undefined ? {} : { password: patch.password }),
       ...(patch.bots === undefined ? {} : { bots: patch.bots }),
@@ -304,6 +323,7 @@ export class VaultStore {
     };
     if (patch.totp === null) delete next.totp;
     else if (patch.totp) next.totp = patch.totp;
+    if (moved && data.logins.some((login) => login.id !== id && sameAccount(login, next))) return "taken";
     this.write({ ...data, logins: data.logins.map((login) => login.id === id ? next : login) });
     return summarizeLogin(next);
   }
@@ -345,13 +365,15 @@ export class VaultStore {
     return (this.read().secrets ?? []).filter((secret) => secretReadable(secret, reader)).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: one kept to some bots before
-   * one for every bot, then the newest. */
+  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: the person's own before the
+   * team's of the same name, whichever was saved later; then one kept to some bots before one for every bot; then the
+   * newest. */
   usableSecret(name: string, botId: string, delivery: "ref" | "file", reader: VaultReader): StoredSecret | null {
     const key = vaultNameKey(name);
     const matches = (this.read().secrets ?? []).filter((secret) => vaultNameKey(secret.name) === key && loginUsableBy(secret, botId) &&
       secretReadable(secret, reader) && (delivery === "ref" || !secret.refOnly));
-    return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
+    return matches.sort((a, b) => Number(Boolean(b.person)) - Number(Boolean(a.person)) || Number(b.bots !== "all") - Number(a.bots !== "all") ||
+      b.updatedAt - a.updatedAt)[0] ?? null;
   }
 
   secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
@@ -361,6 +383,7 @@ export class VaultStore {
 
   /** The same name saved again for the same bots and the same person replaces its value; otherwise it is a new secret. */
   saveSecret(input: NewSecret): VaultSecret {
+    checkNewSecretValue(input.value);
     const data = this.read();
     const secrets = data.secrets ?? [];
     const at = this.now();
@@ -388,6 +411,7 @@ export class VaultStore {
     const at = this.now();
     const current = secrets.find((secret) => secret.id === input.id);
     if (current?.person) return null;
+    checkNewSecretValue(input.value);
     const received: StoredSecret = {
       id: input.id, name: input.name, value: input.value, source: input.source, bots: input.bots, ...(input.refOnly ? { refOnly: true } : {}),
       createdAt: current?.createdAt ?? at, updatedAt: at, ...(current?.lastUsedAt === undefined ? {} : { lastUsedAt: current.lastUsedAt }),
@@ -401,6 +425,7 @@ export class VaultStore {
     const data = this.read();
     const current = data.secrets?.find((secret) => secret.id === id);
     if (!data.secrets || !current) return null;
+    if (patch.value !== undefined) checkNewSecretValue(patch.value);
     const next: StoredSecret = {
       ...current,
       ...(patch.name === undefined ? {} : { name: patch.name }),
@@ -425,8 +450,9 @@ export class VaultStore {
   forgetPerson(person: string): number {
     const data = this.read();
     const gone = (data.secrets ?? []).filter((secret) => secret.person === person).map((secret) => secret.id);
+    if (data.github?.[person]) this.setGithubToken(person, null);
     if (!gone.length) return 0;
-    this.write({ ...data, secrets: data.secrets!.filter((secret) => secret.person !== person) });
+    this.write({ ...this.read(), secrets: data.secrets!.filter((secret) => secret.person !== person) });
     for (const id of gone) this.secretChanged(id);
     return gone.length;
   }
@@ -484,6 +510,26 @@ export class VaultStore {
     this.write(token ? { ...rest, onePassword: { token, connectedAt: this.now() } } : rest);
   }
 
+  bitwardenCredentials(): BitwardenCredentials | null {
+    const saved = this.read().bitwarden;
+    return saved ? { serverUrl: saved.serverUrl, clientId: saved.clientId, clientSecret: saved.clientSecret, password: saved.password } : null;
+  }
+
+  setBitwardenCredentials(credentials: BitwardenCredentials | null): void {
+    const { bitwarden: _previous, ...rest } = this.read();
+    this.write(credentials ? { ...rest, bitwarden: { ...credentials, connectedAt: this.now() } } : rest);
+  }
+
+  bitwardenSecretsCredentials(): BitwardenSecretsCredentials | null {
+    const saved = this.read().bitwardenSecrets;
+    return saved ? { serverUrl: saved.serverUrl, accessToken: saved.accessToken } : null;
+  }
+
+  setBitwardenSecretsCredentials(credentials: BitwardenSecretsCredentials | null): void {
+    const { bitwardenSecrets: _previous, ...rest } = this.read();
+    this.write(credentials ? { ...rest, bitwardenSecrets: { ...credentials, connectedAt: this.now() } } : rest);
+  }
+
   onePasswordGrants(): Record<string, LoginBots> {
     return this.read().onePasswordGrants ?? {};
   }
@@ -513,11 +559,27 @@ export class VaultStore {
     this.write(Object.keys(grants).length ? { ...rest, onePasswordItemGrants: grants } : rest);
   }
 
+  /** The GitHub token pasted for one sign-in (sign-in.ts): never a route's answer, never a bot's. */
+  githubToken(audience: string): { token: string; login: string } | null {
+    const saved = this.read().github?.[audience];
+    return saved ? { token: saved.token, login: saved.login } : null;
+  }
+
+  setGithubToken(audience: string, saved: { token: string; login: string } | null): void {
+    const { github, ...rest } = this.read();
+    const { [audience]: _previous, ...others } = github ?? {};
+    const next = saved ? { ...others, [audience]: { ...saved, savedAt: this.now() } } : others;
+    this.write(Object.keys(next).length ? { ...rest, github: next } : rest);
+  }
+
   secretValues(): string[] {
     const data = this.read();
     return [
+      ...Object.values(data.github ?? {}).map((saved) => saved.token),
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
       ...(data.onePassword ? [data.onePassword.token] : []),
+      ...(data.bitwarden ? [data.bitwarden.clientSecret, data.bitwarden.password] : []),
+      ...(data.bitwardenSecrets ? [data.bitwardenSecrets.accessToken] : []),
       ...(data.secrets ?? []).map((secret) => secret.value),
     ];
   }

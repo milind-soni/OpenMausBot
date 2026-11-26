@@ -67,8 +67,9 @@ function actionTokens(name: string): string[] {
     const [, server = "", ...rest] = name.split("__");
     action = rest.join("_");
     if (isConnectedAppsServer(server)) return actionTokens(action);
-  } else if (/^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(name)) {
-    action = name.slice(name.indexOf("_") + 1);
+  } else if (/^(?:[A-Z][A-Z0-9]*|_[A-Z0-9]+)_[A-Z0-9_]+$/.test(name)) {
+    const start = name.startsWith("_") ? 1 : 0;
+    action = name.slice(name.indexOf("_", start) + 1);
   }
   return action
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -113,6 +114,11 @@ export function normalizeOutboundPolicy(value: unknown): OutboundPolicy | null {
 /** What a bot without a stored policy does: ask, every time. */
 export const DEFAULT_OUTBOUND_POLICY: OutboundPolicy = { policy: "ask" };
 
+/** The rule a bot's sends follow: its own, or without one, sending freely at Full access and asking otherwise. */
+export function effectiveOutboundPolicy(rule: OutboundPolicy | undefined, fullAccess: boolean): OutboundPolicy {
+  return rule ?? (fullAccess ? { policy: "allow" } : DEFAULT_OUTBOUND_POLICY);
+}
+
 /** Drops from a stored bot's rule what `normalizeOutboundPolicy` drops, so every copy of one rule reads the same; true
  * when it changed. A rule that is not one is left as it is, and asks. */
 export function trimOutboundPolicy(bot: { outbound?: OutboundPolicy }): boolean {
@@ -127,6 +133,8 @@ export function trimOutboundPolicy(bot: { outbound?: OutboundPolicy }): boolean 
 export interface ConnectorCall {
   slug: string;
   arguments?: unknown;
+  /** The connected account a multi-execute item names (its id or alias). */
+  account?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -147,7 +155,11 @@ export function connectorCallsIn(name: string, args: unknown): ConnectorCall[] {
       if (!isRecord(item)) return [{ slug: "COMPOSIO_PROXY_EXECUTE", arguments: args }];
       const slug = [item.tool_slug, item.slug, item.name, item.tool].find((value) => typeof value === "string" && value);
       if (typeof slug !== "string") return [{ slug: "COMPOSIO_PROXY_EXECUTE", arguments: args }];
-      calls.push({ slug, ...(item.arguments !== undefined ? { arguments: item.arguments } : {}) });
+      calls.push({
+        slug,
+        ...(item.arguments !== undefined ? { arguments: item.arguments } : {}),
+        ...(typeof item.account === "string" && item.account.trim() ? { account: item.account.trim() } : {}),
+      });
     }
     return calls;
   }

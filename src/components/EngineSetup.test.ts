@@ -66,7 +66,7 @@ describe("managed engine setup errors", () => {
     const markup = render(engine);
     expect(markup).toContain(reason);
     expect(markup).toContain('role="alert"');
-    expect(markup).toContain("Install official Antigravity");
+    expect(markup).toContain("Install Google Antigravity CLI");
     expect(engineStatus(engine)).toBe("Setup required");
     expect(markup).not.toMatch(/CLI not found|Not installed/);
   });
@@ -82,7 +82,7 @@ describe("managed engine setup errors", () => {
     const markup = render(engine);
     expect(engineStatus(engine)).toBe("Sign-in required");
     expect(markup).toContain("Sign in with Google");
-    expect(markup).not.toContain("Install official Antigravity");
+    expect(markup).not.toContain("Install Google Antigravity CLI");
   });
 });
 

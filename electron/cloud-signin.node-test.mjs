@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { createCloudAccountClient } from "./cloud-account.mjs";
-import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_TRIES, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { cleanCode, cleanEmail, failureKind, parseSignInStart, retryAfterSeconds, SIGN_IN_TRIES, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 const accessToken = `omc_${"E".repeat(43)}`, ATTEMPT = "a".repeat(43), CODE = "48201937";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -87,7 +87,7 @@ test("happy path: the code is sent, the right code signs this computer in with t
   }
   assert.deepEqual(f.browsers, [], "no browser at all");
   assert.equal((await f.client.emailVerify(CODE)).outcome, "expired", "an attempt is used once");
-  await assert.rejects(f.client.emailStart("person@example.test"), /Sign out before/, "signed in: no second sign-in");
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "signed-in" }, "signed in: no second sign-in");
 });
 
 test("with new accounts closed the Admin still answers \"sent\" (only an existing address gets mail), and the page is told", async t => {
@@ -197,4 +197,93 @@ test("a token that cannot be stored is revoked and nothing is signed in; cancell
   g.client.emailCancel();
   assert.deepEqual(await g.client.emailVerify(CODE), { outcome: "expired" });
   assert.equal(g.requests.filter(row => row.route.endsWith("/verify")).length, 0);
+});
+
+/** A saved sign-in this computer can't use, as a store: `read` fails as it would (`unreadable`: the key no longer opens it, else
+ * the system store is unavailable), and each write fails where `fails(value)` says (a file Windows won't let go, no encryption). */
+function stuckStore({ unreadable, fails }) {
+  const seen = { reads: 0, writes: [] };
+  const error = message => Object.assign(new Error(message), unreadable ? { code: "unreadable_record" } : {});
+  return { seen, store: {
+    read: async () => { seen.reads++; throw error("Your company connection could not be read."); },
+    write: async value => { seen.writes.push(value === null ? "remove" : "save"); if (fails(value)) throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }); },
+  } };
+}
+const later = { pending: null, delay: 0 };
+const timers = { setTimer: (callback, delay) => { later.pending = callback; later.delay = delay; return 1; }, clearTimer: () => { later.pending = null; } };
+/** The saved sign-in is read again when its timer falls due, until clearing it is offered: the times those reads came at. */
+async function readUntilOffered(f) {
+  const at = [];
+  while (!f.client.state().reset) {
+    assert.ok(later.pending && at.length < 10); f.now += later.delay; at.push(f.now);
+    const read = later.pending; later.pending = null; read(); await until(() => later.pending);
+  }
+  return at;
+}
+
+test("Windows: a saved sign-in that can be neither read nor removed never locks the person out", async t => {
+  const { seen, store } = stuckStore({ unreadable: true, fails: () => true });
+  const f = await fixture(t, { store, platform: "win32", ...timers });
+  const start = f.now;
+  // Nothing is removed by itself, and clearing isn't offered at once: a file held for a moment at launch (an antivirus scan)
+  // would read on the next try.
+  assert.deepEqual(f.client.state(), { status: "unavailable", message: "restore-failed" });
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved" });
+  assert.ok(later.pending, "it is read again meanwhile");
+  // Three failed reads by 0:45, and two minutes: offered at the read at 2:45.
+  assert.deepEqual((await readUntilOffered(f)).map(at => (at - start) / 1000), [15, 45, 105, 165]);
+  assert.deepEqual(f.client.state(), { status: "unavailable", message: "restore-failed", reset: true });
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved", reset: true });
+  assert.equal(f.requests.length, 0, "no code is asked for while it blocks");
+  assert.deepEqual(await f.client.resetSaved(), { status: "signed-out", message: "reset-kept" });
+  assert.equal(later.pending, null, "nothing reads it again this run");
+  assert.equal((await f.client.emailStart("person@example.test")).outcome, "sent");
+  const verified = await f.client.emailVerify(CODE);
+  assert.equal(verified.outcome, "signed-in"); assert.equal(verified.state.status, "connected"); assert.equal(verified.state.unsaved, true);
+  assert.equal(f.client.memorySignIn()?.token, accessToken, "the account switcher can take it from memory");
+  assert.ok(!f.requests.some(row => row.method === "DELETE"), "kept for this run, not revoked");
+  assert.equal((await f.client.refresh()).status, "connected", "a sign-in kept in memory is never written again");
+  assert.equal(seen.reads, 5);
+  assert.deepEqual(await f.client.signOut(), { status: "signed-out" }, "signing out of it needs nothing on disk");
+  assert.equal(f.client.memorySignIn(), null);
+});
+
+test("a system store that can't encrypt: the person clears the saved sign-in and signs in for this run", async t => {
+  const { seen, store } = stuckStore({ unreadable: false, fails: value => value !== null });
+  const f = await fixture(t, { store, platform: "win32", ...timers });
+  assert.equal(f.client.state().reset, undefined);
+  await readUntilOffered(f);
+  assert.equal(f.client.state().reset, true);
+  assert.deepEqual(await f.client.resetSaved(), { status: "signed-out" }, "removed");
+  await f.client.emailStart("person@example.test");
+  const verified = await f.client.emailVerify(CODE);
+  assert.equal(verified.outcome, "signed-in"); assert.equal(verified.state.unsaved, true);
+  assert.deepEqual(seen.writes, ["remove", "save"]);
+  assert.equal(seen.reads, 5);
+});
+
+test("a sign-in under way in the browser: the email code says so, and cancelling it lets the code go", async t => {
+  const f = await fixture(t);
+  assert.equal((await f.client.begin()).status, "connecting");
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "connecting" });
+  await f.client.cancel();
+  assert.equal((await f.client.emailStart("person@example.test")).outcome, "sent");
+});
+
+test("a sign-in request that fails is logged by its kind only: status, or the network error's code", () => {
+  const network = Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("unable to verify the first certificate"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" }) });
+  assert.equal(failureKind(network), "UNABLE_TO_VERIFY_LEAF_SIGNATURE");
+  assert.equal(failureKind(Object.assign(new Error("x"), { status: 403, opaque: true })), "HTTP 403 (not the Admin's own answer)");
+  assert.equal(failureKind(Object.assign(new Error("x"), { status: 503, code: "unavailable" })), "HTTP 503 unavailable");
+  assert.equal(failureKind(Object.assign(new Error("x"), { name: "TimeoutError" })), "TimeoutError");
+  assert.equal(failureKind(Object.assign(new Error("x"), { status: 400, code: "person@example.test" })), "HTTP 400", "nothing the answer names is logged as is");
+});
+
+test("the Admin's Retry-After reaches whoever asked, in seconds or as a date", async t => {
+  const headers = value => new Headers(value === null ? {} : { "retry-after": value });
+  assert.equal(retryAfterSeconds(headers("120")), 120);
+  assert.equal(retryAfterSeconds(headers(new Date(1_800_000_090_000).toUTCString()), 1_800_000_000_000), 90);
+  for (const value of [null, "soon", ""]) assert.equal(retryAfterSeconds(headers(value)), undefined, String(value));
+  const f = await fixture(t, { fetch: async () => new Response(JSON.stringify({ error: "rate_limited" }), { status: 429, headers: { "content-type": "application/json", "retry-after": "120" } }) });
+  await assert.rejects(f.client.updatesConsentByEmail({ email: "person@example.test", installId: "x", textVersion: 1 }), { status: 429, code: "rate_limited", retryAfter: 120 });
 });

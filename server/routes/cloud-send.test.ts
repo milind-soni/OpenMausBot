@@ -76,3 +76,101 @@ describe("what a move asks of a server", () => {
     expect(other.body.secrets["login:example.test|alice"]).not.toBe(answered.body.secrets["login:example.test|alice"]);
   });
 });
+
+describe("cloud-send outer wrapper gating", () => {
+  const teamRefusal = { error: "A team server does not accept inbound moves." };
+
+  it("returns 403 refusal on team server when request is not scoped to a bot move", async () => {
+    let answered: { status: number; body: unknown } | undefined;
+    const req = { resume() {} };
+    const res = { setHeader() {} };
+    const route = createCloudSendRoutes({
+      appVersion: "0.1.120",
+      bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki" } as never],
+      messagesTail: () => ({ messages: [], hasMore: false }),
+      skills: () => [],
+      logins: { listSecrets: () => [], secret: () => null, changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordItemGrants: () => ({}), onePasswordToken: () => null },
+      config: () => ({}),
+      refusal: teamRefusal,
+      scope: () => null,
+    });
+
+    await route({
+      path: "/api/cloud-send",
+      method: "GET",
+      url: new URL("http://127.0.0.1/api/cloud-send"),
+      req: req as never,
+      res: res as never,
+      auth: { kind: "session", email: "member@example.com" } as never,
+      json: (_res: unknown, status: number, value: unknown) => {
+        answered = { status, body: value };
+      },
+      readBody: async () => null,
+    } as never);
+
+    expect(answered?.status).toBe(403);
+    expect(answered?.body).toEqual(teamRefusal);
+  });
+
+  it("permits dispatch past team refusal when request has a scoped bot move session", async () => {
+    let answered: { status: number; body: unknown } | undefined;
+    const req = { resume() {} };
+    const res = { setHeader() {} };
+    const route = createCloudSendRoutes({
+      appVersion: "0.1.120",
+      bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", soul: "" } as never],
+      messagesTail: () => ({ messages: [], hasMore: false }),
+      skills: () => [],
+      logins: { listSecrets: () => [], secret: () => null, changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordItemGrants: () => ({}), onePasswordToken: () => null },
+      config: () => ({}),
+      refusal: teamRefusal,
+      scope: () => "bot-00000001",
+    });
+
+    await route({
+      path: "/api/cloud-send",
+      method: "GET",
+      url: new URL("http://127.0.0.1/api/cloud-send"),
+      req: req as never,
+      res: res as never,
+      auth: { kind: "session", email: "member@example.com" } as never,
+      json: (_res: unknown, status: number, value: unknown) => {
+        answered = { status, body: value };
+      },
+      readBody: async () => null,
+    } as never);
+
+    expect(answered?.status).toBe(200);
+    expect((answered?.body as { items: unknown[] })?.items).toBeDefined();
+  });
+});
+
+describe("GET /api/cloud-send/changes", () => {
+  const ask = async (route: ReturnType<typeof createCloudSendRoutes>, path: string, method = "GET") => {
+    let answered: { status: number; body: any } | undefined;
+    await route({ path: path.split("?")[0], method, url: new URL(`http://127.0.0.1${path}`), req: { resume() {} } as never, res: { setHeader() {} },
+      json: (_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }, readBody: async () => undefined } as never);
+    return answered!;
+  };
+  const bots = [{ id: "bot-1", threadId: "t-1", name: "Yuki", cwd: "/Users/ash/app", modelSelection: { instanceId: "claude", model: "m" }, tasks: [] } as never];
+  const route = (more: Partial<Parameters<typeof createCloudSendRoutes>[0]> = {}) => createCloudSendRoutes({
+    appVersion: "0.1.180", bots: () => bots, messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [],
+    logins: { listSecrets: () => [], secret: () => null, changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordItemGrants: () => ({}), onePasswordToken: () => null },
+    config: () => ({}), changes: { bots: () => bots, instances: () => ({}), mcpServers: () => ({}), skills: () => [] }, ...more,
+  });
+
+  it("answers what moving these bots changes, read from this computer", async () => {
+    const answer = await ask(route(), "/api/cloud-send/changes?bots=bot-1");
+    expect(answer.status).toBe(200);
+    expect(answer.body).toEqual({ v: 1, facts: { folder: "/Users/ash/app", folders: 1, paths: ["/Users/ash/app"], engine: null, tools: [], skills: [], hidden: [], teammates: [] } });
+  });
+
+  it("refuses bots it doesn't know, no bots, other methods, and any Cloud home or team server", async () => {
+    expect((await ask(route(), "/api/cloud-send/changes?bots=nobody")).status).toBe(404);
+    expect((await ask(route(), "/api/cloud-send/changes")).status).toBe(404);
+    expect((await ask(route(), "/api/cloud-send/changes?bots=bot-1", "POST")).status).toBe(405);
+    expect((await ask(route({ cloudHome: true }), "/api/cloud-send/changes?bots=bot-1")).status).toBe(404);
+    expect((await ask(route({ refusal: { error: "team" } as never }), "/api/cloud-send/changes?bots=bot-1")).status).toBe(403);
+    expect((await ask(route({ changes: undefined }), "/api/cloud-send/changes?bots=bot-1")).status).toBe(404);
+  });
+});

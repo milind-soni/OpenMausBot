@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { createConnection } from "node:net";
+import { createConnection, type AddressInfo } from "node:net";
+import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -13,10 +14,12 @@ import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { DATA_DIR, NATIVE_DIR } from "../config.ts";
 import { flushNativeLog } from "./native.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
+import { chatgptAccountHome } from "./codex-account-home.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
+import { CODEX_LINUX_SANDBOX_NOTE } from "./codex-instructions.ts";
 import { codexCliOverrides } from "./codex-process.ts";
 import { codexReleaseUpdate } from "./codex-update.ts";
 import { parseToml } from "../toml-lite.ts";
@@ -28,11 +31,17 @@ import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { unsupportedCallsNotice } from "./codex-unsupported-calls.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
+import { ownMcpHttpRoutes } from "../routes/own-mcp-http.ts";
+import { json as sendJson, readBody } from "../harness/http.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import * as procs from "../procs.ts";
 import { botBox } from "../bot-box/box.ts";
 import { boxEnvironment } from "../bot-box/env.ts";
 import { autoVerdict } from "../auto-approve.ts";
 import { formatQuestionAnswers } from "../../shared/ask-question.ts";
+
+const codexSandboxSuffix = process.platform === "linux" ? `\n\n${CODEX_LINUX_SANDBOX_NOTE}` : "";
 
 vi.mock("./codex-release.ts", async (importOriginal) => ({
   ...await importOriginal<typeof import("./codex-release.ts")>(),
@@ -560,6 +569,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     delete process.env.FAKE_CODEX_RESOLVED_SANDBOX;
     delete process.env.FAKE_CODEX_MCP_START;
     delete process.env.FAKE_CODEX_MCP_HANDSHAKE;
+    vi.unstubAllEnvs();
     delete process.env.FAKE_CODEX_STEER_ERROR;
     delete process.env.FAKE_CODEX_STEER_ERROR_FILE;
     delete process.env.FAKE_CODEX_STEER_HANG;
@@ -725,6 +735,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(owner.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty("environments");
   });
 
+  it("runs work from the person's other place with the shell off and no environment, in Ask's workspace sandbox", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-link", text: "rm -rf ~", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask", linkLimited: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    for (const override of ["features.shell_tool=false", "features.unified_exec=false", "features.view_image=false"]) {
+      expect(seen.argv[seen.argv.indexOf(override) - 1], override).toBe("-c");
+    }
+    const started = seen.calls.find((call) => call.method === "turn/start")?.params;
+    expect(started.environments).toEqual([]);
+    expect(started.sandboxPolicy).toMatchObject({ type: "workspaceWrite" });
+    expect(started.approvalPolicy).toBe("on-request");
+  });
+
   it("refuses a guest's turn when Codex did not take the shell-off overrides", async () => {
     await create({ environment: { FAKE_CODEX_IGNORE_FEATURES: "1" } });
     const dump = join(scratch, "dump.json");
@@ -794,7 +820,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(processIsAlive(seen.pid)).toBe(false);
+    expect(processIsAlive(seen.pid)).toBe(true);
+    expect(instance.adapter.hasSession("t-codex")).toBe(false);
     expect(seen.env.OPENAI_API_KEY).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();
@@ -804,7 +831,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const turnStart = seen.calls.at(-1);
     expect(turnStart.params.input[0].text).toBe("list files");
     const threadStart = seen.calls.find((c: { method: string }) => c.method === "thread/start");
-    expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai", developerInstructions: "You are Testy." });
+    expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai", developerInstructions: `You are Testy.${codexSandboxSuffix}` });
   });
 
   it("keeps the developer slot stable and delivers volatile context in-turn", async () => {
@@ -832,7 +859,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const third = await send("split-3.json", "third", "Memory: moved to Toronto.", "codex-thread-1");
     const threadStarts = first.filter((c) => c.method === "thread/start");
     expect(threadStarts).toHaveLength(1);
-    expect(threadStarts[0].params.developerInstructions).toBe("Stable rules.");
+    expect(threadStarts[0].params.developerInstructions).toBe(`Stable rules.${codexSandboxSuffix}`);
     for (const calls of [first, second, third]) {
       expect(calls.some((c) => c.method === "thread/inject_items")).toBe(false);
     }
@@ -847,6 +874,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const fourth = await send("split-4.json", "fourth", "Memory: moved to Toronto.", "codex-thread-1", true);
     expect(turnText(fourth)).toContain("Memory: moved to Toronto.");
     expect(turnText(fourth)).toContain("fourth");
+  });
+
+  it("saves a conversation's thread but not one no later turn resumes", async () => {
+    await create({ mode: "resume" });
+    const threadStart = async (dumpName: string, threadId: string, ephemeral?: boolean) => {
+      process.env.FAKE_CODEX_DUMP = join(scratch, dumpName);
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId, text: "hello", system: "Stable rules.", systemStable: "Stable rules.", systemVolatile: "Memory: likes quiet hours.",
+        ...(ephemeral === undefined ? {} : { ephemeral }),
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      const calls = JSON.parse(readFileSync(join(scratch, dumpName), "utf8")).calls as Array<{ method: string; params: Record<string, unknown> }>;
+      return calls.filter((call) => call.method === "thread/start").map((call) => call.params.ephemeral);
+    };
+    // A one-to-one chat resumes its thread next turn, so Codex keeps it.
+    expect(await threadStart("chat.json", "t-chat")).toEqual([false]);
+    // A room turn sends the whole conversation each time and never resumes: nothing is saved, so the Codex app lists nothing.
+    expect(await threadStart("room.json", "t-room", true)).toEqual([true]);
   });
 
   it("ignores requests received after turn completion", async () => {
@@ -943,6 +988,39 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(recorder.events.at(-1)).toMatchObject({ ok: true });
     const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
     expect(calls.find((call: { method: string }) => call.method === "turn/start").params.sandboxPolicy).toEqual(sandbox);
+  });
+
+  it.each([
+    { resumed: false, approvalMode: "ask", sandbox: { type: "readOnly" } },
+    { resumed: true, approvalMode: "ask", sandbox: { type: "readOnly" } },
+    { resumed: false, approvalMode: "full", sandbox: { type: "workspaceWrite" } },
+    { resumed: false, approvalMode: "full", sandbox: { type: "readOnly" } },
+  ] as const)("starts the turn in a stricter sandbox Codex chose itself, as on Windows: %j", async ({ resumed, approvalMode, sandbox }) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "stricter-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-stricter-sandbox", text: "continue", approvalMode,
+      ...(resumed ? { resumeCursor: "codex-thread-1" } : {}) });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.sandboxPolicy).toEqual(sandbox);
+  });
+
+  it.each([
+    { approvalMode: "ask", sandbox: { type: "externalSandbox" } },
+    { approvalMode: "full", sandbox: { type: "externalSandbox" } },
+  ] as const)("refuses a resolved sandbox it cannot rank: %j", async ({ approvalMode, sandbox }) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "unranked-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-unranked-sandbox", text: "continue", approvalMode });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: false });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
   });
 
   it.each([false, true].flatMap(resumed => [null, {}, { type: "dangerFullAccess" }].map(sandbox => ({ resumed, sandbox }))))("refuses an absent or mismatched resolved sandbox: %j", async ({ resumed, sandbox }) => {
@@ -1397,7 +1475,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const plain = { command: "python3", args: ["todo.py"], env: {} };
       await instance.adapter.sendTurn({ threadId: "t-box-no-env", text: "go", integrations: { custom: { plain } } });
       await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-no-env");
-      expect(appServer()).not.toHaveProperty("box");
+      expect(appServer()?.box).toEqual({ engine: "codex" });
     } finally {
       spawnSpy.mockRestore();
     }
@@ -1624,6 +1702,27 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(expect.arrayContaining(["OMB_CODEX_AUTH_SECRET", "OMB_CODEX_AUTH_SOCKET"]));
     });
 
+    it("gives the bot box the token socket, since the box's /tmp is its own", async () => {
+      process.env.FAKE_CODEX_VERSION = "codex-cli 0.165.0";
+      plan();
+      await create({ authMode: "chatgpt-plan" });
+      const realSpawnCli = procs.spawnCli;
+      const spawns: Parameters<typeof procs.spawnCli>[] = [];
+      const spawnSpy = vi.spyOn(procs, "spawnCli").mockImplementation((...args: Parameters<typeof procs.spawnCli>) => {
+        spawns.push(args);
+        return realSpawnCli(...args);
+      });
+      try {
+        await instance.adapter.sendTurn({ threadId: "plan-box", text: "go", model: "gpt-6.1-sol" });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "plan-box")).toMatchObject({ ok: true });
+        const appServer = spawns.find(([, args]) => args.includes("app-server"))?.[2];
+        expect(appServer?.env?.OMB_CODEX_AUTH_SOCKET).toBeTruthy();
+        expect(appServer?.box).toEqual({ engine: "codex", rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
+      } finally {
+        spawnSpy.mockRestore();
+      }
+    });
+
     it.each(["new login", "sign out"])("revokes a running task's token capability on %s", async (action) => {
       process.env.FAKE_CODEX_VERSION = "codex-cli 0.165.0";
       plan();
@@ -1724,6 +1823,36 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
       expect(recorder.events.some((event) => event.type === "runtime.error" && event.turnId === turnId)).toBe(true);
       expect(refuse).not.toHaveBeenCalled();
+    });
+
+    it("rebuilds a ChatGPT plan thread whose saved session holds audio the plan refuses, once, from the chat", async () => {
+      plan();
+      await create({ mode: "plan-unsupported-input", authMode: "chatgpt-plan" });
+      const dump = join(scratch, "plan-unsupported-input.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+      const recoveryText = "History\nUser: check the voice\nUser: go on";
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-plan-audio", text: "go on", resumeCursor: "audio-thread", recoveryText, model: "gpt-6.1-sol" });
+      await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: true });
+      const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+      expect(calls.map((call: { method: string }) => call.method)).not.toContain("thread/resume");
+      expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
+      expect(recorder.events.filter((e) => e.type === "turn.retrying")).toMatchObject([{ reason: "unsupported_input" }]);
+      expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === turnId)).toEqual([]);
+      expect(recorder.events.filter((e) => e.type === "session.started").at(-1)).toMatchObject({ sessionId: "codex-thread-1", rebuilt: true });
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([expect.objectContaining({ message: rebuiltSessionNotice("Codex") })]);
+    });
+
+    it("leaves the same refusal a plain failure off a ChatGPT plan, keeping the saved session", async () => {
+      await create({ mode: "plan-unsupported-input" });
+      const dump = join(scratch, "unsupported-input-own.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-own-audio", text: "go on", resumeCursor: "audio-thread", recoveryText: "History\nUser: go on" });
+      await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: false });
+      expect(JSON.parse(readFileSync(dump, "utf8")).calls.map((call: { method: string }) => call.method)).toContain("thread/resume");
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+      expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === turnId)).toHaveLength(1);
     });
 
     it("passes the person's proxy settings to the proxy, which Codex would otherwise drop", async () => {
@@ -1944,7 +2073,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.env.HEALTH_REGION).toBe("eu");
   });
 
-  it.each(["ask", "auto"] as const)("pre-allows peer-agent comms without exposing its token in %s mode", async (approvalMode) => {
+  it.each([["ask", "0"], ["auto", "0"], ["ask", "1"], ["auto", "1"]] as const)("pre-allows peer-agent comms without exposing its token in %s mode (OMB_OWN_MCP_HTTP=%s)", async (approvalMode, http) => {
+    vi.stubEnv(OWN_MCP_HTTP_ENV, http);
     await create();
     const dump = join(scratch, "agents.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -1963,7 +2093,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
             OMB_BOT_ID: "captain",
             OMB_THREAD_ID: "t-agents",
             OMB_COMMS_TOKEN: "peer-comms-secret",
-            OMB_TURN_DEPTH: "0",
           },
         },
       },
@@ -1971,14 +2100,47 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     await recorder.until((event) => event.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv.join(" ")).toContain("mcp_servers.agents.command");
+    expect(seen.argv.join(" ")).toContain(http === "1" ? 'mcp_servers.agents.url="http://127.0.0.1:8799/api/internal/mcp-http/agents"' : "mcp_servers.agents.command");
     expect(seen.argv).toContain('mcp_servers.agents.default_tools_approval_mode="approve"');
     expect(seen.argv).toContain("mcp_servers.agents.tool_timeout_sec=960");
-    expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
+    if (http === "1") expect(seen.argv).toContain('mcp_servers.agents.bearer_token_env_var="OMB_COMMS_TOKEN"');
+    else expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
     expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
     expect(seen.env.OMB_COMMS_TOKEN).toBe("peer-comms-secret");
     expect(instance.adapter.capabilities.agentsMcp).toBe(true);
+  });
+
+  it("with OMB_OWN_MCP_HTTP=1, starts the agents server by URL with the bot's settings and capability, the loopback out of any proxy", async () => {
+    vi.stubEnv(OWN_MCP_HTTP_ENV, "1");
+    const seenAuth: Array<string | undefined> = [];
+    const harness = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      seenAuth.push(req.headers.authorization);
+      await ownMcpHttpRoutes({ req, res, url, path: url.pathname, method: req.method ?? "GET", auth: {} as RequestAuth, json: sendJson, readBody });
+      if (!res.headersSent) sendJson(res, 404, { error: "no such endpoint" });
+    });
+    await new Promise<void>((resolve) => harness.listen(0, "127.0.0.1", resolve));
+    try {
+      process.env.FAKE_CODEX_MCP_START = "1";
+      // Codex given a proxy for HTTP must reach this server's loopback URL around it.
+      await create({ environment: { NO_PROXY: "corp.internal" } });
+      const dump = join(scratch, "agents-http.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-agents-http", text: "go", integrations: { agents: { command: process.execPath, args: ["/tmp/agents-proxy.js"], env: {
+        ELECTRON_RUN_AS_NODE: "1", OMB_HARNESS_URL: `http://127.0.0.1:${(harness.address() as AddressInfo).port}`, OMB_BOT_ID: "captain", OMB_THREAD_ID: "t-agents-http",
+        OMB_COMMS_TOKEN: "peer-comms-secret", OMB_CHIEF_OF_STAFF: "1",
+      } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.mcpStartup.agents).toMatchObject({ status: "ready", tools: expect.arrayContaining(["coordinate_bots", "create_bot"]) });
+      expect(seenAuth.length).toBeGreaterThan(0);
+      expect(seenAuth.every((authorization) => authorization === "Bearer peer-comms-secret")).toBe(true);
+      expect(seen.env.NO_PROXY.split(",")).toEqual(["corp.internal", "127.0.0.1", "localhost", "::1"]);
+      expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
+    } finally {
+      await new Promise<void>((resolve) => harness.close(() => resolve()));
+    }
   });
 
   it.each(["ask", "auto"] as const)("pre-allows the built-in browser while preserving the native %s reviewer", async (approvalMode) => {
@@ -2156,6 +2318,20 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
   });
 
+  it("reports Codex's own compaction of the session once, and as no tool", async () => {
+    process.env.FAKE_CODEX_COMPACTION = "1";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-compaction", text: "carry on" });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.FAKE_CODEX_COMPACTION;
+    }
+    expect(recorder.events.filter((e) => e.type === "context.compacted")).toHaveLength(1);
+    expect(recorder.events.some((e) => "itemId" in e && e.itemId === "c1")).toBe(false);
+    expect(instance.adapter.capabilities.nativeCompaction).toBe(true);
+  });
+
   it("streams a running command's output to the bus, and names its app-server while the turn runs", async () => {
     const gate = join(scratch, "command-done");
     Object.assign(process.env, { FAKE_CODEX_COMMAND: "/bin/zsh -lc 'pnpm test'", FAKE_CODEX_COMMAND_OUTPUT: JSON.stringify(["RUN v3\n", " ✓ a.test.ts\n"]), FAKE_CODEX_COMMAND_GATE: gate });
@@ -2232,6 +2408,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       ["company-codex-model", "company-codex-model", "openmaus_company"],
     ] },
   ])("reasserts the selected model and provider after $name app-server restarts", async ({ opts, selections }) => {
+    vi.stubEnv("OMB_CODEX_SESSION_KEEP", "0");
     const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("synthetic-chatgpt-token");
     const catalog = vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({
       default: "gpt-6.1-sol", options: ["gpt-5.6-sol", "gpt-6.1-sol"].map(id => ({ id, label: id })),
@@ -2299,24 +2476,76 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it.each([
     ["Cloud home", "OMB_CLOUD_ROLE", "home"],
     ["hosted enterprise", "OMB_ADMIN_URL", "https://admin.example.test"],
-  ])("refuses desktop ChatGPT plan sign-in on %s before accessing credentials or spawning", async (_name, variable, value) => {
+  ])("signs each added ChatGPT account in on %s with Codex's device code, in a Codex home of its own", async (_name, variable, value) => {
     vi.stubEnv(variable, value);
-    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation(() => { throw new Error("Unexpected process"); });
-    const exec = vi.spyOn(procs, "execCli").mockImplementation(() => { throw new Error("Unexpected process"); });
-    const catalog = vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "", options: [] });
-    const token = vi.spyOn(ChatGptPlanAuthController.prototype, "accessToken").mockResolvedValue("unused-synthetic-token");
-    const snapshot = vi.spyOn(ChatGptPlanAuthController.prototype, "snapshot").mockResolvedValue({ authenticated: false });
-    const start = vi.spyOn(ChatGptPlanAuthController.prototype, "start").mockRejectedValue(new Error("Unexpected sign-in"));
-    await create({ authMode: "chatgpt-plan" });
-    expect(instance.models).toEqual({ default: "", options: [] });
-    expect(await instance.snapshot()).toMatchObject({
-      state: "unavailable", authenticated: false, chatgptPlan: true,
-      authenticationUnavailableReason: expect.stringContaining("hosted-app approval"),
+    const planCalls = (["models", "accessToken", "snapshot", "start", "signOut"] as const)
+      .map((method) => vi.spyOn(ChatGptPlanAuthController.prototype, method).mockRejectedValue(new Error("Unexpected plan call")));
+    const personHome = join(scratch, ".codex"), loginLog = join(scratch, "logins.jsonl"), dump = join(scratch, "turn.json");
+    mkdirSync(personHome, { recursive: true });
+    writeFileSync(join(personHome, "config.toml"), "model = \"gpt-fake-default\"\n");
+    const firstLogin = JSON.stringify({ auth_mode: "chatgpt", email: "first@example.test", tokens: { access_token: "fixture-first" } });
+    writeFileSync(join(personHome, "auth.json"), firstLogin);
+    const shared = { HOME: scratch, USERPROFILE: scratch, FAKE_CODEX_LOGIN_FILE: "1", FAKE_CODEX_LOGIN_LOG: loginLog, FAKE_CODEX_DUMP: dump, FAKE_CODEX_DUMP_TURNS_ONLY: "1" };
+    const make = (instanceId: string, email: string, config: object, environment: Record<string, string> = {}) => CodexDriver.create({
+      instanceId, displayName: instanceId, enabled: true, environment: { ...shared, FAKE_CODEX_DEVICE_EMAIL: email, ...environment },
+      config: { cli: FAKE_CLI, fullAuto: false, ...config },
     });
-    await expect(instance.startAuthentication!()).rejects.toThrow("hosted-app approval");
-    await expect(instance.adapter.sendTurn({ threadId: "hosted-plan", text: "Continue", model: "gpt-6.1-sol" }))
-      .rejects.toThrow("hosted-app approval");
-    for (const operation of [spawn, exec, catalog, token, snapshot, start]) expect(operation).not.toHaveBeenCalled();
+    const first = await make("codex", "unused@example.test", {}, { CODEX_HOME: personHome });
+    const work = await make(`chatgpt-work-${variable}`, "work@example.test", { authMode: "chatgpt-plan" });
+    const spare = await make(`chatgpt-spare-${variable}`, "spare@example.test", { authMode: "chatgpt-plan" });
+    const workHome = chatgptAccountHome(`chatgpt-work-${variable}`), spareHome = chatgptAccountHome(`chatgpt-spare-${variable}`);
+    try {
+      expect(workHome).not.toBe(spareHome);
+      for (const home of [workHome, spareHome]) {
+        expect(home.startsWith(join(DATA_DIR, "providers", "chatgpt-plan") + sep)).toBe(true);
+        if (process.platform !== "win32") expect(statSync(home).mode & 0o777).toBe(0o700);
+      }
+      expect(work.authenticationMethod).toBeUndefined();
+      expect(work.signOut).toBeTypeOf("function");
+      expect(await work.snapshot()).toMatchObject({ state: "available", authenticated: false });
+
+      const started = await work.startAuthentication!();
+      expect(started).toMatchObject({ phase: "waiting", authorizationUrl: "https://auth.openai.com/codex/device", userCode: "0CSG-0IXIM" });
+      await vi.waitFor(async () => expect((await work.getAuthentication!(started.flowId!)).phase).toBe("succeeded"), { timeout: 10_000 });
+
+      // Only the work account's home got a login; the first account's login is untouched and the spare has none.
+      expect(JSON.parse(readFileSync(join(workHome, "auth.json"), "utf8"))).toMatchObject({ email: "work@example.test" });
+      expect(lstatSync(join(workHome, "auth.json")).isSymbolicLink()).toBe(false);
+      expect(existsSync(join(spareHome, "auth.json"))).toBe(false);
+      expect(readFileSync(join(personHome, "auth.json"), "utf8")).toBe(firstLogin);
+      expect(realpathSync(join(workHome, "config.toml"))).toBe(realpathSync(join(personHome, "config.toml")));
+      const logins = readFileSync(loginLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(logins.filter((call) => call.codexHome === workHome).map((call) => call.args.join(" ")))
+        .toEqual(["login status", "login status", "login --device-auth", "login status"]);
+      expect(logins.filter((call) => call.codexHome !== workHome).every((call) => call.args.join(" ") === "login status")).toBe(true);
+
+      expect(await work.snapshot()).toMatchObject({ authenticated: true, account: { email: "work@example.test" } });
+      expect(await spare.snapshot()).toMatchObject({ authenticated: false });
+      expect(await first.snapshot()).toMatchObject({ authenticated: true, account: { email: "first@example.test" } });
+
+      // A turn of the work account runs with its home, never the first account's.
+      const turns = recordEvents(work.adapter);
+      await work.adapter.sendTurn({ threadId: "work-turn", text: "Fixture" });
+      await turns.until((event) => event.type === "turn.completed");
+      expect(turns.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.CODEX_HOME).toBe(workHome);
+
+      // Signing the work account out removes only its login.
+      await work.signOut!();
+      expect(existsSync(join(workHome, "auth.json"))).toBe(false);
+      expect(readFileSync(join(personHome, "auth.json"), "utf8")).toBe(firstLogin);
+      expect(await work.snapshot()).toMatchObject({ authenticated: false });
+      expect(await first.snapshot()).toMatchObject({ authenticated: true });
+      for (const call of planCalls) expect(call).not.toHaveBeenCalled();
+    } finally {
+      await Promise.all([first, work, spare].map((engine) => engine.dispose()));
+    }
+  });
+
+  it("keeps the browser ChatGPT plan sign-in on the person's own computer", async () => {
+    vi.spyOn(ChatGptPlanAuthController.prototype, "models").mockResolvedValue({ default: "", options: [] });
+    await create({ authMode: "chatgpt-plan" });
+    expect(instance.authenticationMethod).toBe("browser-pkce");
   });
 
   it.each(["signOut", "dispose"] as const)("invalidates pending ChatGPT token/model preparation on %s", async (action) => {
@@ -2549,6 +2778,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
   it("completes a turn whose process exit could not be confirmed without waiting for the stall watchdog", async () => {
     await create();
     vi.stubEnv("FAKE_CODEX_STOP_RETRY_MS", "50");
+    vi.stubEnv("OMB_CODEX_SESSION_KEEP", "0");
     const stopping = vi.spyOn(procs, "killCliTree").mockResolvedValueOnce(false);
     await instance.adapter.sendTurn({ threadId: "t-stop-unconfirmed", text: "hi" });
     await expect(recorder.until((e) => e.type === "turn.completed", 10_000)).resolves.toMatchObject({ ok: true, stopReason: null });
@@ -2806,7 +3036,14 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       }>;
       const threadCalls = calls.filter((call) => ["thread/start", "thread/resume"].includes(call.method));
       expect(threadCalls.length).toBeGreaterThan(0);
-      for (const call of threadCalls) expect(call.params.developerInstructions).toBe(system ?? "");
+      const expectedDeveloper = system
+        ? `${system}${codexSandboxSuffix}`
+        : codexSandboxSuffix
+          ? `No OpenMausBot bot-specific instructions remain.${codexSandboxSuffix}`
+          : "";
+      // A call naming a permission profile leaves the sandbox to that profile, so it carries no sandbox note; the
+      // legacy-sandbox retry after a refused profile does.
+      for (const call of threadCalls) expect(call.params.developerInstructions).toBe(call.params.permissions ? system ?? "" : expectedDeveloper);
       if (index > 0) expect(threadCalls[0].method).toBe("thread/resume");
       const updates = calls.filter((call) => call.method === "thread/inject_items");
       expect(updates).toHaveLength(index === 2 || index === 3 ? 1 : 0);
@@ -2830,11 +3067,15 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
         ...(index > 0 ? { resumeCursor: "codex-thread-1" } : {}),
       });
       await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: true });
+      // One app-server serves all three turns, so its calls add up: the rules are replaced once, when they change.
       const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
-      const threadCall = calls.find((call: { method: string }) => call.method === (index ? "thread/resume" : "thread/start"));
-      expect(threadCall.params.developerInstructions).toBe(`${system || "No OpenMausBot bot-specific instructions remain."}\n\nPrivate native rules.`);
-      expect(calls.filter((call: { method: string }) => call.method === "thread/inject_items")).toHaveLength(index === 1 ? 1 : 0);
-      expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: `message-${index}` }]);
+      expect(calls.filter((call: { method: string }) => call.method === "thread/resume")).toHaveLength(0);
+      const modeSuffix = approvalMode === "full" ? "" : codexSandboxSuffix;
+      expect(calls.find((call: { method: string }) => call.method === "thread/start").params.developerInstructions).toBe(`Bot rules.${modeSuffix}\n\nPrivate native rules.`);
+      const updates = calls.filter((call: { method: string }) => call.method === "thread/inject_items");
+      expect(updates).toHaveLength(index ? 1 : 0);
+      if (index) expect(JSON.stringify(updates[0].params)).toContain(JSON.stringify(`No OpenMausBot bot-specific instructions remain.${modeSuffix}\n\nPrivate native rules.`).slice(1, -1));
+      expect(calls.filter((call: { method: string }) => call.method === "turn/start").at(-1).params.input).toEqual([{ type: "text", text: `message-${index}` }]);
     }
     const nativeLog = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8");
     expect(nativeLog).toContain("[effective config omitted]");
@@ -3338,6 +3579,240 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  describe("an app-server kept between a conversation's turns", () => {
+    type Dump = { pid: number; env: Record<string, string>; calls: Array<{ method: string; params: any }> };
+    let dump: string;
+    const seen = (): Dump => JSON.parse(readFileSync(dump, "utf8"));
+    const methods = (name: string) => seen().calls.filter((call) => call.method === name);
+    const runTurn = async (input: Parameters<ProviderInstance["adapter"]["sendTurn"]>[0]) => {
+      const { turnId } = await instance.adapter.sendTurn(input);
+      const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return { turnId, done, events: recorder.events.filter((event) => event.turnId === turnId) };
+    };
+    const closes = (threadId: string): Array<{ close: string; contractChanged?: string[] }> => {
+      flushNativeLog(threadId);
+      return readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8").trim().split("\n").map((line) => JSON.parse(line))
+        .filter((entry) => entry.source === "codex.session").map((entry) => entry.msg);
+    };
+
+    beforeEach(() => {
+      dump = join(scratch, "warm.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      mkdirSync(NATIVE_DIR, { recursive: true });
+    });
+
+    it("serves the next turn without a new process, handshake or native thread, and counts each turn's own tokens", async () => {
+      await create({ mode: "resume" });
+      const first = await runTurn({ threadId: "t-warm", text: "one" });
+      expect(first.done).toMatchObject({ ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
+      const { pid } = seen();
+      expect(processIsAlive(pid)).toBe(true);
+      expect(instance.adapter.hasSession("t-warm")).toBe(false);
+      expect(instance.adapter.enginePid?.("t-warm")).toBeUndefined();
+
+      const second = await runTurn({ threadId: "t-warm", text: "two", resumeCursor: "codex-thread-1" });
+      expect(second.done).toMatchObject({ ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
+      expect(seen().pid).toBe(pid);
+      expect(methods("initialize")).toHaveLength(1);
+      expect(methods("thread/start")).toHaveLength(1);
+      expect(methods("thread/resume")).toHaveLength(0);
+      expect(methods("turn/start").map((call) => [call.params.threadId, call.params.input])).toEqual([
+        ["codex-thread-1", [{ type: "text", text: "one" }]],
+        ["codex-thread-1", [{ type: "text", text: "two" }]],
+      ]);
+      expect(second.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+      expect(second.events.find((event) => event.type === "session.started")).toMatchObject({ sessionId: "codex-thread-1" });
+      expect(publishedMessages(second.events).map((message) => message.completed)).toEqual(["done from fake codex"]);
+
+      await instance.dispose();
+      expect(processIsAlive(pid)).toBe(false);
+    });
+
+    it.each([
+      ["model", { model: "gpt-other" }, "thread"],
+      ["approval mode", { approvalMode: "full" as const }, "thread"],
+      ["folder", { cwd: "elsewhere" }, "cwd"],
+      ["team tools credential", { integrations: { agents: { command: process.execPath, args: ["agents-proxy.js"], env: { OMB_TEST_BEARER: "second-bearer-secret" } } } }, "env:OMB_TEST_BEARER"],
+    ])("starts again when the turn's %s changed, after the kept process has exited", async (name, change, changed) => {
+      const threadId = `t-contract-${name.replaceAll(" ", "-")}`;
+      await create({ mode: "resume" });
+      const cwd = "cwd" in change ? join(scratch, change.cwd) : undefined;
+      if (cwd) mkdirSync(cwd);
+      const agents = { command: process.execPath, args: ["agents-proxy.js"], env: { OMB_TEST_BEARER: "first-bearer-secret" } };
+      await runTurn({ threadId, text: "one", integrations: { agents } });
+      const { pid } = seen();
+      const second = await runTurn({ threadId, text: "two", resumeCursor: "codex-thread-1", integrations: { agents }, ...change, ...(cwd ? { cwd } : {}) });
+      expect(second.done).toMatchObject({ ok: true });
+      expect(seen().pid).not.toBe(pid);
+      expect(processIsAlive(pid)).toBe(false);
+      expect(methods("thread/resume")).toHaveLength(1);
+      expect(second.events.some((event) => event.type === "turn.retrying" || event.type === "runtime.error")).toBe(false);
+      const [closed] = closes(threadId);
+      expect(closed.close).toBe("spawn contract changed");
+      expect(closed.contractChanged).toContain(changed);
+      expect(JSON.stringify(closed)).not.toContain("bearer-secret");
+    });
+
+    it("starts again for another native session, and never serves another conversation", async () => {
+      await create({ mode: "resume" });
+      await runTurn({ threadId: "t-own", text: "one" });
+      const { pid } = seen();
+      await runTurn({ threadId: "t-other", text: "one" });
+      const other = seen().pid;
+      expect(other).not.toBe(pid);
+      expect(processIsAlive(pid)).toBe(true);
+      await runTurn({ threadId: "t-own", text: "two", resumeCursor: "codex-thread-earlier" });
+      expect(seen().pid).not.toBe(pid);
+      expect(processIsAlive(pid)).toBe(false);
+      expect(methods("thread/resume")[0]!.params.threadId).toBe("codex-thread-earlier");
+      expect(closes("t-own")[0]!.close).toBe("another native session");
+      expect(processIsAlive(other)).toBe(true);
+    });
+
+    it("starts again, without a retry notice, when the person's Codex configuration changed between turns", async () => {
+      const rules = join(scratch, "native-rules.txt");
+      const log = join(scratch, "config-reads.log");
+      vi.stubEnv("FAKE_CODEX_INSTRUCTIONS_FILE", rules);
+      await create({ mode: "resume" });
+      vi.stubEnv("FAKE_CODEX_STARTUP_LOG", log);
+      await runTurn({ threadId: "t-config", text: "one", system: "Bot rules." });
+      const { pid } = seen();
+      // The kept process is asked for its configuration once more when its turn ends: the change comes after that.
+      await expect.poll(() => readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line)).filter((entry) => entry.pid === pid && entry.event === "config/read")).toHaveLength(2);
+      writeFileSync(rules, "New native rules.");
+      const second = await runTurn({ threadId: "t-config", text: "two", system: "Bot rules.", resumeCursor: "codex-thread-1" });
+      expect(second.done).toMatchObject({ ok: true });
+      expect(seen().pid).not.toBe(pid);
+      expect(processIsAlive(pid)).toBe(false);
+      expect(methods("thread/resume")[0]!.params.developerInstructions).toBe(`Bot rules.${codexSandboxSuffix}\n\nNew native rules.`);
+      expect(second.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+      expect(second.events.some((event) => event.type === "turn.retrying" || event.type === "runtime.error")).toBe(false);
+      expect(closes("t-config")).toEqual([{ close: "configuration changed", contractChanged: ["config:developer_instructions"] }]);
+    });
+
+    it("starts again when config.toml changed, even while the last turn ran", async () => {
+      const home = join(scratch, "toml-home");
+      mkdirSync(home);
+      await create({ mode: "resume", environment: { HOME: scratch, CODEX_HOME: home } });
+      await runTurn({ threadId: "t-toml", text: "one" });
+      const { pid } = seen();
+      writeFileSync(join(home, "config.toml"), "model_reasoning_summary = \"auto\"\n");
+      await runTurn({ threadId: "t-toml", text: "two", resumeCursor: "codex-thread-1" });
+      expect(seen().pid).not.toBe(pid);
+      expect(closes("t-toml")).toEqual([{ close: "spawn contract changed", contractChanged: ["config"] }]);
+    });
+
+    it("resumes in a new process when the kept one died while idle", async () => {
+      await create({ mode: "resume" });
+      await runTurn({ threadId: "t-died", text: "one" });
+      const { pid } = seen();
+      process.kill(pid, "SIGKILL");
+      await expect.poll(() => closes("t-died").map((entry) => entry.close)).toEqual(["exited while idle"]);
+      const second = await runTurn({ threadId: "t-died", text: "two", resumeCursor: "codex-thread-1" });
+      expect(second.done).toMatchObject({ ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
+      expect(seen().pid).not.toBe(pid);
+      expect(methods("thread/resume")).toHaveLength(1);
+      expect(recorder.events.some((event) => event.type === "runtime.error" || event.type === "turn.retrying")).toBe(false);
+    });
+
+    it("resumes in a new process when the kept one dies as the next turn reaches it", async () => {
+      vi.stubEnv("FAKE_CODEX_DIE_ON_TURN", "2");
+      await create({ mode: "resume" });
+      await runTurn({ threadId: "t-race", text: "one" });
+      const { pid } = seen();
+      const second = await runTurn({ threadId: "t-race", text: "two", resumeCursor: "codex-thread-1" });
+      expect(second.done).toMatchObject({ ok: true });
+      expect(seen().pid).not.toBe(pid);
+      expect(methods("turn/start").map((call) => call.params.input)).toEqual([[{ type: "text", text: "two" }]]);
+      expect(second.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+      expect(second.events.some((event) => event.type === "runtime.error" || event.type === "turn.retrying")).toBe(false);
+    });
+
+    it("ends the process when a turn on it is stopped, and the next turn resumes in a new one", async () => {
+      const gate = join(scratch, "turn-gate");
+      writeFileSync(gate, "");
+      vi.stubEnv("FAKE_CODEX_COMMAND_GATE", gate);
+      await create({ mode: "resume" });
+      await runTurn({ threadId: "t-stop", text: "one" });
+      const { pid } = seen();
+      await removeTempDir(gate);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-stop", text: "two", resumeCursor: "codex-thread-1" });
+      await expect.poll(() => methods("turn/start")).toHaveLength(2);
+      expect(instance.adapter.enginePid?.("t-stop")).toBe(pid);
+      await instance.adapter.interruptTurn("t-stop");
+      await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(methods("turn/interrupt")).toHaveLength(1);
+      expect(processIsAlive(pid)).toBe(false);
+      writeFileSync(gate, "");
+      const third = await runTurn({ threadId: "t-stop", text: "three", resumeCursor: "codex-thread-1" });
+      expect(third.done).toMatchObject({ ok: true });
+      expect(seen().pid).not.toBe(pid);
+    });
+
+    it("answers a permission request on a later turn of the same process", async () => {
+      await create({ mode: "approval" });
+      for (const [index, text] of ["one", "two"].entries()) {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-ask", text, ...(index ? { resumeCursor: "codex-thread-1" } : {}) });
+        const opened = await recorder.until((event) => event.type === "request.opened" && event.turnId === turnId);
+        await instance.adapter.respondToRequest("t-ask", opened.requestId!, { behavior: "allow" });
+        await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: true });
+      }
+      expect(methods("initialize")).toHaveLength(1);
+      expect(methods("turn/start")).toHaveLength(2);
+    });
+
+    it("does not keep a process whose turn failed", async () => {
+      vi.stubEnv("FAKE_CODEX_TRANSIENTS", "9");
+      vi.stubEnv("FAKE_CODEX_PARTIAL_FAILS", "1");
+      vi.stubEnv("FAKE_CODEX_STATE", join(scratch, "failed-launches"));
+      await create();
+      const failed = await runTurn({ threadId: "t-failed", text: "one" });
+      expect(failed.done).toMatchObject({ ok: false });
+      expect(processIsAlive(seen().pid)).toBe(false);
+    });
+
+    it("leaves no process once every engine is stopped", async () => {
+      await create();
+      await runTurn({ threadId: "t-shutdown-a", text: "one" });
+      const a = seen().pid;
+      await runTurn({ threadId: "t-shutdown-b", text: "one" });
+      const b = seen().pid;
+      expect([a, b].map(processIsAlive)).toEqual([true, true]);
+      await instance.adapter.stopAll();
+      expect([a, b].map(processIsAlive)).toEqual([false, false]);
+    });
+
+    it.skipIf(process.platform === "win32").each(["stopped", "killed while idle"])("leaves none of a kept process's children running once it is %s", async (how) => {
+      const childPid = join(scratch, "tool-server.pid");
+      const cli = join(scratch, "codex-with-tool-server.mjs");
+      writeFileSync(cli, [
+        "#!/usr/bin/env node",
+        'import { spawn } from "node:child_process";',
+        'import { writeFileSync } from "node:fs";',
+        'if (process.argv[2] === "app-server" && process.env.FAKE_CODEX_TOOL_SERVER_PID) {',
+        '  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+        "  writeFileSync(process.env.FAKE_CODEX_TOOL_SERVER_PID, String(child.pid));",
+        "}",
+        `await import(${JSON.stringify(new URL(`file://${FAKE_CLI}`).href)});`,
+      ].join("\n"), { mode: 0o755 });
+      await create({ cli });
+      vi.stubEnv("FAKE_CODEX_TOOL_SERVER_PID", childPid);
+      await runTurn({ threadId: "t-tree", text: "one" });
+      const root = seen().pid, child = Number(readFileSync(childPid, "utf8"));
+      expect([root, child].map(processIsAlive)).toEqual([true, true]);
+      if (how === "stopped") await instance.adapter.stopAll();
+      else process.kill(root, "SIGKILL");
+      await expect.poll(() => [root, child].map(processIsAlive), { timeout: 10_000 }).toEqual([false, false]);
+    });
+
+    it("ends every process with its turn when keeping is switched off", async () => {
+      vi.stubEnv("OMB_CODEX_SESSION_KEEP", "0");
+      await create();
+      await runTurn({ threadId: "t-off", text: "one" });
+      expect(processIsAlive(seen().pid)).toBe(false);
+    });
+  });
+
   it("steers the running turn through turn/steer without killing the child", async () => {
     const dump = join(scratch, "codex-steer.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -3360,7 +3835,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     await instance.adapter.respondToRequest("t-codex-steer", opened.requestId!, { behavior: "deny" });
     await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
-    await expect.poll(() => processIsAlive(snapshot.pid), { timeout: 5_000 }).toBe(false);
+    await instance.dispose();
+    expect(processIsAlive(snapshot.pid)).toBe(false);
   }, 20_000);
 
   it("reports an explicitly refused steer as refused so the caller queues, and keeps the child alive", async () => {
@@ -3464,6 +3940,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
   it.each([false, true])("keeps ownership after an uncertain stop even when root close arrives (before failure: %s)", async (closeFirst) => {
     await create();
+    vi.stubEnv("OMB_CODEX_SESSION_KEEP", "0");
     const stopping = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
       if (closeFirst && child.exitCode === null && child.signalCode === null) {
         const closed = once(child, "close");
@@ -3801,7 +4278,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const { done, errors } = await runTurn("t-no-login");
       expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
       expect(codexNotSignedIn().includes("Sign-ins don't copy over when you move to My Cloud.")).toBe(Boolean(role));
-      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required", unsent: true });
       expect(spawn).not.toHaveBeenCalled();
     });
 
@@ -4180,7 +4657,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     ]);
   });
 
-  it("sends effort on turn/start, and omits the key when unset", async () => {
+  it("sends effort (including ultra) on turn/start, and omits the key when unset", async () => {
     await create();
     const dump = join(scratch, "effort.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -4191,6 +4668,13 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
     expect(turnStart.params.effort).toBe("xhigh");
+
+    const ultraDump = join(scratch, "effort-ultra.json");
+    process.env.FAKE_CODEX_DUMP = ultraDump;
+    await instance.adapter.sendTurn({ threadId: "t-effort-ultra", text: "hi", effort: "ultra" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-effort-ultra");
+    const ultraSeen = JSON.parse(readFileSync(ultraDump, "utf8"));
+    expect(ultraSeen.calls.find((c: any) => c.method === "turn/start").params.effort).toBe("ultra");
   });
 
   it("sends no effort key when the turn has none", async () => {
@@ -4206,7 +4690,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(turnStart.params).not.toHaveProperty("effort");
   });
 
-  it("runs a Fast row on its base model with the Fast tier for that turn only", async () => {
+  it("runs a Fast or Ultrafast row on its base model with that service tier for that turn only", async () => {
     await create();
     const dump = join(scratch, "fast.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -4221,6 +4705,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(threadStart.params).not.toHaveProperty("serviceTier");
     expect(turnStart.params).toMatchObject({ serviceTierForTurn: "priority", effort: "high" });
     expect(turnStart.params).not.toHaveProperty("serviceTier");
+
+    const ultraDump = join(scratch, "ultrafast.json");
+    process.env.FAKE_CODEX_DUMP = ultraDump;
+    await instance.adapter.sendTurn({ threadId: "t-ultrafast", text: "hi", model: "gpt-6.2-sol+ultrafast" });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-ultrafast");
+
+    const ultraSeen = JSON.parse(readFileSync(ultraDump, "utf8"));
+    const ultraThreadStart = ultraSeen.calls.find((c: any) => c.method === "thread/start");
+    const ultraTurnStart = ultraSeen.calls.find((c: any) => c.method === "turn/start");
+    expect(ultraThreadStart.params).toMatchObject({
+      model: "gpt-6.2-sol",
+      modelProvider: "openai",
+    });
+    expect(ultraThreadStart.params).not.toHaveProperty("serviceTier");
+    expect(ultraTurnStart.params).toMatchObject({
+      serviceTierForTurn: "ultrafast",
+    });
+    expect(ultraTurnStart.params).not.toHaveProperty("serviceTier");
   });
 
   it("sends no service tier for a plain row", async () => {

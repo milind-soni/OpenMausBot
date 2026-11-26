@@ -1,5 +1,6 @@
 import type { Message } from "@/state/store";
 import { isToolStep } from "@/lib/activity-runs";
+import type { LiveSpokenLine } from "../../shared/wire";
 
 export type CallRecordLine =
   | { kind: "step"; id: string; tool: NonNullable<Message["tool"]> }
@@ -20,13 +21,20 @@ export function callRecordLines(transcript: readonly Message[], callId: string):
 export type CallConversationEntry =
   | { kind: "said"; id: string; message: Message }
   | { kind: "answer"; id: string; message: Message }
+  | { kind: "spoken"; id: string; text: string }
   | CallRecordLine;
 
-export function callConversation(transcript: readonly Message[], callId: string): CallConversationEntry[] {
+/** `spoken` is the call record's lines the bot said aloud, placed among the chat's rows by when they began. */
+export function callConversation(transcript: readonly Message[], callId: string, spoken: readonly LiveSpokenLine[] = []): CallConversationEntry[] {
   const requests = callRequests(transcript, callId);
-  if (requests.size === 0) return [];
+  if (requests.size === 0 && spoken.length === 0) return [];
   const entries: CallConversationEntry[] = [];
+  let next = 0;
+  const speakUntil = (at: number) => {
+    for (; next < spoken.length && spoken[next]!.at <= at; next++) entries.push({ kind: "spoken", id: `spoken-${next}`, text: spoken[next]!.text });
+  };
   for (const message of transcript) {
+    speakUntil(message.at);
     if (requests.has(message.id)) {
       if (message.text?.trim()) entries.push({ kind: "said", id: message.id, message });
       continue;
@@ -39,6 +47,7 @@ export function callConversation(transcript: readonly Message[], callId: string)
     const line = callRecordLine(message);
     if (line) entries.push(line);
   }
+  speakUntil(Number.POSITIVE_INFINITY);
   return entries;
 }
 

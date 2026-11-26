@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ requests: [] as Array<[string, string | undefined, unknown]>, failImport: "", failSkill: "" }));
+const fixture = vi.hoisted(() => ({ requests: [] as Array<[string, string | undefined, unknown]>, failImport: "", failSkill: "", history: {} as unknown }));
 
 vi.mock("@/state/store", () => ({
   api: vi.fn(async (path: string, init: { method?: string; body?: string }) => {
@@ -11,6 +11,10 @@ vi.mock("@/state/store", () => ({
       return { bots: [{ id: `id-${body.package.name}`, name: body.package.name, threadId: "t1" }], routines: [], connections: [] };
     }
     if (fixture.failSkill && path.endsWith(`/skills/${fixture.failSkill}`)) throw new Error("no");
+    if (path === "/api/setup-import/grok/history") {
+      if (fixture.history instanceof Error) throw fixture.history;
+      return fixture.history;
+    }
     return {};
   }),
 }));
@@ -33,6 +37,7 @@ beforeEach(() => {
   fixture.requests.length = 0;
   fixture.failImport = "";
   fixture.failSkill = "";
+  fixture.history = {};
 });
 
 describe("the preview", () => {
@@ -54,10 +59,19 @@ describe("the preview", () => {
 
   it("names a Bot already moved instead of copying it; a taken name only renumbers", () => {
     const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
-    const again = previewGrokMove(bots(DESK), facts({ bots: [{ name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
+    const again = previewGrokMove(bots(DESK), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
     expect(again.plans).toEqual([]);
-    expect(again.moved).toEqual(["Desk"]);
-    expect(previewGrokMove(bots(DESK), facts({ bots: [{ name: "Desk" }] })).plans[0]!.addedAs).toBe("Desk 2");
+    expect(again.moved).toEqual([{ name: "Desk", botId: "here-Desk" }]);
+    expect(previewGrokMove(bots(DESK), facts({ bots: [{ id: "other", name: "Desk" }] })).plans[0]!.addedAs).toBe("Desk 2");
+  });
+
+  it("a Bot moved before gets its chat on a second move, into the bot already here, and nothing else is imported", async () => {
+    const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
+    fixture.history = { messages: 214 };
+    const report = await runGrokMove(previewGrokMove(bots(DESK), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] })), vi.fn(), true);
+    expect(fixture.requests).toEqual([["/api/setup-import/grok/history", "POST", { botId: "here-Desk", grokName: "Desk" }]]);
+    expect(report.moved).toEqual([{ name: "Desk", history: { messages: 214 } }]);
+    expect(report.bots).toEqual([]);
   });
 });
 
@@ -85,6 +99,35 @@ describe("the import", () => {
     fixture.failSkill = "greet";
     const report = await runGrokMove(previewGrokMove(bots(DESK), facts()), vi.fn());
     expect(report.bots[0]!.skillsOff).toEqual(["Greet", "Risky"]);
+  });
+});
+
+describe("each Bot's chat", () => {
+  it("on the desktop app comes over for each Bot added, asked for by its name in Grok Bot, and is counted", async () => {
+    fixture.history = { messages: 214 };
+    const report = await runGrokMove(previewGrokMove(bots(DESK), facts()), vi.fn(), true);
+    expect(fixture.requests.filter(([path]) => path === "/api/setup-import/grok/history")).toEqual([
+      ["/api/setup-import/grok/history", "POST", { botId: "id-Desk", grokName: "Desk" }],
+    ]);
+    expect(report.bots.map((bot) => bot.history)).toEqual([{ messages: 214 }]);
+  });
+
+  it("says why it didn't come over, and a request that got no usable answer is named as failed", async () => {
+    const outcome = async (answer: unknown) => {
+      fixture.history = answer;
+      return (await runGrokMove(previewGrokMove(bots(DESK), facts()), vi.fn(), true)).bots[0]!.history;
+    };
+    expect(await outcome({ reason: "ambiguous" })).toEqual({ reason: "ambiguous" });
+    expect(await outcome({ reason: "noApp" })).toEqual({ reason: "noApp" });
+    expect(await outcome({ reason: "somethingNew" })).toEqual({ reason: "failed" });
+    expect(await outcome(new Error("offline"))).toEqual({ reason: "failed" });
+  });
+
+  it("isn't asked for where the move can't look at this computer, and a Bot that wasn't added asks nothing", async () => {
+    expect((await runGrokMove(previewGrokMove(bots(DESK), facts()), vi.fn())).bots[0]).not.toHaveProperty("history");
+    fixture.failImport = "Desk";
+    await runGrokMove(previewGrokMove(bots(DESK), facts()), vi.fn(), true);
+    expect(fixture.requests.map(([path]) => path)).not.toContain("/api/setup-import/grok/history");
   });
 });
 

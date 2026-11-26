@@ -47,7 +47,7 @@ function PlanCard({ card, shown, details, compare, busy, onStart }: {
       {shown.map(row => {
         const Icon = ROW_ICON[row.key];
         return <li key={row.key} data-plan-row={row.key} className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2.5 text-[13px] leading-[18px] text-ink">
-          {Icon ? <Icon size={16} strokeWidth={1.5} aria-hidden="true" className="mt-px text-ink-tertiary" /> : <span />}
+          {Icon ? <Icon size={16} aria-hidden="true" className="mt-px text-ink-tertiary" /> : <span />}
           <span>{row.text}{row.note && <small className="block text-[12px] leading-4 text-ink-tertiary">{row.note}</small>}</span>
         </li>;
       })}
@@ -67,11 +67,13 @@ function PlanCard({ card, shown, details, compare, busy, onStart }: {
   </li>;
 }
 
-export function ChooseScreen({ offer, current = null, own = null, now, busy, signedOut, notice, onStart, onSignIn }: {
+export function ChooseScreen({ offer, current = null, own = null, now, busy, signedOut, notice, botsHere = false, onStart, onSignIn }: {
   offer: CloudOffer;
   /** The person's own plan tier, and that plan when it is no longer on sale: its card says Your plan instead of a button. */
   current?: string | null; own?: CloudOfferPlan | null;
   now: number; busy: boolean; signedOut: boolean; notice: string | null;
+  /** This computer has bots of its own: the offer says where a bot lives. */
+  botsHere?: boolean;
   onStart: (tier: string) => void; onSignIn: () => void;
 }) {
   const [compare, setCompare] = useState(false);
@@ -89,10 +91,11 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
         </p>
         <button type="button" aria-expanded={compare} aria-controls={cards.map(card => detailsId(card.tier)).join(" ")} onClick={() => setCompare(!compare)}
           className="-ms-2 mt-2 inline-flex items-center gap-1 self-start rounded-full py-0.5 pe-1.5 ps-2 text-[13px] leading-[18px] text-(--cloud-night-ink-quiet) transition-colors hover:bg-white/10 hover:text-(--cloud-night-ink) motion-reduce:transition-none">
-          {t("pro.seePlans")}<ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", compare && "rotate-180")} />
+          {t("pro.seePlans")}<ChevronDown size={14} aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", compare && "rotate-180")} />
         </button>
       </NightCard>
     </div>
+    {botsHere && <p data-cloud-one-place="" className="text-[13px] leading-[18px] text-ink-secondary [text-wrap:pretty]">{t("cloudBuy.onePlace")}</p>}
     {notice && <p role="status" className="rounded-[12px] bg-ink/[0.04] px-4 py-3 text-[13px] leading-[18px] text-ink">{notice}</p>}
     <section aria-labelledby="cloud-add-plans">
       <h3 id="cloud-add-plans" className="sr-only">{t("cloudBuy.choose")}</h3>
@@ -116,7 +119,7 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
       <ul className="flex flex-wrap gap-x-5 gap-y-2">
         {FEATURES.map(([Icon, title, body]) => <li key={title} className="flex text-[13px] leading-[18px] text-ink">
           <span aria-hidden="true" title={t(body)} className="inline-flex items-center gap-1.5">
-            <Icon size={16} strokeWidth={1.5} className="shrink-0 text-ink-tertiary" />{t(title)}
+            <Icon size={16} className="shrink-0 text-ink-tertiary" />{t(title)}
           </span>
           <span className="sr-only">{t(title)}: {t(body)}</span>
         </li>)}
@@ -124,7 +127,7 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
     </section>
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t-[0.5px] border-ink/10 pt-4 text-[12px] leading-4 text-ink-tertiary">
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <span className="inline-flex items-center gap-1.5"><Lock size={13} strokeWidth={1.5} aria-hidden="true" />{t("cloudBuy.secure")}</span>
+        <span className="inline-flex items-center gap-1.5"><Lock size={13} aria-hidden="true" />{t("cloudBuy.secure")}</span>
         <span role="img" aria-label={t("cloudBuy.wallets")} className="inline-flex gap-1">
           {[t("cloudBuy.applePay"), t("cloudBuy.googlePay"), t("cloudBuy.card")].map(mark => <span key={mark} aria-hidden="true"
             className="rounded-[6px] border-[0.5px] border-ink/20 px-1.5 py-px text-[11px] font-medium text-ink-secondary">{mark}</span>)}

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Share2, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
@@ -11,6 +11,7 @@ import type { SectionNaming } from "./SidebarBotDrag";
 
 export function SidebarSectionHeader({
   name,
+  count,
   collapsed,
   attention,
   alert,
@@ -21,16 +22,18 @@ export function SidebarSectionHeader({
   onDragEnd,
   onMove,
   onDelete,
+  onShare,
   onContextMenu,
   line = false,
   onMenu,
   reserveMenu = false,
   menuOpen = false,
-  count,
   naming,
   dropInto = false,
 }: {
   name: string;
+  /** How many rows the section holds, for a section whose size is the point of it. */
+  count?: number;
   collapsed: boolean;
   attention?: SidebarSectionAttention;
   alert?: boolean;
@@ -41,14 +44,13 @@ export function SidebarSectionHeader({
   onDragEnd?: () => void;
   onMove?: (direction: -1 | 1) => void;
   onDelete?: () => void;
+  onShare?: () => void;
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
-  /** Keep the ⋯ button's space when this line has none, so counts line up with lines that do (Simple). */
+  /** Keep the ⋯ button's space when this line has none, so chevrons line up with lines that do (Simple). */
   reserveMenu?: boolean;
   menuOpen?: boolean;
-  /** How many rows the section holds, shown at rest where the chevron shows on hover (Simple). */
-  count?: number;
   /** A name field in place of the name, for a department being made or renamed. */
   naming?: SectionNaming;
   /** A dragged bot would go into this department. */
@@ -75,14 +77,13 @@ export function SidebarSectionHeader({
       ? t("sidebar.section.expand", { name })
       : t("sidebar.section.collapse", { name });
 
+  const counted = count !== undefined;
+  const size = counted && <span data-section-count="" className={cn("shrink-0 text-[12px] leading-4 tabular-nums text-ink-tertiary", line && "me-auto")}>{count}</span>;
   const dropMark = dropInto ? "bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70" : undefined;
 
   if (line) {
-    const tail = (
-      <span aria-hidden="true" className="relative flex size-4 shrink-0 items-center justify-center">
-        {count !== undefined && <span className={cn("text-[12px] tabular-nums leading-4 text-ink-secondary transition-opacity", onToggle && "group-hover/section:opacity-0 group-focus-within/section:opacity-0 touch:opacity-0")}>{count}</span>}
-        {onToggle && <Chevron size={14} className="absolute text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />}
-      </span>
+    const tail = onToggle && (
+      <Chevron size={12} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
     );
     return (
       <div
@@ -106,13 +107,15 @@ export function SidebarSectionHeader({
             title={toggleTitle}
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
-            <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-secondary">{name}</span>
+            <span className={cn("min-w-0 truncate text-[13px] leading-[18px] text-ink-secondary", !counted && "flex-1")}>{name}</span>
+            {size}
             {collapsed && <SectionAttention attention={attention} label={attentionLabel} alert={alert} />}
             {tail}
           </button>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-ink-secondary">{name}</span>
+            <span className={cn("min-w-0 truncate text-[13px] leading-[18px] text-ink-secondary", !counted && "flex-1")}>{name}</span>
+            {size}
             {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
             {tail}
           </div>
@@ -125,12 +128,12 @@ export function SidebarSectionHeader({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={(event) => onMenu(event.currentTarget)}
-            className="flex h-[18px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-ink-tertiary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus group-hover/section:opacity-100 group-focus-within/section:opacity-100 aria-expanded:bg-raised aria-expanded:text-ink aria-expanded:opacity-100 touch:opacity-100"
+            className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-tertiary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus group-hover/section:opacity-100 group-focus-within/section:opacity-100 aria-expanded:bg-raised aria-expanded:text-ink aria-expanded:opacity-100 touch:opacity-100"
           >
             <MoreHorizontal size={15} aria-hidden="true" />
           </button>
         )}
-        {!onMenu && reserveMenu && !naming && <span aria-hidden="true" className="w-[22px] shrink-0" />}
+        {!onMenu && reserveMenu && !naming && <span aria-hidden="true" className="w-6 shrink-0" />}
       </div>
     );
   }
@@ -147,19 +150,32 @@ export function SidebarSectionHeader({
           title={toggleTitle}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
         >
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
-          <Chevron size={13} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+          {size}
+          <Chevron size={12} className="shrink-0 text-ink-secondary" aria-hidden="true" />
           <SectionAttention attention={attention} label={attentionLabel} alert={alert} />
         </button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5">
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
+          {size}
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
+      )}
+      {onShare && !naming && (
+        <button
+          type="button"
+          onClick={onShare}
+          aria-label={t("template.shareDepartment", { name })}
+          title={t("template.shareDepartment", { name })}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <Share2 size={13} aria-hidden="true" />
+        </button>
       )}
       {onDelete && !naming && (
         <button
@@ -230,33 +246,40 @@ function SectionNameField({ value, label, onCommit, onCancel }: SectionNaming) {
   );
 }
 
+type SectionMark = "waiting" | "unread" | "working";
+
+const SECTION_MARK: Record<SectionMark, string> = {
+  waiting: "size-2 bg-warning",
+  unread: "size-2 bg-accent",
+  working: "size-1.5 animate-pulse bg-success motion-reduce:animate-none",
+};
+
+/** Waiting and unread each keep their own dot, so a wait never hides unread rows; working shows only when neither does. */
+function sectionMarks(attention: SidebarSectionAttention | undefined): SectionMark[] {
+  if (!attention) return [];
+  const marks: SectionMark[] = [];
+  if (attention.waiting > 0) marks.push("waiting");
+  if (attention.unread > 0) marks.push("unread");
+  if (marks.length === 0 && attention.working > 0) marks.push("working");
+  return marks;
+}
+
+/** How many rows inside need the person: unread or waiting on them. */
+function needsYouCount(attention: SidebarSectionAttention | undefined): number {
+  return attention ? attention.needsYou ?? attention.unread + attention.waiting : 0;
+}
+
 function SectionAttention({ attention, label, alert }: { attention?: SidebarSectionAttention; label: string; alert?: boolean }) {
+  const marks = alert ? [] : sectionMarks(attention);
+  const needs = alert ? 0 : needsYouCount(attention);
   return (
     <>
-      {attention && attention.waiting > 0 && (
-        <span
-          aria-hidden="true"
-          className="min-w-4 rounded-full bg-warning/15 px-1 text-center text-[9px] font-semibold leading-4 text-warning"
-        >
-          {attention.waiting}
+      {needs > 0 && <span aria-hidden="true" title={label} data-section-needs="" className="shrink-0 text-[12px] leading-4 tabular-nums text-ink-tertiary">{needs}</span>}
+      {marks.map((mark) => (
+        <span key={mark} aria-hidden="true" title={label} data-section-mark={mark} className="flex size-4 shrink-0 items-center justify-center">
+          <span className={cn("rounded-full", SECTION_MARK[mark])} />
         </span>
-      )}
-      {attention && attention.unread > 0 && (
-        <span
-          aria-hidden="true"
-          className="min-w-4 rounded-full bg-accent/15 px-1 text-center text-[9px] font-semibold leading-4 text-accent"
-        >
-          {attention.unread}
-        </span>
-      )}
-      {attention && attention.working > 0 && (
-        <span
-          aria-hidden="true"
-          className="flex size-4 items-center justify-center"
-        >
-          <span className="size-1.5 animate-pulse rounded-full bg-success" />
-        </span>
-      )}
+      ))}
       {label && <span className="sr-only">{label}</span>}
       {alert && (
         <>

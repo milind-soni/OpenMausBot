@@ -66,6 +66,20 @@ describe("listTriggers", () => {
     expect(listed.triggers![0]).toMatchObject({ schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"] } });
   });
 
+  it("says for every kind whether its runs continue one conversation", () => {
+    const listed = listTriggers({
+      botId: "bot-a", routines: [{ ...routine("r1", "bot-a"), sameConversation: true }],
+      webhooks: [{ ...webhook("w1", "bot-a"), sameConversation: true }, webhook("w2", "bot-a")],
+      appTriggers: [
+        { id: "a1", botId: "bot-a", prompt: "Sort mail.", name: "Mail", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", delivery: "poll", sameConversation: true } as AppTrigger,
+        { id: "a2", botId: "bot-a", prompt: "Sort mail.", name: "Mail 2", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", delivery: "poll" } as AppTrigger,
+      ],
+      runs: [], timeZone: "UTC", now,
+    });
+    expect(Object.fromEntries(listed.triggers!.map((trigger) => [trigger.id, trigger.sameConversation])))
+      .toEqual({ r1: true, w1: true, w2: false, a1: true, a2: false });
+  });
+
   it("gives one trigger with its recent fires, and says plainly when the id is not the bot's", () => {
     const runs = Array.from({ length: 12 }, (_, index) => run(`run-${index}`, "r1", "bot-a", `report ${index}`));
     const one = listTriggers({ botId: "bot-a", triggerId: "r1", routines: [routine("r1", "bot-a")], webhooks: [], runs, timeZone: "UTC", now });
@@ -107,7 +121,7 @@ describe("parseTriggerRequest", () => {
     expect(parseTriggerRequest({ ...source, action: "update", triggerId: "a1", changes: { event: "SLACK_X" } }, isSchedule))
       .toMatchObject({ ok: false, error: expect.stringContaining("delete it and create a new one") });
     expect(parseTriggerRequest({ ...source, action: "update", triggerId: "r1", changes: { sameConversation: true } }, isSchedule))
-      .toMatchObject({ ok: false, error: "same_conversation applies only to app-event and webhook triggers" });
+      .toMatchObject({ ok: true, kind: "schedule", proposal: { action: "update", routineId: "r1", changes: { sameConversation: true } } });
     expect(parseTriggerRequest({ ...source, action: "create", kind: "email", routine: {} }, isSchedule)).toMatchObject({ ok: false });
     expect(parseTriggerRequest({ ...source, action: "create", kind: "schedule", routine: {}, extra: 1 }, isSchedule)).toMatchObject({ ok: false });
   });

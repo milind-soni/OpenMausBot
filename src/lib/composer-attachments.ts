@@ -1,6 +1,7 @@
 import { isCitationAttachment, serializeCitation, type CitationAttachment } from "./citations.ts";
 import { randomUuid } from "./random-uuid.ts";
 import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
+import { serverFetch } from "./relay-server.ts";
 export { dataContextFor, type DataContext, type DataViewContext } from "../../shared/data-context.ts";
 
 export type PasteAttachment = {
@@ -206,6 +207,12 @@ const ACCEPTED_AUDIO_MIMES = new Set([
   ...Object.values(AUDIO_MIMES_BY_EXTENSION),
   "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
 ]);
+const VIDEO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+};
+const ACCEPTED_VIDEO_MIMES = new Set(Object.values(VIDEO_MIMES_BY_EXTENSION));
 
 export function documentMime(file: Pick<File, "name" | "type">): string | null {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
@@ -295,7 +302,7 @@ async function uploadWithRetry<T>(url: string, init: RequestInit): Promise<T> {
   for (let attempt = 0; attempt < UPLOAD_ATTEMPTS; attempt += 1) {
     let response: Response;
     try {
-      response = await fetch(url, init);
+      response = await serverFetch(url, init);
     } catch (error) {
       const aborted = typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
       if (aborted || attempt === UPLOAD_ATTEMPTS - 1) throw error;
@@ -382,9 +389,11 @@ export async function imageAttachmentFromFile(
 export async function fileAttachmentFromFile(file: File, anyType = false): Promise<FileAttachment | null> {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const extension = file.name.split(".").at(-1)?.toLowerCase() ?? "";
+  const video = ACCEPTED_VIDEO_MIMES.has(declared) ? declared : VIDEO_MIMES_BY_EXTENSION[extension];
   const mime = documentMime(file) ??
     (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]) ??
     ARCHIVE_MIMES_BY_EXTENSION[extension] ??
+    (file.size <= FILE_MAX_BYTES ? video : undefined) ??
     (anyType ? declared || "application/octet-stream" : undefined);
   if (!mime) return null;
   if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
@@ -716,7 +725,7 @@ export function discardUnsentUpload(attachment: Attachment): void {
   if ((attachment.kind !== "image" && attachment.kind !== "file") || !attachment.path) return;
   const name = attachmentBasename(attachment.path);
   if (!/^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/.test(name)) return;
-  void fetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
+  void serverFetch(`/api/attachments/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => undefined);
 }
 
 export function attachmentBasename(path: string): string {

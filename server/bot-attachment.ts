@@ -1,7 +1,14 @@
 // The source opens through the message-file route's hardened resolver (realpath containment, O_NOFOLLOW, size cap) and is
 // copied into the private store, so the chat never reaches into a bot's workspace or VM home afterwards.
-import { basename, join, posix } from "node:path";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { realpath } from "node:fs/promises";
+import { basename, dirname, join, posix } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { DATA_DIR } from "./config.ts";
+import { openInboxFile, type InboxRead } from "./host/handoff-inbox.ts";
 import {
+  ATTACHMENTS_DIR,
   extensionForFileMime,
   extensionForMime,
   FILE_MAX_BYTES,
@@ -10,6 +17,7 @@ import {
   saveImage,
 } from "./attachments.ts";
 import { mimeFor, openFileSavedSince, openMessageFile, referencedPathIdentity, type OpenedMessageFile } from "./message-file.ts";
+import type { ConversationAttachment } from "./conversation-attachments.ts";
 import type { Message } from "./store.ts";
 
 export type BotAttachment = NonNullable<Message["attachments"]>[number];
@@ -22,6 +30,8 @@ export const ATTACH_SUPPORTED_TYPES =
 function statusError(status: number, message: string): Error & { status: number } {
   return Object.assign(new Error(message), { status });
 }
+
+const sourceFileLink = (path: string): string => /^file:/i.test(path) ? path : path.replace(/[%?#]/g, encodeURIComponent);
 
 /** Maps a guest workspace path onto its bind-mounted host directory; anything outside it, `..` escapes included, is null. */
 export function guestWorkspaceToHost(input: string, guestRoot: string, hostRoot: string): string | null {
@@ -55,22 +65,104 @@ export interface SaveBotAttachmentInput {
   guest?: { root: string; host: string };
   /** A file this turn saved outside the roots, at a place the person named: one copied file, never a folder or a link grant. */
   savedThisTurn?: { since: number; refuse: readonly string[] };
+  /** Store the copy under a name made from its bytes, so the same file passed between bots again is kept once. */
+  byContent?: boolean;
+  /** The conversation's inbox of files other bots passed it: a place the bot may also send from, read without
+   * following any link (server/host/handoff-inbox.ts). */
+  inbox?: InboxRead;
+  /** Stored files attached to this conversation (server/conversation-attachments.ts): each may be sent by its exact path.
+   * Read only when a path is outside every other place a bot may send from. */
+  attached?: () => readonly ConversationAttachment[];
+}
+
+let nameKey: Buffer | undefined;
+/** This install's secret for stored names made from bytes. Security: the store serves a file to whoever knows its name,
+ * so a name must not be computable from the file alone; without this key it is not. */
+function contentNameKey(): Buffer {
+  if (nameKey) return nameKey;
+  const file = join(DATA_DIR, "attachment-names.key");
+  try {
+    mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    writeFileSync(file, randomBytes(32), { mode: 0o600, flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  nameKey = readFileSync(file);
+  if (nameKey.byteLength < 32) throw new Error("the attachment name key is damaged");
+  return nameKey;
+}
+
+/** The upload id the store keeps a file under when it is named by its bytes: a version-8 UUID cut from a keyed digest of
+ * their SHA-256 and the stored extension, so the same bytes under another file type are another stored file. */
+export function contentUploadId(sha256: string, extension: string, key: Buffer = contentNameKey()): string {
+  const hex = createHmac("sha256", key).update(`${sha256}\0${extension}`).digest("hex").slice(0, 32).split("");
+  hex[12] = "8";
+  hex[16] = "89ab"[Number.parseInt(hex[16]!, 16) % 4]!;
+  const id = hex.join("");
+  return `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+}
+
+async function sha256Of(file: OpenedMessageFile): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of file.handle.createReadStream({ start: 0, autoClose: false })) hash.update(chunk as Buffer);
+  return hash.digest("hex");
 }
 
 /** Only the roots' outside_workspace refusal falls through, so a missing or oversized file in the folder says exactly that.
- * Opened at the store's limit, not the preview one: the copy streams, and a person may send the same size. */
-async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"]): Promise<OpenedMessageFile> {
+ * Opened at the store's limit, not the preview one: the copy streams, and a person may send the same size. A path the
+ * roots do not hold is tried in the conversation's inbox before anything else. */
+async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"], inbox: InboxRead | undefined, attached?: () => readonly ConversationAttachment[]): Promise<OpenedMessageFile> {
+  const href = sourceFileLink(path);
   try {
-    return await openMessageFile(path, roots, FILE_MAX_BYTES);
+    return await openMessageFile(href, roots, FILE_MAX_BYTES);
   } catch (error) {
-    if (!savedThisTurn || (error as { code?: unknown } | null)?.code !== "outside_workspace") throw error;
-    return openFileSavedSince(path, savedThisTurn, FILE_MAX_BYTES);
+    const status = (error as { status?: unknown } | null)?.status, outside = (error as { code?: unknown } | null)?.code === "outside_workspace";
+    const received = inbox && (outside || status === 404) ? await openInboxFile(path, inbox, FILE_MAX_BYTES) : null;
+    if (received) return { ...received, mime: mimeFor(received.name) };
+    const stored = outside || status === 404 ? await openAttached(path, attached) : null;
+    if (stored) return stored;
+    if (!savedThisTurn || !outside) throw error;
+    return openFileSavedSince(href, savedThisTurn, FILE_MAX_BYTES);
+  }
+}
+
+/** Opened under the name it was attached with, since the store names its files by an id. Security: only a file directly
+ * in the attachment store; a tag naming anything else on disk opens nothing. */
+async function openAttached(path: string, list: (() => readonly ConversationAttachment[]) | undefined): Promise<OpenedMessageFile | null> {
+  let local = path;
+  if (/^file:/i.test(path)) {
+    try { local = fileURLToPath(path); } catch { return null; }
+  }
+  const [wanted, store] = await Promise.all([realpath(local).catch(() => null), realpath(ATTACHMENTS_DIR).catch(() => null)]);
+  if (!wanted || !store || dirname(wanted) !== store) return null;
+  const attached = list?.() ?? [];
+  const listed = await Promise.all(attached.map((one) => realpath(one.path).catch(() => null)));
+  const index = listed.indexOf(wanted);
+  if (index < 0) return null;
+  const file = await openMessageFile(pathToFileURL(wanted).href, [dirname(wanted)], FILE_MAX_BYTES);
+  return { ...file, name: attached[index]!.name };
+}
+
+const contentSaves = new Map<string, Promise<unknown>>();
+/** One save at a time for each stored name, so exactly one of two saves of the same bytes is the one that stored them. */
+async function oneAtATime<T>(id: string, save: () => Promise<T>): Promise<T> {
+  const before = contentSaves.get(id) ?? Promise.resolve();
+  const mine = before.then(save, save);
+  const settled = mine.catch(() => undefined);
+  contentSaves.set(id, settled);
+  try {
+    return await mine;
+  } finally {
+    if (contentSaves.get(id) === settled) contentSaves.delete(id);
   }
 }
 
 export interface SavedBotAttachment {
   attachment: BotAttachment;
   bytes: number;
+  /** With `byContent`: the bytes' SHA-256, and whether this call put them in the store (false: they were there already). */
+  sha256?: string;
+  fresh?: boolean;
 }
 
 export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<SavedBotAttachment> {
@@ -80,23 +172,31 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
   // A bot with a VM works in it: a relative path means its VM workspace first.
   const roots = input.guest ? [input.guest.host, ...input.roots] : input.roots;
   // A VM turn's tools never wrote to the host, so it gets roots only.
-  const file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn);
+  const file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn, guestHost ? undefined : input.inbox, guestHost ? undefined : input.attached);
   try {
     const mime = mimeFor(file.name);
     const name = displayNameFor(input.name, file.name);
-    if (extensionForMime(mime)) {
-      if (file.bytes > IMAGE_MAX_BYTES) throw statusError(413, `image exceeds ${IMAGE_MAX_BYTES} bytes`);
-      const saved = saveImage(await file.handle.readFile(), mime);
-      return { attachment: { kind: "image", path: saved.path, mime: saved.mime, name, source: file.path }, bytes: saved.bytes };
-    }
-    if (!extensionForFileMime(mime)) {
+    const imageExtension = extensionForMime(mime), fileExtension = extensionForFileMime(mime);
+    if (imageExtension && file.bytes > IMAGE_MAX_BYTES) throw statusError(413, `image exceeds ${IMAGE_MAX_BYTES} bytes`);
+    if (!imageExtension && !fileExtension) {
       throw statusError(415, `${file.name} is not a supported attachment type. Supported: ${ATTACH_SUPPORTED_TYPES}.`);
     }
-    if (file.bytes > FILE_MAX_BYTES) throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
-    const saved = await saveFile(file.handle.createReadStream({ start: 0, autoClose: false }), name || basename(file.name), mime, {
-      expectedBytes: file.bytes,
-    });
-    return { attachment: { kind: "file", path: saved.path, mime: saved.mime, name: saved.name, source: file.path }, bytes: saved.bytes };
+    if (!imageExtension && file.bytes > FILE_MAX_BYTES) throw statusError(413, `file exceeds ${FILE_MAX_BYTES} bytes`);
+    const extension = (imageExtension ?? fileExtension)!;
+    const sha256 = input.byContent ? await sha256Of(file) : undefined;
+    const uploadId = sha256 ? contentUploadId(sha256, extension) : undefined;
+    const store = async (): Promise<SavedBotAttachment> => {
+      const content = sha256 ? { sha256, fresh: !existsSync(join(ATTACHMENTS_DIR, `${uploadId}${extension}`)) } : {};
+      if (imageExtension) {
+        const saved = saveImage(await file.handle.readFile(), mime, uploadId);
+        return { attachment: { kind: "image", path: saved.path, mime: saved.mime, name, source: file.path }, bytes: saved.bytes, ...content };
+      }
+      const saved = await saveFile(file.handle.createReadStream({ start: 0, autoClose: false }), name || basename(file.name), mime, {
+        expectedBytes: file.bytes, ...(uploadId ? { uploadId } : {}),
+      });
+      return { attachment: { kind: "file", path: saved.path, mime: saved.mime, name: saved.name, source: file.path }, bytes: saved.bytes, ...content };
+    };
+    return await (uploadId ? oneAtATime(uploadId, store) : store());
   } finally {
     await file.handle.close().catch(() => undefined);
   }
@@ -131,7 +231,7 @@ export function deliveredCopy(
     const bySource = inScope.filter((attachment) => {
       if (!attachment.source) return false;
       try {
-        return referencedPathIdentity(attachment.source) === wanted;
+        return referencedPathIdentity(sourceFileLink(attachment.source)) === wanted;
       } catch {
         return false;
       }

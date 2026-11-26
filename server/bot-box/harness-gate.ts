@@ -4,6 +4,7 @@
 // other route of the server answers 403 here before it is ever asked.
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { guardedHandler } from "./broker-headers.ts";
 
 export const HARNESS_GATE_PREFIX = "/api/internal/";
 
@@ -41,7 +42,7 @@ export function openHarnessGate(options: HarnessGateOptions): Promise<HarnessGat
   const allow = options.allow ?? [HARNESS_GATE_PREFIX];
   const sockets = new Set<Socket>();
   const gate = { socketPath: options.socketPath, refused: 0 } as HarnessGate;
-  const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server: Server = createServer(guardedHandler("harness gate", (req: IncomingMessage, res: ServerResponse) => {
     const target = harnessTarget(req.url ?? "", allow);
     if (target === null) {
       gate.refused += 1;
@@ -64,7 +65,7 @@ export function openHarnessGate(options: HarnessGateOptions): Promise<HarnessGat
     });
     req.pipe(upstream);
     res.on("close", () => upstream.destroy());
-  });
+  }));
   server.on("connection", (socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));

@@ -138,3 +138,14 @@ describe("isRoomContextMessage", () => {
     expect(isRoomContextMessage({ kind: "activity", text: "Bash" })).toBe(false);
   });
 });
+
+describe("reactions in a room transcript", () => {
+  it("shows them under another member's line, and leaves them off the reader's own, which hears of them once by note", () => {
+    const lines = [
+      row("mine", { role: "bot", text: "Draft one.", from: editor, reactions: [{ emoji: "👎", by: "p_ada", name: "Ada" }] }),
+      row("theirs", { role: "bot", text: "Draft two.", from: writer, reactions: [{ emoji: "❤️", by: "p_ada", name: "Ada" }] }),
+    ];
+    const text = transcript(lines).window("room", "Omkar", undefined, "editor").text;
+    expect(text).toBe("Editor: Draft one.\nWriter: Draft two.\n(Ada reacted ❤️)");
+  });
+});

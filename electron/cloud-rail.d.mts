@@ -50,9 +50,14 @@ export interface RailPlace {
   removable?: true;
   /** A server connected by hand: Remove from list forgets it on this computer (this app signs out of it there). */
   forget?: true;
+  /** A server connected by hand: its menu offers Rename, a name kept on this computer only. */
+  renames?: true;
   /** A server of the person's own, theirs alone by its own word, that this computer's bots may move to: its menu offers
    * Make … my home. */
   makeHome?: true;
+  /** This computer (or the workspace of its own that runs now) and My Cloud: its menu offers Show bots together, checked
+   * while it is on (places-together.mjs). Absent where it is not offered. */
+  together?: boolean;
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings, and
  * a new organization on the Team plan this account pays for (absent from an older app's main). */

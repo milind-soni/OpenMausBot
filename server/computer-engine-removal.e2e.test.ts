@@ -11,6 +11,7 @@ import { runControlOmb } from "../scripts/control-omb.ts";
 import { SNAPSHOT_REUSE_MS } from "./harness/registry.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const FAKE_CLI = join(ROOT, "server/testing/fake-claude-cli.ts");
@@ -44,11 +45,11 @@ function install(home: string, boatPort: () => number) {
   }).then(response => response.status);
   const bots = async (): Promise<any[]> => (await api("GET", "/api/bots?messages=0")).bots;
   const bot = async (botId: string) => (await bots()).find(entry => entry.id === botId);
-  const savedBots = (): any[] => JSON.parse(readFileSync(join(data, "bots.json"), "utf8"));
+  const savedBots = (): any[] => readRegistry(data).bots;
   const editSavedBot = (botId: string, edit: (bot: any) => void) => {
     const saved = savedBots();
     edit(saved.find(entry => entry.id === botId));
-    writeFileSync(join(data, "bots.json"), JSON.stringify(saved, null, 2));
+    writeRegistry(data, { bots: saved });
   };
   const editConfig = (edit: (config: any) => void) => {
     const path = join(data, "config.json");

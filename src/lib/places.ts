@@ -48,6 +48,19 @@ export function usePlaces(): RailState {
   return state;
 }
 
+/** Show bots together, from a circle's menu on the window's rail: what main says it is now, or null when it could not change. */
+export async function setTogetherFromRail(on: boolean): Promise<boolean | null> {
+  const turn = bridge()?.together;
+  if (!turn) return null;
+  try {
+    const now = await turn(on);
+    void refreshPlaces();
+    return now;
+  } catch {
+    return null;
+  }
+}
+
 /** A place's colour, chosen in its menu on the window's rail: main saves it (on the Admin for a Cloud) whatever that
  * place's server runs, and the circle shows it once the list is read again. */
 export async function recolorPlace(id: string, swatch: CloudSwatch | null): Promise<PlaceColorOutcome> {
@@ -66,6 +79,15 @@ export async function removePlace(id: string): Promise<CloudRemoveOutcome> {
   if (!answer) return "failed";
   if (answer.outcome === "removed" || answer.outcome === "gone") void refreshPlaces();
   return answer.outcome;
+}
+
+/** Rename, from a server's menu: main saves the name for that server on this computer only. An older app (no such channel)
+ * answers `failed`. */
+export async function renamePlace(id: string, name: string): Promise<"saved" | "name" | "failed"> {
+  const answer = await bridge()?.rename?.(id, name).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "saved") void refreshPlaces();
+  return answer.outcome === "saved" || answer.outcome === "name" ? answer.outcome : "failed";
 }
 
 /** Make … my home, from a server's menu: main starts moving this computer's bots there. True once it started, else main's
@@ -89,6 +111,18 @@ export const railShown = (state: RailState): boolean => state.beside === true ||
 /** This computer's circle: This computer, or a workspace of its own (a profile) under its own name. */
 export function computerName(place: Pick<RailPlace, "profile"> & Partial<Pick<RailPlace, "named" | "name">>): string {
   return place.profile && place.named && place.name ? place.name : t("rail.thisComputer");
+}
+
+export type WorkspaceState = Awaited<ReturnType<NonNullable<NonNullable<typeof window.ogb>["workspaces"]>["state"]>>;
+
+const CLOUD_HOME_NAME = "My Cloud";
+
+/** The name of the place a window shows: its team, the Cloud's own name, the workspace or This computer. */
+export function windowPlaceName(place: WorkspaceState, team: string | undefined): string {
+  if (place.home) return team || (place.name && place.name !== CLOUD_HOME_NAME ? place.name : t("cloudSetup.myCloud"));
+  if (place.profile) return place.profileName || computerName({ profile: place.profile });
+  if (place.local && !place.localPath) return t("rail.thisComputer");
+  return place.name;
 }
 
 /** A new workspace's first name: Work, then Personal, then Workspace 2, 3 and on, whichever no place here has yet. */

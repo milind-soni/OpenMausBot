@@ -89,6 +89,11 @@ export function newestAutomationLines(messages: readonly Pick<Message, "id" | "a
 
 const saidLine = (message: Message) => message.role === "bot" && message.kind === "text";
 const turnOfLine = (message: Message) => message.turnId ?? message.sentInTurn;
+const settledQuestion = (message: Message) => {
+  const card = message.card;
+  return message.kind === "options" && !message.automation && card?.requestType === "question"
+    && card.requestId && !liveCardKind(card) ? card : undefined;
+};
 
 type Waiting =
   /** `messageId`: the line the run's reply is read from; null when its last turn said and sent nothing, absent when it is
@@ -104,12 +109,20 @@ export interface AutomationReportDeps {
   busy(botId: string, threadId: string): boolean;
   /** After a line this conversation's session did not write: it reaches the next turn. The chat is marked unread here. */
   wrote(bot: BotRecord, threadId: string): void;
-  notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
+  /** `run`: the routine run this notice reports on. */
+  notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string, run: RoutineRun): void;
   /** A run that delivers to the brief completed: its answer is the brief's to read. */
   brief?(run: RoutineRun, turnId?: string): void;
   /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
   threadLanguage?(threadId: string): string | undefined;
+  /** A line the app adds under a run's reply or its failure line, in the language of the chat it reports to, taken once
+   * (host/refused-lending.ts, host/no-terminal.ts): it is said even when the bot's reply is quiet. */
+  notes?: { has(runId: string): boolean; take(runId: string, language: string | undefined): string | null };
 }
+
+/** The reply with the app's own line under it, apart from the bot's words. */
+const withNote = (reply: RunReply, note: string | null): RunReply =>
+  !note ? reply : reply.quiet ? { quiet: false, text: note } : { ...reply, text: `${reply.text}\n\n${note}` };
 
 export function createAutomationReports(deps: AutomationReportDeps) {
   const { store } = deps;
@@ -164,6 +177,38 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   const copyOf = (run: RoutineRun, threadId: string, originalId: string) =>
     store.messagesFor(threadId).find((message) => message.automation?.runId === run.id && message.automation.copyOf === originalId);
 
+  const settleQuestionCopy = (threadId: string, executionThreadId: string, copy: Message, card: NonNullable<Message["card"]>) => {
+    const line = copy.automation;
+    if (line?.executionThreadId !== executionThreadId || copy.kind !== "options"
+        || copy.card?.requestType !== "question" || copy.card.requestId !== card.requestId) return;
+    if (!line.needsYou && JSON.stringify(copy.card) === JSON.stringify(card)) return;
+    const { needsYou: _settled, ...automation } = line;
+    store.patchMessage(threadId, copy.id, { card: { ...card }, automation });
+  };
+
+  const reconcileQuestionCopies = (runs: RoutineRun[]) => {
+    const runsById = new Map<string, RoutineRun>();
+    const resultsThreads = new Set<string>();
+    for (const run of runs) {
+      if (run.target !== "bot" || !run.threadId || !store.taskByThread(run.botId, run.threadId)) continue;
+      const target = destination(run);
+      if (!target) continue;
+      runsById.set(run.id, run);
+      resultsThreads.add(target.threadId);
+    }
+    for (const threadId of resultsThreads) {
+      for (const copy of store.messagesFor(threadId)) {
+        const line = copy.automation;
+        if (!line?.needsYou || !line.copyOf || copy.kind !== "options" || copy.card?.requestType !== "question") continue;
+        const run = runsById.get(line.runId);
+        if (!run?.threadId || run.resultsThreadId !== threadId || run.threadId !== line.executionThreadId) continue;
+        const original = store.messagesFor(run.threadId).find((message) => message.id === line.copyOf);
+        const card = original && settledQuestion(original);
+        if (card) settleQuestionCopy(threadId, run.threadId, copy, card);
+      }
+    }
+  };
+
   /** An option card is copied whole and answered through its request; any other card the run waits on is named. */
   const writeCopy = (line: Extract<Waiting, { kind: "card" }>, target: { bot: BotRecord; threadId: string }) => {
     const original = store.messagesFor(line.threadId).find((message) => message.id === line.messageId);
@@ -196,8 +241,8 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     }
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
     const language = deps.threadLanguage?.(target.threadId);
-    const said: RunReply = line.kind === "reply" ? read(run, source)
-      : { quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
+    const said: RunReply = line.kind === "reply" ? withNote(read(run, source), deps.notes?.take(run.id, language) ?? null)
+      : withNote({ quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") }, deps.notes?.take(run.id, language) ?? null);
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
@@ -213,7 +258,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
     if (line.kind === "failure" || reply.question !== undefined || routineRunNeedsReview(run)) store.patchTask(target.bot.id, target.threadId, { unread: true });
-    if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
+    if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`, run);
     return true;
   };
 
@@ -224,7 +269,9 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     try {
       if (!resumed) {
         resumed = true;
-        for (const run of manager.listRuns().reverse()) {
+        const runs = manager.listRuns().reverse();
+        reconcileQuestionCopies(runs);
+        for (const run of runs) {
           if (run.report?.state !== "pending" || waiting.has(run.id)) continue;
           waiting.set(run.id, run.status === "failed" ? { kind: "failure", run, detail: run.error ?? "" } : { kind: "reply", run });
         }
@@ -247,8 +294,13 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     const option = message.kind === "options" && Boolean(message.card?.requestId);
     if (message.automation || (!option && message.kind !== "signin" && message.kind !== "connector" && message.kind !== "secret")) return;
     const run = deps.routines()?.runForThread(change.threadId);
-    const target = run?.target === "bot" && store.taskByThread(run.botId, change.threadId)?.routineRunId === run.id ? destination(run) : null;
-    if (!run || !target) return;
+    if (run?.target !== "bot") return;
+    const source = store.taskByThread(run.botId, change.threadId);
+    if (!source) return;
+    const settled = change.type === "message.patch" ? settledQuestion(message) : undefined;
+    if (!settled && source.routineRunId !== run.id) return;
+    const target = destination(run);
+    if (!target) return;
     if (change.type === "message") {
       if (option ? !message.card!.autoApplied : waitingCardText(message)) {
         hold(`card:${message.id}`, { kind: "card", run, threadId: change.threadId, messageId: message.id });
@@ -257,6 +309,10 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     }
     const copy = copyOf(run, target.threadId, message.id);
     if (!copy) return;
+    if (settled) {
+      settleQuestionCopy(target.threadId, change.threadId, copy, settled);
+      return;
+    }
     if (option && JSON.stringify(copy.card) !== JSON.stringify(message.card)) store.patchMessage(target.threadId, copy.id, { card: { ...message.card! } });
     if (!option && copy.automation?.needsYou && !waitingCardText(message)) {
       const { needsYou: _settled, ...line } = copy.automation;
@@ -276,9 +332,12 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       const reply = read(run, said);
       const bot = store.bot(run.botId);
       const target = destination(run);
-      if (target && (!reply.quiet || lastSaidFailed(run, target.threadId))) hold(run.id, { kind: "reply", run, messageId: said?.id ?? null });
-      else if (reply.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
-      else if (bot) deps.notify("done", bot, run.threadId, reply.text);
+      if (target && (!reply.quiet || lastSaidFailed(run, target.threadId) || deps.notes?.has(run.id))) hold(run.id, { kind: "reply", run, messageId: said?.id ?? null });
+      else {
+        const noted = withNote(reply, deps.notes?.take(run.id, deps.threadLanguage?.(run.threadId)) ?? null);
+        if (noted.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
+        else if (bot) deps.notify("done", bot, run.threadId, noted.text, run);
+      }
     },
     /** A run failed in a way the person is told about: one line says so where its reports go. */
     runFailed(run: RoutineRun, detail: string): void {

@@ -7,6 +7,7 @@ import {
   composerCanSteerQueuedMessages,
   doubleEnterSteerWindowExpiresAt,
   doubleEnterSteersQueue,
+  roomSteersQueued,
 } from "./ComposerQueuedMessages";
 import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 
@@ -20,6 +21,23 @@ describe("composerCanSteerQueuedMessages", () => {
     expect(composerCanSteerQueuedMessages(false, false, 1)).toBe(false);
     expect(composerCanSteerQueuedMessages(true, true, 1)).toBe(false);
     expect(composerCanSteerQueuedMessages(true, false, 1, true)).toBe(false);
+  });
+});
+
+describe("roomSteersQueued", () => {
+  it("steers when the busy bot can take it or no bot is marked busy, and never falls back to a stop", () => {
+    expect(roomSteersQueued(true, "head")).toBe(true);
+    expect(roomSteersQueued(false, null)).toBe(true);
+    expect(roomSteersQueued(false, undefined)).toBe(true);
+    expect(roomSteersQueued(false, "member")).toBe(false);
+  });
+});
+
+describe("a room message that cannot steer", () => {
+  it("says it stays queued and offers no Stop and send", () => {
+    const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, { items: oneItem, held: true, onCancel: () => {} }));
+    expect(markup).toContain("Queued. Sends when the room&#x27;s current turn finishes.");
+    expect(markup).not.toContain("Stop and send");
   });
 });
 

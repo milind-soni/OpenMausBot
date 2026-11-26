@@ -1,18 +1,22 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { failedTurnTool } from "../shared/failed-turn.ts";
 import type { PlaceRow } from "../shared/place-view.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, CLOUD_PAIRING_SKEW_S, cloudPairingSignature, cloudRequestSignature } from "./cloud-home.ts";
-import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, createCloudHealth, createCloudHealthLedger, type CloudHealthDeps } from "./cloud-health.ts";
+import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, START_CODES, createCloudHealth, createCloudHealthLedger, type CloudHealthDeps } from "./cloud-health.ts";
+import { createCloudSpeed } from "./cloud-speed.ts";
+import { noteStartFailure } from "./engine-start-failures.ts";
 import { DATA_DIR, EVENTS_DIR } from "./config.ts";
 import { memoryStallText, memoryStopText } from "./engine-memory.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { doctorAtStart } from "./doctor/start.ts";
 import { toolFailureMessage } from "./drivers/tool-failure.ts";
+import { STORAGE_HEALTH_MAX_BYTES, type StorageReport } from "./perf/disk-usage.ts";
 import { createCloudSignedRoutes } from "./routes/cloud-signed.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { Store } from "./store.ts";
@@ -49,11 +53,44 @@ function world(overrides: Partial<CloudHealthDeps> = {}) {
 const incidents = (w: ReturnType<typeof world>, after?: string) => w.health.report(after).incidents.map(({ kind, code, engine, count }) => ({ kind, code, engine, count }));
 const place = (state: PlaceRow["state"]): PlaceRow => ({ state, params: { bot: "Tallyspoon Ops", cause: "Boat said: quota exceeded for ada@example.test." }, source: "works-on" });
 
+describe("a Cloud home's storage in its health report", () => {
+  const report = (bots: number): StorageReport => ({
+    v: 1, at: START, ageS: 0, tookS: 60, running: false, progress: null, volume: { totalBytes: 84e9, freeBytes: 3e9, usedBytes: 81e9 }, walkedBytes: 80e9, unwalkedBytes: 1e9,
+    categories: [{ name: "engine_state", class: "precious", bytes: 50e9, files: 10 }], bots: Array.from({ length: bots }, (_, index) => ({ id: `${"b".repeat(60)}${index}`, bytes: 1e9, files: 1 })),
+    botsRest: { bytes: 0, files: 0, count: 0 }, other: null, skipped: null, linksCapped: false, linksUncheckedBytes: 0, resumes: 0, failed: false,
+  });
+
+  it("carries the last breakdown within its own budget, and leaves the field out where it is not measured or its read throws", () => {
+    expect(world({ storage: () => report(2) }).health.report(undefined)).toMatchObject({ storage: { v: 1, volume: { usedBytes: 81e9 }, categories: [{ name: "engine_state" }] } });
+    const big = world({ storage: () => report(200) }).health.report(undefined).storage!;
+    expect(JSON.stringify(big).length).toBeLessThanOrEqual(STORAGE_HEALTH_MAX_BYTES);
+    expect(big.botsRest.count).toBeGreaterThan(0);
+    expect(world().health.report(undefined)).not.toHaveProperty("storage");
+    expect(world({ storage: () => null }).health.report(undefined)).not.toHaveProperty("storage");
+    const warned: string[] = [];
+    const broken = world({ storage: () => { throw new RangeError("at /Users/ada/secret"); }, log: (line) => warned.push(line) });
+    expect(broken.health.report(undefined)).not.toHaveProperty("storage");
+    broken.health.report(undefined);
+    expect(warned).toEqual(["cloud health: storage left out: RangeError"]);
+  });
+});
+
 describe("a Cloud home's memory pressure in its health report", () => {
   it("carries the last day's counts where the home watches memory, and null where it does not", () => {
     expect(world().health.report(undefined)).toMatchObject({ room: null });
     const room = { waits: 3, waitMs: 360_000, stopped: 1, killed: 2, stallMinutes: 4 };
     expect(world({ room: () => room }).health.report(undefined)).toMatchObject({ room });
+  });
+});
+
+describe("the doctor in a Cloud home's health report", () => {
+  it("carries the check ids and counts of this version's first start, and null before it ran", () => {
+    expect(world().health.report(undefined)).toMatchObject({ doctor: null });
+    writeFileSync(join(DATA_DIR, `config.json.31337.${"0b4d8f7a-3c2e-4f1a-9b6d-5e7c8a9f0d1e"}.tmp`), "{}");
+    doctorAtStart(DATA_DIR, "0.1.120", { now: () => START, pidAlive: () => false, log: () => {} });
+    const { doctor } = world().health.report(undefined);
+    expect(doctor).toMatchObject({ at: START, version: "0.1.120", fixed: expect.arrayContaining(["temp-files"]), problems: [], thisStart: true });
+    expect(JSON.stringify(doctor)).not.toContain(DATA_DIR);
   });
 });
 
@@ -65,7 +102,7 @@ describe("a Cloud home's speed in its health report", () => {
     w.emit(w.bot.threadId, { type: "turn.started" });
     const { speed } = w.health.report(undefined);
     expect(speed).toMatchObject({ bootMs: null, wakeMs: null, turnStarts: [0, 1, 0, 0, 0, 0] });
-    expect(Object.keys(speed).sort()).toEqual(["bootMs", "psi", "steal", "turnStarts", "wakeMs", "windowS"]);
+    expect(Object.keys(speed).sort()).toEqual(["bootMs", "loop", "psi", "steal", "turnStarts", "wakeMs", "windowS"]);
     expect(JSON.stringify(speed)).not.toMatch(/Tallyspoon|inbox/);
     expect(JSON.stringify(speed).length).toBeLessThan(200);
   });
@@ -205,18 +242,88 @@ describe("the ledger", () => {
     w.advance(20 * 60_000);
     w.emit(w.bot.threadId, { type: "turn.started" });
     w.fail("no activity for 20 minutes — the turn was stopped");
-    expect(w.health.report(null).turns).toEqual({ started15m: 1, failed15m: 1, started24h: 5, failed24h: 2 });
+    expect(w.health.report(null).turns).toEqual({ started15m: 1, failed15m: 1, started24h: 5, failed24h: 2, boot: 5 });
     w.advance(24 * 3600_000);
-    expect(w.health.report(null).turns).toEqual({ started15m: 0, failed15m: 0, started24h: 0, failed24h: 0 });
+    // The rolling windows empty out; the count since boot never falls (the Admin keeps each hour's increase).
+    expect(w.health.report(null).turns).toEqual({ started15m: 0, failed15m: 0, started24h: 0, failed24h: 0, boot: 5 });
   });
 
-  it("follows each routine's last outcome and its failures in a row", () => {
-    const w = world();
-    const run = (id: string, status: "completed" | "failed" | "missed" | "running") => w.health.noteRoutineRun({ id, routineId: "routine-1", status, finishedAt: w.now() });
-    run("r1", "failed"); run("r1", "failed"); run("r2", "running"); run("r2", "missed");
-    expect(w.health.report(null).routines).toEqual([{ routineId: "routine-1", status: "missed", at: START, consecutiveFailures: 2 }]);
-    run("r3", "completed");
-    expect(w.health.report(null).routines).toEqual([{ routineId: "routine-1", status: "completed", at: START, consecutiveFailures: 0 }]);
+  it("files an engine that did not start under why, not as the provider-looking code its words would get; a sign-in keeps its auth code", () => {
+    const w = world(), thread = (name: string) => w.store.createBot({ name }).threadId;
+    const opencode = "Internal error: Internal service failure (session/new, ServiceUnavailableError)";
+    // Too busy: the plain line busy-start.ts shows (its notice key), and the process limit's.
+    const busy = thread("busy"), cpu = thread("cpu"), processes = thread("processes"), missing = thread("missing"), provider = thread("provider"), signedOut = thread("signed-out"), other = thread("other");
+    for (const id of [busy, cpu, processes, missing, provider, signedOut, other]) w.emit(id, { type: "turn.started" }, "opencodeGo");
+    w.fail(opencode, { text: { key: "chat.notice.cloudBusyStart" } }, busy);
+    w.fail(opencode, { text: { key: "chat.notice.cloudOutOfCpu" } }, cpu);
+    w.fail("There is no room to start another program (EAGAIN)", { text: { key: "chat.notice.outOfProcesses", params: { code: "EAGAIN" } } }, processes);
+    w.fail("`opencode` isn't installed, or isn't on this app's PATH", { setup: true }, missing);
+    // The engine's or its provider's own refusal of session/new, noted by the start (busy-start.ts) for this thread.
+    noteStartFailure(provider, "provider", w.now());
+    w.fail("500 internal server error", {}, provider);
+    w.fail("Authentication required: not logged in", { setup: true }, signedOut);
+    w.fail("500 internal server error", {}, other);
+    w.emit(signedOut, { type: "turn.completed", ok: false, stopReason: "auth_required" }, "opencodeGo");
+    w.emit(other, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).map(({ code, count }) => [code, count]).sort()).toEqual([["auth_required", 1], ["server_error", 1], ["start_not_installed", 1], ["start_overloaded", 3], ["start_provider", 1]]);
+    // A note is the next row's only: a later failure on the thread is filed by its words again.
+    w.emit(provider, { type: "turn.started" }, "opencodeGo");
+    w.fail("500 internal server error", {}, provider);
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "server_error")).toMatchObject({ count: 2 });
+    // A start that failed without a row of its own (its turn just ended) leaves nothing for the thread's next turn.
+    noteStartFailure(provider, "provider", w.now());
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    w.emit(provider, { type: "turn.started" }, "opencodeGo");
+    w.fail("500 internal server error", {}, provider);
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "server_error")).toMatchObject({ count: 3 });
+    // Too busy, noted by the start, though the row came without the plain line (startup recovery words it as the engine did).
+    const recovered = thread("recovered");
+    w.emit(recovered, { type: "turn.started" }, "opencodeGo");
+    noteStartFailure(recovered, "overloaded", w.now());
+    w.fail(opencode, {}, recovered);
+    expect(incidents(w).find((incident) => incident.code === "start_overloaded")).toMatchObject({ count: 4 });
+    // A provider refusal noted, then the backup AI's start on the same thread refused for sign-in: the row stays an auth failure.
+    const backup = thread("backup");
+    w.emit(backup, { type: "turn.started" }, "opencodeGo");
+    noteStartFailure(backup, "provider", w.now());
+    w.fail("Authentication required: not logged in", { setup: true }, backup);
+    w.emit(backup, { type: "turn.completed", ok: false, stopReason: "auth_required" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "auth_required")).toMatchObject({ count: 2 });
+    expect(incidents(w).find((incident) => incident.code === "start_provider")).toMatchObject({ count: 1 });
+    expect(Object.values(START_CODES).every((code) => /^[a-z0-9][a-z0-9_-]{0,47}$/.test(code))).toBe(true);
+  });
+
+  it("carries the event loop's stalls and the counts since boot in a few dozen bytes, codes and counts only", () => {
+    const room = { waits: 3, waitMs: 360_000, stopped: 1, killed: 2, stallMinutes: 4 };
+    const plain = world({ room: () => room, speed: createCloudSpeed({ read: () => null, loop: () => null }) }).health.report(null);
+    const report = world({ room: () => ({ ...room, boot: { waits: 7, stopped: 2, killed: 2, stallMinutes: 9 } }),
+      speed: createCloudSpeed({ read: () => null, loop: () => ({ n: 12, worstMs: 11_234 }) }) }).health.report(null);
+    expect(report.speed.loop).toEqual({ n: 12, worstMs: 11_234 });
+    expect(report.room).toMatchObject({ boot: { waits: 7, stopped: 2, killed: 2, stallMinutes: 9 } });
+    expect(report.turns.boot).toBe(0);
+    const added = JSON.stringify(report).length - JSON.stringify(plain).length;
+    expect(added).toBeLessThanOrEqual(100);
+  });
+
+  it("reports each routine's last outcome and failures in a row as the saved run rows give them, so a restart hides none", () => {
+    const rows = [{ routineId: "routine-1", status: "missed" as const, at: START, consecutiveFailures: 2 }, { routineId: "not an id!", status: "failed" as const, at: START, consecutiveFailures: 9 }];
+    const caps: number[] = [], none = { ran: 0, failed: 0, missed: 0, late: 0, retried: 0 };
+    const schedule = { v: 1 as const, seq: 7, unreadable: true, nextDueAt: null, oldestUnconfirmed: null, lastConfirmed: null, due: { boot: none, day: none }, slowStops: 2 };
+    const deps = { routines: (cap: number) => { caps.push(cap); return rows; }, schedule: () => schedule };
+    for (const w of [world(deps), world(deps)]) {
+      const report = w.health.report(null);
+      expect(report.routines).toEqual([rows[0]]);
+      expect(report.schedule).toEqual(schedule);
+    }
+    expect(caps).toEqual([100, 100]);
+    expect(world().health.report(null)).toMatchObject({ routines: [], schedule: null });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = world({ routines: () => { throw new Error("Quarterly-Secret-Plan"); }, schedule: () => { throw new Error("Quarterly-Secret-Plan"); } }).health.report(null);
+    expect(broken).toMatchObject({ v: 1, routines: [], schedule: null, turns: { started15m: 0 } });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("Quarterly");
+    vi.restoreAllMocks();
   });
 });
 
@@ -267,8 +374,7 @@ describe("the report", () => {
   it("stays under 64 KB, and the cursor picks up what did not fit", () => {
     let clock = START;
     const routines = Array.from({ length: 100 }, (_, i) => `r${String(i).padStart(63, "0")}`);
-    const w = world({ now: () => clock });
-    for (const routineId of routines) w.health.noteRoutineRun({ id: routineId, routineId, status: "failed" });
+    const w = world({ now: () => clock, routines: () => routines.map((routineId) => ({ routineId, status: "failed" as const, at: START, consecutiveFailures: 1 })) });
     const ledger = w.health.ledger;
     for (let i = 0; i < HEALTH_BUCKET_CAP; i++) {
       const thread = `t${String(i).padStart(63, "0")}`;
@@ -320,6 +426,18 @@ describe("GET /api/cloud/health", () => {
     expect(answer.body).toMatchObject({ v: 1, version: "0.1.120", bootedAt: START, incidents: [{ kind: "turn", code: "restart", count: 1 }] });
     const again = `${CLOUD_HEALTH_PATH}?after=${answer.body.cursor}`;
     expect((await send("GET", again, sign(again))).body.incidents).toEqual([]);
+  });
+
+  it("still answers 200, with perf null and one warning a minute, when the performance recorder throws", async () => {
+    const warned: string[] = [];
+    const w = world({ perf: () => { throw new TypeError("boom at /Users/ada/secret"); }, log: (line) => warned.push(line) });
+    const { sign, send } = routes(w);
+    const target = `${CLOUD_HEALTH_PATH}?after=0`;
+    const answer = await send("GET", target, sign(target));
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({ v: 1, perf: null });
+    w.health.report(undefined);
+    expect(warned).toEqual(["cloud health: perf left out: TypeError"]);
   });
 
   it("refuses a wrong key, another path or query, a stale or replayed request, and anything but GET", async () => {

@@ -35,13 +35,13 @@ describe("a login saved from a sign-in card", () => {
 });
 
 describe("the bot's open page", () => {
-  it("is read as its host and whether it shows a password, username or email box, only for a page a login could be filled on", async () => {
+  it("is read as its host, its address without the query, and whether it shows a password, username or email box, only for a page a login could be filled on", async () => {
     page = new FakeLoginPage("https://login.microsoftonline.com/common/oauth2/authorize?client_id=x", LOGIN_FORM);
-    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.microsoftonline.com", signIn: true });
+    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.microsoftonline.com", page: "https://login.microsoftonline.com/common/oauth2/authorize", signIn: true });
     page.navigate("https://login.example.net/u/login/identifier", `<form><input name="username" autocomplete="username"><button>Continue</button></form>`);
-    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.example.net", signIn: true });
+    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "login.example.net", page: "https://login.example.net/u/login/identifier", signIn: true });
     page.navigate("https://example.com/dashboard", "<h1>Hello</h1>");
-    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "example.com", signIn: false });
+    expect(await observeSignInPage((args) => page!.engine(args))).toEqual({ host: "example.com", page: "https://example.com/dashboard", signIn: false });
     page.navigate("http://example.com/login", LOGIN_FORM);
     expect(await observeSignInPage((args) => page!.engine(args))).toBeNull();
     expect(await observeSignInPage(async () => null)).toBeNull();
@@ -140,5 +140,10 @@ describe("the secrets a bot may use", () => {
     expect(deploy!.id).toMatch(/^linked-[0-9a-f]{32}$/u);
     expect(reads).toEqual(["fake:1/user"]);
     expect(held).toEqual(["value-of-fake:1-user"]);
+    expect(logins.secretsPrompt("payroll", TEAM_READER), "a manager with no references").not.toContain("://");
+    const onePassword = { ...provider, id: "1password", resolve: () => null };
+    expect(new BotLogins(store, onePassword as unknown as OnePasswordLogins).secretsPrompt("payroll", TEAM_READER), "a bot that may use the manager's secrets").toContain("op://vault/item/field");
+    const none = new BotLogins(store, { ...onePassword, items: () => [] } as unknown as OnePasswordLogins);
+    expect(none.secretsPrompt("notes", TEAM_READER), "nothing from the manager for this bot").not.toContain("op://");
   });
 });

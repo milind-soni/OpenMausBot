@@ -2,12 +2,13 @@ import { useState } from "react";
 import { ClipboardList } from "lucide-react";
 
 import { t } from "@/lib/i18n";
+import { memoInLocale } from "@/lib/locale-memo";
 import type { LocaleKey } from "@/locales";
 import { formatDuration } from "@/lib/usage-trace";
 import type { Message } from "@/state/store";
 import { traceRootId } from "../../shared/usage-trace";
 import { EXCERPT_SUMMARY_HEADER } from "../../shared/wire";
-import { TraceDialog } from "./usage/TraceView";
+import { TraceDialog } from "./lazy-screens";
 
 const WORK_KEY: Record<"noFiles" | "oneFile" | "files", Record<"oneTool" | "tools", LocaleKey>> = {
   noFiles: { oneTool: "chat.digestChipNoFilesOne", tools: "chat.digestChipNoFiles" },
@@ -16,7 +17,7 @@ const WORK_KEY: Record<"noFiles" | "oneFile" | "files", Record<"oneTool" | "tool
 };
 const one = (count: number | string) => String(count) === "1";
 
-export function DigestChip({ message }: { message: Message }) {
+export const DigestChip = memoInLocale(function DigestChip({ message }: { message: Message }) {
   const [tracing, setTracing] = useState(false);
   const digest = message.digest;
   if (!digest) return null;
@@ -43,18 +44,12 @@ export function DigestChip({ message }: { message: Message }) {
       {tracing && <TraceDialog id={traceRootId(digest.threadId, digest.turnId)} at={digest.at} onClose={() => setTracing(false)} />}
     </div>
   );
-}
+});
 
 const COMPACTION_CHIP = "max-w-[600px] rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[12px] text-ink-secondary";
 
-export function CompactionChip({ message }: { message: Message }) {
-  if (!message.compaction) return message.engineCompaction ? (
-    <div className={COMPACTION_CHIP} data-testid="engine-compaction-chip">
-      <p className="font-medium">{t("chat.engineCompactionTitle")}</p>
-      <p className="mt-1">{t("chat.engineCompactionHint")}</p>
-    </div>
-  ) : null;
-  if (message.compaction.fresh) {
+export function CompactionChip({ message, onNewChat }: { message: Message; onNewChat?: () => void }) {
+  if (message.compaction?.fresh) {
     return (
       <div role="separator" data-testid="fresh-start-divider" className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-secondary">
         <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
@@ -63,12 +58,27 @@ export function CompactionChip({ message }: { message: Message }) {
       </div>
     );
   }
-  const excerpts = message.compaction.summary.startsWith(EXCERPT_SUMMARY_HEADER);
-  return (
+  const excerpts = message.compaction?.summary.startsWith(EXCERPT_SUMMARY_HEADER);
+  const chip = message.compaction ? (
     <details className={COMPACTION_CHIP} data-testid="compaction-chip">
       <summary className="cursor-pointer font-medium">{t(excerpts ? "chat.compactionExcerptTitle" : "chat.compactionTitle")}</summary>
       <p className="mt-2">{t(excerpts ? "chat.compactionExcerptHint" : "chat.compactionHint")}</p>
       <p className="mt-2 whitespace-pre-wrap break-words">{message.compaction.summary}</p>
     </details>
+  ) : message.engineCompaction ? (
+    <div className={COMPACTION_CHIP} data-testid="engine-compaction-chip">
+      <p className="font-medium">{t("chat.engineCompactionTitle")}</p>
+      <p className="mt-1">{t("chat.engineCompactionHint")}</p>
+    </div>
+  ) : null;
+  if (!chip || !onNewChat) return chip;
+  return (
+    <div>
+      {chip}
+      <p className="mt-1 flex flex-wrap items-center gap-x-2 px-3 text-[12px] text-ink-secondary" data-testid="new-chat-hint">
+        {t("chat.newChatHint")}
+        <button type="button" onClick={onNewChat} className="font-medium text-accent hover:underline">{t("chat.newChatHintButton")}</button>
+      </p>
+    </div>
   );
 }

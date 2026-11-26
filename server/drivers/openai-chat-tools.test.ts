@@ -5,7 +5,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
@@ -103,8 +103,31 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 });
 `;
 
+/** What the turn's own tool session has in hand: each server that has listed its tools (or failed) and can be taken in,
+ * also written as a file named after the server in `gates` when set. */
+const mountSettled = vi.hoisted(() => ({ servers: new Set<string>(), gates: undefined as string | undefined }));
+vi.mock("./chat-mcp-tools.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./chat-mcp-tools.ts")>();
+  return { ...actual, mountChatTools: (...args: Parameters<typeof actual.mountChatTools>) => {
+    const call: Parameters<typeof actual.mountChatTools> = [...args];
+    call[9] = { ...call[9], onSettled: (server) => {
+      mountSettled.servers.add(server);
+      if (mountSettled.gates) writeFileSync(join(mountSettled.gates, server), "");
+    } };
+    return actual.mountChatTools(...call);
+  } };
+});
+/** Waits until the turn's tool session has `server` in hand; fails if it has not within 30 s. */
+async function settledServer(server: string) {
+  for (const since = Date.now(); !mountSettled.servers.has(server);) {
+    if (Date.now() - since > 30_000) throw new Error(`the turn's tool session never had ${server} in hand`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  mountSettled.servers.clear();
+  mountSettled.gates = undefined;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -347,7 +370,7 @@ describe("a searched MCP catalog", () => {
     });
     await f.start({ integrations: { custom: { whop: { type: "http", url: remote.url, headers: {} } } } });
     const opened = await f.recorder.until((event) => event.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "whop_payments_list", summary: expect.stringContaining("biz_1") });
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__whop__payments_list", summary: expect.stringContaining("biz_1") });
     expect(remote.calls).toEqual([]);
     await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -363,15 +386,19 @@ describe("a searched MCP catalog", () => {
 
 describe("approvals that follow the other engines", () => {
   it("runs OpenMausBot's own agents tools without a card, while a configured server's tool still asks", async () => {
+    const auditReady = deferred();
     const f = await fixture((_body, response, round) => {
-      if (round === 1) sse(response, [chunk({ tool_calls: [toolCall("agents_write", '{"name":"peer","value":"sent"}', "call_agents")] }, "tool_calls")]);
+      if (round === 1) void auditReady.promise.then(() => sse(response, [chunk({ tool_calls: [toolCall("agents_write", '{"name":"peer","value":"sent"}', "call_agents")] }, "tool_calls")]));
       else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', "call_audit")] }, "tool_calls")]);
       else answer(response);
     });
     const agents = f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["agents"];
     await f.start({ integrations: { ...f.integrations, agents } });
+    await settledServer("audit");
+    auditReady.resolve();
     const opened = await f.recorder.until((event) => event.type === "request.opened");
-    expect(opened).toMatchObject({ requestType: "permission", tool: "audit_write" });
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp__audit__write" });
+    expect(f.requests[1].tools?.map((tool) => tool.function.name)).toContain("audit_write");
     expect(f.effects()).toEqual([{ name: "peer", value: "sent" }]);
     await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -394,7 +421,7 @@ describe("approvals that follow the other engines", () => {
     const opened = () => f.recorder.events.filter((event) => event.type === "request.opened");
     await f.start();
     const first = await f.recorder.until((event) => event.type === "request.opened");
-    expect(first).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(first).toMatchObject({ tool: "mcp__audit__write", allowSession: true });
     expect(await f.instance.adapter.respondToRequest(f.threadId, first.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(opened()).toHaveLength(1);
@@ -403,7 +430,7 @@ describe("approvals that follow the other engines", () => {
     f.recorder.events.splice(0);
     await f.start();
     const other = await f.recorder.until((event) => event.type === "request.opened");
-    expect(other).toMatchObject({ tool: "audit_fail", allowSession: true });
+    expect(other).toMatchObject({ tool: "mcp__audit__fail", allowSession: true });
     expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three"]);
     await f.instance.adapter.respondToRequest(f.threadId, other.requestId!, { behavior: "deny" });
     await f.completed();
@@ -411,10 +438,10 @@ describe("approvals that follow the other engines", () => {
     f.recorder.events.splice(0);
     await f.start({ guestConfined: true });
     const guest = await f.recorder.until((event) => event.type === "request.opened");
-    expect(guest).toMatchObject({ tool: "audit_write", allowSession: false });
+    expect(guest).toMatchObject({ tool: "mcp__audit__write", allowSession: false });
     expect(await f.instance.adapter.respondToRequest(f.threadId, guest.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
     const again = await f.recorder.until((event) => event.type === "request.opened" && event.requestId !== guest.requestId);
-    expect(again).toMatchObject({ tool: "audit_write", allowSession: false });
+    expect(again).toMatchObject({ tool: "mcp__audit__write", allowSession: false });
     await f.instance.adapter.respondToRequest(f.threadId, again.requestId!, { behavior: "deny" });
     await f.completed();
     expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three", "guest"]);
@@ -422,7 +449,7 @@ describe("approvals that follow the other engines", () => {
     f.recorder.events.splice(0);
     await f.instance.adapter.sendTurn({ threadId: randomUUID(), text: "Store it here too.", model: "fixture-model", integrations: f.integrations });
     const elsewhere = await f.recorder.until((event) => event.type === "request.opened");
-    expect(elsewhere).toMatchObject({ tool: "audit_write" });
+    expect(elsewhere).toMatchObject({ tool: "mcp__audit__write" });
     await f.instance.adapter.respondToRequest(elsewhere.threadId, elsewhere.requestId!, { behavior: "deny" });
     await f.completed();
     expect(f.effects().map((effect) => effect.name)).toEqual(["one", "two", "three", "guest"]);
@@ -452,7 +479,7 @@ describe("whose allow \"Always allow this session\" keeps", () => {
     f.recorder.events.splice(0);
     await f.start({ botId: "clive" });
     const roommate = await f.recorder.until((event) => event.type === "request.opened");
-    expect(roommate).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(roommate).toMatchObject({ tool: "mcp__audit__write", allowSession: true });
     await f.instance.adapter.respondToRequest(f.threadId, roommate.requestId!, { behavior: "deny" });
     await f.completed();
 
@@ -466,7 +493,7 @@ describe("whose allow \"Always allow this session\" keeps", () => {
     f.recorder.events.splice(0);
     await f.start({ botId: "mira", integrations: { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_PROFILE: "other" } } } } });
     const changed = await f.recorder.until((event) => event.type === "request.opened");
-    expect(changed).toMatchObject({ tool: "audit_write", allowSession: true });
+    expect(changed).toMatchObject({ tool: "mcp__audit__write", allowSession: true });
     await f.instance.adapter.respondToRequest(f.threadId, changed.requestId!, { behavior: "deny" });
     await f.completed();
     expect(f.effects().map((effect) => effect.name)).toEqual(["mira", "mira2"]);
@@ -557,9 +584,10 @@ describe("optional built-in question compatibility", () => {
     });
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: false });
+    // A transient 429/500 is retried twice now; every attempt still carries the tools.
     expect(f.requests).toHaveLength(status === 429 || status === 500 ? 3 : 1);
     for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
-  });
+  }, 20_000);
 
   it("retries a network failure as the same request, and never strips tools mounted by the person", async () => {
     for (const network of [false, true]) {
@@ -570,11 +598,13 @@ describe("optional built-in question compatibility", () => {
       });
       await f.start(network ? { integrations: undefined } : {});
       expect(await f.completed()).toMatchObject({ ok: false });
+      // A dropped connection is transient, so it goes again twice; the 400 stays a single attempt.
       expect(f.requests).toHaveLength(network ? 3 : 1);
-      for (const request of f.requests) expect(request.tools?.some(tool => tool.function.name === (network ? "ask_user" : "audit_write"))).toBe(true);
+      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      else for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
       expect(f.effects()).toEqual([]);
     }
-  });
+  }, 20_000);
 
   it("does not repeat an unsupported-tools rejection after its one plain retry", async () => {
     const f = await fixture((_body, response) => {
@@ -1341,7 +1371,7 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
-  it("stops a model that keeps requesting tools after 64 steps, with one next action that does not repeat the steps that ran", async () => {
+  it("stops a model that keeps requesting one tool per step at 200 tool calls, with one next action that does not repeat the steps that ran", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', `call_${round}`)] }, "tool_calls"),
     ]), "grok");
@@ -1351,37 +1381,58 @@ describe("structured tool execution boundaries", () => {
     await f.start();
     expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
     stop();
-    expect(f.requests).toHaveLength(64);
-    expect(f.effects()).toHaveLength(64);
+    expect(f.requests).toHaveLength(201);
+    expect(f.effects()).toHaveLength(200);
     expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
-      message: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
+      message: "Stopped after 200 tool calls without a final answer. The steps so far already ran, so ask only for what's left.",
       terminal: true,
     })]);
   });
 
-  it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
-    const last = deferred<ServerResponse>();
-    const f = await fixture((_body, response, round) => round < 64
-      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
-      : last.resolve(response));
-    await f.start({ approvalMode: "full" });
-    const response = await last.promise;
-    await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("refused");
-    answer(response);
-    expect(await f.completed()).toMatchObject({ ok: true });
-    expect(f.requests).toHaveLength(64);
+  it.each([1, 25])("preserves the active task and delivered steering in a cap handoff (%i calls per reply)", async callsPerReply => {
+    const first = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) first.resolve(response);
+      else reply(response, round);
+    });
+    function reply(response: ServerResponse, round: number) {
+      sse(response, [chunk({ tool_calls: Array.from({ length: callsPerReply }, (_, index) => ({
+        ...toolCall("audit_write", `{"name":"step","value":"${round}-${index}"}`, `call_${round}_${index}`), index,
+      })) }, "tool_calls")]);
+    }
+    const task = "Prepare the release draft";
+    const updates = ["Do not publish it", "Use version 2"];
+    await f.start({ approvalMode: "full", text: task, transcript: [
+      { role: "user", text: "List repository files" },
+      { role: "assistant", text: "Listed the files" },
+    ] });
+    const response = await first.promise;
+    for (const update of updates) await expect(f.instance.adapter.steer!(f.threadId, update)).resolves.toBe("steered");
+    reply(response, 1);
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
+    const cap = f.recorder.events.find(event => event.type === "cap.exhausted");
+    expect(cap?.type).toBe("cap.exhausted");
+    if (cap?.type !== "cap.exhausted") throw new Error("missing cap handoff");
+    const handoff = readFileSync(cap.handoffPath, "utf8");
+    expect(handoff).toContain(task);
+    expect(handoff).not.toContain("List repository files");
+    expect(handoff).not.toContain("Listed the files");
+    for (const update of updates) expect(handoff).toContain(update);
+    expect(handoff.indexOf(updates[0]!)).toBeLessThan(handoff.indexOf(updates[1]!));
+    expect(JSON.stringify(f.requests[1]!.messages)).toContain(updates.join("\\n\\n"));
+    expect(f.requests).toHaveLength(callsPerReply === 1 ? 201 : 9);
+    expect(f.effects()).toHaveLength(200);
   });
 
-  it.each([
-    ["a failed tool call", "audit_fail", "The operation is complete.", "tool_error"],
-    ["an announced action", "audit_write", "I'll write the next receipt.", "incomplete_action"],
-  ])("ends on %s in the last allowed step without asking for another step", async (_, lastTool, text, stopReason) => {
-    const f = await fixture((_body, response, round) => round < 64
-      ? sse(response, [chunk({ tool_calls: [toolCall(round === 63 ? lastTool : "audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
-      : answer(response, text));
-    await f.start({ approvalMode: "full", toolErrorCorrectiveRounds: 1 });
-    expect(await f.completed()).toMatchObject({ ok: false, stopReason });
-    expect(f.requests).toHaveLength(64);
+  it("finishes a turn that needs more than 64 steps", async () => {
+    const f = await fixture((_body, response, round) => round < 100
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : answer(response));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(100);
+    expect(f.effects()).toHaveLength(99);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
@@ -1470,18 +1521,73 @@ describe("a configured MCP server that cannot mount", () => {
 });
 
 describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
-  function catalog(names: readonly string[]) {
-    const { dir, server } = catalogServer(names);
+  function catalog(names: readonly string[], options: Parameters<typeof catalogServer>[1] = {}) {
+    const { dir, server } = catalogServer(names, options);
     cleanups.push(() => removeTempDir(dir));
     return server;
   }
-  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
-    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
-    browser: catalog(syntheticToolNames("agent_browser", 32)),
-    agents: catalog(syntheticToolNames("agent", agents)),
-    composio: catalog(syntheticToolNames("router", 7)),
-    data: catalog(syntheticToolNames("table", 5)),
-    ...more,
+  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => {
+    const others = { localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" as const }, browser: catalog(syntheticToolNames("agent_browser", 32)),
+      composio: catalog(syntheticToolNames("router", 7)), data: catalog(syntheticToolNames("table", 5)), ...more };
+    const names = Object.entries(others).flatMap(([key, server]) => key === "localComputer" ? ["computer"] : key === "custom" ? Object.keys(server as object) : [key]);
+    // Started once the turn's tool session has every other server in hand, so the ones that start in the background are listed from the first request.
+    const gates = mkdtempSync(join(tmpdir(), "omb-chat-tools-settled-"));
+    cleanups.push(() => removeTempDir(gates));
+    mountSettled.gates = gates;
+    return { ...others, agents: catalog(syntheticToolNames("agent", agents), { after: names.map((name) => join(gates, name)) }) };
+  };
+
+  it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
+    // The slow server cannot start until the first request has arrived: a turn that waited for it would give up on it
+    // first, so its tools could never be listed in the next round, however slow the runner.
+    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-slow-"));
+    cleanups.push(() => removeTempDir(gate));
+    const go = join(gate, "go");
+    let settledBeforeFirst: boolean | null = null;
+    const notes = catalog(["note"], { after: [go] });
+    const f = await fixture(async (_body, response, round) => {
+      if (round > 1) return answer(response);
+      settledBeforeFirst = mountSettled.servers.has("notes");
+      writeFileSync(go, "");
+      // The turn has the slow server's tools in hand before the next round.
+      await settledServer("notes");
+      sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+    });
+    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(settledBeforeFirst).toBe(false);
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([]);
+  });
+
+  it("lists fewer tools when servers that joined after a tool call go past the provider's limit", async () => {
+    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-gate-"));
+    cleanups.push(() => removeTempDir(gate));
+    const go = join(gate, "go");
+    const notes = catalog(syntheticToolNames("note", 5), { after: [go] });
+    const f = await fixture(async (body, response) => {
+      if (!body.messages.some((message) => message.role === "tool")) {
+        // The slow server starts, and the turn has its tools in hand, before the next round.
+        writeFileSync(go, "");
+        await settledServer("notes");
+        return sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+      }
+      if ((body.tools?.length ?? 0) <= 6) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 6, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([
+      ["agents_agent_1", "ask_user"],
+      ["agents_agent_1", ...syntheticToolNames("notes_note", 5), "ask_user"],
+      ["agents_agent_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"],
+    ]);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("sends at most 128 tools, ask_user and every agents tool among them", async () => {

@@ -158,7 +158,7 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
             </div>
             <div role="tabpanel">
               {tab === "details" && <DetailsTab bot={bot} derived={derived} onOpen={openPage} />}
-              {tab === "library" && <LibraryTab bot={bot} onOpen={openPage} />}
+              {tab === "library" && <LibraryTab bot={bot} />}
               {tab === "computer" && <ComputerTab bot={bot} derived={derived} onOpen={openPage} />}
             </div>
           </>

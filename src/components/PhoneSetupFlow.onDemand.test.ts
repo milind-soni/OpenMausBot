@@ -176,6 +176,9 @@ describe("pairing on a computer that holds no HTTPS address yet", () => {
     fake.finishPrepare("full");
     await vi.waitFor(() => expect(text()).toContain(FULL));
     expect(text()).toContain("Secure access needs attention");
+    expect(host.querySelector('[data-step="account"]')?.getAttribute("data-result")).toBe("failed");
+    expect(button("Copy diagnostics")).not.toBeNull();
+    expect(host.querySelector("[data-remote-access-check]")?.textContent).not.toContain("ada@example.com");
     expect(button("Try secure access again")).not.toBeNull();
     expect(button("Pair on this Wi-Fi instead")).not.toBeNull();
     expect(button("Pair using Tailscale")).toBeNull();

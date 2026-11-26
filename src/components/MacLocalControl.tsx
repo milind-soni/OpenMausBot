@@ -77,7 +77,7 @@ export function MacLocalControl() {
   }, [awaitingGrant, hidden]);
 
   if (capabilities.host.platform !== "darwin" || capabilities.localComputer.reasonCode === "remote-server") return null;
-  if (capabilities.localComputer.available || hidden) return null;
+  if (capabilities.localComputer.available || hidden || capabilities.localComputer.reasonCode === "macos-version-unsupported") return null;
 
   if (settings) {
     // In Settings: an ordinary row. A 16 px warning mark, the title, its reason, and one primary; Retry and Not now quiet.

@@ -29,7 +29,9 @@ import {
   serializeSessionCookie,
   sessionCookieName,
 } from "./request-auth.ts";
+import { desktopMainMover } from "./move-back.ts";
 import { SESSION_TTL_MS, SessionRegistry } from "./sessions.ts";
+import { webSessionHeaders } from "../companion/src/session-route.ts";
 
 function request(headers: Record<string, string>, method = "GET"): IncomingMessage {
   // SAFETY: the resolver reads only headers and method; a bare object is the whole contract here
@@ -180,7 +182,7 @@ describe("scopes", () => {
       ["GET", "/api/bots"], ["GET", "/api/threads/t/messages"], ["GET", "/api/search"], ["GET", "/api/events"],
       ["GET", "/api/config"], ["GET", "/api/webhooks"], ["POST", "/api/tts/speak"],
       ["GET", "/api/auth/session"], ["POST", "/api/auth/stream-ticket"], ["POST", "/api/auth/logout"],
-      ["GET", "/api/bots/x/slack-management"],
+      ["GET", "/api/bots/x/slack-management"], ["GET", "/api/bots/x/library"],
       ["POST", "/api/bots/x/sign-in-cards/m/done"], ["POST", "/api/bots/x/sign-in-cards/m/cancel"], ["POST", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/sign-in-cards/m/save-login"],
       ["GET", "/api/bots/x/browser/live"], ["POST", "/api/bots/x/browser/action"],
@@ -193,11 +195,11 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/local-computer/join"], ["POST", "/api/bots/x/local-computer/screenshot"],
       ["GET", "/api/computers/boxes"], ["POST", "/api/computers/boxes/bx_23456789/delete"],
       ["POST", "/api/webhooks"], ["POST", "/api/webhooks/w/rotate"], ["POST", "/api/bots/x/skills"], ["PATCH", "/api/bots/x/skills/s"],
-      ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["GET", "/api/teams/scout"],
+      ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["POST", "/api/share/import"], ["POST", "/api/share/export"],
       ["POST", "/api/team-library/github"], ["GET", "/api/setup-import/grok"],
       ["GET", "/api/bots/x/memory"], ["PUT", "/api/bots/x/memory"], ["PUT", "/api/section-context"], ["PUT", "/api/groups/order"], ["GET", "/api/threads/t/events"],
       ["GET", "/api/mcp/servers"], ["POST", "/api/mcp/servers"], ["GET", "/api/bots/x/mcp-servers"], ["POST", "/api/connectors/slack/authorize"],
-      ["POST", "/api/bots/x/slack-management"], ["GET", "/api/bots/x/slack-management/extra"],
+      ["POST", "/api/bots/x/slack-management"], ["GET", "/api/bots/x/slack-management/extra"], ["POST", "/api/bots/x/library"], ["GET", "/api/bots/x/library/extra"],
       ["PUT", "/api/config"], ["POST", "/api/auth/pairing"], ["GET", "/api/auth/sessions"], ["DELETE", "/api/auth/sessions/abc"],
       ["POST", "/api/live/session"], ["POST", "/api/live/call/end"], ["GET", "/api/live/call"], ["PATCH", "/api/live/settings"],
       ["POST", "/api/live/device-revoked"],
@@ -288,6 +290,19 @@ describe("resolveRequestAuth", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("treats a request the companion carries for a web session as remote: only its own session counts", () => {
+    // The companion's real headers (companion/src/session-route.ts), however the device dressed the request.
+    const carried = (headers: Record<string, string>) =>
+      webSessionHeaders(request({ host: "127.0.0.1:8799", ...headers }), "web-1") as Record<string, string>;
+    const forged = { "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1", cookie: `${cookieName}=stolen`, origin: "http://127.0.0.1:8799" };
+    expect(resolve(carried(forged)).auth).toBeNull();
+    expect(resolve(carried({ ...forged, authorization: "Bearer omb_sess_wrong" })).auth).toBeNull();
+    const { token } = sessions.issue({ label: "web", scopes: ["admin", "client"] });
+    expect(resolve(carried({ ...forged, authorization: `Bearer ${token}` })).auth?.kind).toBe("session");
+    // From the companion on this machine, the lockout counts this device, never every device as one.
+    expect(requestSource({ headers: carried(forged), socket: { remoteAddress: "127.0.0.1" } } as unknown as IncomingMessage)).toBe("relay-web-1");
+  });
+
   it("accepts authenticated relay mutations without exposing the desktop owner capability", () => {
     const headers = {
       host: "127.0.0.1:8799",
@@ -308,6 +323,10 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
     expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("GET", "/api/bots/b/skills").auth?.kind).toBe("loopback");
+    expect(check("POST", "/api/bots/b/skills").auth).toBeNull();
+    expect(check("DELETE", "/api/attachments/abc-1.jpg").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("DELETE", "/api/attachments/..%2Fconfig.json").auth).toBeNull();
     const plain = resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" }, "GET"), {
       sessions, cookieName, streamPath: "/api/events", url: new URL("/api/phones/self/jobs", "http://localhost"),
       loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret",
@@ -329,7 +348,7 @@ describe("resolveRequestAuth", () => {
     for (const overrides of forged) expect(check("POST", "/api/bots/b/read", overrides).auth).toBeNull();
     expect(check("POST", "/api/bots/b/read", {}, "").auth).toBeNull();
     for (const [method, path] of [
-      ["PUT", "/api/config"], ["POST", "/api/auth/pairing"],
+      ["PATCH", "/api/config"], ["POST", "/api/auth/pairing"],
       ["POST", "/api/internal/anything"], ["GET", "/api/auth/sessions"],
       ["POST", "/api/not-yet-supported"],
     ]) expect(check(method, path).auth, path).toBeNull();
@@ -437,7 +456,8 @@ describe("resolveRequestAuth", () => {
     expect(connectorRefresh.auth).toBeNull();
     expect(connectorRefresh.status).toBe(403);
     for (const path of ["/api/desktop-viewer/vps/bot-1", "/api/desktop-viewer/local/shared/websockify", "/api/webhooks/hook-1/address", "/api/setup-import/grok",
-      "/api/local-computer", "/api/bots/bot-1/local-computer", "/api/usb-phones/PHONE1/stream", "/api/usb-phones/emulator-5554/stream", "/api/usb-phones/SM.G991B/stream"]) {
+      "/api/local-computer", "/api/bots/bot-1/local-computer", "/api/usb-phones/PHONE1/stream", "/api/usb-phones/emulator-5554/stream", "/api/usb-phones/SM.G991B/stream",
+      "/api/bots/bot-1/browser/stream", "/api/bots/bot-1/browser/desktop"]) {
       expect(resolveRequestAuth(request({ host: "127.0.0.1:8799" }, "GET"), options(path)).status, path).toBe(403);
       expect(resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-desktop-owner": "owner-token-123" }, "GET"), options(path)).auth?.kind, path)
         .toBe("loopback");
@@ -588,6 +608,7 @@ describe("resolveRequestAuth", () => {
     ["POST", "/api/instances/claude-work/auth/sign-out"],
     ["GET", "/api/usage?from=2026-09-01&to=2026-09-30"],
     ["GET", "/api/usage.csv?from=2026-09-01&to=2026-09-30"],
+    ["GET", "/api/usage/insights?from=2026-09-01&to=2026-09-30"],
     ["POST", "/api/keys/test"],
     ["GET", "/api/fleet"],
     ["POST", "/api/fleet/workspaces"],
@@ -769,7 +790,23 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
 
   it("ignores service trust while the desktop capability is in force", () => {
     expect(check("PUT", "/api/config", { trust: "service", desktopToken: "owner-token", headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth)
-      .toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+      .toEqual({ kind: "loopback", scopes: ["admin", "client"], desktopMain: true });
+  });
+
+  it("marks the desktop app's own main process apart from its pages, a paired phone and any other program here", () => {
+    const desktop = { desktopToken: "owner-token" };
+    const main = check("PUT", "/api/cloud-send/kind", { ...desktop, headers: { "x-openmausbot-desktop-owner": "owner-token", "sec-fetch-mode": "cors" } }).auth;
+    expect(main).toEqual({ kind: "loopback", scopes: ["admin", "client"], desktopMain: true });
+    const page = check("PUT", "/api/cloud-send/kind", { ...desktop, headers: { "x-openmausbot-desktop-owner": "owner-token", origin: "http://127.0.0.1:8799", "sec-fetch-site": "same-origin", "sec-fetch-dest": "empty" } }).auth;
+    expect(page).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(check("GET", "/api/cloud-send", desktop).auth, "a program here without the capability").toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    expect(check("PUT", "/api/cloud-send/kind", desktop).auth, "and it may not write").toBeNull();
+    expect(check("GET", "/api/cloud-send", { headers: { "x-openmausbot-desktop-owner": "owner-token" } }).auth, "no desktop on this server").toEqual({ kind: "loopback", scopes: ["admin", "client"] });
+    const place = { desktopManaged: true, managed: false };
+    expect(desktopMainMover(main!, place)).toBe(true);
+    expect([desktopMainMover(page!, place), desktopMainMover(main!, { desktopManaged: false, managed: false }), desktopMainMover(main!, { desktopManaged: true, managed: true })]).toEqual([false, false, false]);
+    expect(desktopMainMover({ ...main!, companionDevice: "phone-1" } as never, place), "a paired phone never is").toBe(false);
+    expect(desktopMainMover({ kind: "loopback", scopes: ["client"], trust: "service", desktopMain: true } as never, place), "nor a shared workspace's program").toBe(false);
   });
 
   it("defaults to service on a hosted workspace, owner elsewhere, and lets the operator choose", () => {

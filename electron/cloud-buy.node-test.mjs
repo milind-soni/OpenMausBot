@@ -66,7 +66,7 @@ test("the name and colour chosen while setting up are kept for that account unti
   const look = createCloudLook({ store: lookFile(() => "/user/cloud-home-look.json", fs), accountId: () => account, homeEntry: () => entry, saveEntry: (at, value) => saved.push([at, value]) });
   assert.deepEqual(look.current(), { name: "My Cloud", color: "blue" }); assert.equal(look.pending(), null);
   assert.deepEqual(look.save("  Studio ", "teal"), { name: "Studio", color: "teal" });
-  assert.deepEqual(JSON.parse(files.get("/user/cloud-home-look.json")), { accountId: "acct-1", name: "Studio", color: "teal" });
+  assert.deepEqual(JSON.parse(files.get("/user/cloud-home-look.json")), { accountId: "acct-1", name: "Studio", color: "teal", listed: null });
   assert.deepEqual(look.pending(), { name: "Studio", color: "teal" });
   for (const [name, color] of [["", "teal"], ["x".repeat(29), "teal"], ["Studio", "#00ff00"]]) assert.throws(() => look.save(name, color), /up to 28 characters/);
   const again = createCloudLook({ store: lookFile(() => "/user/cloud-home-look.json", fs), accountId: () => account, homeEntry: () => entry, saveEntry: () => {} });

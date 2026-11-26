@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { dataEngineSpillPath, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 describe("workspace backup data boundary", () => {
   it("exports ordinary settings only and retains destination connection sections unchanged", () => {
@@ -61,6 +61,13 @@ describe("workspace backup data boundary", () => {
     for (const path of ["logins.json", "logins.md", "workspaces/bot/logins.json.enc", "attachments/logins-key"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
   });
 
+  it("never exports a GitHub sign-in's folder, whose config holds its token", () => {
+    for (const path of ["github", "github/owner/config/hosts.yml", "github/p_abcdefghijklmnopqrstuv/config/hosts.yml", "github/owner/home/.gitconfig"]) {
+      expect(excludedWorkspaceAuthPath(path)).toBe(true);
+    }
+    for (const path of ["workspaces/bot/github/notes.md", "githubber/x", "task-workspaces/b/t/github"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
+  });
+
   it("never exports or restores a Cloud home's connected-apps installation", () => {
     for (const path of ["connected-apps-installation.json", "connected-apps-installation.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) {
       expect(excludedWorkspaceAuthPath(path)).toBe(true);
@@ -71,6 +78,11 @@ describe("workspace backup data boundary", () => {
   it("never exports or restores MCP sign-in tokens", () => {
     for (const path of ["mcp-oauth.json", "mcp-oauth.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) expect(excludedWorkspaceAuthPath(path)).toBe(true);
     for (const path of ["mcp-oauth.json.md", "workspaces/bot/mcp-oauth.json"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
+  });
+
+  it("never exports or restores the Bot API keys saved for teammates on other servers", () => {
+    for (const path of ["remote-teammates.json", "remote-teammates.json.4242.05a7b3e0-1234-4abc-8def-0123456789ab.tmp"]) expect(excludedWorkspaceAuthPath(path)).toBe(true);
+    for (const path of ["remote-teammates.json.md", "remote-teammate-work.json", "workspaces/bot/remote-teammates.json"]) expect(excludedWorkspaceAuthPath(path)).toBe(false);
   });
 
   it("never exports the per-turn hook token directory, and only that directory", () => {
@@ -89,13 +101,13 @@ describe("workspace backup data boundary", () => {
     }
   });
 
-  it("leaves out a bot's live DuckDB database, WAL and spill directory, and nothing else in its folder", () => {
-    for (const path of ["bots/b1/data.duckdb", "bots/b1/data.duckdb.wal", "bots/b1/data-tmp", "bots/b1/data-tmp/duckdb_temp_storage-0.tmp"]) {
-      expect(liveDataEnginePath(path)).toBe(true);
+  it("leaves out a bot's DuckDB spill directory, and nothing else in its folder: its Data tables go", () => {
+    for (const path of ["bots/b1/data-tmp", "bots/b1/data-tmp/duckdb_temp_storage-0.tmp"]) {
+      expect(dataEngineSpillPath(path)).toBe(true);
     }
-    for (const path of ["bots/b1/SOUL.md", "bots/b1/sheet.json", "bots/b1/data.duckdb.bak", "bots/b1/data-tmp.zip", "bots/data.duckdb", "data.duckdb",
+    for (const path of ["bots/b1/data.duckdb", "bots/b1/data.duckdb.wal", "bots/b1/SOUL.md", "bots/b1/sheet.json", "bots/b1/data.duckdb.bak", "bots/b1/data-tmp.zip", "bots/data.duckdb", "data.duckdb",
       "workspaces/bot/data.duckdb", "bots/b1/exports/data.duckdb", "attachments/data-tmp/x"]) {
-      expect(liveDataEnginePath(path)).toBe(false);
+      expect(dataEngineSpillPath(path)).toBe(false);
     }
   });
 

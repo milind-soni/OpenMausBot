@@ -4,7 +4,8 @@ import type { SendTurnInput } from "../contracts.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import { appMountFor, gateServer, mcpStdioServer, type AppMount } from "../mcp-gate-config.ts";
-import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "../routes/own-mcp-http-path.ts";
+import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH, TOOL_SHARE_HEADER } from "../routes/own-mcp-http-path.ts";
+import { toolListShare } from "../tool-list-budget.ts";
 import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFor, type ToolSchemaProfileId } from "../tool-schema-profile.ts";
 import { AGENTS_MCP_ENV } from "./agents-mcp-env.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -103,8 +104,9 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
   const kind = HARNESS_KINDS.find((candidate) => candidate === server.args[script + 1]);
   const token = kind && server.env[harnessMcpTokenEnv(kind)];
   const limit = server.env[TOOL_LIMIT_ENV];
+  const share = toolListShare(server.env[TOOL_SCHEMA_PROFILE_ENV]) === undefined ? undefined : server.env[TOOL_SCHEMA_PROFILE_ENV];
   return kind && token ? { url: `${harness}${OWN_MCP_HTTP_PATH}${kind}`,
-    headers: { authorization: `Bearer ${token}`, ...(limit === undefined ? {} : { [TOOL_LIMIT_HEADER]: limit }) } } : null;
+    headers: { authorization: `Bearer ${token}`, ...(limit === undefined ? {} : { [TOOL_LIMIT_HEADER]: limit }), ...(share === undefined ? {} : { [TOOL_SHARE_HEADER]: share }) } } : null;
 }
 
 /** The turn's MCP servers as ACP session/new takes them. stdio is the baseline every ACP agent supports; an agent that
@@ -113,9 +115,17 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
  * provider takes in all. */
 export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string; toolBudget?: number } = {}): AcpMcpServer[] {
   const schemaProfile = toolSchemaProfileFor({ engine: options.engine })?.id;
-  return turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => {
-    const own = options.http ? ownMcpOverHttp(server) : null;
-    const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));
-    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : { ...server, env: pairs(server.env) };
+  const servers: AcpMcpServer[] = turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => ({ ...server, env: pairs(server.env) }));
+  return options.http ? acpOwnServersOverHttp(servers) : servers;
+}
+
+/** `servers` with each of OpenMausBot's own stdio proxies as its endpoint on this server; every other server as it was. */
+export function acpOwnServersOverHttp(servers: AcpMcpServer[]): AcpMcpServer[] {
+  return servers.map((server) => {
+    if (!("command" in server)) return server;
+    const own = ownMcpOverHttp({ ...server, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) });
+    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : server;
   });
 }
+
+const pairs = (record: Record<string, string>): NameValue => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));

@@ -14,6 +14,7 @@ import { link, open, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
+import { dropKeptOriginals, dropOrphanKeptOriginals, keepUploadedOriginal, keptOriginalsBytes } from "./attachment-originals.ts";
 import { boxUploadsDir } from "./bot-box/plan.ts";
 
 export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
@@ -192,17 +193,22 @@ function dropBoxUploadCopies(names: readonly string[], dataDir = DATA_DIR): void
   if (!names.length) return;
   const root = join(dataDir, "box-uploads");
   const dirs = (path: string) => { try { return readdirSync(path); } catch { return []; } };
+  // One listing of each folder for every name at once: a folder per conversation times a name each was minutes of work
+  // when a delete took thousands of uploads.
+  const going = new Set(names);
   for (const bot of dirs(root)) {
     for (const thread of dirs(join(root, bot))) {
-      for (const name of names) {
-        try { rmSync(join(boxUploadsDir(dataDir, bot, thread), name), { force: true }); } catch { /* best effort: a file still in use stays */ }
+      const folder = boxUploadsDir(dataDir, bot, thread);
+      for (const name of dirs(folder)) {
+        if (!going.has(name)) continue;
+        try { rmSync(join(folder, name), { force: true }); } catch { /* best effort: a file still in use stays */ }
       }
     }
   }
 }
 
-/** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
-export function deleteAttachment(path: string): void {
+/** True when the upload is gone (removed now or already); an upload still on disk (a busy file on Windows) stays. */
+function unlinkAttachment(path: string): boolean {
   try {
     const size = committedAttachmentBytes !== null ? statSync(path).size : 0;
     unlinkSync(path);
@@ -210,16 +216,27 @@ export function deleteAttachment(path: string): void {
       committedAttachmentBytes = Math.max(0, committedAttachmentBytes - size);
     }
   } catch (error) {
-    // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
   }
-  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
+  return true;
+}
+
+/** Every removal of a file saveImage/saveFile created must come through here, or the cache overcounts and rejects uploads. */
+export function deleteAttachment(path: string): void {
+  deleteAttachments([path]);
+}
+
+/** deleteAttachment for many files at once. An upload still on disk keeps its box copies; one gone loses them. */
+export function deleteAttachments(paths: readonly string[]): void {
+  const gone = paths.filter((path) => unlinkAttachment(path) && resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)).map((path) => basename(path));
+  dropBoxUploadCopies(gone);
+  dropKeptOriginals(gone);
 }
 
 /** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
 export function attachmentStorageUsage(): { usedBytes: number; maxBytes: number } {
   invalidateAttachmentAccounting();
-  return { usedBytes: committedBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
+  return { usedBytes: committedBytes() + keptOriginalsBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
 }
 
 /** What a Settings clear leaves, as stored names: pictures given by their /api/attachments/ url (bot and profile
@@ -267,6 +284,8 @@ export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): {
     }
   }
   dropBoxUploadCopies(gone);
+  dropKeptOriginals(gone);
+  dropOrphanKeptOriginals(ATTACHMENTS_DIR);
   invalidateAttachmentAccounting();
   return { removed, freedBytes, failed };
 }
@@ -447,7 +466,8 @@ export async function saveFile(
   chunks: AsyncIterable<Uint8Array>,
   originalName: string,
   mime: string,
-  options: { uploadId?: string; expectedBytes?: number } = {},
+  /** keepOriginal: the person's own upload, kept as sent (attachment-originals.ts). */
+  options: { uploadId?: string; expectedBytes?: number; keepOriginal?: boolean } = {},
 ): Promise<SavedFile> {
   const known = extensionForFileMime(mime);
   const normalized = known ? normalizedMime(mime)! : GENERIC_FILE_MIME;
@@ -532,6 +552,7 @@ export async function saveFile(
         }
         await unlink(partialPath);
       }
+      if (options.keepOriginal) await keepUploadedOriginal(path);
       return { path, name, mime: normalized, bytes };
     } catch (error) {
       if (file && !closed) await file.close().catch(() => undefined);
@@ -553,6 +574,16 @@ export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Ui
   if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
   ensureAttachmentsDir();
   const path = join(ATTACHMENTS_DIR, name);
+  if (statSizeIfFile(path) !== null) {
+    // A retried move already owns these bytes. Drain its request without reserving another copy at a full store.
+    let bytes = 0;
+    for await (const chunk of chunks) {
+      bytes += chunk.byteLength;
+      if (bytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+    }
+    if (statSizeIfFile(path) === null) throw statusError(409, "The attachment was removed during the retry. Retry the upload.");
+    return { stored: false };
+  }
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${randomUUID()}-${randomUUID()}.partial`);
   const reservation = new AttachmentReservation();
   activePartials.add(partialPath);

@@ -157,14 +157,16 @@ describe("what the snapshot asks this page's app", () => {
     vi.stubGlobal("ogb", { remoteClient: { active: true }, ...bridges });
     await draw(ready({ webhookIngress: null }));
     expect(asked).toEqual([]);
-    expect(sent()[0]![1]).toMatchObject({ cloud_plan: "unknown", remote_client: true });
+    expect(sent()[0]![1]).toMatchObject({ remote_client: true });
+    expect(sent()[0]![1]).not.toHaveProperty("cloud_plan");
     expect(sent()[0]![1]).not.toHaveProperty("webhooks");
   });
 
   it("asks nothing in a plain browser", async () => {
     await draw(ready({ config: { ...ready().config!, cloudHome: true } }));
     expect(asked).toEqual([]);
-    expect(sent()[0]![1]).toMatchObject({ cloud_plan: "unknown", platform: "browser" });
+    expect(sent()[0]![1]).toMatchObject({ platform: "browser" });
+    expect(sent()[0]![1]).not.toHaveProperty("cloud_plan");
   });
 
   it("runs in the app shell, so every app page sends it", () => {

@@ -87,7 +87,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   useEffect(() => {
     if (!requestedSignIn || requestedSignIn.consumed) return;
     setView(requestedSignIn.place === "browser" ? "browser" : "desktop");
-    if (requestedSignIn.place === "browser") setSignIn({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId });
+    if (requestedSignIn.place === "browser") setSignIn({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId, ...(requestedSignIn.expand ? { expand: true } : {}) });
     dispatch({ type: "signInFocusConsumed", requestId: requestedSignIn.requestId });
   }, [dispatch, requestedSignIn]);
   const botRoutines = state.routines
@@ -261,7 +261,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           <BrowserPanel bot={bot} signIn={signIn} />
           {error && <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
           <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary">
-            {t("remoteDesktop.browserHint")}
+            {t("remoteDesktop.browserHintDevices")}
           </p>
         </div>
       ) : (
@@ -311,7 +311,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           </div>
         )}
         <p className="text-[11px] leading-relaxed text-ink-secondary">
-          {t("remoteDesktop.accessHint")}
+          {t("remoteDesktop.accessHintDevices")}
         </p>
 
         <div className="w-full rounded-xl bg-card p-4 text-left">

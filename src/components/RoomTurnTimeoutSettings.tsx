@@ -7,11 +7,12 @@ import {
   MIN_ROOM_TURN_TIMEOUT_MINUTES,
   parseRoomTurnTimeoutMinutes,
 } from "@/lib/room-turn-timeout";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function RoomTurnTimeoutSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmedMinutes = state.config?.rooms.turnTimeoutMinutes ?? 5;
   const [value, setValue] = useState(String(confirmedMinutes));
   const [dirty, setDirty] = useState(false);

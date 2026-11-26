@@ -79,6 +79,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   delete_trigger: "activity.tool.team.deleteTrigger",
   list_waits: "activity.tool.team.listWaits",
   wait_until: "activity.tool.team.waitUntil",
+  check_back: "activity.tool.team.checkBack",
   add_mcp_server: "activity.tool.team.addMcpServer",
   app_settings: "activity.tool.team.appSettings",
   ask_bot: "activity.tool.team.askBot",
@@ -86,6 +87,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   attach_file: "activity.tool.team.attachFile",
   close_thread: "activity.tool.team.closeThread",
   rename_thread: "activity.tool.team.renameThread",
+  set_main_thread: "activity.tool.team.setMainThread",
   coordinate_bots: "activity.tool.team.coordinateBots",
   create_bot: "activity.tool.team.createBot",
   create_room: "activity.tool.team.createRoom",
@@ -93,9 +95,11 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   decide: "activity.tool.team.decide",
   delegate_bot: "activity.tool.team.delegateBot",
   extract: "activity.tool.team.extract",
+  what_changed: "activity.tool.team.whatChanged",
   fill_login: "activity.tool.team.fillLogin",
   find_tool: "activity.tool.team.findTool",
   generate_image: "activity.tool.team.generateImage",
+  edit_image: "activity.tool.team.editImage",
   list_bots: "activity.tool.team.listBots",
   list_room_targets: "activity.tool.team.listRoomTargets",
   list_rooms: "activity.tool.team.listRooms",
@@ -132,11 +136,14 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   send_voice_note: "activity.tool.team.sendVoiceNote",
   session_read: "activity.tool.team.sessionRead",
   session_search: "activity.tool.team.sessionSearch",
+  share: "activity.tool.team.share",
   shared_computer: "activity.tool.team.sharedComputer",
   show_html: "activity.tool.team.showHtml",
   show_widget: "activity.tool.team.showWidget",
   skill_manage: "activity.tool.team.skillManage",
   skills_list: "activity.tool.team.skillsList",
+  run_workflow: "activity.tool.team.runWorkflow",
+  workflow_edit: "activity.tool.team.workflowEdit",
   start_thread: "activity.tool.team.startThread",
   burst: "activity.tool.team.burst",
   tool_result_read: "activity.tool.team.toolResultRead",
@@ -238,7 +245,7 @@ export function describedTool(name: string, input?: unknown): Described {
 }
 
 const DECISION_SCAN = 20_000;
-const EVENTS_PER_THREAD = 2_000;
+export const EVENTS_PER_THREAD = 2_000;
 /** A verdict is written as the request opens and the run follows, occasionally a clock skew's worth earlier. */
 const MATCH_BEFORE_MS = 5_000;
 const MATCH_AFTER_MS = 30_000;

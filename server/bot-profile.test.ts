@@ -105,7 +105,7 @@ describe("mascotBody", () => {
     });
   });
 
-  it.each(["pumpkin", "laddu"])("accepts the festival body %s", (mascotBody) => {
+  it.each(["pumpkin", "laddu", "obj-mug"])("accepts the festival or object body %s", (mascotBody) => {
     expect(parseBotProfilePatch({ mascotBody } as never, true)).toEqual({
       ok: true,
       patch: { mascotBody },
@@ -118,7 +118,10 @@ describe("mascotBody", () => {
       error:
         "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
         "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, spider, " +
-        "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, or karanji",
+        "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, karanji, " +
+        "obj-controller, obj-barbell, obj-mug, obj-lightbulb, obj-chat, obj-sprout, obj-watering-can, obj-book, " +
+        "obj-brain, obj-bull, obj-bunny, obj-camera, obj-cat, obj-cloud, obj-egg, obj-ghost, obj-magnifier, " +
+        "obj-paint-brush, obj-palette, obj-rocket, or obj-witch-hat",
     });
   });
 });
@@ -133,6 +136,34 @@ describe("mascotFaceColor", () => {
   it.each(["red", "#ffffff", "", 1, {}, []])("rejects an unsupported color %j", (mascotFaceColor) => {
     expect(parseBotProfilePatch({ mascotFaceColor } as never, true)).toEqual({
       ok: false, error: "mascotFaceColor must be white, black, or null",
+    });
+  });
+});
+
+describe("mascotBodyColor", () => {
+  it.each([["#12ab9f", "#12ab9f"], ["#ABCDEF", "#abcdef"], [null, null]] as const)("accepts %s at both profile boundaries", (input, saved) => {
+    for (const strict of [true, false]) {
+      expect(parseBotProfilePatch({ mascotBodyColor: input }, strict)).toEqual({ ok: true, patch: { mascotBodyColor: saved } });
+    }
+  });
+
+  it.each(["red", "#fff", "#12ab9f0", "12ab9f", "url(#x)", "", 1, {}])("rejects %j", (mascotBodyColor) => {
+    expect(parseBotProfilePatch({ mascotBodyColor } as never, true)).toEqual({
+      ok: false, error: "mascotBodyColor must be a #rrggbb hex colour or null",
+    });
+  });
+});
+
+describe("mascotMaterial", () => {
+  it.each(["fluffy", "matte", "metallic", null] as const)("accepts %s at both profile boundaries", (mascotMaterial) => {
+    for (const strict of [true, false]) {
+      expect(parseBotProfilePatch({ mascotMaterial }, strict)).toEqual({ ok: true, patch: { mascotMaterial } });
+    }
+  });
+
+  it.each(["Fluffy", "fuzzy", "velvet", "flat", "", 1, {}])("rejects %j", (mascotMaterial) => {
+    expect(parseBotProfilePatch({ mascotMaterial } as never, true)).toEqual({
+      ok: false, error: "mascotMaterial must be fluffy, matte, metallic, or null",
     });
   });
 });

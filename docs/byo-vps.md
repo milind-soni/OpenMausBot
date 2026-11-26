@@ -36,7 +36,7 @@ host. To move the whole server to a VPS, use [Deploy on a VPS](deploy-vps.md).
 - **Locally:** a `docker` CLI, version 18.09 or newer (that is when `docker -H ssh://` shipped). The Docker
   daemon does not need to run locally — only the CLI is used; install it with the one line for your platform
   below.
-- **On the VPS:** a running Docker daemon (`dockerd`) on x86_64 Linux.
+- **On the VPS:** a running Docker daemon (`dockerd`) on x86_64 or arm64 Linux.
 - **The SSH user** must be in the `docker` group on the VPS, so `docker info` works without sudo.
 
 Be clear-eyed about that last point: membership in the `docker` group is root-equivalent on that machine.
@@ -70,8 +70,9 @@ The live desktop's tunnel is the exception: it opens its own connection (`Contro
 closing it never takes down a connection that docker commands share.
 For long data-directory paths, the app keeps its control socket in a private, user-owned directory
 under `/tmp` to stay within OpenSSH's socket-path limit; the config stays in the app data directory.
-Windows OpenSSH does not support connection sharing, so that platform keeps its normal SSH setup.
-The block below is still the recommended shape, and it is what your own `ssh` uses outside the app:
+On macOS and Linux, the block below is the recommended shape, and it is what your own `ssh` uses outside the app.
+On a Windows server, leave out the three `Control…` lines: Windows OpenSSH does not support connection sharing, so the
+app never adds them there, and `ssh` on Windows can fail when your alias sets them.
 
 ```
 Host my-vps
@@ -86,8 +87,9 @@ Host my-vps
   ConnectTimeout 10
 ```
 
-- `ControlMaster`/`ControlPath`/`ControlPersist` — every bot action is a docker-over-SSH exec; multiplexing turns
-  per-command connects into milliseconds over one persistent connection. The live-desktop tunnel does not share it.
+- `ControlMaster`/`ControlPath`/`ControlPersist` (macOS and Linux only) — every bot action is a docker-over-SSH exec;
+  multiplexing turns per-command connects into milliseconds over one persistent connection. The live-desktop tunnel
+  does not share it.
 - `ServerAliveInterval`/`ServerAliveCountMax`/`ConnectTimeout` — a dropped VPS must fail fast (under a
   minute, and ten seconds to connect), not hang a turn waiting on a dead TCP session.
 
@@ -102,12 +104,22 @@ that matters to that bot — provisioning, status checks, previews, screenshots,
 computer tools, and deletion cleanup. The Settings inventory spans every server in play and tags each
 computer with the alias that holds it.
 
+To pick servers from a list instead of typing aliases, add them under **Named servers** below the default alias
+(Settings → AI → Other services → Self-hosted VPS): a name you choose plus its SSH config alias. Each saved VPS bot
+then gets a server picker in Bot settings → Computer → Where … works: the default server, every named server, or
+**Other SSH alias…** for one that is not on the list, then **Save**. The list is stored as `vpsServers` in `config.json`
+(`[{ "name": "Home lab", "sshAlias": "home-lab" }]`); saving or removing an entry never moves a bot, and the
+picker writes the same `vpsAlias` field. Only owner and admin sessions see the list.
+
 A bot cannot be moved to another server while its computer still lives on the old one, and the default alias
 cannot change while any computer it manages still exists: remove the computer first from Settings → Local VM →
 Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). A server
 that cannot be reached never traps a bot: moving the bot to another server, switching its computer, or deleting
 it goes ahead, and the app says what may be left on that server and the command that removes it once the server
-is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
+is back. Changing or clearing the default alias works the same way: the app lists the command that finds this
+installation's computers left on that server. Only a name lookup or connection failure that SSH reports, or a
+timeout, counts as not reached: a server that answers but refuses (a changed host key, a Docker error) keeps the
+alias until it can be listed. Any alias from your
 `~/.ssh/config`, host key already verified by hand, is all it takes. A new bot starts on the default server.
 
 ### A server that pauses when idle
@@ -137,7 +149,7 @@ host is unknown simply fails until you have done this once.
 
 ## A machine on your Tailscale network
 
-The server does not have to be a rented VPS. Any x86_64 Linux machine that runs Docker and that you can reach
+The server does not have to be a rented VPS. Any x86_64 or arm64 Linux machine that runs Docker and that you can reach
 over SSH works the same way: a home server, a spare desktop, or a computer on your Tailscale network. The bot
 still gets its own managed desktop container on that machine; it does not take over the machine's own screen.
 
@@ -190,6 +202,15 @@ managed containers can keep customized resource and OOM settings, unlimited budg
 policies, including the legacy `no` policy. OpenMausBot does not reset those settings or recreate a
 container to enforce its defaults. Restart behavior follows the chosen Docker policy; for example,
 `always` can wake a slept container after a Docker daemon restart.
+
+Memory (2–128 GiB) and CPU cores (1–64) are set in Settings under **Self-hosted VPS**, for the default server and,
+separately, for each named server. The default server uses 4 GiB and 2 cores until you change them; a named server
+that leaves memory or cores empty uses the default server's.
+
+A new container takes the limits at once. A stopped one takes them when it next starts. A running container keeps
+its limits until it stops; the next start applies the current ones, so recreating it is not needed. When you save a
+limit, OpenMausBot asks the VPS's Docker engine for its CPU count and memory over SSH and refuses cores or memory the
+machine does not have. A host that does not answer does not hold the save up.
 
 - **Provision** (choosing **Cloud** for the bot, or the panel's button): builds the pinned Cua image on the
   VPS if needed, creates the container if missing, starts it if stopped, and waits until the desktop answers.

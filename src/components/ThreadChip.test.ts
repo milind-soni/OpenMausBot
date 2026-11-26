@@ -10,14 +10,17 @@ const scout: Bot = {
   tasks: [
     { threadId: "scout-main", title: "Main", createdAt: 1 },
     { threadId: "qa-245", title: "QA PR 245", createdAt: 2, openedBy: { botId: "ada", name: "Ada", at: 2 } },
+    { threadId: "octopus", title: "Octopus facts", createdAt: 3, openedBy: { botId: "ada", name: "Ada", at: 3 }, closedBy: { botId: "ada", name: "Ada", at: 4 }, archivedAt: 4 },
   ],
 };
+const ada: Bot = { ...scout, id: "ada", threadId: "ada-main", name: "Ada", color: "orange", tasks: [{ threadId: "ada-main", title: "Main", createdAt: 1 }] };
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [scout] }, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [scout, ada] }, dispatch: fixture.dispatch }) };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 import { ThreadChip } from "./ThreadChip";
+import { BotAvatar } from "./Avatar";
 
 const receipt = (threadId = "qa-245"): Message => ({
   id: "receipt", role: "bot", kind: "activity", at: 3,
@@ -37,7 +40,39 @@ function findElement(tree: ReactNode, attribute: string): ReactElement<ElementPr
 
 beforeEach(() => { fixture.dispatch.mockClear(); fixture.showThreads = true; });
 
+function findType(tree: ReactNode, type: unknown): ReactElement<ElementProps> | undefined {
+  for (const child of Children.toArray(tree)) {
+    if (!isValidElement<ElementProps>(child)) continue;
+    if (child.type === type) return child;
+    const found = findType(child.props.children, type);
+    if (found) return found;
+  }
+}
+
 describe("ThreadChip", () => {
+  it("shows the bot that asked on the line that records a hand-off, and opens the archived hand-off thread", () => {
+    const line: Message = { id: "asked", role: "bot", kind: "activity", at: 5,
+      tool: { name: "Ada asked me: Octopus facts", ok: true, nameCode: "chat.notice.askedMe", nameParams: { bot: "Ada", title: "Octopus facts" } },
+      threadRef: { botId: "scout", threadId: "octopus", title: "Octopus facts" }, askedBy: { botId: "ada", name: "Ada", threadIds: ["octopus"] } };
+    let tree: ReactNode;
+    function Capture() { tree = ThreadChip({ message: line }); return tree; }
+    expect(renderToStaticMarkup(createElement(Capture))).toContain("Ada asked me: Octopus facts");
+    expect((findType(tree, BotAvatar)!.props.bot as Bot).id).toBe("ada");
+    findElement(tree, "data-thread-chip")!.props.onClick!();
+    expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "octopus" },
+      { type: "revealThread", threadId: "octopus" },
+    ]);
+  });
+
+  it("keeps the thread's own bot on every other chip", () => {
+    let tree: ReactNode;
+    function Capture() { tree = ThreadChip({ message: receipt() }); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    expect((findType(tree, BotAvatar)!.props.bot as Bot).id).toBe("scout");
+  });
+
   it("renders the receipt as a pill named for the thread it opens", () => {
     const markup = renderToStaticMarkup(createElement(ThreadChip, { message: receipt() }));
     expect(markup).toContain("<button");

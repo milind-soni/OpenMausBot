@@ -8,6 +8,7 @@ import type { Duplex } from "node:stream";
 
 import { resolveTarget, type ResolvedAddress } from "../browser/egress/gate.ts";
 import { refusalFor, type EgressRules } from "../browser/egress/policy.ts";
+import { guardedHandler } from "./broker-headers.ts";
 
 export interface EgressGateOptions {
   socketPath: string;
@@ -69,7 +70,7 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
   const pinnedLookup = (addresses: ResolvedAddress[]) => (_host: string, lookupOptions: { all?: boolean }, callback: (...args: any[]) => void) =>
     lookupOptions.all ? callback(null, addresses) : callback(null, addresses[0]!.address, addresses[0]!.family);
 
-  const server: Server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const server: Server = createServer(guardedHandler("box network gate", async (req: IncomingMessage, res: ServerResponse) => {
     let url: URL;
     try {
       url = new URL(req.url ?? "");
@@ -95,7 +96,7 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
     res.on("close", () => { if (!res.writableFinished) upstream.destroy(); });
     upstream.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" }).end("The connection failed.\n"); else res.destroy(); });
     req.pipe(upstream);
-  });
+  }));
   server.on("connection", track);
   server.on("connect", async (req: IncomingMessage, client: Duplex, head: Buffer) => {
     const target = parseConnectTarget(req.url);

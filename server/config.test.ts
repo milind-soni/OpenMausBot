@@ -23,6 +23,7 @@ import { cacheUntilConfigChanges,
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
+  perBotLocalVmLimitProblem,
   parseStoredConfig,
   persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
@@ -143,6 +144,14 @@ describe("configuration boundaries", () => {
       expect(parseConfigPatch({ tts: { fishModel } }).tts).toEqual({ fishModel });
     }
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
+  });
+
+  it("keeps how the person is heard and the language they speak, and refuses anything else", () => {
+    expect(parseConfigPatch({ tts: { hearWith: "elevenlabs", hearLanguage: " ES " } }).tts).toEqual({ hearWith: "elevenlabs", hearLanguage: "es" });
+    expect(parseConfigPatch({ tts: { hearWith: "device", hearLanguage: "" } }).tts).toEqual({ hearWith: "device", hearLanguage: "" });
+    expect(parseStoredConfig({ tts: { key: "el-own" } }).tts).toEqual({ key: "el-own" });
+    expect(() => parseConfigPatch({ tts: { hearWith: "fish" } })).toThrow("hearWith");
+    expect(() => parseConfigPatch({ tts: { hearLanguage: "english" } })).toThrow("hearLanguage");
   });
 
   it("defaults to what each host holds, and a saved number wins except over a plan's limit", () => {
@@ -522,6 +531,24 @@ describe("configuration boundaries", () => {
     expect(vpsSshAlias({ vps: { sshAlias: "-bad" } })).toBeNull();
   });
 
+  it("keeps named VPS servers apart from the default and accepts only plain names and simple aliases", () => {
+    const servers = [{ name: "Home lab", sshAlias: "home-lab" }, { name: "Office", sshAlias: "office.vps" }];
+    expect(parseConfigPatch({ vpsServers: servers })).toEqual({ vpsServers: servers });
+    expect(parseConfigPatch({ vpsServers: [{ name: "  Home lab ", sshAlias: "home-lab" }] })).toEqual({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(() => parseConfigPatch({ vpsServers: [{ name: "Bad", sshAlias: "prod; reboot" }] })).toThrow("vpsServers");
+    expect(() => parseConfigPatch({ vpsServers: [{ name: " ", sshAlias: "home-lab" }] })).toThrow("vpsServers");
+    expect(() => parseConfigPatch({ vpsServers: [{ name: "Line\nbreak", sshAlias: "home-lab" }] })).toThrow("vpsServers");
+    expect(() => parseConfigPatch({ vpsServers: [...servers, { name: "Again", sshAlias: "home-lab" }] })).toThrow("own SSH alias");
+    expect(() => parseConfigPatch({ vpsServers: Array.from({ length: 21 }, (_, index) => ({ name: `S${index}`, sshAlias: `s${index}` })) })).toThrow("vpsServers");
+    // A hand-edited bad entry is dropped on load, never the whole file.
+    expect(parseStoredConfig({ vpsServers: [...servers, { name: "Bad", sshAlias: "-bad" }, "junk"] })).toEqual({ vpsServers: servers });
+    expect(parseStoredConfig({ vpsServers: "home-lab" })).toEqual({});
+    expect(parseStoredConfig({ vpsServers: Array.from({ length: 25 }, (_, index) => ({ name: `S${index}`, sshAlias: `s${index}` })) }).vpsServers).toHaveLength(20);
+    expect(() => parseConfigPatch({ vpsServers: [{ name: "Lab\u202e", sshAlias: "home-lab" }] })).toThrow("vpsServers");
+    expect(parseStoredConfig({ vpsServers: [...servers, { name: "Copy", sshAlias: "home-lab" }] })).toEqual({ vpsServers: servers });
+    expect(parseStoredConfig({})).toEqual({});
+  });
+
   it("validates browserEngine.attachCdpUrl as a bare CDP port or an http(s)/ws(s) URL, and forwards it only when configured", () => {
     expect(parseStoredConfig({})).toEqual({});
     expect(browserEngineAttachCdpUrl({})).toBeNull();
@@ -609,6 +636,15 @@ describe("configuration boundaries", () => {
     });
     expect(localVmMode({ localVm: { mode: "per-bot" } })).toBe("per-bot");
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
+  });
+
+  it("names the per-bot desktop limit once every allowed desktop exists", () => {
+    const cfg = { localVm: { mode: "per-bot" as const, maxInstances: 8 } };
+    expect(perBotLocalVmLimitProblem(cfg, 7)).toBeNull();
+    expect(perBotLocalVmLimitProblem(cfg, 8)).toBe("The per-bot Local VM limit is 8 — delete an unused bot VM");
+    expect(perBotLocalVmLimitProblem({}, 2)).toBe(
+      "The per-bot Local VM limit is 2 — delete an unused bot VM or raise the limit in App Settings",
+    );
   });
 
   it("accepts pool mode with the same bounded seat count", () => {
@@ -2121,7 +2157,7 @@ describe("changedInstanceIds", () => {
   it("replaces only the engines whose launch config a save changed", () => {
     const saved: AppConfig = { mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } };
     expect(reloaded({ mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } }, saved)).toEqual([]);
-    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral"]);
+    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral", "mistralVibe"]);
     expect(reloaded({ openaiCompat: { key: "c2", url: "https://compat.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ openaiCompat: { key: "c1", url: "https://other.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ anthropic: { key: "a" } }, saved), "Claude (API key) runs on the key too").toEqual(["claude", "claudeApi"]);

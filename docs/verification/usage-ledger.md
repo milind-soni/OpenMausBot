@@ -26,9 +26,13 @@
 
 ## User path
 
-Settings → Usage (in Simple mode, on Account) shows the period's totals, where
-the money went by bot and by model (with a switch for person, day, provider and
-routine), and every run. Opening a run shows its trace waterfall. In a chat, each
+Settings → Spending, in Simple and Advanced mode, opens on the period's charts
+(`GET /api/usage/insights`, bucketed by the viewer's time zone): the total
+against the same number of days before, each provider's share and daily line,
+turns, cost per turn, cache hit rate and turn length, when work happens by
+weekday and hour, tokens by type, spend by person, and a breakdown by model,
+bot, person, provider or day. Spend and Tokens switch the whole page. Every run
+follows; opening a run shows its trace waterfall. In a chat, each
 turn's work line reads "Worked for …" with **View trace** beside it. **Export
 CSV** stays one line per turn.
 
@@ -123,8 +127,10 @@ scope on both routes.
 
 ## Gotchas
 
-- Rows are appended when `turn.completed` folds. A turn that fails before it
-  settles leaves no row, so a failed turn is not billed.
+- Rows are appended when `turn.completed` folds, whether the turn succeeded
+  or failed: a failed turn is booked with the tokens and cost it reported, and
+  its row carries the failed outcome. Only a turn that never settles (refused
+  before it started, or the server stopped first) leaves no row.
 - The cost column is what the engine reported (real on a metered key, an
   equivalent on a subscription) or, for engines that report none, an estimate
   from `server/model-prices.ts`, marked `~` in History and People and labelled

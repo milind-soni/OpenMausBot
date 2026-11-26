@@ -268,7 +268,7 @@ function utf8Prefix(value: string, maximumBytes: number): string {
 }
 
 /** Below common 255-byte name limits, with room for the app's temporary-file suffix. */
-function boundedDisplayName(value: string, maximumBytes = 180): string {
+export function boundedDisplayName(value: string, maximumBytes = 180): string {
   if (Buffer.byteLength(value) <= maximumBytes) return value;
   const extension = extname(value);
   const extensionBytes = Buffer.byteLength(extension);
@@ -475,7 +475,7 @@ export async function openFileSavedSince(
   if (hidden || refused.some((root) => containedBy(root, canonical))) {
     throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
   }
-  const file = await openMessageFile(canonical, [dirname(canonical)], maxBytes);
+  const file = await openMessageFile(pathToFileURL(canonical).href, [dirname(canonical)], maxBytes);
   const opened = await file.handle.stat().catch(async (error: unknown) => {
     await file.handle.close().catch(() => undefined);
     throw error;
@@ -587,7 +587,7 @@ export function messageFolderEntryName(value: unknown): string | null {
   return value;
 }
 
-export function messageFileDisposition(name: string): string {
+export function messageFileDisposition(name: string, type: "attachment" | "inline" = "attachment"): string {
   const safeName = safeDisplayName(name);
   const fallback = safeName
     .normalize("NFKD")
@@ -597,7 +597,7 @@ export function messageFileDisposition(name: string): string {
   const encoded = encodeURIComponent(safeName).replace(/[!'()*]/g, (char) =>
     `%${char.charCodeAt(0).toString(16).toUpperCase()}`
   );
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 /** A transport name must not disguise the bytes' canonical extension (PDF bytes named setup.exe). */

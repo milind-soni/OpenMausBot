@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, ExternalLink, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { useStore } from "@/state/store";
 import { installCommandFor } from "@/state/engine-install";
@@ -130,6 +130,20 @@ export function KeyRow({
 
   const entry = shownKeyEntry(id, state.config);
   const row = rowId ? shownKeyEntry(rowId, state.config) : entry;
+  // The Live key row changes service with the Live calls choice: a key typed for one service is never saved for another.
+  const [draftFor, setDraftFor] = useState(entry.name);
+  if (draftFor !== entry.name) {
+    setDraftFor(entry.name);
+    setDraft("");
+    setShown(false);
+    setReplacing(false);
+    setProblem(null);
+    setVerdict(null);
+    setWorks(false);
+  }
+  // A check or save still running for the previous service must not show its result on this one. A layout effect's
+  // cleanup runs while the new service commits, before any later answer can land, where a passive effect's may run after.
+  useLayoutEffect(() => () => { generation.current += 1; }, [entry.name]);
   const target = entry.target;
   if (!target) throw new Error(`${id} is not saved by a key row`);
   const pointer = row.id !== entry.id;
@@ -160,12 +174,17 @@ export function KeyRow({
             : saved.included ? { tone: "ok", text: t("keys.includedWithCloudPro") }
               : null;
 
+  const testAt = state.config && target.testAt ? target.testAt(state.config) ?? "" : null;
+  const checkedAt = useRef(testAt);
+
   const runCheck = async (): Promise<KeyResult> => {
     if (!target.test) return "unverified";
     const mine = ++generation.current;
+    const at = checkedAt.current;
     setBusy("checking");
     try {
       const check = await checkKey(target.test);
+      if (mine === generation.current && checkedAt.current !== at) return await runCheck();
       if (mine === generation.current) {
         setWorks(check.ok);
         setVerdict(check.ok ? check.text : null);
@@ -173,6 +192,7 @@ export function KeyRow({
       }
       return check.result;
     } catch (cause) {
+      if (mine === generation.current && checkedAt.current !== at) return await runCheck();
       if (mine === generation.current) setProblem(errorText(cause));
       return "unverified";
     }
@@ -186,7 +206,7 @@ export function KeyRow({
       return;
     }
     busyRef.current = true;
-    generation.current += 1;
+    const mine = ++generation.current;
     const hadFocus = document.activeElement === inputRef.current;
     setBusy("saving");
     setProblem(null);
@@ -197,17 +217,20 @@ export function KeyRow({
       const status = await saveKey(target, value, !saved.configured);
       dispatch({ type: "configStatus", config: status });
       const now = target.saved(status);
-      setDraft("");
-      setShown(false);
-      setReplacing(false);
-      setOwnKey(false);
-      if (hadFocus) focusAfter.current = now.configured ? "replace" : "input";
-      if (!now.configured) setProblem(t("keys.row.notKept"));
+      const current = mine === generation.current;
+      if (current) {
+        setDraft("");
+        setShown(false);
+        setReplacing(false);
+        setOwnKey(false);
+        if (hadFocus) focusAfter.current = now.configured ? "replace" : "input";
+        if (!now.configured) setProblem(t("keys.row.notKept"));
+      }
       onSaved?.(now.configured);
       if (now.configured && via === "settings") target.settingsEvent?.("add_key");
-      keySaved(target.analytics, via, now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
+      keySaved(target.analytics, via, current && now.configured && target.test ? await runCheck() : savedKeyResult(target.analytics));
     } catch (cause) {
-      setProblem(errorText(cause));
+      if (mine === generation.current) setProblem(errorText(cause));
       keySaved(target.analytics, via, keySaveFailure(cause));
     } finally {
       busyRef.current = false;
@@ -239,6 +262,12 @@ export function KeyRow({
       setBusy(null);
     }
   };
+
+  useEffect(() => {
+    const before = checkedAt.current;
+    checkedAt.current = testAt;
+    if (before !== null && testAt !== null && before !== testAt && saved.configured) void recheck();
+  }, [testAt]);
 
   const remove = async () => {
     if (busyRef.current) return;

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
 import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
+import { trimmedHeaderValues, unsendableHeader } from "./bot-box/broker-headers.ts";
 
 export { importedMcpServerName } from "../shared/mcp-name.ts";
 
@@ -34,12 +35,31 @@ export interface McpOAuthClientConfig {
   clientId: string;
   clientSecret?: string;
   scopes?: string[];
+  /** Where the app is registered to return, when it is an https address rather than this computer's loopback: the only
+   * return a browser on another computer can reach. Absent: the loopback address, pasted back. */
+  redirectUri?: string;
+}
+
+/** The return address a configured app may name: this server's https address, at the callback path. */
+export function mcpConfiguredRedirectError(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "The redirect URI must be an https address ending in /mcp-oauth/callback.";
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/mcp-oauth/callback") {
+    return "The redirect URI must be an https address ending in /mcp-oauth/callback.";
+  }
+  return null;
 }
 export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   enabled: boolean;
   oauth?: McpOAuthClientConfig;
   resultBudget?: number;
   runsOn?: McpRunsOn;
+  /** The id of the bot this connection is for, such as one holding that bot's own key: only that bot reaches it. Absent: every bot's. */
+  bot?: string;
   /** "Show its apps in chat": stored only as `false`; on by default. */
   apps?: false;
 }
@@ -65,8 +85,9 @@ export interface RemoteMcpServerListing {
   enabled: boolean;
   resultBudget?: number;
   apps: boolean;
-  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
+  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean; redirectUri?: string };
   runsOn?: McpRunsOn;
+  bot?: string;
 }
 export type McpServerListing = StdioMcpServerListing | RemoteMcpServerListing;
 
@@ -79,7 +100,46 @@ export function mcpServerServes(server: object & { bot?: string }, botId: string
   return !server.bot || server.bot === botId;
 }
 
+/** Why a team setup plan cannot give this bot the named server, or null when it can. */
+export function mcpServerProblemFor(servers: Record<string, unknown> | undefined, name: string, botId: string): string | null {
+  const server = servers && Object.hasOwn(servers, name) ? servers[name] : undefined;
+  if (!server || typeof server !== "object") return "no such server";
+  return mcpServerServes(server, botId) ? null : "that server belongs to another bot";
+}
+
+/** How many MCP servers one bot can use: the shared ones plus its own. */
 export const MAX_MCP_SERVERS = 20;
+/** How many the whole install can hold, shared and per-bot together. */
+export const MAX_MCP_SERVERS_TOTAL = 100;
+
+/** How many servers there are, how many every bot uses, and the most any one bot has of its own. */
+function countMcpServers(values: readonly unknown[]): { total: number; shared: number; mostOwn: number } {
+  const own = new Map<string, number>();
+  let shared = 0;
+  for (const value of values) {
+    const bot = value && typeof value === "object" ? (value as { bot?: unknown }).bot : undefined;
+    if (typeof bot === "string" && bot) own.set(bot, (own.get(bot) ?? 0) + 1);
+    else shared++;
+  }
+  return { total: values.length, shared, mostOwn: Math.max(0, ...own.values()) };
+}
+
+/** Why `adding` would not fit next to `current`: at most 100 servers in all, and no bot may use more than 20, the shared ones plus its own. */
+export function mcpServerLimitError(current: Record<string, unknown>, adding: readonly unknown[]): string | null {
+  const { total, shared, mostOwn } = countMcpServers([...Object.values(current), ...adding]);
+  if (total > MAX_MCP_SERVERS_TOTAL) return `You can add at most ${MAX_MCP_SERVERS_TOTAL} MCP servers in all.`;
+  if (shared + mostOwn <= MAX_MCP_SERVERS) return null;
+  return mostOwn
+    ? `A bot can use at most ${MAX_MCP_SERVERS} MCP servers: the shared ones plus its own.`
+    : `You can add at most ${MAX_MCP_SERVERS} MCP servers.`;
+}
+
+/** How many more shared servers (ones every bot uses) fit next to `current`. */
+export function mcpSharedServerRoom(current: Record<string, unknown>): number {
+  const { total, shared, mostOwn } = countMcpServers(Object.values(current));
+  return Math.max(0, Math.min(MAX_MCP_SERVERS_TOTAL - total, MAX_MCP_SERVERS - shared - mostOwn));
+}
+
 const MAX_ARGS = 64;
 const MAX_ENV = 64;
 const MAX_HEADERS = 32;
@@ -141,6 +201,10 @@ function headerError(name: string, value: string): string | null {
   return null;
 }
 
+function unsendableHeaderError(name: string, value: string): string | null {
+  return unsendableHeader({ [name]: value }) ? `Header “${name}” has characters that are not allowed in a header (such as a curly quote or a control character).` : null;
+}
+
 /** Credentials belong in a write-only header, not in the address the listing shows. */
 function urlError(value: string): string | null {
   let parsed: URL;
@@ -190,6 +254,7 @@ const oauthClientSchema = z.object({
     .regex(CLIENT_ID, "A client ID is printable text on one line."),
   clientSecret: z.string().min(1).max(CLIENT_SECRET_MAX).regex(CLIENT_ID, "A client secret is printable text on one line.").optional(),
   scopes: z.array(z.string().max(256).regex(SCOPE, "Scopes are single words, like offline_access or api://my-app/mcp.read.")).max(32).optional(),
+  redirectUri: z.string().trim().max(2_048).optional(),
 }).strict();
 
 const remoteEntrySchema = z.object({
@@ -202,6 +267,7 @@ const remoteEntrySchema = z.object({
   resultBudget: resultBudgetSchema.optional(),
   runsOn: runsOnSchema.optional(),
   apps: z.boolean().optional(),
+  bot: z.string().regex(BOT_ID).optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -228,9 +294,19 @@ function resolveOAuthClient(
     clientSecret = incoming.clientSecret;
   }
   const scopes = [...new Set(incoming.scopes ?? [])];
+  if (incoming.redirectUri !== undefined) {
+    const redirectError = mcpConfiguredRedirectError(incoming.redirectUri);
+    if (redirectError) return { ok: false, error: redirectError };
+  }
+  const redirectUri = incoming.redirectUri ?? (saved?.clientId === incoming.clientId ? saved.redirectUri : undefined);
   return {
     ok: true,
-    value: { clientId: incoming.clientId, ...(clientSecret ? { clientSecret } : {}), ...(scopes.length ? { scopes } : {}) },
+    value: {
+      clientId: incoming.clientId,
+      ...(clientSecret ? { clientSecret } : {}),
+      ...(scopes.length ? { scopes } : {}),
+      ...(redirectUri ? { redirectUri } : {}),
+    },
   };
 }
 
@@ -297,7 +373,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
 }
 
 function botFor(value: string | undefined, mutation: boolean, existing?: StoredMcpServer): { bot?: string } {
-  const bot = value ?? (mutation && existing && !isRemoteMcpServer(existing) ? existing.bot : undefined);
+  const bot = value ?? (mutation ? existing?.bot : undefined);
   return bot ? { bot } : {};
 }
 
@@ -314,7 +390,10 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   }
   const headers = resolveSecrets(incoming, existing && isRemoteMcpServer(existing) ? existing.headers : undefined);
   if (!headers.ok) return headers;
-  const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value)).find((error) => error !== null);
+  // The whitespace a paste leaves around a value (a trailing newline) is dropped, on a save and on a read of what an earlier
+  // version saved. A save refuses what still cannot be sent; a stored one is read as it is, and the broker refuses only its request.
+  headers.values = trimmedHeaderValues(headers.values);
+  const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value) ?? (mutation ? unsendableHeaderError(name, value) : null)).find((error) => error !== null);
   if (invalidHeader) return { ok: false, error: invalidHeader };
   const oauth = resolveOAuthClient(parsed.data.oauth, existing && isRemoteMcpServer(existing) ? existing.oauth : undefined);
   if (!oauth.ok) return oauth;
@@ -329,6 +408,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
       ...runsOnFor(parsed.data.runsOn, mutation, existing),
       ...appsFor(parsed.data.apps, mutation, existing),
+      ...botFor(parsed.data.bot, mutation, existing),
     },
   };
 }
@@ -390,8 +470,13 @@ export type DisabledMcpServerAdd =
 
 const BOT_CANNOT_SWITCH = "A bot cannot change the on/off switch. The server is saved off, and only the user can turn it on in MCP server settings.";
 
-/** Never probes or launches; the caller still applies organisation policy before writing. */
-export function addDisabledMcpServer(current: Record<string, unknown>, body: unknown): DisabledMcpServerAdd {
+/** Never probes or launches; the caller still applies organisation policy before writing. `ownerOf` names the bot the
+ * server will belong to (worked out by the caller, never taken from the body), so the per-bot limit counts it there. */
+export function addDisabledMcpServer(
+  current: Record<string, unknown>,
+  body: unknown,
+  ownerOf?: (server: StoredMcpServer) => string | undefined,
+): DisabledMcpServerAdd {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, status: 400, error: "Expected an MCP server object with a name." };
   }
@@ -401,11 +486,11 @@ export function addDisabledMcpServer(current: Record<string, unknown>, body: unk
   if (name && Object.hasOwn(current, name)) {
     return { ok: false, status: 409, error: "An MCP server with that name already exists." };
   }
-  if (Object.keys(current).length >= MAX_MCP_SERVERS) {
-    return { ok: false, status: 400, error: `You can add at most ${MAX_MCP_SERVERS} MCP servers.` };
-  }
   const parsed = parseMcpServerMutation(name, pickMcpServerFields(record));
   if (!parsed.ok) return { ok: false, status: 400, error: parsed.error };
+  const owner = ownerOf?.(parsed.server);
+  const limit = mcpServerLimitError(current, [owner ? { ...parsed.server, bot: owner } : parsed.server]);
+  if (limit) return { ok: false, status: 400, error: limit };
   if (parsed.server.enabled !== false) return { ok: false, status: 400, error: BOT_CANNOT_SWITCH };
   return { ok: true, name, server: parsed.server, next: { ...current, [name]: parsed.server } };
 }
@@ -425,9 +510,15 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
         apps: server.apps !== false,
         ...(server.oauth ? {
-          oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
+          oauth: {
+            clientId: server.oauth.clientId,
+            scopes: server.oauth.scopes ?? [],
+            clientSecretConfigured: Boolean(server.oauth.clientSecret),
+            ...(server.oauth.redirectUri ? { redirectUri: server.oauth.redirectUri } : {}),
+          },
         } : {}),
         ...(server.runsOn ? { runsOn: server.runsOn } : {}),
+        ...(server.bot ? { bot: server.bot } : {}),
       }];
     }
     return [{

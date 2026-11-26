@@ -42,7 +42,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     reply(request.id, { tools: [{ name: "exec", description: "Records the command it is handed. Runs nothing.", inputSchema: schema }] });
   } else if (request.method === "tools/call") {
     appendFileSync(join(directory, "handed.ndjson"), JSON.stringify(request.params.arguments.command) + "\\n");
-    reply(request.id, { content: [{ type: "text", text: "Recorded, not run." }] });
+    reply(request.id, { content: [{ type: "text", text: "Recorded, not run." }], ...(request.params.arguments.command === "false" ? { isError: true } : {}) });
   } else if (request.id !== undefined && request.method === "ping") reply(request.id, {});
 });
 `;
@@ -64,8 +64,9 @@ function sse(response: ServerResponse, delta: unknown, finishReason: string) {
 }
 
 /** A chat-completions provider that asks for one `shell_exec` call per
- * command, in order, then answers; and the fixture MCP server it calls. */
-async function fixture(commands: string[]) {
+ * command, in order (a step may say something first), then answers; and the
+ * fixture MCP server it calls, where the command `false` fails. */
+async function fixture(commands: Array<string | { say: string; command: string }>) {
   const directory = mkdtempSync(join(tmpdir(), "omb-chat-floor-"));
   const requests: ChatRequest[] = [];
   const server = createServer(async (request, response) => {
@@ -79,9 +80,10 @@ async function fixture(commands: string[]) {
     if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
     for await (const part of request) data += part.toString();
     requests.push(JSON.parse(data) as ChatRequest);
-    const command = commands[requests.length - 1];
-    if (command === undefined) return sse(response, { content: "Done." }, "stop");
-    sse(response, { content: null, tool_calls: [{
+    const step = commands[requests.length - 1];
+    if (step === undefined) return sse(response, { content: "Done." }, "stop");
+    const { say = null, command } = typeof step === "string" ? { command: step } : step;
+    sse(response, { content: say, tool_calls: [{
       index: 0, id: `call_${requests.length}`, type: "function",
       function: { name: "shell_exec", arguments: JSON.stringify({ command }) },
     }] }, "tool_calls");
@@ -116,6 +118,7 @@ async function fixture(commands: string[]) {
       threadId, botId: "bot-floor", text: "Tidy up.", model: "fixture-model", integrations, ...input,
     }),
     completed: () => recorder.until((event) => event.type === "turn.completed"),
+    errors: () => recorder.events.filter((event) => event.type === "runtime.error"),
     cards: () => recorder.events.filter((event) => event.type === "request.opened"),
     notices: () => recorder.events.flatMap((event) => event.type === "runtime.notice" ? [event.message] : []),
     /** What the model was handed back for one call, in the last request it
@@ -174,6 +177,36 @@ describe("the safety floor in the chat runtime", () => {
     ]);
   });
 
+  it("says a turn's only failure was a block after its answer came back, and nothing else", async () => {
+    bindSafetyFloor(() => ({ safetyFloor: { enabled: true } }), undefined, HOST);
+    const REPORT = "Here is the weekly report.";
+    // The answer came first, then the floor blocked the clean-up: the turn stops on it, marked as blocked after the reply.
+    const after = await fixture([{ say: REPORT, command: WIPE }]);
+    await after.start({ approvalMode: "full" });
+    expect(await after.completed()).toMatchObject({ ok: false, stopReason: "tool_error", denials: ["shell_exec"] });
+    expect(after.handed()).toEqual([]);
+    expect(after.errors()).toEqual([expect.objectContaining({ partial: true, blockedAfterReply: true })]);
+    // Blocked before the bot said anything: partly done at most, never blocked after the reply.
+    const before = await fixture([WIPE]);
+    await before.start({ approvalMode: "full" });
+    expect(await before.completed()).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(before.errors()).toEqual([expect.objectContaining({ partial: true })]);
+    expect(before.errors()[0]).not.toHaveProperty("blockedAfterReply");
+    // A step that broke beside the block: not only a block.
+    const broke = await fixture([{ say: REPORT, command: WIPE }, "false"]);
+    await broke.start({ approvalMode: "full" });
+    expect(await broke.completed()).toMatchObject({ ok: false, stopReason: "tool_error" });
+    expect(broke.handed()).toEqual(["false"]);
+    expect(broke.errors()[0]).not.toHaveProperty("blockedAfterReply");
+    // A person's no on a card, after the answer: not the floor.
+    const denied = await fixture([{ say: REPORT, command: WIPE }]);
+    await denied.start({ approvalMode: "ask" });
+    const card = await denied.recorder.until((event) => event.type === "request.opened");
+    await denied.instance.adapter.respondToRequest(denied.threadId, card.requestId!, { behavior: "deny" });
+    expect(await denied.completed()).toMatchObject({ ok: false, stopReason: "tool_error", denials: ["shell_exec"] });
+    expect(denied.errors()[0]).not.toHaveProperty("blockedAfterReply");
+  });
+
   it("refuses a command the floor cannot read, because this gate has no card to show at Full access", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -195,7 +228,7 @@ describe("the safety floor in the chat runtime", () => {
     const f = await fixture([WIPE]);
     await f.start({ approvalMode: "ask" });
     const card = await f.recorder.until((event) => event.type === "request.opened");
-    expect(card).toMatchObject({ requestType: "permission", tool: "shell_exec" });
+    expect(card).toMatchObject({ requestType: "permission", tool: "mcp__shell__exec" });
     expect(f.handed()).toEqual([]);
     expect(await f.instance.adapter.respondToRequest(f.threadId, card.requestId!, { behavior: "allow" })).toBe("allowed-once");
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -209,7 +242,7 @@ describe("the safety floor in the chat runtime", () => {
     const f = await fixture(["ls", WIPE, "pwd"]);
     await f.start({ approvalMode: "ask" });
     const card = await f.recorder.until((event) => event.type === "request.opened");
-    expect(card).toMatchObject({ tool: "shell_exec", allowSession: true });
+    expect(card).toMatchObject({ tool: "mcp__shell__exec", allowSession: true });
     await f.instance.adapter.respondToRequest(f.threadId, card.requestId!, { behavior: "allow", always: true });
     await f.completed();
     // one card for the whole turn: the grant covered the rest, except the wipe

@@ -1,17 +1,45 @@
+// Google's Antigravity ACP server as a child process: its isolated profile and launch environment, the sign-in link it
+// announces, the redirect it waits for, and its model catalog.
+//
+// Adapted from pingdotgg/t3code@b9bc03869e, MIT License, Copyright (c) 2026
+// T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
+//   - apps/server/src/provider/antigravityAuthSupport.ts:56-84, 196-233,
+//     336-411, 500-531 (the browser helper and its check, the launch
+//     environment, the Linux certificate bundle, and the sign-in link's
+//     validation);
+//   - apps/server/src/provider/antigravityCallback.ts (the redirect's
+//     validation and delivery);
+//   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:55-79, 108-121
+//     (the session setup for releases that write a workflow skill file);
+//   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:89-90, 123-129
+//     at b732621b51 (the client name by runtime version);
+//   - apps/server/src/provider/antigravityAuthSupport.ts:467-477,
+//     apps/server/src/provider/acp/AntigravityAcpSupport.ts:186-193 and
+//     apps/server/src/provider/AntigravityInstallation.ts:501-503 at
+//     b732621b51 (the native CLI's launch, its session mode and its name);
+//   - apps/server/src/provider/antigravityAuthSupport.ts:167-177, 222-244 at
+//     38067630229 (the native CLI's environment: no self-update and the
+//     SSH_CONNECTION value that keeps each profile's sign-in in its own file).
+// The temp folder stays one per instance, the redirect can go through a relay into a boxed runtime, and startup waits
+// while a Windows unpack is still growing.
+import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { existsSync, statSync } from "node:fs";
+import { lstat, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { ANTIGRAVITY_CLI_TOOL_BUDGET } from "../tool-list-budget.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
-import { botBox } from "../bot-box/box.ts";
+import { BOX_SSH_CONNECTION } from "../bot-box/env.ts";
 import type { BoxRelay } from "../bot-box/relay.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { ANTIGRAVITY_CLI_TOKEN_FILE } from "./antigravity-cli-install.ts";
 import { acpVariantOption, surveyModelVariants } from "./acp/config-options.ts";
 import { StderrTail, exitDetail } from "./acp/exit-report.ts";
 import {
@@ -24,9 +52,8 @@ import {
 
 // Printed on stderr by Google's server, not stdout.
 export const ANTIGRAVITY_AUTH_PREFIX = "Open the following link to authenticate the ACP server: ";
-const AUTH_TIMEOUT_MS = 5 * 60_000;
 // Google's packaged server can take tens of seconds to cold-start, especially on Windows.
-const STARTUP_TIMEOUT_MS = 90_000;
+export const STARTUP_TIMEOUT_MS = 90_000;
 // The Windows runtime is silent while it unpacks ~1 GB into TEMP, which antivirus scanning can stretch past one window:
 // startup gets another window while that folder grows, up to this cap.
 const STARTUP_CAP_MS = 5 * 60_000;
@@ -61,10 +88,13 @@ const REMOVED_ENVIRONMENT_KEYS = new Set([
   "AGY_ACP_DEFAULT_MODEL",
   "GEMINI_HOME",
   "AGY_ACP_FORCE_FILE_STORAGE",
+  "AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
   "ANTIGRAVITY_HARNESS_PATH",
   "BROWSER",
   "PYTHONUNBUFFERED",
   "ELECTRON_RUN_AS_NODE",
+  // An inherited pipe whose owner exited makes Electron-as-Node print Crashpad errors to stderr.
+  "CHROME_CRASHPAD_PIPE_NAME",
 ]);
 
 const BROWSER_MARKER = "__OPENMAUS_ANTIGRAVITY_AUTH_URL__";
@@ -72,6 +102,54 @@ const browserHelperSource =
   `process.stderr.on("error",()=>process.exit(0)).write(` +
   `"${BROWSER_MARKER}"+JSON.stringify(process.argv[1])+"\\n",` +
   `()=>process.exit(0))`;
+
+const BROWSER_PREFLIGHT_URL = "https://example.invalid/openmaus-antigravity-browser-preflight";
+const BROWSER_PREFLIGHT_MS = 30_000;
+const verifiedBrowserHelpers = new Set<string>();
+
+/** Bundled Python may look for certificates at paths absent on this distribution. */
+const LINUX_CA_BUNDLES = [
+  "/etc/ssl/certs/ca-bundle.crt",
+  "/etc/ssl/certs/ca-certificates.crt",
+  "/etc/pki/tls/certs/ca-bundle.crt",
+  "/etc/ssl/cert.pem",
+];
+
+/** Absolute, since the runtime resolves a relative path against the bot's folder. */
+export function linuxCaBundle(env: NodeJS.ProcessEnv, exists: (path: string) => boolean = existsSync): string | undefined {
+  if (env.SSL_CERT_FILE !== undefined || env.SSL_CERT_DIR !== undefined) return undefined;
+  return [env.NIX_SSL_CERT_FILE, ...LINUX_CA_BUNDLES].find((candidate) => candidate && isAbsolute(candidate) && exists(candidate));
+}
+
+/** A sign-in must hand its link to the app and never open a browser on the server: run the helper once the way the
+ * runtime will, and refuse the sign-in unless it prints the marked link. Other stderr lines (a runtime warning) pass. */
+/** Why the helper fails the check, or null when it passes. The helper is a program started without a shell; one that
+ * cannot be started that way (Windows refuses a script with EINVAL) is a reason like any other. */
+export function antigravityBrowserHelperProblem(environment: NodeJS.ProcessEnv, helper: string): Promise<string | null> {
+  return new Promise((resolveRun) => {
+    try {
+      execFile(helper, ["-e", browserHelperSource, "--", BROWSER_PREFLIGHT_URL],
+        { env: environment, timeout: BROWSER_PREFLIGHT_MS, maxBuffer: 64 * 1024, windowsHide: true },
+        (error, _stdout, stderr) => {
+          if (error) return resolveRun(error.killed ? "it did not answer in 30 seconds" : typeof error.code === "string" ? "it could not be started" : "it stopped with an error");
+          const marked = String(stderr).split(/\r?\n/u).includes(`${BROWSER_MARKER}"${BROWSER_PREFLIGHT_URL}"`);
+          resolveRun(marked ? null : "it did not hand the sign-in link to the app");
+        }).once("error", () => resolveRun("it could not be started"));
+    } catch {
+      resolveRun("it could not be started");
+    }
+  });
+}
+
+export async function verifyAntigravityBrowserHelper(profile: AntigravityProfile, executable = process.execPath): Promise<void> {
+  const helper = process.platform === "win32" ? executable.replaceAll("\\", "/") : executable;
+  if (verifiedBrowserHelpers.has(helper)) return;
+  const reason = await antigravityBrowserHelperProblem(profile.environment, helper);
+  if (reason) {
+    throw new Error(`Google sign-in cannot start: the helper that passes the sign-in link to OpenMausBot failed a check (${reason}). Restart OpenMausBot and try again. If it keeps failing, share this message.`);
+  }
+  verifiedBrowserHelpers.add(helper);
+}
 
 function quoteBrowserArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -113,6 +191,8 @@ export function authorizationUrlFromLine(line: string): string | null {
   }
 }
 
+export const ANTIGRAVITY_SSH_CONNECTION = BOX_SSH_CONNECTION;
+
 export function antigravityProfileDirectory(instanceId: string, baseDir = DATA_DIR): string {
   return join(baseDir, "providers", "antigravity", createHash("sha256").update(instanceId).digest("hex"));
 }
@@ -126,9 +206,46 @@ export async function removeAntigravityProfile(instanceId: string, baseDir = DAT
     });
 }
 
-/** Signing out forgets only this account's stored Google sign-in; its profile stays for the next sign-in. */
+/** The pinned runtime's sign-in. */
+export function antigravityTokenPath(instanceId: string, baseDir = DATA_DIR): string {
+  return join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", "acp_token.json");
+}
+
+/** The native CLI's sign-in. */
+export function antigravityCliTokenPath(instanceId: string, baseDir = DATA_DIR): string {
+  return join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", ANTIGRAVITY_CLI_TOKEN_FILE);
+}
+
+/** Both runtimes' sign-in files. An account that switched to the CLI keeps the Classic runtime's file. */
+export function antigravitySignInPaths(instanceId: string, baseDir = DATA_DIR): string[] {
+  return [antigravityCliTokenPath(instanceId, baseDir), antigravityTokenPath(instanceId, baseDir)];
+}
+
+/** Signing out forgets only this account's stored Google sign-ins, both runtimes'; its profile stays for the next one. */
 export async function removeAntigravitySignIn(instanceId: string, baseDir = DATA_DIR): Promise<void> {
-  await rm(join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", "acp_token.json"), { force: true, maxRetries: 4, retryDelay: 250 });
+  for (const path of antigravitySignInPaths(instanceId, baseDir)) await rm(path, { force: true, maxRetries: 4, retryDelay: 250 });
+}
+
+/** The runtime asked for a Google sign-in although a token file is stored (a revoked or ineligible account). */
+export class AntigravitySignInRequired extends Error {
+  constructor() {
+    super("Antigravity asked for a new Google sign-in.");
+  }
+}
+
+const refusedTokens = new Map<string, string>();
+const tokenStamp = (info: { mtimeMs: number; size: number; ino: number | bigint }) => `${info.mtimeMs}:${info.size}:${info.ino}`;
+
+/** The stored token no longer signs this account in. It counts as signed out until a sign-in succeeds or writes the
+ * file again. */
+export function noteAntigravitySignInRequired(tokenPath: string): void {
+  try {
+    refusedTokens.set(tokenPath, tokenStamp(statSync(tokenPath)));
+  } catch {}
+}
+
+export function noteAntigravitySignedIn(tokenPath: string): void {
+  refusedTokens.delete(tokenPath);
 }
 
 /** An isolated Google profile per instance; foreign Google credentials are stripped so the account
@@ -145,6 +262,9 @@ export async function prepareAntigravityProfile(input: {
   const directory = resolve(input.profileDirectory ?? antigravityProfileDirectory(input.instanceId, input.baseDir));
   const acpDirectory = join(directory, "antigravity-acp");
   await mkdir(acpDirectory, { recursive: true, mode: 0o700 });
+  const skillsDirectory = join(directory, "omb-skills");
+  await mkdir(skillsDirectory, { recursive: true, mode: 0o700 });
+  if (!(await lstat(skillsDirectory)).isDirectory()) throw new Error("Antigravity staging path must be a real directory.");
   if (process.platform !== "win32") {
     const { chmod } = await import("node:fs/promises");
     await chmod(directory, 0o700);
@@ -168,10 +288,26 @@ export async function prepareAntigravityProfile(input: {
     if (!REMOVED_ENVIRONMENT_KEYS.has(key.toUpperCase())) environment[key] = value;
   }
   stripWorkspaceCredentialEnv(environment);
+  const caBundle = (input.platform ?? process.platform) === "linux" ? linuxCaBundle(input.baseEnv ?? process.env) : undefined;
+  const nativeCli = input.runtime.harnessPath === null;
   Object.assign(environment, {
+    ...(caBundle ? { SSL_CERT_FILE: caBundle } : {}),
     GEMINI_HOME: directory,
     AGY_ACP_FORCE_FILE_STORAGE: "1",
-    ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath,
+    ...(nativeCli
+      ? {
+          // Updates come only through this app's updater; the release folder is read-only besides.
+          AGY_CLI_DISABLE_AUTO_UPDATE: "1",
+          // The CLI ignores AGY_ACP_FORCE_FILE_STORAGE and keeps one Google sign-in per computer in the OS keyring,
+          // whatever --gemini-dir says. 1.5.14 and 1.5.15 keep each profile's in its file instead while they believe
+          // they run over SSH. 1.5.16 ignores SSH_CONNECTION and uses the keychain whenever it can open one, unless
+          // AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set (both measured on macOS). With both, every account here has its
+          // own sign-in, the keychain and the CLI in a terminal are never touched, and a box without a keyring works
+          // the same. SSH_CONNECTION is a fixed value, so no address of the host reaches the box.
+          SSH_CONNECTION: ANTIGRAVITY_SSH_CONNECTION,
+          AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1",
+        }
+      : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath! }),
     BROWSER: browserCommand,
     PYTHONUNBUFFERED: "1",
     ELECTRON_RUN_AS_NODE: "1",
@@ -197,6 +333,9 @@ export async function antigravityProfileAuthenticated(profile: AntigravityProfil
     const info = await stat(profile.tokenPath);
     if (!info.isFile() || info.size <= 0 || info.size > 1024 * 1024) return false;
     await readFile(profile.tokenPath, { encoding: "utf8" });
+    const refused = refusedTokens.get(profile.tokenPath);
+    if (refused === tokenStamp(info)) return false;
+    if (refused !== undefined) refusedTokens.delete(profile.tokenPath);
     return true;
   } catch {
     return false;
@@ -225,6 +364,7 @@ export class AntigravityAcpClient {
   private stopping?: Promise<boolean>;
   private readonly onAuthorizationUrl?: (url: string) => void;
   private readonly tempDirectory?: string;
+  private readonly runtimeVersion: string | null;
   /** On Windows a running executable pins its file and directory: do not rename or delete before this settles. */
   readonly exited: Promise<void>;
 
@@ -237,10 +377,11 @@ export class AntigravityAcpClient {
   ) {
     this.onAuthorizationUrl = onAuthorizationUrl;
     this.tempDirectory = profile.tempDirectory;
+    this.runtimeVersion = runtime.version;
     this.child = spawnCli(
       runtime.executablePath,
-      process.platform === "linux" ? ["--uid="] : [],
-      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], ...(relay ? { box: { relay: relay.socketPath } } : {}) },
+      antigravityLaunchArgs(runtime, profile.directory),
+      { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], box: { ro: [join(profile.directory, "omb-skills")], ...(relay ? { relay: relay.socketPath } : {}) } },
       "bot",
     );
     this.child.stdout!.setEncoding("utf8");
@@ -298,7 +439,9 @@ export class AntigravityAcpClient {
     const raw = authorizationUrlFromLine(line);
     if (raw === null) return false;
     try {
-      this.onAuthorizationUrl?.(parseAntigravityAuthorizationUrl(raw).authorizationUrl);
+      const { authorizationUrl } = parseAntigravityAuthorizationUrl(raw);
+      if (!this.onAuthorizationUrl) throw new AntigravitySignInRequired();
+      this.onAuthorizationUrl(authorizationUrl);
     } catch (error) {
       this.failAll(error instanceof Error ? error : new Error(String(error)));
     }
@@ -392,7 +535,7 @@ export class AntigravityAcpClient {
     };
     const initialized = await this.request("initialize", {
       protocolVersion: 1,
-      clientInfo: { name: "openmausbot", version: "0.0.0" },
+      clientInfo: antigravityClientInfo(this.runtimeVersion),
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     }, Math.min(windowMs, Math.max(0, deadline - Date.now())), expired);
     this.initializationComplete = true;
@@ -563,6 +706,7 @@ export async function probeAntigravityModels(input: {
   cwd?: string;
   fallbackDefault: string;
   timeoutMs?: number;
+  onProcess?: (child: ChildProcess) => void;
 }): Promise<ModelCatalog> {
   const deadline = Date.now() + (input.timeoutMs ?? STARTUP_CAP_MS);
   const remaining = () => {
@@ -572,11 +716,13 @@ export async function probeAntigravityModels(input: {
   };
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
   try {
-    await client.initialize(remaining(), deadline);
-    await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
+    input.onProcess?.(client.child);
+    const initialized = await client.initialize(remaining(), deadline);
+    // Native CLI 1.5.14 opens the system browser on `authenticate` and waits 300 s for it; its sign-in is `acp --login`.
+    if (input.runtime.harnessPath !== null) await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
     const session = await client.request(
       "session/new",
-      { cwd: input.cwd ?? input.profile.directory, mcpServers: [] },
+      { cwd: input.cwd ?? input.profile.directory, mcpServers: [], ...antigravitySessionSetup(initialized) },
       remaining(),
     );
     const catalog = catalogFromAntigravityConfigOptions(session?.configOptions, input.fallbackDefault);
@@ -591,22 +737,90 @@ export async function probeAntigravityModels(input: {
         return !option.variants?.length && variants?.length ? { ...option, variants } : option;
       }),
     };
+  } catch (error) {
+    if (error instanceof AntigravitySignInRequired) noteAntigravitySignInRequired(input.profile.tokenPath);
+    throw error;
   } finally {
     client.close();
   }
 }
 
+/** Whether runtimes that offer some models only to editors they know are told an editor's name. */
+export const ANTIGRAVITY_EDITOR_CLIENT_NAME = true;
+// `agy acp` 1.5.1 offers every model to every ACP client; older runtimes allowlist editors.
+const OPEN_MODEL_ACCESS_RELEASE = [1, 5, 1] as const;
+
+/** The `clientInfo` a runtime of `version` is started with. Before 1.5.1, and for a version that is not known, a runtime
+ * offers its non-Gemini models only to clients on its allowlist, so it is given a name from that list. */
+export function antigravityClientInfo(version: string | null | undefined, editorName = ANTIGRAVITY_EDITOR_CLIENT_NAME): { name: string; version: string } {
+  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version?.trim() ?? "");
+  const open = match !== null && OPEN_MODEL_ACCESS_RELEASE.reduce((difference, part, index) => difference || Number(match[index + 1]) - part, 0) >= 0;
+  return open || !editorName ? { name: "openmausbot", version: "0.0.0" } : { name: "zed", version: "0.0.0" };
+}
+
+const runtimeVersion = (value: unknown) => typeof value === "string" ? value.replace(/^agy_acp_server_/u, "").trim() : "";
+
+/** agy_acp_server 1.4.2 to 1.4.5 create or overwrite skills/system/run-workflow/SKILL.md in the session's folder unless
+ * the session turns its `run_workflow` tool off. Sent with session/new, session/load and session/resume. */
+export function antigravitySessionSetup(
+  initialized: any,
+  system?: string,
+): { _meta?: { antigravity: { disabledTools?: string[]; systemPrompt?: { append: string } } } } {
+  const match = /^1\.4\.(\d+)(?!\d)/u.exec(runtimeVersion(initialized?.agentInfo?.version));
+  const patch = match ? Number(match[1]) : -1;
+  const antigravity = {
+    ...(patch >= 2 && patch <= 5 ? { disabledTools: ["run_workflow"] } : {}),
+    ...(system === undefined ? {} : { systemPrompt: { append: system } }),
+  };
+  return Object.keys(antigravity).length > 0 ? { _meta: { antigravity } } : {};
+}
+
+/** The native CLI (1.5.14) advertises `_meta.antigravity.systemPrompt.append` in initialize: session/new, session/load and
+ * session/resume then take the system prompt there, kept with the conversation, and it never reaches the scan that turns
+ * a `/word` anywhere in a prompt's first text block into that command. */
+export function antigravityTakesSystemPrompt(initialized: any): boolean {
+  return initialized?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
+}
+
+/** The native CLI (1.5.16) advertises no MCP transport in `initialize`, yet connects to a session's `type: "http"` servers.
+ * It gives a session's MCP servers about 5 s to list their tools during session/new or session/resume ("Failed to preload
+ * the session's MCP servers: context deadline exceeded"), then prompts without the ones still starting, so a stdio proxy
+ * whose process starts slowly loses its tools; a URL answers in milliseconds. */
+export function antigravityCliTakesHttpMcp(initialized: unknown): boolean {
+  return (initialized as { agentInfo?: { name?: unknown } } | null | undefined)?.agentInfo?.name === "Antigravity ACP Server";
+}
+
+/** The native CLI shows the model every MCP tool of a session and, past one budget for all their definitions, leaves out
+ * the largest silently (google-antigravity/antigravity-cli#1530); agy_acp_server lists them lazily and has none. */
+export function antigravityCliToolBudget(initialized: unknown): number | undefined {
+  return antigravityCliTakesHttpMcp(initialized) ? ANTIGRAVITY_CLI_TOOL_BUDGET : undefined;
+}
+
+/** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath
+ * `--gemini-dir`, including when the value is absolute. */
+export function antigravityLaunchArgs(runtime: Pick<AntigravityRuntime, "harnessPath">, profileDirectory: string, platform: NodeJS.Platform = process.platform): string[] {
+  if (runtime.harnessPath === null) return ["acp", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"];
+  return platform === "linux" ? ["--uid="] : [];
+}
+
+/** The agy CLI rejects the pinned runtime's `yolo` and `auto_edit`. It stays in `default`, where it asks before acting
+ * and the app answers by the turn's own approval level. */
+export function antigravityCliSessionMode(mode: string): string {
+  return mode === "yolo" || mode === "auto_edit" ? "default" : mode;
+}
+
 export function isValidAntigravityInitializeResult(
   initialized: any,
   expectedVersion: string,
+  nativeCli = false,
 ): boolean {
   if (!initialized || initialized.protocolVersion !== 1) return false;
   const name = initialized.agentInfo?.name;
-  if (name !== "antigravity-acp" && name !== "Google Antigravity") return false;
+  if (nativeCli ? name !== "Antigravity ACP Server" : name !== "antigravity-acp" && name !== "Google Antigravity") return false;
   const actualVersion = initialized.agentInfo?.version;
   if (typeof actualVersion !== "string") return false;
-  const normalizedActual = actualVersion.replace(/^agy_acp_server_/u, "").trim();
-  const normalizedExpected = expectedVersion.replace(/^agy_acp_server_/u, "").trim();
+  const normalizedActual = runtimeVersion(actualVersion);
+  const normalizedExpected = runtimeVersion(expectedVersion);
   if (actualVersion !== expectedVersion && normalizedActual !== normalizedExpected) return false;
   // ACP advertises optional operations as capability objects (even empty); older runtimes send booleans.
   const advertised = (value: unknown) => value === true
@@ -640,7 +854,7 @@ export async function validateAntigravityRuntime(runtime: AntigravityRuntime, ex
     tempDirectory = profile.tempDirectory;
     client = new AntigravityAcpClient(runtime, profile, profileDirectory);
     const initialized = await client.initialize();
-    if (!isValidAntigravityInitializeResult(initialized, expectedVersion)) {
+    if (!isValidAntigravityInitializeResult(initialized, expectedVersion, runtime.harnessPath === null)) {
       throw new Error("The download did not identify as the expected Google Antigravity ACP release.");
     }
   } catch (error) {
@@ -672,112 +886,4 @@ export async function validateAntigravityRuntime(runtime: AntigravityRuntime, ex
     }
   }
   if (failed) throw failure;
-}
-
-export interface AntigravityAuthStart {
-  phase: "waiting" | "succeeded";
-  flowId: string | null;
-  authorizationUrl: string | null;
-  expiresAt: string | null;
-}
-
-interface AuthFlow {
-  id: string;
-  client: AntigravityAcpClient;
-  relay: BoxRelay | null;
-  completed: Promise<void>;
-  pending: { redirectUri: string; state: string };
-  expiresAt: number;
-}
-
-export class AntigravityAuthController {
-  private flow: AuthFlow | null = null;
-  private readonly onSignedIn: () => void;
-
-  constructor(onSignedIn: () => void = () => {}) {
-    this.onSignedIn = onSignedIn;
-  }
-
-  async start(runtime: AntigravityRuntime, profile: AntigravityProfile): Promise<AntigravityAuthStart> {
-    this.cancel();
-    let foundUrl!: (value: ReturnType<typeof parseAntigravityAuthorizationUrl>) => void;
-    let failUrl!: (error: Error) => void;
-    const urlPromise = new Promise<ReturnType<typeof parseAntigravityAuthorizationUrl>>((resolveUrl, reject) => {
-      foundUrl = resolveUrl;
-      failUrl = reject;
-    });
-    const relay = await botBox.openRelay();
-    let client: AntigravityAcpClient;
-    try {
-      client = new AntigravityAcpClient(runtime, profile, profile.directory, (url) => {
-        try { foundUrl(parseAntigravityAuthorizationUrl(url)); }
-        catch (error) { failUrl(error instanceof Error ? error : new Error(String(error))); }
-      }, relay ?? undefined);
-    } catch (error) {
-      relay?.close();
-      throw error;
-    }
-    const closeAll = () => {
-      client.close();
-      relay?.close();
-    };
-    try {
-      await client.initialize();
-      const authenticated = client.request("authenticate", { methodId: "oauth-personal" }, AUTH_TIMEOUT_MS);
-      let startupTimer: ReturnType<typeof setTimeout> | undefined;
-      const startupTimeout = new Promise<never>((_resolve, reject) => {
-        startupTimer = setTimeout(() => reject(new Error("Google sign-in did not start in time.")), STARTUP_TIMEOUT_MS);
-        startupTimer.unref?.();
-      });
-      const outcome = await Promise.race([
-        urlPromise.then((request) => ({ kind: "url" as const, request })),
-        authenticated.then(() => ({ kind: "done" as const })),
-        startupTimeout,
-      ]).finally(() => {
-        if (startupTimer) clearTimeout(startupTimer);
-      });
-      if (outcome.kind === "done") {
-        closeAll();
-        this.onSignedIn();
-        return { phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null };
-      }
-      const flow: AuthFlow = {
-        id: randomUUID(),
-        client,
-        relay,
-        completed: authenticated,
-        pending: { redirectUri: outcome.request.redirectUri, state: outcome.request.state },
-        expiresAt: Date.now() + AUTH_TIMEOUT_MS,
-      };
-      this.flow = flow;
-      void authenticated.then(() => this.onSignedIn(), () => {}).finally(() => {
-        if (this.flow === flow) this.flow = null;
-        closeAll();
-      });
-      return {
-        phase: "waiting",
-        flowId: flow.id,
-        authorizationUrl: outcome.request.authorizationUrl,
-        expiresAt: new Date(flow.expiresAt).toISOString(),
-      };
-    } catch (error) {
-      closeAll();
-      throw error;
-    }
-  }
-
-  async complete(flowId: string, callbackUrl: string): Promise<void> {
-    const flow = this.flow;
-    if (!flow || flow.id !== flowId || Date.now() >= flow.expiresAt) {
-      throw new Error("This Google sign-in is no longer active. Start again.");
-    }
-    await forwardAntigravityCallback(validateAntigravityCallbackUrl(flow.pending, callbackUrl), flow.relay ?? undefined);
-    await flow.completed;
-  }
-
-  cancel(): void {
-    this.flow?.client.close();
-    this.flow?.relay?.close();
-    this.flow = null;
-  }
 }

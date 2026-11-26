@@ -39,7 +39,7 @@ async function setup(extraEnv: NodeJS.ProcessEnv) {
 it("sends the provider nothing from before the divider, while a warm session and the turn before it stay untouched", async () => {
   // The reply state keeps the scripted replies in order across the new process, so "OLD" only ever marks the turns before the divider.
   const dir = mkdtempSync(join(tmpdir(), "omb-fresh-start-"));
-  const f = await setup({ FAKE_CLAUDE_REPLIES: JSON.stringify(["OLD_BETA_REPLY", "OLD_DELTA_REPLY", "after one", "after two", "after three"]), FAKE_CLAUDE_REPLY_STATE: join(dir, "replies") });
+  const f = await setup({ FAKE_CLAUDE_REPLIES: JSON.stringify(["OLD_BETA_REPLY", "OLD_DELTA_REPLY", "after one", "after two", "after three"]), FAKE_CLAUDE_REPLY_STATE: join(dir, "replies"), FAKE_CODEX_COMPACT: "unsupported" });
   try {
     const first = await f.send("OLD_SECRET_ALPHA remember this");
     expect(first.prompt).toBe("OLD_SECRET_ALPHA remember this");
@@ -53,7 +53,7 @@ it("sends the provider nothing from before the divider, while a warm session and
     // A summary written before the divider must not cross it either.
     await f.api(`/api/bots/${f.bot.id}/compact`, { method: "POST", body: JSON.stringify({ threadId: f.thread }) });
     await f.settled();
-    expect((await f.messages()).some((m) => m.kind === "compaction" && m.compaction && !m.compaction.fresh)).toBe(true);
+    expect((await f.messages()).some((m) => m.kind === "compaction" && m.engineCompaction && !m.compaction)).toBe(true);
 
     f.guard();
     const reset = await f.startFresh() as { message: WireMessage | null };

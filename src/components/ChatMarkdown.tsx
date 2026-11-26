@@ -1,17 +1,18 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
-import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
-import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
+import { Check, Copy, Download, Eye, FolderOpen, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
-import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
+import { closedFence, mayHoldMath, openFence, splitMarkdownBlocks, splitStreamPieces, type StreamPieces } from "@/lib/markdown-stream-blocks";
+import { drawStreamPieces, type ItemScope, type ParsePiece } from "@/lib/markdown-stream-pieces";
 import { StreamingReplyContext } from "@/state/live-reply";
 
 import { parseFenceInfo } from "../lib/code-block";
@@ -26,6 +27,8 @@ import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
 import { useThreadLinkMenu } from "@/components/ThreadLinkMenu";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { useMessageFileOutsideWorkspace } from "./outside-workspace-probe";
+import { canRevealHostPath, revealHostPath, revealProblemText } from "@/lib/reveal-host-path";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
 import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
@@ -69,6 +72,12 @@ export const localFilePath = (href?: string): string | null => {
   return href;
 };
 
+// A plain-path link as the server reads it: cut at ? or #, then percent-decoded once.
+export const decodedLinkPath = (href: string): string => {
+  try { return decodeURIComponent(href.split(/[?#]/, 1)[0]!); }
+  catch { return href; }
+};
+
 export function chatUrlTransform(value: string, key = "href"): string {
   if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
@@ -105,14 +114,16 @@ const normalizationParseOptions: MarkdownParseOptions = {
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
 };
 
-/** A single line break in a reply is a line break, as chat apps show it, not a space. */
+/** A reply's newlines and a table cell's attribute-free <br> tags become Markdown breaks, without parsing raw HTML. */
 function remarkSoftBreaks() {
   return (tree: { children?: any[] }) => {
-    const visit = (node: { children?: any[] }) => {
+    const visit = (node: { type?: string; children?: any[] }, inTableCell = false) => {
       if (!node.children) return;
+      const tableCell = inTableCell || node.type === "tableCell";
       node.children = node.children.flatMap((child) => {
+        if (tableCell && child?.type === "html" && /^<br\s*\/?>$/i.test(child.value)) return [{ type: "break" }];
         if (child?.type !== "text" || !child.value.includes("\n")) {
-          visit(child);
+          visit(child, tableCell);
           return [child];
         }
         return (child.value as string).split("\n").flatMap((value, index) => [
@@ -146,9 +157,28 @@ function unwrapLinkedImages() {
 // directions falls back to LTR. JS regexes cannot match Bidi_Class, so these are the blocks Unicode reserves for
 // right-to-left letters.
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
+const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF()]+/giu;
+const TECHNICAL = /[\d._/\\@=]|^-|\p{Ll}\p{Lu}/u;
 
+/** The script with more words decides; the first word only breaks a tie. Addresses, numbers and code-like tokens are
+ * not counted. An Arabic answer often opens on a name ("Chrome 158" or "**Node.js**" then Arabic), and the first letter
+ * alone laid that whole paragraph or list out left-to-right. */
 export function textDirection(value: string): "rtl" | "ltr" {
-  const strong = /\p{Letter}/u.exec(value);
+  const text = value.replace(ADDRESS, " ");
+  let rtl = 0, ltr = 0, first: "rtl" | "ltr" | null = null;
+  for (const raw of text.split(/\s+/)) {
+    const word = raw.replace(/[.,;:!?]+$/u, "");
+    const direction = [...word].some((char) => RTL_LETTER.test(char) && /\p{Letter}/u.test(char)) ? "rtl"
+      : /\p{Letter}/u.test(word) && !TECHNICAL.test(word) ? "ltr"
+      : null;
+    if (!direction) continue;
+    first ??= direction;
+    if (direction === "rtl") rtl += 1;
+    else ltr += 1;
+  }
+  if (rtl !== ltr) return rtl > ltr ? "rtl" : "ltr";
+  if (first) return first;
+  const strong = /\p{Letter}/u.exec(text);
   return strong && RTL_LETTER.test(strong[0]) ? "rtl" : "ltr";
 }
 
@@ -259,7 +289,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
         {t("chat.mermaid.failed", { error })}
       </p>
     )}
-    {markup && <div className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
+    {markup && <div data-stream-fade className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
     {(showSource || !svg || error) && (
       <pre className={cn("overflow-x-auto text-[13px]", simple ? "px-3 py-2 leading-5 text-ink-secondary" : "p-3 leading-relaxed text-ink")}>{code}</pre>
     )}
@@ -331,37 +361,63 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // Security: no href at all, since an <a href="file://…"> reaches setWindowOpenHandler on a middle or modifier click,
 // which calls shell.openExternal without main's containment check.
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
-function LocalFileLink({ filePath, name, source, children, message }: { filePath: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+function LocalFileLink({ filePath, shownPath, shownName, name, source, children, message }: { filePath: string; shownPath: string; shownName: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
-  const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
   const revealMenu = useRevealOriginalMenu();
+  const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
+  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  // A text file outside the chat's folder keeps Show in folder, so where the desktop app checks, the preview waits for it.
+  const preview = useHtmlPreview(filePath, shownName, message, shownPath, fileOutsideWorkspace === false || !(revealHere && canRevealHostPath(filePath)));
+  const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
+  const [revealProblem, setRevealProblem] = useState("");
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
   }
+  // Only the desktop app probes; elsewhere the hook stays null and the link must stay usable.
+  const probing = revealHere && canRevealHostPath(filePath) && fileOutsideWorkspace === null;
+  const pathAction = async (event: { currentTarget: HTMLElement }) => {
+    if (preview.opens) {
+      preview.show(event);
+      return;
+    }
+    if (revealOnClick) {
+      setRevealProblem("");
+      const result = await revealHostPath(shownPath);
+      const problem = revealProblemText(result);
+      if (problem) setRevealProblem(problem);
+      return;
+    }
+    void save.save();
+  };
   const label = save.state === "saving"
     ? t("common.saving")
     : save.state === "saved"
       ? t("common.saved")
-      : save.state === "failed"
+      : save.state === "failed" && !revealOnClick
         ? t("chat.retry")
         : null;
+  const pathTitle = preview.opens ? preview.label : revealOnClick ? t("attach.showInFolder") : t("chat.file.saveCopy");
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
       {revealMenu.menu}
       {preview.opens
-        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.retryable} />
-        : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
+        ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
+        : <FilePreviewButton path={filePath} shownPath={shownPath} name={shownName} message={message} />}
       <button
         type="button"
-        onClick={preview.opens ? preview.show : () => void save.save()}
-        disabled={!preview.opens && save.state === "saving"}
-        title={preview.opens ? preview.label : t("chat.file.saveCopy")}
+        onClick={(event) => void pathAction(event)}
+        disabled={!preview.opens && (save.state === "saving" || probing)}
+        title={pathTitle}
         className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
         {children}
         {preview.opens ? (
           <Eye size={12} className="shrink-0" aria-hidden="true" />
+        ) : probing ? (
+          <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+        ) : revealOnClick ? (
+          <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
         ) : save.state === "saving" ? (
           <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
         ) : save.state === "saved" ? (
@@ -372,6 +428,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
       </button>
+      {revealProblem && <span role="alert" className="text-[12px] text-danger">{revealProblem}</span>}
       {label && (
         <span
           role={save.state === "failed" ? "alert" : "status"}
@@ -381,9 +438,9 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
           {save.state === "failed" ? saveFailureText(save) : label}
         </span>
       )}
-      {save.state === "failed" && save.outsideWorkspace && (
+      {save.state === "failed" && save.outsideWorkspace && !revealOnClick && (
         <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
-          <OutsideWorkspaceFile filePath={filePath} />
+          <OutsideWorkspaceFile filePath={shownPath} />
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
@@ -471,6 +528,7 @@ function escapeLiteralDollars(text: string): string {
 }
 
 export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number, number>): string {
+  if (!imageOffsets && !mayHoldMath(text)) return text;
   const protectedCode: Array<{ value: string; sourceOffset: number }> = [];
   const protect = (value: string, sourceOffset: number): string => {
     const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
@@ -522,20 +580,22 @@ export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number,
 const normalizedCache = new Map<string, Pick<MessageScope, "imageOffsets"> & { source: string }>();
 const NORMALIZED_CACHE_MAX = TRANSCRIPT_WINDOW_SIZE * 2;
 
-function normalizeMarkdown(text: string) {
+/** Tables are repaired only in a message without images; `repair` carries that choice to a block of the message. */
+function normalizeMarkdown(text: string, repair = !text.includes(MARKDOWN_IMAGE)) {
   const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
-  return { source: normalizeMathDelimiters(imageOffsets ? text : repairMarkdownTables(text), imageOffsets), imageOffsets };
+  return { source: normalizeMathDelimiters(repair ? repairMarkdownTables(text) : text, imageOffsets), imageOffsets };
 }
 
-function normalizeMessageMarkdown(text: string) {
-  const cached = normalizedCache.get(text);
+function normalizeMessageMarkdown(text: string, repair = !text.includes(MARKDOWN_IMAGE)) {
+  const key = repair ? text : `\u0000${text}`;
+  const cached = normalizedCache.get(key);
   if (cached) return cached;
-  const normalized = normalizeMarkdown(text);
+  const normalized = normalizeMarkdown(text, repair);
   if (normalizedCache.size >= NORMALIZED_CACHE_MAX) {
     const first = normalizedCache.keys().next().value;
     if (first !== undefined) normalizedCache.delete(first);
   }
-  normalizedCache.set(text, normalized);
+  normalizedCache.set(key, normalized);
   return normalized;
 }
 
@@ -600,7 +660,12 @@ const MessageScopeContext = createContext<MessageScope>({ threads: [] });
 /** The source of the block still being written, whose last fence may be open; null for finished text. */
 const StreamSourceContext = createContext<string | null>(null);
 
-function MarkdownCode({ node, children }: BlockProps) {
+/** A fence still being written, drawn without parsing in the place its parsed `pre` takes, so it stays the same block. */
+type OpenFence = NonNullable<MarkdownPart["fence"]>;
+const OPEN_FENCE_KEY = "pre-0";
+
+function MarkdownCode({ node, children, fence }: BlockProps & { fence?: OpenFence }) {
+  if (fence) return <CodeBlock code={fence.code} lang={fence.lang} initialWrap={fence.wrap} open />;
   const streamSource = use(StreamSourceContext);
   const position = (node as { position?: { start: { offset?: number }; end: { offset?: number } } } | undefined)?.position;
   const open = streamSource !== null && !closedFence(streamSource, position?.start.offset, position?.end.offset);
@@ -650,8 +715,12 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   const localPath = localFilePath(href);
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
-    const source = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
-    return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
+    // localFilePath already decodes a file:// URL; a plain path link is still encoded and gets the server's single decode.
+    // A delivered copy keeps its literal name.
+    const shownPath = copy ?? (/^file:\/\//i.test(href) ? localPath : decodedLinkPath(localPath));
+    const original = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
+    const shownName = copy ? fileName(localPath) : fileName(shownPath);
+    return <LocalFileLink filePath={copy ?? localPath} shownPath={shownPath} shownName={shownName} name={copy ? fileName(localPath) : undefined} source={copy ? original : shownPath} message={message}>{children}</LocalFileLink>;
   }
   if (!/^https?:\/\//i.test(href)) {
     return (
@@ -792,6 +861,16 @@ interface MarkdownPart {
   finished: boolean;
   /** A code fence still being written, drawn without parsing. */
   fence?: { lang: string; wrap: boolean; code: string };
+  /** A list or table still being written, of which only the last piece is parsed again. */
+  pieces?: StreamPieces;
+  /** Whether the message repairs tables. */
+  repair?: boolean;
+}
+
+function remarkLooseList() {
+  return (tree: { children: { type: string; spread?: boolean }[] }) => {
+    if (tree.children[0]?.type === "list") tree.children[0].spread = true;
+  };
 }
 
 /** A finished message is one part. A streaming one is its blocks: the finished ones are parsed once and kept, and only
@@ -799,10 +878,13 @@ interface MarkdownPart {
 function markdownParts(text: string, streaming: boolean): MarkdownPart[] {
   if (!streaming) return [{ text, ...normalizeMessageMarkdown(text), finished: true }];
   const blocks = splitMarkdownBlocks(text) ?? [text];
+  const repair = !text.includes(MARKDOWN_IMAGE);
   return blocks.map((block, index): MarkdownPart => {
-    if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block), finished: true };
+    if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block, repair), finished: true, repair };
     const fence = openFence(block);
-    if (!fence) return { text: block, ...normalizeMarkdown(block), finished: false };
+    const pieces = fence ? null : splitStreamPieces(block);
+    if (pieces) return { text: block, source: block, finished: false, pieces, repair };
+    if (!fence) return { text: block, ...normalizeMarkdown(block, repair), finished: false };
     const [info = "", ...meta] = fence.info.split(/\s+/);
     return { text: block, source: block, finished: false, fence: { ...parseFenceInfo(info, meta.join(" ")), code: fence.code } };
   });
@@ -818,7 +900,8 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
   const streaming = use(StreamingReplyContext);
   const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
-  const needsMath = parts.some((part) => !part.fence && normalizedSourceHasMath(part.source));
+  // One answer for the whole text, as a finished message gets: a block alone may hold half of a pair.
+  const needsMath = useMemo(() => normalizedSourceHasMath(parts.length === 1 ? parts[0]!.source : parts.map((part) => part.source).join("")), [parts]);
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
   useEffect(() => {
     if (!needsMath) return;
@@ -837,7 +920,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
   const linksThreads = threads.length > 0;
-  const draw = ({ text: partText, source, finished }: MarkdownPart) => {
+  const parse = (source: string, cacheKey: string | null, loose = false, joined?: () => ReactElement | null) => {
     const mentions = source.includes("@");
     const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
     // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
@@ -845,19 +928,36 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
       const remarkPlugins = [...BASE_REMARK_PLUGINS];
       if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
       if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
-      return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+      if (loose) remarkPlugins.push(remarkLooseList);
+      return joined?.() ?? Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
     };
     // Streamed text grows each render; keeping its drawing would only fill the cache with prefixes.
-    return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
+    return cacheKey === null ? render() : markdownCache.render(cacheKey, variant, render);
+  };
+  const piece: ParsePiece = (source, cacheKey, loose) => parse(source, cacheKey, loose);
+  const itemScope: ItemScope = (nodes, index, open) => <StreamSourceContext key={index} value={open}>{nodes}</StreamSourceContext>;
+  // A block keeps one tree shape from its first words to its end, so its elements stay the same ones on the page.
+  const draw = ({ text: partText, source, finished, pieces, repair }: MarkdownPart): ReactNode => {
+    if (finished) {
+      return <StreamSourceContext value={null}>{parse(source, partText, false, () => {
+        const split = splitStreamPieces(partText);
+        const joined = split && drawStreamPieces(split, false, piece, itemScope);
+        return joined ? <>{joined}</> : null;
+      })}</StreamSourceContext>;
+    }
+    const joined = pieces && drawStreamPieces(pieces, true, piece, itemScope);
+    if (joined) return <StreamSourceContext value={null}><>{joined}</></StreamSourceContext>;
+    const whole = pieces ? normalizeMarkdown(partText, repair).source : source;
+    return <StreamSourceContext value={whole}>{parse(whole, null)}</StreamSourceContext>;
   };
   // A message still streaming has no saved files to fetch yet.
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
     <MessageScopeContext.Provider value={scope}>
-      <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
+      <div data-look="bot-text" data-streaming={streaming ? "" : undefined} className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
-          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>
+          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <StreamSourceContext value={part.text}><>{[<MarkdownCode key={OPEN_FENCE_KEY} fence={part.fence} />]}</></StreamSourceContext> : draw(part)}</Fragment>
         ))}
       </div>
     </MessageScopeContext.Provider>

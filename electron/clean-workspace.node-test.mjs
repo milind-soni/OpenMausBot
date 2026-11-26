@@ -24,7 +24,7 @@ function computer(t, { frozen = { v: 1, at: 1, cloud: CLOUD } } = {}) {
   w.write = (name, text) => { writeFileSync(join(dataDir, name), text); };
   w.clean = createCleanWorkspace({
     dataDir: () => dataDir, running: () => w.running,
-    swap: async (dir) => { w.swaps.push(dir); if (w.swapFails) return { ok: false, error: "switch-failed" }; await new Promise((resolve) => setImmediate(resolve)); w.running = dir; return { ok: true }; },
+    swap: async (dir, how) => { w.swaps.push(dir); if (how) w.hows = [...(w.hows ?? []), how]; if (w.swapFails) return { ok: false, error: "switch-failed" }; await new Promise((resolve) => setImmediate(resolve)); w.running = dir; return { ok: true }; },
     changed: () => { w.changes++; },
   });
   w.request = async (route, init) => { w.requests.push([w.running, (init?.method ?? "GET").toUpperCase(), route]); return json({ frozen: w.running === dataDir && Boolean(frozen) }); };
@@ -409,4 +409,17 @@ test("a named local environment is never forgotten in place of this computer's c
   w.running = w.dataDir;
   await w.main.kick();
   assert.deepEqual(w.requests.filter(([, , route]) => route === "/api/move/forget"), [[w.dataDir, "POST", "/api/move/forget"]]);
+});
+
+test("a workspace opened in the background (together with My Cloud) starts only if it exists, and tells the swap to leave the window alone", async (t) => {
+  const w = computer(t);
+  assert.equal(await w.clean.open("default", { background: true }), false, "never made for it");
+  assert.equal(existsSync(profileDir(w.dataDir, "default")), false);
+  assert.deepEqual(w.swaps, []);
+  mkdirSync(profileDir(w.dataDir, "default"), { recursive: true });
+  assert.equal(await w.clean.open("default", { background: true }), true);
+  assert.deepEqual([w.swaps, w.hows], [[profileDir(w.dataDir, "default")], [{ background: true }]]);
+  assert.equal(w.clean.profile(), "default");
+  assert.equal(await w.clean.open("default"), true, "a click on This Mac afterwards finds it running");
+  assert.equal(w.swaps.length, 1);
 });

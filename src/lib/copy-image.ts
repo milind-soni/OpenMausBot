@@ -1,4 +1,5 @@
 import type { CopyResult } from "./copy-text";
+import { serverFetch } from "./relay-server";
 
 /** PNG is the one image type every browser clipboard accepts, so other types are redrawn as PNG first. */
 export function canCopyImage(): boolean {
@@ -30,7 +31,7 @@ async function drawAsPng(blob: Blob): Promise<Blob> {
 }
 
 async function imageAsPng(source: string, toPng: (blob: Blob) => Promise<Blob>): Promise<Blob> {
-  const response = await fetch(source);
+  const response = await serverFetch(source);
   if (!response.ok) throw new Error(`image ${response.status}`);
   const blob = await response.blob();
   return blob.type === "image/png" ? blob : toPng(blob);

@@ -344,9 +344,36 @@ describe("WebhookManager", () => {
       const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
       const event = { payload: { text: "once" }, deliveryId: "room-dup" };
       expect(await h.manager.receive(webhook.endpointId, secret, event)).toMatchObject({ duplicate: false });
-      expect(await h.manager.receive(webhook.endpointId, secret, event)).toMatchObject({ duplicate: true });
+      expect(await h.manager.receive(webhook.endpointId, secret, event)).toEqual({ duplicate: true, deliveryId: "room-dup", threadId: "room-1-thread" });
+      expect(h.manager.listAttempts().at(-1)).toMatchObject({ outcome: "duplicate", threadId: "room-1-thread" });
+      expect(h.manager.listAttempts().at(-1)).not.toHaveProperty("runId");
       expect(h.roomPosts).toHaveLength(1);
       expect(h.manager.list()[0]?.deliveryCount).toBe(1);
+    });
+
+    it("returns the persisted room destination after restart and a trigger retarget", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-restored-destination" };
+      await h.manager.receive(webhook.endpointId, secret, event);
+      const reloaded = new WebhookManager(h.options);
+      reloaded.update(webhook.id, { groupId: "room-2" });
+      expect(await reloaded.receive(webhook.endpointId, secret, event)).toEqual({ duplicate: true, deliveryId: event.deliveryId, threadId: "room-1-thread" });
+      expect(h.roomPosts).toHaveLength(1);
+      expect(reloaded.listAttempts().at(-1)).toMatchObject({ outcome: "duplicate", threadId: "room-1-thread" });
+    });
+
+    it("still reads older post receipts without a stored thread id", async () => {
+      const h = harness();
+      const { webhook, secret } = h.manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "legacy-room-receipt" };
+      await h.manager.receive(webhook.endpointId, secret, event);
+      const disk = JSON.parse(readFileSync(h.file, "utf8")) as { deliveries: Array<{ threadId?: string }> };
+      for (const receipt of disk.deliveries) delete receipt.threadId;
+      writeFileSync(h.file, JSON.stringify(disk));
+      const reloaded = new WebhookManager(h.options);
+      expect(await reloaded.receive(webhook.endpointId, secret, event)).toEqual({ duplicate: true, deliveryId: event.deliveryId, runId: "post" });
+      expect(h.roomPosts).toHaveLength(1);
     });
 
     it("receipts the room's thread, never the room id, and never echoes it back as the groupId", async () => {
@@ -399,7 +426,7 @@ describe("WebhookManager", () => {
       expect(h.roomPosts).toHaveLength(0);
       release();
       expect(await first).toMatchObject({ duplicate: false, threadId: "room-1-thread" });
-      expect(await retry).toMatchObject({ duplicate: true, runId: "post" });
+      expect(await retry).toEqual({ duplicate: true, deliveryId: event.deliveryId, threadId: "room-1-thread" });
       expect(h.roomPosts).toHaveLength(1);
       expect(manager.list()[0]?.deliveryCount).toBe(1);
       expect(manager.listAttempts().slice(-2).map((attempt) => attempt.outcome)).toEqual(["accepted", "duplicate"]);
@@ -671,10 +698,15 @@ describe("WebhookManager", () => {
 describe("turning a webhook back on, Run now, and a deleted bot's webhooks", () => {
   it("turns a paused webhook back on, and Run now works while it is paused, like a schedule's", () => {
     const h = harness();
-    const { webhook } = create(h.manager);
+    const { webhook, secret } = create(h.manager);
     expect(h.manager.update(webhook.id, { enabled: false, verificationPending: false })).toMatchObject({ enabled: false });
     expect(h.manager.test(webhook.id)).toMatchObject({ runId: "run-1", duplicate: false });
+    // The person's own test: a usage cap lets it run as it lets a routine started by hand; an outside delivery is not.
+    expect(h.queued.at(-1)).toMatchObject({ byPerson: true });
     expect(h.manager.update(webhook.id, { enabled: true, verificationPending: false })).toMatchObject({ enabled: true });
+    h.manager.receive(webhook.endpointId, secret, { payload: { lead: "Ada" }, deliveryId: "outside-1" });
+    expect(h.queued).toHaveLength(2);
+    expect(h.queued.at(-1)?.byPerson).toBeUndefined();
   });
 
   it("removes a deleted bot's webhooks for good, with their calls, and cancels their queued work", () => {

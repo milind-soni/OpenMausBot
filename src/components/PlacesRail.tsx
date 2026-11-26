@@ -3,13 +3,13 @@
 // the person's own a server and a workspace of this computer's own with a name of its own a laptop, so each reads at a
 // glance. Main lists the places and opens one by its id; the rail never names an address. A right-click on a tile (or its
 // row past eight) opens that place's menu: a workspace of this computer's own is renamed, recoloured or removed there (asked
-// first); for the rest, its colour, changed
+// first); a server saved by hand is renamed there too (on this computer only); for the rest, its colour, changed
 // here for every place whatever its server runs, Remove from list for a Cloud of the person's own that ended or was
 // never paid for (asked first; main takes it off their list on the Admin), and Make … my home for a server of theirs that
 // main says this computer's bots may move to (one tap: main starts the move). With several accounts signed in here, the tiles
 // are grouped by account with a thin divider, and a click on another account's tile switches to it first (main does that).
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
-import { Cloud, House, Laptop, Loader2, MoreHorizontal, Plus, Search, Server, UserRound } from "lucide-react";
+import { Check, Cloud, House, Laptop, Loader2, MoreHorizontal, Plus, Search, Server, UserRound } from "lucide-react";
 import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { PlaceColorOutcome } from "../../electron/place-look.mjs";
 import { track } from "@/lib/analytics";
@@ -19,7 +19,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/relative-time";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
-import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, usePlaces, type RailPlace } from "@/lib/places";
+import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, renamePlace, setTogetherFromRail, usePlaces, type RailPlace } from "@/lib/places";
 import { AccountsSheet, switchNote } from "./AccountMenu";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
@@ -109,7 +109,7 @@ export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: n
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
     className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
     style={{ width: size, height: size, borderRadius: tileRadius(size), fontSize: Math.round(size * 0.4), ...(color ? { background: cloudColorFill(color) } : {}) }}>
-    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} strokeWidth={1.75} /> : placeInitials(place.name)}
+    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} /> : placeInitials(place.name)}
   </span>;
 }
 
@@ -135,7 +135,7 @@ type MenuAt = { place: RailPlace; from: HTMLElement };
  * menu; elsewhere, nothing. */
 const menuOpener = (place: RailPlace, onMenu: (at: MenuAt) => void) => (event: ReactMouseEvent<HTMLElement>) => {
   event.preventDefault();
-  if (place.paint || place.removable) onMenu({ place, from: event.currentTarget });
+  if (place.paint || place.removable || place.together !== undefined) onMenu({ place, from: event.currentTarget });
 };
 
 /** How far down the rail an element of it sits, in the rail's own units (offsets, not the screen's: the rail's page
@@ -194,6 +194,27 @@ function RemoveRow({ place, onRemoved }: { place: RailPlace; onRemoved: () => vo
   </div>;
 }
 
+/** Show bots together in the menu of This computer (or the workspace of its own that runs) and of My Cloud: one checkable
+ * row for the same switch as Settings → Plan & billing; main says what it is once it changed, and the menu stays open. */
+function TogetherRow({ on }: { on: boolean }) {
+  const [shown, setShown] = useState(on);
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setShown(on), [on]);
+  const turn = () => {
+    if (busy) return;
+    setBusy(true); setFailed(false);
+    void setTogetherFromRail(!shown).then((now) => { setBusy(false); if (now === null) setFailed(true); else setShown(now); });
+  };
+  return <div data-rail-together className="flex flex-col gap-0.5 border-t border-hairline/50 px-0.5 pt-1.5">
+    <button type="button" role="checkbox" aria-checked={shown} data-rail-together-row className={MENU_ROW} disabled={busy} aria-busy={busy || undefined} onClick={turn}>
+      <span className="min-w-0 flex-1 truncate text-start">{t("rail.together")}</span>
+      {busy ? <Loader2 size={15} aria-hidden="true" className="shrink-0 animate-spin motion-reduce:animate-none" /> : shown && <Check size={15} aria-hidden="true" className="shrink-0" />}
+    </button>
+    {failed && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{t("together.switch.failed")}</p>}
+  </div>;
+}
+
 /** Make … my home in a server's menu: one tap starts the move, and the menu closes once main has started it; the account
  * area then says how it goes. Main's own words when it can't start. */
 function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => void }) {
@@ -211,7 +232,7 @@ function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => 
       {busy ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin motion-reduce:animate-none" /> : <House size={15} aria-hidden="true" className="mt-0.5 shrink-0" />}
       <span className="flex min-w-0 flex-col text-start">
         <span className="text-[13px] text-ink">{t("rail.makeHome", { name: place.name })}</span>
-        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })}</span>
+        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })} {t("rail.makeHomeDataStays", { name: place.name })}</span>
       </span>
     </button>
     {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{said}</p>}
@@ -231,8 +252,8 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
-  if (!paint && !place.removable && !place.makeHome) return null;
+  useEffect(() => { (ref.current?.querySelector<HTMLElement>("[data-rail-rename], [role='radio'][tabindex='0']") ?? ref.current?.querySelector<HTMLElement>("[data-rail-remove-ask], [data-rail-make-home-start]"))?.focus(); }, []);
+  if (!paint && !place.removable && !place.makeHome && !place.renames && place.together === undefined) return null;
   const name = place.kind === "computer" ? computerName(place) : place.name;
   const choose = (swatch: CloudSwatch) => {
     if (!paint || paint.locked || pending || swatch === paint.swatch) return;
@@ -247,6 +268,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
+    {place.renames && <div className="px-0.5 pt-1"><RenameRow current={place.name} save={(next) => renamePlace(place.id, next)} onSaved={onClose} /></div>}
     {paint && <>
       <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
       <div className="px-2 pb-1.5 pt-0.5">
@@ -255,6 +277,7 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
       {note && <p data-rail-menu-note className="px-2 pb-1 text-[12px] text-ink-secondary">{note}</p>}
       {outcome === "failed" && <p role="alert" className="px-2 pb-1 text-[12px] text-danger">{t("placeLook.failed")}</p>}
     </>}
+    {place.together !== undefined && <TogetherRow on={place.together} />}
     {place.makeHome && <MakeHomeRow place={place} onStarted={onClose} />}
     {place.removable && <RemoveRow place={place} onRemoved={onClose} />}
   </div>;
@@ -262,19 +285,20 @@ function ListedMenu({ place, top, onClose }: { place: RailPlace; top: number; on
 
 const rowText = (place: RailPlace) => [placeStatus(place, Date.now()), place.signIn && t("accounts.needsSignIn")].filter(Boolean).join(" · ");
 
-/** Rename in a workspace's menu: its name in a field, saved on Enter or Save; Escape or Cancel leaves it as it was. */
-function RenameRow({ place, onSaved }: { place: RailPlace; onSaved: () => void }) {
+/** Rename in a place's menu (a workspace of this computer's own, or a server saved by hand): its name in a field, saved on
+ * Enter or Save by `save`; Escape or Cancel leaves it as it was. */
+function RenameRow({ current, save: saveName, onSaved }: { current: string; save: (name: string) => Promise<"saved" | "name" | "taken" | "failed">; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<"taken" | "failed" | null>(null);
-  const start = () => { setName(computerName(place)); setSaid(null); setEditing(true); };
+  const start = () => { setName(current); setSaid(null); setEditing(true); };
   const save = () => {
     const next = name.trim();
     if (!next || busy) return;
-    if (next === computerName(place)) { setEditing(false); return; }
+    if (next === current) { setEditing(false); return; }
     setBusy(true); setSaid(null);
-    void editLocal(place.id, { name: next }).then((outcome) => {
+    void saveName(next).then((outcome) => {
       setBusy(false);
       if (outcome === "saved") { setEditing(false); onSaved(); return; }
       setSaid(outcome === "taken" ? "taken" : "failed");
@@ -344,12 +368,13 @@ function LocalMenu({ place, top, onClose }: { place: RailPlace; top: number; onC
       <PlaceMark place={place} size={22} />
       <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-ink">{name}</span>
     </div>
-    <div className="px-0.5 pt-1"><RenameRow place={place} onSaved={onClose} /></div>
+    <div className="px-0.5 pt-1"><RenameRow current={computerName(place)} save={(next) => editLocal(place.id, { name: next })} onSaved={onClose} /></div>
     <p className="px-2 pt-1 text-[12px] text-ink-secondary">{t("placeLook.title")}</p>
     <div className="px-2 pb-1.5 pt-0.5" data-rail-local-color>
       <SwatchRadios value={(pending === undefined ? swatch : pending) ?? "slate"} onChange={choose} label={t("placeLook.aria", { name })} offset="menu" none />
     </div>
     {failed && <p role="alert" className="px-2 pb-1 text-[12px] text-danger">{t("placeLook.failed")}</p>}
+    {place.together !== undefined && <TogetherRow on={place.together} />}
     <RemoveLocalRow place={place} onRemoved={onClose} />
   </div>;
 }

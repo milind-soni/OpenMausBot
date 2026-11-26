@@ -1,7 +1,9 @@
 // People's views of a bot's browser. v1 (GET …/browser/live as server-sent events, POST …/browser/action) is what the
 // phone apps speak, and its contract is frozen. v2 (GET …/browser/stream, a WebSocket) is the desktop panel's and the
 // web UI's, on the new engine only: a page's file picker is answered by POST …/browser/upload and a finished download
-// is fetched from GET …/browser/download/:id. Never mix login frames into the general events feed, which every device
+// is fetched from GET …/browser/download/:id. GET …/browser/desktop (a WebSocket) is the remote-desktop view of a browser
+// whose window is on a private display, beside the v2 stream. In the desktop app, POST …/browser/hold takes a pane tab,
+// named by its id, from the bot or hands it back. Never mix login frames into the general events feed, which every device
 // reads.
 import { createReadStream, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -12,7 +14,8 @@ import { BROWSER_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES } from "../../shared/uploa
 import type { Audience } from "../audience.ts";
 import { storeUploads } from "../browser-upload.ts";
 import type { BrowserLive } from "../browser-live.ts";
-import type { LiveRouter } from "../browser/engines.ts";
+import { chromeTarget, type LiveRouter } from "../browser/engines.ts";
+import { browserInputLog, type BrowserInputLog, type PersonReason } from "../browser/input-log.ts";
 import { requestedSize } from "../browser/viewers/viewport.ts";
 import { messageFileDisposition } from "../message-file.ts";
 import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
@@ -20,9 +23,11 @@ import { PASS, type RouteHandler } from "./table.ts";
 import type { Upgrades } from "./upgrades.ts";
 
 const LIVE = /^\/api\/bots\/([\w-]+)\/browser\/(live|action)$/;
-const STREAM = /^\/api\/bots\/([\w-]+)\/browser\/stream$/;
+const STREAM = /^\/api\/bots\/([\w-]+)\/browser\/(stream|desktop)$/;
 const UPLOAD = /^\/api\/bots\/([\w-]+)\/browser\/upload$/;
 const DOWNLOAD = /^\/api\/bots\/([\w-]+)\/browser\/download\/([\w-]{1,64})$/;
+const HOLD = /^\/api\/bots\/([\w-]+)\/browser\/hold$/;
+const TAB_ID = /^t\d{1,9}$/;
 const CHOOSER = /^[\w-]{1,64}$/;
 const UPLOAD_MAX_FILES = 20;
 const PICKER_CLOSED = "The page's file picker is no longer open.";
@@ -32,7 +37,7 @@ type Failure = { status: number; error: string };
 
 export interface BrowserViewerRouteDeps {
   upgrades: Upgrades;
-  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "fileChooserOffered" | "answerFileChooser" | "download">;
+  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "desktop" | "fileChooserOffered" | "answerFileChooser" | "download"> & Partial<Pick<LiveRouter, "hold">>;
   /** Who is watching, as a hold of the browser knows them: every view and device of one person shares their hold. */
   person(auth: RequestAuth): string;
   /** Whose browser of the bot this person's view shows (`threadId` names the conversation they look at); null when
@@ -47,7 +52,13 @@ export interface BrowserViewerRouteDeps {
   /** Why a person may not restart this browser now, or null. */
   restartRefusal(session: string): string | null;
   dataDir: string;
+  /** Where a person's refused input is counted; the server's own log when unset. */
+  inputLog?: BrowserInputLog;
 }
+
+/** What the app's view sends, beside its actions, to say which input it dropped before sending. */
+const APP_DROPS = "client_drops";
+const STATUS_REASONS: Record<number, PersonReason> = { 400: "invalid_action", 404: "view_gone", 429: "too_many_pending" };
 
 const ownerOf = (auth: RequestAuth) => (auth.kind === "session" ? auth.session.id : "local-owner");
 
@@ -107,7 +118,8 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     const stream = live ? null : STREAM.exec(path);
     const upload = live || stream ? null : UPLOAD.exec(path);
     const download = live || stream || upload ? null : DOWNLOAD.exec(path);
-    const botId = (live ?? stream ?? upload ?? download)?.[1];
+    const hold = live || stream || upload || download ? null : HOLD.exec(path);
+    const botId = (live ?? stream ?? upload ?? download ?? hold)?.[1];
     if (!botId) return PASS;
     res.setHeader("cache-control", "no-store");
     const pending = stream ? deps.upgrades.pending(req) : undefined;
@@ -132,15 +144,35 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (method === "GET" && live[2] === "live") {
         req.socket.setTimeout(0);
         const size = requestedSize(Number(url.searchParams.get("width")), Number(url.searchParams.get("height")));
-        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size });
+        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size, drawsSelects: url.searchParams.get("selects") === "1" });
       }
       if (method === "POST" && live[2] === "action") {
         const body = await readBody(req, 32_768);
-        if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+        const log = deps.inputLog ?? browserInputLog;
+        const seen = { engine: chromeTarget(browser.session, browser.spec) ? "chrome" : "agent-browser", transport: "v1", session: browser.session } as const;
+        const dropped = (reason: PersonReason) => { if (body?.type !== "ack" && body?.type !== "resize") log.record({ who: "person", reason, what: String(body?.type), ...seen }); };
+        if (body?.type === APP_DROPS) {
+          log.fromApp(body.counts, seen);
+          return json(res, 200, { ok: true });
+        }
+        if (!isCurrent()) {
+          dropped("session_changed");
+          return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+        }
         if (typeof body?.viewerId !== "string") return json(res, 400, { error: "A live browser connection is required." });
         const refused = body.type === "restart" && deps.restartRefusal(browser.session);
         if (refused) return json(res, 409, { error: refused });
-        return json(res, 200, await deps.viewers.action({ viewerId: body.viewerId, botId: browser.botId, owner, body }));
+        let answer: unknown;
+        try { answer = await deps.viewers.action({ viewerId: body.viewerId, botId: browser.botId, owner, body }); }
+        catch (error) {
+          const known = error as { reason?: PersonReason; status?: number } | null;
+          dropped(known?.reason ?? STATUS_REASONS[known?.status ?? 0] ?? "other");
+          throw error;
+        }
+        if (typeof (answer as { notice?: unknown } | null)?.notice === "string") dropped("page_refused");
+        // Its v1 view shows no page question, so an answer to one is answered and not applied.
+        else if (seen.engine === "chrome" && body.type === "dialog") dropped("not_handled");
+        return json(res, 200, answer);
       }
       return json(res, 405, { error: "method not allowed" });
     }
@@ -149,6 +181,16 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (pending.socket.destroyed) return;
       if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
       pending.release();
+      if (stream[2] === "desktop") {
+        const opened = deps.viewers.desktop({
+          session: browser.session, spec: browser.spec, botId: browser.botId, owner, person,
+          canOperate: url.searchParams.get("interactive") !== "false",
+          req, socket: pending.socket, head: pending.head, isCurrent,
+        });
+        if (!opened) return json(res, 409, { error: "This browser has no desktop view." });
+        res.detachSocket(pending.socket);
+        return;
+      }
       const opened = deps.viewers.stream({
         session: browser.session, spec: browser.spec, botId: browser.botId, owner, person,
         canOperate: url.searchParams.get("interactive") !== "false",
@@ -158,6 +200,16 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (!opened) return json(res, 409, { error: "This browser shows in the live view only." });
       res.detachSocket(pending.socket);
       return;
+    }
+
+    if (hold) {
+      if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req, 1_024);
+      if (typeof body?.held !== "boolean" || typeof body.tab !== "string" || !TAB_ID.test(body.tab)) return json(res, 400, { error: "Pass held and the tab, as t1." });
+      if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+      const tab = deps.viewers.hold?.(browser, body.tab, body.held) ?? null;
+      if (!tab) return json(res, 409, { error: "Only a browser shown in the desktop app's panel can be held." });
+      return json(res, 200, { tab, held: body.held });
     }
 
     if (upload) {

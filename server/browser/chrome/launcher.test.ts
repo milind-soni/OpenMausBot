@@ -6,6 +6,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { chromeForTestingExecutable, chromeForTestingPin, type installChromeForTesting } from "./install.ts";
+import { BrowserHostError, hostSetupOf } from "./host-setup.ts";
+import { ChromeLaunchError } from "./launch.ts";
 import { ChromeLauncher, runsLauncher } from "./launcher.ts";
 import { chromeHost } from "./resolve.ts";
 import type { IdentitySidecars } from "./sidecar.ts";
@@ -216,6 +218,48 @@ describe("the Chrome launcher", () => {
     expect(existsSync(chrome.path)).toBe(false);
   });
 
+  it("counts a failed Chrome download as the engine's own shell, but not when an installed Google Chrome is what the engine uses", async () => {
+    const bare = launcher(mac({ chrome: false }));
+    expect(bare.runsShellForWantOfChrome()).toBe(false);
+    await bare.prepare();
+    expect(bare.env()).toEqual({});
+    expect(bare.runsShellForWantOfChrome()).toBe(true);
+    const machine = mac();
+    const managed = launcher({ ...machine, host: { ...machine.host, exists: (path: string) => path.endsWith("com.google.Chrome.plist") || machine.host.exists(path) } });
+    await managed.prepare();
+    expect(managed.env()).toEqual({});
+    expect(managed.runsShellForWantOfChrome()).toBe(false);
+  });
+
+  it("counts a downloaded Chrome that then fails its checks as the engine's own shell", async () => {
+    const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
+      const path = chromeForTestingExecutable(options.dataDir, options.pin);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+      return path;
+    });
+    const cached = launcher(mac({ chrome: false }), { install, calibrate: async () => { throw new Error("the browser exited (1) before it answered"); } });
+    await cached.prepare();
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(cached.plan()).toMatchObject({ kind: "chrome", chrome: { source: "downloaded" } });
+    expect(cached.env()).toEqual({});
+    expect(cached.runsShellForWantOfChrome()).toBe(true);
+  });
+
+  it("keeps what the host needs behind the error a viewer gets, when Chrome cannot start there", async () => {
+    const named = mkdtempSync(join(tmpdir(), "omb-named-"));
+    folders.push(named);
+    writeFileSync(join(named, "chrome"), "#!/bin/sh\n", { mode: 0o755 });
+    const host = new BrowserHostError("container");
+    const chrome = launcher(mac({ env: { OMB_CHROME_PATH: join(named, "chrome") } }), {
+      calibrate: async () => { throw new ChromeLaunchError(host.message, "Running as root without --no-sandbox is not supported.", host); },
+    });
+    const failure = await chrome.binary().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("OMB_BROWSER_SANDBOX=0");
+    expect(hostSetupOf(failure)).toBe(host);
+  });
+
   it("keeps a working launcher when reading a newer binary fails, rather than switch browsers mid-session", async () => {
     const machine = mac();
     const calibrate = vi.fn(async () => identity("155"));
@@ -271,6 +315,31 @@ describe("the Chrome launcher", () => {
     await expect(runsLauncher(failing, process.env, 5_000)).rejects.toThrow(/the browser launcher does not run here/);
     chmodSync(slow, 0o644);
     await expect(runsLauncher(slow, process.env, 5_000)).rejects.toThrow(/the browser launcher does not run here/);
+  });
+
+  it.skipIf(process.platform === "win32")("downloads no second Chrome on the server image: both drivers run the Chrome the image names", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-launcher-"));
+    folders.push(root);
+    const imageChrome = join(root, "opt", "openmausbot-browser", "chrome");
+    mkdirSync(dirname(imageChrome), { recursive: true });
+    writeFileSync(imageChrome, "#!/bin/sh\n", { mode: 0o755 });
+    const dataDir = join(root, "data");
+    // The image's ENV (Dockerfile runtime stage), on linux/x64, where Chrome for Testing has a pin to download.
+    const env = { HOME: root, AGENT_BROWSER_EXECUTABLE_PATH: imageChrome };
+    expect(chromeForTestingPin("linux", "x64")).not.toBeNull();
+    const real = chromeHost({ dataDir, env, platform: "linux", arch: "x64", enginePath: () => "/usr/local/bin:/usr/bin:/bin" });
+    const host = { ...real, exists: (path: string) => path.startsWith(root) && existsSync(path), list: (folder: string) => folder.startsWith(root) ? real.list(folder) : [] };
+    const install = vi.fn(async () => { throw new Error("no download on the image"); });
+    const common = { dataDir, env, platform: "linux" as const, arch: "x64", host, install, calibrate: async () => identity("158", "Not_A Brand"), screen: async () => ({ width: 1440, height: 900 }), sidecars: sidecars(), log: () => {}, checkLauncher: async () => {} };
+    // agent-browser's launcher, and OpenMausBot's own driver (server/browser/engines.ts: no wrapper, a managed engine).
+    const agentBrowser = new ChromeLauncher({ ...common, engine: () => ({ managed: true }) });
+    const own = new ChromeLauncher({ ...common, engine: () => ({ managed: true }), wrapper: false });
+    await agentBrowser.ready(headless(agentBrowser.env().AGENT_BROWSER_EXECUTABLE_PATH!));
+    expect(await own.binary()).toMatchObject({ path: imageChrome, source: "named" });
+    expect(agentBrowser.describe()).toMatch(/\(named by OMB_CHROME_PATH or AGENT_BROWSER_EXECUTABLE_PATH\)$/);
+    expect(readFileSync(agentBrowser.path, "utf8")).toContain(imageChrome);
+    expect(install).not.toHaveBeenCalled();
+    expect(existsSync(join(dataDir, "tools", "chrome"))).toBe(false);
   });
 
   it("changes nothing on OMB_BROWSER_LEGACY_SHELL=1", async () => {

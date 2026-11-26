@@ -59,7 +59,7 @@ export function stoppedLine(ms: number, language?: string): string {
 
 /** What the model is told after the person's words, in the turn that answers them. */
 export function stoppedNote(label: string, ms: number): string {
-  return `[OpenMausBot: your step ${JSON.stringify(label)} had run for ${ranFor(ms)} with this message unread, so it was stopped for you to answer first. Answer this now. If that step still matters, do not wait inside a command again: check it once, then use wait_until or a one-time trigger to check back.]`;
+  return `[OpenMausBot: your step ${JSON.stringify(label)} had run for ${ranFor(ms)} with this message unread, so it was stopped for you to answer first. Answer this now. If that step still matters, do not wait inside a command again: check it once, then use check_back or wait_until.]`;
 }
 
 function toolLabel(event: Extract<RuntimeEvent, { type: "item.started" }>): string {
@@ -162,6 +162,9 @@ export function createPersonFirst(deps: PersonFirstDeps) {
           if (event.itemType !== "tool" || !watch) return;
           if (event.itemId) watch.tools.delete(event.itemId);
           watch.read = true;
+          // The engine's next step reads a steered message with this result, so queueing it again would run it twice:
+          // a long call after this one may still be stopped for the person, but nothing is put back in the queue.
+          watch.waits = watch.waits.map((wait): PersonWait => (wait.requeue ? {} : wait));
           check(threadId);
           return;
         }

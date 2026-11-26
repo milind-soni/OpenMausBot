@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Lock, Users } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { hiddenFromSidebar } from "@/lib/default-bot";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, useStore, type AppState, type Bot, type Group } from "@/state/store";
 import { listedSide, setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { useStoreSelector } from "@/state/store-select";
 import { markTeamPrivateChatsLineSaid, sharedChatAudience } from "./TeamPrivateChatsLine";
 
 const SIDES = [{ side: "me", label: "teamSide.me", Icon: Lock }, { side: "team", label: "teamSide.team", Icon: Users }] as const;
@@ -31,9 +33,9 @@ export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "conf
 
 /** The side the conversation a bot has on screen is listed on, on a team's Cloud; null anywhere else. */
 export function useConversationSide(bot: Bot): TeamSide | null {
-  const { state } = useStore();
+  const onTeam = useStoreSelector((state) => Boolean(state.config?.team));
   const { team } = useTeamSide();
-  return state.config?.team && team ? listedSide(bot, bot.threadId) : null;
+  return onTeam && team ? listedSide(bot, bot.threadId) : null;
 }
 
 function hintDue(teamId: string): boolean {
@@ -72,27 +74,27 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
     if (listOnly || state.activeView !== "chat") return;
     const there = teamSideView(state.bots, state.groups, team, next);
     if (there.groups.some((group) => group.id === state.selectedId)) return;
-    const target = there.bots.find((bot) => bot.id === state.selectedId) ?? there.bots.find((bot) => !bot.sidebarHidden);
+    const target = there.bots.find((bot) => bot.id === state.selectedId) ?? there.bots.find((bot) => !hiddenFromSidebar(bot, team.person));
     const bot = target && state.bots.find((candidate) => candidate.id === target.id);
     if (bot) openBot(dispatch, bot, showThreads);
     else if (there.groups[0]) dispatch({ type: "select", id: there.groups[0].id });
   };
   return (
-    <div data-team-side={side} className={compact ? "mx-auto mb-1" : "px-3 pb-1.5"}>
+    <div data-team-side={side} className={compact ? "mb-1 flex justify-center" : "px-3 pb-1.5"}>
       <div role="radiogroup" aria-label={t("teamSide.label")}
-        className={cn("flex rounded-full bg-ink/[0.06] p-0.5 ring-[0.5px] ring-inset ring-ink/[0.07]", compact && "flex-col rounded-[14px]")}>
+        className={compact ? "flex flex-col gap-1" : "flex rounded-full bg-ink/[0.06] p-0.5 ring-[0.5px] ring-inset ring-ink/[0.07]"}>
         {SIDES.map(({ side: option, label, Icon }) => {
           const on = option === side;
           const unread = !on && view.unread[option];
           return (
             <button key={option} type="button" role="radio" aria-checked={on} data-team-side-option={option} onClick={() => choose(option)}
               aria-label={compact ? t(label) : undefined} title={compact ? t(label) : undefined}
-              className={cn("relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-colors", FOCUS,
-                compact ? "size-9 rounded-xl" : "h-8 min-w-0 flex-1 px-3 text-[13px]",
-                on ? "bg-composer text-ink shadow-[0_1px_2px_rgb(0_0_0/0.12)] ring-[0.5px] ring-ink/10" : "text-ink-secondary hover:text-ink")}>
-              {compact ? <Icon size={16} strokeWidth={1.75} aria-hidden="true" /> : t(label)}
+              className={cn("relative flex items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-colors", FOCUS,
+                compact ? cn("size-[46px] shrink-0 rounded-xl hover:bg-raised hover:text-ink active:bg-raised", on ? "bg-raised text-ink" : "text-ink-secondary")
+                  : cn("h-8 min-w-0 flex-1 rounded-full px-3 text-[13px]", on ? "bg-composer text-ink shadow-[0_1px_2px_rgb(0_0_0/0.12)] ring-[0.5px] ring-ink/10" : "text-ink-secondary hover:text-ink"))}>
+              {compact ? <Icon size={20} aria-hidden="true" /> : t(label)}
               {unread && <span role="img" data-team-side-unread={option} aria-label={t("task.unread")}
-                className={cn("size-1.5 rounded-full bg-accent", compact && "absolute right-1.5 top-1.5")} />}
+                className={cn("size-1.5 rounded-full bg-accent", compact && "absolute right-2 top-2 size-2")} />}
             </button>
           );
         })}
@@ -144,7 +146,7 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
     if (group || movedHere || askedFor || (justMade && side === "me")) { setTeamSide(side, team); return; }
     const lists = teamSideView(state.bots, state.groups, team, showing);
     const there = lists.switchable ? lists.bots : [];
-    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !candidate.sidebarHidden);
+    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !hiddenFromSidebar(candidate, person));
     const landing = target && state.bots.find((candidate) => candidate.id === target.id);
     if (landing) openBot(dispatch, landing, showThreads);
     else showTeamSide(side, team);

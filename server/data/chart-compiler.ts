@@ -68,7 +68,7 @@ function resolve(role: string, name: unknown, columns: DataColumn[]): Resolved {
       candidates,
     });
   }
-  return { column, cls: columnClass(column.type), id: quoteIdentifier(column.name) };
+  return { column, cls: columnClass(column.type), id: `src.${quoteIdentifier(column.name)}` };
 }
 
 type Encoding = Record<string, unknown>;
@@ -123,9 +123,10 @@ function binned(x: Resolved, channel: string, bins: number, bars: boolean): Dime
   SELECT min(${v}) AS lo,
          ${width} AS width
   FROM src
+  WHERE isfinite(${v})
 `,
   };
-  const bin = `least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1})`;
+  const bin = `CASE WHEN isfinite(${v}) THEN least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) ELSE NULL END`;
   const start = `${cte.name}.lo + ${bin} * ${cte.name}.width`;
   const end = `${channel}2`;
   return bars
@@ -409,11 +410,12 @@ function planPie(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined): Plan
   const ctes = topNCtes(xExpr, m.expr, n);
   const folded = foldToOther(xExpr);
   const orderBy = spec.sort === "y" ? "y" : spec.sort === "-x" ? "x DESC" : spec.sort === "x" ? "x" : "y DESC";
+  const categoryOrder = spec.sort === "x" || spec.sort === "-x";
   const body = `SELECT ${folded} AS x,\n       ${m.expr} AS y\nFROM src\nGROUP BY ALL\nORDER BY ${orderBy}`;
   const encoding: Encoding = {
     theta: { field: "y", type: "quantitative", title: m.title },
     color: { field: "x", type: "nominal", title: x.column.name },
-    order: { field: "y", type: "quantitative", sort: spec.sort === "y" ? "ascending" : "descending" },
+    order: { field: categoryOrder ? "x" : "y", type: categoryOrder ? "nominal" : "quantitative", sort: spec.sort === "x" || spec.sort === "y" ? "ascending" : "descending" },
   };
   const tooltip: Encoding[] = [
     { field: "x", type: "nominal", title: x.column.name },
@@ -428,7 +430,9 @@ function planScatter(x: Resolved, y: Resolved | undefined, color: Resolved | und
   const selects = [`${x.id} AS x`, `${y.id} AS y`];
   if (color) selects.push(`${color.id} AS color`);
   if (size) selects.push(`${size.id} AS size`);
-  const body = `SELECT ${selects.join(",\n       ")}\nFROM src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (${SAMPLE_SEED})`;
+  const required = [x, y].filter((axis) => axis.cls === "numeric" || axis.cls === "temporal");
+  const source = required.length ? `(SELECT * FROM src WHERE ${required.map((axis) => `${axis.id} IS NOT NULL`).join(" AND ")}) AS src` : "src";
+  const body = `SELECT ${selects.join(",\n       ")}\nFROM ${source} USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (${SAMPLE_SEED})`;
   const encoding: Encoding = {
     x: { field: "x", type: vegaType(x), title: x.column.name },
     y: { field: "y", type: vegaType(y), title: y.column.name },

@@ -60,7 +60,7 @@ describe("the person's message goes first", () => {
     await h.advance(0);
     expect(h.stops).toEqual(["Stopped a step that had run for 9 min, to answer you first"]);
     expect(h.requeued).toEqual([stoppedNote("Bash: gh run view 42; sleep 30", 9 * MIN)]);
-    expect(h.requeued[0]).toContain("do not wait inside a command again: check it once, then use wait_until or a one-time trigger");
+    expect(h.requeued[0]).toContain("do not wait inside a command again: check it once, then use check_back or wait_until");
   });
 
   it("gives a young tool call the rest of its minute, and leaves the turn alone when it returns and the bot answers", async () => {
@@ -75,6 +75,20 @@ describe("the person's message goes first", () => {
     h.toolStarted("next", "npm test");
     await h.advance(10 * MIN);
     expect(h.stops).toEqual([]);
+    expect(h.requeued).toEqual([]);
+  });
+
+  it("does not queue a steered message again that the engine already read, when the next call runs long without text", async () => {
+    const h = harness();
+    h.turnStarted();
+    h.toolStarted("first");
+    await h.advance(10_000);
+    h.first.wait(T, h.steered());
+    await h.advance(5_000);
+    h.toolDone("first");
+    h.toolStarted("second", "npm test");
+    await h.advance(PERSON_FIRST_MS);
+    expect(h.stops).toHaveLength(1);
     expect(h.requeued).toEqual([]);
   });
 

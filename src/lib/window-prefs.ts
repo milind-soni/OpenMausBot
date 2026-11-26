@@ -12,7 +12,6 @@ import { readAdvancedMode, setAdvancedMode } from "./interface-mode";
 import { finishedNotificationsEnabled, notificationFeedEnabled, notificationSoundsEnabled, setFinishedNotifications, setNotificationFeed, setNotificationSounds } from "./notification-preferences";
 import { requestNotificationPermission } from "./notify";
 import { choosePlaceColor } from "./place-look";
-import { setShowRunCard, showRunCard } from "./run-card-preferences";
 import { readSendKey, setSendKey } from "./send-key";
 import { loadPinnedCircles, loadSidebarToolsLayout, loadUniversalPins, setPinnedCircles, setSidebarToolsLayout, setUniversalPins } from "./sidebar-preferences";
 import { applySkinChoice, readSkinChoice } from "./skins";
@@ -21,6 +20,7 @@ import { readColorUserBubbles, setColorUserBubbles } from "./user-bubble-prefere
 import { latestWebPanels, setWebPanels } from "./web-panel-preferences";
 import { newWebPanelId, validateWebPanel, type WebPanel } from "./web-panels";
 import { onWindowPrefChanged } from "./window-pref-changes";
+import { serverFetch } from "./relay-server";
 
 type Pref<I extends WindowPrefId> = { read(): unknown; write(value: WindowPrefValue<I>): unknown };
 const ogb = () => (typeof window === "undefined" ? undefined : window.ogb);
@@ -44,7 +44,6 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "general.sendKey": { read: () => readSendKey(), write: (key) => setSendKey(key) },
   "general.notificationSounds": { read: () => notificationSoundsEnabled(), write: (on) => setNotificationSounds(on) },
   "appearance.userBubbles": { read: () => readColorUserBubbles(), write: (on) => setColorUserBubbles(on) },
-  "appearance.runCard": { read: () => showRunCard(), write: (on) => setShowRunCard(on) },
   "appearance.showThreads": { read: () => showThreads(), write: (on) => setShowThreads(on) },
   "appearance.toolsLayout": { read: () => loadSidebarToolsLayout(), write: (layout) => setSidebarToolsLayout(layout) },
   "appearance.pinnedCircles": { read: () => loadPinnedCircles(), write: (on) => setPinnedCircles(on) },
@@ -118,7 +117,7 @@ export function reportWindowPrefs(): void {
   report = setTimeout(() => {
     report = null;
     void windowPrefValues()
-      .then((values) => fetch("/api/window-prefs", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) }))
+      .then((values) => serverFetch("/api/window-prefs", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) }))
       .catch(() => undefined);
   }, 200);
 }

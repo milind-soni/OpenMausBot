@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { ChevronDown, ChevronRight, FolderOpen, Plus } from "lucide-react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
+import { VpsAliasField } from "./VpsAliasField";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -14,16 +15,19 @@ import { shortPath } from "@/lib/short-path";
 import { isOwnThreadFolder } from "../../../shared/thread-folder";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
-import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
+import { placeManagedBy, worksOnChoices, WorksOnGrid, worksOnHintKey, worksOnSelected, type WorksOnMode } from "../WorksOnGrid";
 import { Switch } from "../SettingsPrimitives";
 import { PhoneAppsCard } from "./PhoneAppsCard";
 import { ProposalStatus } from "./ProposalStatus";
+import { ToolGroupsCard } from "./ToolGroupsCard";
 import { ToolSelectionCard } from "./ToolSelectionCard";
 import { BotApiCard } from "./BotApiCard";
 import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useBotApps } from "./useBotApps";
+import { connectAppFromBot } from "../AppGrantPrompt";
 import {
   classifyConnectorTool,
   connectorServiceAccess,
@@ -32,9 +36,10 @@ import {
 } from "@/lib/connector-grants";
 import { inputCls } from "./field";
 import { openKeySettings } from "../keys/key-focus";
-import { KeysLink } from "../keys/KeysLink";
 import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
+import type { ConnectorAccount } from "@/lib/connector-status";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /**
  * Claude keeps sessions per project folder, so the server pins each task's folder on its first turn. PATCHed directly,
@@ -128,14 +133,14 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
  * bot.
  */
 export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const { servers: all, error, refresh } = useMcpServers();
   const servers = all ? mcpServersOfBot(all, bot.id) : null;
   const mounted = new Set((servers ? mcpServersForBot(servers, bot.mcpServers, bot.id) : []).map((server) => server.name));
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
-    if (!servers || bot.busy || error) return;
+    if (!servers || error) return;
     patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const openPlugins = () => {
@@ -174,7 +179,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
               </div>
               <Switch
                 checked={mounted.has(server.name)}
-                disabled={!server.enabled || !!bot.busy || error}
+                disabled={!server.enabled || error}
                 aria-label={t("botAccess.mcpAllow", { name: server.name })}
                 onClick={() => toggle(server.name)}
                 className="disabled:cursor-not-allowed"
@@ -189,12 +194,12 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
           <Plus size={14} /> {t("botAccess.mcpAdd")}
         </button>
         {!usesAll && servers && servers.length > 0 && (
-          <button type="button" disabled={!!bot.busy || error} onClick={() => { if (!bot.busy && !error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
+          <button type="button" disabled={error} onClick={() => { if (!error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
             {t("botAccess.mcpUseAll")}
           </button>
         )}
       </div>
-      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.mcpBusy")}</p>}
+      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.nextTurn")}</p>}
     </div>
   );
 }
@@ -477,7 +482,7 @@ function ConnectorToolsGrants({
 /** Research through treg (the X tools and the general research tools): on for every bot whenever this server holds a
  * treg key or a Cloud plan's research credential, and switchable off per bot. */
 function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const connecting = xResearchAction(useCloudPlan()?.view ?? null) === "connecting" && state.config?.xResearch?.unavailable !== true;
   const ownKey = state.config?.treg?.configured === true, included = state.config?.xResearch?.included === true;
   const available = ownKey || included;
@@ -500,6 +505,28 @@ function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: bo
         aria-label={t("research.switch")}
         disabled={!available}
         onClick={() => patch({ xResearch: !on })}
+        className="disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
+/** On a Team Cloud: whether this bot may add and change the team's shared files, from any chat (an admin's to set). */
+function TeamFilesCard({ bot, patch }: { bot: Bot; patch: (patch: { teamFilesEdit: boolean }) => void }) {
+  const admin = useOwnerOrAdmin();
+  const on = bot.teamFilesEdit === true;
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-team-files">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{t("botAccess.teamFiles.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t(on ? "botAccess.teamFiles.on" : "botAccess.teamFiles.off")}</div>
+        {!admin && <div className="mt-0.5 text-[12px] text-ink-secondary">{t("botAccess.teamFiles.adminsOnly")}</div>}
+      </div>
+      <Switch
+        checked={on}
+        aria-label={t("botAccess.teamFiles.title")}
+        disabled={!admin}
+        onClick={() => patch({ teamFilesEdit: !on })}
         className="disabled:cursor-not-allowed"
       />
     </div>
@@ -531,72 +558,8 @@ export function cloudPreferenceShown(bot: Pick<Bot, "computer">, config: { cloud
   return (!bot.computer || bot.computer === "cloud") && !config?.cloudHome;
 }
 
-/**
- * A bot's own VPS server. PATCHed directly, not via updateBot: the server refuses
- * a move while the bot's computer still lives on the old host.
- */
-export function VpsAliasField({ bot }: { bot: Bot }) {
-  const { request: api } = useBotEditor();
-  const { state } = useStore();
-  const defaultAlias = state.config?.vps?.sshAlias ?? "";
-  const [draft, setDraft] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Set when the old server could not be reached: the move went ahead, and this says what may be left there.
-  const [notice, setNotice] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const save = async (alias: string | null) => {
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const saved = await api<{ notice?: string }>(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ vpsAlias: alias }) });
-      setNotice(saved?.notice ?? null);
-      setDraft(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-  const value = draft ?? bot.vpsAlias ?? "";
-  return (
-    <div className="mt-3 rounded-lg bg-inset p-3">
-      <div className="text-[13px] text-ink">{t("botAccess.cloud.server")}</div>
-      <div className="mt-0.5 text-[12px] text-ink-secondary">
-        {defaultAlias
-          ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
-          : t("botAccess.cloud.serverNoDefault")} <KeysLink id="vps" />
-      </div>
-      <form
-        className="mt-2 flex items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save(value.trim() || null);
-        }}
-      >
-        <input
-          className={cn(inputCls, "font-mono text-[13px]")}
-          placeholder={defaultAlias || t("botAccess.cloud.serverPlaceholder")}
-          value={value}
-          aria-label={t("botAccess.cloud.server")}
-          onChange={(e) => setDraft(e.target.value)}
-        />
-        <button
-          type="submit"
-          disabled={saving || draft === null}
-          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-        >
-          {t("botAccess.cloud.serverSave")}
-        </button>
-      </form>
-      {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
-      {notice && <div role="status" className="mt-2 break-words text-[12px] text-ink-secondary">{notice}</div>}
-    </div>
-  );
-}
-
 export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"] }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const { draft } = useBotEditor();
   if (!cloudPreferenceShown(bot, state.config)) return null;
   return (
@@ -633,7 +596,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
 }
 
 function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof useBotSettingsDerived>["patch"]; seat: PlaceSeat }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances }), sameFields);
   const { capabilities } = useDesktopCapabilities();
   const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
   const localReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
@@ -658,12 +621,12 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
   const choose = (mode: WorksOnMode) => patch(mode === "browser" ? { computer: mode, browser: true } : { computer: mode });
   return <>
     <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
-    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}</p>
+    <p className="mt-1 text-[12px] leading-5 text-ink-secondary">{t(worksOnHintKey(state.config, capabilities))}</p>
     <WorksOnGrid options={options} onSelect={choose} />
   </>;
 }
 
-export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
+export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "teamFiles" | "mcp" | "tools" | "browser" | "webhooks" | "always";
 
 export function AccessSection({
   bot,
@@ -675,7 +638,7 @@ export function AccessSection({
   parts?: readonly AccessPart[];
 }) {
   const { draft } = useBotEditor();
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances, webhooks: s.webhooks }), sameFields), dispatch = useStoreDispatch();
   const {
     patch,
     canUseConnectedApps,
@@ -700,6 +663,7 @@ export function AccessSection({
   const inventoryReady = apps.phase === "ready";
   const connectedSlugs = apps.connectedSlugs;
   const appLabels = Object.fromEntries(apps.apps.map((app) => [app.slug, app.label]));
+  const appAccounts = Object.fromEntries(apps.apps.map((app) => [app.slug, app.accounts ?? []]));
 
   const webhooks = state.webhooks.filter((webhook) => webhook.botId === bot.id);
   const alwaysAllow = bot.alwaysAllow ?? [];
@@ -765,17 +729,14 @@ export function AccessSection({
         </div>
         {connectedAppsEnabled && inventoryReady && (
           <>
-            {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
+            {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} accounts={appAccounts} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
             <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
           </>
         )}
         {connectedAppsEnabled && connectedAppsConfigured && (
           <button
             type="button"
-            onClick={() => {
-              dispatch({ type: "toggleSettings", open: false });
-              dispatch({ type: "togglePlugins", open: true, surface: "apps" });
-            }}
+            onClick={() => connectAppFromBot(dispatch, bot.id)}
             className="mt-3 flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
           >
             <Plus size={14} /> {t("botAccess.connectApp")}
@@ -785,6 +746,7 @@ export function AccessSection({
 
       {shows("phone") && <PhoneAppsCard bot={bot} patch={patch} />}
       {shows("mcp") && <McpServersCard bot={bot} patch={patch} />}
+      {!draft && shows("tools") && <ToolGroupsCard bot={bot} patch={patch} />}
       {shows("tools") && <ToolSelectionCard key={bot.id} bot={bot} engineKind={derived.engine?.driverKind} />}
 
       {shows("browser") && <div className="rounded-xl bg-card p-4">
@@ -831,6 +793,8 @@ export function AccessSection({
       </div>}
 
       {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
+
+      {!draft && shows("teamFiles") && state.config?.team && <TeamFilesCard bot={bot} patch={patch} />}
 
       {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
 
@@ -891,20 +855,36 @@ export function AccessSection({
   );
 }
 
-function ConnectorScopesControl({ connectedSlugs, labels = {}, scopes, onChange }: {
+export function ConnectorScopesControl({ connectedSlugs, labels = {}, accounts = {}, scopes, onChange }: {
   connectedSlugs: string[];
   /** display names by slug; a slug without one shows as itself */
   labels?: Record<string, string>;
+  /** each app's connected accounts; an app with two or more can be limited to some of them */
+  accounts?: Record<string, ConnectorAccount[]>;
   scopes: ConnectorScopes | undefined;
   onChange: (scopes: ConnectorScopes | null) => void;
 }) {
   const limited = scopes !== undefined;
   const slugs = [...new Set([...connectedSlugs, ...Object.keys(scopes?.apps ?? {})])].sort();
+  const emit = (apps: ConnectorScopes["apps"], limits: Record<string, string[]>) =>
+    onChange(Object.keys(limits).length ? { apps, accounts: limits } : { apps });
   const setScope = (slug: string, scope: ConnectorScope | null) => {
     const apps = { ...scopes?.apps };
+    const limits = { ...scopes?.accounts };
     if (scope) apps[slug] = scope;
-    else delete apps[slug];
-    onChange({ apps });
+    else {
+      delete apps[slug];
+      delete limits[slug];
+    }
+    emit(apps, limits);
+  };
+  // No limit means every account, also ones connected later; once a box is changed the ticked ids stay a limit, so a
+  // later account is allowed only when it is ticked too. Ids no longer connected are dropped.
+  const connectedIds = (slug: string) => (accounts[slug] ?? []).map((account) => account.id);
+  const allowedIds = (slug: string) => scopes?.accounts?.[slug]?.filter((id) => connectedIds(slug).includes(id)) ?? connectedIds(slug);
+  const setAccount = (slug: string, id: string, on: boolean) => {
+    const ids = allowedIds(slug).filter((one) => one !== id).concat(on ? [id] : []);
+    emit({ ...scopes?.apps }, { ...scopes?.accounts, [slug]: ids });
   };
   return <div className="mt-3">
     <div className="flex items-center justify-between gap-4">
@@ -922,6 +902,18 @@ function ConnectorScopesControl({ connectedSlugs, labels = {}, scopes, onChange 
             <button key={label} type="button" title={hint} aria-pressed={(scopes?.apps[slug] ?? null) === value} onClick={() => setScope(slug, value)}
               className={cn("rounded px-2 py-0.5 text-[12px] font-medium", (scopes?.apps[slug] ?? null) === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink")}>{label}</button>)}
         </div>
+        {scopes?.apps[slug] && ((accounts[slug]?.length ?? 0) > 1 || scopes.accounts?.[slug]) && <fieldset className="flex w-full flex-wrap items-center gap-x-3 gap-y-1">
+          <legend className="sr-only">{t("botAccess.scopes.accountsLabel")}</legend>
+          <span aria-hidden className="text-[12px] text-ink-secondary">{t("botAccess.scopes.accountsLabel")}</span>
+          {(accounts[slug] ?? []).map((account) => {
+            const allowed = allowedIds(slug);
+            const on = allowed.includes(account.id);
+            return <label key={account.id} className="flex items-center gap-1.5 text-[12px] text-ink">
+              <input type="checkbox" checked={on} disabled={on && allowed.length === 1} onChange={(event) => setAccount(slug, account.id, event.target.checked)} />
+              {account.alias ?? account.id}
+            </label>;
+          })}
+        </fieldset>}
       </div>)}
     </div>}
   </div>;

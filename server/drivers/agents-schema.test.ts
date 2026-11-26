@@ -12,7 +12,7 @@ const record = (value: unknown): value is Json => value !== null && typeof value
 /** Every switch on: each tool the catalog can list, in the form tools/list sends it. */
 const LISTED = availableTools(catalogProfileFromEnv({
   OMB_BOT_ID: WATCHER_OPTIONS_CARD_BOT_ID, OMB_CHIEF_OF_STAFF: "1", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1",
-  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
+  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1", OMB_MAUSBOT: "1",
 }));
 
 /** Each keyword the advertised node lacks, with where it sat in the full one. */
@@ -75,7 +75,7 @@ function recordingContext(): { context: ToolCallContext; calls: string[] } {
   return {
     calls,
     context: {
-      botId: "bot-schema", threadId: "thread-schema", depth: 0, externalRuntime: false, sharedComputers: true,
+      botId: "bot-schema", threadId: "thread-schema", externalRuntime: false, sharedComputers: true,
       client: {
         api: async (path) => { calls.push(path); return {}; },
         apiResponse: async (path) => { calls.push(path); return { ok: true, status: 200, body: {} }; },
@@ -100,7 +100,7 @@ describe("the advertised agents tool schemas", () => {
     expect(coordinate.bot_ids).not.toHaveProperty("minItems");
     expect(coordinate.bot_ids).not.toHaveProperty("uniqueItems");
     expect(coordinate.message).not.toHaveProperty("maxLength");
-    expect(fullInputSchema("coordinate_bots")).toMatchObject({ properties: { bot_ids: { minItems: 1, maxItems: 4, uniqueItems: true }, message: { maxLength: 4000 } } });
+    expect(fullInputSchema("coordinate_bots")).toMatchObject({ properties: { bot_ids: { minItems: 1, maxItems: 4, uniqueItems: true }, message: { maxLength: 12_000 } } });
     const schema = { type: "object", additionalProperties: false, properties: {
       every_minutes: { type: "integer", minimum: 5, maximum: 1_440, description: "Whole minutes, from 5 to 1440." },
       limit: { type: "integer", minimum: 1, maximum: 25 },
@@ -149,11 +149,20 @@ describe("every agents call is held to its full schema", () => {
     const schema = fullInputSchema("coordinate_bots");
     expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "hi", title: null, reason: null })).toBeUndefined();
     const refused = outOfBounds("coordinate_bots", schema, {
-      bot_ids: ["a", "a", "b", "c", "d"], message: "m".repeat(4_001), title: "t".repeat(81), reason: "r".repeat(201), done_when: "d".repeat(1_001),
+      bot_ids: ["a", "a", "b", "c", "d"], message: "m".repeat(12_001), title: "t".repeat(81), reason: "r".repeat(201), done_when: "d".repeat(1_001),
     })!;
     expect(refused).toContain("bot_ids takes at most 4 items (it has 5)");
     expect(refused).toContain("bot_ids must not repeat an item");
-    expect(refused).toContain("message takes at most 4000 characters (it has 4001)");
+    expect(refused).toContain("message takes at most 12000 characters (it has 12001)");
     expect(refused).toContain("and 2 more");
+  });
+
+  it("takes a brief up to the engine's own limit, and refuses only past it", () => {
+    const schema = fullInputSchema("coordinate_bots");
+    // The 4,013-6,448-character briefs a bot really sends were refused by the old 4,000 cap.
+    expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(6_000) })).toBeUndefined();
+    expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(12_000) })).toBeUndefined();
+    expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(12_001) }))
+      .toBe("coordinate_bots was not run: message takes at most 12000 characters (it has 12001). Fix these and call it again.");
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CloudOff, Loader2 } from "lucide-react";
 import { cloudAsleep, onCloudPower } from "@/lib/cloud-power";
+import { cloudWorkLine, useCloudWork, useNow } from "@/lib/cloud-work";
 import { t } from "@/lib/i18n";
 import { retryLiveEvents } from "@/lib/live-events";
 import { noteRefusedRequest } from "@/lib/session-ended";
@@ -9,7 +10,8 @@ export const RECONNECTING_AFTER_MS = 4_000;
 export const CONNECTION_HELP_AFTER_MS = 20_000;
 
 /** The live stream is down: replies and other people's messages wait until it is back. A blip shorter than a few
- * seconds says nothing; a Cloud asleep has its own strip. */
+ * seconds says nothing; a Cloud asleep has its own strip. While the window says an operation of ours has this Cloud down (an
+ * update, a resize, a move: lib/cloud-work.ts), the strip says that instead, calmly and with nothing to press. */
 export function LiveConnectionStrip({ connected, hydrated }: { connected: boolean; hydrated: boolean }) {
   const [late, setLate] = useState(false);
   const [help, setHelp] = useState(false);
@@ -37,9 +39,18 @@ export function LiveConnectionStrip({ connected, hydrated }: { connected: boolea
     const helpTimer = setTimeout(() => { setHelp(true); noteRefusedRequest(); }, CONNECTION_HELP_AFTER_MS);
     return () => { clearTimeout(probe); clearTimeout(timer); clearTimeout(helpTimer); };
   }, [connected, asleep, online]);
+  // Asked only once the drop is long enough to say so (or a send got no answer), then less and less often (lib/cloud-work.ts).
+  const work = useCloudWork(!connected && !asleep && online, late);
+  const now = useNow(Boolean(work));
   if (asleep) return null;
-  const notice = !online ? "offline" : !connected && late && (hydrated || help) ? "reconnecting" : null;
+  const notice = !online ? "offline" : !connected && work ? "working" : !connected && late && (hydrated || help) ? "reconnecting" : null;
   if (!notice) return null;
+  if (notice === "working" && work) {
+    return <div role="status" data-live-connection="working" className="flex flex-wrap items-center justify-center gap-2 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
+      <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden="true" />
+      <span>{cloudWorkLine(work, now)}</span>
+    </div>;
+  }
   return <div role="status" data-live-connection={notice} className="flex flex-wrap items-center justify-center gap-2 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     {notice === "offline" ? <CloudOff size={14} className="shrink-0" aria-hidden="true" /> : <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden="true" />}
     <span>{t(notice === "offline" ? "liveConnection.offline" : help ? "liveConnection.help" : "liveConnection.reconnecting")}</span>

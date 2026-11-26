@@ -5,7 +5,7 @@
 import { basename } from "node:path";
 
 import { baseBotId } from "../audience.ts";
-import { audienceEquals, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
+import { audienceEquals, audienceWithin, narrowestAudience, roomFeeds, routineRunVisible, routineVisible, SEES_EVERYTHING, VisibleSet, type PathSubject, type ThreadAudiences, type ThreadOwner, type Viewer } from "../bot-visibility.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
@@ -125,6 +125,21 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
   function roomFeedsBot(group: GroupRecord, bot: Pick<BotRecord, "visibility">): boolean {
     return roomFeeds([...roomMemberAudiences(group), group.audienceFloor], bot.visibility);
   }
+
+  function readableByThreadAudience(threadId: string, canRead: (otherThreadId: string) => boolean): (otherThreadId: string) => boolean {
+    const audienceOf = (id: string) => {
+      const group = store.groupByThread(id);
+      if (group) return narrowestAudience([...roomMemberAudiences(group), group.audienceFloor]);
+      const bot = store.botByThread(id);
+      return bot ? narrowestAudience([bot.visibility]) : null;
+    };
+    const audience = audienceOf(threadId);
+    return (other) => {
+      if (audience === null || !canRead(other)) return false;
+      const source = audienceOf(other);
+      return source !== null && audienceWithin(audience, source);
+    };
+  }
   /** A room's floor stays at the narrowest audience it ever had, set before a restricted bot can leave; only an admin's
    * explicit reset widens it. */
   function settleRoomFloor(group: GroupRecord): void {
@@ -134,5 +149,5 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     deps.store().patchGroup(group.id, { audienceFloor: next === "everyone" ? undefined : next });
   }
 
-  return { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, roomMemberAudiences, settleRoomFloor };
+  return { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, readableByThreadAudience, roomMemberAudiences, settleRoomFloor };
 }

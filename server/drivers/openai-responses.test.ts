@@ -240,8 +240,8 @@ describe("a model that refuses tools over Chat Completions, at OpenAI's address"
     expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses"]);
     expect(f.calls[0]!.body).not.toHaveProperty("reasoning_effort");
     expect(textOf(first.events, "assistant_text")).toBe("Hello there.");
-    expect(first.events.find((event) => event.type === "thread.token-usage.updated")).toMatchObject({ input: 40, output: 12 });
-    expect(first.end).toMatchObject({ usage: { input: 40, output: 12 } });
+    expect(first.events.find((event) => event.type === "thread.token-usage.updated")).toMatchObject({ input: 40, output: 12, cachedInput: 8 });
+    expect(first.end).toMatchObject({ usage: { input: 40, output: 12, cachedInput: 8 } });
 
     expect(await f.turn()).toMatchObject({ end: { ok: true } });
     expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/responses"]);
@@ -259,6 +259,17 @@ describe("a model that refuses tools over Chat Completions, at OpenAI's address"
     expect(f.calls[0]!.body).toMatchObject({ reasoning_effort: "low" });
     expect(f.calls[1]!.body.reasoning).toEqual({ effort: "low", summary: "auto" });
     expect(f.calls[2]!.body.reasoning).toEqual({ summary: "auto" });
+  });
+
+  it("keeps a nested reasoning level when the request moves to Responses", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/chat/completions")) reject(response, 400, refusalOf(MODEL));
+      else answer(response);
+    }, OPENAI, [{ id: MODEL, supported_parameters: ["reasoning"], reasoning_efforts: ["max"] }]);
+    await f.instance.refreshModels?.();
+    expect(await f.turn({ variant: "max" })).toMatchObject({ end: { ok: true } });
+    expect(f.calls[0]!.body.reasoning).toEqual({ effort: "max" });
+    expect(f.calls[1]!.body.reasoning).toEqual({ effort: "max", summary: "auto" });
   });
 
   it("leaves a model that accepts tools on Chat Completions", async () => {
@@ -328,7 +339,7 @@ describe("tool rounds over Responses", () => {
     ]);
     expect(textOf(seen, "reasoning_text")).toBe("Thinking it over.Thinking it over.");
     expect(seen.filter((event) => event.type === "item.completed" && event.itemType === "tool").map((event) => event.ok)).toEqual([true, true]);
-    expect(seen.find((event) => event.type === "turn.completed")).toMatchObject({ usage: { input: 120, output: 36 } });
+    expect(seen.find((event) => event.type === "turn.completed")).toMatchObject({ usage: { input: 120, output: 36, cachedInput: 24 } });
   });
 
   it("keeps encrypted reasoning out of everything it logs or shows", async () => {
@@ -607,6 +618,16 @@ describe("the fallback when Responses is not an option", () => {
 });
 
 describe("the same refusal from another provider", () => {
+  it("reports a refusal rather than silently switching a selected effort off", async () => {
+    const f = await fixture((_call, response) => reject(response, 400, refusalOf(MODEL)), "relay", [{ id: MODEL }]);
+    await f.instance.refreshModels?.();
+    const { end, events: seen } = await f.turn({ variant: "max" });
+    expect(end).toMatchObject({ ok: false });
+    expect(f.paths()).toEqual(["/v1/chat/completions"]);
+    expect(f.calls[0]!.body.reasoning_effort).toBe("max");
+    expect(failureOf(seen)).toContain("selected effort was not changed");
+  });
+
   it("stays on Chat Completions with reasoning off, and remembers per model", async () => {
     const f = await fixture((call, response) => {
       if (call.body.reasoning_effort !== "none") return reject(response, 400, refusalOf(MODEL));

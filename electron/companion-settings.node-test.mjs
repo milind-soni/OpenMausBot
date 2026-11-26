@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
 import {
   COMPANION_SETTINGS_VERSION, RECENT_DEVICE_MS, anyRouteOn, companionDevicesFile, countPairedPhones, defaultCompanionSettings, directRoutesOn,
-  hasTailnetAddress, phoneLinkShouldSleep, phoneLinkStartsAtLaunch, readCompanionSettings, setRoute,
+  hasTailnetAddress, phoneLinkShouldSleep, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, removePairedDeviceAtRest, setRoute,
 } from "./companion-settings.mjs";
 
 const NOW = 1_800_000_000_000;
@@ -94,6 +94,25 @@ test("paired devices are read from the companion's own store", () => {
   }
 });
 
+test("a paired device is removed from the store while the phone link is asleep", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "omb-companion-settings-"));
+  try {
+    const file = companionDevicesFile({ OMB_COMPANION_DIR: dir });
+    assert.equal(removePairedDeviceAtRest("a", file), false, "nothing paired yet");
+    writeFileSync(file, JSON.stringify({ devices: [{ id: "a", tokenHash: "x" }, { id: "b", tokenHash: "y" }] }));
+    assert.equal(removePairedDeviceAtRest("a", file), true);
+    assert.deepEqual(readPairedDevices(file), [{ id: "b", tokenHash: "y" }]);
+    assert.equal(removePairedDeviceAtRest("a", file), false, "already gone");
+    assert.deepEqual(readdirSync(dir), ["devices.json"], "no temporary file left behind");
+    if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600, "token hashes stay private to this user");
+    writeFileSync(file, "{not json");
+    assert.throws(() => removePairedDeviceAtRest("b", file), /could not be read/);
+    assert.equal(readFileSync(file, "utf8"), "{not json", "an unreadable store is never overwritten");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Tailscale is seen by its own interface, never by a 100.64/10 address alone", () => {
   assert.equal(hasTailnetAddress({ en0: [{ family: "IPv4", address: "192.168.1.4" }] }), false);
   assert.equal(hasTailnetAddress({ utun4: [{ family: "IPv4", address: "100.101.2.3" }] }), false, "carrier NAT or another VPN");
@@ -113,4 +132,14 @@ test("the switch for other computers lives on the Tailscale route and goes with 
   assert.deepEqual(setRoute(shared, "tailscale", false).routes.tailscale, { on: false, since: null });
   const read = readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: { tailscale: { on: true, since: 5, name: "mac.tail1.ts.net", computers: "yes" } } });
   assert.equal(read.routes.tailscale.computers, undefined, "anything but true is off: this opens a listener");
+});
+
+test("a Tailscale route the share turned on is marked, keeps the mark through a name refresh, and loses it when the person turns the route on or off", () => {
+  const shared = setRoute(defaultCompanionSettings(), "tailscale", true, { now: 5, name: "mac.tail1.ts.net", computers: true, forShare: true });
+  assert.deepEqual(shared.routes.tailscale, { on: true, since: 5, name: "mac.tail1.ts.net", computers: true, forShare: true });
+  assert.equal(setRoute(shared, "tailscale", true, { now: 6, name: "mac.tail1.ts.net" }).routes.tailscale.forShare, true);
+  assert.equal(setRoute(shared, "tailscale", true, { now: 6, forShare: false }).routes.tailscale.forShare, undefined);
+  assert.deepEqual(setRoute(shared, "tailscale", false).routes.tailscale, { on: false, since: null });
+  assert.equal(readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: shared.routes }).routes.tailscale.forShare, true);
+  assert.equal(readCompanionSettings({ version: COMPANION_SETTINGS_VERSION, routes: { tailscale: { on: true, since: 5, forShare: "yes" } } }).routes.tailscale.forShare, undefined);
 });

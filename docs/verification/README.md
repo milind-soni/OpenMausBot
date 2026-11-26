@@ -68,6 +68,8 @@ Use only mapped, tested commands:
 - [Native dictation retention and send-to-stop](dictation.md)
 - [Proactive routines and the brief](proactive-routines.md)
 - [Waits: tell me when, with no AI while waiting](waits.md)
+- [Check-backs: a bot comes back later by itself](check-backs.md)
+- [Hand-off status: who's working on what](handoff-status.md)
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
 - [Pages and apps in a room](room-pages.md)
@@ -83,12 +85,15 @@ Use only mapped, tested commands:
 - [Question cards: a teammate's question, in its chat and the person's inbox](question-cards.md)
 - [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
+- [Pi shell timeout bounds and recovery after tool errors](pi-shell-timeouts.md)
 - [Cline engine and native loopback qualification](cline.md)
+- [Grok steering a running turn](grok-steering.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
 - [Codex browser routing and native search](codex-browser-routing.md)
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
+- [Kimi subscription and Platform model selection](kimi-models.md)
 - [Team backups](team-backups.md)
 - [Sharing a whole team](team-sharing.md)
 - [The organization library](org-library.md)
@@ -103,6 +108,7 @@ Use only mapped, tested commands:
 - [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
 - [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
 - [Who can see, chat with and change each team bot](team-bot-access.md)
+- [The Team Board with a real model](team-board.md)
 - [Usage ledger](usage-ledger.md)
 - [Bounded built-in tool results](tool-results.md)
 - [Memory: recall, upkeep and the tidy-up](memory-layer.md)
@@ -225,6 +231,11 @@ The [hosted Slack management fixture](hosted-slack-management.md) checks the
 agent settings link to Admin: hosted-only availability, the member-readable
 route module, and stale-response isolation.
 
+The [Slack for Team Clouds fixture](team-slack.md) checks a Slack message handed over with a member's own session:
+a channel's shared conversation, a direct message's private chat, who may ask and stop, and the signed reports a
+stand-in Admin takes; and the same on a My Cloud, where both are the owner's ordinary conversations. It reaches no
+Slack workspace and no real Admin.
+
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
 through the real renderer in an isolated fake-engine workspace.
@@ -340,6 +351,9 @@ desktop routing, cancellation, and computer authority cleanup.
 The [Gemini speech fixture](gemini-speech.md) checks write-only credentials,
 voice selection and WAV synthesis against an offline provider in an isolated
 server, with manual steps for real Google access and playback.
+The [DeepSeek speech fixture](deepseek-speech.md) checks the shared DeepSeek
+key, the Stella/Tide choice, WAV synthesis and DeepSeek transcription against an
+offline provider in an isolated server.
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility

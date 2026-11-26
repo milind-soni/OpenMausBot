@@ -50,7 +50,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     if (script.malformedFrame) return process.stdout.write("not-json\\n");
     if (script.malformedCatalog) return send(msg.id, { tools: [{ inputSchema: { type: "object" } }] });
     if (msg.params?.collision) { delayedList = msg; return; }
-    return send(msg.id, catalog(msg.params));
+    const listed = catalog(msg.params);
+    if (script.collidingQuery) listed.tools.push({ name: "query_result", description: "Upstream query with different arguments", inputSchema: { type: "object", properties: { sql: { type: "string" } } } });
+    return send(msg.id, listed);
   }
   if (msg.method === "tools/call") {
     appendFileSync(process.env.SCRIPT + ".calls", msg.params.name + "\\n");
@@ -420,6 +422,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect(JSON.parse(await nextLine()).result).toEqual(catalog);
   });
 
+  it("keeps each listed tool's _meta through a tool selection, so a deferred tool stays deferred", async () => {
+    const read = { name: "read", inputSchema: { type: "object" }, _meta: { "anthropic/alwaysLoad": false } };
+    start({ tools: [read, { name: "write", inputSchema: { type: "object" } }] }, selected, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(JSON.parse(await nextLine()).result).toEqual({ tools: [read] });
+  });
+
   describe("shaping an oversized result", () => {
     const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, name: `Bar ${i}`, price: 100 + i, blurb: "x".repeat(300) }));
     const full = JSON.stringify({ nextOffset: "1", products });
@@ -437,6 +446,34 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const last = JSON.parse(await nextLine()).result;
       expect(last.tools.map((tool: { name: string }) => tool.name)).toEqual(["write", "query_result"]);
       expect(last.tools[1].annotations.readOnlyHint).toBe(true);
+    });
+
+    it("replaces a colliding upstream query_result across all catalog pages", async () => {
+      start({ text: full, collidingQuery: true }, {}, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      const first = JSON.parse(await nextLine()).result;
+      expect(first.nextCursor).toBe("second");
+      expect(first.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "write"]);
+      send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: { cursor: "second" } });
+      const last = JSON.parse(await nextLine()).result;
+      expect(last.tools.map((tool: { name: string }) => tool.name)).toEqual(["write", "query_result"]);
+      expect(last.tools[1].inputSchema.required).toEqual(["result", "query"]);
+      expect(last.tools[1].description).not.toContain("Upstream query");
+      const local = await query({ result: "missing", query: "@" }, 3);
+      expect(local.result.isError).toBe(true);
+      expect(local.result.content[0].text).toContain("no longer held");
+      expect(existsSync(join(scratch, "reply.json.calls"))).toBe(false);
+    });
+
+    it("keeps the upstream query_result catalog and execution when shaping is disabled", async () => {
+      start({ text: "upstream query executed", collidingQuery: true }, { OMB_GATE_BUDGET: "0" }, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      const listed = JSON.parse(await nextLine()).result;
+      expect(listed.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "write", "query_result"]);
+      expect(listed.tools[2].description).toContain("Upstream query");
+      const reply = await query({ sql: "SELECT 1" }, 2);
+      expect(reply.result.content[0].text).toBe("upstream query executed");
+      expect(readFileSync(join(scratch, "reply.json.calls"), "utf8")).toBe("query_result\n");
     });
 
     it("never lists it when the budget is zero", async () => {
@@ -473,6 +510,25 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       expect((await query({ result: "r9", query: "@" }, 1)).result).toMatchObject({ isError: true });
       expect((await query({ query: "@" }, 2)).result).toMatchObject({ isError: true });
       expect(existsSync(join(scratch, "reply.json.calls"))).toBe(false);
+    });
+
+    it("bounds wide query metadata on the wire and keeps the held result queryable", async () => {
+      const key = `items_${"x".repeat(10_000)}`;
+      const rows = Array.from({ length: 20 }, (_, id) => ({ id, text: "y".repeat(100) }));
+      start({ text: JSON.stringify({ [key]: rows }) }, { OMB_GATE_BUDGET: "512" }, SCOPED_UPSTREAM);
+      const shaped = (await call("read")).result.content[0].text;
+      expect(shaped.length).toBeLessThanOrEqual(512);
+      expect(shaped).toContain('"r1"');
+
+      const whole = (await query({ result: "r1", query: "@" }, 2)).result;
+      expect(whole.content[0].text.length).toBeLessThanOrEqual(512);
+      expect(whole.content[0].text).toContain("Narrow the query");
+      const invalid = (await query({ result: "r1", query: "[?" }, 3)).result;
+      expect(invalid.isError).toBe(true);
+      expect(invalid.content[0].text.length).toBeLessThanOrEqual(512);
+      const selected = (await query({ result: "r1", query: `${JSON.stringify(key)}[-1].id` }, 4)).result;
+      expect(selected.content[0].text).toBe("19");
+      expect(readFileSync(join(scratch, "reply.json.calls"), "utf8")).toBe("read\n");
     });
 
     it("keeps query_result listed and callable under a tool selection that never names it", async () => {

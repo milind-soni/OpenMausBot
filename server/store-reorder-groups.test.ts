@@ -15,8 +15,7 @@ describe("reordering rooms", () => {
     const bot = store.createBot({ name: "Ada" });
     for (const name of ["One", "Two", "Three"]) store.createGroup(name, [bot.id]);
     const before = store.groups.map((group) => group.id), wanted = [...before].reverse();
-    const file = (store as unknown as { groupsFile: { write: (text: string) => void } }).groupsFile;
-    const write = vi.spyOn(file, "write").mockImplementation(() => { throw new Error("disk full"); });
+    const write = vi.spyOn(store as unknown as { saveGroups: (...args: unknown[]) => void }, "saveGroups").mockImplementation(() => { throw new Error("disk full"); });
     try {
       expect(() => store.reorderGroups(wanted)).toThrow("disk full");
       expect(store.groups.map((group) => group.id)).toEqual(before);

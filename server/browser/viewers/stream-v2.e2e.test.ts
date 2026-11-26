@@ -68,6 +68,7 @@ suite("the v2 stream on real Chrome", () => {
         open: async () => {},
         action: async () => ({ ok: true }),
         stream: ({ session: _session, spec: _spec, ...request }) => { stream.open({ ...request, target }); return true; },
+        desktop: () => false,
         fileChooserOffered: (_browser, owner, chooser) => real.service.fileChooserOffered(target.session, owner, chooser),
         answerFileChooser: (_browser, owner, chooser, paths) => real.service.answerFileChooser(target.session, owner, chooser, paths),
         download: (_browser, id) => real.service.download(target.session, id),

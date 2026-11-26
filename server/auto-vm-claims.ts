@@ -18,6 +18,8 @@ export interface AutoVmClaimSlot {
   cause?: string;
   /** The plan's limit that turned the computer away, as one sentence for the bot: said in place of `cause`. */
   limit?: string;
+  /** The claim waited out the computer wait ceiling: what the screen calls hear instead of a start failure. */
+  parked?: string;
   /** The failure took the conversation's automatic pick off this computer. */
   backOnAuto?: boolean;
   /** The last claim failed on the network; the next screen call claims again. */
@@ -28,6 +30,8 @@ export interface AutoVmClaimSlot {
   lazy?: boolean;
   label?: string;
   localVm?: boolean;
+  /** A Self-hosted VPS desktop: where vm_exec runs its commands once the claim holds it. */
+  vps?: { sshAlias: string; container: string };
   pendingReason?: string;
   boxId?: string;
   startsComputer?: true;
@@ -66,13 +70,16 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
     () => { slot.claimed = true; },
     (error: unknown) => {
       const failure = error instanceof Error ? error.message : String(error);
-      if (transientClaimFailure(error) && attempt < MAX_CLAIM_ATTEMPTS) {
+      // A computer MausBot keeps bringing back by itself (`keepsTrying`) is never given up on for the turn.
+      if (transientClaimFailure(error) && (attempt < MAX_CLAIM_ATTEMPTS || (error as { keepsTrying?: unknown } | null)?.keepsTrying === true)) {
         slot.retryReason = failure;
         if (slot.begin === begin) slot.begin = undefined;
         return;
       }
       slot.failed = true;
       slot.failure = failure;
+      const parked = (error as { parkedRefusal?: unknown } | null)?.parkedRefusal;
+      if (typeof parked === "string") slot.parked = parked;
       // A person's No is an answer, not a failure: the screen calls say so, and nothing reports a broken turn.
       if ((error as { declined?: unknown } | null)?.declined !== true) slot.onRejected?.(slot.failure, error);
     },
@@ -80,8 +87,24 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
   slot.begin = begin;
 }
 
+/** The turn's cloud computer `replacedBoxId` was replaced: the slot claims again, which starts the owner's new computer,
+ * and this waits for that until `until`. The new computer's id once it answers; null while it is still starting (the
+ * claim goes on, and the turn's next call waits for it), or when the claim failed or this slot never claimed one. */
+export async function reclaimAutoVm(table: AutoVmClaimTable, owner: AutoVmClaimOwner, replacedBoxId: string, until: number, signal?: AbortSignal): Promise<string | null> {
+  const slot = table.get(owner.threadId);
+  if (!slot || slot.owner.generation !== owner.generation || !slot.lazy || !slot.startsComputer) return null;
+  // Only the first call to see the replacement starts the claim again; later ones wait on that same claim.
+  if (slot.claimed && slot.boxId === replacedBoxId) {
+    Object.assign(slot, { claimed: false, begin: undefined, attempts: 0, boxId: undefined, retryReason: undefined });
+  }
+  startAutoVmClaim(table, owner.threadId, owner.generation);
+  if (!slot.claimed) await settledWithin(slot.begin ?? null, until - Date.now(), signal);
+  return slot.claimed && slot.boxId && slot.boxId !== replacedBoxId ? slot.boxId : null;
+}
+
 /** What every screen call hears for the rest of a turn whose computer could not be claimed. */
-export function lazyClaimFailedText(slot: Pick<AutoVmClaimSlot, "label" | "failure" | "cause" | "limit" | "startsComputer" | "backOnAuto">): string {
+export function lazyClaimFailedText(slot: Pick<AutoVmClaimSlot, "label" | "failure" | "cause" | "limit" | "startsComputer" | "backOnAuto" | "parked">): string {
+  if (slot.parked) return slot.parked;
   const label = slot.label ?? "this computer";
   const why = (slot.cause ?? slot.failure)?.trim().replace(/[\s.]+$/, "");
   if (!slot.startsComputer) {

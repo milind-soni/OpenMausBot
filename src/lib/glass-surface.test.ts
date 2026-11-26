@@ -45,7 +45,7 @@ describe("glass surface", () => {
     const size = rule('.glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup');
     expect(size).toContain("width: min(920px, 100%)");
     expect(size).toContain("height: min(720px, 100%)");
-    expect(size).toContain("border-radius: 16px");
+    expect(size).toContain("border-radius: 14px");
   });
 
   it("falls back to the opaque menu colour when transparency is reduced", () => {

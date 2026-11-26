@@ -6,11 +6,24 @@ export const LATEST_RELEASE_URL = "https://api.github.com/repos/milind-soni/Open
 /** Written by .github/workflows/promote-stable.yml: the released version our own Clouds have run for 48 hours. */
 export const STABLE_CHANNEL_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json";
 const CACHE_MS = 60 * 60_000;
+/** A press of Check for updates looks again unless the last lookup is younger than this. Any session may press it, and
+ * GitHub allows a server 60 lookups an hour without a token: presses keep to 12 of them. */
+const FRESH_MS = 5 * 60_000;
 /** How long the last answer stands in when the channel cannot be read: an outage of GitHub is no reason to say nothing. */
 const STALE_MS = 24 * 60 * 60_000;
 
-/** "managed" is a hosted or Cloud server that is updated for its owner. */
-export type InstallKind = "desktop" | "managed" | "docker" | "podman" | "npm" | "git" | "unknown";
+/** "managed" is a hosted or Cloud server that is updated for its owner. "podman" is deploy/podman's Compose recipe;
+ * "podman-service" the rootless service deploy/podman/install.sh writes, whose unit sets OMB_PODMAN_SERVICE. */
+export type InstallKind = "desktop" | "managed" | "docker" | "podman" | "podman-service" | "npm" | "git" | "unknown";
+
+/** Where deploy/podman/install.sh puts the install unless told otherwise. */
+export const PODMAN_SERVICE_DIR = "~/.local/share/openmausbot";
+
+/** The install's folder on the host, as the unit gives it in OMB_PODMAN_SERVICE (`~/…` or an absolute path). */
+export function podmanServiceDir(env: NodeJS.ProcessEnv = process.env): string {
+  const dir = env.OMB_PODMAN_SERVICE?.trim() ?? "";
+  return /^(?:~\/|\/)[A-Za-z0-9/._@-]+$/.test(dir) && !dir.split("/").includes("..") ? dir.replace(/\/+$/, "") : PODMAN_SERVICE_DIR;
+}
 
 /** `stable` follows the promoted version; `newest` follows every release, as soon as it is published. */
 export type UpdateChannel = "stable" | "newest";
@@ -24,9 +37,11 @@ export function updateChannel(env: NodeJS.ProcessEnv = process.env): UpdateChann
  * As docs/self-hosting.md and deploy/podman/README.md give them. `version` is the one the channel names: an npm install
  * is pinned to it, and a Docker install passes it to deploy/update.sh unless that is the stable one update.sh takes anyway.
  */
-export function updateCommand(install: InstallKind, target?: { version: string; stable: boolean }): { command: string; restart: boolean } | undefined {
+export function updateCommand(install: InstallKind, target?: { version: string; stable: boolean }, env: NodeJS.ProcessEnv = process.env): { command: string; restart: boolean } | undefined {
+  const version = target && !target.stable ? ` --version ${target.version}` : "";
   switch (install) {
-    case "docker": return { command: target && !target.stable ? `git pull && ./update.sh --version ${target.version}` : "git pull && ./update.sh", restart: false };
+    case "docker": return { command: `git pull && ./update.sh${version}`, restart: false };
+    case "podman-service": return { command: `${podmanServiceDir(env)}/update.sh${version}`, restart: false };
     case "podman": return { command: "git pull && cd deploy/podman && PODMAN_COMPOSE_PROVIDER=podman-compose podman compose --env-file .env -f compose.yaml up -d --build", restart: false };
     case "npm": return { command: `npm install -g openmausbot@${target?.version ?? "latest"}`, restart: true };
     case "git": return { command: "git pull && pnpm install", restart: true };
@@ -39,10 +54,12 @@ export function installKind(input: {
   managed: boolean;
   serverRoot: string;
   exists?: (path: string) => boolean;
+  env?: NodeJS.ProcessEnv;
 }): InstallKind {
   const exists = input.exists ?? existsSync;
   if (input.desktopManaged) return "desktop";
   if (input.managed) return "managed";
+  if ((input.env ?? process.env).OMB_PODMAN_SERVICE?.trim()) return "podman-service";
   if (exists("/.dockerenv")) return "docker";
   if (exists("/run/.containerenv")) return "podman";
   if (input.serverRoot.split(sep).includes("node_modules")) return "npm";
@@ -105,6 +122,8 @@ export function createUpdateChecker(options: {
   let cached: { at: number; result: UpdateCheck } | undefined;
   /** The last answer that was read, kept past the hour for a channel that cannot be read for a while. */
   let lastGood: { at: number; result: UpdateCheck } | undefined;
+  /** The last lookup, when it failed: a press of Check for updates within FRESH_MS gets this error, not a new lookup. */
+  let failed: { at: number; error: unknown } | undefined;
   let inflight: Promise<UpdateCheck> | undefined;
   const base = (): UpdateCheck => ({
     current: options.current,
@@ -135,9 +154,11 @@ export function createUpdateChecker(options: {
     return { version: release.tag_name.replace(/^v/, ""), ...(typeof release.html_url === "string" ? { releaseUrl: release.html_url } : {}) };
   }
 
-  return async function check(): Promise<UpdateCheck> {
+  /** `fresh`: someone pressed Check for updates, so an answer from up to an hour ago is not good enough. */
+  return async function check({ fresh = false }: { fresh?: boolean } = {}): Promise<UpdateCheck> {
     if (options.install === "desktop" || options.install === "managed") return base();
-    if (cached && now() - cached.at < CACHE_MS) return cached.result;
+    if (cached && now() - cached.at < (fresh ? FRESH_MS : CACHE_MS)) return cached.result;
+    if (fresh && failed && now() - failed.at < FRESH_MS) throw failed.error;
     inflight ??= (async () => {
       try {
         const promoted = channel === "stable" ? await stable() : null;
@@ -151,16 +172,23 @@ export function createUpdateChecker(options: {
           ...updateCommand(options.install, { version: found.version, stable: promoted !== null }),
         };
         cached = lastGood = { at: now(), result };
+        failed = undefined;
         return result;
       } catch (error) {
-        // Never a fall back to the newest release, which the stable channel has not taken yet: the last answer it gave,
-        // when there is one from the last day, else the error.
-        if (lastGood && now() - lastGood.at < STALE_MS) return lastGood.result;
+        failed = { at: now(), error };
         throw error;
       } finally {
         inflight = undefined;
       }
     })();
-    return inflight;
+    try {
+      return await inflight;
+    } catch (error) {
+      // Never a fall back to the newest release, which the stable channel has not taken yet: the last answer it gave,
+      // when there is one from the last day, else the error. A press of Check for updates gets the error: an old
+      // answer there reads as "up to date".
+      if (!fresh && lastGood && now() - lastGood.at < STALE_MS) return lastGood.result;
+      throw error;
+    }
   };
 }

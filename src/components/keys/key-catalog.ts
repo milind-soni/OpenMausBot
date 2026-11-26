@@ -35,6 +35,8 @@ export interface KeyTarget {
   placeholderKey?: LocaleKey;
   href?: string;
   test?: TestableProvider;
+  /** The address the check sends the key to, when it is set beside the key: a new address checks the saved key again. */
+  testAt?: (config: ConfigStatus) => string | undefined;
   verifiedOnSave?: boolean;
   analytics: KeyProvider;
   shape?: RegExp;
@@ -46,7 +48,7 @@ export interface KeyTarget {
 
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
-  | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
+  | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "chatterbox" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
@@ -116,7 +118,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["meta", "muse", "llama"], mark: provider("meta", "meta"), kind: "key",
     target: providerKey("meta", { slot: "metaApiKey", placeholder: "LLM|…", href: "https://dev.meta.ai/docs/authentication", test: "meta", analytics: "meta", shape: /^LLM\|/ }) },
   { id: "deepseek", section: "ai", labelKey: "keys.deepseek.label", purposeKey: "keys.purpose.deepseek", name: "DeepSeek", env: ["OMB_DEEPSEEK_API_KEY"],
-    words: ["deepseek", "dsh", "harness"], mark: provider("deepseekAgent", "deepseek"), kind: "key",
+    words: ["deepseek", "dsh", "harness", "voice", "speech", "dictation"], mark: provider("deepseekAgent", "deepseek"), kind: "key",
     target: providerKey("deepseek", { slot: "deepseekApiKey", placeholder: "sk-…", href: "https://platform.deepseek.com/api_keys", analytics: "deepseek" }) },
   { id: "opencodeGo", section: "ai", labelKey: "keys.opencode.label", purposeKey: "keys.purpose.opencodeGo", name: "OpenCode", env: ["OPENCODE_API_KEY"],
     words: ["opencode", "zen", "go"], mark: provider("opencodeGo"), kind: "key",
@@ -130,9 +132,9 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "lmStudio", section: "servers", labelKey: "lmStudio.title", purposeKey: "keys.purpose.lmStudio", name: "LM Studio", env: [],
     words: ["lm studio", "lmstudio", "llm studio", "local", "bionic"], mark: { icon: Server }, kind: "panel" },
   { id: "openaiCompat", section: "servers", labelKey: "keys.openaiCompat.label", purposeKey: "keys.purpose.openaiCompat", name: "OpenAI-compatible", env: ["OPENAI_COMPAT_API_KEY", "OPENAI_COMPAT_URL"],
-    words: ["openai-compatible", "openai compatible", "together", "gemini", "google ai studio", "base url", "server", "endpoint"], mark: { icon: Server }, kind: "key",
+    words: ["openai-compatible", "openai compatible", "together", "venice", "gemini", "google ai studio", "base url", "server", "endpoint"], mark: { icon: Server }, kind: "key",
     target: { patch: (value) => ({ openaiCompat: { key: value } }), slot: "openaiCompatApiKey", saved: (config) => flag(config.openaiCompat), placeholder: "…", placeholderKey: "keys.openaiCompat.placeholder",
-      href: "https://platform.openai.com/docs/api-reference", test: "openaiCompat", analytics: "openai_compat" } },
+      href: "https://platform.openai.com/docs/api-reference", test: "openaiCompat", testAt: (config) => config.openaiCompat?.url, analytics: "openai_compat" } },
   { id: "liveCalls", section: "voice", labelKey: "call.live.key", purposeKey: "keys.purpose.liveCalls", name: "OpenAI", env: [],
     words: ["openai", "live calls", "calls", "voice", "talk", "gpt-live", "read aloud", "speech", "tts"], mark: { icon: Phone }, kind: "uses", uses: "openai" },
   { id: "liveKey", section: "voice", labelKey: "keys.label.liveKey", purposeKey: "keys.purpose.liveKey", name: "OpenAI", env: ["OMB_OPENAI_LIVE_KEY"],
@@ -156,12 +158,15 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     target: { patch: (value) => ({ tts: { fishKey: value } }), slot: "fishAudioKey", verifiedOnSave: true,
       saved: (config) => flag(config.savedKeys?.fishAudioKey ?? { configured: config.tts?.provider === "fish" && config.tts.configured }),
       placeholder: "…", placeholderKey: "voice.fish.keyPlaceholder", href: "https://fish.audio/app/api-keys/", analytics: "fish_audio" } },
+  { id: "chatterbox", section: "voice", labelKey: "voice.chatterboxServer", purposeKey: "voice.chatterboxHelp", name: "Chatterbox", env: [],
+    words: ["chatterbox", "voice", "tts", "speech", "base url", "server", "address", "local"], mark: { icon: AudioLines }, kind: "panel",
+    status: (config) => ({ configured: Boolean(config.tts?.baseUrl?.trim()) }) },
   { id: "box", section: "computers", labelKey: "keys.boat.label", purposeKey: "keys.purpose.box", name: "boat.dev", env: ["BOX_TOKEN"],
     words: ["boat", "box", "cloud desktop", "cloud computer", "computer", "sandbox"], mark: { icon: Monitor }, kind: "key",
     target: { patch: (value) => ({ box: { token: value } }), slot: "boxToken", verifiedOnSave: true,
       saved: (config) => ({ ...flag(config.box?.included ? undefined : config.box), ...(config.box?.included ? { included: true } : {}) }),
       placeholder: "boat_…", href: "https://docs.boat.dev/api-keys", analytics: "boat", shape: /^(boat|box)_/, warningKey: "keys.boat.warning" } },
-  { id: "vps", section: "computers", labelKey: "keys.vps.label", purposeKey: "keys.purpose.vps", name: "VPS", env: [],
+  { id: "vps", section: "computers", labelKey: "keys.vps.ownServer", purposeKey: "keys.purpose.vps", name: "VPS", env: [],
     words: ["vps", "ssh", "server", "self-hosted", "computer", "docker"], mark: { icon: Server }, kind: "panel",
     status: (config) => ({ configured: config.vps?.configured === true }) },
   { id: "onePassword", section: "computers", labelKey: "settings.logins.onePassword.title", purposeKey: "keys.purpose.onePassword", name: "1Password", env: [],
@@ -220,15 +225,31 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
-/** With Azure OpenAI or Fish Audio chosen for Live calls, the row for their key is about that service: required, and no OpenAI
- * key. With Fish Audio it is the Fish Audio key itself, which Fish voices use too. */
+/** With Azure OpenAI, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen for Live calls, the row for their key is about that service:
+ * required, and no OpenAI key. With Fish Audio, Gemini or ElevenLabs it is that service's key itself, which its voices use too. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
   const provider = config?.live?.provider;
-  if (id !== "liveKey" || (provider !== "azure" && provider !== "fish") || !entry.target) return entry;
+  if (id !== "liveKey" || (provider !== "azure" && provider !== "custom" && provider !== "fish" && provider !== "gemini" && provider !== "elevenlabs") || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
   if (provider === "fish") {
     return { ...entry, name: "Fish Audio", labelKey: "keys.label.fishAudio", purposeKey: "keys.purpose.liveKeyFish", target: keyEntry("fishAudio").target };
+  }
+  if (provider === "gemini") {
+    return { ...entry, name: "Gemini", labelKey: "keys.label.geminiTts", purposeKey: "keys.purpose.liveKeyGemini", target: keyEntry("geminiTts").target };
+  }
+  if (provider === "elevenlabs") {
+    // Cloud's included voices cannot place Live calls, so this row asks for the person's own key even then.
+    const voices = keyEntry("elevenlabs").target!;
+    const saved = (config: ConfigStatus): SavedState => {
+      const { included: _included, ...own } = voices.saved(config);
+      return own;
+    };
+    return { ...entry, name: "ElevenLabs", labelKey: "keys.label.elevenlabs", purposeKey: "keys.purpose.liveKeyElevenLabs", target: { ...voices, saved } };
+  }
+  if (provider === "custom") {
+    const { href: _openAiPage, ...own } = target;
+    return { ...entry, name: "Custom endpoint", labelKey: "call.live.customKeyField", purposeKey: "keys.purpose.liveKeyCustom", target: { ...own, placeholder: "…" } };
   }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
@@ -243,10 +264,11 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
   return entry.target?.saved(config) ?? entry.status?.(config) ?? { configured: false };
 }
 
-/** With Azure or Fish Audio chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is hidden. */
+/** With Azure, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is
+ * hidden. */
 export function keyHidden(id: KeyId, config: ConfigStatus | null | undefined): boolean {
   const provider = config?.live?.provider;
-  return id === "liveCalls" && (provider === "azure" || provider === "fish");
+  return id === "liveCalls" && (provider === "azure" || provider === "custom" || provider === "fish" || provider === "gemini" || provider === "elevenlabs");
 }
 
 /** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */

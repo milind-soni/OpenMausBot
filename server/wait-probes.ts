@@ -177,7 +177,8 @@ export const PAGE_TIMEOUT_MS = 15_000;
 export const PAGE_MAX_BYTES = 2 * 1024 * 1024;
 export const PAGE_MAX_REDIRECTS = 3;
 
-type Failure = { ok: false; refused: boolean; error: string };
+/** `status`: the answer's status, when the page answered with an error. */
+type Failure = { ok: false; refused: boolean; error: string; status?: number };
 export type PageResult = { ok: true; text: string } | Failure;
 /** The 2xx answer a redirect chain ended on: its address, headers and at most `maxBytes` of its body. */
 export type PublicPage = { ok: true; url: URL; headers: IncomingHttpHeaders; body: Buffer } | Failure;
@@ -282,7 +283,7 @@ export async function fetchPublicPage(rawUrl: string, options: PageFetchOptions 
         url = new URL(answer.location, url);
         continue;
       }
-      if (answer.status < 200 || answer.status >= 300) return fail(`The page answered ${answer.status}.`);
+      if (answer.status < 200 || answer.status >= 300) return { ...fail(`The page answered ${answer.status}.`), status: answer.status };
       return { ok: true, url, headers: answer.headers, body: answer.body };
     }
   } catch {

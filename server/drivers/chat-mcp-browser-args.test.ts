@@ -46,7 +46,7 @@ describe("loopbackNavigationHint", () => {
 
   it("stays quiet where the browser runs on the person's computer or the setting does not exist", () => {
     const failed = ["agent_browser_open", { url: "http://127.0.0.1:8188/" }, "Navigation to http://127.0.0.1:8188/ failed: ERR_SOCKS_CONNECTION_FAILED"] as const;
-    expect(loopbackNavigationHint(...failed, {})).toMatch(/Open sites on this server/);
+    expect(loopbackNavigationHint(...failed, {})).toMatch(/Settings → Desktops & browser → Built-in browser/);
     // The desktop app: the browser and its loopback are the person's own computer.
     expect(loopbackNavigationHint(...failed, { OMB_DESKTOP_PARENT: "1" })).toBe("");
     // A Cloud home has no "Open sites on this server" row.

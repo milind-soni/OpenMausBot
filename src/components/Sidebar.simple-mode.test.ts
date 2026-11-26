@@ -89,7 +89,7 @@ describe("bot-first sidebar", () => {
     { advanced: true, enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
     { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
     { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
-    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2.5", "rounded-xl", "p-2", "md:h-[54px]"] },
     { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[54px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
     fixture.advanced = advanced;
@@ -128,12 +128,12 @@ describe("bot-first sidebar", () => {
     });
   }
 
-  it.each([false, true])("uses 14px medium names in Simple comfortable rows and keeps 15px semibold otherwise (advanced %s)", (advanced) => {
+  it.each([false, true])("uses 14px medium names in comfortable rows in both modes (advanced %s)", (advanced) => {
     fixture.advanced = advanced;
     fixture.showThreads = false;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })));
     const name = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink ([^"]*)"/)?.[1];
-    expect(name).toBe(advanced ? "text-[15px] font-semibold leading-5" : "text-[14px] font-medium leading-5");
+    expect(name).toBe("text-[14px] font-medium leading-5");
     expect(markup).toContain("truncate text-[13px] leading-[18px]");
   });
 
@@ -157,14 +157,29 @@ describe("bot-first sidebar", () => {
     const line = markup.slice(markup.indexOf(">Done.<"));
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge" role="img" aria-label="Model: [^"]+ \(Claude\)" class="[^"]*\bms-auto\b[^"]*"><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge"[^>]*><span data-provider-mark="brand"[^>]*><svg[\s\S]*?<\/svg><\/span><\/span><\/div><span class="sr-only">Unread<\/span>/);
-    const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pr-7"'), markup.indexOf(">Done.<"));
-    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-2 top-1 flex size-7 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
+    const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7"'), markup.indexOf(">Done.<"));
+    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-\[3px\] top-1\.5 flex size-6 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
     expect(name).toContain('<span aria-hidden="true" title="Unread" class="size-2 shrink-0 rounded-full bg-accent hidden self-center max-md:block touch:block"></span>');
     expect(markup.match(/data-provider-mark=/g)).toHaveLength(1);
     expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
-    expect(markup).not.toContain("group-hover:pr-7");
-    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bright-2 top-1 translate-y-0\b/);
+    expect(markup).not.toContain("group-hover:pe-7");
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
+  });
+
+  it("shows a Simple row's engine mark only while the row is hovered, focused or on a touch screen, and Advanced's always", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [], messages: [{ id: "m", role: "bot", kind: "text", text: "Done.", at: 1 }] } as Bot;
+    const badgeClass = (markup: string) => /<span data-testid="model-badge"[^>]*class="([^"]*)"/.exec(markup)?.[1]?.split(" ") ?? [];
+    const simple = badgeClass(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))));
+    expect(simple).toEqual(expect.arrayContaining(["opacity-0", "group-hover:opacity-100", "group-focus-within:opacity-100", "touch:opacity-100", "motion-reduce:transition-none"]));
+    // The row it reveals on is the hover group, so focus anywhere in the row (its ⋯ too) shows the mark.
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/^<div class="group relative/);
+    fixture.advanced = true;
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(advanced).toContain('data-testid="model-badge"');
+    expect(badgeClass(advanced)).not.toContain("opacity-0");
   });
 
   it("fades the collapsed rail's engine badge in both modes", () => {
@@ -245,9 +260,21 @@ describe("bot-first sidebar", () => {
     const simple = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
     expect(simple).toContain("[--row:var(--color-raised)]");
     expect(simple).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-none opacity-0 group-hover:pointer-events-auto/);
-    expect(simple).toContain('class="flex items-baseline justify-between gap-2 pr-7"');
+    expect(simple).toContain('class="flex items-baseline justify-between gap-2 pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7"');
     fixture.advanced = true;
     expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-auto opacity-100/);
+  });
+
+  it.each(densities)("marks a room as one place instead of its members' faces, where a two-bot channel keeps both faces (%s)", (density) => {
+    const pip: Bot = { ...quiet, id: "pip", name: "Pip", color: "blue" };
+    fixture.state = { ...fixture.state, bots: [bot, pip] };
+    const room: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id, pip.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    const roomMarkup = renderToStaticMarkup(createElement(GroupListItem, { group: room, density, onMenu: vi.fn() }));
+    expect(roomMarkup).toContain("data-room-mark");
+    expect(roomMarkup).not.toContain("data-avatar-kind=\"bot\"");
+    const channel = renderToStaticMarkup(createElement(GroupListItem, { group: { ...room, dm: true }, density, onMenu: vi.fn() }));
+    expect(channel).not.toContain("data-room-mark");
+    expect(channel.match(/data-avatar-kind="bot"/g)).toHaveLength(2);
   });
 
   it("marks an unread Simple group chat with the same top-right dot as a bot row, said once for a screen reader", () => {
@@ -290,11 +317,11 @@ describe("bot-first sidebar", () => {
   });
 
   it.each([
-    { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
-    { advanced: false, density: "icons", face: 36, spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "comfortable", face: 32, spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
-  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, face, spacing, name, preview }) => {
+    { advanced: false, density: "comfortable", slot: "size-9", spacing: ["gap-2.5", "rounded-xl", "pl-2", "pr-2", "md:h-[54px]"] },
+    { advanced: false, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"] },
+    { advanced: true, density: "icons", slot: "size-12", spacing: ["justify-center", "px-1", "py-1.5"] },
+    { advanced: true, density: "comfortable", slot: "size-8", spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"] },
+  ] as const)("sizes group chat rows in $density density (advanced $advanced), names at 14/20 medium and previews at 13/18", ({ advanced, density, slot, spacing }) => {
     fixture.advanced = advanced;
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
     let tree: ReactNode;
@@ -302,9 +329,9 @@ describe("bot-first sidebar", () => {
     const markup = renderToStaticMarkup(createElement(Capture));
     const row = findElement(tree, "data-sidebar-group-row", group.id)!;
     expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
-    expect(markup).toContain(`width="${face}px" height="${face}px"`);
-    expect(markup).toMatch(new RegExp(`truncate text-\\[14px\\] text-ink ${name}`));
-    expect(markup).toContain(`truncate text-ink-secondary ${preview}`);
+    expect(markup).toMatch(new RegExp(`data-room-mark="" class="[^"]*\\b${slot}\\b[^"]*"><svg[^>]*width="16" height="16"`));
+    expect(markup).toContain("truncate text-[14px] font-medium leading-5 text-ink");
+    expect(markup).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
   });
 
   it("keeps the queued dot small", () => {
@@ -320,7 +347,7 @@ describe("bot-first sidebar", () => {
     expect(queuedDot).toContain("bg-ink-secondary");
     expect(queuedDot).not.toContain("size-4");
     expect(queuedDot).not.toContain("size-5");
-    expect(markup).toContain('class="truncate">Queued</span>');
+    expect(markup).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Queued</span>');
     expect(markup).not.toContain("font-semibold text-warning");
     expect(markup).not.toContain("waiting-dot");
   });
@@ -534,7 +561,7 @@ describe("bot-first sidebar", () => {
     ]);
   });
 
-  it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person, keeping its dots, in %s density", (density) => {
+  it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person or is going, keeping its dots, in %s density", (density) => {
     // Its threads were left expanded in Advanced mode.
     fixture.advanced = true;
     let tree: ReactNode;
@@ -549,18 +576,21 @@ describe("bot-first sidebar", () => {
       expect(markup).toContain(`data-sidebar-bot-row="${bot.id}"`);
       expect(markup).not.toContain("data-sidebar-thread-row");
       expect(markup).not.toContain("data-sidebar-folder-row");
-      expect(markup).not.toContain('aria-label="Atlas threads"');
-      if (density === "icons") expect(markup).not.toContain("data-sidebar-bot-activity");
-      else {
-        // It asks the person something, or has a reply they have not read; running, queued and idle threads stay out.
-        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "unread"]);
+      if (density === "icons") {
+        expect(markup).not.toContain("data-sidebar-bot-activity");
+        expect(markup).not.toContain('aria-label="Atlas threads"');
+      } else {
+        // Folded: what asks the person something, is going or queued, or has a reply they have not read; idle threads stay out.
+        expect(markup).toContain('data-bot-threads-fold="atlas" aria-expanded="false"');
+        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "queued", "unread", "working"]);
       }
       expect(markup).toContain('data-testid="waiting-dot"');
     }
     const unread = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, tasks: [bot.tasks![0]!, bot.tasks![5]!] })));
     expect(unread.includes('data-sidebar-activity-row="unread"')).toBe(density !== "icons");
     const read = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, unread: false, tasks: [bot.tasks![0]!, bot.tasks![1]!, bot.tasks![3]!] })));
-    expect(read).not.toContain("data-sidebar-activity-row");
+    // Nothing unread, but a thread still running keeps its row while the bot is folded.
+    expect([...read.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1])).toEqual(density === "icons" ? [] : ["working"]);
     expect(unread).toContain(density === "icons" ? "rounded-full border border-panel bg-accent" : density === "comfortable" ? 'data-testid="unread-dot"' : 'aria-label="Unread threads"');
     forgetSearchDisclosuresForTests();
   });

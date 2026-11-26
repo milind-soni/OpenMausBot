@@ -176,15 +176,47 @@ export function aiChoices<Instance extends AiChoice>(instances: readonly Instanc
   return { recommended, others: instances.filter((instance) => instance !== recommended) };
 }
 
+export type FirstAiKind = "claude" | "chatgpt" | "opencode";
+
+interface FirstAi extends AiChoice {
+  authentication?: { method?: string };
+  snapshot?: { freeFallback?: boolean; authenticationUnavailableReason?: string };
+}
+
+const FIRST_AIS: ReadonlyArray<[FirstAiKind, string]> = [["claude", "claudeAgent"], ["chatgpt", "codex"], ["opencode", "opencodeGo"]];
+
+/** The welcome's three first ways to connect an AI, in this order: a Claude account, a ChatGPT account through Codex and
+ * OpenCode. Each is the provider's own sign-in that can work here: one already `ready` first, then ChatGPT's plan sign-in
+ * in the browser, else the first listed (on a Cloud, which refuses the plan sign-in, Codex's own). */
+export function firstAis<Instance extends FirstAi>(
+  instances: readonly Instance[],
+  ready: (instance: Instance) => boolean = () => false,
+): Array<{ kind: FirstAiKind; instance: Instance }> {
+  const own = instances.filter((instance) => !instance.readOnly && instance.access !== "api" && instance.access !== "custom"
+    && !instance.snapshot?.authenticationUnavailableReason);
+  return FIRST_AIS.flatMap(([kind, driverKind]) => {
+    const group = own.filter((instance) => instance.driverKind === driverKind);
+    const instance = group.find(ready) ?? group.find((candidate) => candidate.authentication?.method === "browser-pkce") ?? group[0];
+    return instance ? [{ kind, instance }] : [];
+  });
+}
+
+/** OpenCode's free models need no account, so its setup keeps its own words instead of the plain sign-in line. */
+export function signInFollows(instance: SignInStep & { driverKind: string }): boolean {
+  return plainSignIn(instance) && instance.driverKind !== "opencodeGo";
+}
+
 /** The AI the welcome's Connect an AI step stands on: the best ready AI (the same ranking) that isn't OpenCode's free
- * backup, passing over one whose test message got no answer. An AI not tested yet is `testing`; none ready is null. */
+ * backup unless the person `chose` it on the welcome, passing over one whose test message got no answer. An AI not
+ * tested yet is `testing`; none ready is null. */
 export function welcomeAi<Instance extends RankableAi>(
   instances: readonly Instance[],
   ready: (instance: Instance) => boolean,
   test: (instance: Instance) => AiTestState | undefined,
+  chose: (instance: Instance) => boolean = () => false,
 ): { instance: Instance; state: AiTestState } | null {
   let silent: Instance | undefined;
-  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && !freeFallback(candidate)))) {
+  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && (!freeFallback(candidate) || chose(candidate))))) {
     const state = test(instance) ?? "testing";
     if (state !== "failed") return { instance, state };
     silent ??= instance;
@@ -209,6 +241,38 @@ export function plainSignIn(instance: SignInStep): boolean {
   return instance.snapshot.state === "available" && instance.snapshot.authenticated === false
     ? Boolean(instance.authentication)
     : Boolean(instance.install?.server || instance.install?.managed);
+}
+
+/** A status check that could not finish (`busy`, a starved machine) says nothing about whether an engine is there: it never
+ * counts as missing. The status the server keeps when a check could not finish (`unverified`) is available already. */
+export function engineMaybeThere(instance: { snapshot: { state: string; busy?: true } }): boolean {
+  return instance.snapshot.state === "available" || instance.snapshot.busy === true;
+}
+
+type EngineRow = { instanceId: string; snapshot: { state: string; busy?: true; unverified?: true; authenticated?: boolean } };
+
+/** Engines seen available since this page loaded. */
+const workedThisSession = new Set<string>();
+/** A fresh page, as a new load starts (tests). */
+export const forgetWorkedEngines = (): void => workedThisSession.clear();
+
+/** Notes the engines available now (by a check that answered); true for one that was available earlier since this page
+ * loaded and has not since been found missing. A setup page never replaces a working engine whose later check could not
+ * finish: the app's usual waiting view stays while the server checks it again. */
+export function workedEarlier(instance: EngineRow, worked: Set<string> = workedThisSession): boolean {
+  if (instance.snapshot.state === "available" && instance.snapshot.unverified !== true) worked.add(instance.instanceId);
+  // A check that answered "not there" is a real loss: the setup page may show again.
+  else if (instance.snapshot.state !== "available" && instance.snapshot.busy !== true) worked.delete(instance.instanceId);
+  return worked.has(instance.instanceId);
+}
+
+/** The "no AI connected" setup page: engines are known and none is there, by checks that answered, and none of them
+ * worked earlier since this page loaded. */
+export function noEnginesDue(state: { connected: boolean; instances: ReadonlyArray<EngineRow> }, worked: Set<string> = workedThisSession): boolean {
+  // Ids repeat across places: what worked is forgotten whenever the live connection drops, as it does on a switch.
+  if (!state.connected) worked.clear();
+  const earlier = state.instances.filter((instance) => workedEarlier(instance, worked));
+  return state.connected && state.instances.length > 0 && !state.instances.some(engineMaybeThere) && earlier.length === 0;
 }
 
 export function cloudSignInDue<Instance>(

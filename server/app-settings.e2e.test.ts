@@ -8,6 +8,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 
 import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const SECRET = "sk-test-123";
 const XAI_URL = "https://example.test/v1";
@@ -66,11 +67,11 @@ beforeAll(async () => {
 
   // Fixture setup, not a production grant: the stopped fixture's own bot is put on Full access on disk.
   await waitForExit(fixture.child, { signal: "SIGTERM" });
-  const saved = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
+  const saved = readRegistry(dataDir).bots;
   const setter = saved.find((one: any) => one.id === bot.id);
   setter.approvalMode = "full"; setter.autoApprove = false;
   for (const task of setter.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
-  writeFileSync(join(dataDir, "bots.json"), JSON.stringify(saved, null, 2));
+  writeRegistry(dataDir, { bots: saved });
   const env = verificationServerEnvironment({}, dataDir, Number(new URL(url).port));
   const log = openSync(fixture.info.logPath, "a", 0o600);
   child = spawn(process.execPath, verificationServerArgs(env), { cwd: join(import.meta.dirname, ".."), env, stdio: ["ignore", log, log] });
@@ -153,7 +154,7 @@ it("a Full-access bot adds an AI engine at once with a saved key it never sees, 
   const [listed, refused] = results(await finished("ENGINE-REMOVE"));
   expect(JSON.parse(listed.text).value).toContain(`${engineId}: Gateway at https://gw.example.test/v1`);
   expect(listed.text).not.toContain(routerKey);
-  expect(refused).toMatchObject({ isError: true, text: "Removing an AI engine is changed only by the person, in Settings → AI. Tell them where in one line; do not try another way." });
+  expect(refused).toMatchObject({ isError: true, text: "Removing an AI engine is changed only by the person, in Settings → AI → Providers. Tell them where in one line; do not try another way." });
   expect(engines()).toHaveLength(1);
 
   const card = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "engines");
@@ -332,7 +333,25 @@ it("a theme turn reads the guide, saves and wears a theme with a picture from it
   const card = (await settingCards(bot.threadId)).filter((one) => one.card.appSettingRequest.settingId === "appearance.theme").at(-1);
   expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: card.card.requestId })).toMatchObject({ ok: true, undone: true });
   expect((await api("GET", "/api/themes/active")).theme.css).toBeUndefined();
-}, 60_000);
+
+  await start("THEME-BACK", [
+    step({ action: "set_theme", id: "pixel", theme: JSON.stringify({ name: "Pixel Quest", canvas: "#1a1033", accent: "#9b5cff" }) }),
+    step({ action: "set_theme", id: "pixel", theme: JSON.stringify({ name: "Pixel Quest", canvas: "#1a1033", accent: "#ffcc00" }) }),
+    step({ action: "undo_theme" }),
+    step({ action: "theme_history" }),
+  ]);
+  const [first, second, back, history] = results(await finished("THEME-BACK"));
+  expect([first.isError, second.isError]).toEqual([false, false]);
+  expect(back).toMatchObject({ isError: false, text: expect.stringContaining("Undo the last look change (edited Pixel Quest)") });
+  expect(await api("GET", "/api/themes/active")).toMatchObject({ id: "pixel", theme: { accent: "#9b5cff" } });
+  expect(JSON.parse(history.text).changes.slice(0, 3).map((change: any) => change.what)).toEqual(["went back 1 change", "edited Pixel Quest", "made Pixel Quest"]);
+  expect((await api("GET", "/api/themes/history")).items[0]).toMatchObject({ index: 1, kind: "undid", count: 1 });
+
+  await start("THEME-DEFAULT", [step({ action: "set_theme", id: "none" })]);
+  const [reset] = results(await finished("THEME-DEFAULT"));
+  expect(reset.isError).toBe(false);
+  expect(await api("GET", "/api/themes/active")).toEqual({ id: null, theme: null });
+}, 90_000);
 
 it("a webhook's run may read a setting but not change it", async () => {
   const value = config().rooms?.turnTimeoutMinutes;

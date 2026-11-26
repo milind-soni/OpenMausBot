@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { execCli } from "../procs.ts";
+import { inconclusiveFailure } from "../harness/probe-hold.ts";
 import { codexHome } from "./codex-identity.ts";
 
 type Env = Record<string, string | undefined>;
@@ -30,15 +31,23 @@ const API_KEY_LOGIN = /^(?:api key configured|logged in using an api key)\b/im;
 export type CodexLoginStatus = "signed-in" | "signed-out" | "unknown";
 
 /** `apiKey` is true for an API-key login, which `codex logout` as a ChatGPT sign-out cannot confirm. */
-export function readCodexLogin(cli: string, env: Env): Promise<{ status: CodexLoginStatus; apiKey: boolean }> {
+/** `busy`: the check could not finish (out of time, killed, no room to start it), which says nothing about the login. */
+export function readCodexLogin(cli: string, env: Env): Promise<{ status: CodexLoginStatus; apiKey: boolean; busy?: true }> {
   return new Promise((resolve) => execCli(cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) => {
     const said = `${stdout}\n${stderr ?? ""}`;
     const signedIn = !err && codexReportsLogin(said);
     resolve({
       status: signedIn ? "signed-in" : err && /^(?:not logged in|error checking login status)\b/im.test(said) ? "signed-out" : "unknown",
       apiKey: signedIn && API_KEY_LOGIN.test(said),
+      ...(!signedIn && inconclusiveFailure(err) ? { busy: true as const } : {}),
     });
   }));
+}
+
+/** Whether Codex is signed in, by its last check that finished: one that could not finish keeps the answer before it. */
+export function keptCodexLogin(): (login: { status: CodexLoginStatus; busy?: true }) => boolean {
+  let last: boolean | undefined;
+  return (login) => (login.busy && last !== undefined ? last : (last = login.status === "signed-in"));
 }
 
 export async function codexLoginStatus(cli: string, env: Env): Promise<CodexLoginStatus> {

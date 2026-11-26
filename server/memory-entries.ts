@@ -38,7 +38,7 @@ const togglesFence = (line: string) => (line.match(/```/g)?.length ?? 0) % 2 ===
 /** Undated hand-written lines are not entries and upkeep never touches them. */
 export function parseMemoryEntries(text: string): MemoryEntryLine[] {
   const out: MemoryEntryLine[] = [];
-  const lines = text.split("\n");
+  const lines = text.split("\n").map((line) => line.replace(/\r$/, ""));
   for (let line = 0; line < lines.length;) {
     const raw = lines[line];
     const m = DATED.exec(raw);

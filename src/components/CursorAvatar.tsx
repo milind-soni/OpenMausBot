@@ -15,8 +15,11 @@ import {
   mouthFrame,
   type Ring,
 } from "./cursor-face-data"
-import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, frameFloorMs, morphUnitsPerMs, nextFrameAt, nextMascotFrame, type BodyMotion } from "./mascot-motion"
-import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
+import {
+  BLEND_OMEGA, COMPACT_MASCOT_PX, FRAME_SLACK_MS, GLYPH_EASE_MS, HOVER_BLINK_MS, MOTION, PoseBlend, REST_POSE, VIEW_SPAN, blinkOpenness, bodyPose,
+  bodyTransform, faceTravelUnits, frameFloorMs, loopSeed, morphUnitsPerMs, nextFrameAt, nextMascotFrame, poseTransform, restPose, type BodyMotion,
+} from "./mascot-motion"
+import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
 export { MOTION, bodyTransform, type BodyMotion }
 export {
@@ -321,522 +324,136 @@ export type CursorState =
   | "powering-down"
 
 export const POOLS = {
-  sleeping: [
-    22,
-    13,
-    4
-  ],
-  waking: [
-    13
-  ],
-  idle: [
-    6,
-    0,
-    8
-  ],
-  listening: [
-    1,
-    10,
-    19
-  ],
-  thinking: [
-    17,
-    8,
-    16,
-    14,
-    5
-  ],
-  searching: [
-    20,
-    15,
-    9,
-    3,
-    12,
-    18
-  ],
-  working: [
-    10,
-    7,
-    16,
-    11
-  ],
-  excited: [
-    2,
-    17,
-    21,
-    3,
-    11
-  ],
-  surprised: [
-    21,
-    3
-  ],
-  suspicious: [
-    5,
-    14,
-    23
-  ],
-  angry: [
-    7,
-    16
-  ],
-  drowsy: [
-    22,
-    4,
-    13
-  ],
-  happy: [
-    19,
-    2,
-    11,
-    17
-  ],
-  curious: [
-    21,
-    3,
-    0,
-    15
-  ],
-  confused: [
-    8,
-    14,
-    5
-  ],
-  bored: [
-    0,
-    4,
-    22
-  ],
-  proud: [
-    2,
-    15,
-    8
-  ],
-  shy: [
-    24,
-    0,
-    13
-  ],
-  sad: [
-    22,
-    4,
-    13
-  ],
-  laughing: [
-    2,
-    11,
-    17
-  ],
-  scared: [
-    21,
-    3
-  ],
-  playful: [
-    2,
-    17,
-    11,
-    8
-  ],
-  celebrate: [
-    2,
-    8,
-    17
-  ],
-  orbit: [
-    6,
-    0,
-    8
-  ],
-  radar: [
-    6,
-    0,
-    8
-  ],
-  progress: [
-    6,
-    0,
-    8
-  ],
-  spawning: [
-    3,
-    0
-  ],
-  humming: [
-    6,
-    0,
-    8
-  ],
-  loading: [
-    6,
-    0,
-    8
-  ],
-  dictating: [
-    1,
-    10,
-    19
-  ],
-  sending: [
-    6,
-    0,
-    8
-  ],
-  receiving: [
-    19,
-    0,
-    8
-  ],
-  uploading: [
-    15,
-    9,
-    8
-  ],
-  writing: [
-    15,
-    9
-  ],
-  notifying: [
-    21,
-    3,
-    0
-  ],
-  alerting: [
-    21,
-    3
-  ],
-  bouncing: [
-    2,
-    17
-  ],
-  dragging: [
-    3,
-    15,
-    0
-  ],
-  "powering-down": [
-    22,
-    13
-  ]
+  sleeping: [22, 13, 4],
+  waking: [13],
+  idle: [6, 0, 8],
+  listening: [1, 10, 19],
+  thinking: [17, 8, 16, 14, 5],
+  searching: [20, 15, 9, 3, 12, 18],
+  working: [10, 7, 16, 11],
+  excited: [2, 17, 21, 3, 11],
+  surprised: [21, 3],
+  suspicious: [5, 14, 23],
+  angry: [7, 16],
+  drowsy: [22, 4, 13],
+  happy: [19, 2, 11, 17],
+  curious: [21, 3, 0, 15],
+  confused: [8, 14, 5],
+  bored: [0, 4, 22],
+  proud: [2, 15, 8],
+  shy: [24, 0, 13],
+  sad: [22, 4, 13],
+  laughing: [2, 11, 17],
+  scared: [21, 3],
+  playful: [2, 17, 11, 8],
+  celebrate: [2, 8, 17],
+  orbit: [6, 0, 8],
+  radar: [6, 0, 8],
+  progress: [6, 0, 8],
+  spawning: [3, 0],
+  humming: [6, 0, 8],
+  loading: [6, 0, 8],
+  dictating: [1, 10, 19],
+  sending: [6, 0, 8],
+  receiving: [19, 0, 8],
+  uploading: [15, 9, 8],
+  writing: [15, 9],
+  notifying: [21, 3, 0],
+  alerting: [21, 3],
+  bouncing: [2, 17],
+  dragging: [3, 15, 0],
+  "powering-down": [22, 13],
 } satisfies Record<CursorState, number[]>
 
 const EXPR_CADENCE = {
-  sleeping: [
-    6000,
-    10000
-  ],
-  waking: [
-    800,
-    800
-  ],
-  idle: [
-    9000,
-    16000
-  ],
-  listening: [
-    2800,
-    5000
-  ],
-  thinking: [
-    2000,
-    3600
-  ],
-  searching: [
-    1000,
-    1800
-  ],
-  working: [
-    1800,
-    3200
-  ],
-  excited: [
-    1100,
-    2000
-  ],
-  surprised: [
-    2500,
-    4000
-  ],
-  suspicious: [
-    2600,
-    4500
-  ],
-  angry: [
-    2200,
-    3800
-  ],
-  drowsy: [
-    4000,
-    8000
-  ],
-  happy: [
-    2500,
-    4500
-  ],
-  curious: [
-    1800,
-    3200
-  ],
-  confused: [
-    2200,
-    3800
-  ],
-  bored: [
-    3500,
-    6000
-  ],
-  proud: [
-    3500,
-    6000
-  ],
-  shy: [
-    3000,
-    5500
-  ],
-  sad: [
-    4000,
-    7000
-  ],
-  laughing: [
-    1200,
-    2400
-  ],
-  scared: [
-    900,
-    1800
-  ],
-  playful: [
-    1500,
-    3000
-  ],
-  celebrate: [
-    1400,
-    2600
-  ],
-  orbit: [
-    4000,
-    8000
-  ],
-  radar: [
-    4000,
-    8000
-  ],
-  progress: [
-    4000,
-    8000
-  ],
-  spawning: [
-    1200,
-    1200
-  ],
-  humming: [
-    5000,
-    9000
-  ],
-  loading: [
-    6000,
-    10000
-  ],
-  dictating: [
-    4000,
-    8000
-  ],
-  sending: [
-    4000,
-    8000
-  ],
-  receiving: [
-    4000,
-    8000
-  ],
-  uploading: [
-    4000,
-    8000
-  ],
-  writing: [
-    4000,
-    8000
-  ],
-  notifying: [
-    1500,
-    2600
-  ],
-  alerting: [
-    2000,
-    3600
-  ],
-  bouncing: [
-    3000,
-    6000
-  ],
-  dragging: [
-    1600,
-    3000
-  ],
-  "powering-down": [
-    6000,
-    9000
-  ]
+  sleeping: [6000, 10000],
+  waking: [800, 800],
+  idle: [9000, 16000],
+  listening: [2800, 5000],
+  thinking: [2000, 3600],
+  searching: [1000, 1800],
+  working: [1800, 3200],
+  excited: [1100, 2000],
+  surprised: [2500, 4000],
+  suspicious: [2600, 4500],
+  angry: [2200, 3800],
+  drowsy: [4000, 8000],
+  happy: [2500, 4500],
+  curious: [1800, 3200],
+  confused: [2200, 3800],
+  bored: [3500, 6000],
+  proud: [3500, 6000],
+  shy: [3000, 5500],
+  sad: [4000, 7000],
+  laughing: [1200, 2400],
+  scared: [900, 1800],
+  playful: [1500, 3000],
+  celebrate: [1400, 2600],
+  orbit: [4000, 8000],
+  radar: [4000, 8000],
+  progress: [4000, 8000],
+  spawning: [1200, 1200],
+  humming: [5000, 9000],
+  loading: [6000, 10000],
+  dictating: [4000, 8000],
+  sending: [4000, 8000],
+  receiving: [4000, 8000],
+  uploading: [4000, 8000],
+  writing: [4000, 8000],
+  notifying: [1500, 2600],
+  alerting: [2000, 3600],
+  bouncing: [3000, 6000],
+  dragging: [1600, 3000],
+  "powering-down": [6000, 9000],
 } satisfies Record<CursorState, [number, number]>
 
 const BLINK = {
   sleeping: null,
   waking: null,
-  idle: [
-    6000,
-    14000
-  ],
-  listening: [
-    3000,
-    7000
-  ],
-  thinking: [
-    3500,
-    7000
-  ],
-  searching: [
-    1600,
-    4000
-  ],
-  working: [
-    2800,
-    5500
-  ],
-  excited: [
-    2000,
-    4000
-  ],
-  surprised: [
-    1800,
-    3500
-  ],
-  suspicious: [
-    4500,
-    8000
-  ],
-  angry: [
-    3500,
-    7000
-  ],
+  idle: [6000, 14000],
+  listening: [3000, 7000],
+  thinking: [3500, 7000],
+  searching: [1600, 4000],
+  working: [2800, 5500],
+  excited: [2000, 4000],
+  surprised: [1800, 3500],
+  suspicious: [4500, 8000],
+  angry: [3500, 7000],
   drowsy: null,
-  happy: [
-    2500,
-    5000
-  ],
-  curious: [
-    2500,
-    5500
-  ],
-  confused: [
-    2800,
-    5500
-  ],
-  bored: [
-    4000,
-    8000
-  ],
-  proud: [
-    3500,
-    7000
-  ],
-  shy: [
-    3000,
-    6000
-  ],
-  sad: [
-    4000,
-    8000
-  ],
-  laughing: [
-    2500,
-    5000
-  ],
-  scared: [
-    1200,
-    3000
-  ],
-  playful: [
-    2000,
-    4500
-  ],
-  celebrate: [
-    2200,
-    4500
-  ],
+  happy: [2500, 5000],
+  curious: [2500, 5500],
+  confused: [2800, 5500],
+  bored: [4000, 8000],
+  proud: [3500, 7000],
+  shy: [3000, 6000],
+  sad: [4000, 8000],
+  laughing: [2500, 5000],
+  scared: [1200, 3000],
+  playful: [2000, 4500],
+  celebrate: [2200, 4500],
   orbit: null,
   radar: null,
   progress: null,
   spawning: null,
-  humming: [
-    4000,
-    8000
-  ],
+  humming: [4000, 8000],
   loading: null,
   dictating: null,
   sending: null,
   receiving: null,
   uploading: null,
   writing: null,
-  notifying: [
-    2000,
-    4000
-  ],
+  notifying: [2000, 4000],
   alerting: null,
   bouncing: null,
-  dragging: [
-    2200,
-    4500
-  ],
-  "powering-down": null
+  dragging: [2200, 4500],
+  "powering-down": null,
 } satisfies Record<CursorState, [number, number] | null>
 
 export const STATE_GROUPS = {
-  "Cycle de vie": [
-    "sleeping",
-    "waking",
-    "idle",
-    "listening",
-    "thinking",
-    "searching",
-    "working"
-  ],
-  "Réactions": [
-    "excited",
-    "surprised",
-    "suspicious",
-    "angry",
-    "drowsy",
-    "happy",
-    "curious",
-    "confused",
-    "bored",
-    "proud",
-    "shy",
-    "sad",
-    "laughing",
-    "scared",
-    "playful",
-    "celebrate"
-  ],
-  "Morphes agent": [
-    "orbit",
-    "radar",
-    "progress"
-  ],
-  "Cycle produit": [
-    "spawning",
-    "humming",
-    "loading",
-    "dictating",
-    "writing",
-    "sending",
-    "receiving",
-    "uploading",
-    "notifying",
-    "alerting",
-    "dragging",
-    "bouncing",
-    "powering-down"
-  ]
+  "Cycle de vie": ["sleeping", "waking", "idle", "listening", "thinking", "searching", "working"],
+  "Réactions": ["excited", "surprised", "suspicious", "angry", "drowsy", "happy", "curious", "confused", "bored", "proud", "shy", "sad", "laughing", "scared", "playful", "celebrate"],
+  "Morphes agent": ["orbit", "radar", "progress"],
+  "Cycle produit": ["spawning", "humming", "loading", "dictating", "writing", "sending", "receiving", "uploading", "notifying", "alerting", "dragging", "bouncing", "powering-down"],
 } satisfies Record<string, CursorState[]>
 
 const isCursorState = (state: string): state is CursorState => state in POOLS
@@ -900,7 +517,10 @@ export interface CursorAvatarProps {
   glyphs?: boolean
   autoBlink?: boolean
   autoExpression?: boolean
-  paused?: boolean
+  /** Holds still: no loops, blinks or expression drift, until the pointer comes over it. A change of face still blends in. */
+  resting?: boolean
+  /** How far the eyes follow a nearby pointer, 0 to ignore it. */
+  pointerGaze?: number
   silhouette?: CursorSilhouette
   gradient?: [string, string, string]
   picture?: string | null
@@ -916,6 +536,19 @@ export interface CursorAvatarHandle {
   setExpression: (index: number) => void
 }
 
+const HOVER_SCOPE = 'a, button, [role="button"], [role="link"], [role="option"], [role="menuitem"]'
+const POINTER_REACH = 2
+const LOOK_SMOOTHING = 0.86
+const LEAN_DEGREES = 3
+const FIRST_HOVER_BLINK_MS: [number, number] = [250, 700]
+
+const engagedMotion = ({ state, resting }: { state: CursorState; resting: boolean }): BodyMotion => {
+  const own: BodyMotion = MOTION[state]
+  return resting ? { ...MOTION.idle, tilt: own.tilt, settle: own.settle } : own
+}
+
+const between = ([lo, hi]: [number, number]) => lo + Math.random() * (hi - lo)
+
 export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarProps>(
   function CursorAvatar(
     {
@@ -926,7 +559,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       turn = 0,
       lookAround = 0.5,
       flip = false,
-      spring = 7,
+      spring = BLEND_OMEGA,
       eyeScale = 1,
       showMouth = true,
       mouthStroke = MOUTH_STROKE,
@@ -935,10 +568,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       glyphs = true,
       autoBlink = true,
       autoExpression = true,
-      paused = false,
+      resting = false,
+      pointerGaze = 0,
       silhouette = DEFAULT_SILHOUETTE,
       gradient = DEFAULT_GRADIENT, picture,
-      eyeColor = "#ffffff",
+      eyeColor,
       title,
       className,
       style,
@@ -951,32 +585,37 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const eye0 = useRef<SVGPathElement | null>(null)
     const eye1 = useRef<SVGPathElement | null>(null)
     const mouth = useRef<SVGPathElement | null>(null)
+    const faceShift = useRef<SVGGElement | null>(null)
     const bodyGroup = useRef<SVGGElement | null>(null)
     const bodyContent = useRef<SVGGElement | null>(null)
     const trailLayer = useRef<SVGGElement | null>(null)
     const confettiLayer = useRef<SVGGElement | null>(null)
     const glyphLayer = useRef<SVGGElement | null>(null)
     const ticket = useRef<MascotTicket | null>(null)
-    const wake = () => ticket.current?.wake(nextFrameAt(performance.now(), frameFloorMs(engine.current.props.sizePx)))
+    const wake = () => ticket.current?.wake(nextFrameAt(performance.now(), frameFloorMs(engine.current.props.sizePx, engine.current.hovered)))
 
     const reduced = usePrefersReducedMotion()
     const motionStrength = motion ?? (reduced ? 0 : 1)
     const paint = `url(#${uid}-grad)`
+    const sizePx = typeof size === 'number' ? size : 160
     const props = {
       state,
       expression,
       gaze,
       turn,
+      flip,
       spring,
       eyeScale,
-      paused,
+      resting,
       reduced,
       lookAround,
       motionStrength,
       effects,
       glyphs,
+      autoBlink,
       paint,
-      sizePx: typeof size === 'number' ? size : 160,
+      sizePx,
+      compact: sizePx <= COMPACT_MASCOT_PX,
     }
 
     const engine = useRef({
@@ -990,13 +629,21 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       morph: 1,
       velocity: 0,
       travel: 0,
+      drawn: false,
       blinkStart: noTimestamp(),
+      nextBlinkAt: noTimestamp(),
       spinStart: noTimestamp(),
       spinDuration: 900,
       last: 0,
       stateStart: 0,
       lastState: state,
-      lastBodyTransform: '',
+      seed: loopSeed(uid),
+      blend: new PoseBlend(),
+      shown: REST_POSE,
+      poseKey: '',
+      hovered: false,
+      look: [0, 0],
+      lookTarget: [0, 0],
       faceStale: true,
       faceMoving: false,
       effectsStill: '',
@@ -1017,7 +664,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       e.targetGaze = GAZE[i]
       e.travel = faceTravelUnits(from, { rings: e.target, mouth: e.targetMouth, gaze: e.targetGaze })
       e.expression = i
-      e.morph = 0
+      e.morph = e.drawn ? 0 : 1
       e.velocity = 0
       e.last = performance.now()
       wake()
@@ -1047,10 +694,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     }, [state, expression])
 
     useEffect(() => {
-      if (!autoExpression || expression !== undefined || paused || reduced) return
+      if (!autoExpression || expression !== undefined || resting || reduced) return
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
-        const [lo, hi] = EXPR_CADENCE[state]
         timer = setTimeout(() => {
           const pool = POOLS[state]
           const alternatives = pool.filter(x => x !== engine.current.expression)
@@ -1060,31 +706,71 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               : pool[0]
           )
           tick()
-        }, lo + Math.random() * (hi - lo))
+        }, between(EXPR_CADENCE[state]))
       }
       tick()
       return () => clearTimeout(timer)
-    }, [state, autoExpression, expression, paused, reduced])
-
-    useEffect(() => {
-      const cadence = BLINK[state]
-      if (!autoBlink || !cadence || paused || reduced) return
-      let timer: ReturnType<typeof setTimeout>
-      const tick = () => {
-        timer = setTimeout(() => {
-          engine.current.blinkStart = performance.now()
-          wake()
-          tick()
-        }, cadence[0] + Math.random() * (cadence[1] - cadence[0]))
-      }
-      tick()
-      return () => clearTimeout(timer)
-    }, [state, autoBlink, paused, reduced])
+    }, [state, autoExpression, expression, resting, reduced])
 
     useEffect(() => {
       engine.current.faceStale = true
       wake()
-    }, [state, expression, gaze?.x, gaze?.y, turn, eyeScale, lookAround, paused, reduced, motionStrength, effects, glyphs, paint, showMouth, size])
+    }, [state, expression, gaze?.x, gaze?.y, turn, eyeScale, lookAround, resting, reduced, motionStrength, effects, glyphs, paint, showMouth, size, autoBlink])
+
+    useEffect(() => {
+      const el = svg.current
+      if (!pointerGaze || reduced || !el) return
+      const doc = el.ownerDocument
+      const scope = el.parentElement?.closest(HOVER_SCOPE) ?? el
+      let inside = false
+      let following = false
+      const stop = () => {
+        if (!following) return
+        following = false
+        doc.removeEventListener('pointermove', follow)
+        doc.documentElement.removeEventListener('pointerleave', stop)
+        const e = engine.current
+        e.hovered = false
+        e.lookTarget = [0, 0]
+        wake()
+      }
+      const follow = (event: PointerEvent) => {
+        const box = el.getBoundingClientRect()
+        const reach = Math.max(box.width, 1) * POINTER_REACH
+        const dx = (event.clientX - box.left - box.width / 2) / reach
+        const dy = (event.clientY - box.top - box.height / 2) / reach
+        const distance = Math.hypot(dx, dy)
+        if (!inside && distance > 1) return stop()
+        const fit = (distance > 1 ? 1 / distance : 1) * pointerGaze
+        const e = engine.current
+        e.lookTarget = [dx * fit * (e.props.flip ? -1 : 1), dy * fit]
+        wake()
+      }
+      const enter = (event: PointerEvent) => {
+        if (event.pointerType === 'touch') return
+        inside = true
+        if (!following) {
+          following = true
+          doc.addEventListener('pointermove', follow, { passive: true })
+          doc.documentElement.addEventListener('pointerleave', stop)
+          const e = engine.current
+          e.hovered = true
+          e.nextBlinkAt = performance.now() + between(FIRST_HOVER_BLINK_MS)
+        }
+        follow(event)
+      }
+      const leave = (event: PointerEvent) => {
+        inside = false
+        if (following) follow(event)
+      }
+      scope.addEventListener('pointerenter', enter as EventListener)
+      scope.addEventListener('pointerleave', leave as EventListener)
+      return () => {
+        scope.removeEventListener('pointerenter', enter as EventListener)
+        scope.removeEventListener('pointerleave', leave as EventListener)
+        stop()
+      }
+    }, [pointerGaze, reduced])
 
     useEffect(() => {
       const drawFace = (e: typeof engine.current, now: number, spinTurn: number) => {
@@ -1110,8 +796,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           const longitude = baseLongitude + radians
           const depth = Math.cos(longitude)
           const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
-          el.setAttribute('d', toPath(ring))
-          el.setAttribute(
+          put(el, 'd', toPath(ring))
+          put(
+            el,
             'transform',
             `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
               c[1] + gy
@@ -1121,7 +808,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               2.4
             ).toFixed(4)}) translate(${(-c[0]).toFixed(2)} ${(-c[1]).toFixed(2)})`
           )
-          el.style.opacity = depth > 0.02 ? '1' : '0'
+          put(el, 'opacity', depth > 0.02 ? '1' : '0')
         })
 
         const mouthEl = mouth.current
@@ -1132,8 +819,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           const longitude = baseLongitude + radians
           const depth = Math.cos(longitude)
           const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
-          mouthEl.setAttribute('d', mouthPath(frameGeom, spec))
-          mouthEl.setAttribute(
+          put(mouthEl, 'd', mouthPath(frameGeom, spec))
+          put(
+            mouthEl,
             'transform',
             `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
               frameGeom.y + gy
@@ -1141,25 +829,40 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               -frameGeom.x
             ).toFixed(2)} ${(-frameGeom.y).toFixed(2)})`
           )
-          mouthEl.style.opacity = depth > 0.02 ? '1' : '0'
+          put(mouthEl, 'opacity', depth > 0.02 ? '1' : '0')
         }
       }
 
-      const drawBody = (e: typeof engine.current, now: number, showEffects: boolean, showGlyphs: boolean) => {
+      const drawPose = (e: typeof engine.current, now: number, engaged: boolean) => {
         const p = e.props
         if (p.state !== e.lastState) {
           e.lastState = p.state
           e.stateStart = now
         }
-        const bodyEl = bodyGroup.current
-        if (bodyEl) {
-          const transform = bodyTransform(MOTION[p.state] ?? {}, now - e.stateStart, p.motionStrength ?? 1)
-          if (transform !== e.lastBodyTransform) {
-            e.lastBodyTransform = transform
-            if (transform) bodyEl.setAttribute('transform', transform)
-            else bodyEl.removeAttribute('transform')
-          }
+        const motion = engagedMotion(p)
+        const strength = p.motionStrength ?? 1
+        const target = engaged
+          ? bodyPose(motion, now - e.stateStart, strength, { seed: e.seed, compact: p.compact })
+          : restPose(motion, strength)
+        const key = `${p.state}|${engaged}`
+        if (key !== e.poseKey) {
+          if (e.poseKey && !motion.enter && !p.reduced) e.blend.retarget(now, e.shown, target)
+          e.poseKey = key
         }
+        const pose = e.blend.apply(now, target)
+        pose.rotate += e.look[0] * LEAN_DEGREES
+        e.shown = pose
+        const pixel = p.compact ? VIEW_SPAN / p.sizePx / Math.max(globalThis.devicePixelRatio ?? 1, 1) : 0
+        if (bodyGroup.current) put(bodyGroup.current, 'transform', poseTransform(pose, pixel) || null)
+        if (faceShift.current) {
+          const fx = pose.fx + e.look[0] * GAZE_TRAVEL.x
+          const fy = e.look[1] * GAZE_TRAVEL.y
+          put(faceShift.current, 'transform', Math.abs(fx) < 0.005 && Math.abs(fy) < 0.005 ? null : `translate(${fx.toFixed(2)} ${fy.toFixed(2)})`)
+        }
+      }
+
+      const drawEffects = (e: typeof engine.current, now: number, showEffects: boolean, showGlyphs: boolean) => {
+        const p = e.props
         const spec = EFFECTS[p.state]
         const glyph = spec?.glyph && showGlyphs ? glyphAmount(spec.glyph, now - e.stateStart) : 0
         const still = `${p.state}|${showEffects}|${showGlyphs}|${glyph}|${p.paint}`
@@ -1179,15 +882,46 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         })
       }
 
+      const stepLook = (e: typeof engine.current, dt: number) => {
+        const k = 1 - Math.pow(LOOK_SMOOTHING, dt * 60)
+        let moving = false
+        for (const axis of [0, 1]) {
+          const gap = e.lookTarget[axis] - e.look[axis]
+          if (Math.abs(gap) < 0.002) e.look[axis] = e.lookTarget[axis]
+          else {
+            e.look[axis] += gap * k
+            moving = true
+          }
+        }
+        return moving
+      }
+
+      const scheduleBlink = (e: typeof engine.current, now: number, engaged: boolean) => {
+        const p = e.props
+        const own = BLINK[p.state]
+        const cadence = engaged && p.autoBlink && !p.reduced && own ? (p.resting ? HOVER_BLINK_MS : own) : null
+        if (!cadence) {
+          e.nextBlinkAt = null
+          return
+        }
+        if (e.nextBlinkAt === null) e.nextBlinkAt = now + between(cadence)
+        else if (now + FRAME_SLACK_MS >= e.nextBlinkAt) {
+          e.blinkStart = now
+          e.nextBlinkAt = now + between(cadence)
+        }
+      }
+
       const frame = (now: number): number => {
         const e = engine.current
         const p = e.props
         const dt = Math.min(Math.max(now - e.last, 0) / 1000, 0.05)
-        const f = p.spring ?? 7
+        const f = p.spring ?? BLEND_OMEGA
         e.last = now
-        if (p.paused || p.reduced) {
+        if (p.reduced || !e.drawn) {
           e.morph = 1
           e.velocity = 0
+        }
+        if (p.reduced) {
           e.blinkStart = null
           e.spinStart = null
         } else {
@@ -1199,6 +933,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
             e.velocity = 0
           }
         }
+        e.drawn = true
+
+        const engaged = !p.reduced && (!p.resting || e.hovered)
+        scheduleBlink(e, now, engaged)
+        const lookMoving = stepLook(e, dt)
 
         let spinTurn = 0
         if (e.spinStart !== null) {
@@ -1211,21 +950,25 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         if (e.faceStale || e.faceMoving || faceMoving()) drawFace(e, now, spinTurn)
         e.faceStale = false
         e.faceMoving = faceMoving()
-        const showEffects = p.effects !== false && !p.paused
-        const showGlyphs = p.glyphs !== false && !p.paused && !p.reduced
-        drawBody(e, now, showEffects, showGlyphs)
-        if (p.paused) return Infinity
-        return nextMascotFrame(now, {
-          motion: MOTION[p.state] ?? {},
+        drawPose(e, now, engaged)
+        const showEffects = p.effects !== false && engaged && !p.resting && !p.compact
+        const showGlyphs = p.glyphs !== false && engaged && !p.resting
+        drawEffects(e, now, showEffects, showGlyphs)
+        const due = nextMascotFrame(now, {
+          motion: engagedMotion(p),
           effects: EFFECTS[p.state],
           stateElapsedMs: now - e.stateStart,
-          strength: p.motionStrength ?? 1,
+          strength: engaged ? p.motionStrength ?? 1 : 0,
           showEffects,
           showGlyphs,
           sizePx: p.sizePx,
           faceUnitsPerMs: morphUnitsPerMs(e.velocity, e.morph, f, e.travel),
-          blinkingOrSpinning: e.blinkStart !== null || e.spinStart !== null,
+          blinkingOrSpinning: e.blinkStart !== null || e.spinStart !== null || lookMoving,
+          hovered: e.hovered,
+          blending: e.blend.blending,
         })
+        const blinkDue = e.nextBlinkAt === null ? Infinity : nextFrameAt(e.nextBlinkAt - FRAME_SLACK_MS - 0.01, frameFloorMs(p.sizePx, e.hovered))
+        return Math.min(due, blinkDue)
       }
 
       engine.current.last = performance.now()
@@ -1239,7 +982,17 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
 
     const dimension = typeof size === 'number' ? `${size}px` : size
     const label = title === undefined ? mascotLabel(silhouette.name) : title
-    const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
+    const body = useMemo(() => ({ __html: silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`) }), [silhouette.body, uid]), clip = useMemo(() => ({ __html: silhouette.clip }), [silhouette.clip])
+    const cutFace = !eyeColor && !picture
+    const ink = cutFace ? 'black' : eyeColor
+    const face = (
+      <g clipPath={`url(#${uid}-clip)`} visibility={picture ? 'hidden' : undefined}>
+        <g transform={anchorTransform(silhouette.anchor)}><g ref={faceShift}>
+          <path ref={eye0} fill={ink} /><path ref={eye1} fill={ink} />
+          {showMouth && <path ref={mouth} fill="none" stroke={ink} strokeWidth={mouthStroke} strokeLinecap="round" />}
+        </g></g>
+      </g>
+    )
 
     return (
       <svg
@@ -1263,29 +1016,19 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           <clipPath
             id={`${uid}-clip`}
             transform={silhouette.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: silhouette.clip }}
+            dangerouslySetInnerHTML={clip}
           />
+          {cutFace && <mask id={`${uid}-face`} maskUnits="userSpaceOnUse" x={-VIEW_SPAN} y={-VIEW_SPAN} width={VIEW_SPAN * 3} height={VIEW_SPAN * 3}>
+            <rect x={-VIEW_SPAN} y={-VIEW_SPAN} width={VIEW_SPAN * 3} height={VIEW_SPAN * 3} fill="white" />{face}</mask>}
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           <g ref={trailLayer} />
           <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          {picture ? <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" /> : <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />}
-          <g clipPath={`url(#${uid}-clip)`} visibility={picture ? 'hidden' : undefined}>
-            <g transform={anchorTransform(silhouette.anchor)}>
-              <path ref={eye0} fill={eyeColor} />
-              <path ref={eye1} fill={eyeColor} />
-              {showMouth && (
-                <path
-                  ref={mouth}
-                  fill="none"
-                  stroke={eyeColor}
-                  strokeWidth={mouthStroke}
-                  strokeLinecap="round"
-                />
-              )}
-            </g>
-          </g>
+          {picture ? <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" /> : <g mask={cutFace ? `url(#${uid}-face)` : undefined}>
+            <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={body} />
+          </g>}
+          {!cutFace && face}
           </g>
           <g ref={glyphLayer} style={{ opacity: 0 }} />
           </g>
@@ -1313,12 +1056,9 @@ const displayedGaze = (e: { currentGaze: number[]; targetGaze: number[]; morph: 
 
 function blinkScale(e: { blinkStart: number | null }, now: number) {
   if (e.blinkStart === null) return 1
-  const t = (now - e.blinkStart) / 320
-  if (t >= 1) {
-    e.blinkStart = null
-    return 1
-  }
-  return Math.max(t < 0.42 ? 1 - t / 0.42 : (t - 0.42) / 0.58, 0.04)
+  const open = blinkOpenness(now - e.blinkStart)
+  if (open === null) e.blinkStart = null
+  return open ?? 1
 }
 
 export default CursorAvatar

@@ -1,13 +1,13 @@
-/** The GitHub update provider gives release notes as HTML; a generic feed often gives Markdown. */
-export function releaseHighlights(notes: string | undefined, max = 4): string[] {
-  if (!notes?.trim()) return [];
-  const markdown = notes
+/** The GitHub update provider gives release notes as HTML; a generic feed often gives Markdown. Either way, as Markdown. */
+export function notesAsMarkdown(notes: string): string {
+  return notes
     .replace(/\r\n?/g, "\n")
     .replace(/<\s*(strong|b)\s*>/gi, "**")
     .replace(/<\s*\/\s*(strong|b)\s*>/gi, "**")
     .replace(/<\s*li[^>]*>/gi, "\n- ")
     .replace(/<\s*\/\s*(li|p|h[1-6]|ul|ol)\s*>|<\s*br\s*\/?>/gi, "\n")
-    .replace(/<\s*h[1-6][^>]*>/gi, "\n# ")
+    .replace(/<\s*h([1-6])[^>]*>/gi, (_, level: string) => `\n${"#".repeat(Number(level))} `)
+    .replace(/<\s*\/?\s*code\s*>/gi, "`")
     .replace(/<[^>]+>/g, "")
     .replace(/&nbsp;/g, " ")
     .replace(/&quot;/g, '"')
@@ -15,6 +15,11 @@ export function releaseHighlights(notes: string | undefined, max = 4): string[] 
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&amp;/g, "&");
+}
+
+export function releaseHighlights(notes: string | undefined, max = 4): string[] {
+  if (!notes?.trim()) return [];
+  const markdown = notesAsMarkdown(notes);
   const out: string[] = [];
   for (const raw of markdown.split("\n")) {
     const item = /^\s*[-*+]\s+(.*)$/.exec(raw)?.[1]?.trim();

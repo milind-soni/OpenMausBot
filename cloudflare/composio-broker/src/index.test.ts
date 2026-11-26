@@ -17,7 +17,7 @@ import { streamedBody } from "./test-harness";
 
 const multiAccount = {
   enable: true,
-  max_accounts_per_toolkit: 5,
+  max_accounts_per_toolkit: 10,
   require_explicit_selection: true,
 };
 
@@ -340,10 +340,64 @@ describe("connected-apps broker boundaries", () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({ error: "Add an account alias so the existing connection is not replaced" });
     }
-    fixture.accounts = Array.from({ length: 5 }, (_, id) => ({ id: String(id), status: "INITIALIZING", toolkit: { slug: "gmail" } }));
-    expect((await fixture.authorize()).status).toBe(409);
+    fixture.accounts = Array.from({ length: 10 }, (_, id) => ({ id: String(id), status: "INITIALIZING", toolkit: { slug: "gmail" } }));
+    const full = await fixture.authorize();
+    expect(full.status).toBe(409);
+    await expect(full.json()).resolves.toEqual({ error: "gmail already has the maximum of 10 accounts" });
     expect(fixture.links()).toHaveLength(successfulLinks);
     expect(fixture.deletes()).toEqual([]);
+  });
+
+  it("links a sixth account, raising a Session made under the old cap of 5 in place first", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls, "agency-user");
+    const installation = { id: "agency-install", composio_user_id: "agency-user", session_id: "trs_old_cap", disabled_at: null };
+    let cap = 5;
+    const accounts = Array.from({ length: 5 }, (_, id) => ({ id: `ca_${id}`, alias: `sub-${id}`, status: "ACTIVE", toolkit: { slug: "gmail" } }));
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (url.includes("/connected_accounts")) return Response.json({ items: accounts });
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/gmail" });
+      if (url.includes("/auth_configs")) return Response.json({ items: [] });
+      if (init?.method === "PATCH") {
+        cap = (JSON.parse(String(init.body)) as { multi_account: { max_accounts_per_toolkit: number } }).multi_account.max_accounts_per_toolkit;
+        return Response.json({ session_id: "trs_old_cap" });
+      }
+      const old = session("trs_old_cap", "agency-user");
+      return Response.json({ ...old, config: { ...old.config, multi_account: { ...multiAccount, max_accounts_per_toolkit: cap } } });
+    });
+
+    const response = await authorize("gmail", "sub-5", installation, env as never, ctx as never);
+    expect(response.status).toBe(200);
+    const steps = fetchCalls.filter((call) => call.init?.method === "PATCH" || call.url.endsWith("/link"));
+    expect(steps.map((call) => [call.init?.method, call.url])).toEqual([
+      ["PATCH", "https://backend.composio.dev/api/v3.1/tool_router/session/trs_old_cap"],
+      ["POST", "https://backend.composio.dev/api/v3.1/tool_router/session/trs_old_cap/link"],
+    ]);
+    expect(JSON.parse(String(steps[0]!.init?.body))).toEqual({ multi_account: multiAccount });
+    expect(fetchCalls.some((call) => call.init?.method === "POST" && call.url.endsWith("/tool_router/session"))).toBe(false);
+  });
+
+  it("still links when the request to raise the old cap cannot reach Composio", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls, "offline-cap-user");
+    const installation = { id: "offline-cap-install", composio_user_id: "offline-cap-user", session_id: "trs_cap_offline", disabled_at: null };
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (init?.method === "PATCH") throw new TypeError("fetch failed");
+      if (url.includes("/connected_accounts")) return Response.json({ items: [{ id: "ca_0", alias: "sub-0", status: "ACTIVE", toolkit: { slug: "gmail" } }] });
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/gmail" });
+      if (url.includes("/auth_configs")) return Response.json({ items: [] });
+      const old = session("trs_cap_offline", "offline-cap-user");
+      return Response.json({ ...old, config: { ...old.config, multi_account: { ...multiAccount, max_accounts_per_toolkit: 5 } } });
+    });
+
+    const response = await authorize("gmail", "sub-1", installation, env as never, ctx as never);
+    expect(response.status).toBe(200);
+    expect(fetchCalls.some((call) => call.init?.method === "PATCH")).toBe(true);
+    expect(fetchCalls.some((call) => call.url.endsWith("/trs_cap_offline/link"))).toBe(true);
   });
 
   it("links a toolkit whose only account failed to sign in", async () => {
@@ -377,10 +431,10 @@ describe("connected-apps broker boundaries", () => {
     expect(fixture.deletes()).toHaveLength(1);
     expect(fixture.links()).toHaveLength(1);
 
-    const working = Array.from({ length: 4 }, (_, id) => ({ id: `ca_${id}`, alias: `other-${id}`, status: "ACTIVE", toolkit: { slug: "gmail" } }));
+    const working = Array.from({ length: 9 }, (_, id) => ({ id: `ca_${id}`, alias: `other-${id}`, status: "ACTIVE", toolkit: { slug: "gmail" } }));
     fixture.accounts = [{ id: "ca_old_work", alias: "work", status: "INITIATED", toolkit: { slug: "gmail" } }, ...working];
     expect((await fixture.authorize("work")).status).toBe(200);
-    fixture.accounts.push({ id: "ca_4", alias: "other-4", status: "ACTIVE", toolkit: { slug: "gmail" } });
+    fixture.accounts.push({ id: "ca_9", alias: "other-9", status: "ACTIVE", toolkit: { slug: "gmail" } });
     expect((await fixture.authorize("work")).status).toBe(409);
     expect(fixture.links()).toHaveLength(2);
 
@@ -403,11 +457,104 @@ describe("connected-apps broker boundaries", () => {
     await catalog(catalogEnv, new URL("https://broker.test/v1/catalog?cursor=eyJwYWdlIjoyfQ=="));
     await catalog(catalogEnv, new URL("https://broker.test/v1/catalog?cursor=%20%26limit%3D1"));
 
+    // A malformed cursor asks for the first page, which is kept from the first request.
     expect(fetchCalls.map((call) => new URL(call.url).searchParams.get("cursor"))).toEqual([
       null,
       "eyJwYWdlIjoyfQ==",
-      null,
     ]);
+  });
+
+  describe("kept catalog pages", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
+
+    async function catalogHarness(page: () => Response = () => Response.json({ items: [{ slug: "deepgram" }], next_cursor: "Mi01MDA=" })) {
+      vi.resetModules();
+      const { catalog: read } = await import("./index");
+      const upstream: string[] = [];
+      const { env } = testEnv([]);
+      vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+        upstream.push(new URL(String(input)).searchParams.get("cursor") ?? "");
+        return page();
+      });
+      const background: Array<Promise<unknown>> = [];
+      const ctx = { waitUntil: (promise: Promise<unknown>) => void background.push(promise) };
+      const catalogEnv = { ...env, COMPOSIO_TOOLKIT_BASE: "https://backend.composio.dev/api/v3" } as never;
+      const get = (cursor?: string) => read(catalogEnv, new URL(`https://broker.test/v1/catalog${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`), ctx);
+      return { get, upstream, settled: () => Promise.all(background) };
+    }
+
+    it("answers a page it has from memory, each cursor its own page, for thirty minutes", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-20T12:00:00Z"));
+      const { get, upstream } = await catalogHarness();
+      const first = await get();
+      const again = await get();
+      expect(upstream).toEqual([""]);
+      expect(await again.json()).toEqual(await first.json());
+      expect(again.headers.get("cache-control")).toBe("private, max-age=600");
+      expect(again.headers.get("content-type")).toContain("application/json");
+
+      await get("Mi01MDA=");
+      await get("Mi01MDA=");
+      expect(upstream).toEqual(["", "Mi01MDA="]);
+
+      vi.setSystemTime(new Date("2026-11-20T12:29:59Z"));
+      await get();
+      expect(upstream).toHaveLength(2);
+      vi.setSystemTime(new Date("2026-11-20T12:30:01Z"));
+      await get();
+      expect(upstream).toEqual(["", "Mi01MDA=", ""]);
+    });
+
+    it.each([
+      ["an upstream error", () => Response.json({ error: "down" }, { status: 500 }), 502],
+      ["a page with no toolkits", () => Response.json({ items: [] }), 200],
+      ["a page that is not a catalog", () => new Response("<html>", { headers: { "content-type": "text/html" } }), 200],
+    ])("never keeps %s", async (_name, page, status) => {
+      const { get, upstream } = await catalogHarness(page);
+      expect((await get()).status).toBe(status);
+      expect((await get()).status).toBe(status);
+      expect(upstream).toHaveLength(2);
+    });
+
+    it("stores a page in the data center's cache under its cursor alone, and another isolate answers from there", async () => {
+      const stored = new Map<string, { body: string; headers: Headers }>();
+      const edge = {
+        match: async (key: string) => {
+          const hit = stored.get(key);
+          return hit ? new Response(hit.body, { headers: hit.headers }) : undefined;
+        },
+        put: async (key: string, response: Response) => void stored.set(key, { body: await response.text(), headers: response.headers }),
+      };
+      const first = await catalogHarness();
+      vi.stubGlobal("caches", { default: edge });
+      await first.get();
+      await first.get("Mi01MDA=");
+      await first.settled();
+      expect([...stored.keys()]).toEqual(["https://catalog.invalid/v1/catalog?cursor=", "https://catalog.invalid/v1/catalog?cursor=Mi01MDA%3D"]);
+      expect(stored.get("https://catalog.invalid/v1/catalog?cursor=")!.headers.get("cache-control")).toBe("public, max-age=1800");
+
+      const second = await catalogHarness();
+      vi.stubGlobal("caches", { default: edge });
+      const answer = await second.get();
+      expect(await answer.json()).toEqual({ items: [{ slug: "deepgram" }], next_cursor: "Mi01MDA=" });
+      expect(answer.headers.get("cache-control")).toBe("private, max-age=600");
+      await second.get();
+      expect(second.upstream).toEqual([]);
+    });
+
+    it("still answers when the data center's cache fails", async () => {
+      const { get, upstream, settled } = await catalogHarness();
+      vi.stubGlobal("caches", { default: { match: async () => { throw new Error("cache down"); }, put: async () => { throw new Error("cache down"); } } });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect((await get()).status).toBe(200);
+      await settled();
+      expect(upstream).toEqual([""]);
+      warn.mockRestore();
+    });
   });
 
   it("passes catalog pagination metadata through untouched", async () => {
@@ -544,6 +691,8 @@ describe("MCP relay Session reuse", () => {
       // Read once per isolate and cached, so it is not part of a request's call sequence.
       if (path === "/auth_configs") return Response.json({ items: [] });
       calls.push(`${method} ${path}`);
+      const under = path.match(/^\/tool_router\/session\/([^/]+)\//)?.[1];
+      if (under && gone.has(under)) return Response.json({ error: "session not found" }, { status: 404 });
       const lookup = path.match(/^\/tool_router\/session\/([^/]+)$/)?.[1];
       if (method === "GET" && lookup) {
         return gone.has(lookup) ? Response.json({ error: "not found" }, { status: 404 }) : Response.json(session(lookup, "omb_relay"));
@@ -683,22 +832,53 @@ describe("MCP relay Session reuse", () => {
     expect(idle.lastSeenWrites).toHaveLength(1);
   });
 
-  it("keeps checking the Session on every connector-management route", async () => {
-    const relay = relayHarness("trs_connectors");
-    await relay.mcp();
-    const lookup = "GET /tool_router/session/trs_connectors";
+  const MANAGEMENT_ROUTES = [
+    ["/v1/connectors/connected", {}],
+    ["/v1/connectors?services=gmail", {}],
+    ["/v1/connectors/gmail/authorize", { method: "POST", body: JSON.stringify({ alias: "second" }) }],
+    ["/v1/connectors/gmail", { method: "DELETE" }],
+    ["/v1/connectors/gmail/accounts/ca_relay", { method: "DELETE" }],
+  ] as const;
 
-    for (const [path, init] of [
-      ["/v1/connectors/connected", {}],
-      ["/v1/connectors?services=gmail", {}],
-      ["/v1/connectors/gmail/authorize", { method: "POST", body: JSON.stringify({ alias: "second" }) }],
-      ["/v1/connectors/gmail", { method: "DELETE" }],
-      ["/v1/connectors/gmail/accounts/ca_relay", { method: "DELETE" }],
-    ] as const) {
+  it("checks the Session once for the connector-management routes that follow within five minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-20T12:00:00Z"));
+    const relay = relayHarness("trs_connectors");
+    const lookup = "GET /tool_router/session/trs_connectors";
+    const first = await relay.send("/v1/connectors/connected");
+    expect(first.calls[0]).toBe(lookup);
+
+    for (const [path, init] of MANAGEMENT_ROUTES) {
       const result = await relay.send(path, init);
       expect(result.response.status, path).toBe(200);
-      expect(result.calls[0], path).toBe(lookup);
+      expect(result.calls, path).not.toContain(lookup);
     }
+    expect((await relay.mcp()).calls).toEqual(["MCP trs_connectors"]);
+
+    vi.setSystemTime(new Date("2026-11-20T12:05:01Z"));
+    expect((await relay.send("/v1/connectors/connected")).calls[0]).toBe(lookup);
+  });
+
+  it.each(MANAGEMENT_ROUTES.slice(0, 4))("looks a dropped Session up again and sends %s once more", async (path, init) => {
+    const id = `trs_dropped_${MANAGEMENT_ROUTES.findIndex(([route]) => route === path)}`;
+    const relay = relayHarness(id);
+    await relay.send("/v1/connectors/connected");
+    relay.gone.add(id);
+
+    const result = await relay.send(path, init);
+    expect(result.response.status).toBe(200);
+    expect(result.calls).toContain(`GET /tool_router/session/${id}`);
+    expect(result.calls).toContain("POST /tool_router/session");
+    expect(result.calls.filter((call) => call.includes(`/tool_router/session/${id}_new/`))).toHaveLength(1);
+    expect(relay.row.session_id).toBe(`${id}_new`);
+    expect(result.calls.filter((call) => call.endsWith("/link"))).toHaveLength(path.endsWith("/authorize") ? 2 : 0);
+  });
+
+  it("looks the Session up again when D1 points the installation at another one", async () => {
+    const relay = relayHarness("trs_before_adoption");
+    await relay.send("/v1/connectors/connected");
+    relay.row.session_id = "trs_after_adoption";
+    expect((await relay.send("/v1/connectors/connected")).calls[0]).toBe("GET /tool_router/session/trs_after_adoption");
   });
 });
 

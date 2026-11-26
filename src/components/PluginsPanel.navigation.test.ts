@@ -50,6 +50,8 @@ vi.mock("./McpServersPanel", async () => {
 });
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
+vi.mock("./github/GithubAppCard", () => ({ GITHUB_CARD_SEARCH: "github git", GITHUB_CARD_CATEGORIES: ["Developer tools"], GithubAppCard: () => null }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => true }));
 vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
@@ -62,6 +64,7 @@ vi.mock("./PostizCard", () => ({
 }));
 import { HOSTED_MCP_APPS } from "@/lib/hosted-mcp-apps";
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
+import { AppTile, AppTileView, type AppTileProps } from "./AppTile";
 import { connectedInventoryCopy } from "@/lib/connector-status";
 import { FACE_BOX } from "./cursor-face-data";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
@@ -84,7 +87,9 @@ function nodes(value: ReactNode): Node[] {
   return Children.toArray(value).flatMap((child) => {
     if (!isValidElement(child)) return [];
     const node = child as Node;
-    return [node, ...nodes(node.props.children)];
+    // A tile is its own component, of props alone: what it renders is walked as part of the panel's tree.
+    const inside = node.type === AppTile ? AppTileView(node.props as unknown as AppTileProps) : node.props.children;
+    return [node, ...nodes(inside)];
   });
 }
 function render() {
@@ -538,6 +543,22 @@ describe("Apps pop-up", () => {
     expect(html).not.toContain('data-app-tile="gmail"');
     expect(html).not.toContain("MCP inventory");
     expect(html).toContain("1 connected");
+  });
+
+  it("puts the GitHub sign-in row just before the GitHub app's tile in its section, and in the native cards otherwise", () => {
+    const categorized = (slug: string, category: string) => ({ ...card(slug), categories: [category] });
+    fixture.overrides.set(CARDS, [categorized("linear", "Developer tools"), categorized("github", "Developer tools"), categorized("gmail", "Communication")]);
+    const sectioned = render();
+    const githubRows = (html: string) => [...html.matchAll(/<div (?:class="([^"]*)" )?data-native-card="github"(?: class="([^"]*)")?/g)].map((match) => match[1] ?? match[2]);
+    expect(githubRows(sectioned.html)).toEqual(["contents", "hidden"]);
+    const section = sectioned.html.slice(sectioned.html.indexOf("Developer tools"));
+    expect(section.indexOf('data-native-card="github"')).toBeLessThan(section.indexOf('data-app-tile="github"'));
+    expect(section.indexOf('data-app-tile="linear"')).toBeLessThan(section.indexOf('data-native-card="github"'));
+    fixture.overrides.set(SEARCH, "git");
+    const searched = render();
+    expect(githubRows(searched.html)).toEqual(["contents"]);
+    fixture.overrides.set(SEARCH, "gmail");
+    expect(githubRows(render().html)).toEqual(["hidden"]);
   });
 
   it("groups the catalog into connected apps, category previews and every app, with a View all per section", () => {

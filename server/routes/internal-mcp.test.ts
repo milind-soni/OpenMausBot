@@ -326,6 +326,22 @@ describe("internal mcp_server route, Full access", () => {
     expect(body.dropped).toBeUndefined();
   });
 
+  it("refuses a partial literal environment update without clearing saved credentials", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, stored, ref } = fixture({ servers: { notes } });
+    const rejected = await post({ action: "update", name: "notes", env: { npm_config_cache: "/tmp/npm-cache" } });
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.error).toContain("env NOTES_TOKEN");
+    expect(rejected.body.error).not.toContain("saved-token");
+    expect(stored("notes")).toMatchObject({ env: { NOTES_TOKEN: "saved-token" } });
+    expect(probe).not.toHaveBeenCalled();
+
+    const accepted = await post({ action: "update", name: "notes", env: { npm_config_cache: "/tmp/npm-cache", NOTES_TOKEN: ref("replacement") } });
+    expect(accepted.status).toBe(200);
+    expect(stored("notes")).toMatchObject({ env: { npm_config_cache: "/tmp/npm-cache" } });
+    expect(accepted.body.dropped).toBeUndefined();
+  });
+
   it("a new address drops the sign-in only when there was one to drop", async () => {
     probeWith({ ok: true, tools: [] });
     const signedIn = fixture({ servers: { linear } });
@@ -883,6 +899,15 @@ describe("internal mcp_server route, below Full access", () => {
     expect(JSON.stringify(remote.chat)).not.toMatch(/opaque-value-123|abc123/);
   });
 
+  it("allows clearing saved credentials when the person approves the card", async () => {
+    probeWith({ ok: true, tools: [] });
+    const { post, card, respond, stored } = fixture({ full: false, servers: { notes } });
+    expect((await post({ action: "update", name: "notes", env: { npm_config_cache: "/tmp/npm-cache" } })).status).toBe(202);
+    expect(card()?.subtitle).toContain("env NOTES_TOKEN");
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { result: { state: "applied" } } });
+    expect(stored("notes")).toMatchObject({ env: { npm_config_cache: "/tmp/npm-cache" } });
+  });
+
   it("the card's targetHash is the hash of the display target, so a secret in the args or url cannot be guessed from it", async () => {
     const value = "sk-live-hunter2-secret";
     const keyed = { command: "npx", args: ["-y", "notes-mcp", "--api-key", value], enabled: false };
@@ -986,6 +1011,13 @@ describe("internal mcp_server route, below Full access", () => {
     const personal = fixture({ servers: { linear }, personal: ["linear"], admin: false });
     expect((await personal.post({ action: "sign_in", name: "linear" })).status).toBe(202);
     expect(personal.signIns).toEqual([{ name: "linear", url: linear.url }]);
+  });
+
+  it("sign_in to another bot's own web connection is refused and posts no card", async () => {
+    const { post, signIns, lines } = fixture({ servers: { linear: { ...linear, bot: "scout" } } });
+    expect(await post({ action: "sign_in", name: "linear" })).toEqual({ status: 403, body: { error: "That server belongs to another bot." } });
+    expect(signIns).toEqual([]);
+    expect(lines).toEqual([]);
   });
 
   it("sign_in on a server that is off posts no card and tells the bot to call enable", async () => {

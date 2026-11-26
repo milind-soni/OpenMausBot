@@ -29,10 +29,12 @@ function ended(phase: "expired" | "failed", message?: string): DeviceSignInStatu
 }
 
 /** `autoStart` begins at once and opens Anthropic's page; `onDone` hears the outcome so an account list can close it. */
-export function ClaudeSignIn({ instanceId, autoStart = false, onDone }: {
+export function ClaudeSignIn({ instanceId, autoStart = false, onDone, onStart }: {
   instanceId: string;
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
+  /** A sign-in is starting. */
+  onStart?: () => void;
 }) {
   const { refreshInstances, refreshModels } = useStore();
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
@@ -64,6 +66,7 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone }: {
   const start = async () => {
     setBusy("start");
     setError(null);
+    onStart?.();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setCode("");

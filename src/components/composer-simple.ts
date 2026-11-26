@@ -2,12 +2,13 @@ import type { Bot, Group } from "@/state/store";
 import { effectiveDefaultResponder, groupComposerHint } from "@/lib/group-routing";
 import { t } from "@/lib/i18n";
 import { BOT_BUTTON, botButtonStyle, botButtonTone, type BotButton } from "@/lib/bot-button";
+import { ELEVATED_COMPOSER } from "./elevated";
 
 /** Simple mode's composer pill on a wider screen: the field, the mic and the round button in one shell. */
-export const SIMPLE_COMPOSER = "bg-composer p-2 ring-[0.5px] ring-ink/10 hover:ring-ink/[0.22] focus-within:ring-ink/[0.22] shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03),0_0_0_1px_rgb(228_228_228/0.04)] [transition:border-radius_300ms,box-shadow_150ms]";
+export const SIMPLE_COMPOSER = `${ELEVATED_COMPOSER} p-2 hover:ring-ink/[0.22] focus-within:ring-ink/[0.22] [transition:border-radius_300ms,box-shadow_150ms]`;
 
 /** Simple mode's small round controls in the composer: the +, the mic and Stop beside the round button. */
-export const SIMPLE_CONTROL = "size-7 rounded-full bg-ink/[0.05] ring-[0.5px] ring-inset ring-ink/[0.07] text-ink-tertiary hover:bg-ink/[0.09] hover:text-ink";
+export const SIMPLE_CONTROL = "size-7 rounded-full bg-ink/[0.06] inset-ring-[0.5px] inset-ring-ink/[0.08] text-ink-tertiary hover:bg-ink/[0.09] hover:text-ink";
 
 const ROOM_FILL = { fill: "var(--color-accent)", ink: "var(--color-accent-ink)" };
 
@@ -21,9 +22,8 @@ export function slotColors(color: Bot["color"] | undefined, room: boolean): { fi
   return { fill: tone.fill, ink: tone.ink, button: { className: BOT_BUTTON, style: botButtonStyle(own) } };
 }
 
-export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint }: {
+export function composerPlaceholder({ simple, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint, startsThread = false }: {
   simple: boolean;
-  locked: boolean;
   approval: boolean;
   attaching: boolean;
   listening: boolean;
@@ -39,12 +39,14 @@ export function composerPlaceholder({ simple, locked, approval, attaching, liste
   goal: boolean;
   botName: string;
   setupHint: string | null | undefined;
+  /** The room feed's composer: every line starts a thread. */
+  startsThread?: boolean;
 }): string {
-  if (locked) return t("composer.placeholder.locked");
   if (approval) return t("composer.placeholder.approval");
   if (attaching) return t("composer.placeholder.attaching");
   if (listening) return t("composer.placeholder.listening");
   if (replying && !busy) return t("composer.placeholder.reply");
+  if (startsThread && group && !goal) return t("composer.placeholder.newThread", { name: group.name });
   if (simple) {
     if (!busy && goal) return group ? t("composer.placeholder.goal", { name: group.name }) : t("composer.placeholder.goalSolo", { name: botName });
     if (!busy && !group && setupHint) return setupHint;
@@ -83,4 +85,12 @@ export function sendLabels({ simple, busy, canSteer, name, sendLabel }: { simple
       : { label: t("composer.send.queue"), title: t("composer.send.queueHint") };
   }
   return { label: t("composer.send.message"), title: `${t("chat.send")} (${sendLabel})` };
+}
+
+/** Whose thread /fork copies from this composer, or none where it isn't offered: on a phone, in a bot-to-bot room, with
+ * no thread yet, and in a room feed's composer, whose line starts a thread that doesn't exist yet. */
+export function composerForkOwner({ phone, group, botId, threadId, startsThread }: {
+  phone: boolean; group?: { id: string; dm?: boolean }; botId?: string; threadId?: string; startsThread: boolean;
+}): string | undefined {
+  return phone || group?.dm || !threadId || startsThread ? undefined : group?.id ?? botId;
 }

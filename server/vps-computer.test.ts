@@ -1,3 +1,4 @@
+import { ComputerIdleTimer } from "./computer-idle.ts";
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
@@ -30,10 +31,12 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
+import { ensureVpsSshMaster } from "./vps-ssh.ts";
 import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
   VPS_ENVIRONMENT_LABEL,
+  vpsEnvironmentId,
   VPS_IMAGE,
   VPS_MANAGED_LABEL,
   VPS_VIEWER_LABEL,
@@ -41,7 +44,9 @@ import {
   vpsComputerJoin,
   vpsDesktopConnection,
   closeVpsDesktopTunnel,
+  stopVpsDesktopTunnel,
   closeAllVpsDesktopTunnels,
+  vpsComputerRunning,
   vpsComputerScreenshot,
   vpsComputerStatus,
   vpsComputerMcp,
@@ -57,6 +62,7 @@ import {
   reuseVps,
   dockerCliInstallCommand,
   listManagedVpsComputers,
+  VpsHostUnreachableError,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
 
@@ -515,6 +521,31 @@ describe("VPS computer", () => {
     expect(stopped.container).toBe("stopped");
     expect(stop.calls.some(({ args }) => args[2] === "stop" && args[3] === CONTAINER_ID)).toBe(true);
     expect(stop.calls.some(({ args }) => ["rm", "system", "reboot", "shutdown"].includes(args[2]!))).toBe(false);
+  });
+
+  it("leaves the desktop running when work arrives during idle-stop inspection", async () => {
+    const fake = fixture({ environmentId: vpsEnvironmentId() });
+    let idle = true;
+    const runner: typeof fake.runner = (args, options) => { idle = false; return fake.runner(args, options); };
+    const result = await vpsComputerAction("stop", CONFIG, BOT_ID, runner, () => idle);
+    expect(result.container).toBe("running");
+    expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
+  });
+
+  it("restarts the same container after an unattended idle stop", async () => {
+    const fake = fixture({ environmentId: vpsEnvironmentId() });
+    const stopped = await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => true);
+    expect(stopped.container).toBe("stopped");
+    const resumed = await vpsComputerAction("provision", CONFIG, BOT_ID, fake.runner);
+    expect(resumed.ready).toBe(true);
+    expect(resumed.container_id).toBe(CONTAINER_ID);
+    expect(fake.calls.some(({ args }) => ["rm", "run"].includes(args[2]!))).toBe(false);
+  });
+
+  it.each([null, "another-installation"])("leaves an unverified idle desktop running (%s)", async environmentId => {
+    const fake = fixture({ environmentId });
+    await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => true);
+    expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
   });
 
   it("serializes concurrent provisioning for the same bot", async () => {
@@ -1184,7 +1215,7 @@ describe("VPS computer", () => {
   });
 
   it("names the one way on that fits what Auto's VPS check found", () => {
-    const connection = "Check the VPS connection in Settings → API keys.";
+    const connection = "Check the VPS connection in Settings → AI → Other services.";
     expect(vpsUnavailableHint({ reachable: true })).toBe("Open Computer and enable Start VPS automatically, or choose Cloud computer to start it manually.");
     expect(vpsUnavailableHint({ reachable: false })).toBe(connection);
     expect(vpsUnavailableHint({ autoStartVps: true, reachable: true })).toBe(connection);
@@ -1218,10 +1249,10 @@ describe("remote desktop tunnel ownership", () => {
     } };
   }
 
-  async function openFixture() {
+  async function openFixture(onViewerClosed?: () => void) {
     const { children, runner, cleanup } = tunnelFixture();
     try {
-      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true, onViewerClosed);
       return { child: children[0]!, runner };
     } catch (error) { cleanup(); throw error; }
   }
@@ -1259,13 +1290,15 @@ describe("remote desktop tunnel ownership", () => {
   it("ignores an old tunnel's queued expiry and close after replacement", async () => {
     const { children, runner, cleanup } = tunnelFixture();
     const timers = vi.spyOn(globalThis, "setTimeout");
+    const closed = vi.fn();
     try {
-      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true, closed);
       const expired = timers.mock.calls.find(([, delay]) => delay === 30_000)![0] as () => void;
       closeAllVpsDesktopTunnels();
       await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
       expired();
       children[0]!.emit("close", 0);
+      expect(closed).not.toHaveBeenCalled();
       expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
       expect(children[1]!.killed).toBe(false);
     } finally { timers.mockRestore(); cleanup(); }
@@ -1332,6 +1365,42 @@ describe("remote desktop tunnel ownership", () => {
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
   });
+  it.each(["grace expiry", "SSH exit"])("renews the full VPS idle window after %s", async (end) => {
+    const stop = vi.fn(async () => {});
+    const timer = new ComputerIdleTimer(300_000, () => Boolean(vpsDesktopConnection(BOT_ID)), stop);
+    const { child } = await openFixture(() => timer.touch());
+    vi.useFakeTimers();
+    try {
+      timer.touch();
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      await vi.advanceTimersByTimeAsync(240_000);
+      release();
+      if (end === "SSH exit") child.kill();
+      else await vi.advanceTimersByTimeAsync(30_000);
+      expect(vpsDesktopConnection(BOT_ID)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally { timer.cancel(); closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("waits a full idle window after a short desktop view closes", async () => {
+    const stop = vi.fn(async () => {});
+    const timer = new ComputerIdleTimer(1000, () => Boolean(vpsDesktopConnection(BOT_ID)), stop);
+    await openFixture(() => timer.touch());
+    vi.useFakeTimers();
+    try {
+      timer.touch();
+      await vi.advanceTimersByTimeAsync(400);
+      expect(closeVpsDesktopTunnel(BOT_ID)).toEqual({ closed: true });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally { timer.cancel(); closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
   it("keeps remote tabs connected when the native viewer closes", async () => {
     const { child, runner } = await openFixture();
     try {
@@ -1344,6 +1413,33 @@ describe("remote desktop tunnel ownership", () => {
       await vi.advanceTimersByTimeAsync(30_001);
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("stops an open viewer tunnel on a server switch without firing onViewerClosed, so the next join opens a fresh tunnel", async () => {
+    const closed = vi.fn();
+    const { child, runner } = await openFixture(closed);
+    try {
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      expect(stopVpsDesktopTunnel(BOT_ID)).toBe(true);
+      expect(child.killed).toBe(true);
+      release();
+      child.emit("close", 0);
+      expect(closed).not.toHaveBeenCalled();
+      expect(vpsDesktopConnection(BOT_ID)).toBeUndefined();
+      const next = await vpsComputerJoin({ vps: { sshAlias: "alpha-vps" } }, BOT_ID, runner, true);
+      expect(next.state).toBe("running");
+      expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
+    } finally { closeAllVpsDesktopTunnels(); }
+  });
+
+  it("checks whether a managed VPS desktop container is running without throwing on unreachable or missing hosts", async () => {
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ running: true }).runner)).toBe(true);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ running: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ container: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ managed: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ environmentId: "another-installation" }).runner)).toBe(false);
+    expect(await vpsComputerRunning({}, BOT_ID, fixture().runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, async () => { throw new Error("ssh: connect timeout"); })).toBe(false);
   });
 });
 
@@ -1363,11 +1459,70 @@ describe("a missing Docker CLI", () => {
     const command = dockerCliInstallCommand(process.platform)!;
     const inventory = await listManagedVpsComputers(CONFIG, [], runner);
     expect(inventory.available).toBe(false);
+    expect(inventory.unreachable).toBeUndefined();
     expect(inventory.problem).toContain(command);
     expect(inventory.problem).not.toMatch(/ENOENT/);
 
     const status = await vpsComputerStatus(CONFIG, BOT_ID, runner);
     expect(status.problem).toContain(command);
     expect(status.problem).not.toMatch(/ENOENT/);
+  });
+});
+
+describe("a VPS inventory that fails", () => {
+  it("is unreachable only when the host gave no list at all", async () => {
+    const silent: VpsCommandRunner = async () => {
+      throw new VpsHostUnreachableError("ssh: connect to host fixture port 22: Connection timed out");
+    };
+    expect(await listManagedVpsComputers(CONFIG, [], silent)).toMatchObject({ available: false, unreachable: true });
+
+    // SSH got through and the daemon said no: the host is there, so its computers may be too.
+    const refused: VpsCommandRunner = async () => {
+      throw new Error("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
+    };
+    const refusal = await listManagedVpsComputers(CONFIG, [], refused);
+    expect(refusal.available).toBe(false);
+    expect(refusal.unreachable).toBeUndefined();
+
+    const garbled: VpsCommandRunner = async () => ({ stdout: "not-a-container-id\n", stderr: "" });
+    const unverified = await listManagedVpsComputers(CONFIG, [], garbled);
+    expect(unverified.available).toBe(false);
+    expect(unverified.unreachable).toBeUndefined();
+
+    const answers: VpsCommandRunner = async () => ({ stdout: "", stderr: "" });
+    const both = await listManagedVpsComputers(CONFIG, [], async (args, options) =>
+      args.includes("ssh://other") ? garbled(args, options) : silent(args, options), ["fixture", "other"]);
+    expect(both.available).toBe(false);
+    expect(both.unreachable).toBeUndefined();
+    expect((await listManagedVpsComputers(CONFIG, [], answers)).unreachable).toBeUndefined();
+  });
+
+  it("tells an SSH failure from a Docker refusal on the real command path", async () => {
+    try {
+      mockTransport(async () => {
+        throw new Error("error during connect: command [ssh -- production-vps docker system dial-stdio] has exited with exit status 255, stderr=ssh: Could not resolve hostname production-vps");
+      });
+      expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+
+      mockTransport(async () => {
+        throw new Error("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?");
+      });
+      const refused = await listManagedVpsComputers(CONFIG, []);
+      expect(refused.available).toBe(false);
+      expect(refused.unreachable).toBeUndefined();
+
+      // Windows has no shared SSH master to check first.
+      if (process.platform !== "win32") {
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("ssh: Could not resolve hostname production-vps"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+        // The host answered with a changed key, or the local ssh never started: the host may still be up.
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed."));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("spawn ssh ENOENT"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(Object.assign(new Error("VPS SSH initialization timed out"), { killed: true }));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+      }
+    } finally { spawnMock.mockReset(); }
   });
 });

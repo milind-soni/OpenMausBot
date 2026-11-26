@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, llmThreadTitlesEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, usbPhoneTakeoverEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, suggestedRepliesEnabled, usbPhoneTakeoverEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -69,13 +69,6 @@ describe("experimental feature flags", () => {
     expect(sharedComputersEnabled({ features: { sharedComputers: true } })).toBe(true);
   });
 
-  it("offers Regenerate title only while the server has generated titles on", () => {
-    expect(llmThreadTitlesEnabled(null)).toBe(false);
-    expect(llmThreadTitlesEnabled({ features: {} })).toBe(false);
-    expect(llmThreadTitlesEnabled({ features: { llmThreadTitles: false } })).toBe(false);
-    expect(llmThreadTitlesEnabled({ features: { llmThreadTitles: true } })).toBe(true);
-  });
-
   it("keeps Learn from group chats off until it is switched on", () => {
     expect(roomMemoryCaptureEnabled(null)).toBe(false);
     expect(roomMemoryCaptureEnabled({ features: {} })).toBe(false);
@@ -103,5 +96,12 @@ describe("saved steps flag", () => {
     expect(savedStepsEnabled(null)).toBe(true);
     expect(savedStepsEnabled({ features: {} })).toBe(true);
     expect(savedStepsEnabled({ features: { savedSteps: false } })).toBe(false);
+  });
+
+  it("follows the server's suggested replies switch, and stays off with a server that doesn't report one", () => {
+    expect(suggestedRepliesEnabled(null)).toBe(false);
+    expect(suggestedRepliesEnabled({ features: {} })).toBe(false);
+    expect(suggestedRepliesEnabled({ features: { suggestedReplies: true } })).toBe(true);
+    expect(suggestedRepliesEnabled({ features: { suggestedReplies: false } })).toBe(false);
   });
 });

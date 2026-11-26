@@ -65,16 +65,41 @@ describe("audio attachments", () => {
     expect(isAudioAttachment("/store/a.mp4")).toBe(false);
   });
 
+  const route = "/api/threads/thread%2Fone/messages/message%20two/file";
+  const asks = (body: unknown) => [route, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: expect.any(AbortSignal),
+  }];
+
+  it("streams audio of any size through this message's own link", async () => {
+    const url = `${route}?media=${"c".repeat(43)}`;
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ url, mime: "audio/mpeg", bytes: PREVIEW_MAX_BYTES * 8 }), {
+      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await loadMessageAudio(clip, message, new AbortController().signal)).toBe(url);
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url, mime: "video/mp4" }), {
+      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+  });
+
   it("loads audio through the message-scoped file endpoint and keeps the server's MIME type", async () => {
     const fetcher = vi.fn(async () => new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
     vi.stubGlobal("fetch", fetcher);
-    const signal = new AbortController().signal;
-    const blob = await loadMessageAudio(clip, message, signal);
-    expect(fetcher).toHaveBeenCalledWith("/api/threads/thread%2Fone/messages/message%20two/file", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: clip.path }), signal: expect.any(AbortSignal),
-    });
+    const blob = await loadMessageAudio(clip, message, new AbortController().signal) as Blob;
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
     expect(blob.type).toBe("audio/mpeg");
     expect(await blob.text()).toBe("audio bytes");
+  });
+
+  it("asks again for the bytes when the server links only videos", async () => {
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => String(init.body).includes("media")
+      ? new Response(JSON.stringify({ error: "only videos can be played here" }), { status: 415 })
+      : new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await (await loadMessageAudio(clip, message, new AbortController().signal) as Blob).text()).toBe("audio bytes");
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true }), asks({ path: clip.path })]);
   });
 
   it("refuses anything the server does not call audio, and keeps authorization failures", async () => {
@@ -82,8 +107,10 @@ describe("audio attachments", () => {
       vi.stubGlobal("fetch", vi.fn(async () => new Response("not audio", { headers: { "content-type": mime } })));
       await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
     }
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 })));
+    const refused = vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 }));
+    vi.stubGlobal("fetch", refused);
     await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("outside this conversation");
+    expect(refused).toHaveBeenCalledOnce();
   });
 
   it("enforces the size limit with and without Content-Length", async () => {
@@ -113,16 +140,16 @@ describe("message gallery", () => {
       "Plain prose /workspace/private.txt",
     ].join("\n");
     expect(collectMessageFiles(text, [image.path])).toEqual([
-      { path: "./report.pdf", name: "report.pdf", linked: true },
-      { path: "./demo.mp4", name: "demo.mp4", linked: true },
+      { path: "./report.pdf", shownPath: "./report.pdf", name: "report.pdf", linked: true },
+      { path: "./demo.mp4", shownPath: "./demo.mp4", name: "demo.mp4", linked: true },
     ]);
   });
 
   it("handles Windows and encoded paths while keeping a safe filename", () => {
     expect(collectMessageFiles("[release](file:///C:/work/release%20notes.pdf) [video](./demo.MP4#section)"))
       .toEqual([
-        { path: "file:///C:/work/release%20notes.pdf", name: "release notes.pdf", linked: true },
-        { path: "./demo.MP4#section", name: "demo.MP4", linked: true },
+        { path: "file:///C:/work/release%20notes.pdf", shownPath: "C:/work/release notes.pdf", name: "release notes.pdf", linked: true },
+        { path: "./demo.MP4#section", shownPath: "./demo.MP4", name: "demo.MP4", linked: true },
       ]);
     expect(isVideoAttachment("./demo.MP4#section")).toBe(true);
     expect(isVideoAttachment("./movie.mp4.html")).toBe(false);
@@ -130,16 +157,16 @@ describe("message gallery", () => {
 
   it("sends a Windows path with its backslash before punctuation intact", () => {
     expect(collectMessageFiles("[report](C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md)")).toEqual([
-      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
+      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", shownPath: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
     ]);
   });
 
   it("does not decode file URLs twice or mistake filename characters for URL suffixes", () => {
     expect(collectMessageFiles("[video](file:///work/demo%23one.mp4) [percent](file:///work/r%2520.pdf) [space](file:///work/r%20.pdf)"))
       .toEqual([
-        { path: "file:///work/demo%23one.mp4", name: "demo#one.mp4", linked: true },
-        { path: "file:///work/r%2520.pdf", name: "r%20.pdf", linked: true },
-        { path: "file:///work/r%20.pdf", name: "r .pdf", linked: true },
+        { path: "file:///work/demo%23one.mp4", shownPath: "/work/demo#one.mp4", name: "demo#one.mp4", linked: true },
+        { path: "file:///work/r%2520.pdf", shownPath: "/work/r%20.pdf", name: "r%20.pdf", linked: true },
+        { path: "file:///work/r%20.pdf", shownPath: "/work/r .pdf", name: "r .pdf", linked: true },
       ]);
     expect(isVideoAttachment("file:///work/demo%23one.mp4")).toBe(true);
   });

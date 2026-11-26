@@ -51,13 +51,45 @@ export function effectiveRoomTurnTimeoutMinutes(
 /** How long a turn may show nothing while one of its tools runs: as long as an MCP call may be set to take. */
 export const ROOM_TOOL_QUIET_LIMIT_MS = MAX_MCP_CALL_TIMEOUT_MINUTES * 60_000;
 
+export const ROOM_TURN_CLOCK_LOOK_MS = 5_000;
+/** Two looks more than this many periods apart: the process was suspended or its event loop blocked, which no timer can
+ * tell apart, and neither is the turn's silence. On macOS (Electron 43) Node's timers and monotonic clock keep counting
+ * while the computer sleeps, so a deadline due during the sleep fires the moment it wakes: only the gap between looks
+ * tells the sleep apart. */
+const SUSPENDED_LOOKS = 3;
+
+export interface RoomTurnClock {
+  now(): number;
+  /** Returns the cancel. */
+  after(ms: number, run: () => void): () => void;
+  /** Returns the cancel. */
+  every(ms: number, run: () => void): () => void;
+}
+
+const systemClock: RoomTurnClock = {
+  now: () => Date.now(),
+  after: (ms, run) => {
+    const timer = setTimeout(run, ms);
+    return () => clearTimeout(timer);
+  },
+  every: (ms, run) => {
+    const timer = setInterval(run, ms);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  },
+};
+
 /** Stops a turn that shows no progress for the limit, or for ROOM_TOOL_QUIET_LIMIT_MS while a tool runs; the clock
- * holds while the turn waits on a person or the computer, and stray ends clamp the count at zero. */
+ * holds while the turn waits on a person or the computer, and while the computer sleeps; stray ends clamp the count at
+ * zero. */
 export class RoomTurnDeadline {
   private limitMs: number;
+  private clock: RoomTurnClock;
   private progressAt = 0;
   private heldAt = 0;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private lookedAt = 0;
+  private stopLooking: (() => void) | null = null;
+  private cancelTimer: (() => void) | null = null;
   private openWaits = 0;
   private runningTools = new Set<string>();
   private stopped = false;
@@ -65,101 +97,127 @@ export class RoomTurnDeadline {
   private fire: () => void;
 
   // No parameter properties: Node's type-stripping cannot transform them.
-  constructor(minutes: number, fire: () => void) {
+  constructor(minutes: number, fire: () => void, clock: RoomTurnClock = systemClock) {
     this.limitMs = roomTurnTimeoutMs(minutes);
     this.fire = fire;
+    this.clock = clock;
   }
 
   start(): void {
-    this.progressAt = Date.now();
-    this.arm();
+    if (this.stopped || this.fired || this.stopLooking !== null) return;
+    const at = this.clock.now();
+    this.progressAt = at;
+    this.lookedAt = at;
+    this.stopLooking = this.clock.every(ROOM_TURN_CLOCK_LOOK_MS, () => this.discountSleep());
+    this.arm(at);
   }
 
   observe(e: RuntimeEvent): void {
-    if (ROOM_TURN_PROGRESS.has(e.type)) this.progress();
-    if (e.type === "request.opened" || e.type === "turn.wait_started") this.setWaiting(true);
-    else if (e.type === "request.resolved" || e.type === "turn.wait_ended") this.setWaiting(false);
+    const at = this.discountSleep();
+    if (ROOM_TURN_PROGRESS.has(e.type)) this.progressed(at);
+    if (e.type === "request.opened" || e.type === "turn.wait_started") this.waiting(true, at);
+    else if (e.type === "request.resolved" || e.type === "turn.wait_ended") this.waiting(false, at);
     else if ((e.type === "item.started" || e.type === "item.completed") && e.itemType === "tool" && e.itemId) {
       if (e.type === "item.started") this.runningTools.add(e.itemId);
       else this.runningTools.delete(e.itemId);
-      this.rearm();
+      this.rearm(at);
     }
   }
 
   progress(): void {
-    // A delayed event loop can deliver progress after the limit, before the timer ran: it must not revive an idle turn.
-    if (this.timer !== null && this.idleMs() >= this.quietLimitMs()) {
-      this.expired();
-      return;
-    }
-    this.progressAt = Date.now();
+    this.progressed(this.discountSleep());
   }
 
   setWaiting(waiting: boolean): void {
+    this.waiting(waiting, this.discountSleep());
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.release();
+  }
+
+  private progressed(at: number): void {
+    // A delayed event loop can deliver progress after the limit, before the timer ran: it must not revive an idle turn.
+    if (this.cancelTimer !== null && at - this.progressAt >= this.quietLimitMs()) {
+      this.expired();
+      return;
+    }
+    this.progressAt = at;
+  }
+
+  private waiting(waiting: boolean, at: number): void {
     if (this.stopped || this.fired) return;
     if (waiting) {
       const wasIdle = this.openWaits === 0;
       this.openWaits += 1;
-      if (wasIdle) this.hold();
+      if (wasIdle) this.hold(at);
     } else if (this.openWaits > 0) {
       this.openWaits -= 1;
       if (this.openWaits === 0) {
         // The wait paused the clock: idle time from before it still counts, progress during it counts as now.
         const idleBefore = this.progressAt >= this.heldAt ? 0 : this.heldAt - this.progressAt;
-        this.progressAt = Date.now() - idleBefore;
-        this.arm();
+        this.progressAt = at - idleBefore;
+        this.arm(at);
       }
     }
   }
 
-  stop(): void {
-    this.stopped = true;
-    if (this.timer !== null) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+  private release(): void {
+    this.stopLooking?.();
+    this.stopLooking = null;
+    this.cancelTimer?.();
+    this.cancelTimer = null;
   }
 
-  private idleMs(): number {
-    return Date.now() - this.progressAt;
+  private discountSleep(): number {
+    const at = this.clock.now();
+    if (this.stopLooking === null) return at;
+    const gapMs = at - this.lookedAt;
+    this.lookedAt = at;
+    if (gapMs <= SUSPENDED_LOOKS * ROOM_TURN_CLOCK_LOOK_MS) return at;
+    this.progressAt = Math.min(at, this.progressAt + gapMs);
+    if (this.openWaits > 0) this.heldAt = Math.min(at, this.heldAt + gapMs);
+    return at;
   }
 
   private quietLimitMs(): number {
     return this.runningTools.size > 0 ? Math.max(this.limitMs, ROOM_TOOL_QUIET_LIMIT_MS) : this.limitMs;
   }
 
-  private hold(): void {
-    this.heldAt = Date.now();
-    if (this.timer === null) return;
-    clearTimeout(this.timer);
-    this.timer = null;
+  private hold(at: number): void {
+    this.heldAt = at;
+    if (this.cancelTimer === null) return;
+    this.cancelTimer();
+    this.cancelTimer = null;
     // A delayed event loop can deliver the wait after the deadline: a wait must not revive an idle turn.
-    if (this.idleMs() >= this.quietLimitMs()) this.expired();
+    if (at - this.progressAt >= this.quietLimitMs()) this.expired();
   }
 
-  private rearm(): void {
-    if (this.timer === null) return;
-    clearTimeout(this.timer);
-    this.timer = null;
-    this.arm();
+  private rearm(at: number): void {
+    if (this.cancelTimer === null) return;
+    this.cancelTimer();
+    this.cancelTimer = null;
+    this.arm(at);
   }
 
-  private arm(): void {
+  private arm(at: number): void {
     if (this.stopped || this.fired || this.openWaits > 0) return;
-    const leftMs = this.quietLimitMs() - this.idleMs();
+    const leftMs = this.quietLimitMs() - (at - this.progressAt);
     if (leftMs <= 0) {
       this.expired();
       return;
     }
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      this.arm();
-    }, leftMs);
+    this.cancelTimer = this.clock.after(leftMs, () => {
+      this.cancelTimer = null;
+      this.arm(this.discountSleep());
+    });
   }
 
   private expired(): void {
     if (this.stopped || this.fired) return;
     this.fired = true;
+    this.release();
     this.fire();
   }
 }

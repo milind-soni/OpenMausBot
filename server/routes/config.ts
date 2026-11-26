@@ -9,7 +9,7 @@ import type { BrowserCleanupCoordinator, BrowserCleanupRequest } from "../browse
 import { finalizeBrowserCleanupMutation, requireBrowserCleanupAcknowledged } from "../browser-lifecycle-cleanup.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
-import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
+import { boatAccountResourceChangeError, vpsAliasLeftBehindNotice, vpsAliasResourceChangeError } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import {
   browserProfilePartitionTarget,
@@ -17,6 +17,7 @@ import {
   builtInBrowserEnabled,
   changedInstanceIds,
   engineLaunches,
+  isValidSshAlias,
   loadConfig,
   localVmMode,
   mergeOpenCodeProviderKeys,
@@ -26,25 +27,28 @@ import {
   type AppConfig,
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
-import { TEAM_PERSONAL_HINTS } from "../../shared/cloud-hints.ts";
-import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { teamPersonalHint } from "../../shared/cloud-hints.ts";
+import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
 import type { ComputerIdleTimer } from "../computer-idle.ts";
-import { PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
+import { isPhoneKeyPatch, PROVIDER_KEY_KINDS } from "../provider-key-check.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { SharedComputerControl } from "../shared-computer-control.ts";
 import type { SharedComputers } from "../shared-computers.ts";
 import { parseSkillMd } from "../skills.ts";
-import type { Store } from "../store.ts";
+import type { BotRecord, Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
+import { DEFAULT_DEEPSEEK_VOICE } from "../../shared/deepseek-voice.ts";
 import * as vps from "../vps-computer.ts";
+import { vpsHostLimitProblem } from "../vps-host-limits.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
+import { patchMayChangeEngineStatus } from "./config-engine-effect.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -81,6 +85,9 @@ export interface ConfigRouteDeps {
   sharedMembership: () => boolean;
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
+  vpsIdleMs(): number;
+  vpsIdles: ConfigRouteDeps["localVmIdles"];
+  vpsServerSwitched?(bot: BotRecord): void;
   localVmIdleMs(): number;
   localVmIdles: { values(): Iterable<Pick<ComputerIdleTimer, "setIdleMs">> };
   localVmActiveThreads: { readonly size: number };
@@ -115,11 +122,16 @@ export interface ConfigRouteDeps {
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
 }
 
+/** The label that lists only this installation's VPS computers, or null when its ID can't be read. */
+function vpsEnvironmentFilter(): string | null {
+  try { return `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`; } catch { return null; }
+}
+
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
     closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, sharedMembership, lendingEnabled, providerConfigs,
-    localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
+    vpsIdleMs, vpsIdles, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
     configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, ownHints, postiz,
@@ -131,6 +143,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
+      const pairedDevice = fromPairedDevice(req, auth);
+      if (pairedDevice && !isPhoneKeyPatch(body)) {
+        return json(res, 403, { error: "From a phone, only API keys can be changed. Change other settings on your computer." });
+      }
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
@@ -147,11 +163,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
       }
       if (patch.onboarding?.hintsSeen && ownHints) {
-        const mine = patch.onboarding.hintsSeen.filter((hint) => TEAM_PERSONAL_HINTS.has(hint));
+        const mine = patch.onboarding.hintsSeen.filter(teamPersonalHint);
         if (mine.length && ownHints(auth, mine)) {
           // The team's record keeps what it had of these; only this person's changes.
-          const kept = (cfg.onboarding?.hintsSeen ?? []).filter((hint) => TEAM_PERSONAL_HINTS.has(hint));
-          patch.onboarding = { ...patch.onboarding, hintsSeen: [...new Set([...patch.onboarding.hintsSeen.filter((hint) => !TEAM_PERSONAL_HINTS.has(hint)), ...kept])] };
+          const kept = (cfg.onboarding?.hintsSeen ?? []).filter(teamPersonalHint);
+          patch.onboarding = { ...patch.onboarding, hintsSeen: [...new Set([...patch.onboarding.hintsSeen.filter((hint) => !teamPersonalHint(hint)), ...kept])] };
         }
       }
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
@@ -186,7 +202,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
-        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg) });
+        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderBorrowedKey(cfg) });
         if (!planned.ok) return json(res, 400, refusalBody(planned));
         patch.decider = planned.patch;
       }
@@ -194,10 +210,15 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         && patch.tts.provider !== tts.voiceProvider(cfg);
       if (changingVoiceProvider && patch.tts?.voice === undefined) {
         // Voice ids are provider-owned: never carry one from one catalog into another.
-        patch.tts = { ...patch.tts, voice: "" };
+        patch.tts = { ...patch.tts, voice: patch.tts?.provider === "deepseek" ? DEFAULT_DEEPSEEK_VOICE : "" };
       }
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (patch.vps !== undefined || patch.vpsServers !== undefined) {
+        providerConfigBusy.set(true);
+        const overHost = await vpsHostLimitProblem(cfg, patch).finally(() => providerConfigBusy.set(false));
+        if (overHost) return json(res, 400, overHost);
+      }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
         if (JSON.stringify(body.expectedBrowserProfiles) !== JSON.stringify(current)) {
@@ -269,6 +290,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       providerConfigBusy.set(true);
       const changingLocalVmMode = patch.localVm?.mode !== undefined && patch.localVm.mode !== localVmMode(cfg);
       if (changingLocalVmMode) localVmModeChangeBusy.set(true);
+      // Set once the alias change is saved: every reply after that, a failed one too, must carry it.
+      let savedVpsNotice: string | null = null;
       try {
         for (const provider of transitioningProviders) {
           const conflict = providerOperationConflict(provider);
@@ -276,18 +299,22 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
         for (const provider of transitioningProviders) computerProviderConfigTransitions.add(provider);
 
+        let vpsLeftOn: string | null = null;
         if (changingVpsAlias && currentVpsAlias) {
           const inventory = await vps.listManagedVpsComputers(
             { vps: { sshAlias: currentVpsAlias } },
             managedBoatOwners(),
           );
-          if (!inventory.available) {
+          if (inventory.unreachable) {
+            vpsLeftOn = currentVpsAlias;
+          } else if (!inventory.available) {
             return json(res, 503, {
               error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
             });
+          } else {
+            const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
+            if (resourceError) return json(res, 409, { error: resourceError });
           }
-          const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
-          if (resourceError) return json(res, 409, { error: resourceError });
         }
 
         let boatRecovery = changingBoatToken ? boatCreateRecoverySnapshot() : [];
@@ -542,9 +569,14 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         return spec ? [{ session, spec }] : [];
       });
       let configWriteCommitted = false;
+      // Ready before the save: once it commits, nothing that fails later may lose what the old server may still hold.
+      const vpsNotice = vpsLeftOn
+        ? vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, vpsEnvironmentFilter(), `label=${vps.VPS_MANAGED_LABEL}=1`)
+        : null;
       const enginesBefore = engineLaunches(providerConfigs());
       const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
-      const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
+      // Only the desktop's own save has put the key in the encrypted store; a phone's must land in config.json.
+      const externalSecretStorage = !pairedDevice && url.searchParams.get("secretStorage") === "external";
       try {
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.
@@ -582,11 +614,13 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";
           saveConfig(persisted);
           configWriteCommitted = true;
+          savedVpsNotice = vpsNotice;
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
         } else {
           saveConfig(patch);
           configWriteCommitted = true;
+          savedVpsNotice = vpsNotice;
           // loadConfig prefers env over the file for credentials, so the env must follow the save.
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
@@ -606,7 +640,15 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       localVmModeChanged?.();
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
-      registry.forgetSnapshots();
+      if (patchMayChangeEngineStatus(patch)) registry.forgetSnapshots();
+      if (changingVpsAlias) {
+        for (const bot of store.bots) {
+          if (!isValidSshAlias(bot.vpsAlias)) deps.vpsServerSwitched?.(bot);
+        }
+      }
+      if (patch.vpsIdle?.timeoutMinutes !== undefined) {
+        for (const idle of vpsIdles.values()) idle.setIdleMs(vpsIdleMs());
+      }
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
@@ -682,7 +724,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         finalized.acknowledgements.every(Boolean),
         removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
       );
-      return json(res, 200, configForAccess(finalized.value, auth));
+      return json(res, 200, { ...(configForAccess(finalized.value, auth) as object), ...(savedVpsNotice ? { notice: savedVpsNotice } : {}) });
+      } catch (error) {
+        if (!savedVpsNotice) throw error;
+        // The alias change is already saved, so this reply is the only place left to say what the old server may still hold.
+        const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+        return json(res, status, { error: error instanceof Error ? error.message : String(error), notice: savedVpsNotice });
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);
         if (changingLocalVmMode) localVmModeChangeBusy.set(false);

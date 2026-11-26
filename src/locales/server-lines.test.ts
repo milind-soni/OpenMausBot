@@ -391,7 +391,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/routine-requests.ts", "Runs only on its schedule"],
     ["server/webhook-requests.ts", "When another app sends something … ,  …   …"],
     ["server/webhook-requests.ts", "does what it is asked"],
-    ["shared/plain-time-zone.ts", "every day"],
+    ["packages/phone-protocol/src/plain-time-zone.ts", "every day"],
   ],
   "rooms and teammates": [
     ["server/host/delegated-level.ts", "…  — handed on by  … ,  … a Chief of Staff on  …"],
@@ -502,7 +502,25 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/team-setup-requests.ts", "Team setup not applied"],
   ],
   "restarts, stops and context": [
+    ["server/drivers/acp/quiet-status.ts", "hit a rate limit (HTTP 429)"],
+    ["server/drivers/acp/quiet-status.ts", "got a server error from its model provider (HTTP"],
+    ["server/drivers/acp/quiet-status.ts", "got an error from its model provider (HTTP"],
+    ["server/drivers/acp/quiet-status.ts", "had a failed model request"],
+    ["server/drivers/acp/quiet-status.ts", " Next try in  …  s."],
+    ["server/drivers/acp/quiet-status.ts", "and is retrying … . …  It is still working."],
+    ["server/drivers/acp/quiet-status.ts", "'s model request failed:"],
+    ["server/drivers/acp/quiet-status.ts", "is compressing its conversation history to make room."],
+    ["server/drivers/acp/quiet-status.ts", "Its history is nearly full, so it may be compressing it."],
+    ["server/drivers/acp/quiet-status.ts", "; with no tool or question active, the turn may stop after"],
+    ["server/drivers/acp/quiet-status.ts", "Its model provider may be slow or busy"],
+    ["server/drivers/acp/quiet-status.ts", "is busy on this computer but has sent nothing for"],
+    ["server/drivers/acp/quiet-status.ts", "and has no request open to its model right now."],
+    ["server/drivers/acp/quiet-status.ts", "It may be waiting before a retry. Still waiting; press Stop to end the"],
+    ["server/drivers/acp/quiet-status.ts", "has no open request to its model, and is not using the CPU. It may be"],
+    ["server/drivers/acp/quiet-status.ts", "Press Stop to end the turn; otherwise it is stopped after"],
+    ["server/drivers/acp/quiet-status.ts", "…  has sent nothing for  … . Still waiting; press Stop to end the turn."],
     ["server/index.ts", "context compaction started ( … )"],
+    ["server/host/warm-summary-host.ts", "context compaction started (auto)"],
     ["server/index.ts", "context compacted — re-sent the last  …  digest …"],
     ["server/index.ts", "generated image could not be attached —  …"],
     ["server/index.ts", "invalid image"],
@@ -511,7 +529,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
   "moves to the Cloud": [
   ],
   "calls": [
-    ["shared/live-call.ts", "Call with  …  ·  …"],
+    ["packages/phone-protocol/src/live-call.ts", "Call with  …  ·  …"],
   ],
 };
 

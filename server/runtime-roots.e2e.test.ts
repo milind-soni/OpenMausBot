@@ -15,6 +15,7 @@ import { freePortBlock } from "./testing/ports.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
 import { withAnswer } from "./testing/your-computer.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
@@ -68,6 +69,7 @@ async function loopbackModel() {
     if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const sent = JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
+    if (isTitleCall(sent)) { res.writeHead(500); res.end(); return; }
     const text = (message: { content?: unknown }) => typeof message.content === "string" ? message.content
       : Array.isArray(message.content) ? message.content.map((part: any) => part?.text ?? "").join("\n") : "";
     const lastUserAt = sent.messages.map((message) => message.role).lastIndexOf("user");
@@ -281,6 +283,47 @@ it("T2 parks the root on a credential card and runs it again with the provided l
   expect(f.roots()[0].executions).toBe(2);
 }), hostTimeout(60_000));
 
+it("T2b parks the root when multiple credentials are asked in one turn and resumes the bot on each saved card", () => scenario(async (f) => {
+  f.script(f.clive.id,
+    { key: "C2", match: [SECRET_PROVIDED, "OpenAI API key"], reply: "T2b-DONE: all credentials received." },
+    { key: "C1", match: [SECRET_PROVIDED, "xAI API key"], reply: "T2b-C1-DONE: first credential received, waiting for the rest." },
+    { key: "C0", match: ["T2b-JOB"], steps: [
+      { tool: "request_credential", arguments: { credential_id: "xaiApiKey", reason: "For Grok" } },
+      { tool: "request_credential", arguments: { credential_id: "openaiImageApiKey", reason: "For Images" } },
+    ], reply: "T2b-ASKED: waiting for credentials." });
+  const job = f.clive.activeTaskId;
+  await f.say(f.clive.id, job, "T2b-JOB: need multiple credentials.");
+  await f.final(job, "T2b-ASKED");
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
+  const cards = (await f.messages(job)).filter((message: any) => message.kind === "secret");
+  expect(cards).toHaveLength(2);
+  const [first, second] = cards;
+  const parked = f.roots()[0];
+  expect(parked.cards).toEqual([first.id, second.id]);
+
+  expect((await f.api("PUT", "/api/config", { xai: { key: "xai-fixture-key" }, imageGen: { key: "openai-fixture-key" } })).status).toBe(200);
+
+  const save1 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${first.id}/provided`, { threadId: job });
+  expect(save1.status).toBe(200);
+  expect(save1.body).toMatchObject({ provided: true, resumed: true });
+  await f.final(job, "T2b-C1-DONE");
+
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
+  expect(f.roots()[0].cards).toEqual([second.id]);
+
+  const save2 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${second.id}/provided`, { threadId: job });
+  expect(save2.status).toBe(200);
+  expect(save2.body).toMatchObject({ provided: true, resumed: true });
+
+  await f.final(job, "T2b-DONE");
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
+  expect(f.roots()[0].executions).toBe(3);
+
+  const finalCards = (await f.messages(job)).filter((message: any) => message.kind === "secret");
+  expect(finalCards.map((m: any) => m.secret?.resumed)).toEqual([true, true]);
+}), hostTimeout(60_000));
+
+
 it("T3 parks the root on connector cards and runs it again once when both connect", async () => {
   const composio = await composioStub();
   try {
@@ -375,7 +418,7 @@ it("T6 continues a person's step-capped turn in place on the same root", async (
       const root = f.roots()[0];
       expect(root).toMatchObject({ status: "completed", outcome: "done", executions: 2, result: "T6-DONE: finished the rest." });
       expect(f.eventsOf(root.id)).toEqual(expect.arrayContaining(["started", "continued", "started", "settled"]));
-      expect(model.requests.filter((sent) => sent.lastUser.includes("T6-JOB") && !sent.lastUser.includes(STEP_CAP_CONTINUES))).toHaveLength(64);
+      expect(model.requests.filter((sent) => sent.lastUser.includes("T6-JOB") && !sent.lastUser.includes(STEP_CAP_CONTINUES))).toHaveLength(201);
       const continued = model.requests.filter((sent) => sent.lastUser.includes(STEP_CAP_CONTINUES));
       expect(continued).toHaveLength(1);
       expect(continued[0]!.lastUser).toMatch(/Every step so far is listed in \S*handoffs\S*; read it before going on\./);

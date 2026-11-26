@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   aiChoices,
+  firstAis,
   aiWorks,
   beatsFor,
   cloudSignInDue,
+  noEnginesDue,
+  workedEarlier,
   companyModelCount,
   completionPatch,
   EMPTY_ONBOARDING,
@@ -179,6 +182,32 @@ describe("connecting an AI in the welcome", () => {
   });
 });
 
+describe("the welcome's first three ways to connect an AI", () => {
+  type Row = { id: string; driverKind: string; access?: string; readOnly?: boolean; ready?: boolean;
+    authentication?: { method?: string }; snapshot?: { authenticationUnavailableReason?: string } };
+  const row = (id: string, driverKind: string, extra: Partial<Row> = {}): Row => ({ id, driverKind, ...extra });
+  const first = (rows: Row[]) => firstAis(rows, (r) => r.ready === true).map(({ kind, instance }) => [kind, instance.id]);
+
+  it("are Claude, ChatGPT and OpenCode, in that order, whatever order they are listed in", () => {
+    expect(first([row("opencodeGo", "opencodeGo"), row("grok", "grokAgent"), row("codex", "codex"), row("claude", "claudeAgent")]))
+      .toEqual([["claude", "claude"], ["chatgpt", "codex"], ["opencode", "opencodeGo"]]);
+    expect(first([row("grok", "grokAgent")])).toEqual([]);
+  });
+
+  it("use ChatGPT's plan sign-in where it can work here, Codex's own on a Cloud, and one already working first", () => {
+    const codex = row("codex", "codex", { authentication: { method: "device-code" } });
+    const plan = row("chatgpt", "codex", { authentication: { method: "browser-pkce" } });
+    expect(first([codex, plan])).toEqual([["chatgpt", "chatgpt"]]);
+    expect(first([codex, { ...plan, snapshot: { authenticationUnavailableReason: "Not on a Cloud." } }])).toEqual([["chatgpt", "codex"]]);
+    expect(first([{ ...codex, ready: true }, plan])).toEqual([["chatgpt", "codex"]]);
+  });
+
+  it("are never an API key, a custom endpoint or an organization's model", () => {
+    expect(first([row("claudeApi", "claudeAgent", { access: "api" }), row("company", "claudeAgent", { readOnly: true }),
+      row("endpoint", "codex", { access: "custom" })])).toEqual([]);
+  });
+});
+
 describe("the AI the welcome stands on", () => {
   type Ai = { id: string; driverKind: string; ready: boolean; aiTest?: "testing" | "passed" | "failed" | "untestable"; snapshot?: { freeFallback?: boolean } };
   const ai = (id: string, driverKind: string, extra: Partial<Ai> = {}): Ai => ({ id, driverKind, ready: true, ...extra });
@@ -191,6 +220,14 @@ describe("the AI the welcome stands on", () => {
     const backup = ai("opencodeGo", "opencodeGo", { snapshot: { freeFallback: true }, aiTest: "passed" });
     expect(stand([backup, ai("claude", "claudeAgent", { ready: false })])).toBeNull();
     expect(stand([])).toBeNull();
+  });
+
+  it("is OpenCode's free model once the person picked OpenCode on the welcome, after any other ready AI", () => {
+    const backup = ai("opencodeGo", "opencodeGo", { snapshot: { freeFallback: true }, aiTest: "passed" });
+    const picked = (instance: Ai) => instance.id === "opencodeGo";
+    const found = welcomeAi([backup], (instance) => instance.ready, (instance) => instance.aiTest, picked);
+    expect(found && { id: found.instance.id, state: found.state }).toEqual({ id: "opencodeGo", state: "passed" });
+    expect(welcomeAi([backup, ai("claude", "claudeAgent")], (instance) => instance.ready, (instance) => instance.aiTest, picked)?.instance.id).toBe("claude");
   });
 
   it("is the best ready AI, waiting on its test, and works once it answered", () => {
@@ -282,5 +319,41 @@ describe("welcomeFinishedThisLaunch", () => {
     vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
     expect(() => markWelcomeFinished()).not.toThrow();
     expect(welcomeFinishedThisLaunch()).toBe(true);
+  });
+});
+
+describe("the no-AI setup page", () => {
+  let n = 0;
+  const row = (snapshot: { state: string; busy?: true; unverified?: true; authenticated?: boolean }, instanceId = `e${++n}`) => ({ instanceId, snapshot });
+  it("shows only when engines are known and none is there", () => {
+    const worked = new Set<string>();
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" })] }, worked)).toBe(true);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }), row({ state: "available" })] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: false, instances: [row({ state: "unavailable" })] }, worked)).toBe(false);
+  });
+
+  it("never for status checks that could not finish on a busy machine", () => {
+    const worked = new Set<string>();
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable", busy: true }), row({ state: "unavailable" })] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available", unverified: true })] }, worked)).toBe(false);
+  });
+
+  it("never for an engine that worked earlier since the page loaded, until a check finds it missing", () => {
+    const worked = new Set<string>();
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available" }, "opencode")] }, worked)).toBe(false);
+    expect(workedEarlier(row({ state: "unavailable", busy: true }, "opencode"), worked)).toBe(true);
+    expect(workedEarlier(row({ state: "unavailable" }, "codex"), worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "codex")] }, worked)).toBe(true);
+    // A check that answered "not there" is a real loss: the setup page may show again.
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available" }, "kimi")] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable", busy: true }, "kimi")] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "kimi")] }, worked)).toBe(true);
+    // Only found installed is not "worked".
+    expect(workedEarlier(row({ state: "available", unverified: true }, "pi"), worked)).toBe(false);
+    // Another place, after the connection dropped: its own engines decide.
+    expect(workedEarlier(row({ state: "available" }, "grok"), worked)).toBe(true);
+    expect(noEnginesDue({ connected: false, instances: [row({ state: "unavailable", busy: true }, "grok")] }, worked)).toBe(false);
+    expect(workedEarlier(row({ state: "unavailable", busy: true }, "grok"), worked)).toBe(false);
   });
 });

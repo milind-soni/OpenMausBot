@@ -219,11 +219,12 @@ describe("what is for sale, as the Admin says", () => {
     expect(bare.map(card => keys(card.shown)), "a plan without allowances sets nothing apart").toEqual([[], ["hours", "storage", "voice"]]);
   });
 
-  it("says who a team plan is for, from the most people the Admin allows it, and nothing it can't back", () => {
+  it("says a team plan is for the whole team, never a seat count the app would have to know, and nothing it can't back", () => {
     const allowances = { cpus: 4, cpuKind: "shared" as const, memoryMb: 4096, diskGb: 10, maxDiskGb: 100, computers: 4, computerHours: 300, voiceCharacters: 180_000 };
-    const promise = (seats?: number) => planCards({ plans: [{ tier: "team", amount: 16900, allowances: { ...allowances, ...(seats ? { seats } : {}) } }], recommended: "team" })[0]!.promise;
-    expect(promise(5)).toBe("One shared Cloud for up to 5 people: bots, group chats and roles your whole team uses.");
-    expect(promise(20)).toContain("up to 20 people");
+    const promise = (seats?: number) => planCards({ plans: [{ tier: "team", amount: 4000, allowances: { ...allowances, ...(seats ? { seats } : {}) } }], recommended: "team" })[0]!.promise;
+    expect(promise(2)).toBe("One shared Cloud for your whole team: bots, group chats and roles everyone uses. Add people any time.");
+    expect(promise(50), "the same words whatever seats the Admin sends").toBe(promise(2));
+    expect(promise(5)).not.toMatch(/\d/);
     expect(promise()).toBeNull();
     const pro = planCards({ plans: [{ tier: "pro", amount: 4900, allowances: { ...allowances, seats: 5 } }], recommended: "pro" })[0]!.promise;
     expect(pro, "a plan with its own words keeps them").toBe("Your bots keep working 24/7, even when your laptop is closed.");
@@ -231,14 +232,14 @@ describe("what is for sale, as the Admin says", () => {
 
   it("says a 1-day trial in the singular, in English and every language, and leaves other lengths as they read", () => {
     const allowances = { cpus: 8, cpuKind: "shared" as const, memoryMb: 8192, diskGb: 10, maxDiskGb: 100, computers: 15, computerHours: 800, voiceCharacters: 90_000, snapshotDays: 14 };
-    const terms = (trialDays: number) => planCards({ plans: [{ tier: "team", amount: 16900, trialDays, allowances }], recommended: "team" })[0]!.terms;
-    expect(terms(1)).toBe("Free for 1 day, then $169/month + tax");
-    expect(terms(3)).toBe("Free for 3 days, then $169/month + tax");
-    const badge = (trialDays: number) => cloudIntroView({ plans: [{ tier: "team", amount: 16900, trialDays }], recommended: "team" })!.badge;
+    const terms = (trialDays: number) => planCards({ plans: [{ tier: "team", amount: 4000, trialDays, allowances }], recommended: "team" })[0]!.terms;
+    expect(terms(1)).toBe("Free for 1 day, then $40/month + tax");
+    expect(terms(3)).toBe("Free for 3 days, then $40/month + tax");
+    const badge = (trialDays: number) => cloudIntroView({ plans: [{ tier: "team", amount: 4000, trialDays }], recommended: "team" })!.badge;
     expect(badge(1)).toBe("Free for 1 day");
     expect(badge(3)).toBe("Free for 3 days");
     setLocale("de");
-    expect(terms(1)).toBe("1 Tag kostenlos, dann $169/Monat zzgl. Steuern");
+    expect(terms(1)).toBe("1 Tag kostenlos, dann $40/Monat zzgl. Steuern");
     expect(badge(3)).toBe("3 Tage kostenlos");
     setLocale("en");
   });

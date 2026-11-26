@@ -75,7 +75,8 @@ function keyChars(questions: Record<string, DeciderQuestion>): number {
   );
 }
 
-export function openrouterRequestBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
+/** An OpenAI-style chat request for strict JSON answers: shared with custom gateways that speak chat. */
+export function chatRequestBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
   return {
     model,
     temperature: 0,
@@ -83,7 +84,6 @@ export function openrouterRequestBody(state: unknown, questions: Record<string, 
       MAX_TOKENS_CEILING,
       MAX_TOKENS_FLOOR + MAX_TOKENS_PER_OPTION * optionCount(questions) + MAX_TOKENS_PER_KEY_CHAR * keyChars(questions),
     ),
-    provider: { require_parameters: true },
     response_format: {
       type: "json_schema",
       json_schema: { name: "decision", strict: true, schema: openrouterSchema(questions) },
@@ -95,8 +95,31 @@ export function openrouterRequestBody(state: unknown, questions: Record<string, 
   };
 }
 
+export function openrouterRequestBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
+  return { ...chatRequestBody(state, questions, model), provider: { require_parameters: true } };
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/** A chat completion whose message is the answers JSON, read as Jev's answers. */
+export function parseChatResponse(body: unknown, questions: Record<string, DeciderQuestion>): BackendResult {
+  let answered: unknown;
+  try {
+    const content = isRecord(body) && Array.isArray(body.choices) && isRecord(body.choices[0]) && isRecord(body.choices[0].message)
+      ? body.choices[0].message.content
+      : undefined;
+    answered = typeof content === "string" ? JSON.parse(content) : undefined;
+  } catch {
+    return { ok: false, reason: "malformed" };
+  }
+  const parsed = parseJevResponse(answered, questions);
+  if (!parsed.ok || !isRecord(body)) return { ok: false, reason: "malformed" };
+  const promptTokens = isRecord(body.usage) ? body.usage.prompt_tokens : undefined;
+  const inputTokens = typeof promptTokens === "number" && Number.isFinite(promptTokens) && promptTokens >= 0 ? promptTokens : undefined;
+  const model = typeof body.model === "string" && body.model.length <= MODEL_ECHO_MAX ? body.model : undefined;
+  return { ok: true, answers: parsed.answers, ...(inputTokens !== undefined ? { inputTokens } : {}), ...(model ? { model } : {}) };
+}
 
 export function openrouterDecisionsBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
   return { ...jevRequestBody(state, questions), model };
@@ -132,26 +155,14 @@ async function decide(request: BackendRequest): Promise<BackendResult> {
     return refusal(response.status);
   }
   let body: unknown;
-  let answered: unknown;
   try {
     body = await response.json();
-    if (decisions) {
-      const parsed = parseJevResponse(body, request.questions);
-      return parsed.ok ? parsed : { ok: false, reason: "malformed" };
-    }
-    const content = isRecord(body) && Array.isArray(body.choices) && isRecord(body.choices[0]) && isRecord(body.choices[0].message)
-      ? body.choices[0].message.content
-      : undefined;
-    answered = typeof content === "string" ? JSON.parse(content) : undefined;
   } catch {
     return { ok: false, reason: "malformed" };
   }
-  const parsed = parseJevResponse(answered, request.questions);
-  if (!parsed.ok || !isRecord(body)) return { ok: false, reason: "malformed" };
-  const promptTokens = isRecord(body.usage) ? body.usage.prompt_tokens : undefined;
-  const inputTokens = typeof promptTokens === "number" && Number.isFinite(promptTokens) && promptTokens >= 0 ? promptTokens : undefined;
-  const model = typeof body.model === "string" && body.model.length <= MODEL_ECHO_MAX ? body.model : undefined;
-  return { ok: true, answers: parsed.answers, ...(inputTokens !== undefined ? { inputTokens } : {}), ...(model ? { model } : {}) };
+  if (!decisions) return parseChatResponse(body, request.questions);
+  const parsed = parseJevResponse(body, request.questions);
+  return parsed.ok ? parsed : { ok: false, reason: "malformed" };
 }
 
 export const openrouterBackend: DeciderBackend = { id: "openrouter", decide };

@@ -1,14 +1,15 @@
 // Each person's themes on this workspace: <dataDir>/themes/<person>/<theme id>/theme.json with its files beside it in
-// assets/, and active.json naming the one their windows wear.
+// assets/, active.json naming the one their windows wear, and history.json with their last look changes.
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  rehomeThemeCss, THEME_ASSET_NAME, THEME_EXPORT_VERSION, THEME_ID, THEME_LIMITS, themeAssetType, themeAssetUrl, themeCssProblem,
-  themeFileSchema, type ThemeExport, type ThemeFile, type ThemeList,
+  LOOK_HISTORY_LIMIT, rehomeThemeCss, THEME_ASSET_NAME, THEME_EXPORT_VERSION, THEME_ID, THEME_LIMITS, themeAssetType, themeAssetUrl, themeCssProblem,
+  themeFileSchema, type LookChange, type ThemeExport, type ThemeFile, type ThemeHistoryItem, type ThemeList,
 } from "../../shared/theme.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { appendHistory, lookAfter, readHistory, type Look, type Skin, type Snapshot } from "./history.ts";
 
 export type Refusal = { refusal: string };
 const refused = (refusal: string): Refusal => ({ refusal });
@@ -18,9 +19,48 @@ export const isRefusal = (value: unknown): value is Refusal => typeof value === 
 const personFolder = (person: string) => (/^[\w-]{1,64}$/.test(person) ? person : `h_${createHash("sha256").update(person).digest("hex").slice(0, 32)}`);
 
 /** Route words under /api/themes/, and the tool's word for no theme. */
-const RESERVED_IDS: ReadonlySet<string> = new Set(["active", "import", "none"]);
+const RESERVED_IDS: ReadonlySet<string> = new Set(["active", "history", "import", "none"]);
+
+/** One look change: themes to save, what to wear (undefined: keep), the built-in skin the windows put on, and what to
+ * call it when the change alone does not say. `keep` names themes whose file is kept as it was without saving them. */
+export interface LookWrite {
+  saves?: Array<{ id: string; file: ThemeFile }>;
+  wear?: string | null;
+  skin?: Skin;
+  change?: LookChange;
+  keep?: string[];
+}
+
+/** A kept change, newest first, with the look right after it: what was worn and that theme's file as it was then. */
+export type LookHistoryItem = ThemeHistoryItem & { seq: number; look: Look; file: ThemeFile | null };
 
 export const slugFor = (name: string) => name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "theme";
+
+export type PictureKind = "png" | "jpg" | "webp" | "gif" | "avif" | "svg";
+const HEIF_BRANDS = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs", "mif1", "msf1"]);
+
+/** The brands an ISO media file's ftyp box names (AVIF and HEIC both are such files), or null when it is not one. */
+function ftypBrands(bytes: Buffer): string[] | null {
+  if (bytes.length < 16 || bytes.subarray(4, 8).toString("latin1") !== "ftyp") return null;
+  const end = Math.min(bytes.length, Math.max(16, bytes.readUInt32BE(0)));
+  const brands = [bytes.subarray(8, 12).toString("latin1")];
+  for (let at = 16; at + 4 <= end; at += 4) brands.push(bytes.subarray(at, at + 4).toString("latin1"));
+  return brands;
+}
+
+/** What picture the bytes are, by their first bytes: one a window can show, "heic" for a phone photo it cannot, or null. */
+export function pictureKind(bytes: Buffer): PictureKind | "heic" | null {
+  const starts = (...values: number[]) => values.every((value, index) => bytes[index] === value);
+  const ascii = (at: number, text: string) => bytes.subarray(at, at + text.length).toString("latin1") === text;
+  if (starts(0x89, 0x50, 0x4e, 0x47)) return "png";
+  if (starts(0xff, 0xd8, 0xff)) return "jpg";
+  if (ascii(0, "GIF8")) return "gif";
+  if (ascii(0, "RIFF") && ascii(8, "WEBP")) return "webp";
+  const brands = ftypBrands(bytes);
+  if (brands) return brands.some((brand) => brand === "avif" || brand === "avis") ? "avif" : brands.some((brand) => HEIF_BRANDS.has(brand)) ? "heic" : null;
+  const head = bytes.subarray(0, 4096).toString("utf8").replace(/^\uFEFF/, "").trimStart();
+  return /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head) ? "svg" : null;
+}
 
 /** Security: a file's first bytes must match its extension, so a theme file is only ever the image or font it claims. */
 function looksLike(name: string, bytes: Buffer): boolean {
@@ -32,7 +72,7 @@ function looksLike(name: string, bytes: Buffer): boolean {
     case "jpg": case "jpeg": return starts(0xff, 0xd8, 0xff);
     case "gif": return ascii(0, "GIF8");
     case "webp": return ascii(0, "RIFF") && ascii(8, "WEBP");
-    case "avif": return ascii(4, "ftyp");
+    case "avif": return pictureKind(bytes) === "avif";
     case "woff": return ascii(0, "wOFF");
     case "woff2": return ascii(0, "wOF2");
     case "ttf": return starts(0x00, 0x01, 0x00, 0x00) || ascii(0, "true");
@@ -94,14 +134,82 @@ export function createThemeStore(deps: { dataDir: string }) {
     return null;
   }
 
-  function save(person: string, id: string, file: ThemeFile): Refusal | null {
+  function saveProblem(person: string, id: string, file: ThemeFile): Refusal | null {
     if (!validId(id)) return refused("A theme id is lowercase letters, digits and dashes, up to 48 characters.");
     const problem = file.css ? themeCssProblem(file.css) : null;
     if (problem) return refused(problem);
     if (!read(person, id) && ids(person).length >= THEME_LIMITS.themesPerPerson) return refused(`You can keep up to ${THEME_LIMITS.themesPerPerson} themes. Delete one first.`);
+    return null;
+  }
+
+  function writeTheme(person: string, id: string, file: ThemeFile): void {
     mkdirSync(folder(person, id), { recursive: true });
     writeFileAtomic(join(folder(person, id), "theme.json"), `${JSON.stringify(file, null, 2)}\n`);
+  }
+
+  /** Saves a theme without recording a look change: a copy, an import or a new name. */
+  function save(person: string, id: string, file: ThemeFile): Refusal | null {
+    const problem = saveProblem(person, id, file);
+    if (problem) return problem;
+    writeTheme(person, id, file);
     return null;
+  }
+
+  const nameOf = (person: string, id: string) => read(person, id)?.name ?? id;
+
+  function describe(person: string, before: Look, after: Look, edited: Array<{ id: string; file: ThemeFile; was: Snapshot }>, skin?: Skin): LookChange | null {
+    if (edited.length) return { kind: edited[0]!.was.file ? "edited" : "made", name: edited[0]!.file.name };
+    if (after.id && after.id !== before.id) return { kind: "wore", name: nameOf(person, after.id) };
+    if (after.id === before.id && after.skin === before.skin) return null;
+    return skin && skin !== "system" ? { kind: "skin", name: skin } : { kind: "default" };
+  }
+
+  /** Saves themes and changes what is worn as one entry in the person's look history; answers the skin to put on. */
+  function change(person: string, write: LookWrite): { skin?: Skin } | Refusal {
+    const saves = write.saves ?? [];
+    for (const { id, file } of saves) {
+      const problem = saveProblem(person, id, file);
+      if (problem) return problem;
+    }
+    if (write.wear && !read(person, write.wear) && !saves.some((save) => save.id === write.wear)) return refused(`No saved theme has the id ${write.wear}.`);
+    const known = readHistory(home(person)).at(-1)?.after.skin;
+    const before: Look = { id: active(person), ...(known ? { skin: known } : {}) };
+    const themes: Record<string, Snapshot> = Object.fromEntries([...saves.map((save) => save.id), ...(write.keep ?? [])].map((id) => [id, { file: read(person, id), assets: assets(person, id) }]));
+    for (const { id, file } of saves) writeTheme(person, id, file);
+    if (write.wear !== undefined) setActive(person, write.wear);
+    const skin = write.skin ?? known;
+    const after: Look = { id: active(person), ...(skin ? { skin } : {}) };
+    const edited = saves.flatMap((save) => (JSON.stringify(themes[save.id]!.file) === JSON.stringify(save.file) ? [] : [{ ...save, was: themes[save.id]! }]));
+    const said = write.change ?? describe(person, before, after, edited, write.skin);
+    if (said) appendHistory(home(person), { change: said, before, after, ...(Object.keys(themes).length ? { themes } : {}) });
+    return write.skin ? { skin: write.skin } : {};
+  }
+
+  /** The person's kept look changes, newest first, each with the look right after it. */
+  function history(person: string): LookHistoryItem[] {
+    const since: Record<string, Snapshot> = {};
+    return readHistory(home(person)).reverse().map((entry, index) => {
+      const id = entry.after.id;
+      const file = id ? (id in since ? since[id]!.file : read(person, id)) : null;
+      Object.assign(since, entry.themes);
+      return { index: index + 1, at: entry.at, ...entry.change, seq: entry.seq, look: entry.after, file };
+    });
+  }
+
+  /** Goes back to how things looked right after change `seq`, as a new change, so going back on it is a redo. */
+  function restore(person: string, seq: number): { skin?: Skin } | Refusal {
+    const plan = lookAfter(readHistory(home(person)), seq);
+    if (!plan) return refused(`Only the last ${LOOK_HISTORY_LIMIT} look changes are kept.`);
+    if (!plan.undone.length) return refused("That is how it looks now.");
+    const saves = Object.entries(plan.themes).flatMap(([id, snapshot]) => (snapshot.file ? [{ id, file: snapshot.file }] : []));
+    const skin = plan.look.skin ?? (plan.undone.some((entry) => entry.before.skin !== entry.after.skin) ? "system" : undefined);
+    return change(person, { saves, wear: plan.look.id, ...(skin ? { skin } : {}), change: { kind: "undid", count: plan.undone.length } });
+  }
+
+  /** The files a theme had at change `seq` that are gone from its folder now. */
+  function missingAssets(person: string, seq: number): string[] {
+    const plan = lookAfter(readHistory(home(person)), seq);
+    return Object.entries(plan?.themes ?? {}).flatMap(([id, snapshot]) => snapshot.assets.filter((name) => !asset(person, id, name)));
   }
 
   function addAsset(person: string, id: string, name: string, bytes: Buffer): { url: string } | Refusal {
@@ -152,7 +260,7 @@ export function createThemeStore(deps: { dataDir: string }) {
 
   function remove(person: string, id: string): void {
     if (!validId(id)) return;
-    if (active(person) === id) setActive(person, null);
+    if (active(person) === id) change(person, { wear: null, keep: [id], change: { kind: "deleted", name: nameOf(person, id) } });
     rmSync(folder(person, id), { recursive: true, force: true });
   }
 
@@ -180,7 +288,7 @@ export function createThemeStore(deps: { dataDir: string }) {
   }
 
   return {
-    read, save, active, setActive, addAsset, asset, duplicate, remove, exportTheme, importTheme, freeId,
+    read, save, active, setActive, change, history, restore, missingAssets, addAsset, asset, duplicate, remove, exportTheme, importTheme, freeId,
     list(person: string): ThemeList {
       const themes = ids(person).flatMap((id) => {
         const file = read(person, id);

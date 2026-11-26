@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +37,7 @@ import {
   type CommandRunner,
   type LocalVmTarget,
   autoLocalVmAttachable,
+  dockerWorkspaceMountIsSafe,
 } from "./container-computer.ts";
 import { DESKTOP_FLAGS_LABEL, DESKTOP_FLAGS_VERSION, dockerSecurityIsHardened, podmanSecurityIsHardened } from "./container-isolation.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
@@ -304,6 +305,95 @@ function perBotReadyInspect(botId: string, viewerPort: number, targetLabel?: str
   };
   return JSON.stringify([detail]);
 }
+
+describe("containerRuntimeStatus probe of a hung runtime", () => {
+  const dockerInfo = "docker info --format {{.ServerVersion}}";
+  const dockerOnly = (info: string | Error) => runner({
+    "/usr/bin/which docker": "/usr/local/bin/docker\n",
+    "/usr/bin/which podman": new Error("missing"),
+    [dockerInfo]: info,
+  });
+  const infoCalls = (calls: string[]) => calls.filter((call) => call === dockerInfo).length;
+
+  it.each([
+    ["killed", Object.assign(new Error("timeout"), { killed: true })],
+    ["ETIMEDOUT", Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })],
+  ])("remembers a %s info check for 30 s instead of waiting again", async (_name, timeout) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const fake = dockerOnly(timeout);
+      const down = { runtime: "docker", available: ["docker"], daemonUp: false };
+
+      expect(await containerRuntimeStatus(fake.run, "linux")).toEqual(down);
+      expect(await containerRuntimeStatus(fake.run, "linux")).toEqual(down);
+      expect(infoCalls(fake.calls)).toBe(1);
+
+      vi.advanceTimersByTime(30_001);
+      expect(await containerRuntimeStatus(fake.run, "linux")).toEqual(down);
+      expect(infoCalls(fake.calls)).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("checks again right away after a fast daemon error", async () => {
+    const fake = dockerOnly(new Error("Cannot connect to the Docker daemon"));
+
+    expect((await containerRuntimeStatus(fake.run, "linux")).daemonUp).toBe(false);
+    expect((await containerRuntimeStatus(fake.run, "linux")).daemonUp).toBe(false);
+    expect(infoCalls(fake.calls)).toBe(2);
+  });
+
+  it("does not cache a healthy check", async () => {
+    const fake = dockerOnly("29.0.0\n");
+
+    expect((await containerRuntimeStatus(fake.run, "linux")).daemonUp).toBe(true);
+    expect((await containerRuntimeStatus(fake.run, "linux")).daemonUp).toBe(true);
+    expect(infoCalls(fake.calls)).toBe(2);
+  });
+
+  it("shares one info check between concurrent callers", async () => {
+    let infos = 0;
+    const run: CommandRunner = async (command, args) => {
+      const key = [command, ...args].join(" ");
+      if (key === "/usr/bin/which docker") return { stdout: "/usr/local/bin/docker\n" };
+      if (key !== dockerInfo) throw new Error("missing");
+      infos += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return { stdout: "29.0.0\n" };
+    };
+
+    const both = await Promise.all([containerRuntimeStatus(run, "linux"), containerRuntimeStatus(run, "linux")]);
+
+    expect(both.map((status) => status.daemonUp)).toEqual([true, true]);
+    expect(infos).toBe(1);
+  });
+});
+
+describe("dockerWorkspaceMountIsSafe", () => {
+  const workspace = "C:\\Users\\light\\.openmausbot\\vm-home";
+  const mount = (Source: string) => [{ Type: "bind", Source, Destination: VM_WORKSPACE_GUEST, RW: true }];
+
+  it.each([
+    "/mnt/c/Users/light/.openmausbot/vm-home",
+    "/mnt/c/Users/light/.openmausbot/vm-home/",
+    "/mnt//c/Users/light//.openmausbot/vm-home",
+    "\\mnt\\C\\Users\\light\\.openmausbot\\vm-home",
+  ])("accepts the WSL translation of a Windows workspace for any runtime: %s", (source) => {
+    expect(dockerWorkspaceMountIsSafe(mount(source), "win32", workspace)).toBe(true);
+  });
+
+  it("still rejects a different folder, other platforms and a non-bind mount", () => {
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/c/Users/light/other"), "win32", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/d/Users/light/.openmausbot/vm-home"), "win32", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/c/Users/light/.openmausbot/vm-home"), "linux", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(
+      [{ Type: "volume", Source: "/mnt/c/Users/light/.openmausbot/vm-home", Destination: VM_WORKSPACE_GUEST, RW: true }],
+      "win32",
+      workspace,
+    )).toBe(false);
+  });
+});
 
 describe("containerComputerStatus", () => {
   it("prefers the supported Podman image store when Docker is also healthy on Windows", async () => {
@@ -966,9 +1056,12 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("prepare-openmausbot-workspace.sh");
     expect(dockerfile).toContain('if ! chmod 0700 "$workspace"');
     expect(dockerfile).toContain('test -r "$directory" && test -w "$directory" && test -x "$directory"');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.config/google-chrome" google-chrome');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.config/chromium" chromium');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.mozilla" mozilla');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.config/google-chrome" "$profiles/google-chrome"');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.config/chromium" "$profiles/chromium"');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.mozilla" "$profiles/mozilla"');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.local" "$apps/local"');
+    expect(dockerfile).toContain("cp -an");
+    expect(dockerfile).toContain("unmerged-");
     expect(dockerfile).toContain("SingletonLock");
     expect(dockerfile).toContain(`${IMAGE_LAYER_LABEL}="${IMAGE_LAYER_VERSION}"`);
     expect(dockerfile).toContain("did not become ready within 45 seconds");
@@ -982,7 +1075,7 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("9");
+    expect(IMAGE_LAYER_VERSION).toBe("10");
   });
 
   it("starts the driver's Chrome without its own sandbox inside the hardened container", () => {

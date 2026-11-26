@@ -28,7 +28,7 @@ const evidenceDir = process.env.OMB_UI_EVIDENCE_DIR ? resolve(ROOT, process.env.
 afterAll(async () => { if (!process.env.OMB_UI_EVIDENCE_DIR) await removeTempDir(evidenceDir); });
 
 /** The send button sits at a fixed place in the page, so a real mouse can find it inside the frame. What send() did
- * shows in the page and in its height, which the host's frame follows: 300px when it resolved, 240px when refused. */
+ * shows in the page. */
 const PAGE = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{margin:0;font:15px/1.4 var(--font-sans);color:var(--color-text-primary)}
 #mode{position:absolute;left:16px;top:12px;margin:0}
@@ -121,9 +121,9 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await evaluate(`document.querySelector('${row}').click(); true`);
     await until(() => evaluate(`Boolean(document.querySelector('${row}[aria-current="page"]'))`), "the room to open");
 
-    // Pepper answers the room and shows a page there through the same internal route show_html uses.
-    await ui("type", "--name", "Message Launch room", "--text", "Pepper, show us the coffee counter");
-    await ui("press", "--keys", "Enter");
+    // Pepper answers the room's thread and shows a page there through the same internal route show_html uses. The room
+    // is its feed, whose composer starts a new thread, so the line goes to the room's own thread by the room's route.
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "Pepper, show us the coffee counter", threadId: room.threadId, sendId: "room-pages-ui-send-0000" });
     const pepper = await roomTurn(info.botId);
     const shown = await card(pepper.token, { tool: "show_html", html: PAGE, title: "Coffee counter", height: 180 });
     expect(shown, JSON.stringify(shown.body)).toMatchObject({ status: 201, body: { messageId: expect.any(String) } });
@@ -153,11 +153,20 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(pageDoc).toMatchObject({ room: true, can: { message: false, modelContext: false, serverTools: false, openLinks: true } });
     expect(await api("GET", `/api/threads/${room.threadId}/messages/${boardRow.id}/app`)).toMatchObject({ room: true, can: { serverTools: false, serverResources: false, message: false } });
 
-    // Both rows render in the room for the person, view-only: Point (its pick goes to the page's bot), no Share.
+    // The room's thread opens beside its feed, where both rows render for the person, view-only. The page is a card that
+    // keeps its tools for when it is open.
+    await until(() => evaluate(`Boolean(document.querySelector('[data-feed-thread="${room.threadId}"]'))`), "the thread's row in the feed");
+    await evaluate(`document.querySelector('[data-feed-thread="${room.threadId}"] > button:first-child').click(); true`);
+    await until(() => evaluate(`Boolean(document.querySelector('[data-thread-panel="${room.threadId}"]'))`), "the thread beside the feed");
     const live = (id: string) => `[data-app="${id}"][data-app-room][data-app-state="live"] iframe[data-app-frame]`;
-    await until(() => evaluate(`Boolean(document.querySelector('${live(pageId)}') && document.querySelector('${live(boardRow.id)}'))`), "both frames to go live", 30_000);
-    expect(await evaluate(`[...document.querySelectorAll('[data-app="${pageId}"] button')].map((b) => b.textContent.trim()).filter((t) => t === "Point" || t === "Share")`)).toEqual(["Point"]);
-    expect(await evaluate(`Boolean([...document.querySelectorAll('[data-app="${pageId}"] button')].find((b) => b.getAttribute("aria-label") === "Full screen"))`)).toBe(true);
+    // The panel is narrower than the chat, so each frame is brought into view to go live.
+    for (const id of [pageId, boardRow.id]) {
+      await until(async () => {
+        await evaluate(`document.querySelector('[data-app="${id}"]')?.scrollIntoView({ block: "center" }); true`);
+        return evaluate(`Boolean(document.querySelector('${live(id)}'))`);
+      }, `the frame of ${id} to go live`, 30_000);
+    }
+    expect(await evaluate(`Boolean(document.querySelector('[data-app="${pageId}"] [data-page-tools]'))`)).toBe(false);
     mkdirSync(evidenceDir, { recursive: true });
 
     // Every request the renderer makes goes through fetch: from here on each one is kept.
@@ -179,14 +188,21 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     };
 
     const sentBefore = (await transcript()).filter((message) => message.role === "user").length;
-    const page = await inView(pageId);
-    await ui("screenshot", "--out", join(evidenceDir, "room-pages-shown.png"));
-    await click(page, 146, 70);
-    // 300px: send() resolved in the page without asking the host; a refusal would leave it at 240px.
-    await until(async () => (await frameBox(pageId)).height === 300, "the page to show what its send did");
-    expect(await shows("Clicked: send() resolved and posted nothing")).toBe(true);
     await inView(pageId);
+    await ui("screenshot", "--out", join(evidenceDir, "room-pages-shown.png"));
+    // The card opens the page over the room, with Point (its pick goes to the page's bot) and no Share.
+    const opened = `[data-page-fullscreen="${pageId}"]`;
+    await evaluate(`document.querySelector('[data-app="${pageId}"] [data-page-open]').click(); true`);
+    await until(() => evaluate(`Boolean(document.querySelector('${opened} iframe'))`), "the page to open over the room");
+    expect(await evaluate(`[...document.querySelectorAll('${opened} button')].map((b) => b.textContent.trim()).filter((t) => t === "Point" || t === "Share")`)).toEqual(["Point"]);
+    await until(async () => {
+      const box = await evaluate(`(() => { const r = document.querySelector('${opened} iframe').getBoundingClientRect(); return { left: r.left, top: r.top }; })()`);
+      await click(box, 146, 70);
+      return shows("Clicked: send() resolved and posted nothing");
+    }, "the page to show what its send did");
     await ui("screenshot", "--out", join(evidenceDir, "room-pages-clicked-send.png"));
+    await evaluate(`document.querySelector('${opened} button[aria-label="Close full screen"]').click(); true`);
+    await until(async () => !(await evaluate(`Boolean(document.querySelector('${opened}'))`)), "the page to close");
 
     await inView(boardRow.id);
     await ui("click", "--name", "Paint it red");

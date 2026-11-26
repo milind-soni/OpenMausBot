@@ -64,7 +64,7 @@ It runs the newest release, pinned by its version; once a `stable` channel is pu
 cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "First admin"
 ```
 
-Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
+Open the link it prints, or paste it into the desktop app under **＋ → Connect to another computer**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
 
 - **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
 - **Repair:** run the install command again. It checks the server, rewrites its own files and leaves `.env` and `data/` alone. That also moves an install made before Caddy got its own container: Caddy then shared the server's network, and HTTPS went down whenever the server restarted without it.
@@ -153,7 +153,7 @@ No domain, no proxy, no open port. The server gets an address like `https://c-7f
 
 ```sh
 npx openmausbot setup          # once: choose AI access, connect, and choose a model
-npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
+npx openmausbot account login          # once: an emailed code signs this machine in and reserves its address
 npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
@@ -163,7 +163,7 @@ chat-only connection. More engines can be added later. See [CLI setup](cli-onboa
 
 `login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot logout` releases the address.
+The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot account logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -275,12 +275,12 @@ npx openmausbot pair --label "Kitchen iPad"
 Pairing code   RR8Y-BLR6-H939   works once, until 10:59 · everything
 Link           https://c-7f3a9c.openmausbot.com/pair#code=RR8Y-BLR6-H939
 
-  Desktop app   ＋ → Connect to a server, paste the link
+  Desktop app   ＋ → Connect to another computer, paste the link
   Phone         scan with your camera or the MausBot app
 ```
 
 - **A browser:** open the link. The code is filled in; press **Connect**. That browser is paired for 30 days, renewed on use as above.
-- **The desktop app:** choose **＋ → Connect to a server** and paste the link, or type the address and the code. The rail at the window's left edge switches between your own machine and every server you added.
+- **The desktop app:** choose **＋ → Connect to another computer** and paste the link, or type the address and the code. The rail at the window's left edge switches between your own machine and every server you added.
 - **The phone:** scan the QR code from the iOS app's pairing screen, or paste the whole link into its address field. A code from `pair --phone` can chat, approve, and read; creating bots, changing models, and connecting apps stay with you in the server's UI.
 
 Worth knowing: a code works **once**, for **10 minutes** (`--ttl 24h` keeps it open up to a day, for a device you set up later; it is still single use, and a server restart ends every open code); the link only works on that address (typing the code by hand: open `…/pair` and enter it); five wrong codes in five minutes from one address lock pairing there for five minutes; `--phone` mints a code for a device that may chat and approve but not change settings or pair others.
@@ -292,7 +292,7 @@ Every paired device is a session:
 ```sh
 npx openmausbot devices               # id, device, scope, last seen, expires
 npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot status                # the address others use, and whether it answers as this server
+npx openmausbot account status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
@@ -510,6 +510,11 @@ every file's owner and mode either way. The script then:
    before (the server's own count of ready engines, `GET /api/health/engines`,
    which a hardened server answers too; `openmausbot doctor` on a version
    without it), and Caddy runs again.
+   If it does not, the new version's doctor runs on the data
+   (`openmausbot doctor --data --fix`: in the server's container while it is up,
+   else in a one-off one with the server stopped). When the doctor repaired
+   something, the new version is started once more and step 4 is tried again.
+   [What the doctor checks and repairs](self-hosting.md#the-doctor-checking-and-repairing-the-data).
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
    is as it was before step 1, `.env` included, byte for byte. Only when `.env`
@@ -579,11 +584,32 @@ published image with `./update.sh --replace-local-build`. Building needs about 6
 on a smaller server, add swap first or use the published image. Engines you install
 from **Settings → Engines** live on the data volume and survive either way.
 
-### Paths A and C (npm with the service above): the same steps by hand
+### Paths A and C (npm with the service above)
 
-There is no one-command updater for an npm install yet. Do what the script
-does: copy the data first, install one named version, check it, and keep the
-way back. Take the stable version number from
+From a trusted checkout on the Linux server, run this from the administrator shell:
+
+```sh
+sudo ./deploy/update-npm.sh
+```
+
+The script needs systemd with cgroup v2, curl, jq, and the
+[fixed-prefix unit above](#keep-it-running) with the default data directory and
+port. It stages the newer stable package as the service user before downtime,
+then stops the service, copies its data, and starts the new version. It checks
+the local service and verifies that an engine is still ready if one was ready
+before. A failed start or health check restores the previous package and data.
+The script prints the backup location. Keep the backup private because it can
+contain credentials.
+
+If the machine shuts down or the update is interrupted, the next run reports
+the unfinished update and the backup location. To restore the old version and
+the workspace from before the update, run
+`sudo ./deploy/update-npm.sh --rollback`. Data written by the failed version
+is saved alongside the backup. Update between runs to avoid interrupting work.
+
+#### Manual update
+
+For a custom unit, apply the same steps by hand. Take the stable version number from
 [`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
 (`"version"`), and note the one you run now (`openmausbot --version`). From
 the administrator shell, replacing `X.Y.Z`:
@@ -606,8 +632,8 @@ sudo -iu maus sh -c 'mv ~/.openmausbot ~/.openmausbot-failed-update && tar xzf ~
 sudo systemctl start openmausbot
 ```
 
-A service restart by itself does not update the installed package. For
-foreground `npx` usage, name the release: `npx --yes openmausbot@X.Y.Z serve --tunnel`.
+A service restart keeps the installed release. For foreground `npx` usage,
+start the version you want with `npx --yes openmausbot@X.Y.Z serve --tunnel`.
 
 ### How far behind a server may fall
 
@@ -703,17 +729,17 @@ Read this before putting anything else in front of the server.
 
 - The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
-- Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
+- Pairing is the login. Caddy adds no password: a `basic_auth` block would need variables neither Compose file passes to Caddy, the installer rewrites its `Caddyfile` on every run, and a password at Caddy would also refuse clients that send their own `Authorization` header. For a second wall, use path C or a firewall.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
 - The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot account login` on this machine first; the credentials are per machine.
 
 **The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot account logout && npx openmausbot account login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -721,11 +747,11 @@ Read this before putting anything else in front of the server.
 
 **Pairing code refused.** It expired (10 minutes, or its `--ttl`) or was used. Mint a new one. "Too many wrong codes. Try again at 11:19." means wait until then.
 
-**More errors** (from the desktop's Connect to a server sheet and the CLI's Reach line) are in the [troubleshooting table](self-hosting.md#troubleshooting).
+**More errors** (from the desktop's Connect to another computer sheet and the CLI's Reach line) are in the [troubleshooting table](self-hosting.md#troubleshooting).
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot account status` prints the same on the server.
 
 **Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 

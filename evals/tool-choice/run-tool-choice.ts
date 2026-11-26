@@ -6,11 +6,13 @@
 //
 // Each case is one real model turn on your account: never in CI, closed unless OMB_EVAL_LIVE=1. For the bridge, add
 // OMB_AGENTS_TOOL_BRIDGE=1 OMB_EVAL_LIVE_PASS_ENV=OMB_AGENTS_TOOL_BRIDGE. Everything else is a temporary data folder.
+// --context runs no model: it prints what a Claude turn sends of the agents tools up front, whole against deferred.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadLiveInstance } from "../live/run-live.ts";
 import { spawnLiveServer } from "../live/live-server.ts";
+import { contextSizes } from "./context.ts";
 import { scoreCase, summarize, type CaseScore, type ToolChoiceCase } from "./score.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -18,6 +20,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 interface Row { id: string; score: CaseScore; calls: string[]; reply: string; costUsd?: number; inputTokens?: number; done: boolean }
 
 async function main(): Promise<void> {
+  if (process.argv.includes("--context")) {
+    for (const row of contextSizes()) {
+      console.log(`${row.profile}: ${row.tools} tools; up front ${row.before.total} bytes whole, ${row.after.total} deferred `
+        + `(${row.after.whole} for ${row.loaded.join(", ")}, ${row.after.deferred} of deferred names)`);
+    }
+    return;
+  }
   if (process.env.OMB_EVAL_LIVE !== "1") {
     console.log("tool-choice eval: skipped (set OMB_EVAL_LIVE=1; each case is one real model turn)");
     return;
@@ -57,8 +66,9 @@ async function main(): Promise<void> {
       }
       const calls = messages.filter((message) => message.kind === "activity" && message.tool?.name).map((message) => String(message.tool.name));
       const after = await spent();
-      const row: Row = { id: item.id, score: scoreCase(item, calls), calls, done, costUsd: Number((after.cost - before.cost).toFixed(4)), inputTokens: after.input - before.input,
-        reply: String(messages.filter((message) => message.role === "bot" && message.kind === "text").at(-1)?.text ?? "").slice(0, 200) };
+      const reply = messages.filter((message) => message.role === "bot" && message.kind === "text").map((message) => String(message.text ?? "")).join("\n");
+      const row: Row = { id: item.id, score: scoreCase(item, calls, reply), calls, done, costUsd: Number((after.cost - before.cost).toFixed(4)), inputTokens: after.input - before.input,
+        reply: reply.slice(-200) };
       rows.push(row);
       console.log(`${row.score.pass ? "pass" : "MISS"} ${item.id}: ${row.score.chosen ?? "no tool"}${row.score.searched ? " (looked up)" : ""} $${row.costUsd} [${calls.join(", ")}]`);
     }

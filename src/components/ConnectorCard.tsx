@@ -13,12 +13,19 @@ import { cn } from "@/lib/cn";
 import { askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
 import { CardHint } from "./CardHint";
 import { ConnectorAlsoUseful } from "./ConnectorAlsoUseful";
+import { GithubChatCard } from "./github/GithubChatCard";
 
 const STATUS_CHECK_MS = 4_000;
 /** Composio marks an unfinished account EXPIRED shortly after its link lapses; the card keeps asking until it can say so. */
 const STATUS_WATCH_MS = AUTHORIZATION_LINK_MS + 2 * 60 * 1_000;
 
-export function ConnectorCard({ botId, color, threadId, message }: { botId: string; color?: Bot["color"]; threadId: string; message: Message }) {
+type ConnectorCardProps = { botId: string; color?: Bot["color"]; threadId: string; message: Message };
+
+export function ConnectorCard(props: ConnectorCardProps) {
+  return props.message.connector?.source === "github" ? <GithubChatCard {...props} /> : <AppConnectorCard {...props} />;
+}
+
+function AppConnectorCard({ botId, color, threadId, message }: ConnectorCardProps) {
   const connector = message.connector!;
   const gone = connector.dismissed || connector.superseded;
   const isMcp = connector.source === "mcp";

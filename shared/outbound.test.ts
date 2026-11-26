@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectorCallsIn, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn, trimOutboundPolicy } from "./outbound.ts";
+import { connectorCallsIn, effectiveOutboundPolicy, isOutboundTool, isReadOnlyTool, normalizeOutboundPolicy, outboundCallsIn, trimOutboundPolicy } from "./outbound.ts";
 
 describe("isOutboundTool", () => {
   it("flags tools that send, reply, post, publish, invite, share, or move money", () => {
@@ -91,6 +91,8 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__get_issue",
       "GMAIL_SEARCH_MESSAGES",
       "mcp__agents__check_app_hosting",
+      "_1PASSWORD_GET_ITEM",
+      "_1PASSWORD_LIST_ITEMS",
     ]) expect(isReadOnlyTool(name), name).toBe(true);
 
     for (const name of [
@@ -99,6 +101,7 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__create_comment",
       "mcp__computer__click",
       "Bash",
+      "_1PASSWORD_CREATE_ITEM",
     ]) expect(isReadOnlyTool(name), name).toBe(false);
   });
 });
@@ -124,6 +127,18 @@ describe("normalizeOutboundPolicy", () => {
   });
 });
 
+describe("effectiveOutboundPolicy", () => {
+  it("sends without asking at Full access when the bot has no rule of its own", () => {
+    expect(effectiveOutboundPolicy(undefined, true)).toEqual({ policy: "allow" });
+    expect(effectiveOutboundPolicy(undefined, false)).toEqual({ policy: "ask" });
+  });
+
+  it("keeps a stored rule at every level", () => {
+    expect(effectiveOutboundPolicy({ policy: "ask" }, true)).toEqual({ policy: "ask" });
+    expect(effectiveOutboundPolicy({ policy: "allow" }, false)).toEqual({ policy: "allow" });
+  });
+});
+
 describe("trimOutboundPolicy", () => {
   it("drops a stored daily cap and says so, once", () => {
     const bot = { outbound: { policy: "allow", dailyCap: 25 } as never };
@@ -142,6 +157,13 @@ describe("trimOutboundPolicy", () => {
 });
 
 describe("connectorCallsIn", () => {
+  it("keeps the account a multi-execute item names", () => {
+    const calls = connectorCallsIn("COMPOSIO_MULTI_EXECUTE_TOOL", {
+      tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {}, account: " work " }, { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }],
+    });
+    expect(calls).toEqual([{ slug: "GMAIL_SEND_EMAIL", arguments: {}, account: "work" }, { slug: "GMAIL_FETCH_EMAILS", arguments: {} }]);
+  });
+
   // Composio's session exposes a handful of meta tools; the app tools run
   // inside them. The gate has to see through the wrapper or it sees nothing.
   it("returns a direct app tool as itself", () => {

@@ -30,7 +30,7 @@ import { handleDirectUpgrade, isE2EUpgrade } from "./e2e/direct.ts";
 import { CLOSE, TRANSPORT_RELAY } from "./e2e/noise.ts";
 import { createE2EOrigin } from "./e2e/origin.ts";
 import { E2ERegistry } from "./e2e/registry.ts";
-import { RelayClient } from "./e2e/relay-client.ts";
+import { allowFarRelay, RelayClient } from "./e2e/relay-client.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
@@ -47,9 +47,15 @@ let mutationToken: string | null = null;
 let controlToken = initialControlToken(process.env, Boolean(parentPort));
 let controlTokenReceived = (): void => {};
 const controlReady = controlToken ? Promise.resolve() : new Promise<void>((resolve) => { controlTokenReceived = resolve; });
+type ProviderKeyReply = { status: number; body: unknown };
+const providerKeySaves = new Map<number, (reply: ProviderKeyReply) => void>();
+let providerKeySaveId = 0;
 parentPort?.on("message", ({ data }) => {
   if (!data || typeof data !== "object") return;
   const message = data as Record<string, unknown>;
+  if (message.type === "openmausbot:companion-provider-key-result" && typeof message.status === "number") {
+    return void providerKeySaves.get(message.id as number)?.({ status: message.status, body: message.body });
+  }
   if (message.type === "openmausbot:companion-e2e") return void configureE2E(message);
   if (message.type === "openmausbot:companion-e2e-redial") return void relay?.redial();
   if (message.type !== "openmausbot:companion-mutation-token") return;
@@ -61,6 +67,20 @@ parentPort?.on("message", ({ data }) => {
     controlTokenReceived();
   }
 });
+
+/** A phone's key goes to the desktop app, which saves it the way its own Settings do. */
+const saveProviderKey = (port: NonNullable<typeof parentPort>) => (patch: unknown): Promise<ProviderKeyReply> =>
+  new Promise((resolve) => {
+    const id = ++providerKeySaveId;
+    const done = (reply: ProviderKeyReply) => {
+      clearTimeout(timer);
+      providerKeySaves.delete(id);
+      resolve(reply);
+    };
+    const timer = setTimeout(() => done({ status: 504, body: { error: "The computer took too long to save the key. Try again." } }), 60_000);
+    providerKeySaves.set(id, done);
+    port.postMessage({ type: "openmausbot:companion-provider-key", id, patch });
+  });
 
 /** A typo'd port must not become port 0. */
 const num = (value: string | undefined, fallback: number): number => {
@@ -130,8 +150,9 @@ const relayBaseUrl = relayBaseUrlOverride(process.env.OMB_COMPANION_RELAY_URL);
 const watcher = createAddressWatcher({
   addresses: advertisableAddresses,
   name: machineName,
-  advertise: () => mdns.advertise(service()),
-  withdraw: () => mdns.stop(),
+  // Called when the address set (or the name) changes: a relay socket that crossed networks may be dead without knowing it.
+  advertise: () => (relay?.checkAlive(), mdns.advertise(service())),
+  withdraw: () => (relay?.checkAlive(), mdns.stop()),
   log: (line) => console.log(`bonjour: ${line}`),
   // On a Mac a failed join is not papered over by the default-route
   // membership, so a join that fails while an interface settles is retried.
@@ -153,7 +174,7 @@ const proxy = createProxyHandler({
     mutationToken: parentPort ? () => mutationToken : undefined,
     // Also stamps lastSeenAt.
     authenticate: (token) => devices.authenticate(token),
-    redeem: (code, deviceName, pairRequestId) => devices.redeem(code, deviceName, pairRequestId),
+    redeem: (code, deviceName, pairRequestId, replacesToken) => devices.redeem(code, deviceName, pairRequestId, replacesToken),
     serverName: machineName,
     version: process.env.OMB_APP_VERSION,
     hosts: () => hostCandidates(),
@@ -161,6 +182,7 @@ const proxy = createProxyHandler({
     connected: connectedDevices.open,
     e2eDescriptor: (deviceId) => e2e.descriptor(deviceId),
     e2ePaired: (context, deviceId) => e2e.paired(context, deviceId),
+    saveProviderKey: parentPort ? saveProviderKey(parentPort) : undefined,
   });
 const e2eOrigin = createE2EOrigin((req, res) => proxy(req, res), (req, socket, head) => proxy.upgrade(req, socket, head));
 const companion = createServer((req, res) => proxy(req, res, "lan"));
@@ -200,6 +222,7 @@ function applyRelay(config: RelayConfig | null): void {
   e2e.setRelay(config && e2e.enabled ? { hostId: config.hostId, nodes: config.nodes } : null);
   if (!config || !e2e.enabled) return;
   if (relay) return relay.setToken(config.token, config.nodes);
+  allowFarRelay();
   relay = new RelayClient({
     nodes: config.nodes,
     token: config.token,
@@ -233,6 +256,25 @@ devices.onDropped((deviceId) => {
   console.log("companion: dropped a paired device its phone never used");
 });
 
+function disconnectDevice(deviceId: string): void {
+  connectedDevices.disconnect(deviceId);
+  proxy.disconnectDevice(deviceId);
+}
+
+// The harness hears a phone as this computer, so only the sidecar can tell
+// it the phone lost access and end the Live call that phone holds.
+function deviceRevoked(deviceId: string): void {
+  e2e.closeDevice(deviceId);
+  if (parentPort && !mutationToken) return;
+  void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
+}
+
+// After the pairing reply is written: until then the session carrying it may still belong to the replaced device.
+devices.onReplaced((deviceId) => setImmediate(() => {
+  disconnectDevice(deviceId);
+  deviceRevoked(deviceId);
+}));
+
 const control = createControlServer({
   devices,
   controlToken: () => controlToken,
@@ -244,17 +286,8 @@ const control = createControlServer({
   },
   discovery: () => ({ advertising: mdns.advertising, name: service().name }),
   connectedDeviceIds: connectedDevices.ids,
-  disconnectDevice: (deviceId) => {
-    connectedDevices.disconnect(deviceId);
-    proxy.disconnectDevice(deviceId);
-  },
-  // The harness hears a phone as this computer, so only the sidecar can tell
-  // it the phone lost access and end the Live call that phone holds.
-  revoked: (deviceId) => {
-    e2e.closeDevice(deviceId);
-    if (parentPort && !mutationToken) return;
-    void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
-  },
+  disconnectDevice,
+  revoked: deviceRevoked,
   setDirectRoutes: (body) => {
     const next = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
     if (!next || typeof next.wifi !== "boolean" || typeof next.tailscale !== "boolean") return false;
@@ -263,7 +296,7 @@ const control = createControlServer({
     void watcher.check();
     return true;
   },
-  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, descriptor: e2e.descriptor(null) }),
+  e2e: () => ({ enabled: e2e.enabled, relay: relay?.status ?? "off", node: relay?.node ?? null, relayProblem: relay?.problem ?? null, descriptor: e2e.descriptor(null) }),
   liveRoutes: () => e2e.routes(),
   // The phone hears where it may connect from inside its session first. Narrowed, the relay keeps it a moment so that
   // lands, then refuses it (4404) and its relay sessions close; direct ones stay. Widened, it is admitted before it hears.

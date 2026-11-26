@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-09T21:02:58Z",
+  "updatedAt": "2026-11-24T06:00:00Z",
   "engines": {
     "claude": {
       "default": "claude-sonnet-5",
@@ -25,6 +25,12 @@
         {
           "id": "claude-opus-5-5",
           "name": "Claude Opus 5.5",
+          "status": "current",
+          "contextWindow": 1000000
+        },
+        {
+          "id": "claude-opus-5-5[1m]",
+          "name": "Claude Opus 5.5 (1M)",
           "status": "current",
           "contextWindow": 1000000
         },
@@ -164,6 +170,48 @@
     }
   },
   "prices": {
+    "gpt-6-luna": {
+      "inputPerMillion": 0.1,
+      "cachedInputPerMillion": 0.01,
+      "outputPerMillion": 0.5,
+      "asOf": "2026-11-20",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-6-sol": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 10,
+      "asOf": "2026-11-20",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-6.2-astra": {
+      "inputPerMillion": 8,
+      "cachedInputPerMillion": 0.4,
+      "outputPerMillion": 40,
+      "asOf": "2026-11-20",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-6.2-sol": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 10,
+      "asOf": "2026-11-20",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-6.1-sol": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 10,
+      "asOf": "2026-11-20",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-6.1-terra": {
+      "inputPerMillion": 1,
+      "cachedInputPerMillion": 0.05,
+      "outputPerMillion": 5,
+      "asOf": "2026-11-20",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
     "gpt-6-astra": {
       "inputPerMillion": 10,
       "cachedInputPerMillion": 1,
@@ -316,6 +364,50 @@
       "cachedInputPerMillion": 0.2,
       "outputPerMillion": 12,
       "asOf": "2026-09-23",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    "gemini-4-neon": {
+      "inputPerMillion": 3,
+      "cachedInputPerMillion": 0.15,
+      "outputPerMillion": 15,
+      "asOf": "2026-11-20",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    "gemini-4-argon": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 10,
+      "asOf": "2026-11-20",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "changes": [
+        {
+          "from": "2026-12-01",
+          "inputPerMillion": 4,
+          "cachedInputPerMillion": 0.2,
+          "outputPerMillion": 20
+        }
+      ]
+    },
+    "gemini-4-carbon": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 10,
+      "asOf": "2026-11-20",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "changes": [
+        {
+          "from": "2026-12-01",
+          "inputPerMillion": 4,
+          "cachedInputPerMillion": 0.2,
+          "outputPerMillion": 20
+        }
+      ]
+    },
+    "gemini-4-hydrogen": {
+      "inputPerMillion": 1.5,
+      "cachedInputPerMillion": 0.075,
+      "outputPerMillion": 7.5,
+      "asOf": "2026-11-20",
       "source": "https://ai.google.dev/gemini-api/docs/pricing"
     },
     "gemini-3.8-flash": {
@@ -514,6 +606,20 @@
       "outputPerMillion": 1.2,
       "asOf": "2026-09-23",
       "source": "https://openrouter.ai/api/v1/models"
+    },
+    "composer-2.5": {
+      "inputPerMillion": 0.5,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 2.5,
+      "asOf": "2026-11-20",
+      "source": "https://cursor.com/docs/models-and-pricing"
+    },
+    "composer-2.5-fast": {
+      "inputPerMillion": 3,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 15,
+      "asOf": "2026-11-20",
+      "source": "https://cursor.com/docs/models-and-pricing"
     }
   }
 }

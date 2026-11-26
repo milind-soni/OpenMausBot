@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { botOwner } from "../../shared/bot-owner.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { audienceMember, memberAudience, roomAudience, type Audience } from "../audience.ts";
+import { createPlaceInbox } from "../host/place-inbox.ts";
 import { createTeamMessages, type TeamMessagesDeps } from "../host/team-messages.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -23,7 +24,7 @@ export const session = (email: string) => ({ kind: "session", scopes: ["client"]
 type Task = { threadId: string; title: string; archivedAt?: number; activity?: string; routineRunId?: string };
 type Bot = Partial<Omit<BotRecord, "tasks">> & { id: string; name: string; threadId: string; tasks: Task[] };
 
-export function teamInbox(options: { team?: boolean; representative?: TeamMessagesDeps["inbox"]["representative"]; noChiefFor?: string[]; handed?: Record<string, string>; confined?: string[] } = {}) {
+export function teamInbox(options: { team?: boolean; place?: boolean; named?: TeamMessagesDeps["named"]; representative?: TeamMessagesDeps["inbox"]["representative"]; noChiefFor?: string[]; handed?: Record<string, string>; confined?: string[] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-team-inbox-"));
   const listeners = new Set<(change: StoreChange) => void>();
   const emit = (change: StoreChange) => { for (const listener of listeners) listener(change); };
@@ -90,6 +91,10 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
   const changed: string[] = [];
   const make = () => createTeamMessages({
     team: options.team === false ? null : { id: "team-acme", name: "Acme" },
+    // A place that is no team's (this computer, or a Cloud of one person): its one inbox.
+    ...(options.place ? { place: createPlaceInbox({ dataDir, store: store as never, openCards: () => [], live: () => false, viewer: () => ({ kind: "owner" }), sees: () => true,
+      mayAnswer: () => true, guestOf: () => null, guestName: () => undefined, handedBy: () => null, send: (notification) => { notified.push(notification); }, now: tick }) } : {}),
+    ...(options.named ? { named: options.named } : {}),
     dataDir,
     now: tick,
     store: store as never,

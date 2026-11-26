@@ -205,7 +205,7 @@ describe("outward links", () => {
   });
 });
 
-describe("the Phone & devices row", () => {
+describe("the Devices row", () => {
   const sub = (state: Parameters<typeof phoneDevicesSubtitle>[0], place = "This computer") => phoneDevicesSubtitle(state, place);
 
   it("names the place the phone joins, and how it is doing there", () => {
@@ -221,10 +221,10 @@ describe("the Phone & devices row", () => {
     expect(sub({ kind: "portal" }, "studio.example.com")).toBe("Signed in through your organization");
   });
 
-  it("is one row, dotted green while a phone is connected, that opens Phone & devices", () => {
+  it("is one row, dotted green while a phone is connected, that opens Devices", () => {
     const open = vi.fn();
     const row = phoneDevicesItem({ kind: "paired", count: 1, connected: true }, "This computer", open);
-    expect([row.key, row.label]).toEqual(["phone-devices", "Phone & devices"]);
+    expect([row.key, row.label]).toEqual(["phone-devices", "Devices"]);
     expect(row.trailing).toBeTruthy();
     expect(phoneDevicesItem({ kind: "none" }, "This computer", open).trailing).toBeUndefined();
     row.onSelect();
@@ -335,6 +335,39 @@ describe("profileMenuItems", () => {
     const accounts = [{ key: "accounts-sign-out", label: "Sign out", onSelect: noop }];
     const items = build({ accounts });
     expect(items.at(-1)).toMatchObject({ key: "accounts-sign-out", separatorBefore: true });
+  });
+});
+
+describe("Announcements in the profile menu", () => {
+  const noop = () => {};
+  const build = (patch: Partial<Parameters<typeof profileMenuItems>[0]> = {}) => profileMenuItems({
+    phone: { key: "phone-devices", label: "Phone & devices", onSelect: noop },
+    update: null,
+    header: { name: "Ada", line: "Not signed in", avatar: null, onOpen: noop },
+    plan: { key: "plan", label: "Plan & billing", onSelect: noop },
+    onSettings: noop, onShortcuts: noop, onAbout: noop, onHelp: noop, onFeedback: noop,
+    ...patch,
+  });
+
+  it("sits first in Help's group, in Simple and in Advanced, red-dotted while one is new, lit while its page is open", () => {
+    const open = vi.fn();
+    const advanced = build({ announcements: { unread: true, active: false, onSelect: open } });
+    expect(advanced.map((item) => item.key)).toEqual(["account", "phone-devices", "settings", "plan", "announcements", "support"]);
+    expect(advanced.find((item) => item.key === "announcements")).toMatchObject({ label: "Announcements", attention: true, active: false, separatorBefore: true });
+    advanced.find((item) => item.key === "announcements")!.onSelect();
+    expect(open).toHaveBeenCalledOnce();
+    const simple = build({ simple: { tools: toolMenuItems({ activeView: "announcements", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop }) },
+      announcements: { unread: false, active: true, onSelect: noop } });
+    expect(simple.map((item) => item.key)).toEqual(["account", "phone-devices", "settings", "automations", "team-map", "plan", "announcements", "support"]);
+    expect(simple.find((item) => item.key === "announcements")).toMatchObject({ attention: false, active: true, separatorBefore: true });
+  });
+
+  it("raises the avatar's dot red, and names it on the button, while an announcement is new", () => {
+    expect(accountDot({ automationsNeedYou: false, update: null, move: null, announcements: true })).toBe("danger");
+    expect(accountDot({ automationsNeedYou: false, update: "news", move: null, announcements: true })).toBe("danger");
+    expect(accountDot({ automationsNeedYou: false, update: null, move: null, announcements: false })).toBeNull();
+    expect(accountLabel("Ada", { automationsNeedYou: false, update: null, announcements: true })).toBe("Ada · New announcements");
+    expect(accountLabel("Ada", { automationsNeedYou: false, update: null })).toBe("Ada");
   });
 });
 

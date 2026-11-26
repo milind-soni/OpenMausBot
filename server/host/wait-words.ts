@@ -18,15 +18,16 @@ export interface WaitWordsDeps {
 
 export function createWaitWords(deps: WaitWordsDeps): EngineWaits & { queued(threadId: string, reason: SteerQueueReason | undefined): string | undefined } {
   return {
-    text(threadId, { first, running, ahead, limit }) {
+    text(threadId, { first, running, ahead, limit, server }) {
       const language = deps.language(threadId);
+      if (server) return limit !== undefined ? serverLine(language, first ? "server.room.turns" : "server.room.turnsStill", { limit, ahead }) : serverLine(language, first ? "server.room.wait" : "server.room.still", { running, ahead });
       if (limit !== undefined) return serverLine(language, first ? "server.planTurns.wait" : "server.planTurns.still", { limit, ahead });
       if (!first) return serverLine(language, "server.memory.still", { running, ahead });
       const wait = serverLine(language, "server.memory.wait", { running, ahead });
       return deps.starter() ? `${wait} ${serverLine(language, "server.memory.starter")}` : wait;
     },
-    began(threadId, { running, ahead, limit }) {
-      deps.held(threadId, limit !== undefined ? `plan: ${limit} at once, ${ahead} ahead` : `memory: ${running} running, ${ahead} ahead${deps.starter() ? ", on Starter" : ""}`);
+    began(threadId, { running, ahead, limit, server }) {
+      deps.held(threadId, limit !== undefined ? `${server ? "server" : "plan"}: ${limit} at once, ${ahead} ahead` : `${server ? "room" : "memory"}: ${running} running, ${ahead} ahead${deps.starter() ? ", on Starter" : ""}`);
     },
     changed: deps.changed,
     queued(threadId, reason) {

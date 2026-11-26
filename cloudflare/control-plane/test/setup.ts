@@ -10,6 +10,7 @@ declare global {
   namespace Cloudflare {
     interface Env {
       MIGRATION_DB: D1Database;
+      PUSH_MIGRATION_DB: D1Database;
       TEST_MIGRATIONS: D1Migration[];
       /** wrangler.jsonc's CLOUDFLARE_ENDPOINT_ACCOUNTS, as JSON. */
       TEST_PRODUCTION_ENDPOINT_ACCOUNTS: string;
@@ -31,6 +32,8 @@ afterEach(async () => {
     env.DB.prepare("DELETE FROM installation_action_rate_limits"),
     env.DB.prepare("DELETE FROM installation_endpoints"),
     env.DB.prepare("DELETE FROM installation_push_devices"),
+    env.DB.prepare("DELETE FROM machine_push_devices"),
+    env.DB.prepare("DELETE FROM machine_push_rate_limits"),
     // A missing row reads as an empty snapshot (never scanned, never refused).
     env.DB.prepare("DELETE FROM managed_endpoint_account_capacity"),
     env.DB.prepare("DELETE FROM managed_endpoint_reclaim_preview"),

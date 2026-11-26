@@ -9,13 +9,16 @@ import { customMcpServers } from "../config.ts";
 import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { addBotMcpServer, claimBotMcpServers, keepForBot, withoutBotMcpServers, type BotKept, type BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { MCP_RESTART_ENV } from "../mcp-app-catalog.ts";
+import { grantMover, grantServersMark, storedGrantSpec, type GrantServer } from "../mcp-grant-spec.ts";
 import { createMcpHealth, nameList, toolLabel, type McpHealthDeps } from "../mcp-health.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
-import { isRemoteMcpServer, parseStoredMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
+import { isRemoteMcpServer, parseStoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import type { McpKeys } from "../vault/mcp-keys.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
+import { brokeredServer, type BrokerPath } from "../bot-box/broker-probe.ts";
+import { createMcpUrlChecks, initializeAnswer, withoutRedirects } from "./mcp-url-checks.ts";
 
-type Bot = { id: string; name: string; mcpServers?: string[]; toolScope?: unknown };
+type Bot = { id: string; name: string; mcpServers?: string[]; toolScope?: unknown; alwaysAllow?: string[] };
 /** A server left out of a bot's turns, with why; `key`: its Vault key is off, as against it not starting. */
 export type McpServerOff = { name: string; error: string; key?: true };
 
@@ -33,8 +36,18 @@ export interface McpServersHostDeps {
   /** Whether bots' turns run boxed here, each seeing only its own folders. */
   boxed(): boolean;
   start?: McpHealthDeps["start"];
+  /** The servers each person connects with their own key: never checked on their own, which would send no one's key. */
+  personMcp?(): readonly string[];
+  /** How a URL server is checked: initializeAnswer. */
+  probeUrl?: typeof initializeAnswer;
+  /** The credential broker bots' turns reach URL servers through, or null where turns aren't boxed. */
+  botsPath?(): BrokerPath | null;
   /** A server's `vault:<id>` keys, read when it is launched or called. */
   keys?: McpKeys;
+  /** Drops a server's sign-in: its tokens and any sign-in still open. */
+  forgetSignIn?(name: string): void;
+  /** Rewrites the bot's saved "Always allow" grants with `move`, which answers null when it changes nothing. */
+  moveGrants?(bot: Bot, move: (keys: readonly string[]) => string[] | null): void;
 }
 
 const CLAIMED_FILE = (dataDir: string) => join(dataDir, "mcp-bot-servers.json");
@@ -60,6 +73,16 @@ export function enabledCommandServers(cfg: AppConfig): Record<string, StdioMcpSp
     if (!parsed.ok || isRemoteMcpServer(parsed.server) || !parsed.server.enabled || parsed.server.runsOn) continue;
     const { command, args, env, bot } = parsed.server;
     out[name] = { command, args, env, ...(bot ? { bot } : {}) };
+  }
+  return out;
+}
+
+/** The enabled URL servers this computer's bots reach, by name. */
+export function enabledUrlServers(cfg: AppConfig): Record<string, StoredRemoteMcpServer> {
+  const out: Record<string, StoredRemoteMcpServer> = {};
+  for (const [name, raw] of Object.entries(cfg.mcpServers ?? {})) {
+    const parsed = parseStoredMcpServer(name, raw);
+    if (parsed.ok && isRemoteMcpServer(parsed.server) && parsed.server.enabled && !parsed.server.runsOn) out[name] = parsed.server;
   }
   return out;
 }
@@ -114,14 +137,69 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     start,
     tell: deps.tell,
   });
+  const urls = createMcpUrlChecks({
+    // The organisation's policy first: a server it blocks is never contacted.
+    servers: () => {
+      const personal = new Set(deps.personMcp?.() ?? []);
+      return deps.policy(Object.fromEntries(Object.entries(enabledUrlServers(deps.cfg())).filter(([name]) => !personal.has(name))));
+    },
+    users: (name) => deps.bots().filter((bot) => started(bot).includes(name)),
+    probe: async (name, server) => {
+      const stored = server as StoredRemoteMcpServer;
+      await deps.keys?.warm(name, stored);
+      const resolved = deps.keys ? deps.keys.resolve(name, stored) : { ok: true as const, server: stored };
+      // A server whose Vault key is off is off for that reason (keyed), not checked: no answer either way.
+      if (!resolved.ok || !("url" in resolved.server)) return { ok: false };
+      const probe = deps.probeUrl ?? initializeAnswer, path = deps.botsPath?.() ?? null;
+      if (!path) return probe(resolved.server);
+      const brokered = brokeredServer(path, name, resolved.server);
+      try {
+        return await probe({ ...resolved.server, url: brokered.url, headers: {} }, { fetch: withoutRedirects(brokered.fetch) });
+      } finally {
+        await brokered.done();
+      }
+    },
+    tell: deps.tell,
+    file: join(deps.dataDir, "mcp-url-checks.json"),
+  });
   const restarts = new Map<string, number>();
-  const health = { ...checks, changed(name: string): void { restarts.set(name, (restarts.get(name) ?? 0) + 1); checks.changed(name); } };
+  const health = {
+    ...checks,
+    changed(name: string): void { restarts.set(name, (restarts.get(name) ?? 0) + 1); checks.changed(name); urls.changed([name]); },
+    engineFailed(botId: string, names: readonly string[]): void { checks.engineFailed(botId, names); urls.engineFailed(names); },
+    async settled(): Promise<void> { await Promise.all([checks.settled(), urls.settled()]); },
+  };
+
+  const mounted = (bot: Bot): Record<string, McpServerSpec> => withRestarts(urls.usable(health.usable(bot.id, keyed(bot).servers)), restarts);
+  /** `servers` as a saved "Always allow" names them (mcp-grant-spec.ts): no Vault key's value and no restart count. */
+  const grantSpecs = (servers: Record<string, McpServerSpec>): Record<string, McpServerSpec> => {
+    const stored = deps.cfg().mcpServers ?? {};
+    return Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, storedGrantSpec(name, stored[name]) ?? server]));
+  };
+  /** Grants an earlier version tied to a key's value or a restart count move to the server as it is named now: once for
+   * a bot's servers as they are, so a turn whose servers have not changed since does none of this. A failed save changes
+   * nothing: the next turn tries again, and until then those tools ask as they did. */
+  const movedFor = new Map<string, string>();
+  const moveGrants = (bot: Bot): void => {
+    if (!deps.moveGrants) return;
+    const started = mounted(bot), names = grantSpecs(started);
+    const servers: Record<string, GrantServer> = Object.fromEntries(Object.keys(started).map((name) => [name, { names: names[name]!, started: started[name]! }]));
+    const mark = grantServersMark(servers);
+    if (movedFor.get(bot.id) === mark) return;
+    try {
+      deps.moveGrants(bot, grantMover(servers));
+      movedFor.set(bot.id, mark);
+    } catch {
+      console.error("[mcp] Could not move this bot's saved tool permissions to their new form.");
+    }
+  };
 
   return {
     health,
     /** How Test starts a command server: as the turns of its bot, or of any bot. */
     probeAs: (server: { bot?: string }) => (server.bot ? asBot(server.bot) : {}),
-    mounted: (bot: Bot): Record<string, McpServerSpec> => withRestarts(health.usable(bot.id, keyed(bot).servers), restarts),
+    mounted,
+    grantSpecs,
     /** The servers set for this bot, started or not: who a change to one reaches. */
     given: (bot: Bot): string[] => Object.keys(configured(bot)),
     /** Before a turn: any Vault key its servers read from a linked password manager, and the first start checks. */
@@ -133,10 +211,11 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
         }
       }
       await health.prepare(bot.id, started(bot));
+      moveGrants(bot);
     },
-    off: (bot: Bot): McpServerOff[] => [...health.off(bot.id, started(bot)), ...keyed(bot).off.filter(({ name }) => canUseMcpServer(bot.toolScope, name))],
+    off: (bot: Bot): McpServerOff[] => [...health.off(bot.id, started(bot)), ...urls.off(started(bot)), ...keyed(bot).off.filter(({ name }) => canUseMcpServer(bot.toolScope, name))],
     listing: <T extends { name: string }>(server: T): T & { offFor?: string[]; keyOff?: true } => {
-      const offFor = health.offFor(server.name);
+      const offFor = [...health.offFor(server.name), ...urls.offFor(server.name)];
       const keyGone = deps.keys ? keyRemoved(deps.keys, deps.cfg(), server.name) : false;
       return { ...server, ...(offFor.length ? { offFor } : {}), ...(keyGone ? { keyOff: true as const } : {}) };
     },
@@ -151,7 +230,14 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
       const next = withoutBotMcpServers(before, botId);
       if (!next) return;
       deps.persist(next);
-      for (const name of Object.keys(before ?? {})) if (!Object.hasOwn(next, name)) deps.keys?.forgetServer(name);
+      for (const name of Object.keys(before ?? {})) {
+        if (Object.hasOwn(next, name)) continue;
+        try {
+          deps.keys?.forgetServer(name);
+        } finally {
+          deps.forgetSignIn?.(name);
+        }
+      }
     },
     /** At start: the first time bots run boxed here, servers in one existing bot's folders become its own (said once);
      * then every server is checked. A server added after that stays as it was added. */
@@ -167,6 +253,7 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
         }
       }
       health.checkAll();
+      urls.checkAll();
     },
   };
 }

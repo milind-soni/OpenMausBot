@@ -1,9 +1,9 @@
 import type { AppState, Bot } from "@/state/store";
 import { keepWarmLine } from "./cache-keepwarm";
 import { t } from "./i18n";
-import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "./usage";
+import { contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "./usage";
 
-export function usageSummary(bot: Bot, instances: AppState["instances"]): { short: string; detail: string; tone?: "danger" | "warning" } | null {
+export function usageSummary(bot: Bot, instances: AppState["instances"]): { short: string; detail: string } | null {
   const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
   const usage = task?.usage;
   if (!usage || !usageChip(usage)) return null;
@@ -20,7 +20,5 @@ export function usageSummary(bot: Bot, instances: AppState["instances"]): { shor
   ]
     .filter(Boolean)
     .join("\n");
-  const short = usageChip(usage);
-  const ctx = contextChip(usage);
-  return { short: ctx ? `${short} · ${ctx}` : short, detail, tone: share?.tone === "danger" ? "danger" : share?.tone === "warning" ? "warning" : undefined };
+  return { short: usageChip(usage), detail };
 }

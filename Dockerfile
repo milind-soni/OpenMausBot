@@ -20,10 +20,16 @@
 # ...) and OpenMausBot's own state (~/.openmausbot) persist across container
 # restarts.
 #
-# A plain `docker run` of either image wants `--init --shm-size=512m`, as the
-# compose files set: the bots' browsers leave exited processes for an init to
-# collect, and Chrome needs shared memory (docs/browser-packaging.md, "Process
-# hygiene"). On Fly Machines (the Cloud home) Fly's own init is PID 1.
+# The bots' browsers, engines and shells leave exited processes for an init to
+# collect (docs/browser-packaging.md, "Process hygiene"). The server image
+# brings its own, tini, as its entrypoint: a container platform runs an image
+# with no `--init`, and Node as PID 1 waits only for its own children, so the
+# rest stay as zombies until the container's pids limit refuses every spawn.
+# The compose files' `init: true` on top of it is harmless. The Cloud home
+# image has the same entrypoint: a host that starts it with a plain
+# `docker run` gives it no init, and under Fly's own init tini collects as a
+# subreaper. Chrome keeps its shared memory out of a small /dev/shm by itself
+# (server/browser/chrome/shm.ts).
 
 FROM caddy:2.10.2 AS edge
 # Official Caddy carries a privileged-port file capability. The Cloud home's
@@ -74,9 +80,11 @@ RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
-# git + curl: agent CLIs shell out to git; curl backs the healthcheck
+# git + openssh-client: agent CLIs shell out to git, and the VPS desktop reaches
+# servers over ssh; curl backs the healthcheck. tini is
+# the server image's init, and what its launcher falls back to as PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client tini \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
     libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0 \
     libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0 libcairo-gobject2 \
@@ -89,13 +97,16 @@ RUN apt-get update \
 # The bots' browser (docs/plans/browser-engine.md): the pinned agent-browser
 # and a Chrome for Testing with its libraries, so a server bot can browse.
 # Pin here and in server/browser-engine-release.ts together.
-ARG AGENT_BROWSER_VERSION=0.37.0
+ARG AGENT_BROWSER_VERSION=0.39.0
 # `agent-browser install` fetches Chrome for Testing's last-known-good Stable;
 # the publish job passes that version so a Chrome release rebuilds this layer.
 ARG CHROME_CACHE_TAG=""
 # Chrome for Testing has no Linux ARM64 build, so an arm64 image takes
 # Debian's Chromium instead, linked at the same path; the publish job passes
 # its newest bookworm version so a Debian security update rebuilds it too.
+# A browser on a private display reads Chrome's lock-down policy from a folder
+# its own mount namespace covers (server/browser/desktop/policy.ts); Debian's
+# Chromium makes no /etc/chromium/policies, so the image does.
 ARG CHROMIUM_CACHE_TAG=""
 ARG TARGETARCH
 # The global link must be the native binary for this platform (agent-browser's
@@ -104,7 +115,7 @@ RUN echo "agent-browser ${AGENT_BROWSER_VERSION}, Chrome for Testing ${CHROME_CA
   && npm install -g --cache /tmp/npm-cache agent-browser@${AGENT_BROWSER_VERSION} \
   && if [ "$TARGETARCH" = arm64 ]; then \
        apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/* \
-       && mkdir -p /opt/openmausbot-browser && ln -s /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome; \
+       && mkdir -p /opt/openmausbot-browser /etc/chromium/policies && ln -s /usr/lib/chromium/chromium /opt/openmausbot-browser/chrome; \
      else HOME=/opt/openmausbot-browser agent-browser install \
        && ln -s /opt/openmausbot-browser/.agent-browser/browsers/chrome-*/chrome /opt/openmausbot-browser/chrome; \
      fi \
@@ -134,20 +145,23 @@ FROM runtime AS cloud-home
 # runs every bot turn in its own namespaces, socat bridges a box's loopback
 # ports to the server's gates. Their own layer, so the Chrome layers beneath
 # stay cached. pnpm, so a bot's shell can install what its project asks for.
+# Xvnc (TigerVNC, run unmodified as its own process), for browserEngine.cloudDisplay: the bots' Chrome shows its window
+# on a private display that the browser panel shows as a remote desktop (server/browser/desktop). It only runs while a
+# browser does, and that Chrome alone starts under bubblewrap with Chrome's lock-down policy in its policy folders.
 # uv and uvx, so a connector someone runs with uvx comes along when they move here
 # (server/cloud-connections.ts) as an npx one does: about 32 MB, on every user's
 # PATH and out of the volume. What it downloads lives in the volume's cache.
 ARG UV_VERSION=0.13.4
 ARG TARGETARCH
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat \
+  && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat tigervnc-standalone-server \
   && rm -rf /var/lib/apt/lists/* \
   && HOME=/tmp/omb-build-home npm install -g pnpm@10.33.0 \
   && uv_arch=x86_64 && if [ "$TARGETARCH" = arm64 ]; then uv_arch=aarch64; fi \
   && mkdir -p /tmp/uv-install \
   && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${uv_arch}-unknown-linux-gnu.tar.gz" | tar -xz -C /tmp/uv-install --strip-components=1 \
   && install -m 0755 /tmp/uv-install/uv /tmp/uv-install/uvx /usr/local/bin/ \
-  && bwrap --version && socat -V | head -1 && HOME=/tmp/omb-build-home pnpm --version && uv --version | grep -qF "uv ${UV_VERSION}" \
+  && bwrap --version && socat -V | head -1 && test -x /usr/bin/Xvnc && { Xvnc -version 2>&1 | head -1; } && HOME=/tmp/omb-build-home pnpm --version && uv --version | grep -qF "uv ${UV_VERSION}" \
   && rm -rf /tmp/omb-build-home /tmp/uv-install /tmp/node-compile-cache
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.
@@ -232,6 +246,12 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
 # environment `maus` could read (server/cloud-home-start.ts). It runs only
 # root's code from the image, never anything on the volume.
 USER root
+# tini is PID 1 where the host gives the container no init, and collects the
+# orphans of everything beneath it: the server's, the edge's and the bots'.
+# It passes signals on to the supervisor and exits with its code. -s: under
+# Fly's init, or `docker run --init`, it is not PID 1 and collects as a
+# subreaper instead of warning.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "/app/dist-server/cloud-home-start.js"]
 
 # The self-hosted server, last so a plain `docker build .` builds it.
@@ -254,4 +274,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # The launcher runs dist-server/index.js and starts it again when it asks to
 # (a copied workspace committing, server/restart.ts), so the container, and a
 # Caddy sharing its network, stays up through that restart.
+# -s: under `docker run --init` or compose's `init: true` tini is not PID 1,
+# and collects the server's orphans as a subreaper instead of warning.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist-server/server-launcher.js"]

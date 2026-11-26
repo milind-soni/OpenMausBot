@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 it("pins an explicitly chosen new-thread folder without moving existing sessions or the bot default", async () => {
   const fixture = await launchVerificationServer();
@@ -38,7 +39,7 @@ it("pins an explicitly chosen new-thread folder without moving existing sessions
     expect(explicit.body.task.cwd).toBe(chosen);
     expect(explicit.body.bot.cwd).toBe(original);
     const threadId = explicit.body.task.threadId;
-    const persisted = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8")).find((item: any) => item.id === bot.id);
+    const persisted = () => readRegistry(fixture.info.dataDir).bots.find((item: any) => item.id === bot.id);
     expect(persisted().tasks.find((task: any) => task.threadId === threadId).cwd).toBe(chosen);
 
     const beforeInvalid = persisted().tasks.length;

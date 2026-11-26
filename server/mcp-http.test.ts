@@ -11,6 +11,16 @@ afterEach(async () => {
 });
 
 describe("a server's own requests to the client", () => {
+  it("does not charge earlier SSE replies against a later request's byte limit", async () => {
+    fake = await startFakeHttpMcp({ transport: "sse", tools: [{ name: "still_available" }] });
+    client = new RemoteMcpClient({ type: "sse", url: fake.url, headers: {} }, { maxBytes: 512 });
+    await client.initialize("fixture", AbortSignal.timeout(5_000));
+    for (let i = 0; i < 20; i++) {
+      await expect(client.request("tools/list", {}, AbortSignal.timeout(1_000))).resolves.toEqual({ tools: [{ name: "still_available" }] });
+    }
+    expect(fake.toolsLists).toBe(20);
+  });
+
   it("keeps the shared SSE stream alive after the opening request's signal expires", async () => {
     fake = await startFakeHttpMcp({ transport: "sse", tools: [{ name: "still_available" }] });
     let streamSignal: AbortSignal | null | undefined;
@@ -93,6 +103,19 @@ describe("a server's JSON-RPC error", () => {
     const failure = await client.request("tools/call", { name: "report", arguments: {} }, AbortSignal.timeout(5_000)).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(McpRpcError);
     expect(failure).toMatchObject({ kind: "protocol", code: -32602, detail: "Missing required parameter 'campaignId'" });
+  });
+});
+
+describe("the protocol version the server answers with", () => {
+  it.each([
+    { echo: "2026-07-28", wire: "2025-06-18" },
+    { echo: "2024-11-05", wire: "2024-11-05" },
+  ])("puts $wire, not the echoed $echo, on later requests", async ({ echo, wire }) => {
+    fake = await startFakeHttpMcp({ tools: [{ name: "still_available" }], protocolVersion: echo });
+    client = new RemoteMcpClient({ type: "http", url: fake.url, headers: {} });
+    await client.initialize("fixture", AbortSignal.timeout(5_000));
+    await client.request("tools/list", {}, AbortSignal.timeout(5_000));
+    for (const headers of fake.seenHeaders.slice(1)) expect(headers["mcp-protocol-version"]).toBe(wire);
   });
 });
 

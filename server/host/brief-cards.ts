@@ -5,7 +5,7 @@ import { inboxNoteWords } from "./inbox-words.ts";
 // and Caption nodes only, and a link becomes a button only when it is an https link with no username or password.
 import { WEB_URL_MAX, WIDGET_LIMITS, type WidgetRoot } from "../../shared/widget.ts";
 import type { WidgetMoment, WidgetText, WidgetTextFields } from "../../shared/widget-text.ts";
-import type { CalendarEvent } from "../connected-reads.ts";
+import type { CalendarEvent, MailApp } from "../connected-reads.ts";
 import { intlLocale } from "../language.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { localDate, validZone } from "./check-plan.ts";
@@ -132,7 +132,7 @@ export const BRIEF_ROWS = 6;
 export const DISMISS_ACTION = "dismiss_row";
 export const DRAFT_ACTION = "draft_reply";
 
-export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; whyText?: ServerText; needsReply: boolean }
+export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; whyText?: ServerText; needsReply: boolean; app?: MailApp; link?: string }
 /** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
 export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string; said?: { text?: WidgetText; note?: WidgetText } }
 /** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news. */
@@ -181,17 +181,32 @@ const section = (title: [string, string], rows: Node[], w: BriefWords, empty?: [
 const openButton = (target: OpenTarget | undefined, w: BriefWords): Node[] => (target ? [button(w.open, { type: "open_thread", payload: target }, false, words("brief.card.open"))] : []);
 const pageButton = (url: string | undefined, w: BriefWords): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button(w.openPage, open, false, words("brief.card.openPage"))] : []; };
 
-function emailRow(email: BriefEmail, w: BriefWords): Node {
-  const who = sender(email, BRIEF_TEXT.label, w);
+function openEmailButton(email: BriefEmail, w: BriefWords): Node[] {
+  if (email.app === "outlook") {
+    const link = httpsLink(email.link), outlook = link ? openUrl(link) : undefined;
+    return outlook ? [button(w.openInOutlook, outlook, false, words("brief.card.openOutlook"))] : [];
+  }
   const gmail = email.threadId.length <= BRIEF_TEXT.link ? openUrl(gmailUrl(email.threadId)) : undefined;
+  return gmail ? [button(w.openInGmail, gmail, false, words("brief.card.openGmail"))] : [];
+}
+
+function numberedAction(label: string, said: WidgetText, position: number | undefined): { label: string; said: WidgetText } {
+  if (position === undefined) return { label, said };
+  return { label: `${position}. ${label}`, said: words("brief.card.numberedEmailAction", { number: position, action: said }) };
+}
+
+function emailRow(email: BriefEmail, w: BriefWords, position?: number): Node {
+  const who = sender(email, BRIEF_TEXT.label, w);
   const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
   const whoWords = senderName(email.from).trim() ? who : words("brief.part.noSender");
   const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender, w) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
   const noteWords = inboxNoteWords(email.why, email.whyText, email.needsReply) ?? (email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important"));
+  const reply = numberedAction(w.draftReply(who), words("brief.card.draftReply", { who: whoWords }), position);
+  const dismiss = numberedAction(w.dismiss(who), words("brief.card.dismissEmail", { who: whoWords }), position);
   return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
-    button(w.draftReply(who), { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords })),
-    ...(gmail ? [button(w.openInGmail, gmail, false, words("brief.card.openGmail"))] : []),
-    button(w.dismiss(who), { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords })),
+    button(reply.label, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, reply.said),
+    ...openEmailButton(email, w),
+    button(dismiss.label, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, dismiss.said),
   ], { text: line, ...(noteWords ? { note: noteWords } : {}) });
 }
 
@@ -203,12 +218,15 @@ export function briefCard(facts: BriefFacts): BuiltCard {
   const w = briefWords(language);
   const replies = facts.emails.filter((email) => email.needsReply);
   const important = facts.emails.filter((email) => !email.needsReply);
-  const needRows = [...replies.map((email) => emailRow(email, w)), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w), row.said))];
+  // Numbered only when two emails share a sender, whose buttons would otherwise read the same.
+  const senders = facts.emails.map((email) => sender(email, BRIEF_TEXT.label, w));
+  const place = (index: number): number | undefined => (new Set(senders).size < senders.length ? index + 1 : undefined);
+  const needRows = [...replies.map((email, index) => emailRow(email, w, place(index))), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w), row.said))];
   const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
   const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join),
     { text: words("brief.card.meetingLine", { time: moment(meeting.start, "clock", zone), title: meeting.title }) }));
   const waiting = facts.waiting === true ? w.waitingMany : facts.waiting ? w.waitingCount(facts.waiting) : undefined;
-  const importantRows = important.map((email) => emailRow(email, w));
+  const importantRows = important.map((email, index) => emailRow(email, w, place(replies.length + index)));
   const waitingNotice = waiting ? [caption(waiting, facts.waiting === true ? words("brief.card.waitingMany") : words(facts.waiting === 1 ? "brief.card.waitingOne" : "brief.card.waitingOther", { count: facts.waiting || 0 }))] : [];
   const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)], row.said));
   const ideaRows = (facts.ideas ?? []).map((row) => rowBeside(row.text, row.note, [], row.said));

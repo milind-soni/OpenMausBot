@@ -9,8 +9,8 @@ import { PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV } from "../../credent
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 import { discoverAcpModels, type AcpDiscoveryOptions } from "./custom-model-catalog.ts";
 
-const EMPTY: ModelCatalog = { default: "", options: [] };
 const AGENT_DEFAULT = { id: "agent-default", label: "OMP default (configured)" };
+const MODELS: ModelCatalog = { default: AGENT_DEFAULT.id, options: [{ ...AGENT_DEFAULT, custom: true }] };
 const WORKSPACE_CREDENTIALS = new Set<string>(WORKSPACE_CREDENTIAL_ENV);
 const CREDENTIAL_ENV = PROVIDER_CREDENTIAL_ENV.filter((key) => !WORKSPACE_CREDENTIALS.has(key));
 const MAX_DISCOVERED_MODELS = 4096;
@@ -40,7 +40,7 @@ const SUPPORT: AcpSupport = {
   driverKind: "ompAgent",
   displayName: "OMP",
   access: "custom",
-  models: EMPTY,
+  models: MODELS,
   defaultCli: "omp",
   cliVersion: /\bomp\//i,
   nativeSource: "omp.acp",

@@ -20,7 +20,7 @@ const memoryStore = () => { let held = null; return { read: async () => held, wr
  * @param {{
  *   active: { read(): Promise<any>, write(value: unknown): Promise<void> },
  *   saved: { read(): Promise<any>, write(value: unknown): Promise<void> },
- *   client(): { state(): any, quiesce(): void, reload(): Promise<any>, signOut(): Promise<any>, revokeSaved(record: unknown): Promise<void> },
+ *   client(): { state(): any, quiesce(): void, reload(): Promise<any>, signOut(): Promise<any>, revokeSaved(record: unknown): Promise<void>, memorySignIn?(): any },
  *   makeClient(options: { store: any, onState(state: any): void }): any,
  *   origin: string,
  *   holding?(): string | null,
@@ -59,6 +59,8 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     if (raw.v !== VERSION || !Array.isArray(raw.accounts)) throw new Error("These saved sign-ins are from a newer version.");
     return raw.accounts.filter((record) => usable(record, origin));
   }
+  /** The active sign-in as its file holds it; one kept in memory only (its file couldn't be written) is the client's. */
+  const activeRecord = async () => client().memorySignIn?.() ?? await active.read().catch(() => null);
   const activeId = () => { const state = client().state(); return ["signed-out", "connecting"].includes(state?.status) ? null : state?.account?.id ?? null; };
   const remember = (list, without = activeId()) => {
     rows = list.filter((record) => record.account.id !== without).map((record) => ({ id: record.account.id, email: record.account.email, ...(record.expiresAt <= now() ? { signIn: true } : {}) }));
@@ -73,7 +75,7 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
   async function become(next, { list, keep = true }) {
     const leavingId = activeId();
     await naming(leavingId);
-    const current = await active.read().catch(() => null);
+    const current = await activeRecord();
     const waiting = keep && usable(current, origin) ? current : null;
     await saved.write({ v: VERSION, accounts: [...list.filter((record) => record.account.id !== waiting?.account.id), ...(waiting ? [waiting] : [])] });
     client().quiesce();
@@ -120,10 +122,13 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     const hold = holding();
     if (hold) return { outcome: hold };
     const next = list.find((record) => record.account.id !== id && record.expiresAt > now());
-    const current = await active.read().catch(() => null);
+    const memory = client().memorySignIn?.() ?? null, current = memory ?? await active.read().catch(() => null);
     if (next) {
-      await become(next, { list: list.filter((record) => record.account.id !== id), keep: false });
-      if (usable(current, origin)) await client().revokeSaved(current).catch((error) => log(`accounts: signed out here only (${error?.message ?? error})`));
+      let switched = false;
+      // One kept in memory only ends at the Admin even when the switch fails: a failed switch reads the file again, and that
+      // sign-in would be gone from this device with its token still good.
+      try { await become(next, { list: list.filter((record) => record.account.id !== id), keep: false }); switched = true; }
+      finally { if ((switched || memory) && usable(current, origin)) await client().revokeSaved(current).catch((error) => log(`accounts: signed out here only (${error?.message ?? error})`)); }
     } else {
       await naming(id);
       await leaving(id);

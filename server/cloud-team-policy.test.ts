@@ -284,3 +284,10 @@ describe("the managed policy with a team's rules", () => {
     managed.close();
   });
 });
+
+it.each(["_1password", "_" + "a".repeat(63)])("accepts allowed app %s", (slug) => {
+  expect(teamPolicyDocumentSchema.safeParse(doc({ allowedApps: [slug] })).success).toBe(true);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(65)])("rejects invalid allowed app %s", (slug) => {
+  expect(teamPolicyDocumentSchema.safeParse(doc({ allowedApps: [slug] })).success).toBe(false);
+});

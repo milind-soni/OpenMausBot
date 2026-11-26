@@ -17,7 +17,7 @@ const QUERY_METHODS = new Set(["GET", "HEAD", "DELETE"]);
 const PARAMS_IN_SEARCH = 1_500;
 
 /** What a bot does when research is off: says so and offers another way, never quietly works around it. */
-const RESEARCH_INSTEAD = "Tell the person research isn't available here and offer another way, such as web search or the browser; their own treg key in Settings → API keys turns research on.";
+const RESEARCH_INSTEAD = "Tell the person research isn't available here and offer another way, such as web search or the browser; their own treg key in Settings → AI → Other services turns research on.";
 
 export const RESEARCH_MESSAGES = {
   unavailable: "Research is temporarily unavailable. Try again shortly.",

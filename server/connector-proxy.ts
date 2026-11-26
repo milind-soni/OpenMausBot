@@ -1,6 +1,5 @@
 // Connection requests become OpenMausBot chat cards: the agent never authors an auth URL and credentials never pass
 // through its transcript. stdout is the MCP transport: never log there.
-import readline from "node:readline";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -12,6 +11,7 @@ import {
   withConnectionParameters,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
+import { DISCOVERY_FALLBACK_TOOLS } from "./connector-discovery-fallback.ts";
 import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote, preservesNumericText } from "./connector-arguments.ts";
 import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
@@ -19,6 +19,8 @@ import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { toolsListResultForSessionShare } from "./tool-list-share.ts";
+import { readStdioLines } from "./stdio-lines.ts";
 
 type Json = Record<string, unknown>;
 
@@ -37,7 +39,8 @@ const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 const TOOLS_LIST_RETRY_MS = 500;
-const TOOLS_LIST_RELAY_TIMEOUT_MS = 5_000;
+// Both listing attempts together: Antigravity's CLI drops a stdio server whose tool list is not back ~5 s after it starts.
+const TOOLS_LIST_BUDGET_MS = 3_000;
 
 function parsedHeaders(): Record<string, string> {
   try {
@@ -134,7 +137,7 @@ async function relay(message: Json, timeoutMs = RELAY_TIMEOUT_MS): Promise<Json 
   });
   const nextSession = response.headers.get("mcp-session-id");
   if (nextSession) upstreamSessionId = nextSession;
-  if (!response.ok) throw new Error(`connector service returned HTTP ${response.status}`);
+  if (!response.ok) throw Object.assign(new Error(`connector service returned HTTP ${response.status}`), { status: response.status });
   return parseUpstream(await readBounded(response), message.id);
 }
 
@@ -265,22 +268,41 @@ function withArgumentNotes(name: string, response: Json, changed: readonly strin
 }
 
 function fittedList(frame: Json): Json {
-  if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
+  if (!("result" in frame)) return frame;
   const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
-  return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
+  return { ...frame, result: toolsListResultForSessionShare(capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log), process.env, log) };
+}
+
+/** A refusal that answers the same way every time: an HTTP 4xx other than 429, or a result that is not a list (the
+ * harness's own refusal of this bot). A timeout, a dropped connection, a 5xx, a 429, a JSON-RPC error or a reply that
+ * cannot be read is an outage. */
+function refusedListing(failure: { status?: number } | Json | null): boolean {
+  if (failure && "status" in failure && typeof failure.status === "number") return failure.status < 500 && failure.status !== 429;
+  return Boolean(failure && "result" in failure && !("error" in failure));
 }
 
 async function listTools(message: Json): Promise<Json> {
+  let refused = false;
+  const deadline = Date.now() + TOOLS_LIST_BUDGET_MS;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    if (attempt) await delay(TOOLS_LIST_RETRY_MS);
-    try {
-      const response = await relay(message, TOOLS_LIST_RELAY_TIMEOUT_MS);
-      if (response && !response.error && Array.isArray((response.result as Json | undefined)?.tools)) return response;
-    } catch {
+    if (attempt) {
+      if (deadline - Date.now() <= TOOLS_LIST_RETRY_MS) break;
+      await delay(TOOLS_LIST_RETRY_MS);
     }
+    try {
+      const response = await relay(message, deadline - Date.now());
+      if (response && !response.error && Array.isArray((response.result as Json | undefined)?.tools)) return response;
+      refused = refusedListing(response);
+    } catch (error) {
+      refused = refusedListing(error as { status?: number });
+    }
+    if (refused) break;
   }
-  process.stderr.write("connector-proxy: Connected apps are temporarily unavailable; start a new session to retry discovery.\n");
-  return { jsonrpc: "2.0", id: message.id, result: { tools: [] } };
+  process.stderr.write(refused
+    ? "connector-proxy: Connected apps refused this bot's tool list.\n"
+    : "connector-proxy: Connected apps are temporarily unavailable; start a new session to retry discovery.\n");
+  // In an outage, with a service to send calls to, its own tools still go on the list: calls reach it once it answers again.
+  return { jsonrpc: "2.0", id: message.id, result: { tools: UPSTREAM && !refused ? structuredClone(DISCOVERY_FALLBACK_TOOLS) : [] } };
 }
 
 async function handle(received: Json): Promise<void> {
@@ -304,6 +326,13 @@ async function handle(received: Json): Promise<void> {
       const params = (message.params ?? {}) as Json;
       send(initializeResult(id, params.protocolVersion));
     }
+    return;
+  }
+  // Clients that probe with MCP 2026-07-28's server/discover before initialize (Antigravity CLI 1.5.16, Claude Code 2.1.292)
+  // fall back to initialize on Method not found; this proxy answers initialize itself, so it answers the probe too, with
+  // no relay of its own: the Antigravity CLI drops a server that has not listed its tools about 5 s after it started it.
+  if (method === "server/discover") {
+    if (id !== undefined) send({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found: server/discover" } });
     return;
   }
   let changed: string[] = [];
@@ -366,8 +395,7 @@ async function handle(received: Json): Promise<void> {
   }
 }
 
-const input = readline.createInterface({ input: process.stdin, terminal: false });
-input.on("line", (line) => {
+readStdioLines(process.stdin, (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
   let message: Json;
@@ -402,5 +430,4 @@ input.on("line", (line) => {
     if (method === "tools/call") send(textResult(message.id, messageText, true));
     else send(jsonRpcError(message.id, messageText));
   });
-});
-input.on("close", () => process.exit(0));
+}, () => process.exit(0));

@@ -3,14 +3,16 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { cpus, totalmem } from "node:os";
 import { join } from "node:path";
 import type * as DuckDB from "@duckdb/node-api";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
 import { botFolder as defaultBotFolder } from "../bot-folder.ts";
+import { boxCpus } from "../box-cpus.ts";
+import { boxMemory } from "../box-memory.ts";
 import { DATA_DIR } from "../config.ts";
 import { tableIdentifierParts } from "./identifiers.ts";
+import { preparePageQuery } from "./page-query.ts";
 import {
   DataFailure,
   type BotDatabase,
@@ -19,6 +21,7 @@ import {
   type DataConnection,
   type DataEngine,
   type DataExtension,
+  type DataHeld,
   type DataHistogram,
   type DataPage,
   type DescribeResult,
@@ -28,6 +31,8 @@ import {
 } from "./types.ts";
 
 type Binding = typeof DuckDB;
+type DataShut = { closed: true } | { closed: false; why: DataHeld["why"]; detail?: string };
+const CLOSED: DataShut = { closed: true };
 type Cell = string | number | boolean | null;
 
 export const DATA_DB_FILE = "data.duckdb";
@@ -48,6 +53,10 @@ export interface DataEngineOptions {
   env?: NodeJS.ProcessEnv;
   idleMs?: number;
   binding?: Binding;
+  /** Tests: the wait before a status read's answer is confirmed by loading the binding. */
+  confirmInstalledMs?: number;
+  /** Tests: the look for the binding's files. */
+  filesFound?: (directory: string | null) => boolean;
 }
 
 /** Null means the server's own node_modules. */
@@ -69,15 +78,32 @@ function loadBinding(directory: string | null): Binding {
   return nativeRequire(directory)("@duckdb/node-api") as Binding;
 }
 
-/** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. */
-export function instanceSettings(folder: string, dataDir: string, duckdbVersion: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const quarterOfRam = Math.floor(totalmem() / 4);
+/** A status read asks before anything needs the binding; this long after, the binding is loaded to confirm the answer. */
+export const CONFIRM_INSTALLED_MS = 5_000;
+
+/** Whether this platform's binding files are where the loader would look, found without loading them. */
+export function bindingFilesFound(directory: string | null): boolean {
+  try {
+    const bindings = createRequire(nativeRequire(directory).resolve("@duckdb/node-api")).resolve("@duckdb/node-bindings");
+    const from = createRequire(bindings);
+    const native = `@duckdb/node-bindings-${process.platform}-${process.arch}`;
+    return [native, `${native}-musl`].some((name) => { try { from.resolve(`${name}/duckdb.node`); return true; } catch { return false; } });
+  } catch {
+    return false;
+  }
+}
+
+/** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. A
+ * container's limits count, not its host's: each thread also counts against the container's pids limit. */
+export function instanceSettings(folder: string, dataDir: string, duckdbVersion: string, env: NodeJS.ProcessEnv = process.env,
+  box: { cpus: number; memoryBytes: number } = { cpus: boxCpus(), memoryBytes: boxMemory().bytes }): Record<string, string> {
+  const quarterOfRam = Math.floor(box.memoryBytes / 4);
   const memoryMiB = Math.max(256, Math.floor(Math.min(2 * 1024 ** 3, quarterOfRam) / 1024 ** 2));
   return {
     memory_limit: env.OMB_DUCKDB_MEMORY_LIMIT || `${memoryMiB}MiB`,
     temp_directory: join(folder, DATA_TMP_DIR),
     max_temp_directory_size: env.OMB_DUCKDB_MAX_TEMP_SIZE || "20GB",
-    threads: String(Math.max(1, Math.min(4, cpus().length || 1))),
+    threads: String(Math.max(1, Math.min(4, Math.floor(box.cpus) || 1))),
     // Extensions are tied to the exact DuckDB version.
     extension_directory: join(dataDir, "duckdb-extensions", duckdbVersion),
     autoinstall_known_extensions: "false",
@@ -253,9 +279,11 @@ export async function drainLanes(lanes: Array<{ run<T>(sql: string, options: obj
 }
 
 interface CatalogEntry {
+  catalog: string;
   schema: string;
   name: string;
   type: string;
+  qualifyCatalog?: true;
 }
 
 function toCount(cell: Cell): number {
@@ -273,7 +301,9 @@ function formatEpoch(seconds: number, dateOnly: boolean): string {
 
 class BotDb implements BotDatabase {
   private state: Promise<Open> | null = null;
-  private closing: Promise<void> | null = null;
+  private closing: Promise<DataShut> | null = null;
+  /** The instance a close could not let go of: still open on the file, so the next statement uses it, never a second one. */
+  private kept: Promise<Open> | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private inFlight = 0;
   private readonly statsCache = new Map<string, DataColumnStats>();
@@ -285,9 +315,10 @@ class BotDb implements BotDatabase {
 
   private open(): Promise<Open> {
     if (!this.state) {
-      // The file admits one instance per process: a reopen waits for a close that may still be draining.
-      const previous = this.closing ?? Promise.resolve();
-      const opening = previous.then(() => this.openNow());
+      // The file admits one instance per process: a reopen waits for a close that may still be draining, and after a close
+      // that could not let go of the instance it goes on with that one.
+      const previous = this.closing ?? Promise.resolve(CLOSED);
+      const opening = previous.then((shut) => (shut.closed || !this.kept ? this.openNow() : this.kept));
       this.state = opening;
       opening.catch(() => {
         if (this.state === opening) this.state = null;
@@ -305,17 +336,20 @@ class BotDb implements BotDatabase {
     const instance = await binding.DuckDBInstance.create(join(folder, DATA_DB_FILE), settings);
     let bot: DuckDB.DuckDBConnection | undefined;
     let panel: DuckDB.DuckDBConnection | undefined;
+    let page: DuckDB.DuckDBConnection | undefined;
     try {
       bot = await instance.connect();
       panel = await instance.connect();
+      page = await instance.connect();
       // A real schema: temp tables would be invisible to the panel's connection.
       await bot.run(`CREATE SCHEMA IF NOT EXISTS ${DATA_RESULTS_SCHEMA}`);
       const keywords = await bot.runAndReadAll("SELECT keyword_name FROM duckdb_keywords() WHERE keyword_category = 'reserved'");
       const reserved = new Set(keywords.getRowsJson().map((row) => String(row[0]).toLowerCase()));
-      return { binding, instance, lanes: { bot: new Lane(bot), panel: new Lane(panel) }, reserved };
+      return { binding, instance, lanes: { bot: new Lane(bot), panel: new Lane(panel), page: new Lane(page) }, reserved };
     } catch (error) {
       bot?.closeSync();
       panel?.closeSync();
+      page?.closeSync();
       instance.closeSync();
       throw error;
     }
@@ -385,6 +419,27 @@ class BotDb implements BotDatabase {
     return this.statement(options.connection, sql, options, (open, conn) => this.read(open, conn, sql, maxRows));
   }
 
+  async pageQuery(sql: string, params: unknown[] | Record<string, unknown> | undefined, options: { maxRows: number; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult> {
+    return this.statement("page", sql, options, async (open, conn) => {
+      const started = performance.now();
+      // A transaction a cancelled query left open ends before the next one begins.
+      await conn.run("ROLLBACK").catch(() => undefined);
+      await conn.run("BEGIN TRANSACTION READ ONLY");
+      try {
+        const prepared = await preparePageQuery(open.binding, conn, sql, params);
+        const result = await prepared.stream();
+        const rows: Cell[][] = [];
+        for (let chunk = await result.fetchChunk(); chunk && chunk.rowCount > 0 && rows.length <= options.maxRows; chunk = await result.fetchChunk()) {
+          rows.push(...this.cells(open.binding, chunk));
+        }
+        const kept = rows.slice(0, options.maxRows);
+        return { columns: this.resultColumns(result), rows: kept, rowCount: kept.length, truncated: rows.length > options.maxRows, elapsedMs: Math.round(performance.now() - started) };
+      } finally {
+        await conn.run("ROLLBACK").catch(() => undefined);
+      }
+    });
+  }
+
   /** A first-time INSTALL is a download, so extensions load as their own step, off the statement's timeout. */
   private async loadExtensions(options: RunOptions): Promise<void> {
     const extensions = options.extensions ?? [];
@@ -417,10 +472,11 @@ class BotDb implements BotDatabase {
     await this.statement(connection, sql, {}, (open, conn) => this.read(open, conn, sql));
   }
 
-  private async catalog(connection: DataConnection = "panel"): Promise<CatalogEntry[]> {
-    const sql = "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name";
+  private async catalog(connection: DataConnection = "panel", temporary = false): Promise<CatalogEntry[]> {
+    const catalogs = temporary ? "(table_catalog = current_database() OR table_catalog = 'temp')" : "table_catalog = current_database()";
+    const sql = `SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables WHERE ${catalogs} AND table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name`;
     const result = await this.statement(connection, sql, {}, (open, conn) => this.read(open, conn, sql));
-    return result.rows.map((row) => ({ schema: String(row[0]), name: String(row[1]), type: String(row[2]) }));
+    return result.rows.map((row) => ({ catalog: String(row[0]), schema: String(row[1]), name: String(row[2]), type: String(row[3]) }));
   }
 
   private displayName(entry: CatalogEntry): string {
@@ -429,7 +485,7 @@ class BotDb implements BotDatabase {
 
   private qualified(entry: CatalogEntry, reserved: Set<string>): string {
     const part = (name: string) => (PLAIN_IDENTIFIER.test(name) && !reserved.has(name) ? name : quoteIdentifier(name));
-    return `${part(entry.schema)}.${part(entry.name)}`;
+    return `${entry.qualifyCatalog || entry.catalog === "temp" ? `${part(entry.catalog)}.` : ""}${part(entry.schema)}.${part(entry.name)}`;
   }
 
   private splitIdentifier(text: string): string[] {
@@ -450,18 +506,21 @@ class BotDb implements BotDatabase {
     return parts.map((part) => part.trim());
   }
 
-  private async lookup(name: string): Promise<CatalogEntry> {
-    const parts = (tableIdentifierParts(name) ?? this.splitIdentifier(name.trim())).slice(-2);
+  private async lookup(name: string, connection: DataConnection = "panel"): Promise<CatalogEntry> {
+    const parts = tableIdentifierParts(name) ?? this.splitIdentifier(name.trim());
     const table = parts[parts.length - 1];
-    const schema = parts.length === 2 ? parts[0] : null;
+    const schema = parts.length > 1 ? parts[parts.length - 2] : undefined;
+    const catalog = parts.length === 3 ? parts[0] : undefined;
     if (!table) throw new DataFailure({ code: "invalid_input", message: "A table name is required." });
-    const entries = await this.catalog();
-    const inSchema = schema ? entries.filter((entry) => entry.schema === schema || entry.schema.toLowerCase() === schema.toLowerCase()) : entries;
+    if (parts.length > 3) throw new DataFailure({ code: "invalid_input", message: "A table name has at most three identifier parts." });
+    const entries = await this.catalog(connection, true);
+    const inCatalog = catalog === undefined ? entries : entries.filter((entry) => entry.catalog.toLowerCase() === catalog.toLowerCase());
+    const inSchema = schema ? inCatalog.filter((entry) => entry.schema === schema || entry.schema.toLowerCase() === schema.toLowerCase()) : inCatalog;
     const rank = (entry: CatalogEntry) => (entry.schema === "main" ? 0 : entry.schema === DATA_RESULTS_SCHEMA ? 1 : 2);
     const exact = inSchema.filter((entry) => entry.name === table).sort((x, y) => rank(x) - rank(y));
     const folded = inSchema.filter((entry) => entry.name.toLowerCase() === table.toLowerCase()).sort((x, y) => rank(x) - rank(y));
-    const found = exact[0] ?? folded[0];
-    if (found) return found;
+    const found = folded.find((entry) => entry.catalog === "temp") ?? exact[0] ?? folded[0];
+    if (found) return catalog === undefined ? found : { ...found, qualifyCatalog: true };
     throw new DataFailure({
       code: "table_not_found",
       message: `Table ${name.trim()} does not exist.`,
@@ -475,8 +534,8 @@ class BotDb implements BotDatabase {
     return closeNames(table, entries.map((entry) => this.displayName(entry)));
   }
 
-  async resolveTable(name: string): Promise<string> {
-    const entry = await this.lookup(name);
+  async resolveTable(name: string, connection: DataConnection = "panel"): Promise<string> {
+    const entry = await this.lookup(name, connection);
     const open = await this.open();
     return this.qualified(entry, open.reserved);
   }
@@ -518,17 +577,17 @@ class BotDb implements BotDatabase {
     return { rowCount, columns: enriched };
   }
 
-  private async source(target: string): Promise<string> {
+  private async source(target: string, connection: DataConnection): Promise<string> {
     const text = target.trim().replace(/;+\s*$/, "");
     // Keep accepting the display names callers could pass before quoted SQL
     // identifiers were recognized here (for example, Order Items).
     const displayName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
-    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text);
+    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text, connection);
     return `(${text}) AS omb_described`;
   }
 
   async describe(target: string, options: RunOptions): Promise<DescribeResult> {
-    const from = await this.source(target);
+    const from = await this.source(target, options.connection);
     const all = await this.columnsOf(options.connection, from, options);
     const profiled = all.slice(0, DATA_LIMITS.describeColumnsMax);
     const { rowCount, columns } = await this.aggregate(options.connection, from, profiled, options);
@@ -555,13 +614,16 @@ class BotDb implements BotDatabase {
     const count = await this.statement("panel", countSql, options, (o, conn) => this.read(o, conn, countSql));
     const rowCount = toCount(count.rows[0]?.[0] ?? 0);
     const key = `${from}\u0000${rowCount}`;
-    const cached = this.statsCache.get(key);
+    const cacheable = entry.type !== "VIEW";
+    const cached = cacheable ? this.statsCache.get(key) : undefined;
     if (cached) return cached;
     const columns = await this.columnsOf("panel", from, options);
     const aggregated = await this.aggregate("panel", from, columns, options);
     const stats: DataColumnStats = { table: this.displayName(entry), rowCount: aggregated.rowCount, columns: aggregated.columns };
-    if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
-    if (revision === this.statsRevision) this.statsCache.set(key, stats);
+    if (cacheable && revision === this.statsRevision) {
+      if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
+      this.statsCache.set(key, stats);
+    }
     return stats;
   }
 
@@ -579,10 +641,14 @@ class BotDb implements BotDatabase {
     const result: DataHistogram = { table: this.displayName(entry), column: found.name, bins: [] };
 
     if (numeric || temporal) {
-      const value = numeric ? `CAST(${id} AS DOUBLE)` : `epoch(CAST(${id} AS TIMESTAMP))`;
-      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} WHERE ${id} IS NOT NULL)
+      const sourceId = `omb_source.${id}`;
+      const value = numeric ? `CAST(${sourceId} AS DOUBLE)` : `epoch(CAST(${sourceId} AS TIMESTAMP))`;
+      // NaN/infinity cannot define a finite bucket. Infinite dates produce
+      // NULL epochs; they must not be counted in the constant/first bucket.
+      const finite = `isfinite(${value})`;
+      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${finite})
 SELECT LEAST(coalesce(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), 0), ${bins - 1})::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
-FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
+FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY 1 ORDER BY bin`;
       const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
       if (!rows.length) return result;
       const lo = Number(rows[0][2]);
@@ -599,7 +665,7 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
       return result;
     }
 
-    const sql = `SELECT CAST(${id} AS VARCHAR) AS v, count(*) AS n FROM ${from} WHERE ${id} IS NOT NULL GROUP BY v ORDER BY n DESC, v LIMIT ${bins}`;
+    const sql = `SELECT CAST(${id} AS VARCHAR) AS v, count(*) AS n FROM ${from} WHERE ${id} IS NOT NULL GROUP BY 1 ORDER BY n DESC, v LIMIT ${bins}`;
     const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
     result.bins = rows.map((row) => ({ label: String(row[0]).slice(0, 2 * DATA_LIMITS.sampleChars), count: toCount(row[1]) }));
     return result;
@@ -674,28 +740,51 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
   }
 
   async close(): Promise<void> {
+    await this.shut();
+  }
+
+  /** Closed, or why the instance is still open: a statement that did not stop, or a close that failed. */
+  async shut(): Promise<DataShut> {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
     const pending = this.state;
-    if (!pending) return this.closing ?? undefined;
+    if (!pending) return this.closing ?? CLOSED;
     this.state = null;
     this.statsCache.clear();
-    const closing = (async () => {
+    const closing = (async (): Promise<DataShut> => {
       let open: Open;
-      try { open = await pending; } catch { return; }
-      // Closing a connection with a statement in flight is undefined: interrupt first, then let the lanes drain.
-      for (const lane of Object.values(open.lanes)) lane.interrupt();
-      if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
-        console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
-        return;
+      try { open = await pending; } catch { return CLOSED; }
+      const shut = await this.closeOpen(open);
+      if (shut.closed) this.kept = null;
+      else {
+        this.kept = pending;
+        if (!this.state) this.state = pending;
       }
-      for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
-      open.instance.closeSync();
+      return shut;
     })();
     this.closing = closing;
-    try { await closing; } finally { if (this.closing === closing) this.closing = null; }
+    try { return await closing; } finally { if (this.closing === closing) this.closing = null; }
+  }
+
+  private async closeOpen(open: Open): Promise<DataShut> {
+    // Closing a connection with a statement in flight is undefined: interrupt first, then let the lanes drain.
+    for (const lane of Object.values(open.lanes)) { try { lane.interrupt(); } catch { /* the drain below decides */ } }
+    if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
+      console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
+      return { closed: false, why: "running" };
+    }
+    try {
+      for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
+      // The last close writes the WAL into the file and removes it: the file then holds every table on its own.
+      open.instance.closeSync();
+    } catch (error) {
+      const detail = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 200);
+      console.warn(`data: ${this.botId}'s database did not close: ${detail}`);
+      return { closed: false, why: "failed", detail };
+    }
+    return CLOSED;
   }
 
   get isOpen(): boolean {
@@ -706,6 +795,10 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
 class Engine implements DataEngine {
   private readonly databases = new Map<string, BotDb>();
   private loaded: { binding: Binding } | { reason: string } | null = null;
+  private confirming: ReturnType<typeof setTimeout> | null = null;
+  private readonly installedListeners = new Set<() => void>();
+  private readonly confirmInstalledMs: number;
+  private readonly filesFound: (directory: string | null) => boolean;
   readonly env: NodeJS.ProcessEnv;
   readonly dataDir: string;
   readonly idleMs: number;
@@ -715,6 +808,8 @@ class Engine implements DataEngine {
     this.env = options.env ?? process.env;
     this.dataDir = options.dataDir ?? DATA_DIR;
     this.idleMs = options.idleMs ?? IDLE_CLOSE_MS;
+    this.confirmInstalledMs = options.confirmInstalledMs ?? CONFIRM_INSTALLED_MS;
+    this.filesFound = options.filesFound ?? bindingFilesFound;
     this.folder = options.botFolder ?? defaultBotFolder;
     if (options.binding) this.loaded = { binding: options.binding };
   }
@@ -746,6 +841,20 @@ class Engine implements DataEngine {
     return "reason" in loaded ? loaded.reason : null;
   }
 
+  installed(): boolean {
+    if (this.loaded) return "binding" in this.loaded;
+    const found = this.filesFound(duckdbDirectory(this.env));
+    if (!this.confirming) {
+      this.confirming = setTimeout(() => { if ((this.unavailable() === null) !== found) for (const listener of this.installedListeners) listener(); }, this.confirmInstalledMs);
+      this.confirming.unref?.();
+    }
+    return found;
+  }
+
+  onInstalledChange(listener: () => void): void {
+    this.installedListeners.add(listener);
+  }
+
   async forBot(botId: string): Promise<BotDatabase> {
     if (!botId || /[\\/]|^\.\.?$/.test(botId)) throw new DataFailure({ code: "invalid_input", message: `Not a bot id: "${botId}".` });
     this.binding();
@@ -766,6 +875,13 @@ class Engine implements DataEngine {
       // Windows keeps a just-closed file busy for a moment; rm retries EBUSY/EPERM.
       await rm(join(folder, name), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     }
+  }
+
+  /** Every bot's database closed and kept, to open again on its next statement; the ones still open, and why. */
+  async release(): Promise<DataHeld[]> {
+    const open = [...this.databases.values()];
+    const shut = await Promise.all(open.map((db) => db.shut()));
+    return open.flatMap((db, i) => { const one = shut[i]!; return one.closed ? [] : [{ botId: db.botId, why: one.why, ...(one.detail ? { detail: one.detail } : {}) }]; });
   }
 
   async closeAll(): Promise<void> {

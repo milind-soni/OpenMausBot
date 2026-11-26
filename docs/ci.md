@@ -101,7 +101,7 @@ run in the Windows Vitest/Electron jobs.
 ## Vitest shards
 
 The slowest shard sets how long a PR and a release wait. Linux and Windows run
-eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
+eight shards each, macOS five (the full lane only); `scripts/ci-scope.mjs`
 builds the matrix.
 
 **Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
@@ -137,9 +137,12 @@ instead, slowest first, each to the shard with the least time so far. The
 times are `scripts/testing/vitest-shard-weights.json`: for each platform
 (`linux`, `win32`, `darwin`), each file's median seconds on that platform's
 runners, for every file over five seconds and every e2e file. A file not in it
-counts one second, or the median e2e time if it is an e2e file. Every file
-still runs exactly once, and each shard job logs a `duration-sequencer:` line
-with its share.
+counts one second, or the median e2e time if it is an e2e file. In a full run,
+shard 1 also runs the `node --test` suites after vitest. The sequencer reserves
+their measured time (`NODE_TESTS_SECONDS`), about 90 seconds on Linux and two
+minutes on macOS and Windows, and gives that shard less vitest work.
+Every file still runs exactly once, and each shard job logs a
+`duration-sequencer:` line with its share.
 
 Refresh the times from a few recent nightly or manual runs (they have all
 three platforms) when shards drift apart:
@@ -196,7 +199,7 @@ half hours. Now:
 
 - A PR runs the Vitest shards on Ubuntu (and Windows where its change can
   break Windows), a push to main or a merge group on Ubuntu and Windows; the
-  full lane adds four macOS shards, which run the host e2e files only. Only a
+  full lane adds five macOS shards, which run the host e2e files only. Only a
   couple of test blocks are macOS-only.
 - Every PR's, push's and merge group's macOS checks are one job: the
   packaged-server smoke and the Electron smokes.

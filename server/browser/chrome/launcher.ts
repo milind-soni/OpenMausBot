@@ -12,9 +12,10 @@ import { augmentedPath } from "../../env-path.ts";
 import { calibrateIdentity, chromeFingerprint, loadOrCalibrateIdentity, type CalibratedIdentity } from "./calibrate.ts";
 import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
-import { chromeHost, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
+import { chromeHost, installedGoogleChrome, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
 import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
+import { BROWSER_CGROUP_ENV, browserCgroupDir } from "../memory-cgroup.ts";
 
 type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string; launcher?: LauncherSettings };
 type State =
@@ -22,7 +23,7 @@ type State =
   | { kind: "preparing" }
   | { kind: "downloading"; pin: ChromeForTestingPin; progress: DownloadProgress }
   | Ready
-  | { kind: "failed"; reason: string };
+  | { kind: "failed"; reason: string; cause: unknown };
 
 type LaunchSpec = { command: string; env?: Record<string, string | undefined> };
 
@@ -116,6 +117,15 @@ export class ChromeLauncher implements BrowserLaunch {
     return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine(), { downloading });
   }
 
+  /** agent-browser runs its own headless shell, which many sites refuse, only because no Google Chrome is installed here. */
+  runsShellForWantOfChrome(): boolean {
+    const plan = this.plan();
+    if (plan.kind === "legacy") return plan.noChrome === true;
+    // A download that failed, or a downloaded Chrome that then failed its checks, leaves the engine on its own shell; an installed Chrome it would use instead does not.
+    const downloadFailed = plan.kind === "download" || (plan.kind === "chrome" && plan.chrome.source === "downloaded");
+    return this.state.kind === "failed" && downloadFailed && installedGoogleChrome(this.host) === null;
+  }
+
   /** Keep the shared agent-browser launcher and sidecar in the application's current language. */
   setLanguageProvider(language: (() => string | undefined) | undefined): void {
     this.language = language ?? this.options.language;
@@ -184,7 +194,7 @@ export class ChromeLauncher implements BrowserLaunch {
       this.log(`browser: ${this.describe()}`);
     }, (error: unknown) => {
       // A launcher that already works is kept as it is: switching browsers under a running session would lose its pages.
-      this.state = previous ? { ...previous, fingerprint: this.fingerprintOr(previous) } : { kind: "failed", reason: message(error) };
+      this.state = previous ? { ...previous, fingerprint: this.fingerprintOr(previous) } : { kind: "failed", reason: message(error), cause: error };
       this.log(`browser: Chrome could not be prepared (${message(error)}); ${previous ? "keeping the browser already set up" : "bots keep the engine's own browser"}`);
     }).finally(() => { this.preparing = null; });
     return this.preparing;
@@ -267,6 +277,7 @@ export class ChromeLauncher implements BrowserLaunch {
         language: this.resolvedLanguage(), timeZone: browserTimeZone(env, platform),
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
         ...this.boxed(),
+        ...(platform === "linux" && browserCgroupDir(env[BROWSER_CGROUP_ENV]) ? { memoryGroup: browserCgroupDir(env[BROWSER_CGROUP_ENV])! } : {}),
       };
       writeLauncher(this.path, launcher, platform);
       if (platform !== "win32") await (this.options.checkLauncher ?? runsLauncher)(this.path, this.chromeEnv());
@@ -314,7 +325,7 @@ export class ChromeLauncher implements BrowserLaunch {
         ? `Getting the browser ready (${megabytes(state.progress.received)} of ${megabytes(state.progress.total)} MB). Try again in a minute.`
         : "Getting the browser ready. Try again in a moment.");
     }
-    if (state.kind === "failed") throw new Error(`Chrome could not be started (${state.reason}).`);
+    if (state.kind === "failed") throw new Error(`Chrome could not be started (${state.reason}).`, { cause: state.cause });
     if (state.kind !== "ready") throw new Error("Chrome is not ready yet. Try again in a moment.");
     return { path: state.chrome.path, identity: state.identity, product: state.product, source: state.chrome.source };
   }

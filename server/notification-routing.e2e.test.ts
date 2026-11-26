@@ -126,6 +126,20 @@ beforeAll(async () => {
         environment: { FAKE_ACP_MODE: "question" },
         config: { cli: FAKE_ACP, fullAuto: true },
       },
+      // hands one piece of work (not a consultation) to the first teammate list_bots shows, then reviews its result
+      lead: {
+        driver: "grokAgent",
+        displayName: "Lead fixture",
+        environment: { FAKE_ACP_MODE: "delegate-peer" },
+        config: { cli: FAKE_ACP, fullAuto: true },
+      },
+      // every turn stops on the account's usage cap
+      capped: {
+        driver: "claudeAgent",
+        displayName: "Capped fixture",
+        environment: { FAKE_CLAUDE_MODE: "usage-limit" },
+        config: { cli: FAKE_CLAUDE },
+      },
       // consults the first teammate list_bots shows through the real agents proxy, and its resume says it saw the result
       asker: {
         driver: "grokAgent",
@@ -372,7 +386,8 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(consult.threadId).not.toBe(peer.threadId);
       expect(ink.tasks.find((task: { threadId: string }) => task.threadId === consult.threadId)?.openedBy)
         .toMatchObject({ botId: asker.id, kind: "work" });
-      expect(ink.messages).toEqual(peerConversation);
+      // Ink's own chat only gets the hand-off's quiet line, which opens the consultation's thread.
+      expect(ink.messages).toEqual([...peerConversation, expect.objectContaining({ kind: "activity", threadRef: expect.objectContaining({ botId: peer.id, threadId: consult.threadId }) })]);
       expect(current.groups.find((group: { dm?: boolean }) => group.dm === true)).toBeUndefined();
       const pen = current.bots.find((candidate: { id: string }) => candidate.id === asker.id);
       const replied = pen.messages.find(
@@ -397,6 +412,50 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     } finally {
       stream.close();
       await cleanup([], [asker.id, peer.id]);
+    }
+  }, 60_000);
+
+  const delegate = async (employeeEngine: string) => {
+    const employee = await createBot("Ink", employeeEngine);
+    const lead = await createBot("Pen", "lead");
+    const stream = await openSse(`${base}/api/events`);
+    expect((await api("POST", `/api/bots/${lead.id}/messages`, { text: "Pen, hand the export to Ink." })).status).toBe(202);
+    const work = () => handoffs().find((node) => node.botId === employee.id);
+    await expect.poll(() => work()?.status, { timeout: 30_000 }).toMatch(/^(completed|failed)$/);
+    await stream.until((candidate) => candidate.kind === "notify" && candidate.notification?.botId === lead.id && candidate.notification?.kind === "done", 30_000);
+    // A unique bot patch is an SSE ordering barrier: once seen, every notification this job raised is in `frames`.
+    expect((await api("PATCH", `/api/bots/${lead.id}`, { name: "Pen observed" })).status).toBe(200);
+    await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.id === lead.id && candidate.bot?.name === "Pen observed");
+    const notified = stream.frames.filter((candidate) => candidate.kind === "notify").map((candidate) => candidate.notification);
+    stream.close();
+    return { lead, employee, work: work()!, notified };
+  };
+
+  it("tells the person once, from the lead, when work a lead handed an employee is done", async () => {
+    const { lead, employee, work, notified } = await delegate("quick");
+    try {
+      expect(work).toMatchObject({ mode: "work", status: "completed" });
+      expect(notified.filter((notification) => notification?.botId === employee.id), JSON.stringify(notified)).toEqual([]);
+      expect(notified.map((notification) => [notification?.botId, notification?.kind]), JSON.stringify(notified)).toEqual([[lead.id, "done"]]);
+      expect(notified[0]).toMatchObject({ threadId: lead.threadId, title: "Pen finished", body: expect.stringContaining("saw the result") });
+    } finally {
+      await cleanup([], [lead.id, employee.id]);
+    }
+  }, 60_000);
+
+  it("reports an employee stopped by its usage cap to the lead's conversation, and the person still hears of the cap", async () => {
+    const { lead, employee, work, notified } = await delegate("capped");
+    try {
+      expect(work).toMatchObject({ status: "failed" });
+      const leadLines = (await api("GET", `/api/threads/${lead.threadId}/messages`)).body.messages as Array<{ kind: string; text?: string; tool?: { name?: string; ok?: boolean } }>;
+      expect(leadLines.some((line) => line.kind === "activity" && line.tool?.name?.startsWith("Ink — failed") && /usage limit/.test(line.tool.name)), JSON.stringify(leadLines)).toBe(true);
+      expect(leadLines.at(-1)?.kind === "digest" ? leadLines.at(-2)?.text : leadLines.at(-1)?.text).toContain("woke after delegation failure");
+      const fromEmployee = notified.filter((notification) => notification?.botId === employee.id);
+      expect(fromEmployee.map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["notice"]);
+      expect(fromEmployee[0]?.body).toContain("reached its limit");
+      expect(notified.filter((notification) => notification?.botId === lead.id).map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["done"]);
+    } finally {
+      await cleanup([], [lead.id, employee.id]);
     }
   }, 60_000);
 
@@ -471,6 +530,7 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       const consult = await consultation(asked.body.receipts[0].requestId);
       expect(consult.threadId).not.toBe(peer.threadId);
       await expect.poll(() => handoffs().find((node) => node.id === consult.id)?.status, { timeout: 20_000 }).toBe("completed");
+      // The hand-off is recorded in Vellum's chat, not announced: nothing there is unread.
       expect((await botState(peer.id))?.unread).toBeFalsy();
 
       expect((await api("POST", `/api/bots/${peer.id}/messages`, { text: "and for me?" })).status).toBe(202);
@@ -508,6 +568,7 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(asked.body.receipts[0]).toMatchObject({ botId: peer.id, outcome: "queued" });
       const consult = await consultation(asked.body.receipts[0].requestId);
       expect(consult.threadId).not.toBe(peer.threadId);
+      // The hand-off is recorded in Folio's chat, not announced: nothing there is unread.
       expect((await botState(peer.id))?.unread).toBeFalsy();
 
       expect((await api("PATCH", `/api/bots/${peer.id}`, {
@@ -532,7 +593,7 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
   it("still buzzes when a peer's turn stops to ask the person a question", async () => {
     const asker = await createBot("Quill", "quick");
     const peer = await createBot("Sage", "curious", "fake-model");
-    // On "Ask me first" a peer's question is the person's; at Full access its asker answers it instead.
+    // On "Ask for approval" a peer's question is the person's; at Full access its asker answers it instead.
     for (const bot of [asker, peer]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {

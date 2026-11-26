@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOT_PARTS, EMPTY, PICTURE_PART, itemKey } from "../electron/cloud-send-parts.mjs";
+import { BOT_PARTS, EMPTY, PICTURE_PART, itemKey, parseSendSummary, planSend } from "../electron/cloud-send-parts.mjs";
 import { botParts, cloudSendSummary, partHash, unused, type CloudSendSources } from "./cloud-send.ts";
 import { keptBotIds } from "./routes/bots-create.ts";
 import type { BotRecord } from "./store.ts";
@@ -81,7 +81,7 @@ describe("saved Vault secrets in the comparison", () => {
 });
 
 describe("a bot sent from the person's other computer keeps its id", () => {
-  const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined };
+  const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined, bots: [] as Array<{ id: string }> };
   it("takes the server's own id form, only while nothing here uses it", () => {
     expect(keptBotIds({}, store)).toEqual({});
     expect(keptBotIds({ id: "ember-0001", threadId: "thread-0001" }, store)).toEqual({ id: "ember-0001", threadId: "thread-0001" });
@@ -91,5 +91,48 @@ describe("a bot sent from the person's other computer keeps its id", () => {
     expect(keptBotIds({ id: "ember-0001", threadId: "ember-0001" }, store)).toEqual({ error: "this conversation id is already used here" });
     for (const id of ["short", "../../etc/passwd", "x".repeat(129), 42]) expect(keptBotIds({ id }, store)).toHaveProperty("error");
     expect(keptBotIds({ threadId: "thread-0001" }, store)).toHaveProperty("error");
+  });
+
+  it("refuses an id shaped like another place's address, so a bot here is never also an address", () => {
+    // bot-link/protocol.ts addresses a bot of another place as `link-<that place's key>-<its id there>`.
+    for (const id of ["link-0123abcd-local-writer", "LINK-0123abcd-local-writer", "Link-0123abcd-writer"]) {
+      expect(keptBotIds({ id }, store), id).toEqual({ error: "id must not begin with \"link-\": that is how a bot in another place is addressed here" });
+    }
+    // The reserved shape only: an id that merely contains or ends in it is taken as usual.
+    for (const id of ["my-link-0001", "linker-00001", "bot-link-0001"]) expect(keptBotIds({ id }, store), id).toEqual({ id });
+  });
+
+  it("refuses an id that differs from one here only by case, so no case-variant twin can be brought in beside a bot", () => {
+    const here = { bot: () => null, botByThread: () => null, groupByThread: () => undefined, bots: [{ id: "ember-0001-4eea-ac52" }] };
+    expect(keptBotIds({ id: "EMBER-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
+    expect(keptBotIds({ id: "Ember-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
+    // An id that names no bot here, exactly or in another case, is taken as usual.
+    expect(keptBotIds({ id: "ember-0002-4eea-ac52" }, here)).toEqual({ id: "ember-0002-4eea-ac52" });
+  });
+});
+
+describe("a bot coming back to the place it left", () => {
+  const stub = (movedTo: object) => bot({ hidden: true, title: "Old title", movedTo } as Partial<BotRecord>);
+  const routine = { key: "routine:r1", kind: "routine" as const, label: "Daily", id: "r1", bot: "ember-0001", parts: { def: "aaa" } };
+  const move = { items: () => [routine], botParts: () => ({ archived: "x" }) };
+
+  it("is listed where it comes to while it is held as returning, marked with its skills and routines; as a stub it is not", () => {
+    const leaving = (movedTo: object) => cloudSendSummary(sources({ bots: () => [stub(movedTo)], move }), { move: true, leaving: true });
+    expect(leaving({ team: { id: "my-cloud", name: "My Cloud" }, state: "moved", at: 1 }).items.filter((item) => item.kind === "bot")).toEqual([]);
+    const coming = leaving({ team: { id: "my-cloud", name: "My Cloud" }, state: "moving", at: 1, back: true });
+    expect(coming.items.filter((item) => item.bot === "ember-0001" || item.key === itemKey.bot("ember-0001")).map((item) => [item.key, item.returning])).toEqual([
+      [itemKey.bot("ember-0001"), true], [itemKey.skill("ember-0001", "weekly-summary"), true], ["routine:r1", true]]);
+    expect(cloudSendSummary(sources({ move }), { move: true }).items.some((item) => item.returning), "a bot that is not coming back is not marked").toBe(false);
+  });
+
+  it("takes what the place it comes from has, over what its line kept, even where an earlier send left both agreeing", () => {
+    const there = { v: 1 as const, appVersion: "x", items: [{ key: itemKey.bot("ember-0001"), kind: "bot", label: "Ember", parts: { title: "new", soul: "same", archived: EMPTY } }, { ...routine, parts: { def: "bbb" } }] };
+    const here = parseSendSummary({ v: 1, appVersion: "x", items: [{ key: itemKey.bot("ember-0001"), kind: "bot", label: "Ember", parts: { title: "old", soul: "same", archived: "hid" }, returning: true },
+      { ...routine, returning: true }] });
+    const sent = { [itemKey.bot("ember-0001")]: { title: ["new", "old"] as [string, string] } };
+    const plan = planSend({ local: there as never, cloud: here, sent });
+    expect(plan.rows.map((row) => [row.key, row.state, row.parts])).toEqual([[itemKey.bot("ember-0001"), "to-update", ["title", "archived"]], ["routine:r1", "to-update", ["def"]]]);
+    const plain = planSend({ local: there as never, cloud: parseSendSummary({ ...here, items: here!.items.map(({ returning: _returning, ...item }) => item) }), sent });
+    expect(plain.rows[0]!.state, "without the mark, the line's own values are kept").toBe("differs");
   });
 });

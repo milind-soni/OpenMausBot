@@ -13,15 +13,16 @@ import { callTriggerTool, TRIGGER_TOOL_NAMES } from "./agents-call-triggers.ts";
 import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
-import { memorySearchText } from "./memory-search-text.ts";
-import { boundedAgentResult } from "./agents-result.ts";
-import { outOfBounds } from "./agents-schema.ts";
+import { memorySavedText, memorySearchText, threadReadText, threadsListText } from "./memory-search-text.ts";
+import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
+import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
+import { callWhatChangedTool, WHAT_CHANGED_TOOL } from "./agents-what-changed-tool.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
-import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callSetMainThreadTool, SET_MAIN_THREAD_TOOL } from "./agents-main-thread-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
+import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts"; import { BOARD_TOOL_NAMES, callBoardTool } from "./agents-board-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callImageTool, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
@@ -29,13 +30,13 @@ import { callHostingTool, HOSTING_TOOL_NAMES } from "./agents-hosting-tools.ts";
 import { callMeetingTool, MEETING_TOOL_NAMES } from "./agents-meeting-tools.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
+import { callShareTool, SHARE_TOOL_NAMES } from "./agents-share-tool.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
   threadId: string;
-  depth: number;
   /** A standing external runtime: its capability cannot reach the result cache, so big results are cut. */
   externalRuntime: boolean;
   // Presentation only: the server still authenticates and scopes every call.
@@ -54,7 +55,6 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
   return {
     botId: profile.botId,
     threadId: env.OMB_THREAD_ID ?? "",
-    depth: Number(env.OMB_TURN_DEPTH ?? "0") || 0,
     externalRuntime: env.OMB_EXTERNAL_RUNTIME === "1",
     sharedComputers: profile.sharedComputers,
     client: harnessClientFromEnv(env),
@@ -104,7 +104,7 @@ function renderAssignmentStatus(r: Json, id: string): string {
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
-  if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
+  if (!settled) lines.push(`It is not settled. ${r.sentElsewhere === true ? "It was sent from another of your chats, so its result returns there and does not resume you here" : "Its result resumes you on its own"}; do not wait on it in this turn.`);
   return lines.join("\n");
 }
 
@@ -219,7 +219,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
-  const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
+  const { botId: BOT_ID, threadId: THREAD_ID } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
@@ -233,7 +233,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const lines = [body.timedOut ? "The command was stopped: it ran past its time limit." : `exit code ${exitCode}`];
     if (stdout) lines.push("--- stdout ---", stdout.replace(/\s+$/, ""));
     if (stderr) lines.push("--- stderr ---", stderr.replace(/\s+$/, ""));
-    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)");
+    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)"); if (typeof body.note === "string" && body.note) lines.push("--- note ---", body.note);
     return { text: lines.join("\n"), ...(exitCode !== 0 || body.timedOut ? { isError: true } : {}) };
   }
   if (name === "attach_file") {
@@ -247,16 +247,18 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
+  if (name === WHAT_CHANGED_TOOL) return callWhatChangedTool(args, context);
   if (IMAGE_TOOL_NAMES.has(name)) return callImageTool(name, args, context);
   if (HOSTING_TOOL_NAMES.has(name)) return callHostingTool(name, args, context);
   if (MEETING_TOOL_NAMES.has(name)) return callMeetingTool(name, args, context);
   if (MAUSBOT_TOOL_NAMES.has(name)) return callMausBotTool(name, args, context);
   if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
+  if (SHARE_TOOL_NAMES.has(name)) return callShareTool(args, context);
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
-  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context);
-  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context);
+  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context); if (CHECK_BACK_TOOL_NAMES.has(name)) return callCheckBackTool(args, context); if (BOARD_TOOL_NAMES.has(name)) return callBoardTool(name, args, context);
+  if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context, args);
   if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
   if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !context.sharedComputers) {
@@ -307,23 +309,23 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
       && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string")
-      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string");
+      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string") && (canonical.files === undefined || canonical.files === null || (Array.isArray(canonical.files) && canonical.files.every((path) => typeof path === "string") && canonical.files.filter((path) => path.trim()).length <= 5));
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when, answers and files (an array of at most 5 file paths) are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
-    const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
+    const answer = await apiResponse("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
       groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
       thread: canonical.thread, reply: canonical.reply,
       title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
-      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
+      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined, files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
     }) });
-    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+    return apiAnswer(answer.ok, answer.status, answer.body);
   }
   if (name === "assignment_status") {
     const id = args.id === undefined || args.id === null || args.id === "" ? "" : String(args.id).trim();
@@ -340,8 +342,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const { ok, status, body: r } = await apiResponse(`/api/internal/assignment-status${query.size ? `?${query.toString()}` : ""}`);
     if (!ok) {
       const why = status === 404 ? `No assignment ${id || "(none given)"} is known here: check the id against your coordinate_bots receipt or list_threads.`
-        : status === 403 ? `Assignment ${id} is not this conversation's; only its requester can read it.`
+        : status === 403 ? `Assignment ${id} can't be read here: ${String(r.error ?? "only the conversation that sent it can read it")}.`
         : String(r.error ?? `HTTP ${status}`);
+      // An id this turn sent is an instruction to finish the turn, not a failed call that ends it.
+      if (r.sentThisTurn === true) return { text: why };
       return { text: why, isError: true };
     }
     if (id) return { text: renderAssignmentStatus(r, id) };
@@ -353,8 +357,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
-    const bots = (r.bots as Array<Json>) ?? [];
-    if (!bots.length) return { text: "No other bots you can reach yet." };
+    // `elsewhere`: the person's bots in their other places, which can't be reached from here, so none is "no such bot".
+    const bots = (r.bots as Array<Json>) ?? [], elsewhere = typeof r.elsewhere === "string" && r.elsewhere ? `\n\n${r.elsewhere}` : "";
+    if (!bots.length) return { text: `No other bots you can reach yet.${elsewhere}` };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
@@ -365,7 +370,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${team}${state ? `, ${state}` : ""}]`;
     });
     return {
-      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
+      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.${elsewhere}`,
     };
   }
   if (name === "list_rooms") {
@@ -407,6 +412,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
   if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
+  if (name === SET_MAIN_THREAD_TOOL) return callSetMainThreadTool(args, context);
+  if (WORKFLOW_TOOL_NAMES.has(name)) return callWorkflowTool(name, args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
       return { text: "Choose auto, cloud, vm, local or browser; omit surface to inspect connected choices.", isError: true };
@@ -424,29 +431,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!r.ok) return { text: String(r.body.error ?? `reset_cloud_computer failed (HTTP ${r.status}).`), isError: true };
     return { text: String(r.body.text ?? "") };
   }
-  if (name === "list_threads") {
-    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
-    const r = await api(`/api/internal/threads?${query.toString()}`);
-    if (r.error) return { text: `Couldn't list threads: ${String(r.error)}`, isError: true };
-    const threads = Array.isArray(r.threads) ? r.threads.filter(jsonRecord) : [];
-    if (!threads.length) return { text: "No threads yet: you have none of your own beyond this one, and you have not opened any on a teammate." };
-    const stateWord: Record<string, string> = { running: "running", "waiting-on-you": "waiting on the person", queued: "queued", idle: "idle" };
-    const lines = threads.map((thread) => {
-      const where = thread.own === true ? "yours" : `on @${String(thread.botName)}${typeof thread.openedBy === "string" && thread.openedBy ? `, opened by @${thread.openedBy}` : ""}`;
-      const state = stateWord[String(thread.state)] ?? String(thread.state);
-      const unread = thread.unread === true ? ", unread for the person" : "";
-      const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
-      const waiting = typeof thread.waiting === "string" && thread.waiting ? `: ${thread.waiting}` : "";
-      return `- #${String(thread.title)} (${where}, ${state}${waiting}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
-    });
-    return { text: `Threads, newest first:\n${lines.join("\n")}` };
-  }
+  if (name === LIST_THREADS_TOOL) return callListThreadsTool(args, context);
   if (name === "close_thread") {
-    const threadId = String(args.thread_id ?? "").trim();
-    if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
+    const threadId = String(args.thread_id ?? "").trim() || THREAD_ID;
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
-    return { text: `Closed #${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}. It stays in the person's sidebar, idle, with a note that you closed it.` };
+    return { text: closedThreadText(r) };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();
@@ -454,7 +444,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!title || !message) return { text: "start_thread needs title (one short line) and message (the complete first message).", isError: true };
     const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
     const folder = typeof args.folder === "string" ? args.folder.trim() : "";
-    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message, depth: DEPTH };
+    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message };
     if (toBotId) body.toBotId = toBotId;
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {
@@ -637,15 +627,25 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (name === "request_sign_in") {
+    const instruction = typeof args.instruction === "string" ? args.instruction.trim() : "";
     const site = typeof args.site === "string" ? args.site.trim() : "";
-    if (!site) return { text: "request_sign_in needs site: the page's address or its domain, such as example.com.", isError: true };
+    if (!instruction && !site) return { text: "request_sign_in needs instruction: one sentence on the step the person does.", isError: true };
     const reason = typeof args.reason === "string" ? args.reason.trim().slice(0, 240) : "";
     const r = await api("/api/internal/request-sign-in", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, site, ...(reason ? { reason } : {}) }),
+      body: JSON.stringify({
+        fromBotId: BOT_ID, fromThreadId: THREAD_ID, ...(instruction ? { instruction } : {}), ...(site ? { site } : {}), ...(reason ? { reason } : {}),
+        ...(typeof args.kind === "string" ? { kind: args.kind } : {}), ...(typeof args.target === "string" ? { target: args.target } : {}),
+      }),
     });
+    const where = SIGN_IN_PLACES[String(r.place)] ?? "the place you work";
+    if (!instruction) {
+      return {
+        text: `The person was asked to sign in to ${r.site ?? site} on ${where}. Your turn ends now: say in one short line that you are waiting for them, then stop. OpenMausBot resumes you when they finish or decline. Never ask for the password or a code in chat.`,
+      };
+    }
     return {
-      text: `The person was asked to sign in to ${r.site ?? site} on ${SIGN_IN_PLACES[String(r.place)] ?? "the place you work"}. Your turn ends now: say in one short line that you are waiting for them, then stop. OpenMausBot resumes you when they finish or decline. Never ask for the password or a code in chat.`,
+      text: `Waiting for the person. Asked them on ${where}: ${JSON.stringify(instruction)} The request expires in 30 minutes. Say in one short line that you are waiting for them, then stop, or do other work that does not need ${where}. OpenMausBot resumes you with the outcome: done, skipped or expired. Never ask for a password, a code or payment details in chat.`,
     };
   }
   if (name === "fill_login") {
@@ -740,7 +740,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
       || (args.action !== "append" && args.action !== "prefer" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
       return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, forget with old_text naming what to forget, or prefer with text: one standing preference of the person.", isError: true };
-    }
+    } else if (args.action === "append" && args.old_text !== undefined) return { text: "memory_update was not run: old_text is not used with append. Leave it out to add a new note, or use replace or supersede to change the passage it names.", isError: true };
     const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
       body: JSON.stringify({
@@ -749,23 +749,19 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         action: args.action,
         text: args.text,
         oldText: args.old_text,
-        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}),
+        ...(typeof args.until === "string" && args.until.trim() ? { until: args.until.trim() } : {}), ...(args.scope === "thread" || args.scope === "everywhere" ? { scope: args.scope } : {}),
       }),
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "Memory update was not confirmed."), isError: true };
     if (args.action === "forget") return { text: forgetText(String(args.old_text), r) };
     if (args.action === "prefer") return { text: preferText(r) };
-    const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     const moved = Array.isArray(r.moved) ? r.moved.filter((line) => typeof line === "string") : [];
-    const full = r.truncated
-      ? "\nSaved, but the lines that never move out of MEMORY.md (hand-written ones, health and safety facts) fill what loads each session, so the newest entries do not load. Tell the person their saved notes are full, and that they can remove ones they no longer need under What it remembers in your panel."
-      : "";
     const shown = moved.slice(0, MOVED_ENTRIES_SHOWN).map((text) => text.split("\n")[0]);
     const more = moved.length > shown.length ? `\n…and ${moved.length - shown.length} more` : "";
     const movedNote = moved.length
       ? `\nTo stay within what loads each session, moved ${moved.length === 1 ? "1 older entry" : `${moved.length} older entries`} to your archive (session_search finds them):\n${shown.join("\n")}${more}`
       : "";
-    return { text: `Memory updated.${entry}${full}${movedNote}` };
+    return { text: `${memorySavedText(r)}${movedNote}` };
   }
   if (name === "retry_thread") {
     const botId = String(args.bot_id ?? "").trim();
@@ -812,7 +808,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const q = String(args.query ?? "").trim();
     const since = typeof args.since === "string" ? args.since.trim() : "";
     const until = typeof args.until === "string" ? args.until.trim() : "";
-    if (!q && !since) {
+    if (!q && !since && args.scope !== "threads") {
       return { text: "session_search needs a query (a few content words) or a since span, for example {\"query\":\"site audit broken links\"} or {\"since\":\"2d\"}.", isError: true };
     }
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
@@ -820,8 +816,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (since) query.set("since", since);
     if (until) query.set("until", until);
     if (typeof args.limit === "number" && Number.isFinite(args.limit)) query.set("limit", String(Math.trunc(args.limit)));
-    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team") query.set("scope", args.scope);
-    const r = await api(`/api/internal/session-search?${query.toString()}`);
+    if (args.scope === "conversations" || args.scope === "memory" || args.scope === "team" || args.scope === "threads") query.set("scope", args.scope);
+    const r = await api(`/api/internal/session-search?${query.toString()}`); if (args.scope === "threads") return { text: threadsListText(q, r) };
     const hits = Array.isArray(r.hits) ? (r.hits as Json[]) : [];
     const memoryHits = Array.isArray(r.memoryHits) ? r.memoryHits.filter(jsonRecord) : [];
     const teamHits = Array.isArray(r.teamHits) ? r.teamHits.filter(jsonRecord) : [];
@@ -856,6 +852,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (member === "session_read") {
+    if (args.scope === "threads" && typeof args.thread_id === "string") return { text: threadReadText(await api(`/api/internal/session-search?${new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, scope: "threads", threadId: args.thread_id.trim(), ...(typeof args.message_id === "string" && args.message_id.trim() ? { before: args.message_id.trim() } : {}), ...(typeof args.limit === "number" && Number.isFinite(args.limit) ? { limit: String(Math.trunc(args.limit)) } : {}) }).toString()}`)) };
     const threadId = String(args.thread_id ?? "").trim();
     const messageId = String(args.message_id ?? "").trim();
     if (!threadId || !messageId) {
@@ -892,7 +889,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         // Unreviewed imports: a hostile description is still prompt content, so only names and status.
         const revision = typeof row.revision === "string" ? `, shared with your team, revision ${row.revision}` : "";
         const unlisted = row.enabled && row.listed === false ? ", not in your prompt: search to read it" : "";
-        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${row.editable === true ? "learned/editable" : "imported"}${revision}${unlisted})`;
+        const kind = row.allBots === true ? "on all your bots: update/delete changes all" : row.editable === true ? "learned/editable" : "imported";
+        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${kind}${revision}${unlisted})`;
       }).join("\n")
       : "(none)";
     const pending = staged.length
@@ -919,16 +917,16 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
       };
     }
-    if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete".', isError: true };
+    if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
-    if (!skillMd.trim()) {
-      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter.', isError: true };
+    if (!skillMd.trim() && args.action !== "import") {
+      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, e.g. "---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n".', isError: true };
     }
     const source = typeof args.source === "string" ? args.source.trim() : "";
     if (!source) {
-      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill.', isError: true };
+      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill (for import, the GitHub or skills.sh link).', isError: true };
     }
     const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
     if (args.action === "update" && !skillName) {
@@ -944,7 +942,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         ...(Array.isArray(args.references) ? { references: args.references } : {}),
         gist: typeof args.gist === "string" ? args.gist : undefined,
         base_revision: typeof args.base_revision === "string" ? args.base_revision : undefined,
-        source,
+        source, ...(args.all_bots === true ? { all_bots: true } : {}),
       }),
     });
     const nameLabel = typeof r.name === "string" ? r.name : "the skill";

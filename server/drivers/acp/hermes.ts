@@ -8,9 +8,11 @@ import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
-import { resolveCli, spawnCli } from "../../procs.ts";
+import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { hermesPermissionRequest } from "./hermes-mcp-trust.ts";
+import { selectAdvertisedMode } from "./session-modes.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
@@ -288,31 +290,19 @@ export async function fetchHermesAcpModels(
     }
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
     const done = (out: { id: string; label: string; custom: true }[]) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      try {
-        if (child.kill()) {
-          hardKillTimer = setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch {}
-          }, 1_000);
-          hardKillTimer.unref?.();
-        }
-      } catch {}
+      // Hermes' own children (its MCP servers) go too: spawnCli started it in a group of its own.
+      void killCliTree(child, 1_000);
       resolve(out);
     };
     timer = setTimeout(() => done([]), hermesAcpModelsTimeoutMs(env));
     child.once("error", () => done([]));
     // A child that already exited makes stdin emit EPIPE, and an unhandled stream 'error' crashes the server.
     child.stdin?.on("error", () => done([]));
-    child.once("close", () => {
-      if (hardKillTimer) clearTimeout(hardKillTimer);
-      done([]);
-    });
+    child.once("close", () => done([]));
 
     let buf = "";
     let id = 0;
@@ -450,6 +440,8 @@ const support: AcpSupport = {
   spawnArgs: () => ["acp"],
   // Hermes keeps the first MCP server it registers under a name for the process's life, so a new bearer needs a fresh process.
   restartOnMcpChange: true,
+  sessionScopedApproval: true,
+  permissionRequest: hermesPermissionRequest,
   resendsReasoningReply: true,
   steer: { command: "steer", answer: hermesSteerAnswer },
   transformEnv: (env) => {
@@ -460,7 +452,18 @@ const support: AcpSupport = {
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
-  async configureSession({ request, sessionId, turn }) {
+  async configureSession({ request, sessionId, config, turn, sessionModes, expectMode }) {
+    if (sessionModes) {
+      const modeId = selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto);
+      if (!modeId) {
+        const level = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
+        throw new Error(`Hermes did not advertise an ACP mode for approval level "${level}"`);
+      }
+      expectMode?.(modeId);
+      if (sessionModes.currentModeId !== modeId) {
+        await applySetting(request, "session/set_mode", { sessionId, modeId }, `mode "${modeId}"`);
+      }
+    }
     // Decode only: ensure* here would read process.env and rewrite the user's real ~/.hermes/config.yaml.
     const native = hermesAcpModelId(turn.model);
     if (!native) return;

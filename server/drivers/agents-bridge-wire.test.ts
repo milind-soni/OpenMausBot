@@ -26,6 +26,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { waitForExit } from "../testing/cleanup.ts";
 import { FIND_TOOL, USE_TOOL, createToolBridge, type BridgeTool } from "./agents-bridge.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
+import { toolsOffNames } from "./agents-tool-groups.ts";
+import { toolsOffFromEnv } from "../../shared/tool-groups.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROXY_SOURCE = join(HERE, "agents-proxy.ts");
@@ -70,6 +72,9 @@ function profiles(): Record<string, Record<string, string>> {
   all["default+images"] = { ...all.default!, OMB_IMAGE_GENERATION: "1" };
   all["skills+shared+voice+x+team+images+hosting"] = { ...all["skills+shared+voice+x+team+images"]!, OMB_APP_HOSTING: "1" };
   all["default+hosting"] = { ...all.default!, OMB_APP_HOSTING: "1" };
+  all["skills+shared+voice+x+team+board"] = { ...all["skills+shared+voice+x+team"]!, OMB_TEAM_BOARD: "1" };
+  all["default+room+board"] = { ...all["default+room"]!, OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1" };
+  all["default+tools-off"] = { ...all.default!, OMB_TOOLS_OFF: "pages,meetings" };
   return all;
 }
 
@@ -84,36 +89,39 @@ const FULL = "skills+shared+voice+x+team+images+hosting";
  * either: lock a saving in by lowering the number. A Chief's list is longer
  * than another bot's only by the Chief-only names in find_tool's description. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 18394,
-  "voice": 19221,
-  "shared": 18434,
-  "shared+voice": 19261,
-  "skills": 18421,
-  "skills+voice": 19248,
-  "skills+shared": 18461,
-  "skills+shared+voice": 19288,
-  "non-chief": 18277,
-  "voice+non-chief": 19010,
-  "shared+non-chief": 18317,
-  "shared+voice+non-chief": 19050,
-  "skills+non-chief": 18304,
-  "skills+voice+non-chief": 19037,
-  "skills+shared+non-chief": 18344,
-  "skills+shared+voice+non-chief": 19077,
-  "skills+shared+voice+cloud-home": 19304,
-  "skills+shared+voice+non-chief+cloud-home": 19093,
-  "skills+shared+voice+x": 19367,
-  "skills+shared+voice+x+team": 19367,
-  "default+legacy-switches": 18394,
-  "default+mausbot": 18446,
-  "skills+shared+voice+mausbot": 19340,
-  "default+no-computer-pick": 17182,
-  "default+room": 17389,
-  "non-chief+room": 17272,
-  "skills+shared+voice+x+team+images": 19289,
-  "default+images": 18410,
-  "skills+shared+voice+x+team+images+hosting": 20683,
-  "default+hosting": 19758,
+  "default": 18076,
+  "voice": 18857,
+  "shared": 18116,
+  "shared+voice": 18897,
+  "skills": 18103,
+  "skills+voice": 18884,
+  "skills+shared": 18143,
+  "skills+shared+voice": 18924,
+  "non-chief": 17959,
+  "voice+non-chief": 18740,
+  "shared+non-chief": 17999,
+  "shared+voice+non-chief": 18780,
+  "skills+non-chief": 17986,
+  "skills+voice+non-chief": 18767,
+  "skills+shared+non-chief": 18026,
+  "skills+shared+voice+non-chief": 18807,
+  "skills+shared+voice+cloud-home": 18940,
+  "skills+shared+voice+non-chief+cloud-home": 18823,
+  "skills+shared+voice+x": 18985,
+  "skills+shared+voice+x+team": 18985,
+  "default+legacy-switches": 18076,
+  "default+mausbot": 18128,
+  "skills+shared+voice+mausbot": 18976,
+  "default+no-computer-pick": 16864,
+  "default+room": 16793,
+  "non-chief+room": 16676,
+  "skills+shared+voice+x+team+images": 19013,
+  "default+images": 18104,
+  "skills+shared+voice+x+team+images+hosting": 20215,
+  "default+hosting": 19278,
+  "default+tools-off": 16419,
+  "skills+shared+voice+x+team+board": 19047,
+  "default+room+board": 16855,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
@@ -125,7 +133,7 @@ async function proxyLines(entry: string, env: Record<string, string>, requests: 
   // OMB_* switches of its own; the profile must be the only source.
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OMB_")));
   const child = spawn(process.execPath, [entry], {
-    env: { ...inherited, OMB_HARNESS_URL: "http://127.0.0.1:9", OMB_BOT_ID: "bot-golden", OMB_THREAD_ID: "thread-golden", OMB_COMMS_TOKEN: "unused", OMB_TURN_DEPTH: "0", ...env },
+    env: { ...inherited, OMB_HARNESS_URL: "http://127.0.0.1:9", OMB_BOT_ID: "bot-golden", OMB_THREAD_ID: "thread-golden", OMB_COMMS_TOKEN: "unused", ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   try {
@@ -282,11 +290,12 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
   it("keeps the same hot tools whatever the role and features, except the ones a profile does not have", () => {
     const hotOf = (name: string) => toolsOf(wires[name]!).slice(0, -2).map((tool) => tool.name);
     const base = hotOf("default");
-    expect(base).toEqual(["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "post_to_thread", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"]);
+    expect(base).toEqual(["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "post_to_thread", "request_credential", "request_sign_in", "fill_login", "message_person", "share", "memory_update"]);
     for (const name of Object.keys(PROFILES)) {
       const selects = PROFILES[name]!.OMB_COMPUTER_SELECTION === "1";
+      const off = toolsOffNames(toolsOffFromEnv(PROFILES[name]!.OMB_TOOLS_OFF));
       // publish_app puts an app on the public web, so the host counts it as outbound and it is never behind use_tool.
-      expect(hotOf(name).filter((tool) => tool !== "send_voice_note" && tool !== "publish_app"), name).toEqual(selects ? base : base.filter((tool) => tool !== "select_computer"));
+      expect(hotOf(name).filter((tool) => tool !== "send_voice_note" && tool !== "publish_app"), name).toEqual(base.filter((tool) => (selects || tool !== "select_computer") && !off.has(tool)));
       expect(hotOf(name).includes("publish_app"), name).toBe(PROFILES[name]!.OMB_APP_HOSTING === "1");
       expect(hotOf(name).includes("send_voice_note"), name).toBe(PROFILES[name]!.OMB_VOICE_NOTES === "1");
     }

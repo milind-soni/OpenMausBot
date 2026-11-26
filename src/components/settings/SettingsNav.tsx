@@ -7,20 +7,22 @@ import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { InitialsAvatar } from "../Avatar";
 import { PlaceMark } from "../PlacesRail";
 import { profileInitials } from "../SidebarProfileMenu";
 import { Switch, SettingsTag } from "../SettingsPrimitives";
 import { accountLine, useAccountSummary, useYou } from "./account-summary";
+import { devicesDot, devicesPlaceKey, useDevicesSignal, type NavDot } from "./devices-signal";
 import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
 import { OWNERS, pageById, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
 import { useUpdaterState } from "@/lib/updater";
+import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 import { keySection, type KeyEntry } from "../keys/key-catalog";
 import { HELP_CENTER_URL, desktopAppVersion } from "@/lib/app-links";
 
-export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
+export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-[9px] py-[7px] text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
 /** A place's badge as its rail circle draws it; with no colour of its own (This computer, or a Cloud in a browser) it is a
  * quiet filled tile with an edge, so it never vanishes on the sheet. */
@@ -33,7 +35,7 @@ export function PlaceBadge({ place, size }: { place: Pick<SettingsPlace, "kind" 
     <span aria-hidden="true" data-place-badge={place.kind}
       className="grid shrink-0 place-items-center bg-ink/[0.06] font-semibold leading-none text-ink-secondary shadow-[inset_0_0_0_0.5px_var(--settings-edge)]"
       style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), fontSize: Math.max(7, Math.round(size * 0.4)) }}>
-      {place.kind === "computer" && !place.named ? <Laptop size={glyph} strokeWidth={1.75} /> : placeInitials(place.name)}
+      {place.kind === "computer" && !place.named ? <Laptop size={glyph} /> : placeInitials(place.name)}
     </span>
   );
 }
@@ -55,11 +57,10 @@ export function YouAvatar({ size }: { size: number }) {
 
 /** The place's one status line under its name: bots on This computer, power on a Cloud. */
 export function usePlaceSubLine(place: SettingsPlace): string {
-  const { state } = useStore();
+  const count = useStoreSelector((state) => (place.kind === "computer" ? state.bots.length : 0));
   const update = useUpdaterState();
   if (update?.status === "downloaded" && place.kind === "computer") return t("sidebar.update.readyShort");
   if (place.kind === "computer") {
-    const count = state.bots.length;
     return count === 0 ? t("settings.place.botsNone") : count === 1 ? t("settings.place.botsOne") : t("settings.place.botsMany", { count });
   }
   return place.kind === "server" ? t("settings.place.running") : t("settings.place.alwaysOn");
@@ -101,17 +102,36 @@ function IdentityRow({ page, current, badge, name, line, onOpen, narrow }: {
   );
 }
 
-function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: "success" | "warning" | null; onOpen: () => void }) {
+type Dot = { tone: NavDot; label: string };
+
+/** The mark beside Devices, said in words too: amber while a device or the private network needs the person, green while
+ * a phone is connected and nothing does. Before Devices has been read, the phones alone decide it. */
+function useDevicesDot(place: SettingsPlace, enabled: boolean): Dot | null {
+  const phone = usePhonePlaceState(enabled);
+  const seen = useDevicesSignal(devicesPlaceKey(place));
+  if (seen) {
+    const tone = devicesDot(seen);
+    return tone && { tone, label: t(tone === "warning" ? "settings.nav.devicesNeedYou" : "settings.nav.phoneConnectedAllClear") };
+  }
+  if (phone.kind === "paired" && phone.connected) return { tone: "success", label: t("settings.nav.phoneConnected") };
+  return phone.kind === "attention" ? { tone: "warning", label: t("settings.nav.phoneNeedsYou") } : null;
+}
+
+function PageDot({ dot }: { dot: Dot }) {
+  return <span role="img" aria-label={dot.label} title={dot.label} data-settings-dot={dot.tone} className={cn("size-1.5 shrink-0 rounded-full", dot.tone === "success" ? "bg-success" : "bg-warning")} />;
+}
+
+function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; label: string; current: boolean; dot?: Dot | null; onOpen: () => void }) {
   const Icon = page.icon;
   return (
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
       className={cn(NAV_ITEM, current ? "bg-menu-active font-medium" : "hover:bg-menu-hover")}>
-      <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
+      <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
       <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden" title={label}>
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [grid-area:1/1]">{label}</span>
         <span aria-hidden="true" className="invisible h-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium [grid-area:1/1]">{label}</span>
       </span>
-      {dot && <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", dot === "success" ? "bg-success" : "bg-warning")} />}
+      {dot && <PageDot dot={dot} />}
     </button>
   );
 }
@@ -182,7 +202,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
   const account = { ...summary, email: summary.email ?? (summary.plan ? profile?.email ?? null : null) };
   const placeLine = usePlaceSubLine(place);
   const appLine = useAppSubLine(ctx.desktop);
-  const phone = usePhonePlaceState(!ctx.client);
+  const devicesMark = useDevicesDot(place, !ctx.client);
   const listRef = useRef<HTMLDivElement>(null);
   const openSource = ctx.desktop && !window.ogb?.cloudAccount && !window.ogb?.cloudPlan;
   const lines: Record<SettingsOwner, { badge: ReactNode; name: string; line: string; page: SettingsPageId }> = {
@@ -190,8 +210,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
     account: { badge: <YouAvatar size={24} />, name: t("settings.page.account"), line: accountLine(account, { browser: !ctx.desktop, place: place.name, openSource }), page: "account" },
     app: { badge: <AppIcon size={24} />, name: ctx.desktop ? t("settings.page.app") : t("settings.page.browser"), line: appLine, page: "app" },
   };
-  const dot = (page: SettingsPageId) => page === "phone" && phone.kind === "paired" && phone.connected ? "success" as const
-    : page === "phone" && phone.kind === "attention" ? "warning" as const : null;
+  const dot = (page: SettingsPageId) => (page === "devices" ? devicesMark : null);
   const searching = query.trim() !== "";
   return (
     <nav aria-label={t("settings.title")} className={cn("flex min-h-0 flex-col", narrow ? "flex-1" : "w-[220px] shrink-0 shadow-[inset_-0.5px_0_0_var(--settings-edge)]")}>
@@ -210,9 +229,9 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
                 {group.map((page) => narrow ? (
                   <button key={page.id} type="button" data-settings-page={page.id} data-settings-section={page.id} onClick={() => onOpen(page.id)}
                     className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[14px] leading-5 text-ink hover:bg-menu-hover">
-                    <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} strokeWidth={1.75} aria-hidden="true" className="text-ink-secondary" />}</span>
+                    <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} aria-hidden="true" className="text-ink-secondary" />}</span>
                     <span className="min-w-0 flex-1 truncate">{t(page.labelKey)}</span>
-                    {dot(page.id) && <span aria-hidden="true" className={cn("size-1.5 rounded-full", dot(page.id) === "success" ? "bg-success" : "bg-warning")} />}
+                    {dot(page.id) && <PageDot dot={dot(page.id)!} />}
                     <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />
                   </button>
                 ) : (
@@ -283,7 +302,7 @@ export function hitLabel(hit: SearchHit, place: SettingsPlace, desktop: boolean)
   if (hit.entry.id === "page:overview") return place.name;
   if (hit.entry.id === "page:account") return t("settings.page.account");
   if (hit.entry.id === "page:app") return desktop ? t("settings.page.app") : t("settings.page.browser");
-  return t(hit.entry.labelKey, { app: productName(), helper: "" });
+  return t(hit.entry.macLabelKey && isMacPlatform() ? hit.entry.macLabelKey : hit.entry.labelKey, { app: productName(), helper: "" });
 }
 
 function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place: SettingsPlace; hit: SearchHit; query: string; onHit: (hit: SearchHit) => void }) {
@@ -298,7 +317,7 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
   return (
     <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)} title={full ? `${label} · ${full}` : label}
       className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
-      <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
+      <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span data-settings-hit-title="" className="line-clamp-2 text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">{highlight(label, query)}</span>
         {(where || tag) && (
@@ -320,17 +339,17 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 }
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
-  overview: "place", phone: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", data: "place",
-  people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app",
+  overview: "place", devices: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
+  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "place",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
-  phone: "settings.section.phoneDevices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
-  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", data: "settings.page.data", people: "settings.section.people",
-  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance",
+  devices: "settings.page.devices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
+  vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", storage: "settings.page.storage", data: "settings.page.data", people: "settings.section.people",
+  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance", features: "settings.page.features",
 };
 
-/** A result's second line: its owner and its page ("This computer › Phone & devices"), or what a jump opens. */
+/** A result's second line: its owner and its page ("This computer › Devices"), or what a jump opens. */
 export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): { owner: string; page?: string } | null {
   const entry = hit.entry;
   if (entry.jump) return { owner: searchLocation(hit, place, ctx) };
@@ -341,7 +360,7 @@ export function searchWhere(hit: SearchHit, place: SettingsPlace, ctx: SettingsC
   return { owner: ownerName, ...(pageKey && !entry.id.startsWith("page:") ? { page: t(pageKey) } : {}) };
 }
 
-/** The full path, owner first ("This computer › Phone & devices › How your phone reaches this computer"): the tooltip. */
+/** The full path, owner first ("This computer › Devices › How your phone reaches this computer"): the tooltip. */
 export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: SettingsContext): string {
   const entry = hit.entry;
   if (entry.jump === "apps") return t("settings.search.opensApps");

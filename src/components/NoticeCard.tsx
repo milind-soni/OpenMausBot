@@ -3,15 +3,16 @@ import { ArrowUpRight, X } from "lucide-react";
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 
-export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel = t("notice.dismiss"), notice, children }: {
+export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel = t("notice.dismiss"), notice, layer = "z-40", children }: {
   titleId: string; icon: ComponentType<{ size?: number; className?: string }>; title: string; onDismiss: () => void;
   dismissLabel?: string;
   notice?: string;
+  layer?: string;
   children: ReactNode;
 }) {
   return <aside aria-labelledby={titleId} data-notice={notice} onKeyDown={event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onDismiss(); }
-  }} className="fixed bottom-4 left-[calc(var(--rail-beside,0px)_+_1rem)] z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw_-_var(--rail-beside,0px)_-_32px)] overflow-y-auto rounded-xl border border-hairline/40 bg-panel p-3.5 text-ink shadow-2xl shadow-black/20">
+  }} className={`fixed bottom-4 left-[calc(var(--rail-beside,0px)_+_1rem)] ${layer} max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw_-_var(--rail-beside,0px)_-_32px)] overflow-y-auto rounded-xl border border-hairline/40 bg-panel p-3.5 text-ink shadow-2xl shadow-black/20`}>
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-start gap-2.5">
         <Icon size={16} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />
@@ -26,7 +27,7 @@ export function NoticeCard({ titleId, icon: Icon, title, onDismiss, dismissLabel
 
 export const PRIMARY_BUTTON = "ui-button ui-button-primary min-h-9 gap-1.5 px-3 py-1.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function LinkButton({ url, label, onOpened, className = PRIMARY_BUTTON }: { url: string; label: string; onOpened?: () => void; className?: string }) {
+export function LinkButton({ url, label, onOpened, showUrlOnError, className = PRIMARY_BUTTON }: { url: string; label: string; onOpened?: () => void; showUrlOnError?: boolean; className?: string }) {
   const [failed, setFailed] = useState(false);
   return <div>
     <button type="button" className={className} onClick={() => {
@@ -35,7 +36,9 @@ export function LinkButton({ url, label, onOpened, className = PRIMARY_BUTTON }:
     }}>
       {label}<ArrowUpRight size={14} aria-hidden="true" />
     </button>
-    {failed && <p role="alert" className="mt-2 text-[12px] text-danger">{t("notice.openFailed")}</p>}
+    {failed && <p role="alert" className="mt-2 text-[12px] text-danger">
+      {t("notice.openFailed")}{showUrlOnError && <> <span className="select-all">{url}</span></>}
+    </p>}
   </div>;
 }
 

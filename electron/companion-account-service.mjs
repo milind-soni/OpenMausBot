@@ -17,7 +17,7 @@ import {
   COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
   COMPANION_TUNNEL_RETIRED_FIELD,
   COMPANION_TUNNEL_WAITING_FIELD,
-  UUID,
+  UUID, accountProblem,
   companionAccountCleanupPending,
   companionTunnelRetired,
   ownString,
@@ -233,7 +233,7 @@ export function createCompanionAccountService({
       return publicState({
         available: false,
         status: "signed-out",
-        message: FRIENDLY_MESSAGES.control_plane_unavailable,
+        message: FRIENDLY_MESSAGES.control_plane_unavailable, problem: "unconfigured",
       });
     }
     const document = credentials();
@@ -247,7 +247,7 @@ export function createCompanionAccountService({
         status: account ? "error" : "signed-out",
         email: account?.email,
         endpoint: persistedAccess?.endpoint,
-        message: FRIENDLY_MESSAGES.control_plane_unavailable,
+        message: FRIENDLY_MESSAGES.control_plane_unavailable, problem: "unreachable",
         paused,
         tunnelRetired,
       });
@@ -271,7 +271,7 @@ export function createCompanionAccountService({
         available,
         status: "error",
         email: account.email,
-        message: "This computer still needs a secure address. Try again; local pairing continues to work.",
+        message: "This computer still needs a secure address. Try again; local pairing continues to work.", problem: "address",
       });
     }
     const connection = managedConnectionState?.() ?? {};
@@ -291,7 +291,7 @@ export function createCompanionAccountService({
           status: "error",
           email: account.email,
           endpoint: access.endpoint,
-          message: "The secure connection needs attention. Local pairing still works.",
+          message: "The secure connection needs attention. Local pairing still works.", problem: "address",
         });
       }
     }
@@ -498,7 +498,7 @@ export function createCompanionAccountService({
         status: "error",
         email: user.email,
         endpoint: endpoint.endpoint.url,
-        message: "The address is ready, but this app could not start its secure connection. Local pairing still works.",
+        message: "The address is ready, but this app could not start its secure connection. Local pairing still works.", problem: "address",
       };
     }
     return settledState();
@@ -529,6 +529,7 @@ export function createCompanionAccountService({
           : "error",
       email,
       message,
+      problem: accountProblem(error instanceof ControlPlaneError ? error.code : ""),
     };
     return message;
   };
