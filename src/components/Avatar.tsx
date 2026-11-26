@@ -13,7 +13,7 @@ import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMot
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
 import { MOTION_BEAT_MS } from "./mascot-beat";
-import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotBodyColorSchema, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
+import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotBodyColorSchema, mascotFaceInk, mascotMaterialSchema, type BotAvatarCrop, type MascotFaceColor, type MascotMaterial } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
 import { engineBody } from "../../shared/object-bodies";
@@ -108,6 +108,8 @@ export type MausAvatarProps = {
   faceColor?: MascotFaceColor | null;
   /** A custom `#rrggbb` body colour; it wins over `color` for the body only. */
   bodyColor?: string | null;
+  /** The finish (matte, metallic or fluffy fur) of a body the engine draws (the shapes and objects); the cursor and festival bodies stay flat. */
+  material?: MascotMaterial | null;
   /** Whose face this is; a decorative mascot has none. */
   kind?: AvatarKind;
 };
@@ -139,6 +141,7 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
       <ObjectAvatar
         definition={definition}
         fill={customFill(props.bodyColor) ?? vivid(MAUS_COLORS[color] ?? MAUS_COLORS.green)}
+        material={mascotMaterialSchema.safeParse(props.material).data}
         faceColor={props.faceColor}
         size={size}
         state={state}
@@ -252,6 +255,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
     mascotBody?: BotBodyId | null;
     mascotFaceColor?: MascotFaceColor | null;
     mascotBodyColor?: string | null;
+    mascotMaterial?: MascotMaterial | null;
   };
 };
 
@@ -291,6 +295,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
         color={bot.color}
         faceColor={bot.mascotFaceColor}
         bodyColor={bot.mascotBodyColor}
+        material={bot.mascotMaterial}
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}
         size={size}
         label={label ?? bot.name}

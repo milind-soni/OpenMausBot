@@ -7,7 +7,7 @@
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_COPY_LIVE_LOAD=1  a session/load of a session still open adds a second copy, and each open copy streams
 //     FAKE_ACP_TEXT_REPLY again, like mistral-vibe 3.1.2; session/close ends every copy
-//   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
+//   FAKE_ACP_TEXT_REPLY  answer every session/prompt with FAKE_ACP_UPDATES_FILE's updates, then only this text
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
@@ -51,6 +51,7 @@
 //   FAKE_ACP_RPC_FAILURE_FILE  JSON-RPC error for session/prompt; once read the process stays poisoned
 //   FAKE_ACP_RPC_FAILURE_METHOD  initialize, authenticate, session/new or session/prompt (default)
 //   FAKE_ACP_RPC_FAILURE_GATE  hold the error until this file exists
+//   FAKE_ACP_RPC_FAILURE_ONCE  fail once, then answer as usual (the failure file is removed)
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text and a tool result before failing
 //   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit the scripted usage updates and FAKE_ACP_UPDATES_FILE's before failing
 //   FAKE_ACP_LOAD_ERROR  JSON-RPC error returned by session/load
@@ -323,6 +324,12 @@ const acpModels = (process.env.FAKE_ACP_SESSION_MODELS ?? "")
   });
 const sessionModels = () =>
   acpModels.length ? { currentModelId: acpModels[0].modelId, availableModels: acpModels } : null;
+const sessionModesList = (process.env.FAKE_ACP_SESSION_MODES ?? "").split(",").filter(Boolean);
+let currentSessionMode: string | null = sessionModesList[0] ?? null;
+const sessionModesPayload = () =>
+  sessionModesList.length
+    ? { currentModeId: currentSessionMode ?? sessionModesList[0], availableModes: sessionModesList.map((id) => ({ id, name: id })) }
+    : null;
 
 const argv = process.argv.slice(2);
 const dumpEnv = Object.fromEntries(
@@ -672,6 +679,9 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false
   });
 }
 let liveSession: string | null = null;
+let idleModeUpdateSent = false;
+let modeUpdateAfterSetModeSent = false;
+let modeUpdateOnSetModelSent = false;
 const openCopies = new Map<string, number>();
 let sessionsOpened = 0;
 let rpcFailure: unknown = null;
@@ -705,6 +715,10 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
   const fail = () => {
     recordMethod(`${msg.method}.error`);
     out({ jsonrpc: "2.0", id: msg.id, error: rpcFailure });
+    if (process.env.FAKE_ACP_RPC_FAILURE_ONCE === "1") {
+      rpcFailure = null;
+      if (failureFile) try { unlinkSync(failureFile); } catch {}
+    }
   };
   const gate = process.env.FAKE_ACP_RPC_FAILURE_GATE;
   if (gate && !existsSync(gate)) {
@@ -1094,6 +1108,7 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      const sm = sessionModesPayload();
       sessionsOpened += 1;
       const firstSession = process.env.FAKE_ACP_SESSION_ID ?? "fake-acp-session";
       liveSession = sessionsOpened === 1 ? firstSession : `${firstSession}-${sessionsOpened}`;
@@ -1102,6 +1117,7 @@ function handle(msg: any) {
         sessionId: liveSession,
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
+        ...(sm ? { modes: sm } : {}),
       }, "session/new", liveSession);
       if (mode === "hermes-steer") advertiseHermesCommands(liveSession);
       break;
@@ -1178,7 +1194,8 @@ function handle(msg: any) {
         }
       }
       if (process.env.FAKE_ACP_LOAD_UNANSWERED === "1") break;
-      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
+      const sm = sessionModesPayload();
+      resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}), ...(sm ? { modes: sm } : {}) }, "session/load", msg.params.sessionId);
       if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
     }
@@ -1196,8 +1213,9 @@ function handle(msg: any) {
       }
       const opts = configOptions();
       const mdls = sessionModels();
+      const sm = sessionModesPayload();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
-      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) });
+      result(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}), ...(sm ? { modes: sm } : {}) });
       break;
     }
     // droid sets model/autonomy here, not via argv. Recorded beside FAKE_ACP_DUMP; last writer wins.
@@ -1223,9 +1241,35 @@ function handle(msg: any) {
         });
         break;
       }
+      if (msg.method === "session/set_mode" && sessionModesList.length) {
+        if (!sessionModesList.includes(msg.params.modeId)) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: `Invalid params: unknown modeId "${msg.params.modeId}"` } });
+          break;
+        }
+        currentSessionMode = msg.params.modeId;
+      }
       configCalls.push({ method: msg.method, params: msg.params });
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+      }
+      if (msg.method === "session/set_mode" && !modeUpdateAfterSetModeSent && process.env.FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE) {
+        const [trigger, override] = process.env.FAKE_ACP_MODE_UPDATE_AFTER_SET_MODE.split(":");
+        if (trigger && override && msg.params.modeId === trigger) {
+          modeUpdateAfterSetModeSent = true;
+          currentSessionMode = override;
+          const resp = { jsonrpc: "2.0", id: msg.id, result: {} };
+          const notif = { jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: override } } };
+          process.stdout.write(`${JSON.stringify(resp)}\n${JSON.stringify(notif)}\n`);
+          break;
+        }
+      }
+      if (msg.method === "session/set_model" && !modeUpdateOnSetModelSent && process.env.FAKE_ACP_MODE_UPDATE_ON_SET_MODEL) {
+        const override = process.env.FAKE_ACP_MODE_UPDATE_ON_SET_MODEL.trim();
+        if (override) {
+          modeUpdateOnSetModelSent = true;
+          currentSessionMode = override;
+          out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "current_mode_update", currentModeId: override } } });
+        }
       }
       result(msg.id, {});
       break;
@@ -1362,6 +1406,7 @@ function handle(msg: any) {
         return;
       }
       if (process.env.FAKE_ACP_TEXT_REPLY !== undefined) {
+        emitSessionReports();
         for (let copy = openCopies.get(String(msg.params?.sessionId)) ?? 1; copy > 0; copy -= 1) {
           out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
         }
@@ -1408,6 +1453,15 @@ function handle(msg: any) {
             ? { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 }, _meta: {} }
             : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
         );
+        const idleMode = process.env.FAKE_ACP_IDLE_MODE_UPDATE;
+        if (idleMode && !idleModeUpdateSent) {
+          idleModeUpdateSent = true;
+          const sid = msg.params?.sessionId ?? liveSession;
+          setTimeout(() => {
+            currentSessionMode = idleMode;
+            out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: sid, update: { sessionUpdate: "current_mode_update", currentModeId: idleMode } } });
+          }, 10);
+        }
       };
       const script = streamScript((Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join(""));
       if (script) {

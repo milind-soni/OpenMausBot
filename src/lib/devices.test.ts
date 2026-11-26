@@ -47,8 +47,10 @@ describe("the device list", () => {
     expect(mini).toMatchObject({ kind: "server", route: "tailscale", status: "attention", note: "update", version: "0.1.170", address: "http://studio-mini.tail1234.ts.net:8799" });
     expect(mini!.actions).toContainEqual({ type: "copy-update", install: "global" });
     expect(vps).toMatchObject({ route: "internet", status: "offline", note: "unreachable" });
-    expect(vps!.actions.map((action) => action.type)).toEqual(["switch", "retry", "pair-again", "copy-address", "remove"]);
+    expect(vps!.actions.map((action) => action.type)).toEqual(["switch", "retry", "copy-address", "remove"]);
     expect(lan).toMatchObject({ route: "local", status: "attention", note: "signed-out" });
+    expect(lan!.actions.map((action) => action.type)).toEqual(["switch", "pair-again", "copy-address", "remove"]);
+    expect(mini!.actions.some((action) => action.type === "pair-again" || action.type === "retry")).toBe(false);
   });
 
   it("leaves out the place on screen and this computer's own environments", () => {

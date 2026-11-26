@@ -38,7 +38,10 @@ import {
   type PromptSection,
 } from "./system-prompt.ts";
 import { loginPlace } from "../shared/logins.ts";
-import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
+import { PUBLISH_HABIT, REPLY_HABITS_PROMPT, replyHabitsPrompt } from "./reply-habits.ts";
+import { readFileSync } from "node:fs";
+import { PAGE_TOOL_DEFINITIONS } from "./drivers/agents-pages-tools.ts";
+import { HOSTING_TOOL_DEFINITIONS } from "./drivers/agents-hosting-tools.ts";
 
 describe("the stable half", () => {
   it("leaves out a conversation's folder, so a new thread can read the bot's cached prompt", () => {
@@ -421,7 +424,8 @@ describe("cloudHomePrompt", () => {
       const text = cloudHomePrompt(tools);
       expect(text).toContain(CLOUD_REUSE_INSTALLS + CLOUD_PUSH_CODE_WORK);
     }
-    expect(CLOUD_PUSH_CODE_WORK).toMatch(/push it to a new branch/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/a git remote the person works in and you can push to it/);
+    expect(CLOUD_PUSH_CODE_WORK).toMatch(/push it to one branch of your own, reusing that branch/);
     expect(CLOUD_PUSH_CODE_WORK).toMatch(/never force-push, never push to the default branch/);
     expect(CLOUD_PUSH_CODE_WORK).toMatch(/never commit secrets, \.env files or installed packages/);
   });
@@ -599,11 +603,11 @@ describe("how every bot replies", () => {
 
   it("asks for an opening line on longer work, the answer first, one question at most, plain words and money facts first", () => {
     for (const habit of [
-      "send one short line in their words on what you are doing and why",
-      "add what they will get and roughly how long",
-      "Quick answers skip both.",
+      "say in one short line in their words what you will deliver (and roughly how long, if minutes), then deliver exactly that.",
+      "Quick answers skip it.",
       "Answer first (verdict, result or answer), then support.",
       "Say in one line where and when looked-up facts came from",
+      "say so if a promised look-up did not happen.",
       "Use and convert to their units, currency, time zone and numbers",
       "no \"let me know if…\", no \"hope this helps\", no offers or questions out of habit",
       "at most one concrete next step, only when it clearly helps.",
@@ -616,6 +620,34 @@ describe("how every bot replies", () => {
       "Never ask for passwords, one-time codes or card numbers in chat.",
       "say plainly what you did not do, offer the simplest other way (drag the file in, or paste the text)",
     ]) expect(REPLY_HABITS_PROMPT).toContain(habit);
+  });
+
+  it("tells only a turn that has publish_page to publish what others will open, and to say the link is public", () => {
+    expect(REPLY_HABITS_PROMPT).not.toContain("published to a link");
+    expect(PUBLISH_HABIT).toContain("Something for others to open (share, send to someone, post) is a page published to a link, unless they asked for a format: say anyone with the link can open it.");
+    expect(PUBLISH_HABIT).toContain("Anything just for them is a file or a page here; when you cannot publish, give the file in one sentence, no retries.");
+    // It names no tool, so a bot without the tool is never pointed at one.
+    expect(PUBLISH_HABIT).not.toMatch(/publish_page|tool/);
+    const habits = (agents: object | undefined, pagesOff?: boolean) =>
+      buildSystemPrompt("You are Kiwi.", "", [], agents, { pagesOff }).sections.find((section) => section.id === "reply-habits")!.text;
+    expect(habits(undefined)).toBe(REPLY_HABITS_PROMPT);
+    expect(habits({ env: {} }, true)).toBe(REPLY_HABITS_PROMPT);
+    const withPages = habits({ env: {} });
+    expect(withPages).toBe(replyHabitsPrompt(true));
+    expect(withPages).toContain(`then deliver exactly that. Quick answers skip it.${PUBLISH_HABIT}\n- Answer first`);
+    expect(withPages.length).toBe(REPLY_HABITS_PROMPT.length + PUBLISH_HABIT.length);
+  });
+
+  it("says the same about publishing everywhere: only what others will open, public to anyone with the link, never private details", () => {
+    const publishPage = PAGE_TOOL_DEFINITIONS.find((tool) => tool.name === "publish_page")!.description;
+    expect(publishPage).toContain("to a public link anyone with it can open, when the person wants others to open it (share, send to someone, post) or asks to publish it");
+    expect(publishPage).toContain("Never publish secrets, or money, health, ID or customer details the person didn't ask to make public; give the file instead.");
+    expect(publishPage).not.toMatch(/\bkeep\b/);
+    expect(HOSTING_TOOL_DEFINITIONS.find((tool) => tool.name === "publish_app")!.description).toContain("a page or report to share goes through publish_page instead");
+    const dashboards = readFileSync(new URL("../skills/data-dashboards/SKILL.md", import.meta.url), "utf8");
+    expect(dashboards).toContain("Publish only when the person wants others to open it (share, send to someone, post) or asks to publish; a page just for them stays in the chat.");
+    expect(dashboards).toContain("A published page is public to anyone with its link, so say so");
+    expect(dashboards).not.toContain("Publish only when the person asks to share.");
   });
 
   it("asks one thing with tap-to-answer choices, keeps forms for real edits, and confirms a routine in plain words", () => {

@@ -5,7 +5,7 @@ import { useStoreDispatch } from "@/state/store-select";
 import type { TurnLive } from "@/state/turn-status";
 import { cn } from "@/lib/cn";
 import { focusActivityRun } from "@/lib/activity-focus";
-import { friendlyNowPhrases } from "@/lib/friendly-activity";
+import { friendlyNowPhrases, taskSubject } from "@/lib/friendly-activity";
 import { t } from "@/lib/i18n";
 import { turnNowPhrases } from "@/lib/live-activity";
 import { nowSteps, type NowStep, type NowStepState } from "@/lib/now-steps";
@@ -44,11 +44,15 @@ export function NowCard({ steps, tail, onOpenActivity }: { steps: readonly NowSt
 
 /** Everything the working line of a bot's chat shows: what is happening now, in each mode's words, how a long step is
  * doing, and the card it unfolds. */
-export function useTurnNow(bot: Pick<Bot, "id" | "name" | "threadId">, messages: readonly Message[], lastMessage: Message | undefined, live: TurnLive, advanced: boolean) {
+export function useTurnNow(bot: Pick<Bot, "id" | "name" | "threadId" | "tasks">, messages: readonly Message[], lastMessage: Message | undefined, live: TurnLive, advanced: boolean) {
   const dispatch = useStoreDispatch();
   const status = live.status;
   const exact = turnNowPhrases(status, lastMessage);
-  const shown = advanced ? exact : friendlyNowPhrases(status, lastMessage);
+  const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
+  // Simple mode only, and once per title or loaded page of messages, never per frame.
+  const subject = useMemo(() => advanced ? undefined
+    : taskSubject(title, messages.flatMap((message) => message.text ? [message.text] : [])), [advanced, title, messages]);
+  const shown = advanced ? exact : friendlyNowPhrases(status, lastMessage, subject);
   const steps = useMemo(() => nowSteps(messages, status), [messages, status]);
   const quiet = status && "quiet" in status ? status.quiet : undefined;
   const tail = status?.activity === "command" && "tail" in status ? status.tail : undefined;

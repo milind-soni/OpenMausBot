@@ -254,23 +254,32 @@ const SECTION_MARK: Record<SectionMark, string> = {
   working: "size-1.5 animate-pulse bg-success motion-reduce:animate-none",
 };
 
-function sectionMark(attention: SidebarSectionAttention | undefined): SectionMark | null {
-  if (!attention) return null;
-  if (attention.waiting > 0) return "waiting";
-  if (attention.unread > 0) return "unread";
-  if (attention.working > 0) return "working";
-  return null;
+/** Waiting and unread each keep their own dot, so a wait never hides unread rows; working shows only when neither does. */
+function sectionMarks(attention: SidebarSectionAttention | undefined): SectionMark[] {
+  if (!attention) return [];
+  const marks: SectionMark[] = [];
+  if (attention.waiting > 0) marks.push("waiting");
+  if (attention.unread > 0) marks.push("unread");
+  if (marks.length === 0 && attention.working > 0) marks.push("working");
+  return marks;
+}
+
+/** How many rows inside need the person: unread or waiting on them. */
+function needsYouCount(attention: SidebarSectionAttention | undefined): number {
+  return attention ? attention.needsYou ?? attention.unread + attention.waiting : 0;
 }
 
 function SectionAttention({ attention, label, alert }: { attention?: SidebarSectionAttention; label: string; alert?: boolean }) {
-  const mark = alert ? null : sectionMark(attention);
+  const marks = alert ? [] : sectionMarks(attention);
+  const needs = alert ? 0 : needsYouCount(attention);
   return (
     <>
-      {mark && (
-        <span aria-hidden="true" title={label} data-section-mark={mark} className="flex size-4 shrink-0 items-center justify-center">
+      {needs > 0 && <span aria-hidden="true" title={label} data-section-needs="" className="shrink-0 text-[12px] leading-4 tabular-nums text-ink-tertiary">{needs}</span>}
+      {marks.map((mark) => (
+        <span key={mark} aria-hidden="true" title={label} data-section-mark={mark} className="flex size-4 shrink-0 items-center justify-center">
           <span className={cn("rounded-full", SECTION_MARK[mark])} />
         </span>
-      )}
+      ))}
       {label && <span className="sr-only">{label}</span>}
       {alert && (
         <>

@@ -194,6 +194,9 @@ Closed-app alerts for the phone app, on iPhone through APNs and on Android
 through Firebase Cloud Messaging (HTTP v1). The design, the threat model and
 the switch-on steps are in `docs/phone-push.md`; the harness side is
 `server/phone-push.ts`, its wire types `packages/phone-protocol/src/phone-push.ts`.
+Every desktop, server and Cloud home has phone push on by default ("Who gets
+it" in that document) and calls these routes only for a phone that paired and
+registered; one with no paired phone never calls them.
 Apple accepts pushes for an App Store or TestFlight build only when they are
 signed with the publishing team's key, and Google only from a service account
 of the Firebase project the Android build is registered in. So the project's
@@ -325,9 +328,10 @@ that runs it checks the home's own signature and relays its calls here, keyed
 by the home's machine id:
 
 - `POST /v1/cloud-homes/<machine id>/push/register`, `unregister`, `send` and
-  `activity` take exactly the installation routes' bodies, schemas, answers and
-  limits (50 tokens, 120 registrations, 600 sends and 60 per token an hour,
-  each per machine), and send through the same path to APNs and FCM. A send
+  `activity` take exactly the installation routes' bodies, schemas and answers,
+  and their limits per machine (50 tokens, 120 registrations and 60 sends per
+  token an hour) except sends: 200 an hour per machine (`CLOUD_HOME_SEND_LIMIT`,
+  1% of the fleet's), not 600, and send through the same path to APNs and FCM. A send
   reaches only a token registered under the same machine id (`404
   push_device_unknown` otherwise), never an installation's.
 - `POST /v1/cloud-homes/<machine id>/push/forget` deletes every token and rate

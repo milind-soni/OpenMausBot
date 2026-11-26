@@ -27,7 +27,7 @@ const render = async (messages: RunMessage[], live: string[] = [], busy = false)
   })));
 };
 const burger = () => host.querySelector<HTMLElement>("[data-skill-burger]");
-const button = (text: string) => [...host.querySelectorAll("button")].find((node) => node.textContent?.includes(text));
+const button = (text: string) => [...host.querySelectorAll("button")].find((node) => node.textContent?.includes(text) || node.title === text || node.getAttribute("aria-label") === text);
 
 beforeEach(() => {
   fixture.api.mockReset();
@@ -84,11 +84,35 @@ it("edits the summary in place: Escape puts it back, Enter keeps it", async () =
   expect(button("Weekly sales email")).toBeDefined();
 });
 
-it("folds and closes from the top bun", async () => {
-  await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL")]);
-  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Hide steps"]')!.click());
-  expect(host.querySelector(".burger-fold")?.getAttribute("data-folded")).toBe("true");
-  expect(host.querySelector(".burger-fold")?.hasAttribute("inert")).toBe(true);
+it("stays a closed pill while it cooks, finishes or fails, opens only on a tap, and closes from its panel", async () => {
+  const fold = () => host.querySelector(".burger-fold");
+  const pill = () => host.querySelector<HTMLButtonElement>("[data-burger-pill] button[aria-controls]")!;
+  const shell = (id: string, command: string, extra: Partial<NonNullable<RunMessage["tool"]>> = {}): RunMessage => ({ id, role: "bot", kind: "activity", tool: { name: "Bash", ok: true, input: JSON.stringify({ command }), ...extra } });
+  // One step in, still working: the pill cooks, closed.
+  await render([ask, app("m1", "GOOGLESHEETS_BATCH_GET")], [], true);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("Cooking… 1");
+  // Eight steps across six apps: still closed, the count ticks over, at most four marks.
+  const many = [ask, app("m1", "GOOGLESHEETS_BATCH_GET"), app("m2", "GMAIL_SEND_EMAIL"), app("m3", "SLACK_SEND_MESSAGE"), app("m4", "NOTION_CREATE_PAGE"), app("m5", "LINEAR_CREATE_ISSUE"), app("m6", "GITHUB_CREATE_ISSUE"), shell("m7", "git push"), app("m8", "GMAIL_SEND_EMAIL")];
+  await render(many, [], true);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("Cooking… 8");
+  expect(host.querySelectorAll("[data-burger-pill] .rounded-full.bg-card").length).toBe(4);
+  // Finished, and then with a failed step: never opens by itself; a failure tints the count.
+  await render(many);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("8 steps");
+  await render([...many, shell("m9", "pnpm deploy", { ok: false })]);
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(host.querySelector("[data-burger-pill] .text-danger")).not.toBeNull();
+  // A tap opens it; another closes it; Close in the panel dismisses it.
+  await act(async () => pill().click());
+  expect(fold()?.getAttribute("data-folded")).toBe("false");
+  expect(pill().getAttribute("aria-expanded")).toBe("true");
+  await act(async () => pill().click());
+  expect(fold()?.getAttribute("data-folded")).toBe("true");
+  expect(fold()?.hasAttribute("inert")).toBe(true);
+  await act(async () => pill().click());
   await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
   expect(burger()).toBeNull();
 });
@@ -134,7 +158,7 @@ it("explains a finished delegation run and saves only what the person kept, unde
   expect(rows[0]!.textContent).toContain("Ask Kiwi and Rio");
   expect(rows[0]!.textContent).toContain("Kiwi · Accessibility tester");
   expect(rows[0]!.textContent).toContain("2 rounds");
-  expect(host.querySelector("[role=status]")?.textContent).toContain("1 exact, 1 by judgement");
+  expect(host.querySelector(".burger-bun-top")?.textContent).toContain("1 exact, 1 by judgement");
   // Open the delegation: what each was asked, what came back, what done meant.
   await act(async () => rows[0]!.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
   const detail = rows[0]!.querySelector("[data-burger-detail]")!.textContent!;
@@ -154,20 +178,25 @@ it("explains a finished delegation run and saves only what the person kept, unde
   expect(body).toMatchObject({ botId: "scout", threadId: "t1", skip: ["s2"], inputs: { site: { name: "website" } } });
 });
 
-it("leaving a step out leaves out the steps that use its output", async () => {
+it.each([1, 2, 10])("groups %i composed fields with their app step and leaves out dependent steps", async (fields) => {
+  const writers = Array.from({ length: fields }, (_, index) => ({
+    id: `s2_write${index ? `_${index + 1}` : ""}`, kind: "ai", label: "Write summary", exact: false, needs: ["s1"],
+  }));
   const draft = {
-    goal: "Fetch and write", inputs: [],
+    goal: "Fetch and send", inputs: [],
     steps: [
       { id: "s1", kind: "shell", label: "Fetch example.com", exact: true, needs: [] },
-      { id: "s2_write", kind: "ai", label: "Write top.md", exact: false, needs: ["s1"] },
-      { id: "s2", kind: "file", label: "Write top.md", exact: true, needs: ["s2_write"] },
+      ...writers,
+      { id: "s2", kind: "app", label: "Send summary", exact: true, needs: writers.map((step) => step.id) },
     ],
   };
   fixture.api.mockImplementation(async (path: string) => (path === "/api/skill-burger-draft" ? { draft } : {}));
   // Another run than the one saved above: a saved run's card comes back saved.
   await render([ask, app("m31", "GOOGLESHEETS_BATCH_GET"), app("m32", "GMAIL_SEND_EMAIL")]);
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-  expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.textContent)).toEqual([expect.stringContaining("Fetch example.com"), expect.stringContaining("Write top.md")]);
+  expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.textContent)).toEqual([expect.stringContaining("Fetch example.com"), expect.stringContaining("Send summary")]);
+  expect(host.querySelector("[data-burger-pill]")?.textContent).toContain("2 steps");
+  expect(host.querySelector(".burger-bun-top")?.textContent).toContain("1 exact, 1 by judgement");
   await act(async () => host.querySelector<HTMLInputElement>('input[aria-label="Keep “Fetch example.com”"]')!.click());
   expect([...host.querySelectorAll("[data-burger-layer]")].map((row) => row.getAttribute("data-kept"))).toEqual(["false", "false"]);
 });

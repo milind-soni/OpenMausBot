@@ -63,13 +63,13 @@ const DATA_FOLDERS: Readonly<Record<string, StorageCategory>> = {
   // config.ts EVENTS_DIR and NATIVE_DIR: each conversation's event log; checkpoints.ts; memory-journal.ts.
   events: "conversations", native: "conversations", checkpoints: "conversations", "memory-journal": "conversations",
   // Sign-ins and settings: providers (provider logins), people and people-connections (team-connections.ts), caddy
-  // (caddy.ts), ssh (vps-ssh.ts), the skills folders (index.ts, skill-library.ts, imported-skills.ts), themes
+  // (caddy.ts), ssh (vps-ssh.ts), the skills folders (index.ts, skill-library.ts, imported-skills.ts, skills-for-all-bots.ts), themes
   // (themes/store.ts), org-library (org-library.ts), share (share.ts), usage (usage-ledger.ts), decisions and
   // admin-activity (decision-log.ts, admin-activity.ts: the audit log readDecisions reads), prompt-split (drivers/prompt-split.ts),
   // codex-instructions (drivers/codex-instructions.ts), local-vm-stops, skill-switch, hook-tokens (drivers/claude.ts),
   // claude-user-skills (turn-settings.ts), box (bot-box/boot.ts), github (github/sign-in.ts).
   providers: "settings", people: "settings", "people-connections": "settings", caddy: "settings", ssh: "settings",
-  skills: "settings", "skills-library": "settings", "imported-skills": "settings", "skill-state": "settings", "skill-switch": "settings",
+  skills: "settings", "skills-library": "settings", "imported-skills": "settings", "skill-state": "settings", "skill-switch": "settings", "skills-for-all-bots": "settings",
   themes: "settings", "org-library": "settings", share: "settings", usage: "settings", decisions: "settings", "admin-activity": "settings",
   "prompt-split": "settings", "codex-instructions": "settings", "local-vm-stops": "settings", "hook-tokens": "settings",
   "claude-user-skills": "settings", box: "settings", github: "settings",

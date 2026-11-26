@@ -33,6 +33,9 @@
 //   FAKE_CODEX_APPROVAL_REQUEST  JSON {method, params} override in approval mode
 //   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
 //   FAKE_CODEX_ACCOUNT_MODE  chatgpt (default) | api-key | none | unsupported | error | hang
+//   FAKE_CODEX_LOGIN_FILE  "1": the login lives in $CODEX_HOME/auth.json, as codex-cli keeps it: `login --device-auth` prints a
+//     device code and writes it (FAKE_CODEX_DEVICE_EMAIL names the account), `login status` and account/read report it,
+//     `logout` removes it; each call appends {args, codexHome} to FAKE_CODEX_LOGIN_LOG
 //   FAKE_CODEX_RESUME_ERROR  JSON-RPC error rejecting thread/resume
 //   FAKE_CODEX_ARCHIVED  "1": thread/resume says the session is archived until thread/unarchive; "unarchive-fails": unarchive is refused too
 //   FAKE_CODEX_INSTRUCTIONS_FILE  while this file exists, config/read reports its text as developer_instructions: the
@@ -86,6 +89,7 @@
 //     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
@@ -137,7 +141,31 @@ if (process.argv[2] === "--version") {
   process.stdout.write(`${updated ? "codex-cli 0.162.1" : process.env.FAKE_CODEX_VERSION ?? "codex-cli 0.147.0"}\n`);
   process.exit(0);
 }
-if (process.argv[2] === "login" && process.argv[3] === "status") {
+const loginFile = process.env.FAKE_CODEX_LOGIN_FILE === "1" && process.env.CODEX_HOME ? join(process.env.CODEX_HOME, "auth.json") : null;
+const storedLogin = (): { email?: string } | null => {
+  try { return loginFile ? JSON.parse(readFileSync(loginFile, "utf8")) : null; } catch { return null; }
+};
+if (loginFile && (process.argv[2] === "login" || process.argv[2] === "logout")) {
+  const args = process.argv.slice(2);
+  if (process.env.FAKE_CODEX_LOGIN_LOG) appendFileSync(process.env.FAKE_CODEX_LOGIN_LOG, `${JSON.stringify({ args, codexHome: process.env.CODEX_HOME })}\n`);
+  if (args.join(" ") === "login status") {
+    if (storedLogin()) { process.stderr.write("Logged in using ChatGPT\n"); process.exit(0); }
+    process.stderr.write("Not logged in\n");
+    process.exit(1);
+  }
+  if (args.join(" ") === "login --device-auth") {
+    process.stderr.write("Open this link:\nhttps://auth.openai.com/codex/device\nEnter this one-time code (expires in 15 minutes)\n0CSG-0IXIM\n");
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    // Synthetic fixture only: no token here is real.
+    writeFileSync(loginFile, JSON.stringify({ auth_mode: "chatgpt", email: process.env.FAKE_CODEX_DEVICE_EMAIL ?? "ada@example.test", tokens: { access_token: "fixture-access" } }), { mode: 0o600 });
+    process.stderr.write("Successfully logged in\n");
+    process.exit(0);
+  } else if (args[0] === "logout") {
+    try { unlinkSync(loginFile); } catch {}
+    process.stderr.write("Successfully logged out\n");
+    process.exit(0);
+  } else process.exit(2);
+} else if (process.argv[2] === "login" && process.argv[3] === "status") {
   if (mode === "logged-out") {
     process.stderr.write("Not logged in\n");
     process.exit(1);
@@ -624,7 +652,8 @@ process.stdin.on("data", (chunk) => {
           } });
           break;
         }
-        const account = accountMode === "none" || mode === "logged-out" ? null
+        const account = accountMode === "none" || mode === "logged-out" || (loginFile && !storedLogin()) ? null
+          : loginFile ? { type: "chatgpt", email: storedLogin()!.email, planType: "pro" }
           : accountMode === "api-key" ? { type: "apiKey" }
           : { type: "chatgpt", email: process.env.FAKE_CODEX_ACCOUNT_EMAIL ?? "ada@example.test", planType: "pro" };
         out({ jsonrpc: "2.0", id: msg.id, result: { account, requiresOpenaiAuth: true } });

@@ -47,7 +47,6 @@ import { initialState, reducer } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, UNREAD_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
 import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
-import { BOT_ROW_DRAG_TYPE } from "@/lib/sidebar-bot-drop";
 import type { BotRowDrag } from "./SidebarBotDrag";
 const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { PinnedBotRoster } from "./PinnedCircleThreads";
@@ -406,8 +405,7 @@ describe("Simple-mode sidebar layout", () => {
   });
 });
 
-describe("the sidebar's Unread section", () => {
-  const unreadHeader = (tree: ReactElement<Props>[]) => headers(tree).find((header) => header.props.name === "Unread");
+describe("unread bots keep their place", () => {
   const thread = (id: string, updatedAt: number, unread = true) => ({ threadId: `${id}-thread`, title: id, createdAt: 1, updatedAt, unread });
   const withUnread = () => {
     fixture.state = { ...fixture.state, bots: [
@@ -418,214 +416,66 @@ describe("the sidebar's Unread section", () => {
       bot("eve", { section: "Work" }),
     ] };
   };
+  const rowOf = (tree: ReactElement<Props>[], id: string) => tree.find((node) => (node.props.bot as Bot | undefined)?.id === id)!.props as { botDrag: BotRowDrag };
 
-  it("is absent while every bot is read", () => {
+  it("lists an unread bot in its own place, with no Unread list and no Bots heading", () => {
+    withUnread();
     const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(sectionOrder(tree)).not.toContain(UNREAD_SECTION_ID);
-    expect(unreadHeader(tree)).toBeUndefined();
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo", "eve"]);
+    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
   });
 
-  it("gathers the unread bots of the main list and of departments above the rest, newest first, with their count", () => {
-    withUnread();
-    const { tree } = render();
-    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
-    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-    expect(unreadHeader(tree)!.props).toMatchObject({ count: 3, reorderable: false, line: true });
-    expect(headers(tree).map((header) => [header.props.name, "count" in header.props])).toEqual([["Unread", true], ["Bots", false], ["Group chats", false], ["Work", false]]);
-  });
-
-  it("keeps the bot opened from it listed in its place, and sends it back to its own place once another chat is open", () => {
-    withUnread();
-    render();
-    fixture.state = reducer(fixture.state, { type: "select", id: "dodo" });
-    let tree = render().tree;
-    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-    expect(unreadHeader(tree)!.props.count).toBe(2);
-    expect(tree.find((node) => (node.props.bot as Bot | undefined)?.id === "dodo")!.props.botDrag).toBeUndefined();
-
-    fixture.state = reducer(fixture.state, { type: "select", id: "cora" });
-    tree = render().tree;
-    expect(listedBots(tree)).toEqual(["cora", "bea", "atlas", "dodo", "eve"]);
-    expect(unreadHeader(tree)!.props.count).toBe(1);
-
-    fixture.state = reducer(fixture.state, { type: "select", id: "room" });
-    tree = render().tree;
-    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo", "eve"]);
-
+  it("moves no row when a bot is opened, gets a reply, is marked unread, works or waits on the person while the app is in use", () => {
+    const shown = () => { const { tree } = render(); return { sections: sectionOrder(tree), bots: listedBots(tree) }; };
+    const before = shown();
     fixture.state = reducer(fixture.state, { type: "select", id: "bea" });
-    tree = render().tree;
-    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
-    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo", "eve"]);
-    expect("count" in unreadHeader(tree)!.props).toBe(false);
+    expect(shown()).toEqual(before);
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, unread: true, tasks: [thread("bea", 90)] } : candidate)) };
+    expect(shown()).toEqual(before);
+    fixture.state = reducer(fixture.state, { type: "markUnread", botId: "dodo" });
+    expect(shown()).toEqual(before);
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, busy: true, activity: "working" as const } : candidate.id === "dodo" ? { ...candidate, activity: "waiting-on-you" as const } : candidate)) };
+    expect(shown()).toEqual(before);
+    fixture.state = reducer(fixture.state, { type: "select", id: "room" });
+    expect(shown()).toEqual(before);
+  });
 
-    fixture.state = reducer(reducer(fixture.state, { type: "select", id: "bea" }), { type: "showFiles" });
+  it("moves a bot past an unread one with Alt+arrow, as the person sees them", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("fetch", () => new Promise(() => {}));
+    fixture.state = { ...fixture.state, bots: [bot("atlas"), bot("bea", { unread: true }), bot("cora"), bot("dodo", { section: "Work" })] };
+    let tree = render().tree;
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo"]);
+    rowOf(tree, "atlas").botDrag.step("atlas", 1);
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botsOrdered", botIds: ["bea", "atlas", "cora"] });
+    fixture.state = reducer(fixture.state, { type: "botsOrdered", botIds: ["bea", "atlas", "cora"] });
     tree = render().tree;
+    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo"]);
+  });
+
+  it("keeps the rail's groups as they are", () => {
+    withUnread();
+    setSidebarDensity("icons");
+    const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo", "eve"]);
   });
 
-  it("sends the bot opened from it back to its own place once another conversation with that bot is open", () => {
-    const openDodo = () => {
-      withUnread();
-      render();
-      fixture.state = reducer(fixture.state, { type: "select", id: "dodo" });
-      expect(listedBots(render().tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-    };
-    openDodo();
-    fixture.state = reducer(fixture.state, { type: "newTask", botId: "dodo" });
-    expect(fixture.state.newChat?.botId).toBe("dodo");
-    let tree = render().tree;
-    expect(listedBots(tree)).toEqual(["cora", "bea", "atlas", "dodo", "eve"]);
-    expect(unreadHeader(tree)!.props.count).toBe(2);
-
-    openDodo();
-    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "dodo" ? { ...candidate, tasks: [...candidate.tasks!, { ...thread("dodo", 5, false), threadId: "dodo-other" }] } : candidate)) };
-    expect(listedBots(render().tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-    fixture.state = reducer(fixture.state, { type: "switchTask", botId: "dodo", threadId: "dodo-other" });
-    tree = render().tree;
-    expect(listedBots(tree)).toEqual(["cora", "bea", "atlas", "dodo", "eve"]);
-    expect(unreadHeader(tree)!.props.count).toBe(2);
-  });
-
-  it("keeps a held bot listed when it is marked unread or gets a new message, by the normal rule", () => {
-    withUnread();
-    render();
-    fixture.state = reducer(fixture.state, { type: "select", id: "bea" });
-    expect(listedBots(render().tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-
-    fixture.state = reducer(fixture.state, { type: "markUnread", botId: "bea" });
-    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, tasks: [thread("bea", 20)] } : candidate)) };
-    let tree = render().tree;
-    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-    expect(unreadHeader(tree)!.props.count).toBe(3);
-
-    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, tasks: [thread("bea", 90)] } : candidate)) };
-    tree = render().tree;
-    expect(listedBots(tree)).toEqual(["bea", "cora", "dodo", "atlas", "eve"]);
-  });
-
-  it("brings a read bot to it when it is marked unread", () => {
-    fixture.state = reducer(fixture.state, { type: "markUnread", botId: "dodo" });
-    const { tree } = render();
-    expect(sectionOrder(tree)[0]).toBe(UNREAD_SECTION_ID);
-    expect(listedBots(tree)).toEqual(["dodo", "atlas", "bea"]);
-    expect(unreadHeader(tree)!.props.count).toBe(1);
-  });
-
-  it("arranges the rows left in place around a held one with Alt+arrow", () => {
-    vi.stubGlobal("requestAnimationFrame", () => 0);
-    vi.stubGlobal("fetch", () => new Promise(() => {}));
-    fixture.state = { ...fixture.state, bots: [bot("atlas"), bot("bea", { unread: true }), bot("cora"), bot("dodo", { section: "Work" })] };
-    render();
-    fixture.state = reducer(fixture.state, { type: "select", id: "bea" });
-    const tree = render().tree;
-    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo"]);
-    rowOf(tree, "atlas").botDrag.step("atlas", 1);
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botsOrdered", botIds: ["cora", "atlas"] });
-  });
-
-  it("keeps a department whose bots are all unread, and takes no drag on its own rows", () => {
-    withUnread();
-    fixture.state = { ...fixture.state, sections: [], bots: fixture.state.bots.filter((candidate) => candidate.id !== "eve") };
-    const { tree } = render();
-    expect(sectionOrder(tree)).toContain(userSectionId("Work"));
-    const rows = tree.filter((node) => (node.props.bot as Bot | undefined) !== undefined);
-    expect(rows.map((row) => [(row.props.bot as Bot).id, row.props.botDrag !== undefined])).toEqual([["cora", false], ["dodo", false], ["bea", false], ["atlas", true]]);
-  });
-
-  const rowOf = (tree: ReactElement<Props>[], id: string) => tree.find((node) => (node.props.bot as Bot | undefined)?.id === id)!.props as { botDrag: BotRowDrag };
-  const sectionZone = (tree: ReactElement<Props>[], id: string) => tree.find((node) => node.props["data-sidebar-section-id"] === id)!.props as unknown as Record<"onDragOver" | "onDrop", (event: unknown) => void>;
-  const dragEvent = (types: string[] = []) => ({
-    preventDefault: vi.fn(), stopPropagation: () => {}, clientY: 0, dataTransfer: { types, setData: () => {}, getData: () => "" },
-    currentTarget: { querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, height: 40 }) },
-  });
-
-  it.each([["cora", -1], ["atlas", 1]] as const)("moves %s past the row it is shown next to with Alt+arrow, not past one Unread is listing", (id, direction) => {
-    vi.stubGlobal("requestAnimationFrame", () => 0);
-    vi.stubGlobal("fetch", () => new Promise(() => {}));
-    fixture.state = { ...fixture.state, bots: [bot("atlas"), bot("bea", { unread: true }), bot("cora"), bot("dodo", { section: "Work" })] };
-    let tree = render().tree;
-    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo"]);
-
-    rowOf(tree, id).botDrag.step(id, direction);
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botsOrdered", botIds: ["cora", "atlas"] });
-    fixture.state = reducer(fixture.state, { type: "botsOrdered", botIds: ["cora", "atlas"] });
-    tree = render().tree;
-    expect(listedBots(tree)).toEqual(["bea", "cora", "atlas", "dodo"]);
-    expect(fixture.state.bots.map((candidate) => candidate.id)).toEqual(["cora", "bea", "atlas", "dodo"]);
-  });
-
-  it("offers the main list to a bot dragged out of its department while every bot of that list is unread", () => {
-    fixture.state = { ...fixture.state, bots: [bot("atlas", { unread: true }), bot("bea", { unread: true }), bot("dodo", { section: "Work" })] };
-    let tree = render().tree;
-    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
-
-    rowOf(tree, "dodo").botDrag.row("dodo").onDragStart(dragEvent() as never);
-    tree = render().tree;
-    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
-    expect(tree.some((node) => node.props["data-bot-drop-slot"] === "")).toBe(true);
-
-    sectionZone(tree, BOTS_SECTION_ID).onDrop(dragEvent([BOT_ROW_DRAG_TYPE]));
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "dodo", patch: { section: "" } });
-  });
-
-  it("takes no dragged section and shows no line for one, since it has no place in the order", () => {
-    withUnread();
-    const lines = (tree: ReactElement<Props>[]) => tree.filter((node) => node.props.className === "mx-2 h-0.5 rounded-full bg-accent").length;
-    let tree = render().tree;
-    headers(tree).find((header) => header.props.name === "Work")!.props.onDragStart!(dragEvent() as never);
-    tree = render().tree;
-
-    const overBots = dragEvent();
-    sectionZone(tree, BOTS_SECTION_ID).onDragOver(overBots);
-    expect(overBots.preventDefault).toHaveBeenCalled();
-    expect(lines(render().tree)).toBe(1);
-
-    const overUnread = dragEvent();
-    sectionZone(tree, UNREAD_SECTION_ID).onDragOver(overUnread);
-    expect(overUnread.preventDefault).not.toHaveBeenCalled();
-    expect(lines(render().tree)).toBe(0);
-  });
-
-  it("leaves pinned bots and the Chief where they are, and sits under Advanced's Pinned heading", () => {
+  it("leaves pinned bots and the Chief where they are, in Simple and Advanced", () => {
     fixture.state = { ...fixture.state, bots: [
       bot("chief", { chiefOfStaff: true, unread: true }), bot("atlas", { pinned: true, unread: true }), bot("bea", { unread: true }), bot("cora"),
     ] };
     let tree = render().tree;
     const grid = tree.find((node) => node.type === SidebarTileGrid)!.props as Parameters<typeof SidebarTileGrid>[0];
     expect([grid.primary?.id, ...grid.pinned.map((candidate) => candidate.id)]).toEqual(["chief", "atlas"]);
-    expect(sectionOrder(tree).slice(0, 2)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID]);
+    expect(sectionOrder(tree)[0]).toBe(BOTS_SECTION_ID);
     expect(listedBots(tree)).toEqual(["bea", "cora"]);
 
     fixture.advanced = true;
     tree = render().tree;
-    expect(sectionOrder(tree).slice(0, 2)).toEqual([PINNED_SECTION_ID, UNREAD_SECTION_ID]);
+    expect(sectionOrder(tree)).toEqual([PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["chief", "bea", "cora"]);
-    expect(unreadHeader(tree)!.props).toMatchObject({ count: 1, reorderable: false, line: false });
-  });
-
-  it("stays at the top whatever order the sections were dragged into", () => {
-    withUnread();
-    fixture.storage.set(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, JSON.stringify([userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID]));
-    expect(sectionOrder(render().tree)).toEqual([UNREAD_SECTION_ID, userSectionId("Work"), CHANNELS_SECTION_ID, BOTS_SECTION_ID]);
-  });
-
-  it("gives way to a search, which lists every match in its own place", () => {
-    withUnread();
-    (render().tree.find((node) => node.type === SidebarSearchToggle)!.props as Parameters<typeof SidebarSearchToggle>[0]).onToggle();
-    (render().tree.find((node) => node.type === SidebarSearchPill)!.props as Parameters<typeof SidebarSearchPill>[0]).onQuery("o");
-    const { tree } = render();
-    expect(sectionOrder(tree)).not.toContain(UNREAD_SECTION_ID);
-    expect(listedBots(tree)).toEqual(["cora", "dodo"]);
-  });
-
-  it("leads the rail as a group of its own, with no heading", () => {
-    withUnread();
-    setSidebarDensity("icons");
-    const { tree } = render();
-    expect(sectionOrder(tree)).toEqual([UNREAD_SECTION_ID, BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
-    expect(listedBots(tree)).toEqual(["cora", "dodo", "bea", "atlas", "eve"]);
-    expect(headers(tree)).toEqual([]);
-    expect(tree.filter((node) => node.type === SidebarRailSeparator)).toHaveLength(3);
   });
 });

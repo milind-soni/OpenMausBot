@@ -8,12 +8,12 @@ export type BulkDeleteResult = { responses: DeleteResponse[]; error?: string };
 type Selection = ReadonlySet<string>;
 
 /** One request per chunk, in order; a failed chunk stops the rest, and earlier chunks stay deleted. */
-export async function deleteThreadsInBulk(owner: { botId: string } | { groupId: string }, threadIds: string[], dispatch: (action: Action) => void): Promise<BulkDeleteResult> {
+export async function deleteThreadsInBulk(owner: { botId: string } | { groupId: string }, threadIds: string[], dispatch: (action: Action) => void, scope: "all" | "closed" = "all"): Promise<BulkDeleteResult> {
   const url = "botId" in owner ? `/api/bots/${owner.botId}/tasks/delete` : `/api/groups/${owner.groupId}/tasks/delete`;
   const responses: DeleteResponse[] = [];
   try {
     for (const part of chunkIds(threadIds)) {
-      const response = await api<DeleteResponse & { bot?: BotAnnouncement; group?: Partial<Group> & { id: string } }>(url, { method: "POST", body: JSON.stringify({ threadIds: part }) });
+      const response = await api<DeleteResponse & { bot?: BotAnnouncement; group?: Partial<Group> & { id: string } }>(url, { method: "POST", body: JSON.stringify(scope === "closed" ? { threadIds: part, scope } : { threadIds: part }) });
       responses.push(response);
       if (response.bot) dispatch({ type: "botPatched", bot: response.bot });
       if (response.group) dispatch({ type: "groupPatched", group: response.group });
@@ -66,6 +66,7 @@ export function bulkDeleteOutcome(outcome: BulkDeleteResult): string {
     t("task.bulk.result", { count: done.deleted }),
     done.busy > 0 ? t("task.bulk.resultBusy", { count: done.busy }) : null,
     done.missing > 0 ? t("task.bulk.resultMissing", { count: done.missing }) : null,
+    done.notClosed > 0 ? t("task.bulk.resultNotClosed", { count: done.notClosed }) : null,
     outcome.error ? t("task.bulk.resultError", { message: outcome.error }) : null,
   ].filter(Boolean).join(" ");
 }

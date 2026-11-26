@@ -93,8 +93,12 @@ The `.rpm` is community-supported: every release builds and checks it, but it is
 `.deb` is on Ubuntu. Install it with the package manager so its desktop dependencies are resolved:
 
 ```sh
-sudo dnf install ./OpenMausBot-x86_64.rpm
+cd ~/Downloads   # or wherever you saved the file
+sudo dnf install ./OpenMausBot-*.rpm
 ```
+
+The glob matches both the stable-named download (`OpenMausBot-x86_64.rpm`) and the versioned one from the
+releases page (`OpenMausBot-<version>-x86_64.rpm`), so the command works no matter which asset you saved.
 
 Remove it with `sudo dnf remove openmausbot`. Updates are downloaded by the app, which then copies the `rpm` install
 command and opens a terminal for you to run it. Other RPM distributions (RHEL, openSUSE) and image-based Fedora
@@ -403,3 +407,18 @@ If it prints `No suitable fusermount binary found on the $PATH` or `Cannot mount
 setup`, install the distribution's FUSE 3 package (`fuse3` on Ubuntu, Debian and Arch). If it then names a missing
 `lib*.so` file, install the desktop libraries listed under
 [Arch Linux and EndeavourOS](#arch-linux-and-endeavouros-appimage), or your distribution's packages for them.
+
+### A phone on the same Wi-Fi cannot pair
+
+On Same Wi-Fi the phone connects to this computer on TCP port 8810. A host firewall that drops incoming connections
+stops it, and the phone can only say it couldn't reach the computer. Omarchy turns on ufw with "deny incoming" by
+default; stock Ubuntu ships ufw turned off. While a pairing code is open, the pairing panel says when ufw is on and
+its rules, where they are readable without root, allow nothing on that port. Either turn on **Anywhere, through MausBot** (it needs no open port), or allow
+the port:
+
+```sh
+sudo ufw allow 8810/tcp
+```
+
+The app never changes the firewall itself. If pairing still fails, check that the phone is not on a guest network
+or one with client isolation, which stops devices on the same Wi-Fi from reaching each other.

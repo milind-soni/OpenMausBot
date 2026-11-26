@@ -50,7 +50,7 @@ ipcRenderer.on("desktop-notifications:open", (_event, target) => {
 
 // Only fixed actions are retained, never a destination supplied by a renderer.
 const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto",
-  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "storage", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
+  "overview", "devices", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "storage", "data", "people", "installations", "account", "plan", "app", "general", "appearance", "features"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -587,8 +587,11 @@ const bridge = {
     // Which of this computer's bots move to My Cloud: asked on either page, and only from the person's click on My Cloud's.
     botMoveState: () => ipcRenderer.invoke("cloud-send:bot-move-state"),
     botChoices: () => ipcRenderer.invoke("cloud-send:bot-choices"),
-    moveBots: ids => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : []) : Promise.reject(new Error("Choose which bots move.")),
+    // `options`: what the move step chose to lend (main asks its own dialog before commands are lent).
+    moveBots: (ids, options) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : [], { folder: options?.folder !== false, commands: options?.commands === true })
+      : Promise.reject(new Error("Choose which bots move.")),
+    moveChanges: ids => ipcRenderer.invoke("cloud-send:move-changes", Array.isArray(ids) ? ids.map(String) : []),
     moveEverything: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:move-everything") : Promise.reject(new Error("Choose which bots move.")),
     botMoveRetry: () => ipcRenderer.invoke("cloud-send:bot-move-retry"),
@@ -756,6 +759,8 @@ const bridge = {
       ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     repair: () => ipcRenderer.invoke("home:repair"),
     updating: onHomePage && reloadedForUpdate(),
+    // My Cloud's own page, while its live stream is down: what the Admin says has it down (an update, resize, move...), or null.
+    operation: onHomePage ? () => ipcRenderer.invoke("home:operation") : undefined,
   },
   updatesConsent: {
     state: () => ipcRenderer.invoke("updates-consent:state"),

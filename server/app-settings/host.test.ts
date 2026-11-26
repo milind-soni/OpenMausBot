@@ -19,7 +19,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; patchRefusalFor?: (botId: string) => string | null; emptyRegistryBots?: boolean; automated?: boolean } = {}) {
+function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; patchRefusalFor?: (botId: string) => string | null; emptyRegistryBots?: boolean; automated?: boolean; tts?: AppConfig["tts"] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
@@ -27,6 +27,7 @@ function fixture(options: { owner?: boolean; ownerRefusal?: TurnOwnerRefusal; gu
     { id: "clive", name: "Clive", color: "blue", threadId: "t-clive", approvalMode: "ask", modelSelection: { instanceId: "claude", model: "sonnet" }, assignedSkills: ["notes"] } as unknown as BotRecord,
   ];
   const cfg = { language: "en", rooms: { turnTimeoutMinutes: 30 }, mcp: {}, threads: { maxConcurrentPerBot: 3 }, openai: { key: OPENAI_KEY }, anthropic: { url: "https://api.anthropic.com" },
+    ...(options.tts ? { tts: options.tts } : {}),
     instances: { "openai-compat-gw": { driver: "openai-compat", displayName: "Gateway", config: { key: GATEWAY_KEY, url: "https://gw.example/v1" } } } } as unknown as AppConfig;
   const engineCalls: unknown[] = [];
   const engines = [{ instanceId: "claude", name: "Claude", working: true }, { instanceId: "openai-compat-gw", name: "Gateway", working: true }];
@@ -130,7 +131,7 @@ describe("reads", () => {
   it("names real places only: find falls back to where a thing is, places lists them all", async () => {
     const { host, turn } = fixture();
     const owner = await host.handle({ action: "get", id: "phone.pairing" }, turn);
-    expect(JSON.parse(String(owner.body.text))).toMatchObject({ where: "Settings → Phone & devices → Pair a phone", change: "only the person, in Settings → Phone & devices → Pair a phone" });
+    expect(JSON.parse(String(owner.body.text))).toMatchObject({ where: "Settings → Devices → Phones and tablets → Add a phone", change: "only the person, in Settings → Devices → Phones and tablets → Add a phone" });
     const none = await host.handle({ action: "find", query: "invoice" }, turn);
     expect(none.body.text).toMatch(/^No setting you can change matches "invoice"\. Where the person finds it in the app: Settings → Plan & billing/);
     expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending$/m);
@@ -383,7 +384,7 @@ describe("owner-only tier", () => {
     expect(on.body.text).toMatch(/^Done: Let your paired phones reach this computer from anywhere, through MausBot's relay\./);
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     const off = await fx.set("remote.relay", false);
-    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Phone & devices → How your phone reaches this computer → Anywhere, through MausBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
+    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Devices → How your phone reaches this computer → Anywhere, through MausBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
     expect(fx.windowValues.get("remote.relay")).toBe(false);
@@ -474,6 +475,23 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     check(fx);
     await flushDecisionLog(fx.dataDir);
     expect(readDecisions(fx.dataDir, 10)).toMatchObject([{ decision: "auto-approved", source: "app-settings", tool: "app_settings", summary: expect.stringMatching(new RegExp(`^${id.replaceAll(".", "\\.")}: `)) }]);
+  });
+
+  it("reads, updates, and clears voice.baseUrl without re-sending saved tts keys", async () => {
+    const fx = fixture({
+      tts: { provider: "elevenlabs", key: "el-secret", fishKey: "fish-secret", geminiKey: "gem-secret", baseUrl: "http://127.0.0.1:4123" },
+    });
+    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "voice.baseUrl" }, fx.turn)).body.text));
+    expect(got).toMatchObject({ tier: "safe", value: "http://127.0.0.1:4123" });
+    expect((await fx.set("voice.baseUrl", "http://127.0.0.1:5000")).status).toBe(200);
+    expect(fx.cards()[0]!.card.subtitle).toBe("http://127.0.0.1:4123 → http://127.0.0.1:5000");
+    expect((await fx.set("voice.baseUrl", "")).status).toBe(200);
+    expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(fx.saved).toEqual([
+      { tts: { baseUrl: "http://127.0.0.1:5000" } },
+      { tts: { baseUrl: "" } },
+      { tts: { baseUrl: "http://127.0.0.1:5000" } },
+    ]);
   });
 
   it("an approval mode change says what it allows and applies at once; Undo restores the earlier mode", async () => {

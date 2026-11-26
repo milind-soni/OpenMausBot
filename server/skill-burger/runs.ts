@@ -30,15 +30,17 @@ export interface StepEvent {
   output?: string;
 }
 
-export interface BurgerTurn extends Pick<ExecutorContext, "internal"> {
+export interface BurgerTurn extends Pick<ExecutorContext, "internal" | "connected"> {
   botId: string;
   threadId: string;
   cwd: string;
   publish(event: StepEvent): void;
-  /** A burger used in every chat belongs to the whole place: whether this turn may change one. */
-  mayEditEveryChat: boolean;
+  /** Saved burgers are everyone's: whether a bot's own turn may change one (not on a Team Cloud, where only whoever saved
+   * it, or an admin, does). */
+  mayEditBurgers: boolean;
 }
 
+const CANT_EDIT = "On a Team Cloud a bot can't change a saved Skill Burger: whoever saved it, or an admin, can.";
 const runBody = z.object({ name: z.string().min(1).max(64), args: z.record(z.string(), z.unknown()).optional() }).strict();
 const resumeBody = z.object({ run: z.string().min(1).max(64), response: z.string().max(20_000) }).strict();
 const undoBody = z.object({ undo: z.string().min(1).max(64) }).strict();
@@ -77,10 +79,11 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
   const states = createRunStates(join(deps.dataDir, "skill-burger-runs"));
   const history = createRunHistory(join(deps.dataDir, "skill-burger-runs"));
   const open = new Map<string, Set<string>>();
-  const runDeps = (turn: BurgerTurn): RunDeps => ({
-    exec: deps.executors?.(turn) ?? createExecutors({ botId: turn.botId, cwd: turn.cwd, internal: turn.internal }),
+  const runDeps = (turn: BurgerTurn, signal: AbortSignal): RunDeps => ({
+    exec: deps.executors?.(turn) ?? createExecutors({ botId: turn.botId, cwd: turn.cwd, internal: turn.internal, ...(turn.connected ? { connected: turn.connected } : {}) }),
     events: stepEvents(turn, open),
     save: (state) => states.save(state),
+    signal,
   });
   const finished = (turn: BurgerTurn, name: string | undefined, envelope: RunEnvelope) => {
     if (envelope.status !== "needs_input") open.delete(envelope.run);
@@ -90,13 +93,16 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
 
   const internalRoutes = (turn: BurgerTurn): RouteHandler => async ({ req, res, path, method, json, readBody }) => {
     if (method !== "POST" || ![RUN_PATH, RESUME_PATH, EDIT_PATH, UNDO_PATH].includes(path)) return PASS;
+    const controller = new AbortController();
+    res.once("close", () => { if (!res.writableEnded) controller.abort(); });
+    if (res.destroyed) controller.abort();
     const body = await readBody(req);
     if (path === RUN_PATH) {
       const parsed = runBody.safeParse(body);
       if (!parsed.success) return json(res, 400, { error: "run_workflow needs the Skill Burger's name." });
       const found = findWorkflowSkill(turn.botId, parsed.data.name, deps.root);
       if (!found) return json(res, 404, { error: `No Skill Burger named "${parsed.data.name}" here. Check the names in your skills index.` });
-      const envelope = await startRun({ name: parsed.data.name, botId: turn.botId, threadId: turn.threadId, sha256: found.sha256, workflow: found.workflow, ...(parsed.data.args ? { args: parsed.data.args } : {}) }, runDeps(turn));
+      const envelope = await startRun({ name: parsed.data.name, botId: turn.botId, threadId: turn.threadId, sha256: found.sha256, workflow: found.workflow, ...(parsed.data.args ? { args: parsed.data.args } : {}) }, runDeps(turn, controller.signal));
       return json(res, 200, finished(turn, parsed.data.name, envelope));
     }
     if (path === RESUME_PATH) {
@@ -104,7 +110,7 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       if (!parsed.success) return json(res, 400, { error: "Resume needs the run's token and your response." });
       const state = states.take(parsed.data.run, turn.botId);
       if (!state) return json(res, 404, { error: "That run can't be resumed: it finished, was resumed already, or is more than a day old." });
-      return json(res, 200, finished(turn, state.name, await resumeRun({ ...state, threadId: turn.threadId }, parsed.data.response, runDeps(turn))));
+      return json(res, 200, finished(turn, state.name, await resumeRun({ ...state, threadId: turn.threadId }, parsed.data.response, runDeps(turn, controller.signal))));
     }
     if (path === UNDO_PATH) {
       const parsed = undoBody.safeParse(body);
@@ -112,8 +118,8 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
       if (!kept) return json(res, 404, { error: "There is nothing to undo with that id." });
       const found = findWorkflowSkill(turn.botId, kept.name, deps.root);
       if (!found) return json(res, 404, { error: "That Skill Burger is gone." });
-      if ("everyChat" in found.place && !turn.mayEditEveryChat) return json(res, 403, { error: "Only an admin of this installation can change a Skill Burger used in every chat." });
-      const restored = replaceWorkflowSkill({ place: found.place, name: kept.name, workflow: kept.previous, sha256: kept.sha256, root: deps.root });
+      if (!turn.mayEditBurgers) return json(res, 403, { error: CANT_EDIT });
+      const restored = replaceWorkflowSkill({ name: kept.name, workflow: kept.previous, sha256: kept.sha256, root: deps.root });
       if ("stale" in restored) return json(res, 409, { error: "The Skill Burger changed since; undo isn't safe now." });
       return "error" in restored ? json(res, 422, restored) : json(res, 200, { skill: restored });
     }
@@ -124,10 +130,10 @@ export function createSkillBurgerRuns(deps: { dataDir: string; root?: string; ho
     if (!name || !edit.success) return json(res, 400, { error: `workflow_edit needs name and a change: ${edit.success ? "name" : edit.error.issues[0]?.message ?? ""}` });
     const found = findWorkflowSkill(turn.botId, name, deps.root);
     if (!found) return json(res, 404, { error: `No Skill Burger named "${name}" here.` });
-    if ("everyChat" in found.place && !turn.mayEditEveryChat) return json(res, 403, { error: "Only an admin of this installation can change a Skill Burger used in every chat." });
+    if (!turn.mayEditBurgers) return json(res, 403, { error: CANT_EDIT });
     const next = applyEdit(found.workflow, edit.data);
     if ("error" in next) return json(res, 422, next);
-    const saved = replaceWorkflowSkill({ place: found.place, name, workflow: next, sha256: found.sha256, root: deps.root });
+    const saved = replaceWorkflowSkill({ name, workflow: next, sha256: found.sha256, root: deps.root });
     if ("stale" in saved) return json(res, 409, { error: "The Skill Burger changed meanwhile; read it again and retry." });
     if ("error" in saved) return json(res, 422, saved);
     return json(res, 200, { skill: saved, undo: editUndo.keep(name, found.workflow, saved.sha256) });

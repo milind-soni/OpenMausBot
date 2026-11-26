@@ -7,7 +7,7 @@ import type { ConnectorToolGrant } from "../shared/wire.ts";
 import { loginLabel, type LoginPlace } from "../shared/logins.ts";
 import { vaultNameKey } from "../shared/vault.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
-import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
+import { replyHabitsPrompt } from "./reply-habits.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -91,7 +91,8 @@ export function buildSystemPrompt(
   soul: string,
   parts: PromptPart[],
   agents?: { env?: Record<string, string | undefined> },
-  opts?: { replyStyle?: ReplyStyle; rules?: string },
+  /** `pagesOff`: the person turned off this bot's Pages and apps tools, so it has no publish_page. */
+  opts?: { replyStyle?: ReplyStyle; rules?: string; pagesOff?: boolean },
 ): { text: string; sections: PromptSection[]; stable: string; volatile: string; roster: string } {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
@@ -101,7 +102,8 @@ export function buildSystemPrompt(
     { id: "tool-bridge", label: "Tool search", text: agentsToolBridged(agents) ? AGENTS_TOOL_BRIDGE_PROMPT : "" },
     { id: "reply-style", label: "Reply style", text: replyStylePrompt(opts?.replyStyle) },
     ...parts,
-    { id: "reply-habits", label: "How to reply", text: REPLY_HABITS_PROMPT },
+    // Only a turn with the agents tools, Pages and apps on, has publish_page.
+    { id: "reply-habits", label: "How to reply", text: replyHabitsPrompt(Boolean(agents) && opts?.pagesOff !== true) },
   ];
   const sections = ordered
     .filter((part) => part.text.length > 0)
@@ -201,7 +203,7 @@ export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor a
 export const CLOUD_REUSE_INSTALLS = " Reuse, and update if needed, what is already installed or cloned in your working folder instead of installing or cloning it again, unless the person asks for a fresh copy.";
 
 /** Work on a Cloud disk lives only there: code with a remote goes up as a branch, never over anyone's main line. */
-export const CLOUD_PUSH_CODE_WORK = " When a project has a git remote you can push to, commit your work and push it to a new branch instead of leaving it only on this disk: never force-push, never push to the default branch, and never commit secrets, .env files or installed packages such as node_modules.";
+export const CLOUD_PUSH_CODE_WORK = " When a project in your working folder has a git remote the person works in and you can push to it, commit your work and push it to one branch of your own, reusing that branch, instead of leaving it only on this disk: never force-push, never push to the default branch, and never commit secrets, .env files or installed packages such as node_modules.";
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],

@@ -259,7 +259,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       synonyms: ["openai compatible", "custom provider", "model name"], value: z.string().trim().max(200), allowed: "a model name, or empty to clear",
       current: () => cfg().openaiCompat?.model ?? "", write: config((model: string) => ({ openaiCompat: { ...cfg().openaiCompat, model } })),
     }),
-    provider("voice.baseUrl", "Voice server address", ["tts", "voice", "speech", "chatterbox"], () => cfg().tts?.baseUrl, (text) => ({ tts: { ...cfg().tts, baseUrl: text } })),
+    provider("voice.baseUrl", "Voice server address", ["tts", "voice", "speech", "chatterbox"], () => cfg().tts?.baseUrl, (text) => ({ tts: { baseUrl: text } })),
   ];
 
   const secret: SettingEntry[] = (Object.keys(CREDENTIAL_TARGETS) as CredentialTargetId[]).map((credentialId) => {
@@ -339,7 +339,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       "members", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),
     ownerOnly("remote.domain", "Custom domain", "The web address this self-hosted server answers on. Changing it can cut off the address the person is using right now.", "domain",
       ["domain", "custom domain", "dns", "public url"], () => cfg().customDomain ?? ""),
-    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "tailscale",
+    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "https-address",
       ["https", "public address"], () => "managed in Settings"),
   ];
 

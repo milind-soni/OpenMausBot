@@ -564,3 +564,21 @@ describe("live peer roster for coordination briefs", () => {
     expect(block).not.toContain("Ghost");
   });
 });
+
+describe("the bots of the person's other places in the roster", () => {
+  const line = "- In the person's other places, not reachable from here (if asked for one, say where it lives): Ziggy (on My Cloud)";
+
+  it("goes inside a roster's markers, around itself when a bot has no roster (no peers, or a chief's), and adds nothing when there is no line", async () => {
+    const { withElsewhere, peerRosterPrompt } = await import("./peer-roster.ts");
+    const peers = peerRosterPrompt([{ id: "b1", name: "Scout" }]);
+    expect(withElsewhere(peers, line).roster).toBe(peers.roster.replace("\n[/TEAM ROSTER]", `\n${line}\n[/TEAM ROSTER]`));
+    expect(withElsewhere({ rules: "", roster: "" }, line)).toEqual({ rules: "", roster: `[TEAM ROSTER]\n${line}\n[/TEAM ROSTER]` });
+    expect(withElsewhere({ rules: "r", roster: "Your team:\n- Scout" }, line).roster).toBe(`Your team:\n- Scout\n[TEAM ROSTER]\n${line}\n[/TEAM ROSTER]`);
+    expect(withElsewhere(peers, "")).toBe(peers);
+  });
+
+  it("names lose bidi controls and zero-width characters", async () => {
+    const { peerName } = await import("./peer-roster.ts");
+    expect(peerName("Zig​gy‮⁦﻿")).toBe("Ziggy");
+  });
+});

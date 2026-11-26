@@ -47,7 +47,7 @@ it("moves only the bots ticked, and says how many", async () => {
   expect(q("[data-move-chosen]")!.textContent).toBe("Move 2 bots");
   expect(q('[data-move-bot="b3"]')!.getAttribute("aria-checked")).toBe("true");
   await click(q("[data-move-chosen]"));
-  expect(page.moveBots).toHaveBeenCalledWith(["b1", "b3"]);
+  expect(page.moveBots).toHaveBeenCalledWith(["b1", "b3"], { commands: false, together: false });
 });
 
 it("offers the bots main lists, whichever page asks: a page's own bots are never what is moved", async () => {
@@ -91,10 +91,125 @@ const menu = async (bot: Record<string, unknown>) => { await act(async () => roo
 it("a bot's menu offers Move to My Cloud, and it goes after one confirm", async () => {
   await menu({ id: "ada", name: "Ada" });
   await click(q("[data-item]"));
-  expect(q("[data-bot-move-confirm]")!.textContent).toContain("Ada's chats, skills, memory and routines go with it");
+  expect(q("[data-bot-move-confirm]")!.textContent).toContain("Ada moves with its chats, memory, skills and routines, and works on My Cloud from then on. Your logins, saved secrets, profile and connections go too, except connections that only work on this computer.");
   expect(q("[data-bot-move-confirm]")!.textContent).toContain("Tables Ada loaded in Data don't move: they stay on this computer, where Ada can't open them once it lives on My Cloud.");
   await click(all("button").find((button) => button.textContent === "Move") ?? null);
-  expect(page.moveBots).toHaveBeenCalledWith(["ada"]);
+  expect(page.moveBots).toHaveBeenCalledWith(["ada"], { commands: false, together: false });
+});
+
+const facts = { folder: "~/code/app", folders: 1, engine: "Ollama", tools: ["git"], skills: ["weekly-digest"], hidden: ["~/.claude"], teammates: ["Proofreader"] };
+const noLending = { paused: false, folderLent: false, terminal: false };
+
+it("before Move, says what changes for the bot from its real setup, four lines at most until asked for more", async () => {
+  const moveChanges = vi.fn(async () => ({ facts, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await menu({ id: "ada", name: "Ada" });
+  await click(q("[data-item]"));
+  await act(async () => {});
+  expect(moveChanges).toHaveBeenCalledWith(["ada"]);
+  const lines = () => all("[data-move-change]").map((line) => line.dataset.moveChange);
+  expect(q("[data-move-changes]")!.textContent).toContain("What changes for Ada");
+  expect(lines()).toEqual(["teammates", "folder", "engine", "commands"]);
+  expect(all("[data-move-change]")[1]!.textContent).toBe("~/code/app stays on this computer; My Cloud reaches it while this computer is on.");
+  await click(q("[data-move-changes-more]"));
+  expect(lines()).toEqual(["teammates", "folder", "engine", "commands", "skills"]);
+  expect(q("[data-move-changes-more]")).toBeNull();
+});
+
+it("the folder is lent by default, commands only when turned on, and the choice goes with Move", async () => {
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, engine: null, skills: [], hidden: [], teammates: [] }, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await menu({ id: "ada", name: "Ada" });
+  await click(q("[data-item]"));
+  await act(async () => {});
+  const toggle = (id: string) => q(`[data-move-choice="${id}"] [role="switch"]`);
+  expect(q('[data-move-choice="folder"]')!.textContent).toBe("Let Ada open and edit ~/code/app");
+  expect(toggle("folder")!.getAttribute("aria-checked")).toBe("true");
+  expect(toggle("commands")!.getAttribute("aria-checked")).toBe("false");
+  expect(q('[data-move-choice="commands"]')!.textContent).toBe("Let your Clouds run commands on this computerAs you, for the bots on all your own Clouds, while this computer is on. You confirm on this computer and can turn it off from the OpenMausBot icon.");
+  await click(toggle("commands"));
+  expect(q("[data-move-change=commands]")).toBeNull();
+  await click(toggle("folder"));
+  expect(q("[data-move-change=folder]")!.textContent).toBe("~/code/app stays on this computer, out of My Cloud's reach.");
+  await click(all("button").find((button) => button.textContent === "Move") ?? null);
+  expect(page.moveBots).toHaveBeenCalledWith(["ada"], { folder: false, commands: true, together: false });
+});
+
+it("offers nothing already lent, and says so: a folder inside one lent and commands on leave only the facts", async () => {
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, tools: [], skills: [], hidden: [], teammates: [], engine: null }, lending: { paused: false, folderLent: true, terminal: true } }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await menu({ id: "ada", name: "Ada" });
+  await click(q("[data-item]"));
+  await act(async () => {});
+  expect(all("[data-move-change]").map((line) => line.dataset.moveChange)).toEqual(["folder"]);
+  expect(q("[data-move-choice]")).toBeNull();
+  await click(all("button").find((button) => button.textContent === "Move") ?? null);
+  expect(page.moveBots).toHaveBeenCalledWith(["ada"], { commands: false, together: false });
+});
+
+it("while lending is paused it says so, offers nothing, and leaves the folder to be lent as moves always did once it resumes", async () => {
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, tools: [], skills: [], hidden: [], teammates: [], engine: null }, lending: { paused: true, folderLent: false, terminal: false } }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await menu({ id: "ada", name: "Ada" });
+  await click(q("[data-item]"));
+  await act(async () => {});
+  expect(q("[data-move-change=folder]")!.textContent).toBe("~/code/app stays on this computer; lending to My Cloud is paused, so it can't reach it.");
+  expect(q("[data-move-choice]")).toBeNull();
+  await click(all("button").find((button) => button.textContent === "Move") ?? null);
+  expect(page.moveBots).toHaveBeenCalledWith(["ada"], { commands: false, together: false });
+});
+
+it("in the chooser, a folder turned off stays off even when Move is pressed before the new choice is read", async () => {
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, engine: null, tools: [], skills: [], hidden: [], teammates: [] }, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await render(named(4));
+  await click(q('[data-move-bot="b1"]'));
+  await act(async () => {});
+  await click(q('[data-move-choice="folder"] [role="switch"]'));
+  await click(q('[data-move-bot="b3"]'));
+  await click(q("[data-move-chosen]"));
+  expect(moveChanges).toHaveBeenCalledTimes(1);
+  expect(page.moveBots).toHaveBeenCalledWith(["b1", "b3"], { folder: false, commands: false, together: false });
+});
+
+it("the move's line says when commands asked for with it could not be turned on, in main's words", async () => {
+  const move = { bot: { id: "bots-1", name: "Ada" }, team: { id: "my-cloud", name: "My Cloud" }, phase: "moving" as const, bots: 1, commandsError: "Sign in to the Cloud before lending it the terminal." };
+  await act(async () => root.render(createElement(BotMoveLine, { move, onChange: vi.fn() })));
+  expect(q("[data-bot-move-commands-failed]")!.textContent).toBe("Commands on this computer weren't turned on: Sign in to the Cloud before lending it the terminal.");
+  await act(async () => root.render(createElement(BotMoveLine, { move: { ...move, commandsError: undefined }, onChange: vi.fn() })));
+  expect(q("[data-bot-move-commands-failed]")).toBeNull();
+});
+
+it("in the chooser, what the person turned off stays off while they tick more bots", async () => {
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, engine: null, tools: [], skills: [], hidden: [], teammates: [] }, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await render(named(4));
+  await click(q('[data-move-bot="b1"]'));
+  await act(async () => {});
+  await click(q('[data-move-choice="folder"] [role="switch"]'));
+  await click(q('[data-move-bot="b3"]'));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+  expect(moveChanges).toHaveBeenLastCalledWith(["b1", "b3"]);
+  expect(q('[data-move-choice="folder"] [role="switch"]')!.getAttribute("aria-checked")).toBe("false");
+  await click(q("[data-move-chosen]"));
+  expect(page.moveBots).toHaveBeenCalledWith(["b1", "b3"], { folder: false, commands: false, together: false });
+});
+
+it("the chooser says what changes for the bots ticked, and sends the choice with them", async () => {
+  const moveChanges = vi.fn(async () => ({ facts: { ...facts, folders: 2, engine: null, tools: [], skills: [], hidden: [], teammates: [] }, lending: noLending }));
+  window.ogb = { cloudSendPage: { ...page, moveChanges } } as never;
+  await render(named(4));
+  expect(q("[data-move-changes]")).toBeNull();
+  await click(q('[data-move-bot="b1"]'));
+  await click(q('[data-move-bot="b3"]'));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
+  expect(moveChanges).toHaveBeenCalledTimes(2);
+  expect(moveChanges).toHaveBeenLastCalledWith(["b1", "b3"]);
+  expect(q("[data-move-changes]")!.textContent).toContain("What changes for these bots");
+  expect(q("[data-move-change=folder]")!.textContent).toBe("2 folders, such as ~/code/app, stay on this computer; My Cloud reaches them while this computer is on.");
+  expect(q('[data-move-choice="folder"]')!.textContent).toBe("Let these bots open and edit their folders");
+  await click(q("[data-move-chosen]"));
+  expect(page.moveBots).toHaveBeenCalledWith(["b1", "b3"], { folder: true, commands: false, together: false });
 });
 
 it("a bot's menu leaves it out for the helper, a bot on its way, and when My Cloud can't take bots", async () => {

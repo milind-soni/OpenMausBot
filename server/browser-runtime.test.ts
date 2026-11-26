@@ -693,6 +693,18 @@ describe("server-owned browser MCP runtime", () => {
     expect(next.content[0].text).not.toMatch(/are kept/);
   });
 
+  it("tells a bot whose session moved to the Cloud's browser sandbox after an idle close that its sign-ins are kept", async () => {
+    const value = runtime({ closeBrowser: async () => true });
+    await value.agentRpc("m", spec(), "tools/call", { name: "echo" });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(await value.closeIfIdle("m", 10)).toBe(true);
+    // The next call attaches to the sandbox's Chrome, whose spec never saves state itself: the sign-ins live in its profile.
+    const sandbox = { ...spec(), env: { ...spec().env, AGENT_BROWSER_CDP: "ws://127.0.0.1:1/devtools/browser/x", AGENT_BROWSER_RESTORE_SAVE: "never" } };
+    const next = await value.agentRpc("m", sandbox, "tools/call", { name: "echo" }) as { content: Array<{ text: string }> };
+    expect(next.content[0].text).toMatch(/sat unused and was closed.*saved sign-ins are kept/);
+    expect(next.content[0].text).not.toMatch(/sign-ins are gone/);
+  });
+
   it("never closes a browser in use: a bot's call, a person's hold or input", async () => {
     const closeBrowser = vi.fn(async () => true);
     const value = runtime({ closeBrowser });

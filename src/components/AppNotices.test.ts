@@ -1434,14 +1434,63 @@ describe("ModelGo's sponsor card", () => {
     expect(await relaunch(), "then it comes").toContain(TITLE);
   });
 
-  it("never in the launch the welcome took or over a live call, and waits for the bots to load", async () => {
+  it("never over a live call, and waits for the bots to load", async () => {
     f.state.liveCall = { status: "active" };
     expect(await launch(), "a live call").not.toContain(TITLE);
     f.state.liveCall = undefined; f.state.hydrated = false;
     expect(await relaunch(), "until the bots load").not.toContain(TITLE);
-    f.state.hydrated = true; session.clear(); markWelcomeFinished();
-    expect(await launch(), "the welcome's own launch").not.toContain(TITLE);
-    expect(launchNotice()).not.toBe(MODELGO_OFFER_NOTICE);
+    f.state.hydrated = true;
+    expect(await relaunch()).toContain(TITLE);
+  });
+
+  for (const metChief of [false, true]) {
+    it(`a new install sees it in the launch its welcome finished, once its first chat has a reply, and only once${metChief ? " (after meeting the Chief)" : ""}`, async () => {
+      f.state.bots = [];
+      f.state.config.onboarding = { ...EMPTY_ONBOARDING };
+      expect(await launch(), "the welcome is due").not.toContain(TITLE);
+      f.state.welcomeOpen = true;
+      f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-11-01", version: 1, hintsSeen: [...withTourFinished(undefined), ...(metChief ? [MET_CHIEF_HINT] : [])] };
+      expect(await settle(), "the welcome is open").not.toContain(TITLE);
+      f.state.welcomeOpen = false; markWelcomeFinished();
+      expect(await settle(), "the welcome just finished, nothing said yet").not.toContain(TITLE);
+      f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+      expect(await settle(), "the first chat, before its first reply").not.toContain(TITLE);
+      expect(launchNotice()).toBeNull();
+      f.state.bots = structuredClone(FIRST_REPLY);
+      expect(await settle(), "the first reply came: the card, in this same launch").toContain(TITLE);
+      expect(launchNotice()).toBe(MODELGO_OFFER_NOTICE);
+      press("Not now"); await flush();
+      expect(render()).toBe("");
+      expect(await launch(), "a reload").not.toContain(TITLE);
+      expect(await relaunch(), "a later launch").not.toContain(TITLE);
+    });
+  }
+
+  it("on a new install's first launch it follows the move popup once that closes and the first reply has come", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    storage.delete(GROK_MOVE_NOTICE);
+    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null,
+      querySelector: (selector: string) => selector === "[data-grok-move-popup]" ? { querySelectorAll: () => [] } : null, querySelectorAll: () => [] });
+    f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-11-01", version: 1, hintsSeen: [...withTourFinished(undefined), MET_CHIEF_HINT] };
+    markWelcomeFinished();
+    expect(await launch(), "its first messages are still arriving").toBe("");
+    vi.advanceTimersByTime(6_000);
+    const grok = await settle();
+    expect(grok).toContain("data-grok-move-popup"); expect(grok).not.toContain(TITLE);
+    press("Not now"); await flush();
+    expect(await settle(), "the first chat has no reply yet").not.toContain(TITLE);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    expect(await settle(), "then the card, in the same launch").toContain(TITLE);
+  });
+
+  it("follows MausBot's first-launch card in the same launch once it closes", async () => {
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "the card is due: the sponsor's card waits for it").not.toContain(TITLE);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    expect(await settle(), "the card closed in this launch").toContain(TITLE);
+    expect(launchNotice()).toBe(MODELGO_OFFER_NOTICE);
   });
 
   it("is on every page: the desktop, My Cloud, a Team Cloud's Member and a browser", async () => {
@@ -1732,7 +1781,7 @@ describe("Update MausBot on your phone", () => {
   const OTHER = { ...OLD, id: "7c7c7c7c-1111-4222-8333-444455556666", name: "Old Android" };
   let devices: unknown[], retired: boolean;
   let companion: ReturnType<typeof vi.fn>, linked: ReturnType<typeof vi.fn>;
-  /** This computer's phone link and its account, as Settings → Phone & devices reads them through the same two bridges. */
+  /** This computer's phone link and its account, as Settings → Devices reads them through the same two bridges. */
   const bridgesOn = () => {
     companion = vi.fn(async () => ({ enabled: true, keepAwake: false, port: 1, devices, pairing: null }));
     linked = vi.fn(async () => ({ available: true, status: "ready", ...(retired ? { tunnelRetired: true } : {}) }));
@@ -1740,19 +1789,19 @@ describe("Update MausBot on your phone", () => {
   };
   beforeEach(() => { devices = [OLD, NEW]; retired = true; bridgesOn(); });
 
-  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Phone & devices and Not now", async () => {
+  it("shows once this computer's link ended and a paired phone has an older app: the phone, what to do, Open Devices and Not now", async () => {
     const shown = await launch();
     expect(shown).toContain(TITLE); expect(shown).toContain('data-notice="phone-update"');
     for (const text of ["Ada&#x27;s iPhone has an older version of the MausBot app, which can no longer connect to this computer away from your Wi-Fi.",
       "Update the app on that phone, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again.",
-      "Open Phone &amp; devices", "Not now"]) expect(shown).toContain(text);
+      "Open Devices", "Not now"]) expect(shown).toContain(text);
     expect(shown).not.toContain("Work phone");
     expect(launchNotice()).toBe("phone-app-update");
   });
 
-  it("Open Phone & devices opens pairing in Settings, and the card is done for that phone", async () => {
+  it("Open Devices opens pairing in Settings, and the card is done for that phone", async () => {
     await launch();
-    tree().find(node => node.type === "button" && node.props.children === "Open Phone & devices")!.props.onClick(); await flush();
+    tree().find(node => node.type === "button" && node.props.children === "Open Devices")!.props.onClick(); await flush();
     expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "phone", phonePairing: true });
     expect(hints()).toContain("phone-app-update:0f8c2a41");
     expect(render()).toBe("");
@@ -1796,7 +1845,7 @@ describe("Update MausBot on your phone", () => {
     expect(await relaunch(), "a plain browser").not.toContain(TITLE);
   });
 
-  it("shows on a branded build too, as Settings → Phone & devices explains it there", async () => {
+  it("shows on a branded build too, as Settings → Devices explains it there", async () => {
     f.brand = "file";
     expect(await launch()).toContain(TITLE);
   });

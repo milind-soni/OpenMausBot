@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 
 import { approvalModeFor, modelSwitchNeedsAsk, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { writeFileAtomic } from "../atomic.ts";
-import { recoveryCapabilityError } from "../automatic-recovery.ts";
+import { recoveryCapabilityError, withOfferedReasoning } from "../automatic-recovery.ts";
 import type { InstanceConfigMap, ProviderAdapter, RuntimeEvent } from "../contracts.ts";
 import { readyToRun, signedOut as statusSignedOut, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
 import { engineFailureKind } from "../drivers/engine-errors.ts";
@@ -201,8 +201,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     if (!current) return { backups: [], skipped: [] };
     const out: ModelSelection[] = [];
     const left: SkippedBackup[] = [];
-    const add = (selection: ModelSelection) => {
-      const pick = { instanceId: selection.instanceId, model: selection.model };
+    const add = (chosenPick: ModelSelection) => {
+      const pick = withOfferedReasoning(chosenPick, engines.find((engine) => engine.instanceId === chosenPick.instanceId));
       if (pick.instanceId === from.instanceId && pick.model === from.model) return;
       if ([...out, ...left.map((one) => one.selection)].some((known) => known.instanceId === pick.instanceId && known.model === pick.model)) return;
       if (pick.instanceId === from.instanceId && (scope === "engine" || scope === "signed-out")) {
@@ -214,7 +214,10 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       else out.push(pick);
     };
     const picked = chosen ?? deps.chosen(botId);
-    if ((scope === "model" || scope === "credits") && picked.length) add({ instanceId: current.instanceId, model: current.models.default });
+    if ((scope === "model" || scope === "credits") && picked.length) {
+      const sameAccountDefault = picked.find((entry) => entry.instanceId === current.instanceId && entry.model === current.models.default);
+      add(sameAccountDefault ?? { instanceId: current.instanceId, model: current.models.default });
+    }
     for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? picked : picked)) add(selection);
     return { backups: out, skipped: left };
   }

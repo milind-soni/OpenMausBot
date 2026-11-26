@@ -15,6 +15,13 @@ Deployment for this repository:
 3. For an existing Worker, run `pnpm exec wrangler secret put COMPOSIO_API_KEY --config cloudflare/composio-broker/wrangler.jsonc`, then `pnpm broker:deploy`.
 4. For the very first deploy, put `COMPOSIO_API_KEY=...` in the ignored `.dev.vars.production` file and run `pnpm exec wrangler deploy --config cloudflare/composio-broker/wrangler.jsonc --secrets-file .dev.vars.production`. Delete the file immediately afterward.
 
+CI deploys main after every push and every nightly run (the `deploy-composio-broker` job), with the
+`CLOUDFLARE_API_TOKEN` repository secret: Workers Scripts Edit and D1 Edit on the broker's account only (the migration
+check runs `CREATE TABLE IF NOT EXISTS d1_migrations` and a read through D1's query API, which needs Edit). On this
+repository the job fails without the secret, and it stops before deploying while `wrangler d1 migrations list
+--remote` shows a migration not yet applied: apply it (step 2), then rerun the job. Each CI deploy's message names
+its commit, so `wrangler deployments list` shows which commit is live.
+
 Forks should create their own D1 database and rate-limit namespaces, replace
 the IDs in `wrangler.jsonc`, deploy under their own Worker name, and set
 `OMB_COMPOSIO_BROKER_URL` in their packaged build. Running only the local

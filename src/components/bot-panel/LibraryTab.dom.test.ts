@@ -11,11 +11,6 @@ vi.mock("@/state/store-select", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store-select")>(),
   useStoreDispatch: () => fixture.dispatch,
 }));
-vi.mock("./use-memory-doc", () => ({ useMemoryDoc: () => ({ docs: null, error: false }) }));
-vi.mock("../bot-settings/SkillsSection", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../bot-settings/SkillsSection")>(),
-  useManagedSkills: () => ({ skills: [], loading: false }),
-}));
 vi.mock("@/lib/page-open", () => ({ usePageOpener: () => (url: string) => fixture.opened.push(url) }));
 
 const { LibraryTab, LIBRARY_SHOWN } = await import("./LibraryTab");
@@ -78,7 +73,7 @@ afterEach(() => {
 const settle = () => act(async () => { for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0)); });
 const rows = (kind: string) => [...host.querySelectorAll<HTMLElement>(`[data-panel-row="${kind}"]`)];
 const render = async (bot: Bot) => {
-  await act(async () => root.render(createElement(LibraryTab, { bot, onOpen: () => {} })));
+  await act(async () => root.render(createElement(LibraryTab, { bot })));
   await settle();
 };
 
@@ -93,7 +88,7 @@ it("lists what the bot made in every conversation, newest first, each with the c
   expect(files).toContain("Old notes");
   expect(host.textContent).not.toContain("Gone page");
   expect(host.textContent).not.toContain("From this conversation");
-  expect(host.querySelector('[data-panel-page="memory"]')).not.toBeNull();
+  expect(host.querySelector("[data-panel-page]")).toBeNull();
 });
 
 it("opens a page by its link, and an app from another conversation at its message there", async () => {

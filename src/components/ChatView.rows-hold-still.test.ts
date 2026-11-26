@@ -131,6 +131,15 @@ describe("a long chat on screen", () => {
     expect(countBy(renderedSince(mark).filter((entry) => entry.row !== null), (entry) => entry.component)).toEqual(new Map());
   });
 
+  it("draws no saved row again when its own turn starts and ends", async () => {
+    const mark = renderMark();
+    await send({ kind: "bot", bot: { ...announced("b", "Bea"), busy: true, activity: "working" } });
+    await send({ kind: "bot", bot: { ...announced("b", "Bea"), busy: false, activity: "idle" } });
+    expect(document.querySelectorAll("[data-mid]").length).toBeGreaterThan(30);
+    const redrawn = new Set(renderedSince(mark).flatMap((entry) => entry.component === "Bubble" && entry.row ? [entry.row] : []));
+    expect(redrawn, "only the answer Regenerate is offered on").toEqual(new Set(["answer-9"]));
+  });
+
   it("draws no saved row again while a reply streams in", async () => {
     await send({ kind: "bot", bot: { ...announced("b", "Bea"), busy: true, activity: "working" } });
     await runtime("b-thread", { type: "turn.started" });

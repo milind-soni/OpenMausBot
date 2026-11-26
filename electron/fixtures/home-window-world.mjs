@@ -26,7 +26,7 @@ export function world({ clean = null, journal = done(), marker = null, state = c
     team: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...team },
     /** Another Cloud of the person's own, answering at CLIENT; `gone`: the Admin's pairing says it is no longer theirs. */
     client: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...client },
-    went: [], calls: [], fetched: [], pairs: 0, teamPairs: [], ownPairs: [], wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
+    went: [], calls: [], fetched: [], pairs: 0, refreshes: 0, teamPairs: [], ownPairs: [], wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
     /** The servers this computer's bots moved to, asked for again (`reopen`), and what main answers. `reopenGate`: a
      * recovery whose navigation is still loading. */
     reopened: [], reopenAnswer: true, reopenGate: null,
@@ -47,6 +47,10 @@ export function world({ clean = null, journal = done(), marker = null, state = c
   w.window = { isDestroyed: () => false, webContents: contents };
   const account = {
     state: () => w.state,
+    /** The session read again (cloud-account.mjs `refresh`): `w.refreshed`, when set, is what the Admin says then. */
+    refresh: async () => { w.refreshes++; if (w.refreshed) w.state = w.refreshed; return w.state; },
+    /** While the Admin's session read keeps failing (`w.failingUntil`), when the account tries it again by itself. */
+    failingUntil: () => w.failingUntil ?? 0,
     power: () => w.power,
     powerOf: (origin) => (origin === CLOUD ? w.power : (w.state?.clouds ?? []).find((cloud) => cloud.origin === origin)?.power ?? null),
     async wakeHome() { w.wakes++; await w.cloud.wakeGate; if (w.cloud.wakes) w.power = { ...w.power, state: "awake" }; return "awake"; },

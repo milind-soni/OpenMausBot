@@ -13,6 +13,8 @@ import { execFile, execFileSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { hostBootSession } from "../electron/data-dir-lease.mjs";
+
 export const ENGINE_TAG_ENV = "OMB_ENGINE_TAG";
 /** In the data folder; this machine's own, never backed up or moved. */
 export const ENGINE_RUNS_DIR = "engine-runs";
@@ -87,11 +89,7 @@ function startOf(pid: number): string | null {
 /** Random per boot (Linux boot_id, macOS kern.bootsessionuuid): a pid and its start tick mean nothing across a reboot, as a
  * restarted VM with its volume restored has. */
 function bootId(): string | null {
-  try {
-    if (process.platform === "linux") return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() || null;
-    if (process.platform === "darwin") return execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
-  } catch {}
-  return null;
+  return hostBootSession(); // the lease's reading: one `sysctl` per server, or none when the desktop handed it over
 }
 
 /** A container's processes live in a pid namespace of their own; one container cannot see or signal another's. */

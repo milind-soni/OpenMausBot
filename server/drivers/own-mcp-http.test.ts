@@ -124,6 +124,18 @@ describe("an ACP engine", () => {
     expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: { mcpCapabilities: { http: "yes" } } })).toBe(servers);
     expect(acpSessionMcpServers(servers, "stdio", http)).toBe(servers);
     const sent = acpSessionMcpServers(servers, "advertised", http);
+    // An agent that takes URLs without advertising them (the Antigravity CLI), still never under the stdio setting.
+    expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: {} }, () => true)).toEqual(sent);
+    expect(acpSessionMcpServers(servers, "advertised", { agentCapabilities: {} }, () => false)).toBe(servers);
+    expect(acpSessionMcpServers(servers, "stdio", { agentCapabilities: {} }, () => true)).toBe(servers);
+    // A Windows install mounts them as the app's own executable with backslashed script paths.
+    const unpacked = "C:\\Users\\A B\\AppData\\Local\\Programs\\OpenMausBot\\resources\\app.asar.unpacked\\dist-server";
+    const windows: AcpMcpServer[] = [
+      { name: "agents", command: "C:\\Users\\A B\\AppData\\Local\\Programs\\OpenMausBot\\OpenMausBot.exe", args: [`${unpacked}\\agents-proxy.js`], env: pairs({ ...agents.env, ELECTRON_RUN_AS_NODE: "1" }) },
+      { name: "data", command: "C:\\Users\\A B\\AppData\\Local\\Programs\\OpenMausBot\\OpenMausBot.exe", args: [`${unpacked}\\harness-mcp-proxy.js`, "data"], env: pairs({ OMB_HARNESS_URL: HARNESS, OMB_MCP_TOKEN_DATA: "data-capability", ELECTRON_RUN_AS_NODE: "1" }) },
+    ];
+    expect(acpSessionMcpServers(windows, "advertised", { agentCapabilities: {} }, () => true).map((server) => "type" in server ? server.url : server.command))
+      .toEqual([`${HARNESS}/api/internal/mcp-http/agents`, `${HARNESS}/api/internal/mcp-http/data`]);
     expect(sent.map((server) => "type" in server ? `${server.name}:${server.url}` : server.name)).toEqual([
       ...["agents", "browser", "computer", "data", "email", "device"].map((name) => `${name}:${HARNESS}/api/internal/mcp-http/${name}`),
       "phone", "ogb", "notes"]);

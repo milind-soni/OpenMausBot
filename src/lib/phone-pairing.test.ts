@@ -119,7 +119,7 @@ describe("asking the server", () => {
 });
 
 describe("opening Settings on the phone pairing", () => {
-  it("is Phone & devices, asking for the pairing to be revealed", () => {
+  it("is the old phone section, which lands on Devices' phones, asking for the pairing to be revealed", () => {
     expect(phonePairingSettingsAction()).toEqual({ type: "toggleAppSettings", open: true, section: "phone", phonePairing: true });
   });
 

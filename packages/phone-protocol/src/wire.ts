@@ -1,13 +1,13 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
-import type { PresenceFrame } from "./team-presence.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
+import type { PresenceFrame } from "./team-presence.ts"; import type { BoardItemFrame } from "./board.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
-import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
+import type { BotAvatarCrop, MascotFaceColor, MascotMaterial } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts"; import type { EmailOutgoingFields } from "./email.ts";
@@ -285,7 +285,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   mascotExpression?: MausExpression | null;
   mascotBody?: BotBodyId | null;
   /** Overrides both eyes and mouth. Absent or null preserves the body's default inks. */
-  mascotFaceColor?: MascotFaceColor | null; /** Lowercase `#rrggbb` tint for the avatar body only. Absent or null uses `color`. */ mascotBodyColor?: string | null;
+  mascotFaceColor?: MascotFaceColor | null; /** Lowercase `#rrggbb` tint for the avatar body only. Absent or null uses `color`. */ mascotBodyColor?: string | null; mascotMaterial?: MascotMaterial | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
@@ -370,7 +370,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
   phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
-  fallback?: Array<{ instanceId: string; model: string }>;
+  fallback?: ModelSelection[];
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Record a screenshot and a short note of each browser action, kept with
@@ -562,7 +562,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
   /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
-  doneWhen?: string;
+  doneWhen?: string; /** On a Check before done line that sent the answer back for fixing: that round, so a client can fold the answer it replaced. */ checkRound?: number;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report about that bot's thread
@@ -585,7 +585,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a Team Cloud, a line in its person's inbox: who it is from and where it came from. */
   inbox?: InboxItem;
   /** thread chips: "Opened thread #Title on @X". */
-  threadRef?: { botId: string; threadId: string; title: string };
+  threadRef?: { botId: string; threadId: string; title: string }; /** The quiet line recording hand-offs to this bot ("Mochi asked me: …"): who asked, how many it folds, their threads. */ askedBy?: { botId: string; name: string; count?: number; threadIds?: string[] };
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
@@ -995,6 +995,6 @@ export type ServerFrame =
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
   /** Who is here on a Team Cloud (shared/team-presence.ts). */
-  | PresenceFrame
+  | PresenceFrame | /** A Team Board item was made, changed or removed (board.ts). */ BoardItemFrame
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

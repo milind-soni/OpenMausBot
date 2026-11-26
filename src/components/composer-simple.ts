@@ -22,7 +22,7 @@ export function slotColors(color: Bot["color"] | undefined, room: boolean): { fi
   return { fill: tone.fill, ink: tone.ink, button: { className: BOT_BUTTON, style: botButtonStyle(own) } };
 }
 
-export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint }: {
+export function composerPlaceholder({ simple, locked, approval, attaching, listening, replying, busy, canSteer, queued, busyName, sendLabel, group, members, jevOn, goal, botName, setupHint, startsThread = false }: {
   simple: boolean;
   locked: boolean;
   approval: boolean;
@@ -40,12 +40,15 @@ export function composerPlaceholder({ simple, locked, approval, attaching, liste
   goal: boolean;
   botName: string;
   setupHint: string | null | undefined;
+  /** The room feed's composer: every line starts a thread. */
+  startsThread?: boolean;
 }): string {
   if (locked) return t("composer.placeholder.locked");
   if (approval) return t("composer.placeholder.approval");
   if (attaching) return t("composer.placeholder.attaching");
   if (listening) return t("composer.placeholder.listening");
   if (replying && !busy) return t("composer.placeholder.reply");
+  if (startsThread && group && !goal) return t("composer.placeholder.newThread", { name: group.name });
   if (simple) {
     if (!busy && goal) return group ? t("composer.placeholder.goal", { name: group.name }) : t("composer.placeholder.goalSolo", { name: botName });
     if (!busy && !group && setupHint) return setupHint;
@@ -84,4 +87,12 @@ export function sendLabels({ simple, busy, canSteer, name, sendLabel }: { simple
       : { label: t("composer.send.queue"), title: t("composer.send.queueHint") };
   }
   return { label: t("composer.send.message"), title: `${t("chat.send")} (${sendLabel})` };
+}
+
+/** Whose thread /fork copies from this composer, or none where it isn't offered: on a phone, in a bot-to-bot room, with
+ * no thread yet, and in a room feed's composer, whose line starts a thread that doesn't exist yet. */
+export function composerForkOwner({ phone, group, botId, threadId, startsThread }: {
+  phone: boolean; group?: { id: string; dm?: boolean }; botId?: string; threadId?: string; startsThread: boolean;
+}): string | undefined {
+  return phone || group?.dm || !threadId || startsThread ? undefined : group?.id ?? botId;
 }

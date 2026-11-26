@@ -34,6 +34,7 @@ import { engineReady } from "./EngineLibrary";
 import { ModelgoOfferCard, type ModelgoCardAction } from "./ModelgoOffer";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
+import { hasBotsHere } from "@/lib/move-changes";
 import { useMoveQuiet } from "./CloudSendStrip";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
 import { GrokMovePopup, reportGrokMovePopup, type GrokMovePopupAction } from "./GrokMovePopup";
@@ -212,12 +213,13 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }, [grokDue, grokLanding, waits]);
   const grokNow = !grokDue ? false
     : !viewer || (desktop && !desktopState) || organization === null || firstChat === null || mausBotFirst || moving === null || grokLanding || grokBlocked ? null : true;
-  // Everyone, whether or not a bot has answered yet (so not `afterWelcome`, which holds until one has), but never in the launch
-  // the welcome or MausBot's card took, or during a live call.
-  const modelgoNow = !modelgoHere || moving || welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" || desktopState?.seen.includes(MODELGO_OFFER_NOTICE) ? false
-    : organization === null || moving === null || firstChat === null || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
-  // A card from the project's announcements file: the built-in sponsor card's exclusions, and src/lib/announcements.ts's rules for
-  // which card and for whom (once per person, one sponsor card a week, none on a branded build).
+  // Everyone, whether or not a bot has answered yet (so not `afterWelcome`), never during a live call; in the launch a new
+  // install's welcome finished, only once its first chat has had a reply. It follows MausBot's card once that closes.
+  const modelgoNow = !modelgoHere || moving || desktopState?.seen.includes(MODELGO_OFFER_NOTICE) ? false
+    : organization === null || moving === null || firstChat === null || (welcomeFinishedThisLaunch() && firstChat) || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") || (desktop && !desktopState) ? null : true;
+  // A card from the project's announcements file: never in the launch a welcome or MausBot's card took, else the built-in
+  // sponsor card's exclusions, and src/lib/announcements.ts's rules for which card and for whom (once per person, one
+  // sponsor card a week, none on a branded build).
   const branded = brandStatus().source === "file", team = Boolean(state.config?.team);
   const remoteCards = useAnnouncementCards(!branded);
   const surface = announcementSurface(local, Boolean(state.config?.cloudHome || viewer?.cloudHome));
@@ -357,7 +359,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   }
   if (notice === CLOUD_INTRO && offer) {
     const done = (action: string) => { track("cloud_card_action", { action }); close(); save(CLOUD_INTRO); };
-    return <CloudTrialIntroCard offer={offer}
+    return <CloudTrialIntroCard offer={offer} botsHere={hasBotsHere({ bots: state.bots, cloudHome: state.config?.cloudHome === true, desktop: Boolean(window.ogb), remote: window.ogb?.remoteClient?.active === true })}
       onStart={() => { done("start"); dispatch({ type: "openCloudAdd", source: "app_card" }); }}
       onHowTo={() => { done("howto"); dispatch({ type: "cloudHowTo", open: true }); }}
       onSignIn={view?.kind === "signed-out" ? () => { track("cloud_card_action", { action: "signin" }); close(); dispatch({ type: "openCloudAdd", source: "app_card", signIn: true }); } : undefined}

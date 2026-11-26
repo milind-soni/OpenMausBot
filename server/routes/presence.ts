@@ -13,15 +13,15 @@ export interface PresenceRouteDeps {
   heard?(auth: RequestAuth, language: string): void;
   /** The conversation open in the app while a person who counts was active (the owner, or on a Team Cloud any
    * member): it is the one in front of them. */
-  sawChat?(auth: RequestAuth, threadId: string): void;
+  sawChat?(auth: RequestAuth, threadId: string, typing: boolean): void;
 }
 
 const IANA_ZONE = /^(?:UTC|[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)+)$/;
 const LANGUAGE_TAG = /^[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,3}$/i;
 const THREAD_ID = /^[\w-]{1,100}$/;
 
-/** POST /api/presence/active {source, timeZone, language, threadId}: the person opened or used the app, with that
- * conversation open. Only the owner's counts. */
+/** POST /api/presence/active {source, timeZone, language, threadId, typing}: the person opened or used the app, with that
+ * conversation open (`typing`: a key in its composer). Only the owner's counts. */
 export function createPresenceRoutes(deps: PresenceRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (method !== "POST" || path !== "/api/presence/active") return PASS;
@@ -32,7 +32,7 @@ export function createPresenceRoutes(deps: PresenceRouteDeps): RouteHandler {
     const language = typeof given.language === "string" && LANGUAGE_TAG.test(given.language) ? given.language.toLowerCase() : undefined;
     const counts = Boolean(deps.member) || deps.isOwner(auth);
     if (language && counts) deps.heard?.(auth, language);
-    if (counts && typeof given.threadId === "string" && THREAD_ID.test(given.threadId)) deps.sawChat?.(auth, given.threadId);
+    if (counts && typeof given.threadId === "string" && THREAD_ID.test(given.threadId)) deps.sawChat?.(auth, given.threadId, given.typing === true);
     if (deps.member) return json(res, 200, { ok: true, ...deps.member(auth, language) });
     // A guest's activation is not the person's: answered, never recorded.
     if (!deps.isOwner(auth)) return json(res, 200, { ok: true, returned: false });

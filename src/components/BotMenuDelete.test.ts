@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { api, type Bot } from "@/state/store";
-import { allThreadRows, deleteAllThreads, deleteAllThreadsCopy } from "./BotMenuDelete";
+import { allThreadRows, closedThreadRows, deleteAllThreads, deleteAllThreadsCopy } from "./BotMenuDelete";
 
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), api: vi.fn() }));
 
@@ -40,5 +40,63 @@ describe("delete all threads", () => {
 
     expect(post).toHaveBeenCalledWith("/api/bots/maus/tasks/delete", { method: "POST", body: JSON.stringify({ threadIds: ["open", "pinned"] }) });
     expect(dispatch).toHaveBeenLastCalledWith({ type: "notice", notice: { kind: "note", botName: null, text: "Deleted: 1. Kept because they are running: 1." } });
+  });
+});
+
+describe("delete closed threads", () => {
+  const closer = { botId: "helper", name: "Helper", at: 5 };
+  const closedBot: Bot = {
+    ...bot,
+    tasks: [
+      { threadId: "open", title: "Open chat", createdAt: 5 },
+      { threadId: "done", title: "Finished job", createdAt: 4, closedBy: closer },
+      { threadId: "done-pinned", title: "Pinned finished job", createdAt: 3, pinned: true, closedBy: closer },
+      { threadId: "done-run", title: "Closed routine run", createdAt: 2, routineRunId: "run-2", closedBy: closer },
+      { threadId: "old", title: "Older finished job", createdAt: 1, archivedAt: 9, closedBy: closer },
+    ],
+  };
+
+  it("takes only closed threads, never pinned ones or routine runs", () => {
+    expect(closedThreadRows(allThreadRows(closedBot)).map((row) => row.threadId)).toEqual(["done", "old"]);
+  });
+
+  it("names the closed threads in the confirm and keeps the other threads", () => {
+    const copy = deleteAllThreadsCopy(allThreadRows(closedBot), false, "closed");
+    expect(copy.title).toBe("Delete closed threads (2)?");
+    expect(copy.confirmLabel).toBe("Delete 2");
+    expect(copy.body).not.toContain("Pinned threads included");
+    expect(copy.body).not.toContain("a new empty conversation will be started");
+    expect(deleteAllThreadsCopy(allThreadRows(closedBot), true, "closed").title).toBe("Delete closed conversations (2)?");
+  });
+
+  it("sends only the closed threads", async () => {
+    const post = vi.mocked(api);
+    post.mockResolvedValueOnce({ deleted: ["done", "old"], refused: [], bot: { id: "maus" } });
+    const dispatch = vi.fn();
+
+    await deleteAllThreads(closedBot, dispatch, "closed");
+
+    expect(post).toHaveBeenLastCalledWith("/api/bots/maus/tasks/delete", { method: "POST", body: JSON.stringify({ threadIds: ["done", "old"], scope: "closed" }) });
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "notice", notice: { kind: "note", botName: null, text: "Deleted: 2." } });
+  });
+
+  it("keeps an idle closed thread selectable while the bot works in another thread", () => {
+    const working = { ...closedBot, busy: true, activity: "working" as const };
+    expect(closedThreadRows(allThreadRows(working)).map((row) => row.threadId)).toEqual(["done", "old"]);
+  });
+
+  it("still leaves out a closed thread that is itself running", () => {
+    const tasks = closedBot.tasks!.map((task) => (task.threadId === "done" ? { ...task, activity: "working" as const } : task));
+    expect(closedThreadRows(allThreadRows({ ...closedBot, tasks })).map((row) => row.threadId)).toEqual(["old"]);
+  });
+
+  it("says how many were kept because they were reopened or pinned meanwhile", async () => {
+    const post = vi.mocked(api);
+    post.mockResolvedValueOnce({ deleted: ["old"], refused: [{ threadId: "done", reason: "not-closed" }], bot: { id: "maus" } });
+    const dispatch = vi.fn();
+
+    await deleteAllThreads(closedBot, dispatch, "closed");
+
+    expect(dispatch).toHaveBeenLastCalledWith({ type: "notice", notice: { kind: "note", botName: null, text: "Deleted: 1. Kept because they were reopened or pinned: 1." } });
   });
 });

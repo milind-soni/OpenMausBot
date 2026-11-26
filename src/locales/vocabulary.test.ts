@@ -171,7 +171,7 @@ describe("one name per thing", () => {
       ["native.dialog.unreachable.detail", [label("native.menu.server")]],
       ["native.boot.folderMissing.body", [label("native.menu.server")]],
       ["native.boot.unhealthy.body", [label("native.menu.server")]],
-      ["native.dialog.connectFailed.detail", [withoutEllipsis("native.menu.connect")]],
+      ["native.dialog.connectFailed.detailOther", [withoutEllipsis("native.menu.connectOther")]],
       ["native.dialog.share.detail", [settings("settings.page.app", "settings.app.computers")]],
     ];
     const staleIn = (text: Text, prefix: string) => pointers.flatMap(([key, labels]) => labels.map((of) => of(text))

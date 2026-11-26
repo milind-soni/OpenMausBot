@@ -222,7 +222,7 @@ describe("skill_manage", () => {
     const sent: unknown[] = [];
     const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
     expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
-      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source, all_bots.',
       isError: true,
     });
     expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
@@ -776,5 +776,17 @@ describe("reset_cloud_computer", () => {
     expect(tool({})).toBeUndefined();
     expect(Object.keys(tool({ OMB_MEETINGS: "1" })?.inputSchema.properties ?? {})).toEqual(["why"]);
     expect(Object.keys(tool({ OMB_MEETINGS: "1", OMB_CHIEF_OF_STAFF: "1" })?.inputSchema.properties ?? {})).toEqual(["why", "for_bot_id"]);
+  });
+});
+
+describe("list_bots", () => {
+  const elsewhere = "The person's bots in their other places, which can't be reached from here: Ziggy (on My Cloud). If asked for one, say where it lives.";
+  const list = (answer: Record<string, unknown>) => callTool("list_bots", {}, context({ client: { api: async () => answer, apiResponse: async () => ({ ok: true, status: 200, body: answer }) } }));
+
+  it("names the bots of the person's other places after the ones here, so none of them is taken for no such bot", async () => {
+    const result = await list({ bots: [{ id: "bot-scout", name: "Scout", model: "m", status: "available" }], elsewhere });
+    expect(result.text).toMatch(/^Bots you can reach .*\n- Scout \[id: bot-scout, model: m\]\n\n.*resume you automatically\.\n\nThe person's bots in their other places/su);
+    expect((await list({ bots: [], elsewhere })).text).toBe(`No other bots you can reach yet.\n\n${elsewhere}`);
+    expect((await list({ bots: [] })).text).toBe("No other bots you can reach yet.");
   });
 });

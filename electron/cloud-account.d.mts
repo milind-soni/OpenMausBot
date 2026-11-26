@@ -292,6 +292,8 @@ export interface CloudAccountClient {
   reopen(): Promise<CloudAccountState>;
   cancel(): Promise<CloudAccountState>;
   refresh(): Promise<CloudAccountState>;
+  /** While the Admin's session read keeps failing, when this client tries it again by itself (epoch ms); 0 otherwise. */
+  failingUntil?(): number;
   signOut(): Promise<CloudAccountState>;
   openDashboard(): Promise<CloudAccountState>;
   offer(): Promise<import("./cloud-home.mjs").CloudOffer | null>;
