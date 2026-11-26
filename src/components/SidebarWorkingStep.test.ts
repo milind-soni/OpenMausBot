@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { Message } from "@/state/store";
 import { noteTurnEvent, resetTurnLive } from "@/state/turn-status";
+import { setAdvancedMode } from "@/lib/interface-mode";
 import { SidebarWorkingStep, useHeldText } from "./SidebarWorkingStep";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -28,6 +29,38 @@ describe("sidebar working line", () => {
       type: "turn.progress", activity: "command", itemId: "c1", target: "sleep 240" } as RuntimeEvent);
     act(() => root.render(createElement(SidebarWorkingStep, { bot })));
     expect(phrase()).toBe("Running a command");
+  });
+
+  it("says what a page or write-up makes, still without its name", () => {
+    const write = (target: string): Message => ({ id: "w", at: 1, role: "bot", kind: "activity", tool: { name: "Write", step: { activity: "write", target } } });
+    act(() => root.render(createElement(SidebarWorkingStep, { bot, last: write("lisbon.html") })));
+    expect(phrase()).toBe("Putting the page together");
+  });
+
+  it("reads the file's kind from the engine's live status too", () => {
+    noteTurnEvent({ eventId: "e2", provider: "claudeAgent", threadId: "t-side", createdAt: "2026-11-07T00:00:00.000Z", turnId: "turn-2",
+      type: "turn.progress", activity: "write", itemId: "w2", file: "lisbon-trip.md" } as RuntimeEvent);
+    act(() => root.render(createElement(SidebarWorkingStep, { bot: { ...bot, threadId: "t-other" } })));
+    expect(phrase()).toBe("Writing it up");
+  });
+
+  it("keeps Advanced mode's words for a page as they were", () => {
+    setAdvancedMode(true);
+    try {
+      const write: Message = { id: "w", at: 1, role: "bot", kind: "activity", tool: { name: "Write", step: { activity: "write", target: "lisbon.html" } } };
+      act(() => root.render(createElement(SidebarWorkingStep, { bot, last: write })));
+      expect(phrase()).toBe("Writing a file");
+    } finally {
+      setAdvancedMode(false);
+      localStorage.clear();
+    }
+  });
+
+  it("keeps the kind of step for code", () => {
+    noteTurnEvent({ eventId: "e3", provider: "claudeAgent", threadId: "t-side", createdAt: "2026-11-07T00:00:00.000Z", turnId: "turn-3",
+      type: "turn.progress", activity: "write", itemId: "w3", file: "build.py" } as RuntimeEvent);
+    act(() => root.render(createElement(SidebarWorkingStep, { bot })));
+    expect(phrase()).toBe("Writing a file");
   });
 });
 

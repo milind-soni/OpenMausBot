@@ -121,3 +121,34 @@ describe("the sidebar's + menu with a long bot name (simple mode)", () => {
     expect(label?.props.className).toContain("min-w-0");
   });
 });
+
+describe("the sidebar's + menu with a room open", () => {
+  const room = { id: "room", name: "Launch room", threadId: "current", memberIds: [], messages: [], tasks: [], unread: false, createdAt: 0,
+    defaultResponder: { kind: "auto" } };
+  const withRoom = (extra: Record<string, unknown> = {}) => openPlusMenu(true, false, { groups: [{ ...room, ...extra }], selectedId: "room", activeView: "chat" });
+
+  it("offers a new thread in that room first, keeps New group chat, and starts it the way the room's own + does", () => {
+    const items = withRoom().filter((node) => node.props.role === "menuitem");
+    expect(items.map((node) => words(node.props.children))).toEqual(["New thread in Launch room", "New bot", "New group chat", "Add department", "Templates", "Import…"]);
+    fixture.dispatch.mockClear();
+    items[0]!.props.onClick!();
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newGroupTask", groupId: "room" }]]);
+  });
+
+  it("can't start one while the room is busy where it shows its single transcript, which a new thread would move", () => {
+    const busy = { ...room, busyBotId: "kiwi", working: true };
+    const item = (config: unknown) => openPlusMenu(true, false, { groups: [busy], selectedId: "room", activeView: "chat", config })
+      .find((node) => node.props["data-plus-room-thread"] === "room")!;
+    expect(item({ features: {} }).props.disabled).toBe(true);
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    try {
+      expect(item({ features: { roomFeed: true, roomFeedSince: 1 } }).props.disabled).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("offers none for a bot-to-bot room", () => {
+    expect(withRoom({ dm: true }).filter((node) => node.props.role === "menuitem").map((node) => words(node.props.children))).not.toContain("New thread in Launch room");
+  });
+});

@@ -21,6 +21,7 @@ import { classifyError } from "./retry.ts";
 import {
   antigravityCliSessionMode,
   antigravityCliTakesHttpMcp,
+  antigravityCliToolBudget,
   antigravityClientInfo,
   antigravityLaunchArgs,
   antigravityProfileAuthenticated,
@@ -213,6 +214,7 @@ const support: AcpSupport = {
   // Only the native CLI takes them; agy_acp_server keeps its stdio proxies.
   ownMcpOverHttp: "advertised",
   takesUnadvertisedHttpMcp: antigravityCliTakesHttpMcp,
+  sessionToolBudget: antigravityCliToolBudget,
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
   updateFilter: antigravityUpdateFilter,

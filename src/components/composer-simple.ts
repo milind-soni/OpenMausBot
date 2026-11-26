@@ -88,3 +88,11 @@ export function sendLabels({ simple, busy, canSteer, name, sendLabel }: { simple
   }
   return { label: t("composer.send.message"), title: `${t("chat.send")} (${sendLabel})` };
 }
+
+/** Whose thread /fork copies from this composer, or none where it isn't offered: on a phone, in a bot-to-bot room, with
+ * no thread yet, and in a room feed's composer, whose line starts a thread that doesn't exist yet. */
+export function composerForkOwner({ phone, group, botId, threadId, startsThread }: {
+  phone: boolean; group?: { id: string; dm?: boolean }; botId?: string; threadId?: string; startsThread: boolean;
+}): string | undefined {
+  return phone || group?.dm || !threadId || startsThread ? undefined : group?.id ?? botId;
+}
