@@ -14,6 +14,12 @@ export function zoomAtPoint(zoom: PreviewZoom, deltaY: number, pointFromImageOri
   return { scale, x: x - (x - zoom.x) * ratio, y: y - (y - zoom.y) * ratio };
 }
 
+export function wheelPixels(event: Pick<WheelEvent, "deltaY" | "deltaMode">, pageHeight: number): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY * 16;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * pageHeight;
+  return event.deltaY;
+}
+
 export function usePreviewZoom() {
   const overlay = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -32,7 +38,8 @@ export function usePreviewZoom() {
       if (!area || !picture || event.deltaY === 0 || !area.contains(event.target as Node)) return;
       const box = area.getBoundingClientRect();
       const point = { x: event.clientX - box.left - picture.offsetLeft, y: event.clientY - box.top - picture.offsetTop };
-      setZoom((current) => zoomAtPoint(current, event.deltaY, point));
+      const deltaY = wheelPixels(event, area.clientHeight);
+      setZoom((current) => zoomAtPoint(current, deltaY, point));
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);

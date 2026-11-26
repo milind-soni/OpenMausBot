@@ -1,5 +1,6 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
-import { PREVIEW_ZOOM_MAX, zoomAtPoint, type PreviewZoom } from "./preview-zoom";
+import { PREVIEW_ZOOM_MAX, wheelPixels, zoomAtPoint, type PreviewZoom } from "./preview-zoom";
 
 const imagePixelAt = (zoom: PreviewZoom, point: { x: number; y: number }) =>
   ({ x: (point.x - zoom.x) / zoom.scale, y: (point.y - zoom.y) / zoom.scale });
@@ -30,5 +31,11 @@ describe("zooming a previewed image at a point", () => {
 
   it("leaves a fitted image fitted when the wheel turns down", () => {
     expect(zoomAtPoint({ scale: 1, x: 0, y: 0 }, 100, { x: 10, y: 10 })).toEqual({ scale: 1, x: 0, y: 0 });
+  });
+
+  it("reads a wheel's lines and pages as pixels", () => {
+    expect(wheelPixels({ deltaY: -120, deltaMode: WheelEvent.DOM_DELTA_PIXEL }, 700)).toBe(-120);
+    expect(wheelPixels({ deltaY: -3, deltaMode: WheelEvent.DOM_DELTA_LINE }, 700)).toBe(-48);
+    expect(wheelPixels({ deltaY: -1, deltaMode: WheelEvent.DOM_DELTA_PAGE }, 700)).toBe(-700);
   });
 });
