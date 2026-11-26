@@ -1,4 +1,4 @@
-import { readlinkSync } from "node:fs";
+import { lstatSync, readlinkSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseStoredConfig } from "./config.ts";
 import { inSecretFolder } from "./secret-folder.ts";
@@ -84,3 +84,25 @@ export function managedTaskSkillLink(source: string, path: string, roots: string
     return (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) || relative(join(root, "imported-skills", match[2]), target) === "";
   });
 }
+
+/** A folder a project installs and can install again, never carried: node_modules, and a Python virtual environment (any
+ * folder holding pyvenv.cfg, as `python -m venv`, virtualenv, uv and Poetry make them), whose bin/python links to the
+ * Python it was made with, outside the workspace. Either may itself be a link. */
+export function installedDependencyFolder(source: string, name: string, stat: Stats): boolean {
+  if (!stat.isDirectory() && !stat.isSymbolicLink()) return false;
+  if (name === "node_modules") return true;
+  try { return lstatSync(join(source, "pyvenv.cfg")).isFile(); } catch { return false; }
+}
+
+/** A Chromium browser's own profile folder (it holds "Local State"), as a bot's project may keep one: its sign-ins and
+ * cookies stay on the computer they were made on, as the app's own browser profiles do, and its caches are large. */
+export function browserProfileFolder(source: string, stat: Stats): boolean {
+  if (!stat.isDirectory()) return false;
+  try { return lstatSync(join(source, "Local State")).isFile(); } catch { return false; }
+}
+
+/** Up to three of `paths`, for a note that names what was left out. */
+export const examplePaths = (paths: readonly string[]): string => `${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ", …" : ""}`;
+
+/** Python's bytecode cache, written again the next time the code runs. */
+export const bytecodeCache = (name: string, stat: Stats): boolean => name === "__pycache__" && (stat.isDirectory() || stat.isSymbolicLink());

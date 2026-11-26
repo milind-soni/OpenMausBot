@@ -11,6 +11,7 @@
 import { lstatSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import type { AttachmentReferences } from "../attachment-references.ts";
 import { baseBotId, isLayerId } from "../audience.ts";
 
 /** A file in attachments/, by its URL or by its path (as JSON escapes it) a sent document's tag carries. */
@@ -49,12 +50,13 @@ export interface DeleteLeftoversDeps {
     /** Set here: the store calls it before it tries to delete these conversations. */
     threadsGoing: (threadIds: readonly string[]) => void;
   };
-  /** Conversations whose messages still name this text (message-db.ts threadsReferencing). */
-  threadsReferencing(fragment: string): readonly string[];
+  /** Which uploads no remaining message names: one pass over the transcripts for them all (attachment-references.ts). */
+  references: Pick<AttachmentReferences, "removeUnreferenced">;
   /** Stored names something other than a transcript uses (pictures, routines' files, files on their way into a turn);
    * null while that cannot be read, and then no upload is removed. */
   keptAttachments(): ReadonlySet<string> | null;
-  deleteAttachment(name: string): void;
+  /** Removes these stored uploads, by name (attachments.ts deleteAttachments). */
+  deleteAttachments(names: readonly string[]): void;
   engineFolders(): EngineSessionFolders;
   layers: MemoryLayerRecords;
   /** Resolves once no git is running on the bot's checkpoints: Windows cannot remove a folder a process still has open. */
@@ -258,19 +260,42 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     }).join("\n");
   }
 
-  function removeAttachments(names: ReadonlySet<string>): void {
-    if (!names.size) return;
+  /** Of these names, the stored uploads nothing but a transcript may use: not a picture, a member's picture or a kept file.
+   * Null, with a warning, while what still uses uploads cannot be read. */
+  function removable(names: Iterable<string>): string[] | null {
     const kept = deps.keptAttachments();
-    if (!kept) return warn("delete leftovers: uploads stayed behind: what still uses them cannot be read right now");
+    if (!kept) { warn("delete leftovers: uploads stayed behind: what still uses them cannot be read right now"); return null; }
     const pictures = memberPictures();
+    const found: string[] = [];
     for (const name of names) {
       const path = join(attachments, name);
       if (name.includes("..") || basename(name) !== name || kept.has(name) || pictures.includes(name) || !plainlyUnder(dataDir, path)) continue;
-      attempt(`the upload ${name}`, () => {
-        if (!lstatSync(path, { throwIfNoEntry: false })?.isFile() || deps.threadsReferencing(name).length) return;
-        deps.deleteAttachment(name);
-      });
+      attempt(`the upload ${name}`, () => { if (lstatSync(path, { throwIfNoEntry: false })?.isFile()) found.push(name); });
     }
+    return found;
+  }
+
+  /** Asked again just before they go, since the pass gives the event loop back: a name something started using meanwhile stays. */
+  function removeNow(names: readonly string[]): number {
+    const going = removable(names) ?? [];
+    if (!going.length) return 0;
+    try {
+      deps.deleteAttachments(going);
+    } catch (error) {
+      for (const name of going) warn(`delete leftovers: the upload ${name} stayed behind: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+    return going.length;
+  }
+
+  /** Resolves once every upload no remaining message names has gone; never rejects. */
+  function removeAttachments(names: ReadonlySet<string>): Promise<void> {
+    if (!names.size) return Promise.resolve();
+    const candidates = removable(names);
+    if (!candidates?.length) return Promise.resolve();
+    return deps.references.removeUnreferenced(candidates, removeNow).then(() => {}, (error: unknown) => {
+      for (const name of candidates) warn(`delete leftovers: the upload ${name} stayed behind: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   function removeSessions(sessions: ReadonlySet<string>): void {
@@ -313,13 +338,15 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     }
   }
 
-  function flush(): void {
+  /** The uploads go after the rest, off this call: the promise resolves once they have. */
+  function flush(): Promise<void> {
     scheduled = false;
     const threads = new Map(gone);
     const bots = [...goneBots];
     gone.clear();
     goneBots.clear();
-    attempt("uploads", () => removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))));
+    let uploads = Promise.resolve();
+    attempt("uploads", () => { uploads = removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))); });
     attempt("engine sessions", () => removeSessions(new Set([...threads.values()].flatMap((found) => [...found.sessions]))));
     for (const threadId of threads.keys()) attempt(`box uploads of ${threadId}`, () => removeBoxUploads(threadId));
     for (const threadId of threads.keys()) attempt(`notes of ${threadId}`, () => removeThreadNotes(threadId));
@@ -329,12 +356,13 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
       attempt("conversation folders", () => folders.conversationsGone(threads.keys(), [...threads.values()].flatMap((found) => [...found.folders])));
       for (const botId of bots) if (!isLayerId(botId)) attempt(`conversation folders of ${botId}`, () => folders.botGone(botId));
     }
+    return uploads;
   }
 
   function schedule(): void {
     if (scheduled) return;
     scheduled = true;
-    defer(() => attempt("leftovers", flush));
+    defer(() => attempt("leftovers", () => void flush()));
   }
 
   deps.store.threadsGoing = (threadIds) => {
