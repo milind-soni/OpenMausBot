@@ -6223,5 +6223,6 @@
   "server.github.card.description": "Kết nối GitHub để {bot} có thể đẩy công việc lên kho mã của bạn.",
   "server.github.card.connectInApps": "Kết nối GitHub từ thẻ này trong ứng dụng trên máy tính, hoặc trong Ứng dụng.",
   "githubSignIn.title": "Đăng nhập GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "shortcuts.start-fresh": "Bắt đầu lại cuộc trò chuyện này (giữ nguyên tin nhắn)"
 }

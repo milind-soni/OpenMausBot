@@ -129,6 +129,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       icon: <RotateCcw size={16} />,
       disabled: bot.busy || contextAction.pending || !hasMessages || atFreshStart,
       title: t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint"),
+      trailing: <ShortcutHint id="start-fresh" />,
       onSelect: () => contextAction.run(`/api/bots/${profile.id}/start-fresh`, { threadId: bot.threadId }),
     },
     ...shareItems,
