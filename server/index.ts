@@ -465,8 +465,7 @@ import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import 
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createTeamMemoryRequests } from "./team-memory-requests.ts";
 import { createAgentCard } from "./chat-widgets.ts";
-import { createChatAppRoutes, createChatApps, createChatAppsMcp } from "./routes/chat-apps.ts";
-import { createConnectorGate } from "./connector-gate.ts"; import { botApproval } from "./chat-apps-mcp.ts"; import { createConnectorGateApps } from "./host/connector-gate-host.ts";
+import { botApproval, createChatAppRoutes, createChatApps, createChatAppsMcp, createConnectorGate, createConnectorGateApps } from "./routes/chat-apps.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts"; import { browserProfileLabel } from "./bot-browser-profile.ts";
 import { ModelRequestService } from "./model-requests.ts";

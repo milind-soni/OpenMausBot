@@ -12,7 +12,9 @@ import { pageRpc } from "./bot-page-rpc.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export { createChatApps };
-export { createChatAppsMcp } from "../chat-apps-mcp.ts";
+export { botApproval, createChatAppsMcp } from "../chat-apps-mcp.ts";
+export { createConnectorGate } from "../connector-gate.ts";
+export { createConnectorGateApps } from "../host/connector-gate-host.ts";
 
 export interface McpRpcRequest {
   auth: RequestAuth;
