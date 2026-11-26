@@ -1,0 +1,41 @@
+# TEMPORARY: which MCP tools Google's native Antigravity CLI shows its model on Windows, to settle whether a reported
+# "about 950 bytes per tool" limit is Windows-only. Downloads the CLI the app would install and runs
+# scripts/testing/antigravity-cli-probe.ts with no sign-in (a temporary home, a made-up key, a loopback stand-in model).
+# The table is in the job's summary and log; the RESULT line answers the question. Remove once answered.
+#
+# Runs on a pull request labelled `windows` (on open, label and push), or by hand:
+# `gh workflow run antigravity-cli-probe-windows.yml --ref <branch>`.
+name: Antigravity CLI probe (Windows, temporary)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: antigravity-cli-probe-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Antigravity CLI tool probe (windows-latest)
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'windows')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Probe the CLI
+        shell: bash
+        run: node scripts/testing/antigravity-cli-probe.ts
