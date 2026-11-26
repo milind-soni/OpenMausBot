@@ -15,6 +15,9 @@ import { TextItems } from "./text-items.ts";
 const INCOMPLETE_LOG_MESSAGE =
   "Canonical event history is incomplete: OpenMausBot could not write one or more events to disk. Live updates will continue.";
 
+const queueFullMessage = (droppedEvents: number, droppedBytes: number): string =>
+  `Canonical event history is incomplete: OpenMausBot's event queue overflowed and dropped ${droppedEvents} events (~${(droppedBytes / 1024 / 1024).toFixed(1)} MB of log lines) to keep up. Live updates will continue.`;
+
 const DELTA_MERGE_MS = 50;
 
 const MAX_BATCH_LINES = 64;
@@ -57,6 +60,8 @@ export class EventBus {
   private readonly appendLog: EventLogAppend;
   private queued: QueuedLog[] = [];
   private queuedBytes = 0;
+  private droppedEvents = 0;
+  private droppedBytes = 0;
   private pumping = false;
   private kickScheduled = false;
   private readonly drainWaiters: Array<() => void> = [];
@@ -172,12 +177,14 @@ export class EventBus {
     const overCount = this.queued.length >= MAX_QUEUED_EVENTS;
     const overBytes = this.queued.length > 0 && this.queuedBytes + bytes > MAX_QUEUED_BYTES;
     if ((overCount || overBytes) && !isTerminalEvent(event)) {
+      this.droppedEvents += 1;
+      this.droppedBytes += bytes;
       if (!this.queuedLogWarnings.has(event.threadId)) {
-        const warning = this.logWarning(event);
+        const warning = this.logWarning(event, queueFullMessage(this.droppedEvents, this.droppedBytes));
         this.queuedLogWarnings.set(event.threadId, warning);
         // Queued before delivery: listeners may publish synchronously.
         this.push(warning);
-        console.error("bus: canonical event log queue is full");
+        console.error(`bus: canonical event log queue is full; dropped ${this.droppedEvents} events so far`);
         this.deliver(warning);
       }
       return;
@@ -265,7 +272,7 @@ export class EventBus {
     }
   }
 
-  private logWarning(event: RuntimeEvent): RuntimeEvent {
+  private logWarning(event: RuntimeEvent, message = INCOMPLETE_LOG_MESSAGE): RuntimeEvent {
     return {
       eventId: newId(),
       provider: event.provider,
@@ -274,7 +281,7 @@ export class EventBus {
       createdAt: new Date().toISOString(),
       turnId: event.turnId,
       type: "runtime.error",
-      message: INCOMPLETE_LOG_MESSAGE,
+      message,
     };
   }
 

@@ -123,6 +123,26 @@ describe("EventBus", () => {
     expect(log).not.toContain("hunter2-held-value");
   });
 
+  it("blames the queue, not the disk, and counts the drops when the queue overflows", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const append = vi.fn(async () => { await held; });
+    const bus = new EventBus(append);
+    const seen: RuntimeEvent[] = [];
+    bus.subscribe((event) => seen.push(event));
+
+    // Fill past the 4,096-event bound with a stalled append so nothing drains.
+    const overflow = 4_098;
+    for (let i = 0; i < overflow; i++) bus.publish(testEvent({ eventId: `ev-${i}` }));
+    const full = seen.find((event) => event.type === "runtime.error");
+    expect(full?.message).toContain("queue overflowed and dropped");
+    expect(full?.message).not.toContain("could not write");
+    console.error = vi.fn();
+    release();
+    await bus.flush();
+    expect(append).toHaveBeenCalled();
+  }, 30_000);
+
   it("reports an incomplete log once while continuing live delivery", async () => {
     rmSync(EVENTS_DIR, { recursive: true, force: true });
     const bus = new EventBus();
