@@ -12243,7 +12243,7 @@ ROUTES.push(createComputerRoutes({
 ROUTES.push(createStatusRoutes({
   store, cfg,
   staticDir: STATIC_DIR,
-  sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown, records: privateRecords, boxOn: () => botBox.enabled(),
+  sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown, records: privateRecords, boxOn: () => botBox.enabled(), eventLogDrops: () => bus.dropStats(),
   browserEngineInstall: { get: () => browserEngineInstall, set: (install) => { browserEngineInstall = install; } },
   browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
 }));

@@ -15,12 +15,39 @@ import { TextItems } from "./text-items.ts";
 const INCOMPLETE_LOG_MESSAGE =
   "Canonical event history is incomplete: OpenMausBot could not write one or more events to disk. Live updates will continue.";
 
+const DROPPED_EVENT_MESSAGE =
+  "Canonical event history is incomplete: OpenMausBot dropped events because the event log queue was full; no disk write was attempted for them. Live updates will continue.";
+
 const DELTA_MERGE_MS = 50;
 
-const MAX_BATCH_LINES = 64;
+/** Lines per drain batch, queued events and bytes before new ones are dropped, and threads appended at once. */
+const EVENT_LOG_DEFAULTS = { batchLines: 64, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 8 };
 
-const MAX_QUEUED_EVENTS = 4096;
-const MAX_QUEUED_BYTES = 32 * 1024 * 1024;
+export interface EventLogLimits {
+  batchLines: number;
+  queueEvents: number;
+  queueBytes: number;
+  drainThreads: number;
+}
+
+export interface EventLogDrops {
+  events: number;
+  bytes: number;
+}
+
+/** A zero, negative or non-numeric setting falls back to its default rather than stopping the log. */
+export function eventLogLimits(env: Record<string, string | undefined> = process.env): EventLogLimits {
+  const positive = (raw: string | undefined, fallback: number) => {
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+  };
+  return {
+    batchLines: positive(env.OMB_EVENT_LOG_BATCH_LINES, EVENT_LOG_DEFAULTS.batchLines),
+    queueEvents: positive(env.OMB_EVENT_LOG_QUEUE_EVENTS, EVENT_LOG_DEFAULTS.queueEvents),
+    queueBytes: positive(env.OMB_EVENT_LOG_QUEUE_BYTES, EVENT_LOG_DEFAULTS.queueBytes),
+    drainThreads: positive(env.OMB_EVENT_LOG_DRAIN_THREADS, EVENT_LOG_DEFAULTS.drainThreads),
+  };
+}
 
 export type EventLogAppend = (
   path: string,
@@ -55,6 +82,8 @@ export class EventBus {
   private pendingLogWarnings = new Map<string, RuntimeEvent>();
   private pendingText = new Map<string, { event: TextDelta; timer: ReturnType<typeof setTimeout> }>();
   private readonly appendLog: EventLogAppend;
+  private readonly limits: EventLogLimits;
+  private readonly dropped: EventLogDrops = { events: 0, bytes: 0 };
   private queued: QueuedLog[] = [];
   private queuedBytes = 0;
   private pumping = false;
@@ -76,9 +105,15 @@ export class EventBus {
   private readonly textItems = new TextItems();
 
   /** `gate` sees each adapter event first; true means it took the event and publishes what it chooses. */
-  constructor(appendLog: EventLogAppend = defaultAppend, gate?: (event: RuntimeEvent) => boolean) {
+  constructor(appendLog: EventLogAppend = defaultAppend, gate?: (event: RuntimeEvent) => boolean, limits: EventLogLimits = eventLogLimits()) {
     this.appendLog = appendLog;
     this.gate = gate;
+    this.limits = limits;
+  }
+
+  /** Events the queue's bounds refused since this bus started, and their size. Never counted as disk failures. */
+  dropStats(): EventLogDrops {
+    return { ...this.dropped };
   }
 
   attach(instances: ProviderInstance[]) {
@@ -169,11 +204,13 @@ export class EventBus {
     // People paste this log into bug reports: scrub credential-shaped content as the native tee does.
     const line = JSON.stringify(redactSecrets(event));
     const bytes = Buffer.byteLength(line);
-    const overCount = this.queued.length >= MAX_QUEUED_EVENTS;
-    const overBytes = this.queued.length > 0 && this.queuedBytes + bytes > MAX_QUEUED_BYTES;
+    const overCount = this.queued.length >= this.limits.queueEvents;
+    const overBytes = this.queued.length > 0 && this.queuedBytes + bytes > this.limits.queueBytes;
     if ((overCount || overBytes) && !isTerminalEvent(event)) {
+      this.dropped.events += 1;
+      this.dropped.bytes += bytes;
       if (!this.queuedLogWarnings.has(event.threadId)) {
-        const warning = this.logWarning(event);
+        const warning = this.logWarning(event, DROPPED_EVENT_MESSAGE);
         this.queuedLogWarnings.set(event.threadId, warning);
         // Queued before delivery: listeners may publish synchronously.
         this.push(warning);
@@ -232,19 +269,26 @@ export class EventBus {
   }
 
   private async drain(): Promise<void> {
-    if (this.queued.length === 0) return;
-    const batch = this.queued.splice(0, MAX_BATCH_LINES);
-    let bytes = 0;
-    for (const item of batch) bytes += item.bytes;
-    this.queuedBytes -= bytes;
-    const groups: { threadId: string; items: QueuedLog[] }[] = [];
-    for (const item of batch) {
-      const last = groups.at(-1);
-      if (last && last.threadId === item.event.threadId) last.items.push(item);
-      else groups.push({ threadId: item.event.threadId, items: [item] });
+    while (this.queued.length > 0) {
+      const batch = this.queued.splice(0, this.limits.batchLines);
+      let bytes = 0;
+      for (const item of batch) bytes += item.bytes;
+      this.queuedBytes -= bytes;
+      // One append per thread per batch, so its lines keep publication order; different threads append at the same time.
+      const groups = new Map<string, QueuedLog[]>();
+      for (const item of batch) {
+        const items = groups.get(item.event.threadId);
+        if (items) items.push(item);
+        else groups.set(item.event.threadId, [item]);
+      }
+      const pending = [...groups.entries()];
+      const workers = Math.min(this.limits.drainThreads, pending.length);
+      await Promise.all(Array.from({ length: workers }, async () => {
+        for (let group = pending.shift(); group; group = pending.shift()) {
+          await this.appendGroup(group[0], group[1]);
+        }
+      }));
     }
-    for (const group of groups) await this.appendGroup(group.threadId, group.items);
-    if (this.queued.length > 0) await this.drain();
   }
 
   private async appendGroup(threadId: string, items: QueuedLog[]): Promise<void> {
@@ -265,7 +309,7 @@ export class EventBus {
     }
   }
 
-  private logWarning(event: RuntimeEvent): RuntimeEvent {
+  private logWarning(event: RuntimeEvent, message: string): RuntimeEvent {
     return {
       eventId: newId(),
       provider: event.provider,
@@ -274,14 +318,14 @@ export class EventBus {
       createdAt: new Date().toISOString(),
       turnId: event.turnId,
       type: "runtime.error",
-      message: INCOMPLETE_LOG_MESSAGE,
+      message,
     };
   }
 
   /** Never through publish(): that would retry the same failed write and recurse. */
   private noteDiskFailure(event: RuntimeEvent, error: unknown) {
     if (this.pendingLogWarnings.has(event.threadId)) return;
-    const warning = this.logWarning(event);
+    const warning = this.logWarning(event, INCOMPLETE_LOG_MESSAGE);
     this.pendingLogWarnings.set(event.threadId, warning);
     console.error("bus: canonical event log write failed", error);
     this.deliver(warning);
