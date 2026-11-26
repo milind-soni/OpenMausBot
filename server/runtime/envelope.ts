@@ -2,7 +2,7 @@
 // JSON-encoded, so it cannot start a line that reads as the harness or the user.
 import { HOST_FAULT_WHY, type HostFault } from "../host-fault.ts";
 import { CONSENT_RULE, escapeNotes, quoteInNote } from "../peer-provenance.ts";
-import { AUTHORITY, botWho, fromNote, type Authority } from "../provenance-label.ts";
+import { AUTHORITY, botWho, fromNote, HARNESS_WHO, type Authority } from "../provenance-label.ts";
 import { personOnly, requesterDecides, withDefault } from "./questions.ts";
 import type { Assignment, EnvelopeNames, Level, OriginSource, TurnEvidence } from "./types.ts";
 
@@ -227,6 +227,18 @@ export function composeAddition(id: string, requester: string, text: string, aut
     fromNote(botWho(label(requester, "your requester")), `addition to assignment ${label(id, "unknown")}, while you work on it`, authority),
     JSON.stringify(escapeEnvelope(text)),
     `It is part of ${who}'s brief for this work: take it into what you are doing now. Your one reply when you finish still goes to ${who}.`,
+  ].join("\n");
+}
+
+/** The requester's note that work it handed on has shown nothing for `quietMinutes`: the command it runs, if any, when it is
+ * stopped, and how to stop it now. */
+export function composeQuiet(id: string, assignee: string, quietMinutes: number, closesInMinutes: number, command?: { command: string; minutes: number } | null): string {
+  const who = `@${label(assignee, "your teammate")}`;
+  const ref = label(id, "unknown");
+  return [
+    fromNote(HARNESS_WHO, `no progress on assignment ${ref}`, AUTHORITY.info),
+    `${who} has shown no progress for ${count(quietMinutes, "minute")} on the work you handed on${command ? `; it is still running ${JSON.stringify(quote(command.command, QUOTE_MAX))}, for ${count(command.minutes, "minute")}` : ""}.`,
+    `If nothing moves it is stopped in ${count(Math.max(1, closesInMinutes), "minute")} and fails as stalled. To stop it now, mid-command included, call coordinate_bots with bot_ids ["${label(assignee, "your teammate")}"], stop "${ref}" and why in message. Otherwise do nothing: its result still comes back to you.`,
   ].join("\n");
 }
 

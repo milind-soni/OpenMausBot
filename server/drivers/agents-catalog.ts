@@ -188,6 +188,7 @@ const TOOL_DEFINITIONS = [
       consult: { type: "boolean", description: "True for a question answered from what they know, acting on nothing." },
       done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it." },
       answers: { type: "string", description: "Only to answer a teammate's question: the assignment id its note names; message is the answer." },
+      stop: { type: "string", description: "Stop work you handed on now, a running command included: its requestId; say why in message." },
       files: { type: "array", items: { type: "string" }, maxItems: 5, description: "Paths as for attach_file, 100 MB together: copied into each teammate's inbox. Files a teammate attaches with attach_file come back with its result." },
     }, required: ["bot_ids", "message"] },
   },

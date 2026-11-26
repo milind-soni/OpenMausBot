@@ -335,6 +335,12 @@ export interface TurnRunner {
   /** The assignee lives in a place that cannot be reached now (a computer that is off or asleep). Queued work for it is
    * held by no window: neither the queue bound nor the tree's stall window runs while this is true. */
   away?(a: Assignment): boolean;
+  /** The running turn of handed-off `a` waits on a person or a computer, or the host cannot see it: silence then is not
+   * a stall, and the handoffQuiet windows do not end it. */
+  waiting?(a: Assignment): boolean;
+  /** Handed-off `a` has shown no activity for `quietMs` and fails as stalled in `closesInMs`: tell its requester, who
+   * may stop it. Once per quiet stretch. */
+  quiet?(a: Assignment, parent: Assignment | undefined, quietMs: number, closesInMs: number): void;
 }
 
 export interface Clock {
@@ -369,6 +375,13 @@ export interface Limits {
   /** How long that work waits before the person is reminded of it, once. The rest of inputWaitMs always follows the
    * reminder, however late a restart let it go out. Infinite: no reminder. */
   inputRemindMs: number;
+  /** Handed-off work whose running turn shows no activity for this long: its requester is told once per quiet stretch
+   * (TurnRunner.quiet), so it can stop that work. Infinite: never. */
+  handoffQuietNoticeMs: number;
+  /** Handed-off work whose running turn shows no activity for this long fails as stalled and its turn is aborted, a
+   * command still running included, unless the host says the turn waits on a person or a computer (TurnRunner.waiting).
+   * Infinite: never. */
+  handoffQuietMaxMs: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -383,6 +396,8 @@ export const DEFAULT_LIMITS: Limits = {
   turnStallMs: 20 * 60_000,
   inputWaitMs: Number.POSITIVE_INFINITY,
   inputRemindMs: Number.POSITIVE_INFINITY,
+  handoffQuietNoticeMs: Number.POSITIVE_INFINITY,
+  handoffQuietMaxMs: Number.POSITIVE_INFINITY,
 };
 
 export interface LiveEdge {

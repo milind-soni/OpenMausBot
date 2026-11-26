@@ -183,6 +183,10 @@
             "type": "string",
             "description": "Only to answer a teammate's question: the assignment id its note names; message is the answer."
           },
+          "stop": {
+            "type": "string",
+            "description": "Stop work you handed on now, a running command included: its requestId; say why in message."
+          },
           "files": {
             "type": "array",
             "items": {
