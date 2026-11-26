@@ -4476,7 +4476,7 @@
   "room.feed.attachment": "Ein Anhang",
   "room.feed.you": "Du",
   "room.feed.empty": "Noch keine Threads. Schreib unten, um einen zu beginnen.",
-  "room.feed.splitHint": "Bitte einen Bot, große Aufgaben in Threads aufzuteilen",
+  "room.feed.splitHint": "Bitte einen Bot, große Aufgaben in Threads aufzuteilen.",
   "room.work.upNext": "Als Nächstes",
   "room.work.working": "In Arbeit",
   "room.work.botWorking": "{name} arbeitet",

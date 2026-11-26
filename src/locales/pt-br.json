@@ -12116,7 +12116,7 @@
   "room.feed.attachment": "Um anexo",
   "room.feed.you": "Você",
   "room.feed.empty": "Nenhuma conversa ainda. Escreva abaixo para começar uma.",
-  "room.feed.splitHint": "Peça a um bot para dividir trabalhos grandes em conversas",
+  "room.feed.splitHint": "Peça a um bot para dividir trabalhos grandes em conversas.",
   "room.work.upNext": "A seguir",
   "room.work.working": "Em andamento",
   "room.work.botWorking": "{name} trabalhando",

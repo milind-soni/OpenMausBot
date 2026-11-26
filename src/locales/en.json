@@ -12116,7 +12116,7 @@
   "room.feed.attachment": "An attachment",
   "room.feed.you": "You",
   "room.feed.empty": "No threads yet. Write below to start one.",
-  "room.feed.splitHint": "Ask a bot to split big work into threads",
+  "room.feed.splitHint": "Ask a bot to split big work into threads.",
   "room.work.upNext": "Up next",
   "room.work.working": "In progress",
   "room.work.botWorking": "{name} working",

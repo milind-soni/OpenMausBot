@@ -23,9 +23,9 @@ const item = (threadId: string, extra: Partial<BoardItem>): BoardItem => ({ thre
 const BOTS = [{ id: "writer", name: "Writer" }];
 
 let root: Root | null = null;
-let seen = new Map<string, { label: string }>();
+let seen: ReadonlyMap<string, { label: string }> = new Map();
 function Probe({ groupId }: { groupId: string }) {
-  seen = useRoomWorkStatuses(groupId, BOTS) as Map<string, { label: string }>;
+  seen = useRoomWorkStatuses(groupId, BOTS);
   return null;
 }
 const mount = async () => {
