@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 
 import { botShowsUnread } from "@/lib/bot-unread";
 import { withOtherPlace, type PlacedBot } from "@/lib/place-rows";
+import { roomThreadAttention } from "@/lib/room-threads";
 import { nextUnreadHold, partitionSidebarBots, unreadFilterOrder, unreadFilterSince, unreadSinceByBot, withPrimaryTile, type UnreadHold } from "@/lib/sidebar-layout";
 import { newChatThreadId } from "@/state/new-chat";
-import type { Bot } from "@/state/store";
+import type { Bot, Group } from "@/state/store";
 
 import { EFFECTS } from "./CursorAvatar";
 
@@ -62,22 +63,40 @@ export function unreadFilterBots(
   return [...(listed.unsectionedChief ? [listed.unsectionedChief] : []), ...listed.sectionChiefs, ...listed.sectionedBots, ...listed.unsectionedBots];
 }
 
-/** The sidebar's Unread filter: how many of `bots` show unread or wait on the person, and while it is open, those bots
- * in a fixed order. The open bot stays listed until another conversation is open. Nothing is saved; it starts closed. */
-export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null) {
+/** Each room showing unread or with a conversation waiting on the person, with the time the Unread filter lists it by:
+ * its newest unread or waiting conversation, else its last message. Archived conversations do not count. */
+export function unreadFilterRoomSince(groups: readonly Group[], bots: readonly Pick<Bot, "id" | "activity">[]): Map<string, number> {
+  return new Map(groups.flatMap((group) => {
+    const marked = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).filter((task) => {
+      if (task.archivedAt !== undefined) return false;
+      const { waiting, unread } = roomThreadAttention(group, task, bots);
+      return waiting || (group.unread && unread);
+    });
+    if (!group.unread && marked.length === 0) return [];
+    const at = marked.length > 0 ? Math.max(...marked.map((task) => task.updatedAt ?? task.createdAt)) : group.messages.at(-1)?.at ?? 0;
+    return [[group.id, at] as const];
+  }));
+}
+
+export type UnreadFilterRow = { bot: Bot; group?: undefined } | { group: Group; bot?: undefined };
+
+/** The sidebar's Unread filter: how many of `bots` and `rooms` show unread or wait on the person, and while it is open,
+ * those rows in a fixed order, bots and rooms together. The open bot or room stays listed until another conversation is
+ * open. Nothing is saved; it starts closed. `speakers` are the bots a room's wait is read from. */
+export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null, rooms: readonly Group[] = [], speakers: readonly Bot[] = bots) {
   const [open, setOpen] = useState(false);
-  const since = unreadFilterSince(bots, waiting);
-  const shown = bots.find((bot) => bot.id === openId);
-  const chat = shown?.switchingTo ?? shown?.threadId;
+  const since = new Map([...unreadFilterSince(bots, waiting), ...unreadFilterRoomSince(rooms, speakers)]);
+  const byId = new Map<string, UnreadFilterRow>([...rooms.map((group) => [group.id, { group }] as const), ...bots.map((bot) => [bot.id, { bot }] as const)]);
+  const shown = openId === null ? undefined : byId.get(openId);
+  const chat = shown?.bot ? shown.bot.switchingTo ?? shown.bot.threadId : shown?.group.threadId;
   const [seen, setSeen] = useState<{ since: ReadonlyMap<string, number>; held: UnreadHold | null; order: string[] }>({ since, held: null, order: [] });
   const held = open ? nextUnreadHold(seen.held, openId, seen.since, chat) : null;
   const order = open ? unreadFilterOrder(seen.order, since, held) : [];
   if (held !== seen.held || !sameTimes(since, seen.since) || !sameIds(order, seen.order)) setSeen({ since, held, order });
-  const byId = new Map(bots.map((bot) => [bot.id, bot]));
   return {
     open,
     count: since.size,
-    bots: order.flatMap((id) => byId.get(id) ?? []),
+    rows: order.flatMap((id) => byId.get(id) ?? []),
     toggle: () => setOpen((value) => !value),
   };
 }

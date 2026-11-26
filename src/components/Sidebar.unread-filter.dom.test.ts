@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Bot } from "@/state/store";
+import type { Bot, Group } from "@/state/store";
 import type { PlaceBotRow, PlacesTogetherState } from "@/lib/places-together";
 
 const mode = vi.hoisted(() => ({ advanced: false }));
@@ -35,16 +35,23 @@ const unread = (id: string, at: number) => bot(id, { unread: true, messages: [{ 
   tasks: [{ threadId: `${id}-t`, title: "Chat", createdAt: 1, updatedAt: at, unread: true }] });
 
 let host: HTMLDivElement, root: Root;
-const tree = (bots: Bot[], selectedId: string) => createElement(BotEditorStore, {
-  value: { state: { ...initialState, connected: true, bots, selectedId }, dispatch: vi.fn(),
+const tree = (bots: Bot[], selectedId: string, groups: Group[]) => createElement(BotEditorStore, {
+  value: { state: { ...initialState, connected: true, bots, groups, selectedId }, dispatch: vi.fn(),
     flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} },
   children: createElement(Sidebar, { open: true, onClose: () => {} }),
 });
-async function render(bots: Bot[], selectedId = "") {
-  await act(async () => root.render(tree(bots, selectedId)));
+async function render(bots: Bot[], selectedId = "", groups: Group[] = []) {
+  await act(async () => root.render(tree(bots, selectedId, groups)));
   await act(async () => { await Promise.resolve(); });
 }
 const ids = () => [...host.querySelectorAll<HTMLElement>("[data-sidebar-bot-row]")].map((item) => item.dataset.sidebarBotRow);
+const room = (id: string, at: number, extra: Partial<Group> = {}): Group => ({
+  id, threadId: `${id}-t`, name: id[0]!.toUpperCase() + id.slice(1), memberIds: [], defaultResponder: "chief", bulletin: "", unread: false, createdAt: 1,
+  messages: [{ id: `${id}-m`, role: "bot", kind: "text", text: "hi", at }], tasks: [{ threadId: `${id}-t`, title: "Chat", createdAt: 1, updatedAt: at }], ...extra,
+} as Group);
+const unreadRoom = (id: string, at: number) => room(id, at, { unread: true, tasks: [{ threadId: `${id}-t`, title: "Chat", createdAt: 1, updatedAt: at, unread: true }] });
+const rows = () => [...host.querySelectorAll<HTMLElement>("[data-sidebar-bot-row], [data-sidebar-group-row]")]
+  .map((item) => item.dataset.sidebarBotRow ?? `room:${item.dataset.sidebarGroupRow}`);
 const shown = () => { const seen = ids(); return { seen, once: new Set(seen).size === seen.length }; };
 const row = (id: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home: "cloud", id, threadId: `t-${id}`, name: id[0]!.toUpperCase() + id.slice(1), color: "blue", ...over });
 const cloud = (bots: PlaceBotRow[]): PlacesTogetherState => ({ v: 1, available: true, on: true, here: "computer", other: { home: "cloud", state: "ready", bots } });
@@ -230,5 +237,58 @@ describe("the sidebar's Unread filter", () => {
     expect(filter().dataset.sidebarUnreadFilter).toBe("1");
     await click();
     expect(shown()).toEqual({ seen: ["pip", "ben"], once: true });
+  });
+  describe("with rooms", () => {
+    const bots = [bot("ann"), unread("ben", 20), unread("eve", 40)];
+    const waits = room("ops", 10, { tasks: [{ threadId: "ops-t", title: "Chat", createdAt: 1, updatedAt: 10, activity: "waiting-on-you" }] });
+    const rooms = [unreadRoom("dev", 30), room("quiet", 50), waits];
+    const type = async (text: string) => act(async () => {
+      const search = host.querySelector<HTMLInputElement>('input[aria-label="Search bots and messages"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, text);
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    it("counts and lists unread and waiting rooms among the bots in one fixed order, and gives the list back", async () => {
+      mode.advanced = true;
+      await render(bots, "", rooms);
+      const all = rows();
+      expect(filter().dataset.sidebarUnreadFilter).toBe("4");
+      await click();
+      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve"]);
+      await render(bots, "", [...rooms, unreadRoom("late", 5)]);
+      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve", "room:late"]);
+      await click();
+      await render(bots, "", rooms);
+      expect(rows()).toEqual(all);
+    });
+
+    it("leaves an archived conversation's wait out", async () => {
+      await render([bot("ann")], "", [room("old", 10, { tasks: [{ threadId: "old-t", title: "Chat", createdAt: 1, archivedAt: 5, activity: "waiting-on-you" }] })]);
+      expect(filter().dataset.sidebarUnreadFilter).toBe("0");
+    });
+
+    it("keeps an opened room until another conversation is open", async () => {
+      mode.advanced = true;
+      await render(bots, "", rooms);
+      await click();
+      const read = [room("dev", 30), room("quiet", 50), waits];
+      await render(bots, "dev", read);
+      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve"]);
+      await render(bots, "ann", read);
+      expect(rows()).toEqual(["room:ops", "ben", "eve"]);
+    });
+
+    it("keeps an open room and the order through a search that leaves it out", async () => {
+      mode.advanced = true;
+      await render(bots, "", rooms);
+      await click();
+      const read = [room("dev", 30), room("quiet", 50), waits];
+      await render(bots, "dev", read);
+      await type("eve");
+      await type("");
+      expect(rows()).toEqual(["room:ops", "ben", "room:dev", "eve"]);
+      await render(bots, "eve", read);
+      expect(rows()).toEqual(["room:ops", "ben", "eve"]);
+    });
   });
 });
