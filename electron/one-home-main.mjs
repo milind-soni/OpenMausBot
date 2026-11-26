@@ -153,6 +153,10 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
   const send = installCloudSend({ ...sendDeps, t, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(init?.timeoutMs ?? 30_000) }),
     move: () => (home?.view() === null && other()?.view() ? other() : home), teamMove: () => teamMove, botMove: () => botMove, moveSession });
   teamMove = installTeamMove({ t, ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, pageOrigin: sendDeps.pageOrigin, confirmMove: sendDeps.confirmMove, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
+    // This computer's bots are its own to move into a team unless they are on their way to, or live on, My Cloud or a
+    // server of the person's own.
+    computer: { request: (route, init = {}) => localRequest(route, { signal: AbortSignal.timeout(120_000), ...init }),
+      available: () => { const moving = parseJournal(journal.read()); return (!moving || moving.phase === "back") && !other()?.active(); } },
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);

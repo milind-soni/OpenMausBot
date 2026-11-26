@@ -246,10 +246,10 @@ it("a bot whose name Acme already uses arrives as \"Scout (Ada)\"", async () => 
   expect((await teamBots("ben")).find((entry) => entry.id === scout.bot.id)?.name).toBe("Scout");
 }, hostTimeout(180_000));
 
-it("refuses a team the person isn't in, any page but My Cloud's, and Ada leaving Acme mid-move lets the bot go on on My Cloud", async () => {
+it("refuses a team the person isn't in, any page but My Cloud's or this computer's, and Ada leaving Acme mid-move lets the bot go on on My Cloud", async () => {
   const pip = (await fx.onCloud("POST", "/api/bots", { name: "Pip", soul: "Pip." })).body.bot as Bot;
   await expect(ask("cloud-send:team-move", "cloud", pip.id, "team-beta-9", "Pip")).rejects.toThrow("You're not in that team.");
-  await expect(ask("cloud-send:team-move", "local", pip.id, ACME.id, "Pip")).rejects.toThrow(/only available on My Cloud/);
+  await expect(ask("cloud-send:team-move", undefined as never, pip.id, ACME.id, "Pip")).rejects.toThrow(/only available on My Cloud or this computer/);
   expect((await ask<{ teams: unknown[] }>("cloud-send:teams", "cloud")).teams).toEqual([{ ...ACME, ready: true }]);
   // Removed from Acme while My Cloud holds Pip (the app killed right then): Pip goes on on My Cloud, and the move stops.
   const listed = fx.account.state.teams;
