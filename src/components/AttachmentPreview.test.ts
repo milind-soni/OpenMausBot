@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
+  AttachedFileChip,
   AttachedFileChips,
   AttachedImageGallery,
   AttachmentPreviewDialog,
@@ -363,5 +364,15 @@ describe("image preview copy button", () => {
       await preview.close();
       vi.unstubAllGlobals();
     }
+  });
+  it("allows callers to override max-width with max-w-none without sm:max-w-[280px] collision", () => {
+    const file = { name: "video_recording.mp4", path: "/workspace/video_recording.mp4", private: true };
+    const html = renderToStaticMarkup(createElement(AttachedFileChip, {
+      file,
+      message: { threadId: "t1", messageId: "m1" },
+      className: "max-w-none rounded-none border-0",
+    }));
+    expect(html).toContain("max-w-none");
+    expect(html).not.toContain("sm:max-w-[280px]");
   });
 });
