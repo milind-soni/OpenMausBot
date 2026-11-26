@@ -10,6 +10,7 @@ import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
+import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -255,13 +256,21 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
           return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
         }
+        const primary = normalizedSelection ?? existingBot?.modelSelection;
+        const primaryEngine = primary ? registry.get(primary.instanceId) : null;
         const chain: ModelSelection[] = [];
         for (const entry of body.fallback as unknown[]) {
           const row = entry && typeof entry === "object" ? (entry as Partial<Record<keyof ModelSelection, unknown>>) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
-          if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
+          const backupEngine = registry.get(row.instanceId);
+          if (!backupEngine) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
+          const capability = primaryEngine && recoveryCapabilityError(
+            { driverKind: primaryEngine.driverKind, capabilities: primaryEngine.adapter.capabilities },
+            { driverKind: backupEngine.driverKind, capabilities: backupEngine.adapter.capabilities },
+          );
+          if (capability) return json(res, 400, { error: capability });
           const model = row.model.trim();
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
           if (row.effort === undefined && row.variant === undefined) {

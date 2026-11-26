@@ -633,8 +633,10 @@ describe("PATCH /api/bots/:id unread", () => {
 });
 
 describe("PATCH /api/bots/:id fallback", () => {
+  const engineOf = (engines: Record<string, unknown>) =>
+    (instanceId: string) => (engines[instanceId] as ProviderInstance | undefined) ?? null;
   it("checks a backup's reasoning as a model choice is checked, saves what that check returns, and passes plain rows as before", async () => {
-    const engine = { instanceId: "codex", driverKind: "codex", enabled: true } as unknown as ProviderInstance;
+    const engine = { instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
     const checkedModelSelection = vi.fn((raw: unknown) => {
       const row = raw as ModelSelection;
       return row.effort === ("turbo" as never)
@@ -660,5 +662,34 @@ describe("PATCH /api/bots/:id fallback", () => {
     ]);
     // A row with no reasoning is saved as it was, without the model check a reasoning choice needs.
     expect(checkedModelSelection).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a backup the takeover path would refuse, and leaves the saved chain unchanged", async () => {
+    const { store, bot, patch } = fixture({
+      registry: { get: engineOf({
+        codex: { instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: {} } },
+        "openai-compat": { instanceId: "openai-compat", driverKind: "openai-compat", enabled: true, adapter: { capabilities: {} } },
+      }) },
+    });
+    store.patchBot(bot.id, { modelSelection: { instanceId: "codex", model: "gpt-6" } });
+    expect((await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6-mini" }] })).status).toBe(200);
+
+    const refused = await patch(bot.id, { fallback: [{ instanceId: "openai-compat", model: "gpt-6.2" }] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe("The backup cannot use the same workspace.");
+    expect(store.bot(bot.id)?.fallback).toEqual([{ instanceId: "codex", model: "gpt-6-mini" }]);
+  });
+
+  it("still saves a backup that can take over from the bot's engine", async () => {
+    const { bot, patch } = fixture({
+      registry: { get: engineOf({
+        claude: { instanceId: "claude", driverKind: "claude", enabled: true, adapter: { capabilities: {} } },
+        codex: { instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: {} } },
+      }) },
+    });
+
+    const saved = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6-mini" }] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.bot.fallback).toEqual([{ instanceId: "codex", model: "gpt-6-mini" }]);
   });
 });
