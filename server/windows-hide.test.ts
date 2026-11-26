@@ -143,12 +143,14 @@ function callSites(src: string, names: Set<string>): Site[] {
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
       const open = m.index + m[0].length - 1;
-      let depth = 0;
-      let text = src.slice(open + 1, open + 400);
-      for (let i = open; i < src.length && i - open < 8_000; i++) {
-        if (src[i] === "(") depth++;
-        else if (src[i] === ")") { depth--; if (depth === 0) { text = src.slice(open + 1, i); break; } }
-      }
+      const source = ts.createSourceFile("call.ts", `f${src.slice(open)}`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const findCall = (node: ts.Node): ts.CallExpression | undefined => {
+        if (node.pos !== 0) return;
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) return node;
+        return ts.forEachChild(node, findCall);
+      };
+      const call = findCall(source);
+      const text = call ? source.text.slice(2, call.arguments.end) : src.slice(open + 1, open + 400);
       sites.push({ line: src.slice(0, m.index).split("\n").length, api: m[1]!, text });
     }
   };
@@ -194,6 +196,8 @@ describe("windows console hiding", () => {
     'spawn("cmd.exe", [], { env: { windowsHide: true } })',
     'spawn("cmd.exe", [], { windowsHide: true, windowsHide: false })',
     'spawn("cmd.exe", [], { windowsHide: true, ...other })',
+    'spawn("cmd.exe", [], { windowsHide: true, note: ")", ...{ windowsHide: false } })',
+    `spawn("cmd.exe", [], { windowsHide: true, note: "${"x".repeat(8_000)}", ...{ windowsHide: false } })`,
     'spawn("cmd.exe", [], { ...OWN_GROUP, windowsHide: false })',
     'spawn("cmd.exe", [], { note: "windowsHide: true" })',
     'spawn({ windowsHide: true }, [])',
@@ -206,6 +210,11 @@ describe("windows console hiding", () => {
   it.each([
     'spawn("cmd.exe", [], { windowsHide: true })',
     'spawn("cmd.exe", [], { ...OWN_GROUP })',
+    'import * as cp from "node:child_process"; const run = promisify(cp.execFile); run("cmd.exe", [")"], { windowsHide: true })',
+    'spawn("cmd.exe", [`run ${f(")")}`], { windowsHide: true })',
+    'spawn("cmd.exe", [")"], { windowsHide: true }).once("error", onError)',
+    'spawn("cmd.exe", [")"], { windowsHide: true }) as ChildProcess',
+    'spawn("cmd.exe", [/\\)/], { windowsHide: true })',
   ])("accepts an enabled hiding option", (src) => {
     const site = callSites(src, trackedNames(src))[0];
     expect(site && hidesConsole(site.text)).toBe(true);
