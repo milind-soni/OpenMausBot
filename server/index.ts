@@ -49,7 +49,7 @@ import { signInCardResumePrompt, signInCardWaits, signInOutcome } from "../share
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { createPlaceMoves, type ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts"; import { dispatchExternalApprovalReview, externalApprovalReviewerConfig, extractEffectiveToolName } from "./external-approval-reviewer.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts"; import { dispatchExternalApprovalReview, externalApprovalReviewerConfig, extractEffectiveToolName, prewarmExternalApprovalReviewer } from "./external-approval-reviewer.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey, providerToolConfig, savedToolGrant } from "./provider-tool-allow.ts";
@@ -6363,7 +6363,7 @@ bus.subscribe((event: RuntimeEvent) => {
     case "turn.started":
       turnStartedAt.set(event.threadId, Date.now());
       // A stop that never saw its turn.completed must not pass for this turn.
-      stoppedTurns.delete(event.threadId); personStops.turnStarted(event.threadId, event.turnId);
+      stoppedTurns.delete(event.threadId); personStops.turnStarted(event.threadId, event.turnId); if (bot && bot.autoApprove !== false) { const extPreCfg = externalApprovalReviewerConfig(cfg); if (extPreCfg.enabled) prewarmExternalApprovalReviewer(extPreCfg); }
       break;
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
