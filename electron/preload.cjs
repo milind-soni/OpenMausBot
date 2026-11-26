@@ -586,8 +586,11 @@ const bridge = {
     dismiss: signature => ipcRenderer.invoke("cloud-send:dismiss", String(signature)),
     moveRetry: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:move-retry") : Promise.reject(new Error("Choose Try again to move.")),
-    // My Cloud's page: a bot of its moving into one of its person's teams.
+    // My Cloud's page, or this computer's: a bot of that place moving into one of its person's teams.
     teams: () => ipcRenderer.invoke("cloud-send:teams"),
+    teamChoices: () => ipcRenderer.invoke("cloud-send:team-choices"),
+    moveToTeamMany: (ids, teamId) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-move-many", Array.isArray(ids) ? ids.map(String) : [], String(teamId)) : Promise.reject(new Error("Choose Move to move the bots.")),
     moveToTeam: (botId, teamId, name) => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-move", String(botId), String(teamId), String(name ?? "")) : Promise.reject(new Error("Choose Move to move the bot.")),
     moveToTeamCoded: (botId, teamId, name) => navigator.userActivation?.isActive === true
@@ -595,10 +598,12 @@ const bridge = {
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
-    // A team's own page: its person's bots on My Cloud, and one moved in once they agree in main's own confirm.
+    // A team's own page: its person's bots on My Cloud and on this computer, moved in once they agree in main's own confirm.
     teamBring: () => ipcRenderer.invoke("cloud-send:team-bring"),
-    teamBringMove: botId => navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
+    teamBringMove: (botId, from) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId), from === "computer" ? "computer" : "cloud") : Promise.reject(new Error("Choose Move to move the bot.")),
+    teamBringMany: ids => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:team-bring-many", Array.isArray(ids) ? ids.map(String) : []) : Promise.reject(new Error("Choose Move to move the bots.")),
     teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
     // Which of this computer's bots move to My Cloud: asked on either page, and only from the person's click on My Cloud's.
     botMoveState: () => ipcRenderer.invoke("cloud-send:bot-move-state"),

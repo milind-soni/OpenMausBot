@@ -66,12 +66,16 @@ it("says how the move goes on My Cloud's page: on its way with nothing to press,
   expect(changed).toHaveBeenLastCalledWith(null);
 });
 
-it("the strip shows a bot's move into a team on My Cloud's page only", async () => {
+it("the strip shows the move into a team main sends the page, on My Cloud's page or this computer's", async () => {
   const value = { ...notice, teamMove: { bot: { id: "scout", name: "Scout" }, team: ACME, phase: "moving" as const } };
   page.notice = vi.fn().mockResolvedValue(value);
   const strip = (cloudHome: boolean) => () => CloudSendStrip({ cloudHome });
   html(strip(true)); for (const effect of f.effects) effect(); await flush();
   expect(html(strip(true))).toContain("Moving Scout to Acme…");
+  expect(html(strip(false))).toContain("Moving Scout to Acme…");
+  page.notice = vi.fn().mockResolvedValue(notice);
+  f.values = [];
+  html(strip(false)); for (const effect of f.effects) effect(); await flush();
   expect(html(strip(false))).toBe("");
 });
 
@@ -196,4 +200,45 @@ it("a new page and an older main without the coded bridge: main's English", asyn
   page.moveToTeam = vi.fn().mockRejectedValue(new Error("Error invoking remote method 'cloud-send:team-move': Error: You're not in that team."));
   expect(page.moveToTeamCoded).toBeUndefined();
   expect((await confirmMove()).html).toContain("You're not in that team.");
+});
+
+it("on this computer's page the confirm says what stays on this computer, and Move several bots… swaps it for the chooser with this bot ticked", async () => {
+  page.teams = vi.fn().mockResolvedValue({ teams: [{ ...ACME, ready: true }], from: "computer" });
+  const moveToTeamMany = vi.fn().mockResolvedValue({ view: null });
+  Object.assign(page, { moveToTeamMany });
+  const blockedFrom: string[] = [];
+  const menu = () => useMoveToTeam({ blocked: (_bot, from) => { blockedFrom.push(from); return undefined; } });
+  const items: Array<{ onClick?: () => void }> = [];
+  f.index = 0; let hook = menu(); for (const effect of f.effects) effect(); await flush();
+  f.index = 0; hook = menu();
+  hook.items(SCOUT, (_icon, _label, onClick) => { items.push({ onClick }); return null; });
+  expect(blockedFrom).toEqual(["computer"]);
+  items[0]!.onClick!();
+  f.index = 0;
+  const confirm = renderToStaticMarkup(menu().dialog as ReactElement).replaceAll("&#x27;", "'");
+  expect(confirm).toContain("Stays on this computer: what Scout remembers, your connections, and MausBot");
+  expect(confirm).toContain("There's no way back: you can't move it back to this computer.");
+  expect(confirm).not.toContain("My Cloud");
+  f.index = 0; hook = menu();
+  const several = deep((hook.dialog as ReactElement<{ body: ReactNode }>).props.body).find((node) => node.type === "button" && text(node) === "Move several bots…");
+  several!.props.onClick!();
+  f.index = 0; hook = menu();
+  const chooser = hook.dialog as ReactElement<{ team: { name: string; chosen: string[]; move(ids: string[]): Promise<unknown> } }>;
+  expect(chooser.props.team).toMatchObject({ name: "Acme", chosen: ["scout"] });
+  await chooser.props.team.move(["scout", "quill"]);
+  expect(moveToTeamMany).toHaveBeenCalledExactlyOnceWith(["scout", "quill"], "team-acme");
+  moveToTeamMany.mockResolvedValue({ refused: { code: "notInTeam", params: {}, message: "You're not in that team." } });
+  await expect(chooser.props.team.move(["scout"])).rejects.toThrow("You're not in that team.");
+  expect(page.moveToTeam).not.toHaveBeenCalled();
+});
+
+it("several bots moving: which is on its way and how many, the ones that could not move yet by name, then all of them there", () => {
+  const batch = (phases: Array<"moving" | "failed" | "done">): TeamMoveView => ({ bot: { id: "quill", name: "Quill" }, team: ACME, phase: phases.includes("moving") ? "moving" : phases.includes("failed") ? "failed" : "done", from: "computer",
+    batch: phases.map((phase, i) => ({ id: ["scout", "quill", "wren"][i]!, name: ["Scout", "Quill", "Wren"][i]!, phase })) });
+  expect(html(line(batch(["done", "moving", "moving"])))).toContain("Moving Quill to Acme (2 of 3)…");
+  expect(html(line(batch(["done", "failed", "done"])))).toContain("2 of 3 are in Acme. Couldn't move yet: Quill. They're still here, unchanged.");
+  expect(button(line(batch(["done", "failed", "done"])), "Try again")).toBeTruthy();
+  expect(html(line(batch(["done", "done", "done"])))).toContain("3 bots are in Acme now, with your chats.");
+  button(line(batch(["done", "done", "done"])), "Open Acme")!.props.onClick!();
+  expect(page.openTeam).toHaveBeenCalledWith("team-acme");
 });

@@ -88,7 +88,7 @@ export interface CloudSendNotice {
   arrived?: CloudSendArrived;
   /** The one-time move's own line, while there is one; absent from an older desktop. */
   move?: import("./one-home.mjs").OneHomeView;
-  /** On My Cloud's page: a bot moving into a team, while its line shows; absent from an older desktop. */
+  /** On My Cloud's page, or this computer's: a bot of that place moving into a team, while its line shows; absent from an older desktop. */
   teamMove?: import("./team-move.mjs").TeamMoveView;
   /** On this computer's page: some of its bots on their way to My Cloud. */
   botMove?: BotMoveView;
@@ -100,22 +100,34 @@ export interface CloudSendCounts {
   chats: { conversations: number; messages: number } | null;
 }
 
+/** A bot a move into a team offers, and why it stays where it is, if it does. */
+export type TeamBringable = { id: string; name: string; stays?: "default" | "chief" | "last" };
+
 export interface CloudSendPageBridge {
   notice(): Promise<CloudSendNotice>;
   dismiss(signature: string): Promise<CloudSendNotice>;
   /** The move's Try again, after a day of failing; absent from an older desktop. */
   moveRetry?(): Promise<CloudSendNotice>;
   onNotice(listener: (notice: CloudSendNotice) => void): () => void;
-  /** On My Cloud's page: the teams a bot of its can move into, from the Admin's verified session; absent from an older desktop. */
-  teams?(): Promise<{ teams: Array<{ id: string; name: string; ready: boolean }> }>;
+  /** On My Cloud's page, or this computer's: the teams a bot of that place can move into, from the Admin's verified
+   * session, and which place the bots come from (absent from an older desktop: My Cloud); absent from an older desktop. */
+  teams?(): Promise<{ teams: Array<{ id: string; name: string; ready: boolean }>; from?: import("./team-move.mjs").TeamMoveSource }>;
   /** Moves one bot into one of those teams (a real click). */
   moveToTeam?(botId: string, teamId: string, name: string): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** `moveToTeam` with main's refusal as a value, which the page says in its own language; `moveToTeam` keeps rejecting
    * with the English only, for pages that predate this. Absent from an older desktop. */
   moveToTeamCoded?(botId: string, teamId: string, name: string): Promise<{ view: import("./team-move.mjs").TeamMoveView | null } | { refused: import("./team-move.mjs").TeamMoveRefusal }>;
-  /** A team's own page: the bots its person has on My Cloud, and one moved in once they agree in main's own confirm. */
-  teamBring?(): Promise<{ team?: { id: string; name: string; ready: boolean }; bots: Array<{ id: string; name: string; stays?: "default" | "chief" | "last" }> }>;
-  teamBringMove?(botId: string): Promise<{ started: boolean; move: import("./team-move.mjs").TeamMoveView | null }>;
+  /** On this computer's page: its bots a move into a team offers, each with why it stays, if it does. */
+  teamChoices?(): Promise<{ bots: TeamBringable[] }>;
+  /** On this computer's page: moves these of its bots into that team, one after another (a real click). */
+  moveToTeamMany?(ids: string[], teamId: string): Promise<{ view: import("./team-move.mjs").TeamMoveView | null } | { refused: import("./team-move.mjs").TeamMoveRefusal }>;
+  /** A team's own page: the bots its person has on My Cloud and on this computer (`computer`, when it has any to offer),
+   * and one moved in once they agree in main's own confirm. */
+  teamBring?(): Promise<{ team?: { id: string; name: string; ready: boolean }; bots: TeamBringable[]; computer?: TeamBringable[] }>;
+  /** `from`: "computer" for one of this computer's bots; My Cloud's otherwise. */
+  teamBringMove?(botId: string, from?: import("./team-move.mjs").TeamMoveSource): Promise<{ started: boolean; move: import("./team-move.mjs").TeamMoveView | null }>;
+  /** A team's own page: several of this computer's bots, moved in one after another once they agree in main's own confirm. */
+  teamBringMany?(ids: string[]): Promise<{ started: boolean; move: import("./team-move.mjs").TeamMoveView | null }>;
   teamBringStatus?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */

@@ -183,9 +183,18 @@ export function botMoveLine(move: BotMoveView): { kind: "sending" | "failed" | "
   return { kind: "sending", text: t(many ? "cloudSend.botMove.movingMany" : "cloudSend.botMove.moving", params) };
 }
 
-/** A bot moving from My Cloud into a team, on My Cloud's page: on its way, failed (it is still here, unchanged), or done. */
+/** A bot moving from My Cloud or this computer into a team, on that place's page: on its way, failed (it is still there,
+ * unchanged), or done. Several chosen at once: which one is on its way, and which could not move yet. */
 export function teamMoveLine(move: TeamMoveView): { kind: "sending" | "failed" | "done"; text: string } {
   const names = { bot: move.bot.name, team: move.team.name };
+  const batch = move.batch && move.batch.length > 1 ? move.batch : null;
+  if (batch) {
+    const count = batch.length, settled = batch.filter((bot) => bot.phase !== "moving").length;
+    const failed = batch.filter((bot) => bot.phase === "failed");
+    if (move.phase === "moving") return { kind: "sending", text: t("teamMove.manyMoving", { ...names, done: Math.min(count, settled + 1), count }) };
+    if (failed.length) return { kind: "failed", text: t("teamMove.manyFailed", { team: move.team.name, moved: count - failed.length, count, names: failed.map((bot) => bot.name).join(", ") }) };
+    return { kind: "done", text: t("teamMove.manyDone", { team: move.team.name, count }) };
+  }
   if (move.phase === "done") return { kind: "done", text: t("teamMove.done", names) };
   if (move.phase === "failed") return { kind: "failed", text: t("teamMove.failed", names) };
   return { kind: "sending", text: t("teamMove.moving", names) };
@@ -195,6 +204,7 @@ const TEAM_MOVE_REFUSALS: Record<TeamMoveRefusalCode, LocaleKey> = {
   notInTeam: "teamMove.refused.notInTeam",
   notABot: "teamMove.refused.notABot",
   movingElsewhere: "teamMove.refused.movingElsewhere",
+  computerMoving: "teamMove.refused.computerMoving",
 };
 
 export function teamMoveRefusalText(refused: TeamMoveRefusal): string {

@@ -229,7 +229,7 @@ test("cloud-send:teams returns empty teams outside My Cloud without throwing", a
   });
   assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "local" }), { teams: [] }, "local page gets empty teams");
   assert.deepEqual(await handlers.get("cloud-send:teams")({ page: null }), { teams: [] }, "no page context gets empty teams");
-  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "cloud" }), { teams: [{ id: "team-acme", name: "Acme Corp", ready: true }] }, "My Cloud page gets actual teams");
+  assert.deepEqual(await handlers.get("cloud-send:teams")({ page: "cloud" }), { teams: [{ id: "team-acme", name: "Acme Corp", ready: true }], from: "cloud" }, "My Cloud page gets actual teams");
 });
 
 function preload({ remote = false, activation = false } = {}) {
@@ -244,8 +244,8 @@ function preload({ remote = false, activation = false } = {}) {
   return { bridge, invoked };
 }
 
-test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringStatus", "botMoveState", "botChoices", "moveBots", "moveChanges", "moveEverything", "botMoveRetry", "openMyCloud", "keepHere", "setKeepHere", "onNotice"];
+test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again and turning that switch go only from the person's click on My Cloud's page, and moving bots into a team only from a click on any page", async () => {
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "teamChoices", "moveToTeamMany", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "teamBring", "teamBringMove", "teamBringMany", "teamBringStatus", "botMoveState", "botChoices", "moveBots", "moveChanges", "moveEverything", "botMoveRetry", "openMyCloud", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -259,6 +259,8 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await assert.rejects(page.bridge.cloudSendPage.moveToTeamCoded("scout", "team-acme", "Scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
   await assert.rejects(page.bridge.cloudSendPage.teamBringMove("scout"), /Choose Move/);
+  await assert.rejects(page.bridge.cloudSendPage.teamBringMany(["scout"]), /Choose Move/);
+  await assert.rejects(local.bridge.cloudSendPage.moveToTeamMany(["scout"], "team-acme"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
   await assert.rejects(page.bridge.cloudSendPage.moveBots(["scout"]), /Choose which bots/);
   await assert.rejects(page.bridge.cloudSendPage.moveEverything(), /Choose which bots/);
@@ -272,10 +274,14 @@ test("the bridge: either page gets only the move's line and the switch that keep
   await clicked.bridge.cloudSendPage.moveToTeamCoded("scout", { toString: () => "team-acme" }, "Scout");
   await clicked.bridge.cloudSendPage.teamRetry();
   await clicked.bridge.cloudSendPage.teams();
+  await clicked.bridge.cloudSendPage.moveToTeamMany(["scout", { toString: () => "quill" }], "team-acme");
+  await clicked.bridge.cloudSendPage.teamBringMany(["scout"]);
+  await clicked.bridge.cloudSendPage.teamBringMove("scout", "computer");
   await clicked.bridge.cloudSendPage.openTeam("team-acme");
   await clicked.bridge.cloudSendPage.setKeepHere("yes");
   assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel.startsWith("one-home")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"],
-    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-move-coded", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
+    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-move-coded", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"],
+    ["cloud-send:team-move-many", ["scout", "quill"], "team-acme"], ["cloud-send:team-bring-many", ["scout"]], ["cloud-send:team-bring-move", "scout", "computer"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
   await local.bridge.cloudSendPage.setKeepHere(true);
   assert.deepEqual(local.invoked, [["one-home:keep-set", true]], "this computer's own page needs no click check: main checks the sender");
 });
