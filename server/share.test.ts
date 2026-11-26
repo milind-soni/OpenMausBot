@@ -12,6 +12,7 @@ import { createShareToolRoute, importSource, type ShareToolContext } from "./rou
 import { GithubTemplateError } from "./share-github.ts";
 import { createCommunityPublisher, type CommunityResult } from "./share-publish.ts";
 import { pagesHomeSignature } from "./pages/access.ts";
+import type { ExportablePackageSkill } from "./package-export.ts";
 import { createShareHost, creditName, readFolderFromDisk } from "./share.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord } from "./store.ts";
@@ -42,14 +43,15 @@ const routine = { id: "r1", name: "Morning sweep", botId: "bot-1", prompt: "Swee
 const clean = (overrides: Partial<BotRecord> = {}) => bot({ soul: "Be brief.", ...overrides });
 
 function host(options: { submit?: (submission: unknown) => Promise<CommunityResult>; signedIn?: boolean; bots?: BotRecord[]; picture?: (bot: BotRecord) => string | undefined; brief?: string;
-  personNames?: Array<string | undefined>; suggestedCredit?: string } = {}) {
+  personNames?: Array<string | undefined>; suggestedCredit?: string; skills?: ExportablePackageSkill[] } = {}) {
   const dataDir = scratch(), botFolder = scratch();
   const patches: Array<{ messageId: string; card: TemplateCard }> = [];
   const bots = options.bots ?? [bot()];
   const publisher = createCommunityPublisher({ access: () => options.signedIn === false ? null : { kind: "desktop", url: "https://admin.example.com/api/cloud/pages/token", token: "t" } });
   const share = createShareHost({
     dataDir, bots: () => bots, groups: () => [], routines: () => [routine], brief: () => options.brief,
-    collectTeamSkills: (list) => ({ ok: true, skipped: [], skillsByBot: new Map(list.map((each) => [each.id, [{ name: "triage", description: "Sort the inbox.", instructions: skillText, enabled: true }]])) }),
+    collectTeamSkills: (list) => ({ ok: true, skipped: [], skillsByBot: new Map(list.map((each) => [each.id,
+      (options.skills ?? [{ name: "triage", description: "Sort the inbox.", instructions: skillText, enabled: true }]).map((skill) => ({ ...skill }))])) }),
     picture: options.picture ?? (() => undefined), botFolder: (id) => join(botFolder, id),
     publisher: options.submit ? { ...publisher, submit: options.submit } : publisher,
     patch: (_threadId, messageId, _text, card) => patches.push({ messageId, card }),
@@ -94,6 +96,34 @@ describe("making a template", () => {
     const titled = share.export({ scope: "bot", bot: bot() }, []);
     expect(titled.card.tagline).toBe("Inbox helper");
     expect(share.get(titled.card.id).details.summary).toBe("Keeps the inbox tidy.");
+  });
+
+  it("leaves a switched-off skill out of a bot's and a department's template and names it under Left out", () => {
+    const off = "---\nname: drafts\ndescription: Old drafts.\n---\n\n# Drafts\n\nRead C:/Users/janedoe/Documents/drafts first.\n";
+    const skills = [
+      { name: "triage", description: "Sort the inbox.", instructions: skillText, enabled: true },
+      { name: "drafts", description: "Old drafts.", instructions: off, enabled: false },
+    ];
+    const { share } = host({ skills });
+    for (const [target, part] of [[{ scope: "bot" as const, bot: bot() }, "skills[drafts]"], [{ scope: "department" as const, section: "Ops", bots: [bot()] }, "Helper: skills[drafts]"]] as const) {
+      const made = share.export(target, []);
+      expect(made.card.counts.skills).toBe(1);
+      expect(made.card.skipped).toContain(`skills switched off on the bot (${part})`);
+      expect(existsSync(join(made.dir, "skills", "triage", "SKILL.md"))).toBe(true);
+      expect(existsSync(join(made.dir, "skills", "drafts"))).toBe(false);
+      expect(JSON.stringify(share.get(made.card.id).details)).not.toMatch(/drafts|janedoe/);
+    }
+  });
+
+  it("keeps every switched-on skill, and a skill with no switch, in the template", () => {
+    const { share } = host({ skills: [
+      { name: "triage", description: "Sort the inbox.", instructions: skillText, enabled: true },
+      { name: "notes", description: "Keep notes.", instructions: "---\nname: notes\ndescription: Keep notes.\n---\n\nWrite to C:/Users/janedoe/notes.md.\n" },
+    ] });
+    const made = share.export({ scope: "bot", bot: bot() }, []);
+    expect(made.card.counts.skills).toBe(2);
+    expect(made.card.skipped).not.toEqual(expect.arrayContaining([expect.stringContaining("switched off")]));
+    expect(readFileSync(join(made.dir, "skills", "notes", "SKILL.md"), "utf8")).toContain("Write to ~/notes.md.");
   });
 
   it("makes the same template again in the same folder and keeps its card", () => {
