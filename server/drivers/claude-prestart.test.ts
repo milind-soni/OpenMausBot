@@ -165,6 +165,44 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId)).toMatchObject({ rebuilt: true });
   });
 
+  it("keeps the old session's prompt record when its replacement exits before init", async () => {
+    await instance.dispose();
+    await create({ FAKE_CLAUDE_VERSION: "2.1.232", FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });
+    const threadId = "t-replacement-exits";
+    const realSpawn = procs.spawnCli;
+    const closes: Promise<unknown>[] = [];
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
+      const child = realSpawn(...args);
+      closes.push(once(child, "close", { signal: AbortSignal.timeout(15_000) }));
+      return child;
+    });
+    try {
+      const first = await instance.adapter.sendTurn(turn(threadId, { system: "first", systemStable: "first" }));
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      const initial = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId);
+      if (!initial || initial.type !== "session.started") throw new Error("initial session missing");
+      if (!closes[0]) throw new Error("initial Claude process missing");
+      await Promise.all([closes[0], instance.adapter.stopAll()]);
+
+      vi.stubEnv("FAKE_CLAUDE_MODE", "exit-early");
+      const changed = { system: "second", systemStable: "second", resumeCursor: initial.sessionId, recoveryText: "earlier conversation" };
+      const failed = await instance.adapter.sendTurn(turn(threadId, changed));
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false });
+      if (!closes[1]) throw new Error("replacement Claude process missing");
+      await closes[1];
+      expect(recorder.events.some((e) => e.type === "session.started" && e.turnId === failed.turnId)).toBe(false);
+
+      vi.stubEnv("FAKE_CLAUDE_MODE", "happy");
+      const retry = await instance.adapter.sendTurn(turn(threadId, changed));
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === retry.turnId)).toMatchObject({ ok: true });
+      expect(recorder.events.filter((e) => e.type === "item.completed" && e.turnId === retry.turnId && e.itemType === "assistant_text")).toMatchObject([{ text: "second" }]);
+      expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === retry.turnId)).toMatchObject({ rebuilt: true });
+    } finally {
+      vi.unstubAllEnvs();
+      spawn.mockRestore();
+    }
+  });
+
   it("records the session taken by a first turn without a cursor", async () => {
     await instance.dispose();
     await create({ FAKE_CLAUDE_VERSION: "2.1.232", FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });

@@ -1257,14 +1257,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         replaysUserMessages,
         turn: spare ? null : { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null },
         idleTimer: null,
-        closing: false, spare, take: (taker) => { turnId = taker; if (sessionId === null || knowsRecordedPrompt) recordedPrompts.set(threadId, { session: sessionId ?? newSessionId!, prompt: recordedPrompt }); }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)), spareMs, spareAt: Date.now(), ...(sessionId ? { resumed: sessionId } : {}) } : {}),
+        closing: false, spare, take: (taker) => { turnId = taker; }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)), spareMs, spareAt: Date.now(), ...(sessionId ? { resumed: sessionId } : {}) } : {}),
         stderr: "",
         costTotal: undefined,
       };
       sessions.set(threadId, session);
-      // A fresh session holds this prompt, and so does a resumed one the CLI refreshed; an older CLI's resume keeps
-      // whatever it launched with, so it is not recorded as holding this one.
-      if (!spare && (sessionId === null || knowsRecordedPrompt)) recordedPrompts.set(threadId, { session: sessionId ?? newSessionId!, prompt: recordedPrompt });
 
       const settle = (
         ok: boolean,
@@ -1360,6 +1357,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (session.turn) session.turn.awaitingInit = false;
               session.nativePermissionMode = typeof o.permissionMode === "string" ? o.permissionMode : null;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
+              if (session.sessionId && (sessionId === null || knowsRecordedPrompt)) recordedPrompts.set(threadId, { session: session.sessionId, prompt: recordedPrompt });
               const held = session.turn;
               if (held?.continuationGrace) {
                 clearTimeout(held.continuationGrace);
