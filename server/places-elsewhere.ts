@@ -172,15 +172,16 @@ export function createPlacesElsewhere({ dataDir, here = null, now = Date.now }: 
     /** What kind of place of the person's other places has `bot`, or null. */
     kindOf: (bot: string): Place["kind"] | null => where(bot)?.place.kind ?? null,
     /** The bots of the person's other places that `text` @mentions (none named like a bot `here`), each with where it
-     * lives, told to the bot answering it. */
-    mentioned(text: string, bots: ReadonlyArray<{ name: string }>): string {
+     * lives, told to the bot answering it. `skip`: kinds of place that can be reached, through the link: a bot there is
+     * in the bot's roster, so nothing is said of it (never that it can't be reached). */
+    mentioned(text: string, bots: ReadonlyArray<{ name: string }>, skip: (kind: Place["kind"]) => boolean = () => false): string {
       const known = read();
-      return known ? mentionsOf(known, text, bots).map(({ bot, place }) => ` The user named @${bot}, a bot of theirs that is not here: ${livesElsewhere(bot, place, known.self)}`).join("") : "";
+      return known ? mentionsOf(known, text, bots).filter(({ place }) => !skip(place.kind)).map(({ bot, place }) => ` The user named @${bot}, a bot of theirs that is not here: ${livesElsewhere(bot, place, known.self)}`).join("") : "";
     },
     /** The same, as one plain line each for the chat, for the person. */
-    missed(text: string, bots: ReadonlyArray<{ name: string }>): string[] {
+    missed(text: string, bots: ReadonlyArray<{ name: string }>, skip: (kind: Place["kind"]) => boolean = () => false): string[] {
       const known = read();
-      return known ? mentionsOf(known, text, bots).map(({ bot, place }) =>
+      return known ? mentionsOf(known, text, bots).filter(({ place }) => !skip(place.kind)).map(({ bot, place }) =>
         `${bot} lives ${place.kind === "team" ? "in" : "on"} ${place.name}, so that mention didn't reach it: bots work together only within one place.${place.away ? "" : ` ${bringTogether(place, known.self, "person")}`}`) : [];
     },
   };
