@@ -1158,3 +1158,55 @@ describe("createOpenAIChatRuntime transient retries", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
   }, 20_000);
 });
+
+describe("createOpenAIChatRuntime output-limit continuation", () => {
+  const LENGTH_CONTINUATION = "[OpenMausBot: your reply was cut at the output limit. Continue exactly where you stopped.]";
+  const stream = (delta: Record<string, unknown>, finishReason: string) =>
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 4 } })}\n\n`;
+  const text = (value: string, finishReason: string) => stream({ content: value }, finishReason);
+  const textOf = (events: RuntimeEvent[]) =>
+    events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_text").map((event) => event.text);
+
+  it("continues a reply cut at the output limit and returns the whole answer", async () => {
+    let requests = 0;
+    const events = await runTurn(() => ++requests === 1 ? sse(text("The report is", "length")) : sse(text(" written.", "stop")));
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["The report is", " written."]);
+    expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+
+    const bodies = vi.mocked(fetch).mock.calls
+      .filter(([url]) => String(url).endsWith("/chat/completions"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: unknown }> });
+    expect(bodies[1]!.messages.slice(-2)).toEqual([
+      { role: "assistant", content: "The report is" },
+      { role: "user", content: LENGTH_CONTINUATION },
+    ]);
+  });
+
+  it("still fails a length finish with no text", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(text("", "length"))));
+    expect(requests).toBe(1);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: "provider returned an empty response" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("still fails a reasoning-only length finish", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(stream({ reasoning_content: "thinking" }, "length"))));
+    expect(requests).toBe(1);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("provider did not finish the response (length)") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("stops at the continuation cap instead of looping forever", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(text(`part ${requests}`, "length"))));
+    expect(requests).toBe(9);
+    expect(textOf(events)).toHaveLength(9);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("output limit") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+});

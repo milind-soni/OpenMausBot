@@ -449,13 +449,28 @@ describe("what Responses can answer", () => {
     expect(textOf(seen, "assistant_text")).toBe("Note.\n\nAnswer.");
   });
 
-  it("does not finish a turn on an incomplete response", async () => {
+  it("continues a response cut at the output limit", async () => {
+    let responses = 0;
     const f = await fixture(onResponses((response) => {
-      events(response, [textDelta("Half"), { type: "response.incomplete", response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [], usage } }]);
+      responses += 1;
+      if (responses === 1) {
+        events(response, [created, textDelta("Half"), done(messageItem("Half")), {
+          type: "response.incomplete",
+          response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [messageItem("Half")], usage },
+        }]);
+        return;
+      }
+      answer(response, " and half.");
     }));
     const { end, events: seen } = await f.turn();
-    expect(end).toMatchObject({ ok: false });
-    expect(failureOf(seen)).toContain("provider did not finish the response (length)");
+    expect(end).toMatchObject({ ok: true });
+    const continuation = f.calls.at(-1)!;
+    expect(continuation.path).toContain("/responses");
+    expect(continuation.body.input.at(-1)).toEqual({
+      role: "user",
+      content: "[OpenMausBot: your reply was cut at the output limit. Continue exactly where you stopped.]",
+    });
+    expect(textOf(seen, "assistant_text")).toBe("Half and half.");
   });
 
   it("refuses a tool call cut off by an incomplete response without running it", async () => {

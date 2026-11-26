@@ -20,7 +20,7 @@ import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
-import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, CUT_REPLY_NOTE, cutReplyContinues, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { ChatHttpError, completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
@@ -218,7 +218,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
       ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
       ...(toolCalls ? { tool_calls: toolCalls } : {}) };
-    if (completion.responseOutput) responseOutputs.set(reply, completion.responseOutput);
+    if (completion.responseOutput?.length) responseOutputs.set(reply, completion.responseOutput);
     return reply;
   };
   const delivered = new Map<string, DeliveredUserMessage[]>();
@@ -590,6 +590,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let failureText: ReturnType<typeof runtimeErrorText>;
       let toolFailed = false, spoke = false, unfloored = 0, blockedAfterReply = false; // unfloored: failed calls the safety floor did not block after the bot spoke
       let correctiveRounds = 0;
+      const cutReplies = { count: 0 };
       const denials: string[] = [], failedCalls: string[] = [];
       const seenCalls = new Set<string>();
       let nudges = 0;
@@ -753,6 +754,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (!completion.toolCalls.length) {
             if (!reply.trim()) throw new ChatProtocolError("provider returned an empty response");
+            if (cutReplyContinues(cutReplies, completion, Boolean(options.localModel && tools.definitions.length))) {
+              messages.push(assistantReply(model, completion, completion.text), { role: "user", content: CUT_REPLY_NOTE });
+              continue;
+            }
             if (completion.finishReason && completion.finishReason !== "stop") {
               throw new ChatProtocolError(`provider did not finish the response (${completion.finishReason})`);
             }
