@@ -2482,7 +2482,7 @@
   "chat.replyToMessage": "回复消息",
   "chat.react": "添加表情回应",
   "chat.reactions": "表情回应",
-  "chat.reaction.yes": "点赞",
+  "chat.reaction.yes": "点赞：是，继续",
   "chat.reaction.no": "点踩",
   "chat.reaction.love": "爱心",
   "chat.reaction.laugh": "大笑",

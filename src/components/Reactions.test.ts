@@ -53,7 +53,7 @@ describe("the react button on a bot's message", () => {
     expect(button().getAttribute("aria-expanded")).toBe("true");
     expect(toolbar()?.getAttribute("aria-label")).toBe("Reactions");
     expect(choices().map((choice) => [choice.textContent, choice.getAttribute("aria-label"), choice.getAttribute("aria-pressed")])).toEqual([
-      ["👍", "Thumbs up", "false"],
+      ["👍", "Thumbs up: yes, go ahead", "false"],
       ["👎", "Thumbs down", "false"],
       ["❤️", "Heart", "false"],
       ["😂", "Laughing", "false"],
@@ -181,7 +181,7 @@ describe("reaction chips under a message", () => {
     await render(createElement(ReactionChips, { threadId: "t1", message: reacted }));
     expect(host.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe("Reactions");
     expect(chips().map((chip) => [chip.tagName, chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("aria-pressed"), chip.getAttribute("title")])).toEqual([
-      ["BUTTON", "👍2", "Thumbs up: You, alice@example.test", "true", "You, alice@example.test"],
+      ["BUTTON", "👍2", "Thumbs up: yes, go ahead: You, alice@example.test", "true", "You, alice@example.test"],
       ["BUTTON", "❤️", "Heart: Bob", "false", "Bob"],
     ]);
   });
@@ -202,7 +202,7 @@ describe("reaction chips under a message", () => {
     await render(createElement(ReactionChips, { threadId: "t1", message: reacted, canReact: false }));
     expect(host.querySelectorAll("button")).toHaveLength(0);
     expect(chips().map((chip) => [chip.getAttribute("role"), chip.getAttribute("aria-label")])).toEqual([
-      ["img", "Thumbs up: You, alice@example.test"],
+      ["img", "Thumbs up: yes, go ahead: You, alice@example.test"],
       ["img", "Heart: Bob"],
     ]);
   });
@@ -222,7 +222,7 @@ describe("reaction chips under a message", () => {
     ] };
     await render(createElement(ReactionChips, { threadId: "t1", message: split }));
     expect(chips().map((chip) => [chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("aria-pressed")])).toEqual([
-      ["👍", "Thumbs up: Bob", "false"],
+      ["👍", "Thumbs up: yes, go ahead: Bob", "false"],
       ["👎2", "Thumbs down: You, Ada", "true"],
     ]);
     await click(chips()[1]!);

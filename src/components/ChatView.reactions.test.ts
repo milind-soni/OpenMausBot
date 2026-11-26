@@ -60,7 +60,7 @@ describe("a 👍 that answered a bot's question, in the chat", () => {
     expect(document.querySelector('[data-mid="m3"]')).toBeNull();
     const chips = document.querySelector('[data-mid="m2"] [role="group"]');
     expect(chips?.getAttribute("aria-label")).toBe(t("chat.reactions"));
-    expect(chips?.querySelector("button")?.getAttribute("aria-label")).toBe("Thumbs up: You");
+    expect(chips?.querySelector("button")?.getAttribute("aria-label")).toBe("Thumbs up: yes, go ahead: You");
   });
 
   it("leaves the person's last typed message as the one ArrowUp edits", async () => {

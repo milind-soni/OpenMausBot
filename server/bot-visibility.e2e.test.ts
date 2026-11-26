@@ -585,7 +585,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     }
   }, 60_000);
 
-  it("keeps each person's reaction their own and quiet, tells a session which are its, and streams it only to who sees the thread", async () => {
+  it("keeps each person's reaction their own, sends each 👍 as that person's reply and a 👎 quietly, and streams it only to who sees the thread", async () => {
     const watcher = openStream(BOB);
     const insider = openStream(ADA);
     try {
@@ -596,12 +596,11 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(replied, log.slice(-2_000)).not.toBeNull();
       const answer = (replied as Array<{ id: string; role: string; kind: string; text?: string }>)
         .findLast((message) => message.role === "bot" && message.kind === "text" && message.text)!;
-      const linesBefore = (await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages.length;
       const react = (as: string, emoji: string, threadId = ids.pubThread, messageId = answer.id) =>
         api("POST", `/api/threads/${threadId}/messages/${messageId}/reactions`, { emoji, on: true }, as);
       const ada = await react(ADA, "👍");
       expect(ada.status, JSON.stringify(ada.body)).toBe(200);
-      expect(ada.body.delivery).toBe("noted");
+      expect(ada.body.delivery).toBe("started");
       const bob = await react(BOB, "👍");
       expect(bob.status, JSON.stringify(bob.body)).toBe(200);
       const keyOf = async (as: string) => (await api("GET", "/api/auth/session", undefined, as)).body.reactor as string;
@@ -618,11 +617,14 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(changed.body.message.reactions.map((reaction: any) => [reaction.by, reaction.emoji])).toEqual([[bobKey, "👍"], [adaKey, "👎"]]);
       expect(await waitFor(() => watcher.frames.some((f) => f.kind === "message.patch" && f.threadId === ids.pubThread
         && f.message?.id === answer.id && f.message.reactions?.some((reaction: any) => reaction.by === adaKey && reaction.emoji === "👎")))).toBe(true);
-      const bot = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((candidate: any) => candidate.id === ids.pub);
-      expect(bot.busy).toBeFalsy();
-      const thread = (await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages as any[];
-      expect(thread).toHaveLength(linesBefore);
-      expect(thread.filter((message) => message.reaction && message.replyToId === answer.id)).toEqual([]);
+      const lines = await waitFor(async () => {
+        const bot = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((candidate: any) => candidate.id === ids.pub);
+        const reactions = ((await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages as any[])
+          .filter((message) => message.reaction && message.replyToId === answer.id);
+        return !bot.busy && reactions.length === 2 ? reactions : null;
+      });
+      const thread = (await api("GET", `/api/threads/${ids.pubThread}/messages`, undefined, BOSS)).body.messages;
+      expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", "Ada"], ["👍", "Bob"]]);
 
       const hidden = ((await api("GET", `/api/threads/${ids.hrThread}/messages`, undefined, BOSS)).body.messages as any[])
         .findLast((message) => message.role === "bot" && message.kind === "text" && message.text);

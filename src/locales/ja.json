@@ -2227,7 +2227,7 @@
   "chat.replyToMessage": "メッセージに返信",
   "chat.react": "リアクションを追加",
   "chat.reactions": "リアクション",
-  "chat.reaction.yes": "親指を上に",
+  "chat.reaction.yes": "親指を上に：はい、進めてください",
   "chat.reaction.no": "親指を下に",
   "chat.reaction.love": "ハート",
   "chat.reaction.laugh": "笑い",

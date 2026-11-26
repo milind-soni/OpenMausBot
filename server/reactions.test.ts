@@ -15,12 +15,13 @@ const BOB = { by: "p_bob", name: "bob@example.test" };
 
 beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
 
-function fixture(options: { queued?: boolean; refuse?: Error } = {}) {
+function fixture(options: { queued?: boolean; refuse?: Error; inbox?: boolean } = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const calls = { replies: [] as Parameters<ReactionDeps["reply"]>[0][], cards: [] as Parameters<ReactionDeps["answerCard"]>[0][], withdrawn: [] as string[] };
   const deps: ReactionDeps = {
     store,
+    inboxAnswer: (input) => options.inbox ? deps.reply(input) : null,
     reply: async (input) => {
       calls.replies.push(input);
       if (options.refuse) throw options.refuse;
@@ -44,45 +45,8 @@ function fixture(options: { queued?: boolean; refuse?: Error } = {}) {
   return { store, bot, calls, react, say };
 }
 
-describe("a 👍 or 👎 on any other bot message is quiet", () => {
-  it("records it, posts nothing and starts no turn: the bot reads it with its next turn", async () => {
-    const { store, bot } = fixture();
-    const replies: unknown[] = [];
-    const { react } = createReactions({ store, reply: (input) => { replies.push(input); return null; }, answerCard: async () => ({ ok: true }), withdraw: () => {} });
-    const asked = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Here is the plan." });
-    const before = store.messagesFor(bot.threadId).length;
-    for (const emoji of ["👎", "👍"] as const) {
-      const result = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: ALICE });
-      expect(result.delivery).toBe("noted");
-      expect(result.message.reactions).toEqual([{ emoji, by: ALICE.by, name: ALICE.name, at: expect.any(Number) }]);
-    }
-    expect(replies).toHaveLength(2);
-    expect(store.messagesFor(bot.threadId)).toHaveLength(before);
-    const removed = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: ALICE, on: false });
-    expect(removed).toMatchObject({ delivery: "none", message: { reactions: undefined } });
-  });
-
-  it("reaches the bot's next turn once, and its turn after that no more", () => {
-    const line = (patch: Partial<Message>): Message => ({ id: "x", at: 0, role: "bot", kind: "text", text: "Here is the plan.", ...patch });
-    const path = [
-      line({ id: "b1", at: 1, reactions: [{ emoji: "👎", by: "p_mira", name: "Mira", at: 5 }] }),
-      line({ id: "u1", at: 6, role: "user", text: "Try again" }),
-      line({ id: "b2", at: 7, text: "Second plan." }),
-      line({ id: "u2", at: 8, role: "user", text: "Better" }),
-    ];
-    expect(withReactionNotes("Try again", path.slice(0, 2), new Set(["u1"]), "Milind"))
-      .toBe("(Mira reacted 👎 to your message “Here is the plan.”.)\n\nTry again");
-    expect(withReactionNotes("Better", path, new Set(["u2"]), "Milind")).toBe("Better");
-  });
-
-  it("is never a note on an open card, which it answers", () => {
-    const card = { id: "c1", at: 1, role: "bot", kind: "options", text: "Run it?", card: { requestId: "r1", options: [] }, reactions: [{ emoji: "👍", by: "user", at: 5 }] } as unknown as Message;
-    expect(withReactionNotes("Next", [card, { id: "u1", at: 6, role: "user", kind: "text", text: "Next" }], new Set(["u1"]), "Milind")).toBe("Next");
-  });
-});
-
-describe("a 👍 or 👎 on a line of a person's inbox", () => {
-  it("records a 👍 and passes it back as the person's answer to that line", async () => {
+describe("a reaction on a bot's message", () => {
+  it("records a 👍 and hands it to the bot as the person's reply to that message", async () => {
     const { store, bot, calls, react, say } = fixture();
     const asked = say();
     const result = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } });
@@ -97,7 +61,39 @@ describe("a 👍 or 👎 on a line of a person's inbox", () => {
 
   it("says when the reply waits behind the running turn", async () => {
     const { bot, react, say } = fixture({ queued: true });
-    expect((await react({ auth: OWNER, threadId: bot.threadId, messageId: say().id, emoji: "👎", reactor: { by: "user" } })).delivery).toBe("queued");
+    expect((await react({ auth: OWNER, threadId: bot.threadId, messageId: say().id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("queued");
+  });
+
+  it("keeps a 👎 quiet: posts nothing and starts no turn, and takes back a 👍 it replaces that still waits", async () => {
+    const { store, bot, calls, react, say } = fixture({ queued: true });
+    const asked = say();
+    const before = store.messagesFor(bot.threadId).length;
+    expect((await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("queued");
+    const changed = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👎", reactor: { by: "user" } });
+    expect(changed).toMatchObject({ delivery: "noted", message: { reactions: [{ emoji: "👎", by: "user", at: expect.any(Number) }] } });
+    expect(calls.replies.map((reply) => reply.answer)).toEqual(["👍"]);
+    expect(calls.withdrawn).toEqual([calls.replies[0]!.sendId]);
+    expect(store.messagesFor(bot.threadId)).toHaveLength(before);
+    const removed = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👎", reactor: { by: "user" }, on: false });
+    expect(removed).toMatchObject({ delivery: "none", message: { reactions: undefined } });
+  });
+
+  it("reaches the bot's next turn with a 👎 once, and its turn after that no more", () => {
+    const line = (patch: Partial<Message>): Message => ({ id: "x", at: 0, role: "bot", kind: "text", text: "Here is the plan.", ...patch });
+    const path = [
+      line({ id: "b1", at: 1, reactions: [{ emoji: "👎", by: "p_mira", name: "Mira", at: 5 }] }),
+      line({ id: "u1", at: 6, role: "user", text: "Try again" }),
+      line({ id: "b2", at: 7, text: "Second plan." }),
+      line({ id: "u2", at: 8, role: "user", text: "Better" }),
+    ];
+    expect(withReactionNotes("Try again", path.slice(0, 2), new Set(["u1"]), "Milind"))
+      .toBe("(Mira reacted 👎 to your message “Here is the plan.”.)\n\nTry again");
+    expect(withReactionNotes("Better", path, new Set(["u2"]), "Milind")).toBe("Better");
+  });
+
+  it("never makes a note of a reaction on an open card, which it answers", () => {
+    const card = { id: "c1", at: 1, role: "bot", kind: "options", text: "Run it?", card: { requestId: "r1", options: [] }, reactions: [{ emoji: "👎", by: "user", at: 5 }] } as unknown as Message;
+    expect(withReactionNotes("Next", [card, { id: "u1", at: 6, role: "user", kind: "text", text: "Next" }], new Set(["u1"]), "Milind")).toBe("Next");
   });
 
   it("delivers a double tap once: setting the same reaction again changes nothing", async () => {
@@ -123,8 +119,8 @@ describe("a 👍 or 👎 on a line of a person's inbox", () => {
     expect(calls.replies).toHaveLength(1);
   });
 
-  it("keeps one reaction per person: 👎 replaces their waiting 👍, withdraws it, and answers no", async () => {
-    const { bot, calls, react, say } = fixture({ queued: true });
+  it("on an inbox line, keeps one reaction per person: 👎 replaces their waiting 👍, withdraws it, and answers no", async () => {
+    const { bot, calls, react, say } = fixture({ queued: true, inbox: true });
     const asked = say();
     await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } });
     const changed = await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👎", reactor: { by: "user" } });
@@ -144,8 +140,8 @@ describe("a 👍 or 👎 on a line of a person's inbox", () => {
     expect(calls.withdrawn).toEqual([]);
   });
 
-  it("tells the bot each change of a person's answer once: the same answer again after taking it back is not news", async () => {
-    const { bot, calls, react, say, store } = fixture();
+  it("on an inbox line, tells each change of a person's answer once: the same answer again after taking it back is not news", async () => {
+    const { bot, calls, react, say, store } = fixture({ inbox: true });
     const asked = say();
     const tap = (emoji: "👍" | "👎") => react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by: "user" } });
     const stamps: number[] = [];
@@ -160,12 +156,12 @@ describe("a 👍 or 👎 on a line of a person's inbox", () => {
     expect(calls.replies.map((reply) => [reply.answer, reply.sendId])).toEqual([["👍", `${prefix}${stamps[0]}y`], ["👎", `${prefix}${stamps[1]}n`], ["👍", `${prefix}${stamps[2]}y`]]);
     expect(stamps[1]).toBeGreaterThan(stamps[0]!);
     expect(stamps[2]).toBeGreaterThan(stamps[1]!);
-    const { react: again } = createReactions({ store, reply: async () => ({ queued: false, repeated: true }), answerCard: async () => ({ ok: true }), withdraw: () => {} });
+    const { react: again } = createReactions({ store, reply: async () => ({ queued: false }), inboxAnswer: async () => ({ queued: false, repeated: true }), answerCard: async () => ({ ok: true }), withdraw: () => {} });
     expect((await again({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👎", reactor: ALICE })).delivery).toBe("none");
   });
 
-  it("takes back a change that still waits, so the bot keeps the answer the person went back to", async () => {
-    const options = { queued: false };
+  it("on an inbox line, takes back a change that still waits, so the bot keeps the answer the person went back to", async () => {
+    const options = { queued: false, inbox: true };
     const { bot, calls, react, say } = fixture(options);
     const asked = say();
     const tap = (emoji: "👍" | "👎") => react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by: "user" } });
@@ -179,8 +175,8 @@ describe("a 👍 or 👎 on a line of a person's inbox", () => {
     expect(calls.withdrawn.at(-1)).toBe(calls.replies[1]!.sendId);
   });
 
-  it("lets a person change their mind as often as they like while the bot is busy: each change waits once, the last one stands", async () => {
-    const { store, bot, calls, react, say } = fixture({ queued: true });
+  it("on an inbox line, lets a person change their mind as often as they like while the bot is busy: each change waits once, the last one stands", async () => {
+    const { store, bot, calls, react, say } = fixture({ queued: true, inbox: true });
     const asked = say();
     const tap = (emoji: "👍" | "👎") => react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by: "user" } });
     expect((await tap("👍")).delivery).toBe("queued");
@@ -197,7 +193,7 @@ describe("a 👍 or 👎 on a line of a person's inbox", () => {
 
   it("keeps the answer that waits when a change to it is refused", async () => {
     const refusal = Object.assign(new Error("this workspace has reached its monthly spend limit"), { status: 409, code: "spend_cap" });
-    const options: { queued: boolean; refuse?: Error } = { queued: true };
+    const options: { queued: boolean; refuse?: Error; inbox: boolean } = { queued: true, inbox: true };
     const { store, bot, calls, react, say } = fixture(options);
     const asked = say();
     expect((await react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("queued");
@@ -285,13 +281,12 @@ describe("a reaction in a room", () => {
     const asked = store.appendMessage(room.threadId, { role: "bot", kind: "text", text: "Shall I post it?", from });
     const { react } = createReactions({
       store,
-      reply: (input) => { calls.replies.push(input); return null; },
+      reply: async (input) => { calls.replies.push(input); return { queued: false }; },
       answerCard: async () => ({ ok: true }),
       withdraw: () => {},
     });
-    expect((await react({ auth: OWNER, threadId: room.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("noted");
+    expect((await react({ auth: OWNER, threadId: room.threadId, messageId: asked.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("started");
     expect(calls.replies[0]?.owner.id).toBe(otter.id);
-    expect(store.messagesFor(room.threadId).filter((message) => message.role === "user")).toEqual([]);
     const unsigned = store.appendMessage(room.threadId, { role: "bot", kind: "text", text: "Who said this?" });
     expect((await react({ auth: OWNER, threadId: room.threadId, messageId: unsigned.id, emoji: "👍", reactor: { by: "user" } })).delivery).toBe("none");
     expect(calls.replies).toHaveLength(1);
@@ -376,7 +371,6 @@ describe("feelings the bot reads with its next turn", () => {
     ];
     expect(withReactionNotes("Thanks", path, new Set(["u2"]), "Milind")).toBe([
       "(Milind reacted ❤️ to your message “Here is the draft.”.)",
-      "(Someone reacted 👍 to your message “Here is the draft.”.)",
       "(Bob reacted 😂 to your message “Older note”.)",
       "",
       "Thanks",
@@ -410,7 +404,7 @@ describe("feelings the bot reads with its next turn", () => {
 
   it("shows a room's bot line with who felt what", () => {
     expect(roomReactionNote(line({ reactions: [{ emoji: "❤️", by: "user" }, { emoji: "👍", by: "p_bob", name: "Bob" }, { emoji: "🎉", by: "p_bob", name: "Bob" }] }), "Milind"))
-      .toBe("\n(Milind reacted ❤️, Bob reacted 👍, Bob reacted 🎉)");
+      .toBe("\n(Milind reacted ❤️, Bob reacted 🎉)");
     expect(roomReactionNote(line({ role: "user", reactions: [{ emoji: "❤️", by: "user" }] }), "Milind")).toBe("");
   });
 });
@@ -440,6 +434,18 @@ describe("a room member hears of reactions to its lines in its next turn anywher
     expect(notes.take(group.id, scout.id, "Milind")).toBe("");
     const note = notes.take(group.id, otter.id, "Milind");
     expect(note).toBe("(alice@example.test reacted 🎉 to your message “Posted the launch note.”.)\n\n");
+    expect(notes.take(group.id, otter.id, "Milind")).toBe("");
+  });
+
+  it("takes a 👎 the same way: no post, no turn, one note", async () => {
+    const { store, otter, group, notes, said } = room();
+    const posted = said(group.threadId, "Posted the launch note.");
+    const replies: unknown[] = [];
+    const { react } = createReactions({ store, noted: notes.noted, reply: async (input) => { replies.push(input); return { queued: false }; }, answerCard: async () => ({ ok: true }), withdraw: () => {} });
+    expect((await react({ auth: OWNER, threadId: group.threadId, messageId: posted.id, emoji: "👎", reactor: ALICE })).delivery).toBe("noted");
+    expect(replies).toEqual([]);
+    expect(store.messagesFor(group.threadId).filter((message) => message.role === "user")).toEqual([]);
+    expect(notes.take(group.id, otter.id, "Milind")).toBe("(alice@example.test reacted 👎 to your message “Posted the launch note.”.)\n\n");
     expect(notes.take(group.id, otter.id, "Milind")).toBe("");
   });
 
