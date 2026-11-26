@@ -90,6 +90,7 @@ export const SETTINGS_PLACES = [
   {"id":"help","path":"Settings → This app → Help","words":["help center","feedback","diagnostics","logs","tour","welcome tour"]},
   {"id":"language","path":"Settings → General → Language","words":["language","translate"],"advanced":true,"simplePath":"Settings → This app → Language"},
   {"id":"send-key","path":"Settings → General → Send messages with","words":["enter","return","shift+enter","new line","keyboard"],"advanced":true},
+  {"id":"start-fresh-shortcut","path":"Settings → General → Start fresh shortcut","words":["start fresh","fresh start","shortcut","hotkey","keyboard","reset context","clear context"],"advanced":true},
   {"id":"talk","path":"Settings → General → Talk shortcut","words":["voice","microphone","mic","dictation","talk"],"advanced":true,"only":"the desktop app"},
   {"id":"notifications","path":"Settings → General → Notifications","words":["notifications","notify","alerts","sounds","mute","silent","chime","feed"],"advanced":true,"simplePath":"Settings → This app → Notifications"},
   {"id":"startup","path":"Settings → General → Startup","words":["open at login","startup","launch"],"advanced":true,"only":"the desktop app"},
