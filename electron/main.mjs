@@ -87,7 +87,7 @@ import {
 } from "./companion-account-service.mjs";
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
-import { pairingPageUrl, vouchForPlainHttpServers } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs"; import { installUpdateAll } from "./update-all.mjs";
+import { pairingPageUrl, vouchForPlainHttpServers } from "./server-address.mjs"; import { createServerConnect } from "./server-probe.mjs"; import { createTailnetShare, remotePolicyAllows } from "./tailnet-share.mjs"; import { checkTailscale } from "./tailscale-check.mjs"; import { onTailnet } from "./tailnet.mjs"; import { checkServer, createServerStatus, installServerStatus } from "./server-status.mjs"; import { installUpdateAll } from "./update-all.mjs"; import { createAppWindowSizes, installLocalAppWindows, isLocalAppWindow } from "./local-app-windows.mjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs"; import { installServerLending } from "./server-lending.mjs"; import { ownEnvironmentIds } from "./lent-mcp.mjs";
@@ -142,7 +142,7 @@ let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
 let pendingOrganizationEntry = takeOrganizationDeepLink(process.argv);
 function appWindows() {
-  return BrowserWindow.getAllWindows().filter((win) => !isTalkPanel(win));
+  return BrowserWindow.getAllWindows().filter((win) => !isTalkPanel(win) && !isLocalAppWindow(win));
 }
 const cloudEntry = createCloudEntry({
   reveal: () => { if (!desktopTray?.show()) activateExistingWindow(appWindows()); },
@@ -2669,7 +2669,7 @@ ipcMain.handle("environments:add-from-link", localWorkspaceOnly("environments:ad
 ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", (_event, id, purge) => forgetEnvironment(typeof id === "string" ? id : "", purge === true)));
 const savedServerStatus = createServerStatus({ entries: () => environmentsState.environments.filter((e) => e.kind === "remote" && !e.home && !e.team && !e.cloud), check: (origin) => checkServer(origin, (...args) => session.defaultSession.fetch(...args)),
   appVersion: app.getVersion(), onChange: () => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("environments:status-changed"); } });
-installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() }); installUpdateAll({ ipcMain, guard: localWorkspaceOnly, servers: savedServerStatus.saved, fetch: (...args) => session.defaultSession.fetch(...args), send: (channel, view) => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send(channel, view); } });
+installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() }); installUpdateAll({ ipcMain, guard: localWorkspaceOnly, servers: savedServerStatus.saved, fetch: (...args) => session.defaultSession.fetch(...args), send: (channel, view) => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send(channel, view); } }); installLocalAppWindows({ ipcMain, guard: localOrHome, BrowserWindow, senderOrigin: (event) => { try { return new URL(event.senderFrame.url).origin; } catch { return null; } }, webPreferences: () => ({ contextIsolation: true, preload: path.join(__dirname, "preload.cjs"), additionalArguments: [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`, ...(linuxSoftwareRendering ? [SOFTWARE_RENDERING_ARG] : [])] }), openChat: queueChatLink, openExternal: (url) => shell.openExternal(externalLinkUrl(url)), sizes: createAppWindowSizes({ file: () => path.join(app.getPath("userData"), "app-windows.json"), log: slog }), workAreas: () => screen.getAllDisplays().map((display) => display.workArea), icon: APP_ICON, background: () => windowBackground(nativeTheme.shouldUseDarkColors), log: slog });
 
 // A cloud page may open the native chooser, never choose a destination or edit the saved list.
 // Once My Cloud is home the switcher lists only whole places, and shows only when there is more than My Cloud.

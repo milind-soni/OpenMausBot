@@ -440,6 +440,12 @@ const __APP_VERSION__: string;
       /** Receives a chat link (openmausbot://thread/… or openmausbot://bot/…)
        * opened from outside the app. */
       onChatLink?(cb: (link: string) => void): () => void;
+      /** A saved app in a window of its own, on the server this window shows; true once it is open. `openChat` brings
+       * the main window to a chat link (openmausbot://thread/…) from an app's own window. */
+      localApps?: {
+        openWindow(id: string): Promise<boolean>;
+        openChat(link: string): Promise<boolean>;
+      };
       /** The desktop shell's app-menu Preferences… item was activated; open
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the

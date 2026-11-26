@@ -1,3 +1,5 @@
+import type { MausColor } from "./wire.ts";
+
 /** A bot's page the person saved as an app: it runs on the computer or Cloud that keeps it, privately, and lives on
  * without the chat it came from. */
 
@@ -20,6 +22,8 @@ export interface LocalApp {
   name: string;
   icon?: string;
   botId: string;
+  /** The bot that made it, while it is still here. */
+  bot: { name: string; color: MausColor } | null;
   /** The conversation and the page's message it was saved from. */
   threadId: string;
   messageId: string;

@@ -1,6 +1,6 @@
-// openmausbot://thread/<thread-id>?bot=<bot-id> and openmausbot://bot/<bot-id>. The page checks them strictly against
+// openmausbot://thread/<thread-id>?bot=<bot-id>, openmausbot://bot/<bot-id> and openmausbot://app/<saved app id>. The page checks them strictly against
 // its chats; opening one never sends, interrupts or creates anything.
-const CHAT_LINK_PREFIXES = ["openmausbot://thread/", "openmausbot://bot/"];
+const CHAT_LINK_PREFIXES = ["openmausbot://thread/", "openmausbot://bot/", "openmausbot://app/"];
 const MAX_LINK_LENGTH = 1024;
 
 export function chatLinkFrom(value) {

@@ -7,6 +7,7 @@ import type { AppDocs } from "../app-docs.ts";
 import { appRow } from "../chat-apps.ts";
 import { createPageFiles, PAGE_FILES_PREFIX, type PageFilesViewer } from "../page-files.ts";
 import type { Message, StoreChange } from "../store.ts";
+import type { MausColor } from "../../shared/wire.ts";
 import { LocalAppsStore, type LocalAppRecord, type LocalAppVersion } from "./store.ts";
 
 /** Where a saved folder page's files load from. They answer while the app still keeps that version, whatever became of
@@ -14,6 +15,7 @@ import { LocalAppsStore, type LocalAppRecord, type LocalAppVersion } from "./sto
 export const LOCAL_APP_FILES_PREFIX = "/api/local-app-files/";
 
 export interface LocalAppsChat {
+  bot?(id: string): { name: string; color: MausColor } | null | undefined;
   messagesFor(threadId: string): Message[];
   botByThread(threadId: string): { id: string } | null;
   groupByThread(threadId: string): unknown;
@@ -93,6 +95,10 @@ export function createLocalApps(deps: {
     if ((change.type === "message.patch" || change.type === "message") && store.savedFrom(change.threadId, change.message.id).length) follow(change.threadId, change.message);
   });
 
+  const botOf = (id: string) => {
+    const bot = deps.chat.bot?.(id);
+    return bot ? { name: bot.name, color: bot.color } : null;
+  };
   const shownRev = (record: LocalAppRecord) => record.pinnedRev ?? record.versions.at(-1)!.rev;
   const keeps = (id: string, doc: string) => Boolean(store.get(id)?.versions.some((version) => version.doc === doc));
 
@@ -103,7 +109,7 @@ export function createLocalApps(deps: {
       return record ? followRow(record) : null;
     },
     view: (record) => ({
-      id: record.id, name: record.name, ...(record.icon ? { icon: record.icon } : {}), botId: record.botId, threadId: record.threadId, messageId: record.messageId,
+      id: record.id, name: record.name, ...(record.icon ? { icon: record.icon } : {}), botId: record.botId, bot: botOf(record.botId), threadId: record.threadId, messageId: record.messageId,
       versions: record.versions.map(({ rev, at }) => ({ rev, at })), rev: shownRev(record), ...(record.pinnedRev !== undefined ? { pinnedRev: record.pinnedRev } : {}),
       createdAt: record.createdAt, updatedAt: record.updatedAt, manifest: record.manifest, chat: chatHas(record.threadId),
     }),

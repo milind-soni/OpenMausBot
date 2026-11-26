@@ -59,6 +59,7 @@ beforeEach(() => {
   fixture.api.mockReset();
   fixture.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
     if (path === "/api/published-apps") return { apps, ...(included ? { included } : {}) };
+    if (path === "/api/local-apps") return { apps: [] };
     if (path === "/api/published-apps/delete" && init?.method === "POST") {
       const { id } = JSON.parse(init.body!) as { id: string };
       deletes.push(id);
@@ -198,7 +199,12 @@ describe("the Published apps page", () => {
   });
 
   it("says the list could not be loaded and loads it on Try again", async () => {
-    fixture.api.mockRejectedValueOnce(new Error("offline"));
+    const answer = fixture.api.getMockImplementation()!;
+    let failed = false;
+    fixture.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
+      if (path === "/api/published-apps" && !failed) { failed = true; throw new Error("offline"); }
+      return answer(path, init);
+    });
     await show();
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("Your published apps couldn't be loaded.");
     await act(async () => button(host, "Try again").click());

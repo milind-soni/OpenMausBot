@@ -92,7 +92,7 @@ if (typeof window !== "undefined") {
 }
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate", "lendComputer"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
-const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
+const HOME_PAGE = ["home", "onChatLink", "localApps", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -410,6 +410,10 @@ const bridge = {
       cb(link);
     }
     return () => chatLinkListeners.delete(cb);
+  },
+  localApps: {
+    openWindow: (id) => ipcRenderer.invoke("local-apps:open-window", id),
+    openChat: (link) => ipcRenderer.invoke("local-apps:open-chat", link),
   },
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
   desktopViewer: {
