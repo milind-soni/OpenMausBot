@@ -174,7 +174,7 @@ const FIND_FIELDS = `((nonce, step) => {
   const passwords = rest.filter((el) => el.type === "password" && !isNew(el));
   const fresh = rest.filter((el) => el.type === "password" && isNew(el));
   // Some sign-in forms (TikTok's) mark their only password box new-password.
-  const steps = (() => { try { return location.pathname.split("/").map((step) => decodeURIComponent(step).toLowerCase()); } catch { return []; } })();
+  const steps = (() => { try { return location.pathname.split("/").map((step) => decodeURIComponent(step).toLowerCase().replace(/\\.[a-z0-9]{1,6}$/, "")); } catch { return []; } })();
   const signIn = steps.some((step) => ["login", "log-in", "signin", "sign-in"].includes(step)) &&
     !steps.some((step) => ["signup", "sign-up", "register", "registration", "join", "reset", "forgot", "change"].some((word) => step.includes(word)));
   const password = passwords.find((el) => tokens(el).includes("current-password")) || passwords[0] ||
