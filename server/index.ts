@@ -10034,8 +10034,6 @@ async function runClaimedGroupMemberTurn(
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ], integrations.agents, { rules: cfg.everyBotRules, pagesOff: (store.bot(bot.id) ?? bot).toolsOff?.includes("pages") });
 
-  // Claim /learn only after setup succeeded, so a failed first responder does not consume it.
-  if (roomSkills.claims) takeRoomSkills(skillAuthoringClaim, hop, bot.id, true);
   // Never launch a replacement into a stopped handshake's pre-id window.
   await pendingCancelledProviderHandshakes.waitForClear(threadId);
   const heldBeforeDispatch = roomHeld(store.group(group.id), bot.id);
@@ -10063,6 +10061,8 @@ async function runClaimedGroupMemberTurn(
     }
     return false;
   }
+  // Claim /learn only once this turn dispatches, so a failed, held or cancelled first responder does not consume it.
+  if (roomSkills.claims) takeRoomSkills(skillAuthoringClaim, hop, bot.id, true);
   const turnTexts: string[] = [];
   let turnCompletedOk = false;
   let turnCompleted: Extract<RuntimeEvent, { type: "turn.completed" }> | undefined, oneTimeInputTaken = false;
