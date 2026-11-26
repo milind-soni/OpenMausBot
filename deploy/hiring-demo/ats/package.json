@@ -1,0 +1,26 @@
+{
+  "name": "desk-ats",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Desk ATS (demo): a fake staffing ATS with an MCP server for the MausBot Recruiting Desk demo",
+  "scripts": {
+    "start": "node src/server.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "seed": "node seed/generate.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "express": "^5.3.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
+  }
+}
