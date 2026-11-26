@@ -130,7 +130,6 @@ export function RoomHeader({
   group,
   members,
   simple,
-  setupPending,
   remoteClient,
   findOpen,
   onToggleFind,
@@ -142,7 +141,6 @@ export function RoomHeader({
   group: Group;
   members: Bot[];
   simple: boolean;
-  setupPending: boolean;
   remoteClient: boolean;
   findOpen: boolean;
   onToggleFind: () => void;
@@ -170,7 +168,7 @@ export function RoomHeader({
   if (simple) {
     const more = members.length - SIMPLE_FACES;
     return (
-      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-11 md:pl-5">
+      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-14 md:pl-5">
         <div data-roomhead-row className="flex items-center justify-between gap-3">
           <div data-roomhead-identity className="flex min-w-0 flex-col items-start" style={headerNoDragStyle}>
             <button
@@ -221,7 +219,7 @@ export function RoomHeader({
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
           "@container/roomhead px-5 py-3",
-          "pl-11 md:pl-5",
+          "pl-14 md:pl-5",
         )}
       >
         <div data-roomhead-row className="flex items-center justify-between @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1">
@@ -229,7 +227,7 @@ export function RoomHeader({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-              {!setupPending && !group.dm && !feed && <GroupTaskPicker group={group} />}
+              {!group.dm && !feed && <GroupTaskPicker group={group} />}
             </div>
             {group.description && <p className="truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
@@ -258,11 +256,11 @@ export function RoomHeader({
             messages={group.messages}
             isGroup
           />}
-          {!setupPending && !feed && <ConversationTurnLimit group={group} />}
+          {!feed && <ConversationTurnLimit group={group} />}
           <RoomHeaderCallButton group={group} members={members} />
           <GroupUsageChip usage={group.usage} />
-          {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={onToggleFolder} />}
-          {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
+          {!remoteClient && !group.dm && <RoomWorkingFolderChip group={group} onToggle={onToggleFolder} />}
+          {!remoteClient && !group.dm && <DefaultResponderSelect group={group} members={members} />}
           {group.dm || remoteClient ? (
             faces
           ) : (

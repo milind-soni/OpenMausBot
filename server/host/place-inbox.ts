@@ -282,14 +282,15 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     count(auth: RequestAuth): number {
       return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
     },
-    markRead(auth: RequestAuth, lineId: string): boolean {
+    /** The viewer read a line or an open ask, or marked it unread again. */
+    markRead(auth: RequestAuth, lineId: string, read = true): boolean {
       const line = lines.find((one) => one.id === lineId && lineFor(auth, one));
       if (line) {
-        if (!line.seen) { line.seen = true; save(); }
+        if (Boolean(line.seen) !== read) { line.seen = read; save(); }
         return true;
       }
       if (!askRows(auth).some((row) => row.id === lineId)) return false;
-      if (!seenAsks.has(lineId)) { seenAsks.add(lineId); save(); }
+      if (seenAsks.has(lineId) !== read) { if (read) seenAsks.add(lineId); else seenAsks.delete(lineId); save(); }
       return true;
     },
     /** Every line and open ask this viewer lists is read; an ask is only marked read, never answered. */

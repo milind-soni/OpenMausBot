@@ -108,7 +108,7 @@ export function createAccessRequests(deps: AccessRequestDeps) {
       if (raised) deps.writeAccess(bot, after);
       deps.record?.({ category: "visibility", action: "access.allow", target: { kind: "bot", id: bot.id, name: bot.name }, before: { access, asked: ask.email }, after: { access: after, asked: ask.email } }, person.email);
       deps.inbox().deliver(personKeyOf(ask.email), {
-        kind: "notice", from: { name: nameOf(person.email), email: person.email },
+        kind: "notice", reason: "shared", from: { name: nameOf(person.email), email: person.email },
         text: `${nameOf(person.email)} let you chat with ${bot.name}.`, title: `You can chat with ${bot.name}`, notify: "done",
       });
     }

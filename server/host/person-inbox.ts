@@ -72,6 +72,7 @@ export interface Delivery {
   kind: Item["kind"];
   from: { name: string; email?: string; botId?: string };
   via?: { botId: string; name: string };
+  reason?: InboxItem["reason"];
   to?: Item["to"];
   asker?: string;
   origin?: Origin;
@@ -120,6 +121,12 @@ export interface PersonInboxDeps {
   /** A line reached a person's inbox. */
   delivered?(item: Item, delivery: Delivery): void;
   now?: () => number;
+}
+
+/** A line's wire with the reason of what it now says, or none. */
+function reasoned(wire: InboxItem, reason: InboxItem["reason"]): InboxItem {
+  const { reason: _was, ...rest } = wire;
+  return reason ? { ...rest, reason } : rest;
 }
 
 export function createPersonInbox(deps: PersonInboxDeps) {
@@ -299,7 +306,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
         // The message it points at: the newest one in the conversation it came from, so a client can put the person there.
         ? { origin: { ...origin, title: titleOf(origin), ...(origin.messageId ? {} : focusOf(origin.threadId)) } }
         : {}),
-      ...(delivery.to ? { replies: true as const } : {}),
+      ...(delivery.to ? { replies: true as const } : {}), ...(delivery.reason ? { reason: delivery.reason } : {}),
       ...(delivery.assistant ? { assistant: true as const } : {}),
     };
     const posted = store.appendMessage(at.threadId, delivery.card
@@ -371,7 +378,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       passed = { status: 200, text: `Passed back to ${item.from}, who carries on with it.` };
     } else if (item.to === "person" && item.asker) {
       const delivered = deliver(item.asker, {
-        kind: "message", from: { name: replier.name, email: replier.email }, to: "person", asker: item.person,
+        kind: "message", from: { name: replier.name, email: replier.email }, to: "person", asker: item.person, reason: "replied",
         ...(item.origin ? { origin: item.origin } : {}), text, title: label(item.origin?.threadId ?? ""), notify: "mention", ...(by === "assistant" ? { assistant: true } : {}),
       });
       if (!delivered) return { status: 409, text: `${item.from} has no inbox here, so the answer can't reach them.` };
@@ -462,7 +469,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
         const item = deliver(to, { ...delivery, quiet: true });
         return item ? { item, created: true } : null;
       }
-      store.patchMessage(open.threadId, open.id, { text: delivery.text, ...(posted.inbox ? { inbox: { ...posted.inbox, from: delivery.from, ...(posted.inbox.origin ? { origin: { ...posted.inbox.origin, ...delivery.origin } } : {}) } } : {}) });
+      store.patchMessage(open.threadId, open.id, { text: delivery.text, ...(posted.inbox ? { inbox: reasoned({ ...posted.inbox, from: delivery.from, ...(posted.inbox.origin ? { origin: { ...posted.inbox.origin, ...delivery.origin } } : {}) }, delivery.reason) } : {}) });
       Object.assign(open, { text: oneLine(delivery.text, 400), from: delivery.from.name.slice(0, 200), origin: delivery.origin, at: now(), seen: false });
       if (delivery.from.email) open.fromEmail = delivery.from.email; else delete open.fromEmail;
       save();
@@ -510,7 +517,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
         return {
           id: item.id, kind: item.kind, tab: tabOf(item, posted), from: posted.inbox?.from ?? { name: item.from }, ...(posted.inbox?.via ? { via: posted.inbox.via } : {}),
           ...(posted.inbox?.origin ? { origin: posted.inbox.origin } : {}), text: clip(posted.text ?? item.text, ROW_TEXT_MAX), at: item.at, unread: !item.seen,
-          ...(posted.inbox?.replies ? { replies: true as const } : {}), ...(posted.inbox?.answers?.length ? { answers: posted.inbox.answers } : {}),
+          ...(posted.inbox?.replies ? { replies: true as const } : {}), ...(posted.inbox?.reason ? { reason: posted.inbox.reason } : {}), ...(posted.inbox?.answers?.length ? { answers: posted.inbox.answers } : {}),
           ...(item.kind === "ask" && posted.card ? { card: posted.card } : {}),
         };
       });
@@ -525,11 +532,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       if (!item.done) { item.done = true; item.seen = true; save(); touch(item.threadId); }
       return "done";
     },
-    /** The person read a line. */
-    markRead(person: string, id: string): boolean {
+    /** The person read a line, or marked it unread again. */
+    markRead(person: string, id: string, read = true): boolean {
       const item = items.find((one) => one.person === person && one.id === id);
       if (!item) return false;
-      if (!item.seen) { item.seen = true; save(); touch(item.threadId); }
+      if (Boolean(item.seen) !== read) { item.seen = read; save(); touch(item.threadId); }
       return true;
     },
     /** The person read every line of their inbox that still waits on them; an ask stays open, only unmarked as new. */

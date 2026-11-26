@@ -77,7 +77,7 @@ describe("Simple as the only mode", () => {
   });
 
   it("keeps a paired remote client's full room header", () => {
-    const room = { advanced: readAdvancedMode(), group: { dm: false }, setupPending: false };
+    const room = { advanced: readAdvancedMode(), group: { dm: false } };
     expect(simpleRoomHeader({ ...room, remoteClient: false })).toBe(true);
     expect(simpleRoomHeader({ ...room, remoteClient: true })).toBe(false);
   });

@@ -624,7 +624,7 @@ export type Action =
       heldAtStart: readonly Message[];
     }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string; setup?: { bulletin: string; defaultResponder: GroupDefaultResponder } }
   | {
       type: "sendGroup";
       groupId: string;
@@ -2555,9 +2555,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               memberIds: action.memberIds,
               name: action.name,
               section: action.section,
-              ...(window.ogb?.remoteClient?.active
-                ? { setup: { bulletin: "", defaultResponder: { kind: "mentions" } } }
-                : {}),
+              setup: action.setup,
             }),
           })
             .then(({ group }) => {

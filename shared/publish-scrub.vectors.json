@@ -247,6 +247,66 @@
     }
   },
   {
+    "name": "emails written with a full-width ＠, as %40 or with an internationalised domain",
+    "input": "Mail jane＠acme.io, jane%40acme.io, josé@münchen.de or 太郎@例え.日本; icon@2x.png and you@example.com stay.",
+    "output": "Mail <email>, <email>, <email> or <email>; icon@2x.png and you@example.com stay.",
+    "counts": {
+      "paths": 0,
+      "emails": 3,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "phone numbers without a + in spaced groups; timestamps, dates and ids stay",
+    "input": "Call 415 555 0132, (415) 555 0132 or 98765 43210. Not 1794748391525, 2026 11 25, 100 200 3000, 12:30 555 1234 or 1234 5678 9012 3456.",
+    "output": "Call <phone>, <phone> or <phone>. Not 1794748391525, 2026 11 25, 100 200 3000, 12:30 555 1234 or 1234 5678 9012 3456.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 2,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "WSL, UNC and mounted-disk homes",
+    "input": "/mnt/c/Users/jane/Desktop, \\\\wsl$\\Ubuntu\\home\\jane\\x, \\\\fileserver\\Users\\jane\\docs, \\\\nas\\c$\\Users\\Bob Smith\\x, /Volumes/Macintosh HD/Users/jane/x; \\\\server\\Users\\Public stays.",
+    "output": "~/Desktop, ~\\x, ~\\docs, ~\\x, ~/x; \\\\server\\Users\\Public stays.",
+    "counts": {
+      "paths": 5,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "percent-encoded homes",
+    "input": "file:///Users/Jane%20Doe/x.md, ?path=%2FUsers%2Fjanedoe%2Fnotes, C%3A%5CUsers%5Cjane%5Cx; %2FUsers%2FShared stays.",
+    "output": "file://~/x.md, ?path=~%2Fnotes, ~%5Cx; %2FUsers%2FShared stays.",
+    "counts": {
+      "paths": 3,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "bidirectional overrides and control characters go; tabs, line breaks and right-to-left text stay",
+    "input": "safe ‮txt.exe‬ and a bell\u0007 here\tthen\nשלום עולם",
+    "output": "safe txt.exe and a bell here\tthen\nשלום עולם",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
     "name": "the publisher's markers are not scrubbed again",
     "input": "~/x <workspace>/y <email> <phone> <name> <secret> «redacted 40 chars»",
     "names": [

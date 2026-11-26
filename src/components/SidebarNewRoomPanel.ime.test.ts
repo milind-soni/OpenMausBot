@@ -56,31 +56,34 @@ function press(target: Element, key: string, init: KeyboardEventInit = {}) {
   flushSync(() => target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })));
 }
 
-describe("New channel panel with an input method", () => {
+describe("New group chat panel", () => {
   function open() {
     const onClose = vi.fn();
     flushSync(() => root.render(createElement(NewRoomPanel, { onClose })));
-    flushSync(() => document.querySelector<HTMLButtonElement>('[role="checkbox"][aria-label="Atlas"]')!.click());
-    const [name, section] = [...document.querySelectorAll<HTMLInputElement>("input")];
-    return { onClose, name, section };
+    const atlas = document.querySelector<HTMLButtonElement>('[role="checkbox"][aria-label="Atlas"]')!;
+    return { onClose, atlas };
   }
 
-  it.each(composing)("does not create the channel or close on keys that belong to the $name", ({ init }) => {
-    const { onClose, name, section } = open();
-    for (const input of [name, section]) {
-      type(input, "kaifa");
-      press(input, "Enter", init);
-      press(input, "Escape", init);
-    }
-    expect(fixture.dispatch).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
+  it("asks only for the bots, starting on the first one", () => {
+    const { atlas } = open();
+    expect(document.querySelectorAll("input, textarea")).toHaveLength(0);
+    expect(document.activeElement).toBe(atlas);
   });
 
-  it("creates the channel on the Enter after the text is committed", () => {
-    const { onClose, name } = open();
-    type(name, "开发");
-    press(name, "Enter");
-    expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "createGroup", name: "开发", memberIds: [bot.id] }));
+  it("starts the chat with a name, who answers and a department taken from the bots", () => {
+    const { onClose, atlas } = open();
+    flushSync(() => atlas.click());
+    flushSync(() => [...document.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Create group chat"))!.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({
+      type: "createGroup", memberIds: [bot.id], name: "Atlas", section: "Research",
+      setup: { bulletin: "", defaultResponder: { kind: "member", botId: bot.id } },
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("closes on Escape", () => {
+    const { onClose, atlas } = open();
+    press(atlas, "Escape");
     expect(onClose).toHaveBeenCalledOnce();
   });
 });
@@ -120,8 +123,6 @@ describe("composing keys stay inside the dialog", () => {
     const outside = vi.fn();
     document.addEventListener("keydown", outside);
     try {
-      flushSync(() => root.render(createElement(NewRoomPanel, { onClose: vi.fn() })));
-      for (const input of document.querySelectorAll<HTMLInputElement>("input")) press(input, "Escape", init);
       flushSync(() => root.render(createElement(TeamDialog, { section: "Research", rename: true, onClose: vi.fn() })));
       press(document.querySelector<HTMLInputElement>('[role="dialog"] input')!, "Escape", init);
       expect(outside).not.toHaveBeenCalled();

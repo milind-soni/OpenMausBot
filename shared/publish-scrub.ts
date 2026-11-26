@@ -70,6 +70,8 @@ function scrubSecrets(text: string, found: Found): string {
 
 // ---- Paths ---------------------------------------------------------------------------------------------------------
 
+const decodeURIComponentSafe = (value: string) => { try { return decodeURIComponent(value); } catch { return value; } };
+
 /** A path separator, also as it is written inside a quoted YAML or JSON string (`\\`). */
 const SEP = String.raw`(?:\\{1,2}|/)`;
 /** One path segment without spaces. */
@@ -88,11 +90,23 @@ const WORKSPACE = new RegExp(
   `${SEP}\\.openmausbot[A-Za-z0-9._-]*(?:${SEP}${SEG}){0,3}?${SEP}(?:task-workspaces${SEP}[A-Za-z0-9_-]+(?:${SEP}[A-Za-z0-9_-]{8,})?|workspaces${SEP}[A-Za-z0-9_-]+)(?![A-Za-z0-9_-])`,
   "g",
 );
-const MAC_LINUX_HOME = new RegExp(`${PATH_START}/(Users|home)/([A-Za-z0-9._-]{0,63}[A-Za-z0-9_-])(?![A-Za-z0-9_-])`, "g");
+/** A home under a mounted disk or a WSL view of Windows: `/Volumes/<disk>/Users/x`, `/mnt/c/Users/x`. */
+const MOUNT = String.raw`(?:/Volumes/[^/\r\n'"\`<>]{1,64}|/mnt/[A-Za-z])?`;
+const MAC_LINUX_HOME = new RegExp(`${PATH_START}${MOUNT}/(Users|home)/((?:[A-Za-z0-9._-]|%20){0,63}[A-Za-z0-9_-])(?![A-Za-z0-9_-]|%20)`, "g");
+/** A home on another machine or a WSL distribution: a UNC path to `Users` or `home`, such as `\\server\Users\x` or `\\wsl$\Ubuntu\home\x`. */
+const UNC_HOME = new RegExp(String.raw`(?<![A-Za-z0-9_\\])\\{2,4}[A-Za-z0-9.$_-]{1,64}\\{1,2}(?:[A-Za-z0-9._$-]{1,64}\\{1,2})?(Users|home)\\{1,2}(${WIN_NAME})(?![A-Za-z0-9_-])`, "gi");
+/** A home folder written percent-encoded, as a link or a query holds it: `%2FUsers%2Fx`, `C%3A%5CUsers%5Cx`. */
+const ENCODED_HOME = /(?:[A-Za-z]%3A)?%(?:2F|5C)(Users|home)%(?:2F|5C)((?:[A-Za-z0-9._-]|%20){1,64}?)(?=%(?:2F|5C)|[^A-Za-z0-9._%-]|$)/gi;
 const WINDOWS_HOME = new RegExp(`(?<![A-Za-z0-9_])[A-Za-z]:${SEP}[Uu]sers${SEP}(${WIN_NAME})(?![A-Za-z0-9_-])`, "g");
 
 function scrubPaths(text: string, found: Found): string {
   let out = text.replace(WORKSPACE, (match) => take(found, "paths", match, SCRUB_MARKS.workspace));
+  const home = (match: string, name: string) => {
+    const lower = decodeURIComponentSafe(name).trim().toLowerCase();
+    return SHARED_HOMES.has(lower) || lower === "public" || lower === "default" ? match : take(found, "paths", match, SCRUB_MARKS.path);
+  };
+  out = out.replace(ENCODED_HOME, (match, _root: string, name: string) => home(match, name));
+  out = out.replace(UNC_HOME, (match, _root: string, name: string) => home(match, name));
   out = out.replace(WINDOWS_HOME, (match, name: string) => {
     const lower = name.toLowerCase();
     return SHARED_HOMES.has(lower) || lower === "public" || lower === "default" ? match : take(found, "paths", match, SCRUB_MARKS.path);
@@ -103,7 +117,8 @@ function scrubPaths(text: string, found: Found): string {
 
 // ---- Emails and phone numbers --------------------------------------------------------------------------------------
 
-const EMAIL = /(?<![A-Za-z0-9._%+-])([A-Za-z0-9._%+-]{1,64})@((?:[A-Za-z0-9-]{1,63}\.)+([A-Za-z]{2,24}))(?![A-Za-z0-9-]|\.[A-Za-z0-9])/g;
+/** Also with a full-width ＠ or `%40`, and with letters of any script (an internationalised domain). */
+const EMAIL = /(?<![\p{L}\p{N}._%+-])([\p{L}\p{N}._+-]{1,64}?)(?:@|＠|%40)((?:[\p{L}\p{N}-]{1,63}\.)+(\p{L}{2,24}))(?![\p{L}\p{N}-]|\.[\p{L}\p{N}])/gu;
 /** Addresses nobody owns, and `name@2x.png`-style file names. */
 const FILE_ENDINGS = new Set(["png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp", "pdf", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "scss",
   "json", "md", "py", "rb", "go", "rs", "java", "sh", "txt", "htm", "html", "xml", "yml", "yaml", "toml", "lock", "zip", "tar", "gz", "wasm", "map"]);
@@ -121,15 +136,18 @@ const PHONE_BARE = /(?<![A-Za-z0-9_+/=%.-])\+\d{10,15}(?![A-Za-z0-9_]|[.-]\d)/g;
 const PHONE_NANP = /(?<![A-Za-z0-9_.+-])(?:\(\d{3}\)\s?|\d{3}[-.])\d{3}[-.]\d{4}(?![A-Za-z0-9_]|[.-]\d)/g;
 /** 020 7946 0958, 0800-123-4567: a trunk 0 and three groups. */
 const PHONE_TRUNK = /(?<![A-Za-z0-9_.+-])0\d{2,4}[ -]\d{3,4}[ -]\d{3,4}(?![A-Za-z0-9_]|[ .-]\d)/g;
+/** Without a `+`, only spaced groups a timestamp or an id never has: 415 555 0132, (415) 555 0132, 98765 43210. */
+const PHONE_SPACED = /(?<![A-Za-z0-9_.+:/-])(?:\(?[2-9]\d{2}\)? \d{3} \d{4}|[6-9]\d{4} \d{5})(?![A-Za-z0-9_]|[ .:-]\d)/g;
 const digitCount = (value: string) => value.replace(/\D/g, "").length;
 
 function scrubContacts(text: string, found: Found): string {
   let out = text.replace(EMAIL, (match, local: string, domain: string, ending: string) =>
-    keepEmail(local, domain, ending) ? match : take(found, "emails", match.toLowerCase(), SCRUB_MARKS.email));
+    keepEmail(local, domain, ending) ? match : take(found, "emails", `${local}@${domain}`.toLowerCase(), SCRUB_MARKS.email));
   const phone = (match: string) => take(found, "phones", match.replace(/\D/g, ""), SCRUB_MARKS.phone);
   out = out.replace(PHONE_INTERNATIONAL, (match: string) => digitCount(match) < 8 || digitCount(match) > 15 ? match : phone(match));
   out = out.replace(PHONE_BARE, phone);
   out = out.replace(PHONE_NANP, phone);
+  out = out.replace(PHONE_SPACED, phone);
   return out.replace(PHONE_TRUNK, (match: string) => digitCount(match) < 10 ? match : phone(match));
 }
 
@@ -182,9 +200,24 @@ export function scrubText(text: string, options: ScrubOptions = {}): { text: str
   return { text: scrubInto(text, options, found), counts: countsOf(found) };
 }
 
+/** Bidirectional overrides and isolates (text that reads differently than it shows) and control characters other than
+ * tab and line breaks: they go before anything else is looked at, so none can hide a match. */
+const hidden = (code: number) => (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) || (code >= 0x7f && code <= 0x9f)
+  || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
+
+function withoutHidden(text: string): string {
+  let out = "", from = 0;
+  for (let at = 0; at < text.length; at += 1) {
+    if (!hidden(text.charCodeAt(at))) continue;
+    out += text.slice(from, at);
+    from = at + 1;
+  }
+  return from === 0 ? text : out + text.slice(from);
+}
+
 function scrubInto(text: string, options: ScrubOptions, found: Found): string {
   if (!text) return text;
-  let out = scrubSecrets(text, found);
+  let out = scrubSecrets(withoutHidden(text), found);
   out = scrubPaths(out, found);
   out = scrubContacts(out, found);
   return options.names?.length ? scrubNames(out, options.names, found) : out;

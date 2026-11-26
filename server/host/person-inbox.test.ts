@@ -193,6 +193,8 @@ describe("finished work in a person's inbox", () => {
     f.team.inbox.markRead(person, row.id);
     expect(f.team.inbox.view(person)!.rows[0]!.tab).toBe("done");
     expect(f.team.inbox.view(person)!.rows.filter((one) => one.tab === "info"), "the inbox holds only what needs them").toEqual([]);
+    expect(f.team.inbox.markRead(person, row.id, false), "made new again").toBe(true);
+    expect(f.team.inbox.view(person)!.rows[0]).toMatchObject({ tab: "info", unread: true });
   });
 
   it("points the line at the message it came from, so a client can open the conversation there", () => {
@@ -389,5 +391,19 @@ describe("what a confined conversation says", () => {
     expect(f.team.route(question)).toEqual({ ...question, forPerson: key(BEN.email) });
     expect(f.notified).toEqual([]);
     expect(f.team.needsYou(session(BEN.email))).toEqual([]);
+  });
+});
+
+describe("why a line is here", () => {
+  it("follows what a kept line says now: a share, then a message in the same conversation", () => {
+    const f = fixture();
+    const person = key(BEN.email);
+    const line = { kind: "message" as const, from: { name: "Cleo", email: CLEO.email }, origin: { botId: "scout", threadId: "scout-main" }, title: "Cleo", notify: "mention" as const };
+    expect(f.team.inbox.keepOne(person, { ...line, reason: "shared", text: "Cleo shared “Launch” with you." })?.created).toBe(true);
+    expect(f.team.inbox.view(person)!.rows).toEqual([expect.objectContaining({ reason: "shared" })]);
+    expect(f.team.inbox.keepOne(person, { ...line, text: "Cleo wrote in “Launch”." })?.created).toBe(false);
+    const [row] = f.team.inbox.view(person)!.rows;
+    expect(row).toMatchObject({ text: "Cleo wrote in “Launch”." });
+    expect(row!.reason).toBeUndefined();
   });
 });

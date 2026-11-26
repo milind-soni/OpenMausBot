@@ -197,10 +197,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
       })).body.bot;
     }
     const created = await api("POST", "/api/groups", { name: "Launch", memberIds: [bots.Maya!.id, bots.Theo!.id, bots.Ravi!.id] });
-    expect(created.body.group.defaultResponder).toEqual({ kind: "auto" });
-    const setup = await api("PATCH", `/api/groups/${created.body.group.id}/setup`, { action: "complete", cwd: null, bulletin: "", defaultResponder: { kind: "auto" } });
-    expect(setup.status).toBe(200);
-    expect(setup.body.group.defaultResponder).toEqual({ kind: "auto" });
+    expect(created.body.group).toMatchObject({ defaultResponder: { kind: "auto", fallbackBotId: bots.Maya!.id }, setupCompletedAt: expect.any(Number) });
     room = created.body.group;
   });
 

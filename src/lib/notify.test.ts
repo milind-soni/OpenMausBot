@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const sounds = vi.hoisted(() => ({ enabled: true, finished: true }));
+const sounds = vi.hoisted(() => ({ enabled: true, finished: true, reports: true }));
 vi.mock("./notification-preferences", () => ({
   notificationSoundsEnabled: () => sounds.enabled,
   finishedNotificationsEnabled: () => sounds.finished,
+  reportNotificationsEnabled: () => sounds.reports,
 }));
 
 import { setLocale } from "./i18n";
@@ -44,6 +45,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   sounds.enabled = true;
   sounds.finished = true;
+  sounds.reports = true;
 });
 
 describe("desktop notifications", () => {
@@ -84,6 +86,20 @@ describe("desktop notifications", () => {
     showNotification({ ...frame, kind: "sign-in" }, vi.fn());
     showNotification({ ...frame, kind: "spend" }, vi.fn());
     expect(notices).toHaveLength(3);
+  });
+
+  it("keeps scheduled reports on their own switch, apart from chat replies", () => {
+    const { notices } = installNotification("granted");
+    const report: NotifyFrame = { ...frame, routine: true, title: "Maus finished: Daily digest" };
+    sounds.finished = false;
+    showNotification(frame, vi.fn());
+    showNotification(report, vi.fn());
+    expect(notices.map((notice) => notice.title)).toEqual([report.title]);
+    sounds.finished = true;
+    sounds.reports = false;
+    showNotification(frame, vi.fn());
+    showNotification(report, vi.fn());
+    expect(notices.map((notice) => notice.title)).toEqual([report.title, frame.title]);
   });
 
   it("shows a notification after permission is granted", () => {
