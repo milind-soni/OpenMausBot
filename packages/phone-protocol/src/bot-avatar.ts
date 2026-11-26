@@ -4,8 +4,8 @@ export const MASCOT_FACE_COLORS = ["white", "black"] as const;
 export const mascotFaceColorSchema = z.enum(MASCOT_FACE_COLORS);
 export type MascotFaceColor = z.infer<typeof mascotFaceColorSchema>;
 
-/** The finish of an engine-drawn avatar body (the shapes and Open Bot Avatar objects): Open Bot Avatar's fluffy fur; absent or null is flat. */
-export const MASCOT_MATERIALS = ["fluffy"] as const;
+/** The finish of an engine-drawn avatar body (the shapes and Open Bot Avatar objects): Open Bot Avatar's fluffy fur, or the same surface lit as matte clay or polished metal; absent or null is flat. */
+export const MASCOT_MATERIALS = ["fluffy", "matte", "metallic"] as const;
 export const mascotMaterialSchema = z.enum(MASCOT_MATERIALS);
 export type MascotMaterial = z.infer<typeof mascotMaterialSchema>;
 

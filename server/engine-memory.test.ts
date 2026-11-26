@@ -1115,6 +1115,16 @@ describe("the day's memory pressure, for the Admin", () => {
     expect(ledger.read(start + 60_000, [start])).toEqual({ waits: 2, waitMs: 150_000, stopped: 1, killed: 3, stallMinutes: 1 });
     expect(ledger.read(start + 24 * 60 * 60_000 + 60_000)).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
   });
+
+  it("counts since start beside the rolling day: a stalled minute once, and never falling as the day forgets", () => {
+    const ledger = new PressureLedger(), start = 1_800_000_000_000;
+    ledger.note(start, "waits"); ledger.note(start, "waitMs", 90_000); ledger.note(start, "killed", 3); ledger.note(start, "stopped");
+    ledger.note(start, "stalled"); ledger.note(start + 20_000, "stalled"); ledger.note(start + 60_000, "stalled");
+    expect(ledger.boot()).toEqual({ waits: 1, stopped: 1, killed: 3, stallMinutes: 2 });
+    ledger.note(start + 25 * 60 * 60_000, "waits");
+    expect(ledger.read(start + 25 * 60 * 60_000)).toMatchObject({ waits: 1, stallMinutes: 0 });
+    expect(ledger.boot()).toEqual({ waits: 2, stopped: 1, killed: 3, stallMinutes: 2 });
+  });
 });
 
 describe("a lane of its own", () => {

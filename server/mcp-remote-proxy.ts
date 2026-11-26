@@ -1,6 +1,5 @@
 // The upstream handshake is OMB's own, never the engine's: an engine's client adds capability fields a strict server
 // refuses. stdout carries only protocol frames.
-import { createInterface } from "node:readline";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
@@ -31,6 +30,7 @@ import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts"
 import { fitToolListResult } from "./mcp-tool-schema.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { readStdioLines } from "./stdio-lines.ts";
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
 
 type Json = Record<string, unknown>;
@@ -358,8 +358,7 @@ async function handle(message: Json): Promise<void> {
   } finally { pending.delete(id); }
 }
 
-const input = createInterface({ input: process.stdin });
-input.on("line", (line) => {
+const input = readStdioLines(process.stdin, (line) => {
   if (closing || !line.trim()) return;
   let value: unknown;
   try { value = JSON.parse(line); } catch { error(null, -32700, "Invalid JSON-RPC frame"); return; }
@@ -367,7 +366,7 @@ input.on("line", (line) => {
   const task = handle(value);
   tasks.add(task);
   void task.finally(() => tasks.delete(task));
-});
+}, () => { void shutdown(); });
 async function shutdown(): Promise<void> {
   if (closing) return;
   closing = true;
@@ -378,6 +377,5 @@ async function shutdown(): Promise<void> {
   await client.close();
   process.exit(0);
 }
-input.on("close", () => { void shutdown(); });
 process.on("SIGTERM", () => { void shutdown(); });
 process.on("SIGINT", () => { void shutdown(); });

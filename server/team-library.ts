@@ -25,11 +25,24 @@ export interface TeamCatalogEntry {
   readme: string;
   /** A template folder (`teams/<slug>`): read whole, with its skills and pictures, instead of the files made from it. */
   folder?: string;
+  /** A folder holding one bot (added without a department) or a department. */
+  kind?: "bot" | "department";
+  /** Each bot's face on the gallery card; `picture` is a path in the repository until the catalog route reads it. */
+  avatars?: TeamCatalogAvatar[];
   members: number;
   skills: string[];
   requires: { apps: string[] };
   /** Who published it ("Published by"), as the template's own frontmatter credits them. */
   author?: string;
+}
+
+export interface TeamCatalogAvatar {
+  key: string;
+  name: string;
+  color: string;
+  mascotBody?: string;
+  mascotExpression?: string;
+  picture?: string;
 }
 
 export interface TeamCatalog {
@@ -77,6 +90,26 @@ function catalogAuthor(value: unknown): string | undefined {
   return line && line.length <= 100 ? line : undefined;
 }
 
+const LOOK = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const MAX_FACES = 50;
+
+/** The faces a catalog entry lists. A face that isn't well formed is left out; it never fails the catalog. */
+function catalogAvatars(value: unknown, slug: string): TeamCatalogAvatar[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const picture = new RegExp(`^teams/${slug}/avatars/[a-z0-9][a-z0-9_-]{0,63}\\.(?:webp|png|jpg)$`);
+  return value.slice(0, MAX_FACES).flatMap((raw): TeamCatalogAvatar[] => {
+    if (!isRecord(raw) || typeof raw.key !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(raw.key)) return [];
+    if (typeof raw.name !== "string" || !raw.name.trim() || raw.name.trim().length > 100) return [];
+    if (typeof raw.color !== "string" || !LOOK.test(raw.color)) return [];
+    return [{
+      key: raw.key, name: raw.name.trim(), color: raw.color,
+      ...(typeof raw.mascotBody === "string" && LOOK.test(raw.mascotBody) ? { mascotBody: raw.mascotBody } : {}),
+      ...(typeof raw.mascotExpression === "string" && LOOK.test(raw.mascotExpression) ? { mascotExpression: raw.mascotExpression } : {}),
+      ...(typeof raw.picture === "string" && picture.test(raw.picture) ? { picture: raw.picture } : {}),
+    }];
+  });
+}
+
 /** Validate the remotely maintained index before any of it reaches the renderer. */
 export function parseTeamCatalog(value: unknown): TeamCatalog {
   if (!isRecord(value) || value.format !== "openmaus.catalog" || value.version !== 1) {
@@ -96,6 +129,7 @@ export function parseTeamCatalog(value: unknown): TeamCatalog {
     slugs.add(slug);
     const prefix = `teams/${slug}/`;
     const requires = isRecord(raw.requires) ? raw.requires : {};
+    const avatars = catalogAvatars(raw.avatars, slug);
     return {
       slug,
       name: text(raw.name, `${field}.name`, 100),
@@ -111,6 +145,8 @@ export function parseTeamCatalog(value: unknown): TeamCatalog {
         : {}),
       manifest: relativeFile(raw.manifest, `${field}.manifest`, ".mausteam.json", prefix),
       ...(raw.folder === `teams/${slug}` ? { folder: `teams/${slug}` } : {}),
+      ...(raw.kind === "bot" || raw.kind === "department" ? { kind: raw.kind } : {}),
+      ...(avatars ? { avatars } : {}),
       readme: relativeFile(raw.readme, `${field}.readme`, "README.md", prefix),
       members:
         typeof raw.members === "number" && Number.isSafeInteger(raw.members) && raw.members > 0 && raw.members <= 200

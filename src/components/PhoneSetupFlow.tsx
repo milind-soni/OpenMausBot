@@ -66,6 +66,7 @@ import {
   phonePairingManualCodeMode,
 } from "../lib/companion-state";
 import { ConnectionDetail } from "./ConnectionDetail";
+import { FirewallNotes } from "./HostFirewallNote";
 import { PhonePairingQr } from "./PhonePairingQr";
 import { PhoneSetupSignInRoutes } from "./PhoneSetupSignInRoutes";
 import { productName } from "../lib/brand";
@@ -1056,11 +1057,7 @@ export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupContr
       {!c.pairingExpired && manualCodeMode === "details" && c.state?.pairing && (
         <p className="mt-3 text-[12px] text-ink-secondary">{codeUntil(c.state.pairing.expiresAt)}</p>
       )}
-      {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
-        <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
-          {t("phone.code.publicNetwork", { network: c.state.publicNetwork })}
-        </p>
-      )}
+      {!c.pairingExpired && c.localFallback && c.state && <FirewallNotes state={c.state} />}
       {c.pairingExpired && (
         <button onClick={c.refreshCode} className="mt-5 rounded-lg bg-accent px-5 py-2.5 text-[14px] font-medium text-white">
           {t("phone.code.createNew")}

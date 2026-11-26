@@ -350,24 +350,24 @@ describe("bots that are working or waiting on the person", () => {
     fixture.state = { ...fixture.state, bots: fixture.state.bots.map((item) => (item.id === id ? { ...item, ...extra } : item)) };
   };
 
-  it("move to the top of their own list, in the person's order, and go back when done", () => {
+  it("keep their place in their own list while they work or wait, and after", () => {
     busy("cleo", { busy: true });
     busy("bea", { activity: "waiting-on-you" });
     busy("echo", { busy: true });
-    expect(listed()).toEqual(["bea", "cleo", "atlas", "echo", "dodo"]);
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
     busy("cleo", { busy: false });
     busy("bea", { activity: "idle" });
     busy("echo", { busy: false });
     expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
   });
 
-  it("count a working thread, but not a wait on a teammate", () => {
+  it("keep their place for a working thread too", () => {
     busy("cleo", { tasks: [{ threadId: "c1", title: "Run", createdAt: 1, busy: true } as Task] });
     busy("bea", { waitingForTeammates: true });
-    expect(listed()).toEqual(["cleo", "atlas", "bea", "dodo", "echo"]);
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
   });
 
-  it("never store the shown order: Alt+Up/Down and drops use the person's own order", () => {
+  it("Alt+Up/Down and drops use the person's own order, a working bot in its place", () => {
     busy("cleo", { busy: true });
     row("atlas").botDrag!.step("atlas", 1);
     expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);

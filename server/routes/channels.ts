@@ -38,7 +38,7 @@ import type { UsageTrigger } from "../usage-ledger.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { sameNameRefusal, sameNameRefusalForBots } from "../same-name-mentions.ts";
 import { conversationLanguage } from "../server-lines.ts";
-import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { bulkDeleteThreadIds, outsideClosedScope, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
@@ -120,6 +120,8 @@ export interface ChannelRouteDeps {
 }
 
 const createGroupTaskRequestSchema = z.object({ title: z.string().optional(), activate: z.boolean().optional() });
+/** The most threads one read request may name. */
+const MAX_READ_THREADS = 500;
 
 type StopAnswer = { status: 200 | 403 | 409; body: { ok: true } | { error: string; code?: "stop_not_yours" } };
 
@@ -217,8 +219,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const refused: BulkDeleteRefusal[] = [];
       for (const threadId of parsed.threadIds) {
         const refusal = deleteRefusal(auth, group.id, threadId);
-        if (!refusal) allowed.push(threadId);
-        else refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        if (refusal) refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        else if (parsed.scope === "closed" && outsideClosedScope(store.groupTaskByThread(group.id, threadId))) refused.push({ threadId, reason: "not-closed" });
+        else allowed.push(threadId);
       }
       if (allowed.length >= (group.tasks?.length ?? 1)) return json(res, 400, { error: "a channel keeps at least one task" });
       const result = deleteGroupTasks(group.id, allowed);
@@ -329,6 +332,25 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const room = store.group(m[1]);
       if (!room) return json(res, 404, { error: "no such room" });
       const body = await readBody(req);
+      // Several of the room's threads in one request and one frame: the feed reads marks older than itself this way.
+      if (Array.isArray(body?.threadIds)) {
+        const asked: unknown[] = body.threadIds;
+        if (room.dm || asked.length > MAX_READ_THREADS || asked.some((id) => typeof id !== "string")) return json(res, 400, { error: "threadIds must be up to 500 of the room's threads" });
+        const threadIds = [...new Set(asked as string[])].filter((id) => store.groupTaskByThread(room.id, id));
+        let personal: WireGroup | null = null;
+        let shared: GroupRecord | null = null;
+        for (const id of threadIds) {
+          sawThread(id);
+          deps.threadRead?.(auth, id);
+          personal = deps.personMarkRoom?.(auth, room, false, id) ?? null;
+          if (!personal) shared = store.markGroupThreadUnread(room.id, id, false, readCursor(id).lastReadMessageId);
+          readThreadNotifications(id, broadcast, notificationListed(auth));
+        }
+        if (personal) return json(res, 200, { group: personal, read: threadIds.length });
+        const group = shared ?? store.group(room.id)!;
+        if (shared) broadcast({ kind: "group", group: publicGroupState(group) });
+        return json(res, 200, { group: own(publicGroupState(group)), read: threadIds.length });
+      }
       const threadId = body?.threadId ?? room.threadId;
       if (typeof threadId !== "string" || (room.dm
         ? threadId !== room.threadId

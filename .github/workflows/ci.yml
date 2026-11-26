@@ -532,20 +532,28 @@ jobs:
     # commit, so an unreviewed branch can never push to production. Closes
     # the deploy gap that left #1914's broker fix (45cc2cf) sitting in
     # source without reaching Cloudflare.
+    # The nightly run on main deploys too, so a main run cancelled before this
+    # job leaves the Worker behind main for a day at most.
     needs: [control-plane]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main'
     name: deploy composio broker (Cloudflare Worker)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # A repo without the secret (a fork, or before the token is created)
-      # skips the deploy with a warning instead of failing every main push.
+      # A fork without the secret skips the deploy with a warning. On this
+      # repository a missing token fails the job: from October to November 2026
+      # the job passed while skipping every deploy, and the live Worker stayed
+      # weeks behind main without anyone seeing it.
       - id: token
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          UPSTREAM: ${{ github.repository == 'milind-soni/OpenMausBot' }}
         run: |
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ "$UPSTREAM" = "true" ]; then
+            echo "::error title=Composio broker not deployed::CLOUDFLARE_API_TOKEN is not set, so the broker Worker was not deployed and the live service is behind main."
+            exit 1
           else
             echo "::warning title=Composio broker not deployed::CLOUDFLARE_API_TOKEN is not set, so the broker Worker was not deployed."
           fi
@@ -566,6 +574,20 @@ jobs:
         run: pnpm broker:check
       - if: steps.token.outputs.present == 'true'
         run: pnpm broker:test
+      # Migrations are applied by hand before the code that needs them (the
+      # README's deploy order). New code on a database without them fails at
+      # run time, so the deploy stops here instead.
+      - name: Every database migration is applied
+        if: steps.token.outputs.present == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          out=$(pnpm exec wrangler d1 migrations list openmausbot-composio --remote --config cloudflare/composio-broker/wrangler.jsonc 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          if ! printf '%s\n' "$out" | grep -q "No migrations to apply"; then
+            echo "::error title=Composio broker not deployed::A migration is not applied to the remote database. Apply it (cloudflare/composio-broker/README.md), then rerun this job."
+            exit 1
+          fi
       - name: Deploy the composio broker Worker via Wrangler
         if: steps.token.outputs.present == 'true'
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
@@ -574,8 +596,12 @@ jobs:
           # Mirrors the local `pnpm broker:deploy` script so CI is the same
           # command a developer runs by hand. The token is created in the
           # Cloudflare dashboard with Workers Scripts:Edit on the broker
-          # account; store it as the CLOUDFLARE_API_TOKEN repo secret.
-          command: deploy --config cloudflare/composio-broker/wrangler.jsonc
+          # account, plus D1 Edit: the migration check above runs SQL through
+          # D1's query API (a `CREATE TABLE IF NOT EXISTS d1_migrations` and a
+          # read), which D1 Read does not allow. Store it as the
+          # CLOUDFLARE_API_TOKEN repo secret. The message names the commit,
+          # so `wrangler deployments list` shows what is live.
+          command: deploy --config cloudflare/composio-broker/wrangler.jsonc --message "main ${{ github.sha }} (CI ${{ github.event_name }})"
 
   ui-smoke:
     needs: static

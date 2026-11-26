@@ -213,3 +213,20 @@ it("keeps a voice selected before the pending provider save completes, even befo
   await act(async () => resolve({ tts: { provider: "openai", configured: true } }));
   expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voice: "cedar" });
 });
+
+it("lets a saved Chatterbox server address be cleared", async () => {
+  fixture.config = { tts: { provider: "chatterbox", configured: true, baseUrl: "http://127.0.0.1:4123", model: "" } };
+  fixture.api.mockResolvedValue({ tts: { provider: "chatterbox", configured: false, baseUrl: "", model: "" } });
+  await render(bot("pepper"), vi.fn());
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="Chatterbox server address"]')!;
+  const save = host.querySelector<HTMLButtonElement>('input[aria-label="Chatterbox server address"] + button')!;
+  expect(input.value).toBe("http://127.0.0.1:4123");
+  expect(save.disabled).toBe(false);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(save.disabled).toBe(false);
+  await act(async () => { save.click(); });
+  expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "", model: "" } }) });
+});

@@ -44,13 +44,14 @@ function Face({ avatar, size }: { avatar: TemplateAvatar; size: number }) {
     ...(avatar.picture ? { avatarCrop: "circle" as const } : {}), mascotBody: avatar.mascotBody ? botBodyId(avatar.mascotBody) : null }} />;
 }
 
-/** Up to four faces, overlapping, then "+N". */
-export function TemplateFaces({ avatars, size = 32 }: { avatars: readonly TemplateAvatar[]; size?: number }) {
+/** Up to four faces, overlapping, then "+N". `on` is what they sit on, so the gap between two faces is its colour. */
+export function TemplateFaces({ avatars, size = 32, on = "panel" }: { avatars: readonly TemplateAvatar[]; size?: number; on?: "panel" | "card" }) {
   const shown = avatars.slice(0, FACES);
+  const ring = on === "card" ? "ring-card" : "ring-panel";
   return (
     <span className="flex shrink-0 items-center -space-x-2">
-      {shown.map((avatar) => <span key={avatar.key} className="rounded-full ring-2 ring-panel"><Face avatar={avatar} size={size} /></span>)}
-      {avatars.length > FACES && <span className="flex items-center justify-center rounded-full bg-raised text-[11px] text-ink-secondary ring-2 ring-panel tabular-nums"
+      {shown.map((avatar) => <span key={avatar.key} className={cn("rounded-full ring-2", ring)}><Face avatar={avatar} size={size} /></span>)}
+      {avatars.length > FACES && <span className={cn("flex items-center justify-center rounded-full bg-raised text-[11px] text-ink-secondary ring-2 tabular-nums", ring)}
         style={{ width: size, height: size }}>+{avatars.length - FACES}</span>}
     </span>
   );

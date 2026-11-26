@@ -11,8 +11,9 @@ const { SignedInSites } = await import("./SignedInSites");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
 let root: Root;
-const google = { site: "google.com", cookies: 4, storage: 1 };
-const example = { site: "example.com", cookies: 1, storage: 0 };
+const google = { site: "google.com", cookies: 4, storage: 1, direct: true };
+const example = { site: "example.com", cookies: 1, storage: 0, direct: true };
+const tracker = { site: "doubleclick.net", cookies: 2, storage: 0, direct: false };
 
 beforeEach(() => {
   fixture.api.mockReset();
@@ -91,6 +92,36 @@ describe("signed-in sites", () => {
     expect(fixture.api).toHaveBeenLastCalledWith("/api/browser-sites/sign-out", { method: "POST", body: JSON.stringify({ profile: "profile-work" }) });
     expect(host.textContent).toContain("Not signed in to any site.");
     expect(host.querySelector("button")).toBeNull();
+  });
+
+  it("keeps cookies other sites left apart from sign-ins, folded, and clears them one by one", async () => {
+    fixture.api.mockResolvedValueOnce({ running: true, sites: [tracker, google] }).mockResolvedValueOnce({ running: true, sites: [google] });
+    await render({ bare: true, target: { bot: "pepper" }, sharedBy: ["Pepper"] });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const fold = host.querySelector<HTMLDetailsElement>('[data-testid="third-party-sites"]')!;
+    expect(fold.open).toBe(false);
+    expect(fold.querySelector("summary")?.textContent).toBe("Cookies from other sites (1)");
+    expect([...fold.querySelectorAll("li span")].map((span) => span.textContent)).toEqual(["doubleclick.net"]);
+    expect(listed()).toEqual(["google.com", "doubleclick.net"]);
+    await click("Clear cookies of doubleclick.net");
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/browser-sites/sign-out", { method: "POST", body: JSON.stringify({ bot: "pepper", site: "doubleclick.net" }) });
+    expect(host.querySelector('[data-testid="third-party-sites"]')).toBeNull();
+  });
+
+  it("says it is signed in nowhere when only other sites left cookies", async () => {
+    fixture.api.mockResolvedValueOnce({ running: false, sites: [tracker] });
+    await render({ bare: true, target: { bot: "pepper" }, sharedBy: ["Pepper"] });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host.textContent).toContain("Not signed in to any site.");
+    expect(button("Sign out of all")).toBeDefined();
+  });
+
+  it("lists a site from a server that does not tell them apart as a sign-in", async () => {
+    fixture.api.mockResolvedValueOnce({ running: false, sites: [{ site: "example.com", cookies: 1, storage: 0 }] });
+    await render({ bare: true, target: { bot: "pepper" }, sharedBy: ["Pepper"] });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(listed()).toEqual(["example.com"]);
+    expect(host.querySelector('[data-testid="third-party-sites"]')).toBeNull();
   });
 
   it("shows the server's reason when it cannot read the browser, and keeps buttons off while disabled", async () => {

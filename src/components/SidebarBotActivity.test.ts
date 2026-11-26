@@ -190,7 +190,7 @@ describe("group attention", () => {
     expect(attentionJumpAction(side)).toEqual({ type: "switchGroupTask", groupId: "g", threadId: "g1" });
   });
 
-  it("with the room feed on, shows the room and opens its thread beside the feed, its current one too; with it off, as before", () => {
+  it("where the server has the room feed, shows the room and opens its thread beside the feed, its current one too; on an older server, as before", () => {
     vi.stubGlobal("window", { matchMedia: () => ({ matches: true }) });
     const room = group("g", "Crew", "g0", { messages: [{ id: "m" }], tasks: [{ threadId: "g0", title: "Crew", createdAt: 0 }, { threadId: "g1", title: "Side", createdAt: 0 }] } as never);
     const entries = crossBotAttentionThreads([], { g0: [{}], g1: [{}] }, undefined, [room]);
@@ -202,7 +202,7 @@ describe("group attention", () => {
       { type: "select", id: "g" }, { type: "openForkPanel", kind: "group", ownerId: "g", threadId: "g1" },
     ]);
     sent.length = 0;
-    const off = { config: { features: { roomFeed: false } } as AppState["config"], groups: [room] };
+    const off = { config: { features: {} } as AppState["config"], groups: [room] };
     for (const entry of entries) attentionJump((action) => sent.push(action), entry, off);
     expect(sent).toEqual([{ type: "select", id: "g" }, { type: "switchGroupTask", groupId: "g", threadId: "g1" }]);
     vi.unstubAllGlobals();

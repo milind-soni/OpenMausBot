@@ -612,6 +612,43 @@ describe("Add a device, in the page", () => {
     const foot = $("[data-pair-reach]")!;
     expect(foot.className).toContain("text-ink-secondary");
     expect($("[data-add-panel] [data-copy-link]")?.nextElementSibling).toBe(foot);
+    expect($("[data-host-firewall]")).toBeNull();
+  });
+
+  it("says when ufw likely drops the phone on Wi-Fi and gives the command, only for a Wi-Fi-only code", async () => {
+    const relayed = { v: 1 as const, k: "k", h: "h", r: ["relay1.openmausbot.com"] };
+    const hosted = [{ url: "https://c-ada.example.com", kind: "hosted" as const, priority: 0 }];
+    const cases = [
+      { name: "Wi-Fi only", shows: true, over: { e2e: { enabled: true, relay: "off" as const, node: null, descriptor: { v: 1 as const, k: "k" } } } },
+      { name: "relay in the QR", shows: false, over: { e2e: { enabled: true, relay: "connected" as const, node: null, descriptor: relayed } } },
+      { name: "HTTPS address in the code", shows: false, over: { e2e: { enabled: false, relay: "off" as const, node: null, descriptor: null }, endpoints: hosted } },
+    ];
+    const base = companion;
+    for (const { name, shows, over } of cases) {
+      // Windows' Public-network note stays out of this card, as before.
+      companion = { ...base, port: 8810, lan: "192.168.1.5", hosts: ["192.168.1.5"], hostFirewall: "ufw", publicNetwork: "Wi-Fi", ...over };
+      bridge.pairing.mockImplementation(async (open: boolean) => {
+        companion = { ...companion, pairing: open ? { code: "482913", token: `omb_pair_${"a".repeat(43)}`, expiresAt: NOW + 600_000 } : null };
+        return companion;
+      });
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one page per case.
+      await render();
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one page per case.
+      await click("[data-add-group=phones]");
+      expect($("[data-pair-qr]"), name).not.toBeNull();
+      const note = $("[data-add-panel] [data-host-firewall]");
+      if (shows) {
+        expect(note?.textContent, name).toContain("This computer's firewall (ufw) may block your phone on Wi-Fi.");
+        expect(note?.querySelector("code")?.textContent, name).toBe("sudo ufw allow 8810/tcp");
+        expect($("[data-pair-reach]")?.nextElementSibling, name).toBe(note);
+      } else {
+        expect(note, name).toBeNull();
+      }
+      expect(document.body.textContent, name).not.toContain("set to Public");
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one page per case.
+      await act(async () => root.unmount());
+      root = createRoot(host);
+    }
   });
 
   it("asks for the private network first when Add a computer comes before it, with the later steps shown but quiet", async () => {

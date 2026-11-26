@@ -103,7 +103,7 @@ async function readLink(url: string, readers: ImportReaders): Promise<ShareFolde
 export async function readImport(source: ImportSource, readers: ImportReaders): Promise<ShareFolder> {
   if ("library" in source) {
     if (!readers.library) throw new ShareError(NO_LIBRARY, 404);
-    return readShareFolder(readers.library.files(source.library));
+    return readShareFolder(readers.library.files(source.library), source.library);
   }
   if ("url" in source) return readLink(source.url, readers);
   if ("path" in source) {

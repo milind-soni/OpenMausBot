@@ -759,6 +759,8 @@ const bridge = {
       ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     repair: () => ipcRenderer.invoke("home:repair"),
     updating: onHomePage && reloadedForUpdate(),
+    // My Cloud's own page, while its live stream is down: what the Admin says has it down (an update, resize, move...), or null.
+    operation: onHomePage ? () => ipcRenderer.invoke("home:operation") : undefined,
   },
   updatesConsent: {
     state: () => ipcRenderer.invoke("updates-consent:state"),

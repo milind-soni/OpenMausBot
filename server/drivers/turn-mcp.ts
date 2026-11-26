@@ -4,7 +4,8 @@ import type { SendTurnInput } from "../contracts.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import { appMountFor, gateServer, mcpStdioServer, type AppMount } from "../mcp-gate-config.ts";
-import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "../routes/own-mcp-http-path.ts";
+import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH, TOOL_SHARE_HEADER } from "../routes/own-mcp-http-path.ts";
+import { toolListShare } from "../tool-list-budget.ts";
 import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFor, type ToolSchemaProfileId } from "../tool-schema-profile.ts";
 import { AGENTS_MCP_ENV } from "./agents-mcp-env.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -103,8 +104,9 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
   const kind = HARNESS_KINDS.find((candidate) => candidate === server.args[script + 1]);
   const token = kind && server.env[harnessMcpTokenEnv(kind)];
   const limit = server.env[TOOL_LIMIT_ENV];
+  const share = toolListShare(server.env[TOOL_SCHEMA_PROFILE_ENV]) === undefined ? undefined : server.env[TOOL_SCHEMA_PROFILE_ENV];
   return kind && token ? { url: `${harness}${OWN_MCP_HTTP_PATH}${kind}`,
-    headers: { authorization: `Bearer ${token}`, ...(limit === undefined ? {} : { [TOOL_LIMIT_HEADER]: limit }) } } : null;
+    headers: { authorization: `Bearer ${token}`, ...(limit === undefined ? {} : { [TOOL_LIMIT_HEADER]: limit }), ...(share === undefined ? {} : { [TOOL_SHARE_HEADER]: share }) } } : null;
 }
 
 /** The turn's MCP servers as ACP session/new takes them. stdio is the baseline every ACP agent supports; an agent that
