@@ -173,7 +173,7 @@ it("any bot left on the default hears where the person is talking from: the pair
   const atDesk = (await api("POST", "/api/bots", { name: "Desk helper" })).body.bot;
   const desk = await sendFrom(atDesk, "Remind me to call Ada at five.", "desk-send-000000000001");
   expect(desk.mcpConfig.mcpServers).toHaveProperty(PHONE_MCP_SERVER);
-  expect(desk.systemPromptFile).toContain(`${PHONE_NAME} is an iPhone; this bot may use: Calendar.`);
+  expect(desk.systemPrompt).toContain(`${PHONE_NAME} is an iPhone; this bot may use: Calendar.`);
   expect(desk.systemPrompt).toContain(PHONE_PLACE_PROMPT.computer);
   expect(desk.systemPrompt).not.toContain(PHONE_PLACE_PROMPT.phone);
   // A phone's send with no id of its own (a walkie or command send) is still the phone's.
@@ -182,8 +182,8 @@ it("any bot left on the default hears where the person is talking from: the pair
   expect(fromPhone.mcpConfig.mcpServers).toHaveProperty(PHONE_MCP_SERVER);
   expect(fromPhone.systemPrompt).toContain(PHONE_PLACE_PROMPT.phone);
   expect(fromPhone.systemPrompt).not.toContain(PHONE_PLACE_PROMPT.computer);
-  // Where the person is never reaches the stable file, so a phone turn after a computer one keeps the engine's cache.
-  for (const text of Object.values(PHONE_PLACE_PROMPT)) {
+  // The place and the phone's sender-dependent text never reach the stable file, so alternating senders keep the engine's cache.
+  for (const text of [...Object.values(PHONE_PLACE_PROMPT), `${PHONE_NAME} is an iPhone; this bot may use: Calendar.`]) {
     expect(desk.systemPromptFile).not.toContain(text);
     expect(fromPhone.systemPromptFile).not.toContain(text);
   }

@@ -3,8 +3,8 @@
 // box (spawnCli as "bot"); one on its cloud computer goes through that computer's own route; an app action goes through
 // the connectors gate (grants, read or write scope, team rules) with a capability for this turn; a page opens in the
 // bot's own browser through its route; a file is written only inside the conversation's folder.
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve as resolvePath } from "node:path";
+import { closeSync, constants, lstatSync, mkdirSync, openSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 
 import { appToolCall } from "../connector-app-tools.ts";
 import { toolData } from "../connected-reads.ts";
@@ -12,6 +12,59 @@ import { killCliTree, spawnCli } from "../procs.ts";
 import type { ExecResult, StepExecutors } from "./runner.ts";
 
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
+const FILE_OUTSIDE = "a saved step writes files only inside this conversation's folder";
+const NO_FOLLOW = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+
+function isInside(root: string, candidate: string): boolean {
+  const rel = relative(root, candidate);
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !rel.startsWith("../") && !isAbsolute(rel));
+}
+
+function writeInside(cwd: string, path: string, content: string): ExecResult {
+  const root = realpathSync(cwd);
+  const target = resolvePath(root, path);
+  const inside = relative(root, target);
+  if (!inside || !isInside(root, target)) return { ok: false, error: FILE_OUTSIDE };
+  const dir = dirname(target);
+  // Check the deepest existing ancestor before creating folders so a symlinked directory cannot escape mkdirSync.
+  for (let cur = dir; cur !== root;) {
+    try {
+      lstatSync(cur);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ok: false, error: FILE_OUTSIDE };
+      const parent = dirname(cur);
+      if (parent === cur) return { ok: false, error: FILE_OUTSIDE };
+      cur = parent;
+      continue;
+    }
+    try {
+      if (!isInside(root, realpathSync(cur))) return { ok: false, error: FILE_OUTSIDE };
+    } catch {
+      return { ok: false, error: FILE_OUTSIDE };
+    }
+    break;
+  }
+  mkdirSync(dir, { recursive: true });
+  if (!isInside(root, realpathSync(dir))) return { ok: false, error: FILE_OUTSIDE };
+  try {
+    if (lstatSync(target).isSymbolicLink()) return { ok: false, error: FILE_OUTSIDE };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ok: false, error: FILE_OUTSIDE };
+  }
+  let fd: number;
+  try {
+    fd = openSync(target, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | NO_FOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") return { ok: false, error: FILE_OUTSIDE };
+    throw error;
+  }
+  try {
+    writeFileSync(fd, content);
+  } finally {
+    closeSync(fd);
+  }
+  return { ok: true, output: inside };
+}
 
 export interface ExecutorContext {
   botId: string;
@@ -179,18 +232,12 @@ export function createExecutors(context: ExecutorContext): StepExecutors {
       }
     },
     async browser(input) {
-      const answer = await context.internal("browser", "/api/internal/browser/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "agent_browser_open", arguments: { url: input.url } } }, input.signal);
-      return answer.ok ? callText(answer.body) : { ok: false, error: String(answer.body.error ?? "the browser isn't available") };
+      const cloud = input.where === "vm";
+      const answer = await context.internal(cloud ? "computer" : "browser", cloud ? "/api/internal/computer/mcp" : "/api/internal/browser/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: cloud ? "open_url" : "agent_browser_open", arguments: { url: input.url } } }, input.signal);
+      return answer.ok ? callText(answer.body) : { ok: false, error: String(answer.body.error ?? (cloud ? "the cloud computer isn't available" : "the browser isn't available")) };
     },
     async file(input) {
-      const root = realpathSync(context.cwd);
-      const target = resolvePath(root, input.path);
-      const inside = relative(root, target);
-      if (!inside || inside.startsWith("..") || isAbsolute(inside)) return { ok: false, error: "a saved step writes files only inside this conversation's folder" };
-      mkdirSync(dirname(target), { recursive: true });
-      if (relative(root, realpathSync(dirname(target))).startsWith("..")) return { ok: false, error: "a saved step writes files only inside this conversation's folder" };
-      writeFileSync(target, input.content);
-      return { ok: true, output: inside };
+      return writeInside(context.cwd, input.path, input.content);
     },
   };
 }

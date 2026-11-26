@@ -278,9 +278,11 @@ export async function drainLanes(lanes: Array<{ run<T>(sql: string, options: obj
 }
 
 interface CatalogEntry {
+  catalog: string;
   schema: string;
   name: string;
   type: string;
+  qualifyCatalog?: true;
 }
 
 function toCount(cell: Cell): number {
@@ -445,10 +447,11 @@ class BotDb implements BotDatabase {
     await this.statement(connection, sql, {}, (open, conn) => this.read(open, conn, sql));
   }
 
-  private async catalog(connection: DataConnection = "panel"): Promise<CatalogEntry[]> {
-    const sql = "SELECT table_schema, table_name, table_type FROM information_schema.tables WHERE table_catalog = current_database() AND table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name";
+  private async catalog(connection: DataConnection = "panel", temporary = false): Promise<CatalogEntry[]> {
+    const catalogs = temporary ? "(table_catalog = current_database() OR table_catalog = 'temp')" : "table_catalog = current_database()";
+    const sql = `SELECT table_catalog, table_schema, table_name, table_type FROM information_schema.tables WHERE ${catalogs} AND table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name`;
     const result = await this.statement(connection, sql, {}, (open, conn) => this.read(open, conn, sql));
-    return result.rows.map((row) => ({ schema: String(row[0]), name: String(row[1]), type: String(row[2]) }));
+    return result.rows.map((row) => ({ catalog: String(row[0]), schema: String(row[1]), name: String(row[2]), type: String(row[3]) }));
   }
 
   private displayName(entry: CatalogEntry): string {
@@ -457,7 +460,7 @@ class BotDb implements BotDatabase {
 
   private qualified(entry: CatalogEntry, reserved: Set<string>): string {
     const part = (name: string) => (PLAIN_IDENTIFIER.test(name) && !reserved.has(name) ? name : quoteIdentifier(name));
-    return `${part(entry.schema)}.${part(entry.name)}`;
+    return `${entry.qualifyCatalog || entry.catalog === "temp" ? `${part(entry.catalog)}.` : ""}${part(entry.schema)}.${part(entry.name)}`;
   }
 
   private splitIdentifier(text: string): string[] {
@@ -478,18 +481,21 @@ class BotDb implements BotDatabase {
     return parts.map((part) => part.trim());
   }
 
-  private async lookup(name: string): Promise<CatalogEntry> {
-    const parts = (tableIdentifierParts(name) ?? this.splitIdentifier(name.trim())).slice(-2);
+  private async lookup(name: string, connection: DataConnection = "panel"): Promise<CatalogEntry> {
+    const parts = tableIdentifierParts(name) ?? this.splitIdentifier(name.trim());
     const table = parts[parts.length - 1];
-    const schema = parts.length === 2 ? parts[0] : null;
+    const schema = parts.length > 1 ? parts[parts.length - 2] : undefined;
+    const catalog = parts.length === 3 ? parts[0] : undefined;
     if (!table) throw new DataFailure({ code: "invalid_input", message: "A table name is required." });
-    const entries = await this.catalog();
-    const inSchema = schema ? entries.filter((entry) => entry.schema === schema || entry.schema.toLowerCase() === schema.toLowerCase()) : entries;
+    if (parts.length > 3) throw new DataFailure({ code: "invalid_input", message: "A table name has at most three identifier parts." });
+    const entries = await this.catalog(connection, true);
+    const inCatalog = catalog === undefined ? entries : entries.filter((entry) => entry.catalog.toLowerCase() === catalog.toLowerCase());
+    const inSchema = schema ? inCatalog.filter((entry) => entry.schema === schema || entry.schema.toLowerCase() === schema.toLowerCase()) : inCatalog;
     const rank = (entry: CatalogEntry) => (entry.schema === "main" ? 0 : entry.schema === DATA_RESULTS_SCHEMA ? 1 : 2);
     const exact = inSchema.filter((entry) => entry.name === table).sort((x, y) => rank(x) - rank(y));
     const folded = inSchema.filter((entry) => entry.name.toLowerCase() === table.toLowerCase()).sort((x, y) => rank(x) - rank(y));
-    const found = exact[0] ?? folded[0];
-    if (found) return found;
+    const found = folded.find((entry) => entry.catalog === "temp") ?? exact[0] ?? folded[0];
+    if (found) return catalog === undefined ? found : { ...found, qualifyCatalog: true };
     throw new DataFailure({
       code: "table_not_found",
       message: `Table ${name.trim()} does not exist.`,
@@ -503,8 +509,8 @@ class BotDb implements BotDatabase {
     return closeNames(table, entries.map((entry) => this.displayName(entry)));
   }
 
-  async resolveTable(name: string): Promise<string> {
-    const entry = await this.lookup(name);
+  async resolveTable(name: string, connection: DataConnection = "panel"): Promise<string> {
+    const entry = await this.lookup(name, connection);
     const open = await this.open();
     return this.qualified(entry, open.reserved);
   }
@@ -546,17 +552,17 @@ class BotDb implements BotDatabase {
     return { rowCount, columns: enriched };
   }
 
-  private async source(target: string): Promise<string> {
+  private async source(target: string, connection: DataConnection): Promise<string> {
     const text = target.trim().replace(/;+\s*$/, "");
     // Keep accepting the display names callers could pass before quoted SQL
     // identifiers were recognized here (for example, Order Items).
     const displayName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
-    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text);
+    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text, connection);
     return `(${text}) AS omb_described`;
   }
 
   async describe(target: string, options: RunOptions): Promise<DescribeResult> {
-    const from = await this.source(target);
+    const from = await this.source(target, options.connection);
     const all = await this.columnsOf(options.connection, from, options);
     const profiled = all.slice(0, DATA_LIMITS.describeColumnsMax);
     const { rowCount, columns } = await this.aggregate(options.connection, from, profiled, options);
@@ -583,13 +589,16 @@ class BotDb implements BotDatabase {
     const count = await this.statement("panel", countSql, options, (o, conn) => this.read(o, conn, countSql));
     const rowCount = toCount(count.rows[0]?.[0] ?? 0);
     const key = `${from}\u0000${rowCount}`;
-    const cached = this.statsCache.get(key);
+    const cacheable = entry.type !== "VIEW";
+    const cached = cacheable ? this.statsCache.get(key) : undefined;
     if (cached) return cached;
     const columns = await this.columnsOf("panel", from, options);
     const aggregated = await this.aggregate("panel", from, columns, options);
     const stats: DataColumnStats = { table: this.displayName(entry), rowCount: aggregated.rowCount, columns: aggregated.columns };
-    if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
-    if (revision === this.statsRevision) this.statsCache.set(key, stats);
+    if (cacheable && revision === this.statsRevision) {
+      if (this.statsCache.size >= STATS_CACHE_MAX) this.statsCache.clear();
+      this.statsCache.set(key, stats);
+    }
     return stats;
   }
 
@@ -614,7 +623,7 @@ class BotDb implements BotDatabase {
       const finite = `isfinite(${value})`;
       const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${finite})
 SELECT LEAST(coalesce(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), 0), ${bins - 1})::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
-FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`;
+FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY 1 ORDER BY bin`;
       const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
       if (!rows.length) return result;
       const lo = Number(rows[0][2]);
@@ -631,7 +640,7 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
       return result;
     }
 
-    const sql = `SELECT CAST(${id} AS VARCHAR) AS v, count(*) AS n FROM ${from} WHERE ${id} IS NOT NULL GROUP BY v ORDER BY n DESC, v LIMIT ${bins}`;
+    const sql = `SELECT CAST(${id} AS VARCHAR) AS v, count(*) AS n FROM ${from} WHERE ${id} IS NOT NULL GROUP BY 1 ORDER BY n DESC, v LIMIT ${bins}`;
     const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
     result.bins = rows.map((row) => ({ label: String(row[0]).slice(0, 2 * DATA_LIMITS.sampleChars), count: toCount(row[1]) }));
     return result;

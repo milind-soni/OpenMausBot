@@ -7,10 +7,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { CloudLendingTurn } from "../cloud-lending.ts";
+import { splitSessionPrompt, type PromptSplitReceipt } from "../drivers/prompt-split.ts";
 import { PHONE_PLACE_PROMPT } from "../phones/instructions.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
 import type { BotRecord } from "../store.ts";
+import { buildSystemPrompt } from "../system-prompt.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { createPhones, type PhonesDeps } from "./phones.ts";
 
@@ -103,6 +105,34 @@ describe("where the person is", () => {
       { id: "device", label: "Phone", text: expect.stringContaining("Paired: Omkar's iPhone.") },
     ]);
     expect(phones.promptParts(chief, { mounted: false, offered: false, turn: TURN, place: "phone" })).toEqual([{ id: "device", label: "Phone", text: "" }]);
+  });
+
+  it("keeps the phone section's sender-dependent text out of the stable half, so alternating senders do not resend the prompt", () => {
+    const { phones, send } = world();
+    let hook = 0;
+    // What index.ts hands buildSystemPrompt for one turn: the device integration is mounted only on the owner's own
+    // turn, so the "device" part carries phoneSystemPrompt there and phoneWithheldPrompt on a webhook's.
+    const promptFor = (sender: "person" | "webhook") => {
+      if (sender === "person") send(phones.sendIdFor(loopback));
+      else send(`webhook-send-${++hook}`, { automation: "webhook", origin: { kind: "outside" } });
+      const mounted = Boolean(phones.integration(chief, TURN));
+      return buildSystemPrompt("You are Kiwi.", "", phones.promptParts(chief, {
+        mounted, offered: true, turn: TURN, place: phones.place(THREAD, sender === "person"),
+      }));
+    };
+    let receipt: PromptSplitReceipt | null = null;
+    const full: boolean[] = [];
+    const firstTwo: { stable: string; volatile: string }[] = [];
+    for (let turn = 0; turn < 12; turn++) {
+      const built = promptFor(turn % 2 === 0 ? "person" : "webhook");
+      if (turn < 2) firstTwo.push({ stable: built.stable, volatile: built.volatile });
+      const split = splitSessionPrompt(built.stable, built.volatile, receipt, built.text, `turn ${turn}`, false, 8);
+      receipt = split.receipt;
+      full.push(split.text.startsWith(built.text));
+    }
+    expect(full.map((sent) => (sent ? "F" : ".")).join("")).toBe("F........F..");
+    expect(firstTwo[0]!.volatile).not.toBe(firstTwo[1]!.volatile);
+    expect(firstTwo[0]!.stable).toBe(firstTwo[1]!.stable);
   });
 });
 

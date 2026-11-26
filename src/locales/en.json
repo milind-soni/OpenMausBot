@@ -8590,6 +8590,7 @@
   "brief.card.openPage": "Open page",
   "brief.card.draftReply": "Draft a reply to {who}",
   "brief.card.dismissEmail": "Dismiss {who}'s email",
+  "brief.card.numberedEmailAction": "{number}. {action}",
   "brief.card.emailLine": "{sender}: {subject}",
   "brief.card.waitingReply": "Waiting on your reply",
   "brief.card.waitingReplyWhy": "Waiting on your reply · {why}",

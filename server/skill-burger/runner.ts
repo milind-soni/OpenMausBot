@@ -88,7 +88,7 @@ export type ExecResult = { ok: true; output: unknown } | { ok: false; error: str
 export interface StepExecutors extends Partial<DelegateExecutors> {
   shell(input: { command: string; cwd?: string; env: Record<string, string>; stdin?: string; where: "bot" | "vm"; tool: string; signal: AbortSignal; maxBytes: number }): Promise<ExecResult>;
   app(input: { app: string; tool: string; args: Record<string, unknown>; account?: string; signal: AbortSignal; maxBytes: number }): Promise<ExecResult>;
-  browser(input: { url: string; signal: AbortSignal }): Promise<ExecResult>;
+  browser(input: { url: string; where?: "browser" | "vm"; signal: AbortSignal }): Promise<ExecResult>;
   file(input: { path: string; content: string; signal: AbortSignal }): Promise<ExecResult>;
   /** The apps this bot is connected to (their slugs), or null when that can't be told. */
   connected?(): Promise<readonly string[] | null>;
@@ -134,13 +134,19 @@ export function resolve(node: unknown, args: Record<string, unknown>, results: R
 
 const asText = (value: unknown): string => (value === undefined || value === null ? "" : typeof value === "string" ? value : JSON.stringify(value));
 
+function asNumber(value: unknown): number {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return NaN;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : NaN;
+}
+
 function compare(left: unknown, op: string, right: unknown): boolean {
   switch (op) {
     case "exists": return left !== undefined && left !== null && left !== "" && !(Array.isArray(left) && left.length === 0);
     case "eq": return asText(left) === asText(right);
     case "ne": return asText(left) !== asText(right);
-    case "gt": return Number(left) > Number(right);
-    case "lt": return Number(left) < Number(right);
+    case "gt": return asNumber(left) > asNumber(right);
+    case "lt": return asNumber(left) < asNumber(right);
     default: return false;
   }
 }
@@ -327,7 +333,7 @@ async function execute(step: WorkflowStep, args: Record<string, unknown>, result
       return exec.app({ app: step.app, tool: step.tool, args: resolve(step.args, args, results) as Record<string, unknown>, ...(step.account ? { account: step.account } : {}), signal, maxBytes: OUTPUT_MAX_BYTES });
     case "browser": {
       const url = asText(resolve(step.url, args, results));
-      return /^https?:\/\//i.test(url) ? exec.browser({ url, signal }) : { ok: false, error: `not a web address: ${clip(url, 80)}` };
+      return /^https?:\/\//i.test(url) ? exec.browser({ url, where: step.where === "vm" ? "vm" : "browser", signal }) : { ok: false, error: `not a web address: ${clip(url, 80)}` };
     }
     case "file":
       return exec.file({ path: step.path, content: asText(resolve(step.content, args, results)), signal });

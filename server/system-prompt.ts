@@ -47,7 +47,7 @@ export function heavyPrompt(sections: readonly PromptSection[]): boolean {
 // runs of a bot and not others) and an automation run's reply rule ("automation-reply"), which otherwise makes every
 // routine run write a new cached prefix.
 const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
-  "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks", "device-place", "files", "tool-bridge"]);
+  "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks", "device", "device-place", "files", "tool-bridge"]);
 /** In the stable half, so it is not sent again whenever availability changes, but no part of what a per-thread process is
  * keyed on: a warm process gets a changed roster as a note instead of a relaunch (SendTurnInput.systemRoster). */
 const ROSTER_SECTION = "roster";

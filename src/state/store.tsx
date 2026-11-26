@@ -2741,7 +2741,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const message = error instanceof Error ? error.message : String(error);
               settle(message);
               if (action.type === "newTask" && action.onError) action.onError(message);
-              else showError(error);
+              else if (action.type === "switchTask" && error instanceof ApiError && error.status === 404) rawDispatch({ type: "notice", notice: { kind: "thread-gone", botName: null } }); else showError(error);
             });
           break;
         }
@@ -2773,7 +2773,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "switchGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${SWITCH_MESSAGE_COUNT}`, { method: "POST" })
             .then(roomAnswer(action.groupId, true))
-            .catch(showError);
+            .catch((error) => (error instanceof ApiError && error.status === 404 ? rawDispatch({ type: "notice", notice: { kind: "thread-gone", botName: null } }) : showError(error)));
           break;
         case "renameGroupTask":
         case "pinGroupTask":
