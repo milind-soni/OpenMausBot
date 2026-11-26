@@ -5,7 +5,7 @@
 // read hears. Cancelling lets it sleep. The engine is a stand-in CLI; nothing leaves loopback.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -140,13 +140,14 @@ it("keeps the home awake while a Claude sign-in is open, counts it with no secre
     for (const hidden of [PASTED, LINK_SECRET, flowId, owner]) expect(text).not.toContain(hidden);
   }
   expect(log).toMatch(/sign-in: claudeAgent paste-code started/);
-  expect(log).toMatch(/sign-in: claudeAgent paste-code wrong_code after \d+s/);
+  expect(log).toMatch(/sign-in: claudeAgent paste-code wrong_code after (?:\d+m )?\d+s/);
 
-  // The machine stops under the open sign-in (a stop for sleep or a crash: no shutdown runs), then boots again.
-  await waitForExit(child!, { signal: "SIGKILL" });
+  // The machine is stopped under the open sign-in (Fly's stop is a SIGTERM: the server shuts down), then boots again.
+  await waitForExit(child!, { signal: "SIGTERM" });
+  expect(JSON.parse(readFileSync(join(home, "sign-in-trace.json"), "utf8")).open, log.slice(-2000)).toHaveLength(1);
   log = "";
   await boot();
-  expect(log).toMatch(/sign-in: claudeAgent paste-code interrupted after \d+s \(the server restarted\)/);
+  expect(log).toMatch(/sign-in: claudeAgent paste-code interrupted after (?:\d+m )?\d+s \(the server restarted\)/);
   owner = await pair();
   const after = await admin("GET", `${CLOUD_HEALTH_PATH}?after=0`);
   expect(after.body.signIns).toMatchObject({ attempts: 1, open: 0, engines: [{ last: { outcome: "interrupted" } }] });

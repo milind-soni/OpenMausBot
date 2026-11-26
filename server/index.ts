@@ -15181,7 +15181,7 @@ const gracefulShutdown = createGracefulShutdown({
       companyShutdown = true;
       // Before any provider is torn down, so what the teardown fails stays cut for the next start.
       coordinator.close(); botLink.close(); checkpointSeeds.stop(); checkpoints.stopCollections();
-      noteTurnsCutByShutdown();
+      noteTurnsCutByShutdown(); signInTrace?.stopping();
       if (workspaceAccessTimer) clearInterval(workspaceAccessTimer);
       // Invalidate turn bearers before any cleanup reaches an await: child MCP processes and the listener may outlive it.
       revokeAllInternalCapabilities();

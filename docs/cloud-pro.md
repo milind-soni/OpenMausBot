@@ -2109,7 +2109,7 @@ judge a pending timer by a wall-clock time stored when it was set.
   computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
   engine or browser install, a provider sign-in until it finishes, fails, is
-  cancelled or reaches its own expiry, 15 minutes for every engine's) and no
+  cancelled or reaches its own expiry, at most 15 minutes for every engine) and no
   request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
   A use is an authenticated request, except the event stream, `/api/health`,

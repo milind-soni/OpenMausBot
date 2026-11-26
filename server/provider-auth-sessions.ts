@@ -1,6 +1,6 @@
 // An in-progress login belongs to the admin session that started it: never put its device code on global SSE.
 // While one is under way (`active`) a Cloud home reports itself busy (`maintenance`, server/cloud-power.ts), so it never
-// sleeps under a login process; a flow that is abandoned stops counting at its own expiry (the engines' 15 minutes).
+// sleeps under a login process; a flow that is abandoned stops counting at its own expiry (at most 15 minutes for every engine).
 // On a Cloud home each attempt and its outcome also go to the sign-in trace (server/sign-in-trace.ts): codes, never secrets.
 import { signInOutcome, signInReasonOf, withSignInReason, type SignInOutcome } from "../shared/sign-in-outcome.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus, ProviderInstance } from "./contracts.ts";
@@ -156,7 +156,7 @@ export class ProviderAuthSessions {
       try {
         await flow.instance.completeAuthentication(flowId, callbackUrl);
       } catch (error) {
-        if (!flow.revoked && this.flows.get(instanceId) === flow) await this.afterRefusedCode(flow, flowId, error);
+        if (this.trace && !flow.revoked && this.flows.get(instanceId) === flow) await this.afterRefusedCode(flow, flowId, error);
         throw error;
       }
       if (flow.revoked || this.flows.get(instanceId) !== flow) throw failure("This sign-in session ended.", 404);
@@ -166,8 +166,9 @@ export class ProviderAuthSessions {
     } finally { flow.busy = false; }
   }
 
-  /** A code the engine did not take: a sign-in it ended (the provider refused it, the command exited) is over and no longer
-   * keeps a Cloud awake; one still waiting (a pasted code that is not a code) stays open for another try. */
+  /** A code the engine did not take, on a Cloud home (with a trace): a sign-in it ended (the provider refused it, the command
+   * exited) is over and no longer keeps the home awake; one still waiting (a pasted code that is not a code) stays open for
+   * another try. A desktop keeps its flow until it is read or expires, as before. */
   private async afterRefusedCode(flow: Flow, flowId: string, error: unknown): Promise<void> {
     const reason = signInReasonOf(error);
     const after = flow.instance.getAuthentication ? await flow.instance.getAuthentication(flowId).catch(() => null) : null;

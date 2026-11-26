@@ -87,6 +87,21 @@ describe("the sign-in trace", () => {
     expect(signIns.summary()).toMatchObject({ attempts: 2, open: 1 });
   });
 
+  it("leaves an attempt the shutdown tears down open, so the next boot calls it interrupted, not cancelled", async () => {
+    const signIns = trace();
+    const sessions = new ProviderAuthSessions({ trace: signIns, now: () => clock });
+    const instance = engine();
+    await sessions.start(instance, "session-1");
+    signIns.stopping();
+    sessions.clearInstance(instance.instanceId);
+    expect(JSON.parse(file()).open).toHaveLength(1);
+    expect(lines).toEqual(["sign-in: claudeAgent paste-code started"]);
+    const next = trace();
+    next.recover();
+    expect(next.summary().engines[0].last?.outcome).toBe("interrupted");
+    expect(next.interrupted(instance.instanceId, FLOW)).toBe(true);
+  });
+
   it("a restart, not a sleep, says so; a boot with nothing open writes nothing", () => {
     writeFileSync(join(dir, SIGN_IN_TRACE_FILE), JSON.stringify({ v: 1, open: [{ id: "a", kind: "codex", method: "device-code", at: START - 30_000 }], recent: [], engines: {} }));
     trace(false).recover();
@@ -164,7 +179,7 @@ describe("a desktop's sign-in sessions (no trace)", () => {
     // Without a trace, a resumed flow is never re-read before its start, as before.
     await sessions.start(instance, "session-1");
     await sessions.start(instance, "session-1");
-    expect(instance.getAuthentication).toHaveBeenCalledTimes(1); // only the read after the refused code
+    expect(instance.getAuthentication).not.toHaveBeenCalled();
     expect(readdirSync(dir)).toEqual([]);
     expect(log.mock.calls.flat().some((line) => String(line).startsWith("sign-in:"))).toBe(false);
     log.mockRestore();

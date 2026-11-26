@@ -99,6 +99,9 @@ export function createSignInTrace(options: {
   const now = options.now ?? Date.now, log = options.log ?? ((line: string) => console.log(line));
   const path = join(options.dataDir, SIGN_IN_TRACE_FILE);
   let state: TraceFile | null = null;
+  /** The server is shutting down: whatever ends attempts now (engines torn down, settings cleared) is the stop itself, so
+   * they stay open in the file and the next boot records them as interrupted. */
+  let stopping = false;
   /** Flows open when the server last stopped, by hash: the sign-in screen's next read of one hears `interrupted`. */
   const interruptedFlows = new Set<string>();
 
@@ -138,6 +141,8 @@ export function createSignInTrace(options: {
 
   return {
     recover: () => { recover(); },
+    /** The server began shutting down (a restart, a stop for sleep or an update). */
+    stopping: () => { stopping = true; },
     /** The person pressed sign-in for an engine of this kind. */
     begin(kind: string | undefined, method: SignInMethod): SignInAttempt {
       const file = recover();
@@ -166,6 +171,7 @@ export function createSignInTrace(options: {
         end(outcome, by) {
           if (ended) return;
           ended = true;
+          if (stopping && outcome !== "completed") return;
           const done = event(outcome);
           file.open = file.open.filter((open) => open !== attempt);
           record(file, done);
