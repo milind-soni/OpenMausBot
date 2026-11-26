@@ -43,6 +43,7 @@ const LINES: Record<string, number> = {
   "server/cli.ts": 1053,
   "src/components/AttachmentPreview.tsx": 1025,
   "server/meetings/meetbot.ts": 1047,
+  "server/drivers/openai-chat.ts": 1009, // gains the output-limit continuation: the turn keeps a cut reply instead of failing it
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };
 
