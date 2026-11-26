@@ -25,7 +25,8 @@ afterEach(async () => {
   roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
 });
 
-// The replayed shell steps run as the bot, which the Skill Burger command executor does on POSIX only (executors.test.ts).
+// The replayed shell steps are quoted for /bin/sh. Under cmd.exe on Windows CI they left no file and no output while the run
+// still reported ok, so these cases skip Windows like the other shell-replay tests (working-directory, recorded-inputs).
 async function replay(content: string, name = "write", path = "report.txt") {
   const home = mkdtempSync(join(tmpdir(), "burger-pi-write-"));
   roots.push(home);

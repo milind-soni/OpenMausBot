@@ -13,7 +13,8 @@ import { createSkillBurgerRoutes } from "./routes.ts";
 import type { RunEnvelope } from "./runner.ts";
 import { createSkillBurgerRuns, RESUME_PATH, RUN_PATH } from "./runs.ts";
 
-// Each case reads its count from a shell step, which the command executor runs as the bot on POSIX only (executors.test.ts).
+// The replayed shell steps are quoted for /bin/sh. Under cmd.exe on Windows CI they left no file and no output while the run
+// still reported ok, so these cases skip Windows like the other shell-replay tests (working-directory, recorded-inputs).
 const POSIX_ONLY = process.platform === "win32";
 const roots: string[] = [];
 const servers: Server[] = [];
