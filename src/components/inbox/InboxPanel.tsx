@@ -4,6 +4,7 @@ import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { readInboxWaitingOnly, writeInboxWaitingOnly } from "@/lib/inbox-waiting-only";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, markAllInboxRead, readInboxLine, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
@@ -39,7 +40,13 @@ export const InboxPanel = memo(function InboxPanel() {
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
+  const [waitingOnly, setWaitingOnly] = useState(readInboxWaitingOnly);
   const [filter, setFilter] = useState<ThreadFilter>({});
+  const toggleWaitingOnly = () => {
+    const next = !waitingOnly;
+    setWaitingOnly(next);
+    writeInboxWaitingOnly(next);
+  };
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -65,7 +72,8 @@ export const InboxPanel = memo(function InboxPanel() {
   };
   // Finished work the person has read leaves the list for the Done line at the foot; its conversation moves to Finished.
   const listed = listedRows(view, held);
-  const groups = groupRows(listed.filter((row) => matchesSearch(row, query)));
+  const shown = waitingOnly ? listed.filter((row) => row.tab === "needs-you") : listed;
+  const groups = groupRows(shown.filter((row) => matchesSearch(row, query)));
   const rows = [...groups["for-you"], ...groups.activity];
   const done = rowsIn(view, "done").filter((row) => row.id !== held && matchesSearch(row, query)).sort((a, b) => b.at - a.at);
   const ids = rows.map((row) => row.id);
@@ -136,25 +144,40 @@ export const InboxPanel = memo(function InboxPanel() {
           <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
         ) : (
           <>
+            <div className="flex shrink-0 items-center px-[13px] pt-2">
+              <button type="button" data-inbox-waiting-only aria-pressed={waitingOnly} onClick={toggleWaitingOnly}
+                className={cn("shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] transition-colors",
+                  waitingOnly ? "bg-ink/[0.12] font-medium text-ink" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
+                {t("inbox.waitingOnly")}
+              </button>
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {/* The conversations each bot and room pinned, at the top of the list. */}
               {!query.trim() && <PinnedThreads rows={pinnedRows} faces={faces} now={now} current={openThread} onOpen={jump} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
-              {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
+              {shown.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
                   className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
               </label>}
               <div data-inbox-list className="px-1.5 pb-1.5">
                 {rows.length === 0
-                  ? query.trim() && listed.length
-                    ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
-                    : (
-                      <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                  ? waitingOnly && listed.length
+                    ? (
+                      <div data-inbox-waiting-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
                         <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
-                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
-                        <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
+                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.waitingOnly.empty")}</p>
+                        <button type="button" onClick={toggleWaitingOnly} className="mt-1 text-[12px] text-accent hover:underline">{t("inbox.waitingOnly.showAll")}</button>
                       </div>
                     )
+                    : query.trim() && listed.length
+                      ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
+                      : (
+                        <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                          <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
+                          <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
+                          <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
+                        </div>
+                      )
                   : <InboxGroups groups={groups} now={now} current={held} onOpen={open} onAction={act} moreForYou={fixes > 0} />}
               </div>
               {!query.trim() && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
@@ -167,7 +190,7 @@ export const InboxPanel = memo(function InboxPanel() {
               {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} faces={faces} filter={filter} />}
               {/* The finished, already-read conversations. */}
               {!query.trim() && <FinishedThreads rows={threads.finishedRows} faces={faces} now={now} current={openThread} onOpen={jump} />}
-              {done.length > 0 && (
+              {!waitingOnly && done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
                     className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary hover:bg-raised/70 hover:text-ink-secondary">

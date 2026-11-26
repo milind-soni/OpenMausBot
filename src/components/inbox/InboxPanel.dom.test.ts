@@ -23,6 +23,7 @@ import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, s
 import { approvalRow, INBOX_NOW, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
+import { INBOX_WAITING_ONLY_KEY } from "@/lib/inbox-waiting-only";
 import { InboxPanel } from "./InboxPanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -38,6 +39,7 @@ const click = (selector: string) => act(async () => { document.querySelector<HTM
 const shown = (view: InboxView) => { server.view = view; setInboxView(view); };
 
 beforeEach(() => {
+  localStorage.removeItem(INBOX_WAITING_ONLY_KEY);
   root = createRoot(document.body.appendChild(document.createElement("div")));
   server.calls.length = 0;
   dispatch.mockClear();
@@ -49,6 +51,52 @@ afterEach(() => {
   setInboxView(null);
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
+});
+
+describe("the inbox waiting filter", () => {
+  const listed = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
+
+  it("is off by default, then keeps only needs-you rows and remembers the choice", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const toggle = () => document.querySelector<HTMLElement>("[data-inbox-waiting-only]")!;
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    expect(toggle().textContent).toBe("Waiting for me");
+    expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
+
+    await click("[data-inbox-waiting-only]");
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(listed()).toEqual([approvalRow.id, questionRow.id]);
+    expect(localStorage.getItem(INBOX_WAITING_ONLY_KEY)).toBe("1");
+
+    await act(async () => root.unmount());
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(listed()).toEqual([approvalRow.id, questionRow.id]);
+  });
+
+  it("says when nothing is waiting and offers the full inbox", async () => {
+    shown(inboxView([messageRow, reportRow]));
+    localStorage.setItem(INBOX_WAITING_ONLY_KEY, "1");
+    openInbox();
+    await mount(createElement(InboxPanel));
+    expect(document.querySelector("[data-inbox-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-waiting-empty]")!.textContent).toContain("Nothing is waiting on you.");
+    await click("[data-inbox-waiting-empty] button");
+    expect(document.querySelector("[data-inbox-waiting-only]")!.getAttribute("aria-pressed")).toBe("false");
+    expect(listed()).toEqual([messageRow.id, reportRow.id]);
+    expect(localStorage.getItem(INBOX_WAITING_ONLY_KEY)).toBe("0");
+  });
+
+  it("keeps Mark all as read working while the filter is on", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await click("[data-inbox-waiting-only]");
+    await click("[data-inbox-mark-all]");
+    expect(server.calls).toContainEqual({ path: "/api/inbox/read-all", method: "POST" });
+  });
 });
 
 describe("the inbox panel", () => {
