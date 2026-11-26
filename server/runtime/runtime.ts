@@ -7,7 +7,7 @@ import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
 import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
-import { DEFAULT_LIMITS, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
+import { DEFAULT_LIMITS, STOPPED_BY_USER, STOPPED_WITH_REQUEST, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
 
@@ -53,7 +53,6 @@ export interface BeginRequest {
 
 const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
-const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
 /** progress() runs once per runtime event; lastActivityAt catches up at this cadence, not per event. */
 export const PROGRESS_WRITE_MS = 10_000;
@@ -666,7 +665,7 @@ export class Runtime {
   }
 
   /** Cancel this node and everything under it; abort running turns. */
-  cancel(id: string, reason = "Stopped by user", outcome: "stopped" | "failed" = "stopped"): void {
+  cancel(id: string, reason = STOPPED_BY_USER, outcome: "stopped" | "failed" = "stopped"): void {
     const n = this.store.get(id);
     if (!n) return;
     this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.cancelTree(n, reason, "cancelled", "stopped"));
@@ -675,7 +674,7 @@ export class Runtime {
   /** The person stopped the requester's conversation, and stop means stop: everything it handed out ends with it, work
    * that never started and teammates mid-turn alike (and what they handed on), and nothing resumes the stopped
    * conversation. */
-  stopRequester(owner: Owner, reason = "Stopped by user"): void {
+  stopRequester(owner: Owner, reason = STOPPED_BY_USER): void {
     this.withBatch(() => {
       for (const snapshot of this.store.all({ nonTerminal: true })) {
         if (!ownsConversation(snapshot, owner)) continue;

@@ -60,6 +60,11 @@ export type Status =
 
 export const TERMINAL: readonly Status[] = ["completed", "failed", "cancelled"];
 
+/** A stop with no other cause is the person's own. */
+export const STOPPED_BY_USER = "Stopped by user";
+/** The cause a stop leaves on the work its stopped assignment had handed on. */
+export const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
+
 /** Why it ended the way it did, typed so a requester can branch on it. */
 export type Outcome =
   | "done"

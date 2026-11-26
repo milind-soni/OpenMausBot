@@ -11,6 +11,7 @@ import { personOnly, requesterDecides, withDefault } from "./runtime/questions.t
 import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
 import type { Answerer, Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { STOPPED_BY_USER } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
@@ -23,8 +24,6 @@ const TOTAL_BUDGET = /^Request budget exhausted: \d+ turns in all/;
 const totalRefusal = (limit: number): string => `This request has started ${limit} turns in all, the most one request may take, so this one was not sent. Nobody can reset that, the person included, so don't ask them to, and don't send it another way. Finish with what you have and say what is left undone.`;
 const budgetRefusal = (limit: number): string => `This request reached its limit of ${limit} hand-offs since any work last came back, so this one was not sent. The limit belongs to the request: nobody can reset it, the person included, so don't ask them to, and don't send it another way. If work is still out, end your turn: each result that comes back renews the limit and resumes you. If nothing is out, finish with what you have and say what is left undone.`;
 const NO_TURN = "The requesting turn has no root (no turn)";
-/** A stop with no other cause is the person's own. */
-const STOPPED_BY_USER = "Stopped by user";
 /** How long a person's stop holds against the same request coming back. */
 const STOP_MEMORY_MS = 24 * 60 * 60_000;
 const STOPPED_AGAIN = "The person stopped this teammate's work on this request. It isn't handed out again until the person asks again: tell them what you still wanted done, and don't send it another way.";
