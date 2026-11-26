@@ -1,5 +1,6 @@
 import { DEEPSEEK_RECORDING_MAX_MS } from "../../shared/deepseek-voice";
 import { keyEntry, savedState } from "@/components/keys/key-catalog";
+import type { LocaleKey } from "@/locales";
 import type { ConfigStatus } from "@/state/store";
 import { desktopCapabilitiesNow } from "./desktop";
 import { fishSpeech, type SpeechBridge } from "./fish-speech";
@@ -76,4 +77,16 @@ export function missingListenKey(capabilities: DesktopCapabilities, config: Conf
 /** Whether speech can be heard here: the engine is there and, through the server, so is a saved key. */
 export function listensHere(capabilities: DesktopCapabilities, config: ConfigStatus | null | undefined): boolean {
   return capabilities.dictation.available && missingListenKey(capabilities, config) === null;
+}
+
+/** The note a call shows when the desktop helper stops listening with an error. A call has no text field, so a
+ * missing recognizer points only to a key the server hears with, not to Windows voice typing. */
+export function callSpeechEndNote(reason: string | undefined): LocaleKey {
+  switch (reason) {
+    case "helper-build-failed": return "call.turns.helperBuildFailed";
+    case "dictation-disabled": return "composer.dictation.disabled";
+    case "speech-not-authorized": return "call.turns.speechNotAuthorized";
+    case "speech-language-missing": return "call.turns.languageMissing";
+    default: return "composer.dictation.failed";
+  }
 }

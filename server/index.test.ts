@@ -2067,38 +2067,30 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("persists room setup and blocks the first message until it is finished", async () => {
+  it("makes a room ready to chat at once, named after its bots, and still takes an older client's setup", async () => {
     const bot = (await api("GET", "/api/bots")).body.bots[0];
-    const created = await api("POST", "/api/groups", { name: "Setup probe", memberIds: [bot.id] });
+    const created = await api("POST", "/api/groups", { memberIds: [bot.id] });
     expect(created.status).toBe(201);
     const group = created.body.group;
     try {
-      expect(group).toMatchObject({ setupCompletedAt: null, setupSkippedAt: null, messages: [] });
-      const blocked = await api("POST", `/api/groups/${group.id}/messages`, { text: "before setup" });
-      expect(blocked.status).toBe(409);
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id).messages).toHaveLength(0);
+      expect(group).toMatchObject({ name: bot.name, bulletin: "", defaultResponder: { kind: "member", botId: bot.id }, setupSkippedAt: null, messages: [] });
+      expect(group.setupCompletedAt).toEqual(expect.any(Number));
+      const again = await api("POST", "/api/groups", { memberIds: [bot.id] });
+      expect(again.body.group.name).toBe(`${bot.name} 2`);
+      await api("DELETE", `/api/groups/${again.body.group.id}`);
 
-      const invalid = await api("PATCH", `/api/groups/${group.id}/setup`, {
-        action: "complete",
-        cwd: null,
-        bulletin: "",
-        defaultResponder: { kind: "member", botId: "missing" },
-      });
-      expect(invalid.status).toBe(400);
-
-      const completed = await api("PATCH", `/api/groups/${group.id}/setup`, {
+      const older = await api("PATCH", `/api/groups/${group.id}/setup`, {
         action: "complete",
         cwd: null,
         bulletin: "shared brief",
         defaultResponder: { kind: "member", botId: bot.id },
       });
-      expect(completed.status).toBe(200);
-      expect(completed.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: expect.any(Number) });
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id)).toMatchObject({
-        bulletin: "shared brief",
-        setupSkippedAt: null,
-      });
+      expect(older.status).toBe(200);
+      expect(older.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: group.setupCompletedAt });
+
+      expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "first words" })).status).toBe(202);
     } finally {
+      await api("POST", `/api/groups/${group.id}/interrupt`, {});
       await api("DELETE", `/api/groups/${group.id}`);
     }
   });
@@ -11027,6 +11019,25 @@ describe("harness HTTP API", () => {
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, preserveInstalledApps: false });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+
+  it("keeps the config-file VPS desktop idle timeout apart from the private desktop's and out of the app's settings", async () => {
+    const get = async () => (await api("GET", "/api/config")).body;
+    expect((await get()).vpsIdle).toBeUndefined();
+    try {
+      for (const timeoutMinutes of [4, 1441, 5.5, "5", null]) {
+        expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes } })).status).toBe(400);
+      }
+      const saved = await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 5 } });
+      expect(saved.status).toBe(200);
+      expect(saved.body).toMatchObject({ localVm: { idleTimeoutMinutes: 480 } });
+      expect(saved.body.vpsIdle).toBeUndefined();
+      await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
+      expect(await get()).toMatchObject({ localVm: { idleTimeoutMinutes: 30 } });
+      expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).vpsIdle).toEqual({ timeoutMinutes: 5 });
+    } finally {
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 }, localVm: { idleTimeoutMinutes: 480 } });
+    }
   });
 
   it("validates, persists and applies the Local VM idle timeout in shared and per-bot modes", async () => {

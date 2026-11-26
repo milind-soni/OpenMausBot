@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveCompanionEntry } from "./companion-entry.mjs";
-import { anyRouteOn, COMPANION_SETTINGS_VERSION, countPairedPhones, directRoutesOn, hasTailnetAddress, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, setRoute } from "./companion-settings.mjs";
+import { anyRouteOn, COMPANION_SETTINGS_VERSION, countPairedPhones, directRoutesOn, hasTailnetAddress, phoneLinkStartsAtLaunch, readCompanionSettings, readPairedDevices, removePairedDeviceAtRest, setRoute } from "./companion-settings.mjs";
 import {
   cleanupCompanionOriginEndpoint,
   companionOriginHealth,
@@ -433,11 +433,31 @@ export async function companionPairing(open, expectedToken) {
   }
 }
 
+/** True when something answers the control port; only a refused connection means no companion is there. */
+async function controlPortServed() {
+  try {
+    await fetch(`http://127.0.0.1:${CONTROL_PORT}/state`, { signal: AbortSignal.timeout(4_000) });
+    return true;
+  } catch (error) {
+    return error?.cause?.code !== "ECONNREFUSED";
+  }
+}
+
 export async function companionRevoke(deviceId) {
-  if (!proc) return companionState();
   // the id came from the renderer, so it does not get to shape a path
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
-  await control("DELETE", `/devices/${deviceId}`).catch(() => {});
+  // Asleep, nothing listens: the phone leaves the store the sidecar loads when it starts. In the transition queue, so
+  // a start never loads the store halfway through; a start that got there first takes the removal itself.
+  const removedAtRest = !proc && await serialize(async () => {
+    if (proc) return false;
+    // A companion this app did not start keeps its phones in memory and would save the removed one back.
+    if (await controlPortServed()) throw new Error(`port ${CONTROL_PORT} is already serving another companion — stop it and try again`);
+    removePairedDeviceAtRest(deviceId);
+    return true;
+  });
+  if (removedAtRest) return companionState();
+  // A removal that failed is an error on the page, never a quiet "Removed".
+  await control("DELETE", `/devices/${deviceId}`);
   e2eHooks.changed();
   return companionState();
 }

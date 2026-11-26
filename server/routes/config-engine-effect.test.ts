@@ -59,10 +59,11 @@ describe("saving config and the engines' status", () => {
   const auth = { kind: "owner", via: "loopback", scopes: ["admin", "client"] } as unknown as RequestAuth;
 
   function routes() {
+    const localDeadlines: number[] = [], vpsDeadlines: number[] = [], switchedBots: string[] = [];
     let forgotten = 0, broadcasts = 0;
     const busy = () => ({ get: () => false, set: () => {} });
     const deps = {
-      store: { bots: [], patchBot: () => null, clearVoiceSelections: () => {} },
+      store: { bots: [{ id: "uses-default" }, { id: "pinned", vpsAlias: "alpha-vps" }], patchBot: () => null, clearVoiceSelections: () => {} },
       cfg: {},
       registry: { get: () => undefined, forgetSnapshots: () => { forgotten += 1; } },
       sessions: { revalidateEmailSessions: () => {} },
@@ -80,8 +81,11 @@ describe("saving config and the engines' status", () => {
       sharedMembership: () => false,
       lendingEnabled: () => true,
       providerConfigs: () => ({}),
-      localVmIdleMs: () => 0,
-      localVmIdles: new Map(),
+      localVmIdleMs: () => (deps.cfg.localVm?.idleTimeoutMinutes ?? 480) * 60_000,
+      localVmIdles: new Map([["private", { setIdleMs: (ms: number) => localDeadlines.push(ms) }]]),
+      vpsIdleMs: () => (deps.cfg.vpsIdle?.timeoutMinutes ?? 480) * 60_000,
+      vpsIdles: new Map([["server", { setIdleMs: (ms: number) => vpsDeadlines.push(ms) }]]),
+      vpsServerSwitched: (bot: { id: string }) => { switchedBots.push(bot.id); },
       localVmActiveThreads: new Set(),
       localVmLifecycleBusy: new Set(),
       localVmImageBusy: busy(),
@@ -113,8 +117,26 @@ describe("saving config and the engines' status", () => {
       } as unknown as Parameters<typeof route>[0]);
       return replies;
     };
-    return { save, forgotten: () => forgotten, broadcasts: () => broadcasts, cfg: deps.cfg };
+    return { save, localDeadlines, vpsDeadlines, switchedBots, forgotten: () => forgotten, broadcasts: () => broadcasts, cfg: deps.cfg };
   }
+
+  it("re-arms only timers belonging to the changed idle setting", async () => {
+    const { save, localDeadlines, vpsDeadlines } = routes();
+    expect(await save({ vpsIdle: { timeoutMinutes: 1440 } })).toEqual([200]);
+    expect(vpsDeadlines).toEqual([1440 * 60_000]);
+    expect(localDeadlines).toEqual([]);
+    expect(await save({ localVm: { idleTimeoutMinutes: 5 } })).toEqual([200]);
+    expect(localDeadlines).toEqual([5 * 60_000]);
+    expect(vpsDeadlines).toEqual([1440 * 60_000]);
+  });
+
+  it("switches only bots that use the default VPS server when the default SSH alias changes", async () => {
+    const { save, switchedBots } = routes();
+    expect(await save({ vps: { sshAlias: "alpha-vps" } })).toEqual([200]);
+    expect(switchedBots).toEqual(["uses-default"]);
+    expect(await save({ vps: { sshAlias: "alpha-vps" } })).toEqual([200]);
+    expect(switchedBots).toEqual(["uses-default"]);
+  });
 
   it("keeps every engine's status through a save of what the app shows", async () => {
     const { save, forgotten, broadcasts, cfg } = routes();

@@ -27,7 +27,7 @@ import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
-import { CALL_ENDPOINT_MS, listensHere, missingListenKey, speechBridge } from "@/lib/speech";
+import { CALL_ENDPOINT_MS, callSpeechEndNote, listensHere, missingListenKey, speechBridge } from "@/lib/speech";
 import { VoiceSetupDialog } from "./lazy-screens";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
@@ -673,13 +673,7 @@ function Call({ bot }: { bot: Bot }) {
       }
       if (code === 1) {
         setNote(
-          message ?? t(reason === "helper-build-failed"
-            ? "call.turns.helperBuildFailed"
-            : reason === "dictation-disabled"
-              ? "composer.dictation.disabled"
-              : reason === "speech-not-authorized"
-                ? "call.turns.speechNotAuthorized"
-                : "composer.dictation.failed"),
+          message ?? t(callSpeechEndNote(reason)),
         );
         return;
       }

@@ -32,6 +32,8 @@ export interface TeamCatalogEntry {
   members: number;
   skills: string[];
   requires: { apps: string[] };
+  /** Who published it ("Published by"), as the template's own frontmatter credits them. */
+  author?: string;
 }
 
 export interface TeamCatalogAvatar {
@@ -79,6 +81,13 @@ function relativeFile(value: unknown, field: string, suffix: string, prefix: str
 function stringList(value: unknown, field: string, maxItems: number): string[] {
   if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${field} is invalid`);
   return value.map((item, index) => text(item, `${field}[${index}]`, 100));
+}
+
+/** A catalog entry's credit, as a name or `{ name }`: one line of up to 100 characters, else none. */
+function catalogAuthor(value: unknown): string | undefined {
+  const name = typeof value === "string" ? value : isRecord(value) && typeof value.name === "string" ? value.name : undefined;
+  const line = name?.replace(/[\p{Cc}\p{Cf}]+/gu, " ").replace(/\s+/g, " ").trim();
+  return line && line.length <= 100 ? line : undefined;
 }
 
 const LOOK = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -149,6 +158,7 @@ export function parseTeamCatalog(value: unknown): TeamCatalog {
           )
         : (() => { throw new Error(`${field}.skills is invalid`); })(),
       requires: { apps: stringList(requires.apps ?? [], `${field}.requires.apps`, 30) },
+      ...(catalogAuthor(raw.author) ? { author: catalogAuthor(raw.author)! } : {}),
     };
   });
   return {

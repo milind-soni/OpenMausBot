@@ -181,9 +181,8 @@ describe("Cloud Pro's included decision model", { timeout: 90_000 }, () => {
       })).body.bot;
     }
     const created = await api("POST", "/api/groups", { name: "Launch", memberIds: [bots.Maya!.id, bots.Theo!.id] });
-    expect(created.body.group.defaultResponder).toEqual({ kind: "auto" });
+    expect(created.body.group).toMatchObject({ defaultResponder: { kind: "auto", fallbackBotId: bots.Maya!.id }, setupCompletedAt: expect.any(Number) });
     room = created.body.group;
-    expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "complete", cwd: null, bulletin: "", defaultResponder: { kind: "auto" } })).status).toBe(200);
   });
 
   it("asks the relay who answers, at exactly <OMB_CLOUD_DECIDER_URL>/v1/systemone with the included token", async () => {

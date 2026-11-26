@@ -2,7 +2,7 @@ import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
 import { boatHealth } from "../boat-health.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmResources, type AppConfig } from "../config.ts";
+import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmResources, perBotLocalVmLimitProblem, type AppConfig } from "../config.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -396,12 +396,8 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
           const before = await containerComputerStatus(undefined, undefined, target);
           if (!before.runtime) return json(res, 409, { error: before.problem ?? "No container runtime is installed" });
           if (!(await containerComputerExists(before.runtime, target))) {
-            const count = await existingPerBotLocalVmCount(before.runtime);
-            if (count >= localVmMaxInstances(cfg)) {
-              return json(res, 409, {
-                error: `The per-bot Local VM limit is ${localVmMaxInstances(cfg)} — delete an unused bot VM or raise the limit in App Settings`,
-              });
-            }
+            const limit = perBotLocalVmLimitProblem(cfg, await existingPerBotLocalVmCount(before.runtime));
+            if (limit) return json(res, 409, { error: limit });
           }
         }
         if (action === "remove") await keepSignInsBeforeRemove(target);

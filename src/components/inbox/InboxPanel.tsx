@@ -6,19 +6,22 @@ import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
-import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
+import { closeInbox, markAllInboxRead, readInboxLine, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
 import { sameJson } from "@/state/same-json";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useActiveLocale } from "@/lib/use-active-locale";
-import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
+import { useTeamPeople } from "@/state/team-people";
+import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads } from "./InboxActive";
 import { attentionUnpinAction, botFaces } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
-import { InboxRowItem } from "./InboxRow";
+import { InboxGroups } from "./InboxGroups";
 import { FINISHED_LIMIT, FinishedThreads, finishedThreads } from "./FinishedThreads";
 import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
-import { listedRows, rowsIn, waitingCount } from "./inbox-view";
+import { forYouCount, groupRows, inboxFixes, listedRows, rowsIn, type QuickAction } from "./inbox-view";
+import { InboxRowItem } from "./InboxRow";
 import { useInboxActions, useInboxJump } from "./use-inbox-actions";
+import { useInboxHold } from "./use-inbox-hold";
 import { roundButtonCls } from "../bot-panel/rows";
 import { matchesThreadFilter, threadFilterOn, threadOwners, type ThreadFilter } from "./thread-filter";
 import { ThreadFilterBar } from "./ThreadFilterBar";
@@ -48,17 +51,23 @@ export const InboxPanel = memo(function InboxPanel() {
     else closeInbox();
   };
   const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
+  const { held, marked, pick, undo } = useInboxHold(view, panel.reading);
   /** An ask waits for an answer here and a message waits for a reply, so those open in the panel; finished work opens
    * the conversation it came from, at the message it is about. */
   const open = (row: InboxRow) => {
-    readInboxRow(row);
+    pick(row);
     if (row.tab === "needs-you" || row.replies) { readInboxLine(row.id); return; }
     openInChat(row);
   };
+  const act = (row: InboxRow, action: QuickAction) => {
+    if (action === "open") pick(row);
+    run(row, action);
+  };
   // Finished work the person has read leaves the list for the Done line at the foot; its conversation moves to Finished.
-  const listed = listedRows(view);
-  const rows = listed.filter((row) => matchesSearch(row, query));
-  const done = rowsIn(view, "done").filter((row) => matchesSearch(row, query)).sort((a, b) => b.at - a.at);
+  const listed = listedRows(view, held);
+  const groups = groupRows(listed.filter((row) => matchesSearch(row, query)));
+  const rows = [...groups["for-you"], ...groups.activity];
+  const done = rowsIn(view, "done").filter((row) => row.id !== held && matchesSearch(row, query)).sort((a, b) => b.at - a.at);
   const ids = rows.map((row) => row.id);
   const at = reading ? ids.indexOf(reading.id) : -1;
 
@@ -72,9 +81,9 @@ export const InboxPanel = memo(function InboxPanel() {
     waited.current = null;
     const next = nextAfter(order.current.filter((id) => id === reading.id || ids.includes(id)), reading.id);
     const row = next ? view?.rows.find((one) => one.id === next) : undefined;
-    if (row) readInboxRow(row);
+    if (row) pick(row);
     readInboxLine(row ? row.id : null);
-  }, [reading, ids, view]);
+  }, [reading, ids, view, pick]);
 
   const step = (by: -1 | 1) => {
     const row = rows[at + by];
@@ -90,11 +99,13 @@ export const InboxPanel = memo(function InboxPanel() {
     const finished = finishedThreads(state.bots, state.groups, state.pendingQueued, Infinity, readNewsThreads(view), pinnedThreads);
     const finishedRows = finished.filter((row) => matchesThreadFilter(row, filter)).slice(0, FINISHED_LIMIT);
     return {
-      owners: threadOwners([...active, ...finished], filter.owner), finishedRows, unread: unreadConversations(entries, view),
+      owners: threadOwners([...active, ...finished], filter.owner), finishedRows,
       any: finishedRows.length > 0 || active.some((entry) => matchesThreadFilter(entry, filter)),
     };
   }, sameJson);
-  const count = waitingCount(view) + threads.unread;
+  const team = useTeamPeople();
+  const fixes = inboxFixes(team?.needsYou, view).length;
+  const count = forYouCount(view) + fixes;
   const openThread = useStoreSelector((state) => inboxOpenThread(state), sameJson);
   const body = (
     <>
@@ -133,7 +144,7 @@ export const InboxPanel = memo(function InboxPanel() {
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
                   className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
               </label>}
-              <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
+              <div data-inbox-list className="px-1.5 pb-1.5">
                 {rows.length === 0
                   ? query.trim() && listed.length
                     ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
@@ -144,7 +155,7 @@ export const InboxPanel = memo(function InboxPanel() {
                         <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
                       </div>
                     )
-                  : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+                  : <InboxGroups groups={groups} now={now} current={held} onOpen={open} onAction={act} moreForYou={fixes > 0} />}
               </div>
               {!query.trim() && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
               {!query.trim() && threadFilterOn(filter) && !threads.any && (
@@ -164,11 +175,17 @@ export const InboxPanel = memo(function InboxPanel() {
                     <span className="font-medium">{t("common.done")}</span>
                     <span className="tabular-nums">{done.length}</span>
                   </button>
-                  {showDone && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+                  {showDone && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={act} />)}
                 </section>
               )}
             </div>
           </>
+        )}
+        {marked && (
+          <p role="status" data-inbox-marked className="flex shrink-0 items-center justify-center gap-1.5 border-t border-hairline/40 px-3 py-2 text-[12px] text-ink-tertiary">
+            {t("inbox.markedRead")}<span aria-hidden="true">·</span>
+            <button type="button" data-inbox-undo onClick={undo} className="font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">{t("common.undo")}</button>
+          </p>
         )}
       </div>
     </>

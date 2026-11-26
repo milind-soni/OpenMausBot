@@ -490,7 +490,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
   const unsubscribe = store.onChange((change: StoreChange) => {
     if (change.type === "message") {
       const line = change.message;
-      if (line.role === "user" && line.kind === "text" && !line.peerAsk && !line.aside && line.via !== "api") personWrote(change.threadId, line);
+      if (line.role === "user" && line.kind === "text" && !line.peerAsk && !line.aside && !line.automated && line.via !== "api") personWrote(change.threadId, line);
     } else if (change.type === "thread.deleted") {
       const before = waiting.length + tracked.length;
       waiting = waiting.filter((entry) => entry.threadId !== change.threadId);

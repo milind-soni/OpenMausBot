@@ -88,7 +88,7 @@ const OWN_SERVERS = new Set(["agents", "phone", "device", "dweb", "ogb", "data",
 const COMPUTER_SERVERS: Record<string, LayerWhere> = { computer: "vm", localComputer: "yourComputer" };
 /** Looking at a desktop changes nothing: never a layer. */
 const COMPUTER_LOOK = /^(?:screenshot|get_screen_size|exec_status|move|wait|zoom|cursor_position|list_[a-z_]+|read_[a-z_]+|get_[a-z_]+)$/;
-const FILE_WRITE = new Set(["Write", "write_file", "create_file"]);
+const FILE_WRITE = new Set(["Write", "write", "write_file", "create_file"]);
 const FILE_EDIT = new Set(["Edit", "MultiEdit", "NotebookEdit", "edit", "apply_patch", "str_replace_based_edit_tool"]);
 const BROWSER_OPEN = /(?:^|_)(?:navigate|open|open_url|goto|tab_new)$/;
 const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tabs|wait|check|console|network|close|evaluate_read)$/;
@@ -152,6 +152,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(v
 const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim() ? value : undefined);
 const baseName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const sentence = (words: string) => words.toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
+function fileChanges(raw: string | undefined): Record<string, unknown> | undefined {
+  if (!raw) return undefined;
+  try {
+    const changes: unknown = JSON.parse(raw);
+    if (Array.isArray(changes) && changes.length && changes.every((change) => isRecord(change) && typeof change.path === "string" && typeof change.diff === "string")) return { changes };
+  } catch {}
+  return undefined;
+}
 
 /** GMAIL_SEND_EMAIL → app gmail, words "send email". */
 function slugParts(slug: string): { app: string; words: string } {
@@ -318,11 +327,12 @@ function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
     return [{ ...base, id: message.id, kind: "app", app: server.toLowerCase(), tool: tool.name, words: sentence(bare), read: /^(?:get|list|search|read|find|fetch|query)/i.test(bare), replay: "ai", ...(input ? { args: input } : {}) }];
   }
   if (FILE_WRITE.has(bare) || FILE_EDIT.has(bare)) {
+    const edit = FILE_EDIT.has(bare) ? input ?? (bare === "edit" ? fileChanges(tool.output) ?? fileChanges(tool.input) : undefined) : undefined;
     const path = text(input?.file_path) ?? text(input?.path) ?? text(input?.notebook_path);
-    if (!path) return [{ ...base, id: message.id, kind: "ai", tool: bare, words: "edit files", read: false, replay: "ai" }];
+    if (!path) return [{ ...base, id: message.id, kind: "ai", tool: bare, words: "edit files", read: false, replay: "ai", ...(edit ? { args: edit } : {}) }];
     const content = typeof input?.content === "string" ? input.content : undefined;
     const exact = FILE_WRITE.has(bare) && content !== undefined && !clipped;
-    return [{ ...base, id: message.id, kind: exact ? "file" : "ai", tool: bare, words: baseName(path), read: false, replay: exact ? "exact" : "ai", args: exact ? { path, content } : { path } }];
+    return [{ ...base, id: message.id, kind: exact ? "file" : "ai", tool: bare, words: baseName(path), read: false, replay: exact ? "exact" : "ai", args: exact ? { path, content } : edit ?? { path } }];
   }
   const command = text(tool.summary) ?? text(input?.command) ?? (nameIsCommand(tool.name) ? tool.name : undefined);
   if (command && (bare === "Bash" || bare === "shell" || bare === "vm_exec" || /^(?:exec_command|run_shell_command|bash|terminal)$/i.test(bare) || nameIsCommand(tool.name) || text(input?.command))) {

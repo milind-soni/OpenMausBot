@@ -104,6 +104,26 @@ export function readPairedDevices(file = companionDevicesFile()) {
 
 export const countPairedPhones = (file) => readPairedDevices(file)?.length ?? null;
 
+/** Takes one device out of the companion's own store while its sidecar is not running, the store it loads when it
+ * starts. False when nothing matched. Throws when the store cannot be read or saved: an unreadable store is never
+ * overwritten, and the person never sees a removal that did not happen. */
+export function removePairedDeviceAtRest(id, file = companionDevicesFile()) {
+  const devices = readPairedDevices(file);
+  if (devices === null) throw new Error("the paired devices could not be read");
+  const kept = devices.filter((device) => device?.id !== id);
+  if (kept.length === devices.length) return false;
+  const temporary = `${file}.${process.pid}.tmp`;
+  try {
+    // The store holds token hashes: private to this user, as the sidecar writes it.
+    fs.writeFileSync(temporary, JSON.stringify({ devices: kept }, null, 2), { mode: 0o600 });
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    fs.rmSync(temporary, { force: true });
+    throw error;
+  }
+  return true;
+}
+
 /** Looks at this computer's interfaces only: Tailscale's own interface (`tailscale0`, "Tailscale", or the utun that
  * carries a fd7a:115c:a1e0::/48 address). A 100.64/10 address alone is not Tailscale: carrier NAT and other VPNs use it. */
 export function hasTailnetAddress(interfaces = os.networkInterfaces()) {

@@ -12,7 +12,7 @@ import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
-export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11", "modelgo-offer-2026-11", "teams-2026-11b"]);
+export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11", "modelgo-offer-2026-11", "teams-2026-11b", "whats-new-2026-11b"]);
 const WHATS_NEW = DESKTOP_NOTICES[0];
 /** A card from the project's announcements file someone closed (src/lib/announcements.ts), and the last day a sponsor's
  * card was shown: kept beside the fixed notices, the newest few only. */

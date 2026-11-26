@@ -23,6 +23,7 @@ import { cacheUntilConfigChanges,
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
+  perBotLocalVmLimitProblem,
   parseStoredConfig,
   persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
@@ -635,6 +636,15 @@ describe("configuration boundaries", () => {
     });
     expect(localVmMode({ localVm: { mode: "per-bot" } })).toBe("per-bot");
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
+  });
+
+  it("names the per-bot desktop limit once every allowed desktop exists", () => {
+    const cfg = { localVm: { mode: "per-bot" as const, maxInstances: 8 } };
+    expect(perBotLocalVmLimitProblem(cfg, 7)).toBeNull();
+    expect(perBotLocalVmLimitProblem(cfg, 8)).toBe("The per-bot Local VM limit is 8 — delete an unused bot VM");
+    expect(perBotLocalVmLimitProblem({}, 2)).toBe(
+      "The per-bot Local VM limit is 2 — delete an unused bot VM or raise the limit in App Settings",
+    );
   });
 
   it("accepts pool mode with the same bounded seat count", () => {

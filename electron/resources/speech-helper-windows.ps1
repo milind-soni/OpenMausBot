@@ -1,4 +1,6 @@
 # Windows dictation through the speech recognizer built into Windows (System.Speech): on this computer, offline, no key.
+# A display language with no desktop recognizer tries speech-helper-windows-onecore.ps1 first: the newer Windows speech,
+# which works only when Windows' online speech recognition setting is on (Windows then sends the audio to Microsoft).
 # Same output as speech-helper.swift, one JSON object per line on stdout:
 #   {"partial":true,"text":"..."}   while recognizing
 #   {"partial":false,"text":"..."}  final result, then exit 0
@@ -24,22 +26,42 @@ function Join-Text($left, $right) {
 
 try {
   Add-Type -AssemblyName System.Speech
-  $installed = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())
 } catch {
   Send-Line @{ error = 'speech-unavailable' }
   exit 1
 }
-if ($installed.Count -eq 0) {
-  Send-Line @{ error = 'speech-language-missing' }
-  exit 1
+# Throws (NullReferenceException) instead of returning an empty list when no desktop recognizer is registered, as
+# for languages Windows only covers with its newer speech packs (Portuguese (Brazil)).
+try {
+  $installed = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())
+} catch {
+  $installed = @()
 }
-# The person's display language first, then the same language in another region, then any installed recognizer.
+# The person's display language first, then the same language in another region, then the newer Windows speech,
+# then any installed recognizer.
 $culture = [System.Globalization.CultureInfo]::CurrentUICulture
 $recognizer = $installed | Where-Object { $_.Culture.Name -eq $culture.Name } | Select-Object -First 1
 if (-not $recognizer) {
   $recognizer = $installed | Where-Object { $_.Culture.TwoLetterISOLanguageName -eq $culture.TwoLetterISOLanguageName } | Select-Object -First 1
 }
-if (-not $recognizer) { $recognizer = $installed[0] }
+if (-not $recognizer) {
+  # Exit code 3: the newer speech cannot listen either and wrote nothing.
+  $onecore = Join-Path $PSScriptRoot 'speech-helper-onecore.ps1'
+  if (Test-Path -LiteralPath $onecore) {
+    try {
+      & $onecore -EndpointMs $EndpointMs
+    } catch {
+      Send-Line @{ error = 'helper-exited' }
+      exit 1
+    }
+    if ($LASTEXITCODE -ne 3) { exit $LASTEXITCODE }
+  }
+  if ($installed.Count -eq 0) {
+    Send-Line @{ error = 'speech-language-missing' }
+    exit 1
+  }
+  $recognizer = $installed[0]
+}
 
 try {
   $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine($recognizer)

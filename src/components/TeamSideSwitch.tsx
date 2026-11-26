@@ -80,21 +80,21 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
     else if (there.groups[0]) dispatch({ type: "select", id: there.groups[0].id });
   };
   return (
-    <div data-team-side={side} className={compact ? "mx-auto mb-1" : "px-3 pb-1.5"}>
+    <div data-team-side={side} className={compact ? "mb-1 flex justify-center" : "px-3 pb-1.5"}>
       <div role="radiogroup" aria-label={t("teamSide.label")}
-        className={cn("flex rounded-full bg-ink/[0.06] p-0.5 ring-[0.5px] ring-inset ring-ink/[0.07]", compact && "flex-col rounded-[14px]")}>
+        className={compact ? "flex flex-col gap-1" : "flex rounded-full bg-ink/[0.06] p-0.5 ring-[0.5px] ring-inset ring-ink/[0.07]"}>
         {SIDES.map(({ side: option, label, Icon }) => {
           const on = option === side;
           const unread = !on && view.unread[option];
           return (
             <button key={option} type="button" role="radio" aria-checked={on} data-team-side-option={option} onClick={() => choose(option)}
               aria-label={compact ? t(label) : undefined} title={compact ? t(label) : undefined}
-              className={cn("relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-colors", FOCUS,
-                compact ? "size-9 rounded-xl" : "h-8 min-w-0 flex-1 px-3 text-[13px]",
-                on ? "bg-composer text-ink shadow-[0_1px_2px_rgb(0_0_0/0.12)] ring-[0.5px] ring-ink/10" : "text-ink-secondary hover:text-ink")}>
-              {compact ? <Icon size={16} aria-hidden="true" /> : t(label)}
+              className={cn("relative flex items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-colors", FOCUS,
+                compact ? cn("size-[46px] shrink-0 rounded-xl hover:bg-raised hover:text-ink active:bg-raised", on ? "bg-raised text-ink" : "text-ink-secondary")
+                  : cn("h-8 min-w-0 flex-1 rounded-full px-3 text-[13px]", on ? "bg-composer text-ink shadow-[0_1px_2px_rgb(0_0_0/0.12)] ring-[0.5px] ring-ink/10" : "text-ink-secondary hover:text-ink"))}>
+              {compact ? <Icon size={20} aria-hidden="true" /> : t(label)}
               {unread && <span role="img" data-team-side-unread={option} aria-label={t("task.unread")}
-                className={cn("size-1.5 rounded-full bg-accent", compact && "absolute right-1.5 top-1.5")} />}
+                className={cn("size-1.5 rounded-full bg-accent", compact && "absolute right-2 top-2 size-2")} />}
             </button>
           );
         })}

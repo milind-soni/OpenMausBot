@@ -54,7 +54,7 @@ export function buildNotification(
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string; handoff?: boolean },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string; handoff?: boolean; routine?: boolean },
 ): Notification | null {
   if (bot.notifications === false) return null;
 
@@ -73,6 +73,7 @@ export function buildNotification(
   const notification: Notification = { kind, botId: bot.id, botName: bot.name, threadId, title, body };
   if (extra?.avatarUrl) notification.avatarUrl = extra.avatarUrl;
   if (extra?.group) notification.groupId = extra.group.id;
+  if (extra?.routine && kind === "done") notification.routine = true;
   return notification;
 }
 

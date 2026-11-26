@@ -131,6 +131,8 @@ describe("finished work reaches the inbox once", () => {
     expect(row.kind).toBe("message");
     f.inbox.markRead(OWNER, row.id);
     expect(f.inbox.view(OWNER).rows[0]!.tab, "it still waits for a reply").toBe("info");
+    expect(f.inbox.markRead(OWNER, row.id, false)).toBe(true);
+    expect(f.inbox.view(OWNER).rows[0]!.unread, "made new again").toBe(true);
   });
 
   it("points a line at the message it came from, so a client can open the conversation there", () => {
@@ -394,6 +396,8 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.markRead(OWNER, "card-q")).toBe(true);
     expect(f.inbox.view(OWNER).rows[0]!.unread).toBe(false);
     expect(f.inbox.count(OWNER)).toBe(1);
+    expect(f.inbox.markRead(OWNER, "card-q", false)).toBe(true);
+    expect(f.inbox.view(OWNER).rows[0]!.unread, "an ask made new again").toBe(true);
     expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
     expect(f.inbox.markRead(OWNER, "not-a-line")).toBe(false);
     expect(f.inbox.markDone(OWNER, "not-a-line")).toBe("unknown");

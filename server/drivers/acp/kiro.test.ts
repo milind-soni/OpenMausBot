@@ -167,6 +167,21 @@ describe("Kiro ACP driver", () => {
     expect(prompts().at(-1)).toMatchObject({ model: "claude-sonnet-5-5" });
   });
 
+  it("takes an attached image as its file path for Kiro's own read tool, not as an ACP image block", async () => {
+    const { instance, recorder } = await create({ FAKE_ACP_DUMP_PROMPT: "1" });
+    expect(instance.adapter.capabilities.images).toBe(true);
+    expect(instance.adapter.capabilities.nativeImageInput).toBe(false);
+    const text = '<attached-image path="/private/image.png" name="image.png" />';
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "kiro-image", text, images: [{ path: join(scratch, "missing.png"), mime: "image/png", bytes: 12 }],
+    });
+    const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect(done).toMatchObject({ ok: true });
+    const prompt = JSON.parse(readFileSync(join(scratch, "launch.json.prompt.json"), "utf8")) as Array<{ type: string; text?: string }>;
+    expect(prompt.map((block) => block.type)).toEqual(["text"]);
+    expect(prompt[0]?.text).toContain(text);
+  });
+
   it("leaves Kiro on its own default model, and turns Autopilot on only under Full access", async () => {
     const { instance, recorder } = await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "kiro-full", text: "hello", model: "agent-default", approvalMode: "full" });
