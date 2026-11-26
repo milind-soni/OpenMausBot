@@ -160,7 +160,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                             <span>{problemLine.when} {problemLine.mark} {problemLine.text}</span>
                           </button>}
                           {!!automation.noStartStreak && <div className="mt-1 text-[13px] text-warning" data-automation-no-start="">{t("routines.noStartStreak", { count: automation.noStartStreak })}</div>}
-                          {actions.error && actions.errorFor?.endsWith(`:${automation.id}`) && <p role="alert" className="mt-1 text-[12px] text-danger">{actions.error}</p>}
+                          {!open && actions.error && actions.errorFor?.endsWith(`:${automation.id}`) && <p role="alert" className="mt-1 text-[12px] text-danger">{actions.error}</p>}
                         </div>
                         {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}` || actions.busy === SET_ALL_BUSY} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="relative z-10 mt-0.5 shrink-0" />}
                       </li>
@@ -168,14 +168,14 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                   })}
                 </ul>
               )}
-              {actions.error && !listed.some((automation) => actions.errorFor?.endsWith(`:${automation.id}`)) && <p role="alert" className="mt-3 text-[12px] text-danger">{actions.error}</p>}
+              {!open && actions.error && !listed.some((automation) => actions.errorFor?.endsWith(`:${automation.id}`)) && <p role="alert" className="mt-3 text-[12px] text-danger">{actions.error}</p>}
               <RoutineWakeBar />
             </div>
           </div>
         )}
         {open && (
           <div className="absolute inset-y-0 right-0 z-30 flex shadow-2xl lg:static lg:shadow-none">
-            <AutomationPanel key={open.id} automation={open} sentence={sentenceOf(open)} onClose={() => setOpenId(null)} onDeleted={() => setOpenId(null)} onEdit={() => setEditing({ kind: open.kind, id: open.id })} />
+            <AutomationPanel key={open.id} automation={open} sentence={sentenceOf(open)} actions={actions} onClose={() => setOpenId(null)} onDeleted={() => setOpenId(null)} onEdit={() => setEditing({ kind: open.kind, id: open.id })} />
           </div>
         )}
       </div>

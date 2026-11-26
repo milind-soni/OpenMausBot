@@ -20,13 +20,14 @@ export function useAutomationActions() {
   const [errorFor, setErrorFor] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
+  /** Runs one action unless another is running; true when it ran and was not refused. */
   const attempt = async (key: string, work: () => Promise<unknown>) => {
-    if (busy) return;
+    if (busy) return false;
     setBusy(key);
     setError("");
     setErrorFor(null);
-    try { await work(); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); setErrorFor(key); }
+    try { await work(); return true; }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); setErrorFor(key); return false; }
     finally { setBusy(null); }
   };
 
@@ -50,19 +51,18 @@ export function useAutomationActions() {
     ? new Promise<void>((resolve, reject) => dispatch({ type: "runRoutine", routineId: automation.id, onStarted: () => resolve(), onError: reject }))
     : api(`/api/webhooks/${automation.id}/test`, { method: "POST", body: JSON.stringify({ event: "openmaus.test", message: "A test run from Automations" }) }));
 
-  /** Asks once (a person deleting their own automation), then deletes it. */
+  /** Asks once (a person deleting their own automation), then deletes it; false when it is kept, so a refusal stays in view. */
   const remove = async (automation: Automation, question: string): Promise<boolean> => {
     if (!window.confirm(question)) return false;
     if (automation.kind === "schedule") {
       dispatch({ type: "deleteRoutine", routineId: automation.id });
       return true;
     }
-    await attempt(`delete:${automation.id}`, async () => {
+    return attempt(`delete:${automation.id}`, async () => {
       await api(`/api/webhooks/${automation.id}`, { method: "DELETE" });
       dispatch({ type: "webhookDeleted", webhookId: automation.id });
       removeWebhookCredential(webhookCredentialStore(), automation.id);
     });
-    return true;
   };
 
   /** The address another app sends to, as the server keeps it: the owning bot may already have given it to an app, so

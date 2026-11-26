@@ -8,16 +8,18 @@ import { useAutomationActions } from "./actions";
 /** What `busy` is while "Pause all" / "Resume all" writes: every switch waits for it. */
 export const SET_ALL_BUSY = "toggle:all";
 
+export type AutomationActions = ReturnType<typeof useAllAutomationActions>;
+
 export function useAllAutomationActions() {
   const base = useAutomationActions();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const attempt = async (key: string, work: () => Promise<unknown>) => {
-    if (busy || base.busy) return;
+    if (busy || base.busy) return false;
     setBusy(key);
     setError("");
-    try { await work(); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    try { await work(); return true; }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); return false; }
     finally { setBusy(null); }
   };
   /** Runs a schedule's or another app's own action: an earlier "Pause all" refusal is no longer the latest word. */
@@ -52,8 +54,7 @@ export function useAllAutomationActions() {
         return removed;
       }
       if (!window.confirm(question)) return false;
-      await attempt(`delete:${automation.id}`, () => appTriggerApi.remove(automation.id));
-      return true;
+      return attempt(`delete:${automation.id}`, () => appTriggerApi.remove(automation.id));
     },
   };
 }

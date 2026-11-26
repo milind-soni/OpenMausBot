@@ -368,6 +368,40 @@ describe("the Automations list switch", () => {
       expect(row("routine-1").querySelector("[role=alert]")?.textContent).toBe("The assigned bot no longer exists");
     });
 
+    it("lets a panel's Run now replace its refusal, in the panel only while the panel is open", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { body?: string } | undefined)?.body) throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(container.querySelector("[role=alert]")?.textContent).toBe("The server is restarting"));
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      flushSync(() => button(row("hook-1"), "Sales form leads").click());
+      expect(container.querySelectorAll("[role=alert]")).toHaveLength(1);
+      expect(container.querySelector("aside [role=alert]")?.textContent).toBe("The server is restarting");
+      fixture.api.mockResolvedValue({});
+      flushSync(() => button(container.querySelector("aside")!, "Run now").click());
+      await vi.waitFor(() => expect(fixture.api).toHaveBeenCalledWith("/api/webhooks/hook-1/test", expect.objectContaining({ method: "POST" })));
+      await vi.waitFor(() => expect(container.querySelector("[role=alert]")).toBeNull());
+    });
+
+    it("keeps the panel open with the refusal when a delete is refused", async () => {
+      mountPage();
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { method?: string } | undefined)?.method === "DELETE") throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => button(row("hook-1"), "Sales form leads").click());
+      flushSync(() => button(container.querySelector("aside")!, "Delete").click());
+      await vi.waitFor(() => expect(container.querySelector("aside [role=alert]")?.textContent).toBe("The server is restarting"));
+      expect(container.querySelector("aside h2")!.textContent).toBe("Sales form leads");
+      expect(container.querySelectorAll("[role=alert]")).toHaveLength(1);
+    });
+
     it("keeps every switch waiting while it writes, so a click cannot be undone by it", async () => {
       fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
       mountPage();
