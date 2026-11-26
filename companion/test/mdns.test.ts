@@ -239,6 +239,7 @@ describe("naming", () => {
     expect(dnsLabel("Dr. Smith's computer")).toBe("Dr  Smith's computer");
     expect(dnsLabel("x".repeat(200)).length).toBeLessThanOrEqual(63);
     expect(Buffer.byteLength(dnsLabel("é".repeat(60)), "utf8")).toBeLessThanOrEqual(63);
+    expect(dnsLabel("a".repeat(60) + "\u{1F600}")).toBe("a".repeat(60));
     expect(dnsLabel("")).toBe("OpenMausBot");
     expect(dnsLabel("   ")).toBe("OpenMausBot");
   });
