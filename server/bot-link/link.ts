@@ -30,6 +30,7 @@ import type { PassedFile } from "../host/handoff-files.ts";
 import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
+import { bothPlaces } from "./both-places.ts";
 import { armBackground, BACKGROUND_WAIT_MS, backgroundWaitNote, cloudUnreachableTooLong, neverSent } from "./away.ts";
 import { endedSchema, stateSchema, type EndedLink, type LinkState, type Work } from "./link-state.ts";
 import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedId, parseLinked, peerKey,
@@ -695,7 +696,8 @@ export function createBotLink(deps: BotLinkDeps) {
   /** coordinate_bots for targets that live in another place; the rest go on as they always did (`local`). */
   async function coordinate(call: CoordinateBotsCall, context: CoordinateContext, local: (call: CoordinateBotsCall) => Promise<CoordinateResult>): Promise<CoordinateResult> {
     if (!state || context.external) return local(call);
-    for (const raw of call.botIds) { const shared = sharedName(raw); if (shared) return { status: 403, body: { error: shared } }; }
+    const byName = deps.bots().filter((bot) => !movedAway(bot) && !bot.hidden);
+    for (const raw of call.botIds) { const shared = bothPlaces({ raw, here: byName, peers: state.peers, placeName }) ?? sharedName(raw); if (shared) return { status: 403, body: { error: shared } }; }
     const away = new Map<string, Remote>();
     for (const raw of call.botIds) { const remote = resolve(raw); if (remote) away.set(raw, remote); }
     if (away.size === 0) return local(call);

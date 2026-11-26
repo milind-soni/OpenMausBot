@@ -2893,8 +2893,8 @@ function previewSystemPrompt(bot: BotRecord) {
   const peers = reachablePeers(store.bots, bot);
   const coordination = chiefLevel(bot)
     ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, undefined, store.sections, linkedRoster.forChief(bot, true))
-    : peers.length > 0
-      ? peerRosterSystemPrompt(peers, bot)
+    : peers.length > 0 || linkedRoster.forPeer(bot)
+      ? peerRosterSystemPrompt(peers, bot, linkedRoster.forPeer(bot))
       : "";
   const agentsMounted = caps?.agentsMcp === true;
   const previewPlan = resolveSurface({
@@ -8140,9 +8140,9 @@ async function beginTurn(
         : [];
       const teamPrompt = withElsewhere(chiefLevel(bot)
         ? chiefOfStaffPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId), store.sections, linkedRoster.forChief(bot, Boolean(integrations.agents)))
-        : integrations.agents && sectionPeers.length > 0
-          ? peerRosterPrompt(sectionPeers, bot)
-          : { rules: "", roster: "" }, integrations.agents ? placesElsewhere.roster("roster", (kind) => botLink.link.on() && kind !== "team") : ""); const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
+        : integrations.agents && (sectionPeers.length > 0 || linkedRoster.forPeer(bot))
+          ? peerRosterPrompt(sectionPeers, bot, linkedRoster.forPeer(bot))
+          : { rules: "", roster: "" }, integrations.agents ? placesElsewhere.roster("roster", botLink.reaches) : ""); const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + botLogins.secretsPrompt(bot.id, vaultReaders.turn(threadId)) + THREADS_PROMPT + WIDGET_PROMPT : "";
       const routinePrompt = integrations.agents ? TRIGGER_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
@@ -8274,7 +8274,7 @@ async function beginTurn(
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : opts?.automationSource === "api" ? (botApiThread(threadId) ? BOT_API_PROMPT : BOT_API_OWNER_PROMPT) : "" },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
-        { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots) },
+        { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots, botLink.reaches) },
       ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle, rules: cfg.everyBotRules, pagesOff: (liveBot ?? bot).toolsOff?.includes("pages") }); setup.lap("prompt");
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
@@ -10363,7 +10363,7 @@ async function runClaimedGroupMemberTurn(
     const missed = unreachedMentionLines(
       replyText, members,
       reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)), threadLanguage(threadId),
-    ); for (const line of placesElsewhere.missed(replyText, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
+    ); for (const line of placesElsewhere.missed(replyText, store.bots, botLink.reaches)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
     for (const line of missed) {
       store.appendMessage(threadId, {
         role: "bot",
@@ -10660,7 +10660,7 @@ function startGroupTurn(
   const snippet = titled?.title;
 
   const archived = members.filter((member) => member.hidden);
-  const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0]; for (const line of placesElsewhere.missed(text, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
+  const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0]; for (const line of placesElsewhere.missed(text, store.bots, botLink.reaches)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
   if (mentionedArchived) {
     store.appendMessage(threadId, {
       role: "bot",
@@ -13010,7 +13010,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               description: b.description || undefined,
             };
           });
-        return json(res, 200, { bots: [...bots, ...botLink.link.agents(), ...remoteHandoff.agents()], elsewhere: placesElsewhere.roster("tool", (kind) => botLink.link.on() && kind !== "team") || undefined });
+        return json(res, 200, { bots: [...bots, ...botLink.link.agents().filter((one) => linkedRoster.reaches(sender, one.id)), ...remoteHandoff.agents()], elsewhere: placesElsewhere.roster("tool", botLink.reaches) || undefined });
       }
       if (await dispatchRoutes([createInternalThreadRoutes({
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
