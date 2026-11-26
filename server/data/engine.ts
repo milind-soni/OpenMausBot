@@ -12,6 +12,7 @@ import { boxCpus } from "../box-cpus.ts";
 import { boxMemory } from "../box-memory.ts";
 import { DATA_DIR } from "../config.ts";
 import { tableIdentifierParts } from "./identifiers.ts";
+import { preparePageQuery } from "./page-query.ts";
 import {
   DataFailure,
   type BotDatabase,
@@ -335,17 +336,20 @@ class BotDb implements BotDatabase {
     const instance = await binding.DuckDBInstance.create(join(folder, DATA_DB_FILE), settings);
     let bot: DuckDB.DuckDBConnection | undefined;
     let panel: DuckDB.DuckDBConnection | undefined;
+    let page: DuckDB.DuckDBConnection | undefined;
     try {
       bot = await instance.connect();
       panel = await instance.connect();
+      page = await instance.connect();
       // A real schema: temp tables would be invisible to the panel's connection.
       await bot.run(`CREATE SCHEMA IF NOT EXISTS ${DATA_RESULTS_SCHEMA}`);
       const keywords = await bot.runAndReadAll("SELECT keyword_name FROM duckdb_keywords() WHERE keyword_category = 'reserved'");
       const reserved = new Set(keywords.getRowsJson().map((row) => String(row[0]).toLowerCase()));
-      return { binding, instance, lanes: { bot: new Lane(bot), panel: new Lane(panel) }, reserved };
+      return { binding, instance, lanes: { bot: new Lane(bot), panel: new Lane(panel), page: new Lane(page) }, reserved };
     } catch (error) {
       bot?.closeSync();
       panel?.closeSync();
+      page?.closeSync();
       instance.closeSync();
       throw error;
     }
@@ -413,6 +417,27 @@ class BotDb implements BotDatabase {
     const maxRows = options.maxRows === undefined ? Infinity : Math.max(0, options.maxRows);
     await this.loadExtensions(options);
     return this.statement(options.connection, sql, options, (open, conn) => this.read(open, conn, sql, maxRows));
+  }
+
+  async pageQuery(sql: string, params: unknown[] | Record<string, unknown> | undefined, options: { maxRows: number; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult> {
+    return this.statement("page", sql, options, async (open, conn) => {
+      const started = performance.now();
+      // A transaction a cancelled query left open ends before the next one begins.
+      await conn.run("ROLLBACK").catch(() => undefined);
+      await conn.run("BEGIN TRANSACTION READ ONLY");
+      try {
+        const prepared = await preparePageQuery(open.binding, conn, sql, params);
+        const result = await prepared.stream();
+        const rows: Cell[][] = [];
+        for (let chunk = await result.fetchChunk(); chunk && chunk.rowCount > 0 && rows.length <= options.maxRows; chunk = await result.fetchChunk()) {
+          rows.push(...this.cells(open.binding, chunk));
+        }
+        const kept = rows.slice(0, options.maxRows);
+        return { columns: this.resultColumns(result), rows: kept, rowCount: kept.length, truncated: rows.length > options.maxRows, elapsedMs: Math.round(performance.now() - started) };
+      } finally {
+        await conn.run("ROLLBACK").catch(() => undefined);
+      }
+    });
   }
 
   /** A first-time INSTALL is a download, so extensions load as their own step, off the statement's timeout. */

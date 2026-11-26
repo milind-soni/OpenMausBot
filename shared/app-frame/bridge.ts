@@ -4,10 +4,12 @@
 import { APP_LIMITS, APP_PROTOCOL_VERSION, ROOM_VIEW_ONLY, utf8Bytes, type AppDocument } from "../app.ts";
 import {
   APP_RPC_METHODS,
+  PAGE_RPC_METHODS,
   RPC_HOST_REFUSED,
   RPC_INVALID_PARAMS,
   RPC_METHOD_NOT_FOUND,
   type AppRpcMethod,
+  type PageRpcMethod,
   type JsonRpcError,
   type JsonRpcId,
   type JsonRpcMessage,
@@ -60,7 +62,7 @@ export interface AppContextUpdate {
 export interface AppBridgeAdapter {
   post(message: JsonRpcMessage): void;
   /** Resolves with the JSON-RPC `result`; rejects with { code, message }. */
-  callRpc(method: AppRpcMethod, params: Record<string, unknown>): Promise<unknown>;
+  callRpc(method: AppRpcMethod | PageRpcMethod, params: Record<string, unknown>): Promise<unknown>;
   sendMessage(text: string): Promise<void>;
   openLink(url: string): Promise<void> | void;
   setContext(update: AppContextUpdate): Promise<void> | void;
@@ -177,6 +179,29 @@ export function openableLink(value: unknown): string | null {
   return url.href.length <= APP_FRAME_LIMITS.linkChars ? url.href : null;
 }
 
+/** Why a bot's page may not make a call it did not declare, or makes in a room. */
+export function pageUseRefusal(use: "data" | "state", room: boolean): string {
+  if (room) return "In a room, a page cannot read its bot's data or keep state.";
+  return `This page did not declare "${use}": show it with uses: ["${use}"] to ${use === "data" ? "read its bot's data" : "keep state"}.`;
+}
+
+/** The params a page's own call needs, or what is wrong with them. */
+function pageParamsProblem(method: PageRpcMethod, params: Record<string, unknown>): string | null {
+  const key = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= APP_LIMITS.pageStateKeyChars;
+  switch (method) {
+    case "mausbot/data/query":
+      if (typeof params.sql !== "string" || !params.sql.trim() || params.sql.length > APP_LIMITS.pageQuerySqlChars) {
+        return `mausbot.data.query needs one SELECT of at most ${APP_LIMITS.pageQuerySqlChars} characters.`;
+      }
+      return params.params === undefined || Array.isArray(params.params) || isRecord(params.params) ? null : "mausbot.data.query params: a list for ? or $1, or an object for $name.";
+    case "mausbot/state/get":
+    case "mausbot/state/set":
+      return key(params.key) ? null : `A state key is text of 1 to ${APP_LIMITS.pageStateKeyChars} characters.`;
+    case "mausbot/state/keys":
+      return null;
+  }
+}
+
 function messageText(params: Record<string, unknown> | undefined): string | null {
   if (!params || params.role !== "user" || !Array.isArray(params.content) || params.content.length === 0) return null;
   const texts: string[] = [];
@@ -286,6 +311,22 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
     }
   };
 
+  // A page's reads and saves need no click: a dashboard loads its data, and remembers its filters, on its own.
+  const onPageRpc = async (id: JsonRpcId, method: PageRpcMethod, params: Record<string, unknown>) => {
+    if (mcp) return fail(id, RPC_METHOD_NOT_FOUND, "Method not found");
+    const use = method === "mausbot/data/query" ? "data" : "state";
+    if (!doc.can[use]) return fail(id, RPC_HOST_REFUSED, pageUseRefusal(use, Boolean(doc.room)));
+    const problem = pageParamsProblem(method, params);
+    if (problem) return fail(id, RPC_INVALID_PARAMS, problem);
+    if (!rates.rpc.take()) return fail(id, RPC_HOST_REFUSED, "Too many calls from this page. Wait a moment.");
+    try {
+      respond(id, (await adapter.callRpc(method, params)) ?? {});
+    } catch (error) {
+      const failure = rpcErrorFrom(error);
+      fail(id, failure.code, failure.message);
+    }
+  };
+
   const onRequest = async (id: JsonRpcId, method: string, params: Record<string, unknown> | undefined) => {
     if (method === "ui/initialize") {
       answeredInitialize = true;
@@ -348,6 +389,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
       }
       default:
         if ((APP_RPC_METHODS as readonly string[]).includes(method)) return onRpc(id, method as AppRpcMethod, params ?? {});
+        if ((PAGE_RPC_METHODS as readonly string[]).includes(method)) return onPageRpc(id, method as PageRpcMethod, params ?? {});
         return fail(id, RPC_METHOD_NOT_FOUND, "Method not found");
     }
   };

@@ -364,6 +364,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
   // Only says whether a line is a stop, so the Team map knows where an @everyone line goes (routes/stop-line.ts).
   { methods: ["POST"], path: /^\/api\/stop-line$/ },
+  // One suggested next line for a conversation the caller reads and may write in (routes/suggested-reply.ts).
+  { methods: ["POST"], path: /^\/api\/suggested-reply$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },

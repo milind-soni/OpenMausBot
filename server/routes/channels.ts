@@ -17,12 +17,12 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
 import { roomThreadSummaries } from "../message-db-thread-summaries.ts";
-import type { RoomThreadSummariesResponse } from "../../shared/room-threads.ts";
+import type { RoomThreadCloser, RoomThreadSummariesResponse } from "../../shared/room-threads.ts";
 import { messageTextRefusal } from "../message-text.ts";
 import { prepareRoomPointed, roomPickBots, type RoomPick } from "../room-pointed.ts";
 import { refusalBody } from "../user-errors.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
-import { promptWithReply, type PersonName } from "../replies.ts";
+import { personOf, promptWithReply, type PersonName } from "../replies.ts";
 import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
 import type { RoomContextTracker } from "../room-context.ts";
 import { parseConversationTurnTimeout } from "../room-turn-timeout.ts";
@@ -157,6 +157,10 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     }
     return result;
   };
+  const personCloser = (auth: RequestAuth, threadId: string): RoomThreadCloser => {
+    const sender = messageSender(auth);
+    return { kind: "person", id: sender?.id ?? "owner", name: sender?.name ?? personOf(deps.userName(threadId), {}) };
+  };
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
     let m: RegExpMatchArray | null = null;
@@ -262,7 +266,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt"]);
+      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt", "closed"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported channel thread setting" });
       const existing = store.groupTaskByThread(group.id, m[2]);
       if (!existing) return json(res, 404, { error: "no such channel task" });
@@ -270,7 +274,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const renaming = body.title !== undefined;
       const limiting = Object.prototype.hasOwnProperty.call(body, "turnTimeoutMinutes");
       const archiving = body.archivedAt !== undefined;
-      if (!pinning && !renaming && !limiting && !archiving) return json(res, 400, { error: "unsupported channel thread setting" });
+      const closing = body.closed !== undefined;
+      if (!pinning && !renaming && !limiting && !archiving && !closing) return json(res, 400, { error: "unsupported channel thread setting" });
+      if (closing && typeof body.closed !== "boolean") return json(res, 400, { error: "closed must be true or false" });
       if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
       if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
       if (archiving && body.archivedAt !== null && !(typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0)) {
@@ -290,6 +296,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         ...(pinning ? { pinned: body.pinned === true } : {}),
         ...(archiving ? { archivedAt: body.archivedAt as number | null } : {}),
         ...(titleChange ? { title: body.title } : {}),
+        // Anyone who may post in the room may close or reopen any of its threads; who did comes from the session, never the body.
+        ...(closing && body.closed !== (existing.closedAt !== undefined) ? { closed: body.closed ? { at: Date.now(), by: personCloser(auth, m[2]) } : null } : {}),
       };
       const task = Object.keys(patch).length ? store.patchGroupTask(group.id, m[2], patch) : existing;
       if (!task) return json(res, 404, { error: "no such channel task" });

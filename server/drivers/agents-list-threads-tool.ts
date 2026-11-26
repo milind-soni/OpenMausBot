@@ -35,6 +35,11 @@ export async function callListThreadsTool(args: Json, context: ToolCallContext):
 
 /** close_thread's reply: what closing did, or that the thread was already closed and by whom, and whether the person's sidebar still shows it. */
 export function closedThreadText(r: Json): string {
+  if (r.room === true) {
+    return r.alreadyClosed === true
+      ? `#${String(r.title)} is already closed, so nothing changed.`
+      : `#${String(r.title)} closes when this reply ends. Any new message there opens it again.`;
+  }
   const thread = `#${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}`;
   if (r.alreadyClosed === true) {
     const by = typeof r.closedBy === "string" && r.closedBy ? ` by @${r.closedBy}` : "";

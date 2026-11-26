@@ -190,10 +190,7 @@
           "thread_id": {
             "type": "string"
           }
-        },
-        "required": [
-          "thread_id"
-        ]
+        }
       }
     },
     {
@@ -464,6 +461,16 @@
           },
           "live": {
             "type": "boolean"
+          },
+          "uses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "data",
+                "state"
+              ]
+            }
           },
           "app_id": {
             "type": "string"

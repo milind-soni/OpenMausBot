@@ -101,6 +101,7 @@ export const SETTINGS_PLACES = [
   {"id":"layout","path":"Settings → Appearance → Layout","words":["show your computers","rail","window frame","title bar","threads","tools layout","pinned","circles","universal pins","pinned panels"],"advanced":true},
   {"id":"skill-burger-switch","path":"Settings → Features → Skill Burger","words":["skill burger","skill burgers","burger","saved runs","workflows"]},
   {"id":"thread-tabs","path":"Settings → Features → Thread tabs","words":["tabs","threads"]},
+  {"id":"suggested-replies","path":"Settings → Features → Suggested replies","words":["suggestions","autocomplete","next reply","tab"]},
   {"id":"apps","path":"the Apps panel (Connect apps, at the bottom of the sidebar)","words":["apps","gmail","slack","calendar","notion","connect app","integrations"]},
   {"id":"bot-settings","path":"a bot's own Settings (click the bot's name at the top of its chat)","words":["a bot's own settings","approvals","safety","routines","memory","bot's notifications"]},
   {"id":"shortcuts","path":"the keyboard shortcut list (the menu under the person's name → Keyboard shortcuts)","words":["keyboard shortcuts","hotkeys","cheat sheet"]},

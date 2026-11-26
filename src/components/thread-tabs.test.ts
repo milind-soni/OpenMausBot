@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "@/state/store";
 import { newChatThreadId } from "@/state/new-chat";
-import { botShowsTabs, neighbourOf, showsTabs, threadTabs, type TabsBot } from "./thread-tabs";
+import { botShowsTabs, neighbourOf, showsTabs, stripTabs, threadTabs, type TabsBot } from "./thread-tabs";
 
 const task = (threadId: string, at: number, extra: Partial<Task> = {}): Task => ({ threadId, title: threadId, createdAt: at, lastThreadOrderAt: at, ...extra });
 
@@ -43,6 +43,21 @@ describe("thread tabs", () => {
     expect(botShowsTabs(one, null)).toBe(false);
     expect(botShowsTabs(one, { session: 1, botId: "kiwi", held: [] })).toBe(true);
     expect(botShowsTabs(one, { session: 1, botId: "other", held: [] })).toBe(false);
+  });
+
+  it("gives the strip a tab for a bot's one thread, with no close", () => {
+    const one = bot([task("only", 1)], { mainThreadId: "elsewhere" });
+    expect(stripTabs(one)).toEqual(threadTabs(one));
+    expect(stripTabs(one)).toEqual([expect.objectContaining({ threadId: "only", closable: false, draft: false })]);
+  });
+
+  it("gives the strip a tab for the open thread before it has a thread row, after the pinned ones", () => {
+    expect(stripTabs(bot([], { threadId: "fresh", busy: true }))).toEqual([
+      { threadId: "fresh", title: "New thread", pinned: false, working: true, draft: false, closable: false, renamable: false },
+    ]);
+    const tabs = stripTabs(bot([task("pin", 1, { pinned: true }), task("a", 2)], { threadId: "fresh" }));
+    expect(tabs.map((tab) => tab.threadId)).toEqual(["pin", "fresh", "a"]);
+    expect(stripTabs(bot([], { threadId: "" }))).toEqual([]);
   });
 
   it("puts the blank New thread tab where its thread will land: after the pinned ones", () => {

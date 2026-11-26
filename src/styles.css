@@ -62,6 +62,9 @@
 .mention-editor[data-composing] textarea {
   color: var(--color-ink);
 }
+.mention-editor[data-ghost] textarea::placeholder {
+  color: transparent;
+}
 .mention-editor textarea::selection {
   color: var(--color-ink);
   background: var(--color-raised-hover);
@@ -73,7 +76,8 @@
   .mention-editor textarea { font-size: 16px; }
 }
 @media (forced-colors: active) {
-  .mention-editor-mirror { display: none; }
+  .mention-editor-mirror, .mention-editor-ghost { display: none; }
+  .mention-editor[data-ghost] textarea::placeholder { color: GrayText; }
   .mention-editor textarea, .mention-editor[data-composing] textarea { color: CanvasText; caret-color: CanvasText; }
 }
 

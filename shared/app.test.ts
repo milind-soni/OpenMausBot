@@ -120,3 +120,19 @@ describe("htmlVisibleText numeric character references", () => {
     expect(htmlVisibleText("&#x1F600;")).toBe("😀");
   });
 });
+
+describe("show_html uses", () => {
+  it("reads a list of data and state, and the shapes models send for one", () => {
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: ["data", "state", "data"] })).toMatchObject({ ok: true, value: { uses: ["data", "state"] } });
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: "data" })).toMatchObject({ ok: true, value: { uses: ["data"] } });
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: '["State"]' })).toMatchObject({ ok: true, value: { uses: ["state"] } });
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: [] }).ok && "uses" in (parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: [] }) as { value: object }).value).toBe(false);
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: ["network"] })).toEqual({ ok: false, error: 'uses: a list of "data" and "state", e.g. ["data", "state"].' });
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: [{ name: "data" }] }).ok).toBe(false);
+  });
+
+  it("keeps a replacement's uses as given, and leaves them out when not given", () => {
+    expect(parseUpdateHtmlInput({ app_id: "m1", html: "<p>x</p>", uses: [] })).toMatchObject({ ok: true, value: { uses: [] } });
+    expect(parseUpdateHtmlInput({ app_id: "m1", html: "<p>x</p>" }).ok && "uses" in (parseUpdateHtmlInput({ app_id: "m1", html: "<p>x</p>" }) as { value: object }).value).toBe(false);
+  });
+});
