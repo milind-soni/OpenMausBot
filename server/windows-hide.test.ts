@@ -2,11 +2,13 @@
 // Windows. Every spawn/exec site in server/ and electron/ must set windowsHide (a no-op elsewhere), spread
 // OWN_GROUP, or be allowlisted here with the reason it may stay as it is.
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "@typescript/typescript6";
 import { describe, expect, it } from "vitest";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/+$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const repoRelative = (root: string, file: string, getRelative = relative): string => getRelative(root, file).replace(/\\/g, "/");
 const APIS = ["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync"];
 
 const isTestFile = (name: string): boolean =>
@@ -35,6 +37,15 @@ const withoutCommentLines = (src: string): string =>
 /** child_process entry points plus the local names bound to them (`promisify(execFile)`, `run = options.run ?? execFileAsync`, `run = execFile`). */
 function trackedNames(src: string): Set<string> {
   const names = new Set(APIS);
+  for (const match of src.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']node:child_process["']/g)) {
+    for (const binding of (match[1] ?? "").split(",")) {
+      const parts = binding.trim().split(/\s+as\s+/);
+      if (APIS.includes(parts[0] ?? "") && parts[1]) names.add(parts[1]);
+    }
+  }
+  for (const match of src.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s*["']node:child_process["']/g)) {
+    for (const api of APIS) names.add(`${match[1]}.${api}`);
+  }
   for (let round = 0; round < 3; round++) {
     const bare = (identifier: string | undefined): boolean =>
       identifier !== undefined && new RegExp(`^(${[...names].join("|")})$`).test(identifier);
@@ -62,8 +73,8 @@ const ALLOWED: Array<{ file: string; match?: string; why: string }> = [
   { file: "server/bot-box/self-check.ts", match: "spawn(wrapped.command", why: "Linux box self-check" },
   { file: "server/browser/desktop/policy.ts", match: "execFileSync(candidate", why: "bwrap sandbox policy probe, Linux" },
   { file: "server/browser/desktop/displays.ts", match: "spawn(xvnc", why: "Xvnc per-display server, Linux desktops only" },
+  { file: "server/browser/desktop/displays.ts", match: "spawnProcess(file, args", why: "Xvnc per-display server, Linux desktops only" },
   { file: "server/caddy.ts", match: 'spawnSync("tar"', why: "ensureCaddy refuses win32 before any download; the tar extraction is POSIX-only" },
-  { file: "server/caddy.ts", match: "spawn(options.binary", why: "startCaddy is reachable only through ensureCaddy, so never on Windows" },
   { file: "server/cloud-clock-keeper.ts", match: "spawnSync(DATE", why: "/bin/date clock step, Linux cloud home" },
   { file: "server/cloud-home-start.ts", match: 'spawnSync("/usr/bin/flock"', why: "Linux cloud home" },
   { file: "server/cloud-home-start.ts", match: "spawnSync(command, args", why: "Linux cloud home" },
@@ -113,6 +124,10 @@ const ALLOWED: Array<{ file: string; match?: string; why: string }> = [
   { file: "server/headless/prompt.ts", match: 'spawn(command, args, { stdio: "ignore", detached: true }', why: "deliberately detached + unref'd browser opener; Windows' opener rundll32 is GUI-subsystem" },
   { file: "server/env-path.ts", match: 'spawn(shell, ["-l", "-i", "-c"', why: "POSIX login-shell PATH probe ($SHELL), deliberately detached: an interactive shell takes the terminal's foreground" },
   { file: "server/vps-ssh.ts", match: 'execFile("ssh"', why: "needs a ControlMaster config, and prepareVpsSsh returns configPath null on win32, so ensureVpsSshMaster returns before this" },
+  { file: "server/mcp-bridge.ts", match: "shell: false, windowsHide, env, stdio", why: "consoleChild selects windowsHide at the bridge caller" },
+  { file: "server/mcp-gate.ts", match: '...(process.platform === "win32" ? { windowsHide: true } : {})', why: "windowsHide is true on win32" },
+  { file: "server/procs.ts", match: '...(process.platform === "win32" ? { windowsHide: true } : { detached: true })', why: "windowsHide is true on win32" },
+  { file: "server/memory-store.ts", match: 'stdio: "ignore", windowsHide: false, detached: true', why: "GUI openers must remain visible on Windows" },
   { file: "electron/elevated-install.mjs", match: "pkexec", why: "Linux package install (pkexec + .deb)" },
   { file: "electron/terminal-launch.mjs", match: "run(executable, args, options", why: "options come from the callers; the win32 caller passes windowsHide: true" },
 
@@ -124,7 +139,7 @@ interface Site { line: number; api: string; text: string }
 
 function callSites(src: string, names: Set<string>): Site[] {
   const sites: Site[] = [];
-  const alt = [...names].sort((a, b) => b.length - a.length).join("|");
+  const alt = [...names].sort((a, b) => b.length - a.length).map((name) => name.replace(/\./g, "\\.")).join("|");
   const collect = (re: RegExp): void => {
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
@@ -144,15 +159,68 @@ function callSites(src: string, names: Set<string>): Site[] {
   return sites;
 }
 
+function hidesConsole(text: string): boolean {
+  const source = ts.createSourceFile("call.ts", `f(${text})`, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const statement = source.statements[0];
+  if (!statement || !ts.isExpressionStatement(statement) || !ts.isCallExpression(statement.expression)) return false;
+  return statement.expression.arguments.slice(1, 3).some((argument) => {
+    if (!ts.isObjectLiteralExpression(argument)) return false;
+    let hidden = false;
+    for (const property of argument.properties) {
+      if (ts.isSpreadAssignment(property)) hidden = ts.isIdentifier(property.expression) && property.expression.text === "OWN_GROUP";
+      else if (ts.isPropertyAssignment(property) && property.name.getText(source).replace(/^["']|["']$/g, "") === "windowsHide") {
+        hidden = property.initializer.kind === ts.SyntaxKind.TrueKeyword;
+      }
+    }
+    return hidden;
+  });
+}
+
 describe("windows console hiding", () => {
+  it.each([
+    ['import { spawn as start } from "node:child_process"; start("cmd.exe");', "start"],
+    ['import * as cp from "node:child_process"; cp.spawn("cmd.exe");', "cp.spawn"],
+    ['import { execFile } from "node:child_process"; const run = promisify(execFile); run("cmd.exe");', "run"],
+  ])("detects an unhidden child process through imported bindings", (src, api) => {
+    expect(callSites(src, trackedNames(src)).map((site) => site.api)).toContain(api);
+  });
+
+  it.each([
+    'spawn("cmd.exe", [], { windowsHide: false })',
+    'spawn("windowsHide")',
+    'spawn("cmd.exe", ["windowsHide: true"])',
+    'spawn("cmd.exe", [], { env: { windowsHide: true } })',
+    'spawn("cmd.exe", [], { windowsHide: true, windowsHide: false })',
+    'spawn("cmd.exe", [], { windowsHide: true, ...other })',
+    'spawn("cmd.exe", [], { ...OWN_GROUP, windowsHide: false })',
+    'spawn("cmd.exe", [], { note: "windowsHide: true" })',
+    'spawn({ windowsHide: true }, [])',
+    'spawn("cmd.exe", [], { /* windowsHide: true */ })',
+  ])("rejects an unrelated or disabled hiding option", (src) => {
+    const site = callSites(src, trackedNames(src))[0];
+    expect(site && hidesConsole(site.text)).toBe(false);
+  });
+
+  it.each([
+    'spawn("cmd.exe", [], { windowsHide: true })',
+    'spawn("cmd.exe", [], { ...OWN_GROUP })',
+  ])("accepts an enabled hiding option", (src) => {
+    const site = callSites(src, trackedNames(src))[0];
+    expect(site && hidesConsole(site.text)).toBe(true);
+  });
+
+  it("normalizes Windows paths for the allowlist", () => {
+    expect(repoRelative("C:\\repo\\", "C:\\repo\\server\\testing\\fixture.ts", win32.relative)).toBe("server/testing/fixture.ts");
+  });
+
   it("every child_process spawn in server/ and electron/ hides its console on Windows or is allowlisted", () => {
     const unhidden: string[] = [];
     for (const file of childProcessFiles()) {
-      const rel = file.slice(ROOT.length + 1);
+      const rel = repoRelative(ROOT, file);
       const src = withoutCommentLines(readFileSync(file, "utf8"));
       const lines = src.split("\n");
       for (const site of callSites(src, trackedNames(src))) {
-        if (/windowsHide|OWN_GROUP/.test(site.text)) continue;
+        if (hidesConsole(site.text)) continue;
         const line = (lines[site.line - 1] ?? "").trim();
         const why = ALLOWED.find((entry) =>
           (entry.file.endsWith("/") ? rel.startsWith(entry.file) : rel === entry.file)
