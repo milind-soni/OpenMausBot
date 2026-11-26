@@ -8,7 +8,7 @@ import type { BotRecord, Message } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { resolveYourComputerAsk } from "../your-computer-consent.ts";
 
-export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover"> {
+export interface QuotaSwitchHostDeps extends Pick<QuotaSwitchDeps, "store" | "coordinator" | "turnStops" | "takeover" | "signedOutNotice"> {
   registry: Pick<ProviderRegistry, "instances" | "access">;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   providerConfigs(): InstanceConfigMap;
@@ -41,6 +41,7 @@ export function createQuotaSwitchHost(deps: QuotaSwitchHostDeps) {
     busy: threadBusy,
     request: threadId => directRequestOwners.get(threadId),
     resend: (botId, threadId, message, replyTo, spoken) => startOrQueueDirectMessage(botId, threadId, message.text ?? "", replyTo, undefined, message.sender, undefined, spoken.via, spoken.callId, message.dataContext),
+    signedOutNotice: deps.signedOutNotice,
   });
 
   /** Settles a card the harness raised itself (a use-your-computer ask or a quota-switch offer); undefined for any other card. */

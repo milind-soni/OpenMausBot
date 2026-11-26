@@ -70,7 +70,8 @@ it("waits for a file with no AI, posts once in the asked chat, notifies, and con
     await expect.poll(async () => (await transcript()).filter((m) => m.wait?.status === "fired").map((m) => ({ text: m.text, textCode: m.textCode, textParams: m.textParams })), { timeout: 30_000 })
       .toEqual([{ text: `the report: done. ${report} is there now.`, textCode: "chat.notice.waitDone.fileExists", textParams: { label: "the report", path: report } }]);
     expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: cards[0].card.requestId }, 409)).toEqual({ error: "This wait has already ended.", errorKey: "serverError.wait.alreadyEnded" });
-    await expect.poll(async () => (await transcript()).some((m) => m.role === "user" && m.text?.includes("[Wait finished: the report] Say the report is ready.")), { timeout: 40_000 }).toBe(true);
+    await expect.poll(async () => (await transcript()).find((m) => m.role === "user" && m.text?.includes("[Wait finished: the report] Say the report is ready.")), { timeout: 40_000 })
+      .toMatchObject({ automated: true, waitId: cards[0].card.waitRequest.waitId });
     expect((await api("GET", "/api/notifications")).notifications.filter((n: any) => n.kind === "wait")).toMatchObject([{ title: "Scout's wait is over" }]);
     await new Promise((resolve) => setTimeout(resolve, 7_000));
     expect((await transcript()).filter((m) => m.wait).length).toBe(1);

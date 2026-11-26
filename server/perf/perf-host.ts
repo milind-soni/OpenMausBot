@@ -8,7 +8,8 @@ import type { StoreChange } from "../store.ts";
 import { createLoopStalls, requestArrivedBefore, type LoopStalls } from "./loop-stalls.ts";
 import { createBotFootprints, type BotCapReport, type BotFootprintReport, type BotFootprints, type FootprintOwner } from "./bot-footprint.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
-import { createDiskUsage, type DiskUsage, type StorageReport } from "./disk-usage.ts";
+import { createDiskUsage, type DiskUsage, type StorageReport, type VolumeBytes } from "./disk-usage.ts";
+import { createStorageMeasure, readVolumeNow, type MeasureAnswer } from "./storage-measure.ts";
 import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
 import type { ProcessRow } from "./process-buckets.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
@@ -16,6 +17,7 @@ import { createSetupClock, type SetupClock, type SetupMs } from "./setup-steps.t
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
 import { createLaunchTimings, LAUNCH_FILE, type LaunchTimings } from "./launch-timings.ts";
+import { afterLaunchSettles, launchSettled } from "./launch-probe.ts";
 import { startStallWatch, stallReportLines, type StallWatch } from "./stall-watch.ts";
 import { turnStartsSection } from "./turn-starts.ts";
 
@@ -129,7 +131,8 @@ export function createPerfHost(deps: PerfHostDeps) {
     resumed: (ms) => say("sleep", `the computer slept or the server was paused: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late, not counted as a stall`),
     seen: (rows, buckets) => { processes.sample(rows, buckets); guarded("bots", () => footprints.sample(rows), null); },
   });
-  if (deps.timer !== false && !windows) sampler.start();
+  let stopped = false; // the first sample's `ps` waits for the desktop window (launch-probe.ts); elsewhere it starts at once
+  if (deps.timer !== false && !windows) afterLaunchSettles(() => { if (!stopped) sampler.start(); });
   const stalls = deps.stalls ?? createLoopStalls({ resumed: (ms) => say("sleep", `the computer slept or the server was paused: the event loop waited through a ${duration(ms)} gap, not counted as a stall`) });
   if (deps.timer !== false) stalls.start();
   const watch: StallWatch | null = deps.timer !== false && deps.watchStalls === true
@@ -141,6 +144,7 @@ export function createPerfHost(deps: PerfHostDeps) {
     busy: () => timings.running(), knownBot: deps.storage.knownBot, file: join(deps.dataDir, STORAGE_FILE),
     progressFile: join(deps.dataDir, STORAGE_PROGRESS_FILE), now }) : null);
   if (deps.timer !== false) disk?.start();
+  const measure = disk ? createStorageMeasure({ passNow: disk.passNow, tick: disk.tick, running: disk.running, lastPassAt: () => disk.report().at, now }) : null;
   if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 
   const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report(),
@@ -159,12 +163,21 @@ export function createPerfHost(deps: PerfHostDeps) {
     setupClock: (): SetupClock => createSetupClock(),
     noteSetup: (threadId: string, ms: SetupMs) => guarded("setup", () => timings.noteSetup(threadId, ms), undefined),
     /** A part of the app's launch from its main process or its page; null where no app starts this server. */
-    noteLaunch: (part: unknown) => (launches ? guarded("launch", () => launches.note(part), { ok: false, complete: false }) : null),
+    noteLaunch: (part: unknown) => {
+      const noted = launches ? guarded("launch", () => launches.note(part), { ok: false, complete: false }) : null;
+      if (noted?.ok) launchSettled();
+      return noted;
+    },
     /** Logs a usage-limit hold that started or ended since the last check; the sampler runs it after each sample. */
     checkHolds: watchHolds,
     health: (): PerfHealth | null => guarded("health", () => perfHealth(sources()), null),
     /** What fills the volume, from the last full pass; null where it is not measured or the report failed. */
     storage: (): StorageReport | null => guarded("storage", () => disk?.report() ?? null, null),
+    /** The measured volume as it is now, for Settings → Storage; null where nothing is measured. */
+    storageNow: (): Promise<VolumeBytes | null> => (deps.storage ? readVolumeNow(deps.storage.home) : Promise.resolve(null)),
+    /** Seconds until the owner may ask for a pass; null where nothing is measured. */
+    storageMeasureInS: (): number | null => guarded("storage", () => measure?.inS() ?? null, null),
+    measureStorage: (): MeasureAnswer | null => guarded("storage", () => measure?.measure() ?? null, null),
     /** For a @devs report: these conversations' and bots' latest turns, then everything else. */
     lines(filter: { threadIds: readonly string[]; botIds: readonly string[] }): string[] {
       return stallsFirst(guarded("lines", () => perfLines(sources(), timings.recent({ ...filter, limit: RECENT_IN_REPORT }), "Latest turns in this conversation or of its bots, newest last:"), PERF_UNAVAILABLE));
@@ -175,7 +188,7 @@ export function createPerfHost(deps: PerfHostDeps) {
         ...guarded("turn-starts", () => turnStartsSection(), [])].join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
-    stop() { sampler.stop(); stalls.stop(); watch?.stop(); void disk?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },
+    stop() { stopped = true; sampler.stop(); stalls.stop(); watch?.stop(); void disk?.stop(); guarded("save", () => timings.flush(), undefined); if (launches) guarded("launch", () => launches.flush(), undefined); },
   };
 }
 export type PerfHost = ReturnType<typeof createPerfHost>;

@@ -373,6 +373,124 @@ it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and g
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
 }), 45_000);
 
+it("closes a thread \"new\" opened once its result is back, and opens it again for a follow-up sent to it", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "follow-up.gate");
+  const opening = [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FRESH_BRIEF verify the CSV export yourself", thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ];
+  f.plan[f.chief.id] = { turns: opening };
+  f.plan[f.lead.id] = { turns: [{ reply: "FRESH_RESULT verified" }, { gateFile: gate, reply: "FRESH_RESULT checked again" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  const leadNodes = () => f.nodes().filter((node: any) => node.botId === f.lead.id);
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const [child] = leadNodes();
+  const closed = await leadTask(child.threadId);
+  expect(closed.openedBy).not.toHaveProperty("kind");
+  expect(closed.openedBy.oneShot).toBe(true);
+  expect(closed.closedBy).toMatchObject({ botId: f.chief.id, name: "Clive" });
+  expect(closed.archivedAt).toBe(closed.closedBy.at);
+  expect((await f.messages(child.threadId)).map((message: any) => message.text).filter(Boolean).join("\n")).toContain("FRESH_RESULT verified");
+  expect(await leadTask(f.lead.activeTaskId)).not.toHaveProperty("closedBy");
+
+  f.plan[f.chief.id] = { turns: [...opening,
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "FRESH_FOLLOW_UP check it once more", thread: child.threadId } }], reply: "Sent the follow-up" },
+    { reply: "The follow-up reported back" },
+  ] };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Ask them to check once more in that thread.");
+  await expect.poll(() => leadNodes().at(-1)?.status, { timeout: 15_000 }).toBe("running");
+  expect(leadNodes().map((node: any) => node.threadId)).toEqual([child.threadId, child.threadId]);
+  expect(await leadTask(child.threadId)).not.toHaveProperty("closedBy");
+  expect(await leadTask(child.threadId)).not.toHaveProperty("archivedAt");
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await leadTask(child.threadId)).closedBy, { timeout: 15_000 }).toMatchObject({ botId: f.chief.id });
+  expect((await leadTask(child.threadId)).archivedAt).toBeGreaterThan(closed.archivedAt);
+}), 90_000);
+
+it("reruns an identical brief with rework=true in the archived thread \"new\" opened, which leaves the archive while it runs", () => fixture(async f => {
+  const brief = "REWORK_BRIEF run the export check";
+  const gate = join(f.session.info.dataDir, "rework.gate");
+  const opening = [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief, thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ];
+  f.plan[f.chief.id] = { turns: opening };
+  f.plan[f.lead.id] = { turns: [{ reply: "REWORK_RESULT first" }, { gateFile: gate, reply: "REWORK_RESULT second" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await expect.poll(async () => (await leadTask(child.threadId)).archivedAt, { timeout: 15_000 }).toBeTypeOf("number");
+
+  f.plan[f.chief.id] = { turns: [...opening,
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief, thread: child.threadId, rework: true } }], reply: "Sent it again" },
+    { reply: "The rework reported back" },
+  ] };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Have them run it once more in that thread.");
+  await expect.poll(() => f.nodes().filter((node: any) => node.botId === f.lead.id).at(-1)?.status, { timeout: 15_000 }).toBe("running");
+  const [sent] = f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).evidence.filter((entry: any) => entry.step).map((entry: any) => entry.response.result);
+  expect(sent.isError).toBeFalsy();
+  expect(JSON.parse(sent.content[0].text).receipts[0]).toMatchObject({ outcome: "queued", threadId: child.threadId });
+  const reopened = await leadTask(child.threadId);
+  expect(reopened).not.toHaveProperty("archivedAt");
+  expect(reopened).not.toHaveProperty("closedBy");
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await leadTask(child.threadId)).archivedAt, { timeout: 15_000 }).toBeTypeOf("number");
+  expect((await f.messages(child.threadId)).map((message: any) => message.text).filter(Boolean).join("\n")).toContain("REWORK_RESULT second");
+}), 90_000);
+
+it("lets the opener list and close a thread \"new\" opened after it was archived", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "LISTED_BRIEF verify the CSV export yourself", thread: "new" } }],
+    reply: "Opened a fresh thread", resumeReply: "The fresh thread reported back" };
+  f.plan[f.lead.id] = { reply: "LISTED_RESULT verified" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await expect.poll(async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks
+    .find((task: any) => task.threadId === child.threadId).archivedAt, { timeout: 15_000 }).toBeTypeOf("number");
+  f.plan[f.chief.id] = { steps: [
+    { tool: "list_threads", arguments: {} },
+    { tool: "close_thread", arguments: { thread_id: child.threadId } },
+  ], reply: "Checked the finished thread" };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Find the finished engineering thread and close it.");
+  expect((await f.wait()).status).toBe("settled");
+  const [listed, closed] = f.evidence().at(-1).evidence.filter((entry: any) => entry.step).map((entry: any) => entry.response.result);
+  const { title } = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === child.threadId);
+  expect(listed.content[0].text).toContain(`- #${title} (on @Engineering lead, closed, archived: no longer in the person's sidebar) [thread id: ${child.threadId}]`);
+  expect(closed.isError).toBeFalsy();
+  expect(closed.content[0].text).toBe(`#${title} on @Engineering lead was already closed by @Clive, so nothing changed. It is archived: it is no longer in the person's sidebar.`);
+}), 60_000);
+
+it("keeps a thread \"new\" opened open when a person wrote in it before its result came back", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "person-wrote.gate");
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "JOINED_BRIEF verify the CSV export yourself", thread: "new" } }], reply: "Opened a fresh thread" },
+    { reply: "The fresh thread reported back" },
+  ] };
+  f.plan[f.lead.id] = { turns: [{ gateFile: gate, reply: "JOINED_RESULT verified" }, { reply: "JOINED_RESULT noted" }] };
+  const leadTask = async (threadId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === threadId);
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  await f.api(`/api/bots/${f.lead.id}/messages`, { text: "Also check the header row while you are there.", threadId: child.threadId });
+  await expect.poll(async () => (await f.messages(child.threadId)).some((message: any) => message.role === "user" && !message.peerAsk && message.text === "Also check the header row while you are there."), { timeout: 15_000 }).toBe(true);
+  writeFileSync(gate, "go");
+  expect((await f.wait()).status).toBe("settled");
+  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.output === "JOINED_RESULT verified"), { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await leadTask(child.threadId)).busy, { timeout: 15_000 }).toBeFalsy();
+  stream.close();
+  expect(stream.frames.some(frame => frame.kind === "bot" && frame.bot?.id === f.lead.id
+    && frame.bot.tasks?.find((task: any) => task.threadId === child.threadId)?.closedBy)).toBe(false);
+  expect(await leadTask(child.threadId)).not.toHaveProperty("closedBy");
+}), 90_000);
+
 it("names a fresh teammate thread with coordinate_bots title", () => fixture(async f => {
   f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "TITLED_BRIEF verify the CSV export yourself", thread: "new", title: "CSV export: verify" } }],
     reply: "Opened a titled thread", resumeReply: "The titled thread reported back" };
@@ -549,6 +667,7 @@ it("continues one recipient thread for every follow-up from the same conversatio
   expect(first.title).toBe("@Clive · work");
   expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work", threadId: f.chief.activeTaskId });
   expect(first.closedBy).toMatchObject({ botId: f.chief.id });
+  expect(first).not.toHaveProperty("archivedAt");
   await send("Now ask them to add the header row.");
   await send("Now ask them to document it.");
   const tasks = await leadTasks();
@@ -631,6 +750,36 @@ it("runs two assignments to one teammate from one turn in its thread, one after 
   const transcript = (await f.messages(work.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
   expect(transcript).toContain("Implement the CSV export");
   expect(transcript).toContain("Benchmark the exporter");
+}), 60_000);
+
+it("starts a later send in a parallel work thread while the teammate's standing thread is busy, instead of queueing it", () => fixture(async f => {
+  const gate = join(f.session.info.dataDir, "first-assignment.gate");
+  f.plan[f.lead.id] = { gateFile: gate, reply: "Done" };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Implement the CSV export", reply: "none" } }], reply: "Assigned the build" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "Export the invoices", reply: "none" } }], reply: "Assigned the invoices" },
+  ] };
+  f.save();
+  const leadNodes = () => f.nodes().filter((node: any) => node.botId === f.lead.id);
+  try {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Ask Engineering to build the CSV export.");
+    expect((await f.wait()).status).toBe("settled");
+    await expect.poll(() => leadNodes()[0]?.status, { timeout: 15_000 }).toBe("running");
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Now ask them to export the invoices.");
+    expect((await f.wait()).status).toBe("settled");
+    await expect.poll(() => leadNodes()[1]?.status, { timeout: 15_000 }).toBe("running");
+    const [first, second] = leadNodes();
+    expect(first.status, "the first assignment still runs").toBe("running");
+    expect(second.threadId).not.toBe(first.threadId);
+    writeFileSync(gate, "go");
+    await expect.poll(() => leadNodes().map((node: any) => node.status), { timeout: 15_000 }).toEqual(["completed", "completed"]);
+    const work = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.filter((task: any) => task.openedBy?.kind === "work");
+    expect(work.map((task: any) => task.threadId).sort()).toEqual([first.threadId, second.threadId].sort());
+    for (const task of work) expect(task).toMatchObject({ title: "@Clive · work", openedBy: { botId: f.chief.id, threadId: f.chief.activeTaskId } });
+    expect(sendReceipts(f, f.chief.id).map((receipt: any) => receipt.threadId)).toEqual([first.threadId, second.threadId]);
+  } finally {
+    writeFileSync(gate, "go");
+  }
 }), 60_000);
 
 it("gives another conversation of the same Chief its own thread with the teammate", () => fixture(async f => {

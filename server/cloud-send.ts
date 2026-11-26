@@ -18,6 +18,9 @@ export interface CloudSendItem {
   id?: string;
   bot?: string;
   parts: Record<string, string>;
+  /** Of a bot coming back here (server/bot-moves.ts "returning"), or one of its own: a move sends what the other side
+   * has of it, which is newer than what this line kept. */
+  returning?: true;
 }
 
 export interface CloudSendSummary { v: 1; appVersion: string; items: CloudSendItem[] }
@@ -98,26 +101,30 @@ export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: 
 /** `move`: a move's comparison, with what only a move carries. `bot`: a move of that one bot into a team: the bot, its
  * skills, its routines and the library skills it uses, never anything of the person's own. `bots`: a move of only these of
  * this computer's bots, which a calendar call stays out of: it runs where it was set up. `leaving`: this server is the one
- * bots move away from, so one that lives elsewhere now is not carried again. */
+ * bots move away from, so one that lives elsewhere now is not carried again. A bot coming back here is listed, marked
+ * `returning`, with its skills and automations. */
 export function cloudSendSummary(sources: CloudSendSources, { move = false, bot: only, bots: chosen, leaving = false }: { move?: boolean; bot?: string; bots?: ReadonlySet<string>; leaving?: boolean } = {}): CloudSendSummary {
   const items: CloudSendItem[] = [];
-  const carried = new Set<string>();
+  const carried = new Set<string>(), returning = new Set<string>();
+  const marked = (list: CloudSendItem[]) => list.map((item) => (item.bot && returning.has(item.bot) ? { ...item, returning: true as const } : item));
   for (const bot of sources.bots()) {
     if ((only !== undefined && bot.id !== only) || (chosen && !chosen.has(bot.id)) || (leaving && bot.movedTo?.state === "moved")) continue;
+    const back = (bot.movedTo as { back?: true } | undefined)?.back === true;
     const skills = sources.skills(bot);
-    if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, move ? sources.automated : undefined)) continue;
+    if (only === undefined && !back && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, move ? sources.automated : undefined)) continue;
     carried.add(bot.id);
+    if (back) returning.add(bot.id);
     const parts: Record<string, string> = { ...botParts(bot, sources.picture), ...(move && sources.move ? sources.move.botParts(bot) : {}) };
     if (only !== undefined) for (const part of TEAM_HELD_PARTS) delete parts[part];
-    items.push({ key: itemKey.bot(bot.id), kind: "bot", label: bot.name, id: bot.id, parts });
+    items.push({ key: itemKey.bot(bot.id), kind: "bot", label: bot.name, id: bot.id, parts, ...(back ? { returning: true as const } : {}) });
     for (const skill of skills) {
       items.push({ key: itemKey.skill(bot.id, skill.name), kind: "skill", label: skill.name, id: skill.name, bot: bot.id,
-        parts: { text: skill.sha256.slice(0, 24) || EMPTY, on: skill.enabled ? "on" : "off" } });
+        parts: { text: skill.sha256.slice(0, 24) || EMPTY, on: skill.enabled ? "on" : "off" }, ...(back ? { returning: true as const } : {}) });
     }
   }
   if (only !== undefined) {
     const bot = sources.bots().find((candidate) => candidate.id === only);
-    if (move && sources.move && bot) items.push(...sources.move.items(carried, bot));
+    if (move && sources.move && bot) items.push(...marked(sources.move.items(carried, bot)));
     return { v: 1, appVersion: sources.appVersion, items };
   }
   for (const login of sources.logins()) {
@@ -138,6 +145,6 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   items.push({ key: itemKey.setting("profile"), kind: "setting", label: "profile",
     parts: { name: partHash(profile.name), email: partHash(profile.email), about: partHash(profile.aboutMe) } });
   items.push({ key: itemKey.setting("language"), kind: "setting", label: "language", parts: { value: partHash(language) } });
-  if (move && sources.move) items.push(...sources.move.items(carried).filter((item) => !chosen || item.kind !== "call"));
+  if (move && sources.move) items.push(...marked(sources.move.items(carried).filter((item) => !chosen || item.kind !== "call")));
   return { v: 1, appVersion: sources.appVersion, items };
 }

@@ -75,7 +75,9 @@ export function acpAgentTakesHttpMcp(init: unknown): boolean {
 }
 
 /** The servers a session/new or session/load sends: under `advertised`, OpenMausBot's own as this server's endpoints when
- * the session's agent takes them. Deciding here, after `initialize`, lets an agent's first session use the URL form too. */
-export function acpSessionMcpServers(servers: AcpMcpServer[], transport: AcpOwnMcpTransport, init: unknown): AcpMcpServer[] {
-  return transport === "advertised" && acpAgentTakesHttpMcp(init) ? acpOwnServersOverHttp(servers) : servers;
+ * the session's agent takes them, by its `initialize` answer or, for an agent that takes them without saying so, by
+ * `takesUnadvertised`. Deciding here, after `initialize`, lets an agent's first session use the URL form too. */
+export function acpSessionMcpServers(servers: AcpMcpServer[], transport: AcpOwnMcpTransport, init: unknown,
+  takesUnadvertised?: (init: unknown) => boolean): AcpMcpServer[] {
+  return transport === "advertised" && (acpAgentTakesHttpMcp(init) || takesUnadvertised?.(init) === true) ? acpOwnServersOverHttp(servers) : servers;
 }

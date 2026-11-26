@@ -2,10 +2,11 @@ import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { ComposerForkError, useComposerFork } from "./ComposerFork";
+import { isNewChatThread } from "@/state/new-chat";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Square } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
-import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
+import { visibleMessages, currentTaskBot, type Action, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
@@ -102,6 +103,7 @@ import {
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
 import { randomUuid } from "@/lib/random-uuid";
+import { useComposerThreadCommand } from "./use-composer-thread-command";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -119,7 +121,7 @@ export function Composer({
   onClearReply,
   onConsumeReply,
   onRestoreReply,
-  locked: setupLocked = false,
+  locked: setupLocked = false, onSendGroup,
 }: {
   bot?: Bot;
   group?: Group;
@@ -130,6 +132,8 @@ export function Composer({
   onConsumeReply?: () => void;
   onRestoreReply?: (message: Message, threadId: string) => void;
   locked?: boolean;
+  /** Takes a room's send instead of the store: the room feed starts a new thread with it. */
+  onSendGroup?: (action: Extract<Action, { type: "sendGroup" }>) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
@@ -176,7 +180,7 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
-  const forkOwnerId = singleRow || group?.dm || !threadId ? undefined : group?.id ?? bot?.id;
+  const forkOwnerId = singleRow || group?.dm || !threadId || isNewChatThread(threadId) ? undefined : group?.id ?? bot?.id;
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -301,6 +305,12 @@ export function Composer({
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
+  // A room's threads are managed from the room, and a blank New thread has no conversation to act on yet.
+  const threadCommandAvailable = !group && Boolean(composerTask);
+  const { command: threadCommand, run: runThreadCommand, dialog: threadCommandDialog } = useComposerThreadCommand({
+    text: threadCommandAvailable ? text : "", botId: threadCommandAvailable ? bot?.id : undefined, threadId, mainThreadId: profile?.mainThreadId, threads: profile?.tasks,
+    title: composerTask?.title, busy, dispatch, returnFocusRef: inputRef, onCleared: () => { editText(""); setAttachments([]); picks.clear(); setCaret(0); setDismissedSlashAt(null); onConsumeReply?.(); setChannelMode("chat"); },
+  });
   const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
@@ -334,9 +344,11 @@ export function Composer({
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
+    if (builtIns && !group && bot && composerTask) available.push({ kind: "command", id: "archive", label: "/archive", description: t("composer.command.archiveDesc") },
+      { kind: "command", id: "delete", label: "/delete", description: t("composer.command.deleteDesc") });
     available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
-  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
+  }, [slash, dismissedSlashAt, group, bot, composerTask, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
@@ -526,9 +538,10 @@ export function Composer({
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
   const callShown = singleRow || !hasContent || busy || Boolean(!group && bot?.waitingForTeammates) || calling;
   const slot = slotColors(bot?.color, Boolean(group));
-  // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
-  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
-  const steersNow = group ? canSteer : followUpFor(false) === "steer";
+  // A bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. A room joins in when its speaking engine can steer,
+  // without the send menu: a room's turn has no restart.
+  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && (group ? roomSteers : Boolean(bot)), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
+  const steersNow = followUpFor(false) === "steer";
   const sendNames = fork.command ? { label: t("composer.command.forkDesc"), title: t("composer.command.forkDesc") }
     : sendLabels({ simple: !advanced, busy, canSteer: steersNow, name: busyName, sendLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
@@ -556,13 +569,14 @@ export function Composer({
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
+      (onSendGroup ?? dispatch)({ type: "sendGroup", groupId: group.id, mode: failedMode, ...(failed.followUp ? { followUp: failed.followUp } : {}), ...retry });
     } else if (bot) {
       dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
     }
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
+    if (threadCommand) { setDismissedSlashAt(slash?.start ?? 0); runThreadCommand(); return; }
     if (fork.command) {
       setDismissedSlashAt(slash?.start ?? 0);
       fork.submit();
@@ -594,7 +608,7 @@ export function Composer({
     };
     if (group) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
-      dispatch({
+      (onSendGroup ?? dispatch)({
         type: "sendGroup",
         groupId: group.id,
         text: body,
@@ -602,7 +616,7 @@ export function Composer({
         replyToId: replyTo?.id,
         threadId,
         mode: effectiveChannelMode, mentions: sentDraft.mentions,
-        ...(points ? { pointed: points.pointed } : {}),
+        ...(points ? { pointed: points.pointed } : {}), ...(followUp ? { followUp } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       roomMessageSent(effectiveChannelMode, busy);
@@ -829,7 +843,9 @@ export function Composer({
             // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
             if (imeComposing(e.nativeEvent)) return;
             const submitsFork = fork.command && commandCandidates[highlight]?.id === "fork" && sendsMessage(e.nativeEvent, sendKey);
-            if (commandPickerOpen && !submitsFork) {
+            // A complete /archive or /delete is its own action: Enter runs it instead of only completing the word.
+            const submitsThreadCommand = Boolean(threadCommand) && commandCandidates[highlight]?.id === threadCommand && sendsMessage(e.nativeEvent, sendKey);
+            if (commandPickerOpen && !submitsFork && !submitsThreadCommand) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -909,7 +925,7 @@ export function Composer({
             simple: !advanced, locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
             replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
-            setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
+            setupHint: group ? null : setupRequestPlaceholder(bot, threadId), startsThread: Boolean(onSendGroup),
           })}
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(
@@ -964,7 +980,7 @@ export function Composer({
         {hasContent && !locked && (
           <ComposerSendButton compact={simpleDock} waits={!fork.command && busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
             disabled={attachmentPending} onSend={(alternate) => send(followUpFor(alternate))} onChoose={send}
-            menu={!fork.command && followUpFor(false) ? { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) } : undefined} />
+            menu={!fork.command && !group && followUpFor(false) ? { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) } : undefined} />
           )}
           </div>
         </div>
@@ -975,6 +991,7 @@ export function Composer({
       <div className="pointer-events-auto">
       {approvalDialogs}
       </div>
+      {threadCommandDialog}
     </div>
   );
 }

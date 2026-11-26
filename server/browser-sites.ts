@@ -14,6 +14,12 @@ export interface SignedInSite {
   site: string;
   cookies: number;
   storage: number;
+  /**
+   * The site kept a cookie only a page of its own could set, or kept storage: one the bot opened
+   * itself, where a sign-in can live. False when every cookie is SameSite=None, the kind ads,
+   * trackers and embeds set from other sites' pages.
+   */
+  direct: boolean;
 }
 
 export interface SignedInSites {
@@ -44,7 +50,7 @@ export interface BrowserSitesDeps {
   stop?: (target: BrowserSitesTarget) => Promise<boolean>;
 }
 
-interface Cookie { name: string; domain: string; path: string; partitionKey?: unknown }
+interface Cookie { name: string; domain: string; path: string; partitionKey?: unknown; sameSite?: unknown }
 interface SavedOrigin { origin: string; localStorage?: unknown; sessionStorage?: unknown }
 interface SavedState { cookies: unknown[]; origins: unknown[] }
 
@@ -84,6 +90,12 @@ function hostOfCookie(cookie: Cookie): string {
   return cookie.domain.replace(/^\./u, "").toLowerCase();
 }
 
+// Chrome refuses a SameSite=Lax or Strict cookie from a cross-site subresource, and treats a cookie
+// without the attribute as Lax: only SameSite=None can come from another site's page.
+function firstParty(cookie: Cookie): boolean {
+  return typeof cookie.sameSite !== "string" || cookie.sameSite.toLowerCase() !== "none";
+}
+
 function hostOfOrigin(origin: string): string | null {
   try { return new URL(origin).hostname.toLowerCase().replace(/^\[|\]$/gu, "") || null; }
   catch { return null; }
@@ -109,18 +121,26 @@ function inSite(host: string, site: string): boolean {
 }
 
 export function signedInSites(cookies: readonly unknown[], origins: readonly unknown[]): SignedInSite[] {
-  const cookieHosts = cookies.filter(isCookie).map(hostOfCookie);
+  const saved = cookies.filter(isCookie).filter((cookie) => hostOfCookie(cookie));
   const storageHosts = origins.filter(isOrigin).filter(hasStorage).flatMap((origin) => hostOfOrigin(origin.origin) ?? []);
-  const hosts = new Set([...cookieHosts, ...storageHosts].filter(Boolean));
+  const hosts = new Set([...saved.map(hostOfCookie), ...storageHosts]);
   const sites = new Map<string, SignedInSite>();
   const entry = (host: string) => {
     const site = siteOf(host, hosts);
     let found = sites.get(site);
-    if (!found) sites.set(site, found = { site, cookies: 0, storage: 0 });
+    if (!found) sites.set(site, found = { site, cookies: 0, storage: 0, direct: false });
     return found;
   };
-  for (const host of cookieHosts) if (host) entry(host).cookies += 1;
-  for (const host of storageHosts) entry(host).storage += 1;
+  for (const cookie of saved) {
+    const found = entry(hostOfCookie(cookie));
+    found.cookies += 1;
+    if (firstParty(cookie)) found.direct = true;
+  }
+  for (const host of storageHosts) {
+    const found = entry(host);
+    found.storage += 1;
+    found.direct = true;
+  }
   return [...sites.values()].sort((a, b) => a.site.localeCompare(b.site));
 }
 

@@ -174,8 +174,24 @@ function folderPicture(files: ShareFolderFiles, value: unknown, crop: unknown) {
   return { mime: PICTURE_TYPES[match[2] as keyof typeof PICTURE_TYPES], data: btoa(binary), crop: crop === "rounded" || crop === "square" ? crop : "circle" };
 }
 
-function packageFromFolder(metadata: Record<string, unknown>, files: ShareFolderFiles): unknown {
-  const { botmrr: _version, skills: skillNames, skillFiles, ...definition } = metadata;
+const FOLDER_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** What a folder may leave out: the folder's name is its id, a first release is 1.0.0, and a department is named
+ * after the template. */
+function withFolderDefaults(definition: Record<string, unknown>, slug: string | undefined): Record<string, unknown> {
+  const name = typeof definition.name === "string" ? definition.name.trim() : "";
+  const team = definition.team && typeof definition.team === "object" && !Array.isArray(definition.team) ? definition.team as Record<string, unknown> : null;
+  return {
+    ...definition,
+    ...(definition.id === undefined && slug && FOLDER_SLUG.test(slug) ? { id: slug } : {}),
+    ...(definition.release === undefined ? { release: "1.0.0" } : {}),
+    ...(team && team.name === undefined && name ? { team: { ...team, name: name.slice(0, 60).trim() } } : {}),
+  };
+}
+
+function packageFromFolder(metadata: Record<string, unknown>, files: ShareFolderFiles, slug: string | undefined): unknown {
+  const { botmrr: _version, skills: skillNames, skillFiles, ...given } = metadata;
+  const definition = withFolderDefaults(given, slug);
   const listedFiles = (skillFiles && typeof skillFiles === "object" && !Array.isArray(skillFiles) ? skillFiles : {}) as Record<string, unknown>;
   const agents = Array.isArray(definition.agents) ? definition.agents : [];
   const named = new Set<unknown>(Array.isArray(skillNames) ? skillNames : []);
@@ -196,8 +212,9 @@ function packageFromFolder(metadata: Record<string, unknown>, files: ShareFolder
   return { format: PACKAGE_FORMAT, version: packageVersionFor(pkg), package: pkg };
 }
 
-/** Reads a template folder through the package gate (trust "file"). Throws PackageFormatError with a sentence. */
-export function readShareFolder(input: ShareFolderFiles): ShareFolder {
+/** Reads a template folder through the package gate (trust "file"). `slug` is the folder's name, when it has one.
+ * Throws PackageFormatError with a sentence. */
+export function readShareFolder(input: ShareFolderFiles, slug?: string): ShareFolder {
   const files = normalizeShareFolder(input);
   const bot = textOf(files[MANIFEST_NAMES.bot]), team = textOf(files[MANIFEST_NAMES.department]);
   if (bot !== undefined && team !== undefined) throw refuse("A template folder holds bot.md or team.md, not both.");
@@ -207,7 +224,7 @@ export function readShareFolder(input: ShareFolderFiles): ShareFolder {
     const { metadata } = frontmatterOf(manifest);
     if (metadata.botmrr === 1) return { kind: "package", scope, document: parsePackageDocument(manifest, { trust: "file" }) };
     if (metadata.botmrr !== BOTMRR_FOLDER_VERSION) throw new PackageFormatError("unsupported_version", "This template was made by a newer MausBot. Update the app, then import it again.");
-    return { kind: "package", scope, document: parsePackageDocument(packageFromFolder(metadata, files), { trust: "file" }) };
+    return { kind: "package", scope, document: parsePackageDocument(packageFromFolder(metadata, files, slug), { trust: "file" }) };
   }
   const legacy = textOf(files[LEGACY_MARKDOWN]);
   if (legacy !== undefined) return { kind: "package", scope: "department", document: parsePackageDocument(legacy, { trust: "file" }) };

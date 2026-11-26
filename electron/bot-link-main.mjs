@@ -9,6 +9,8 @@
 // A Cloud that sleeps is never started for the link's sake: pairing is a background request made only while the Admin
 // says the Cloud is awake (or the person has just turned the switch on), a refusal is not asked again for hours, and
 // main passes the Admin's word on to this computer's server every minute so its end sleeps and wakes with the Cloud.
+// "Asleep" goes with the time main first heard it, so that end can tell the Admin's lagging word from the Cloud's own
+// answers since (server/bot-link/dial.ts).
 //
 // Security: only My Cloud is ever paired (the address the person's account names), never a server saved by hand or a
 // team's Cloud. The link's sign-in goes from My Cloud to this computer's server and nowhere else; no page sees it.
@@ -35,7 +37,7 @@ async function body(response) {
  *   pref: { read(): unknown },
  *   localRequest(route: string, init?: RequestInit): Promise<Response>,
  *   fetch: typeof fetch,
- *   cloud(): { origin: string | null, account: string | null, asleep: boolean, signedOut?: boolean },
+ *   cloud(): { origin: string | null, account: string | null, asleep: boolean, since?: string | number | null, signedOut?: boolean },
  *   cloudName(): string,
  *   changed?(): void,
  *   log?(line: string): void,
@@ -43,8 +45,8 @@ async function body(response) {
  *   now?(): number,
  * }} deps `wanted()`: the switch is on and both places exist. `pref`: the switch's own file: turning it off ends a
  * link (My Cloud not being seen for a moment leaves it alone, and so does a file that cannot be read). `cloud()`: My
- * Cloud's address and the signed-in account while the person has them, whether the Admin says it sleeps now, and
- * whether the person signed out. `cloudName()`: what the app calls My Cloud, in the person's language. `changed()`: the
+ * Cloud's address and the signed-in account while the person has them, whether the Admin says it sleeps now (and
+ * since when, in its words: a new `since` is a new word), and whether the person signed out. `cloudName()`: what the app calls My Cloud, in the person's language. `changed()`: the
  * addresses `address` gives changed (the link came, went, or is another Cloud's now).
  */
 export function createBotLinkMain({ wanted, pref, localRequest, fetch: fetchImpl, cloud, cloudName, changed = () => {}, log = () => {}, watchMs = WATCH_MS, now = Date.now }) {
@@ -104,6 +106,15 @@ export function createBotLinkMain({ wanted, pref, localRequest, fetch: fetchImpl
 
   const switchedOff = () => { try { return !parseTogether(pref.read()); } catch (error) { return error?.code === "ENOENT"; } };
   let retryAt = -Infinity, switchWasOn = null, looking = null, idle = false;
+  /** The Admin's "asleep" and when main first heard it, on this computer's clock: heard again when the Admin's `since`
+   * moves on or it said awake in between. */
+  let heard = null;
+  const hearing = (mine) => {
+    if (!mine.asleep) { heard = null; return null; }
+    const key = String(mine.since ?? "");
+    if (!heard || heard.key !== key) heard = { key, at: now() };
+    return heard.at;
+  };
   async function tryPair(force) {
     if (!force && now() < retryAt) return;
     let paired;
@@ -114,6 +125,7 @@ export function createBotLinkMain({ wanted, pref, localRequest, fetch: fetchImpl
   }
   async function reconcile() {
     idle = false;
+    const heardAt = hearing(cloud());
     const state = await local("GET").catch(() => null);
     if (!state) return;
     if (state.on) await thisComputer().catch(() => null);
@@ -142,7 +154,7 @@ export function createBotLinkMain({ wanted, pref, localRequest, fetch: fetchImpl
     if (!mine.origin) return;
     if (state.needsPairing) { if (!mine.asleep) await tryPair(false); return; }
     // The Admin's word, passed on for this link's own Cloud only, for as long as this computer's end disagrees with it.
-    if (mine.asleep && !state.asleep) await local("PUT", { cloud: "asleep", origin: mine.origin });
+    if (mine.asleep && !state.asleep) await local("PUT", { cloud: "asleep", origin: mine.origin, ...(heardAt === null ? {} : { heardAt }) });
     else if (!mine.asleep && state.asleep) await local("PUT", { cloud: "awake", origin: mine.origin });
   }
   /** Brings the link in line with the switch, the account and the Cloud: now, when any of them changes, and every minute. */

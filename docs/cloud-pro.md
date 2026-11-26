@@ -1781,7 +1781,7 @@ wait for the next read, `truncated: true`):
   "cursor": "1790000000000.12", "truncated": false,
   "incidents": [{ "kind": "turn", "code": "rpc_error", "engine": "codex", "count": 3, "firstAt": 1790000100000, "lastAt": 1790000290000,
     "botId": "<uuid>", "threadId": "<uuid>", "seq": 12 }],
-  "turns": { "started15m": 6, "failed15m": 3, "started24h": 40, "failed24h": 5 },
+  "turns": { "started15m": 6, "failed15m": 3, "started24h": 40, "failed24h": 5, "boot": 52 },
   "routines": [{ "routineId": "<uuid>", "status": "failed", "at": 1790000200000, "consecutiveFailures": 2 }],
   "schedule": { "v": 1, "seq": 4182, "unreadable": false, "nextDueAt": 1790086400000, "oldestUnconfirmed": null,
     "lastConfirmed": { "dueAt": 1790000000000, "startedAt": 1790000001250, "state": "ran" },
@@ -1795,9 +1795,10 @@ wait for the next read, `truncated: true`):
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
   "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
-  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 },
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2,
+    "boot": { "waits": 5, "stopped": 1, "killed": 1, "stallMinutes": 4 } },
   "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
-    "turnStarts": [12, 3, 1, 0, 0, 0] }
+    "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } }
 }
 ```
 
@@ -1819,8 +1820,13 @@ Fly's own start before that, and a resume from a suspend, are not in it.
 `turnStarts` counts people's messages since boot by how long each waited
 from being stored to its engine's turn starting: up to 0.5, 1, 2, 5 and 15
 seconds, and longer. A message sent while its thread runs a turn, a bot's, a
-routine's and a steer are not counted. Older homes don't send `speed`: the
-Admin reads that as unknown, never as zero.
+routine's and a steer are not counted. `loop` is the event loop's stalls
+(`server/perf/loop-stalls.ts`, read from the recorder's own minutes, nothing
+measured for it): `n`, delays of a second or more since this process started
+(finished minutes; it never falls), and `worstMs`, the longest delay in the
+last 15 minutes and the minute under way, so one read the Admin missed still
+shows; a sleep or pause is not a stall; `null` where no recorder runs. Older
+homes don't send `speed`: the Admin reads that as unknown, never as zero.
 
 **`room`** is the last day's memory pressure where the home watches it (a Cloud
 home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to
@@ -1828,7 +1834,9 @@ wait for memory and how long they waited in all (a wait still going counts its
 time so far), how many turns were stopped for memory (`stopped`), how many
 processes the kernel stopped (`killed`), and in how many minutes the machine
 stalled on memory. Counted in memory since boot, so a restart starts them
-again.
+again. `boot` is the same counts (no wait time) since this process started:
+they never fall, so the Admin keeps each hour's increase (its Cloud history),
+which the rolling day can't give.
 
 **`firstHour`** is there on a personal Cloud that began with its first hour
 (`server/host/first-hour.ts`), else `null`: `startedAt` is the first boot,
@@ -1854,14 +1862,23 @@ thread ids, and a sequence number the cursor follows; at most 200 buckets,
 the one quiet longest dropped first. The code is the first that applies: the
 place's state (`shared/place-view.ts`); a cause the server words itself
 (`stalled`, `restart`, `could_not_start`, `incident_undelivered`,
-`approval_undelivered`, `event_log`); the trial credit's refusal
+`approval_undelivered`, `event_log`); an engine that did not start, by why,
+instead of the provider-looking code its words would get (`server_error`,
+`rpc_error`, `spawn_error`): `start_overloaded` (the Cloud too busy to start
+it: the plain line `chat.notice.cloudBusyStart` or `cloudOutOfCpu`, or no room
+for another process), `start_not_installed` (its CLI missing), `start_provider`
+(the engine's or its provider's own transient refusal of the start, noted by
+the ACP start for its thread, `server/engine-start-failures.ts`); a sign-in
+refused at the start keeps `auth`/`auth_required`, which the Admin's
+engine-auth alert reads; the trial credit's refusal
 (`trial_used_up`, …); the turn's stop reason when it says more than "failed"
 (`auth_required`, `shutdown_timeout`, `provider_safety`, `update_required`,
 `spawn_error`, `quota`, `tool_error`: a tool call that failed or wasn't allowed); the cause's class (`server/drivers/retry.ts`:
 `auth`, `quota`, `rate_limited`, …); the generic stop reason (`rpc_error`);
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
-counts once too. `turns` counts turns started and failed rows per minute;
+counts once too. `turns` counts turns started and failed rows per minute,
+and `boot` the turns started since boot (it never falls);
 `routines` gives, for each routine that is on and each outside trigger, its last
 outcome and its failures in a row, counted from the saved run rows at every read,
 so a restart does not start the count again. A row that only counts occurrences
@@ -2385,7 +2402,7 @@ calls `POST /api/cloud/desktop/pairing` (same device token) and expects
 `{"cloudContractVersion":1,"origin":…,"code":…,"expiresAt":…}` for the same
 origin, with `expiresAt` at most ten minutes away. It then adds or selects the
 **My Cloud** server entry and opens `<origin>/pair#code=<code>`, the same
-pairing-link flow as Connect to a server. The code stays in main-process
+pairing-link flow as Connect to another computer. The code stays in main-process
 memory for that one navigation: never on disk, never in a renderer. A
 malformed session summary or grant is treated as none.
 
@@ -2584,7 +2601,9 @@ actions, the tip, the dialog's views and checkouts opened, with no content.
 
 Once the Cloud is ready (and the Admin's `moves` switch lets this account
 move), the desktop app moves everything from this computer to it, once, by
-itself, and from then on opens the Cloud as its only home
+itself when this computer has one bot (with more, it first asks which go:
+**Move everything**, or a choice that leaves the rest working here, as a bot's
+own **Move to My Cloud** does), and after a whole move opens the Cloud as its only home
 (`electron/one-home.mjs`, `electron/home-window.mjs`). The move carries each
 thing by id over one owner session (`electron/cloud-send.mjs`), checks that it
 all arrived, and freezes this computer's copy so nothing runs in two places
@@ -2593,6 +2612,18 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
 Import & export. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
+
+A bot lives in one place. Before a chosen bot moves, the confirm (and the
+chooser, for the bots ticked) says what changes for it, read from its own setup
+(`server/move-changes.ts`, `shared/move-changes.ts`): teammates it handed work to
+that stay here, its working folder, a model engine on this computer or its
+network (the Cloud can't reach one; it gets the Cloud's model), command MCP
+servers that need this computer and commands, and skills that read places no
+lent folder reaches, such as `~/.claude` (`electron/personal-secrets.mjs`).
+A working folder not yet lent with editing (one outside the home folder, say) gets
+a switch, on by default as moves always lent it; turned off, the move doesn't lend
+it. Only when the person turns it on and confirms in main's own dialog may their
+Clouds run commands here; a grant that fails is said on the move's line.
 
 The move's journal names the Cloud by its address and, once the session lists
 it, by its id (the person's own Cloud in `clouds[]` at My Cloud's address).

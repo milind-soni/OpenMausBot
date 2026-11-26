@@ -52,7 +52,7 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       "Let your paired phones reach this computer on the same Wi-Fi"),
     wayIn("remote.relay", "Reach from anywhere", "Paired phones reach this computer from anywhere through MausBot's relay (needs a MausBot sign-in).", "relay", ["relay", "anywhere", "away", "remote access"],
       "Let your paired phones reach this computer from anywhere, through MausBot's relay"),
-    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "tailscale", ["tailscale", "tailnet", "remote access"],
+    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "private-network", ["tailscale", "tailnet", "remote access"],
       "Let your devices reach this computer over Tailscale"),
     flag("remote.keepAwake", "Keep awake", "Keep this computer awake while a way in is on, so paired phones can reach it.", "keep-awake", ["sleep", "awake", "overnight"],
       "Keep this computer awake so paired phones can reach it", "Let this computer sleep"),

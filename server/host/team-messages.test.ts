@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { memberAudience } from "../audience.ts";
 import { ADA, CARL, key, BEN, CLEO, session, teamInbox } from "../testing/team-inbox-fixture.ts";
 import { ASSISTANT_HOURLY } from "./person-inbox.ts";
+import { botsElsewhere } from "./message-person-bots.ts";
 import { MESSAGE_PERSON_HOURLY } from "./team-messages.ts";
 
 const fixtures: Array<ReturnType<typeof teamInbox>> = [];
@@ -128,6 +129,87 @@ describe("message_person", () => {
     f.said("scout-main", "@Ben look", CLEO);
     expect(f.notified).toEqual([]);
     expect(f.team.inbox.home(key(BEN.email))).toBeNull();
+  });
+});
+
+describe("message_person naming a bot", () => {
+  /** message_person as the agents server sends it, from Scout's own chat. */
+  const send = async (f: ReturnType<typeof fixture>, body: Record<string, unknown>) => {
+    let answered: { status: number; body: { text?: string; error?: string } } | null = null;
+    await f.team.internal({ method: "POST", path: "/api/internal/people/message", res: {} as never, botId: "scout", threadId: "scout-main",
+      json: ((_res: unknown, status: number, sent: { text?: string; error?: string }) => { answered = { status, body: sent }; }) as never, readBody: async () => body });
+    return answered! as { status: number; body: { text?: string; error?: string } };
+  };
+  const POSTED = "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it.";
+  const REVIEWER = "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f";
+  /** A place of one person with a bot whose id is a real one, so only its name or id can match it. */
+  const solo = (named: NonNullable<Parameters<typeof fixture>[0]>["named"] = { personNames: () => ["Milind Soni"] }) => {
+    const f = fixture({ team: false, place: true, named });
+    f.bots.push({ id: REVIEWER, name: "Reviewer 2", color: "teal", threadId: "rev-main", tasks: [{ threadId: "rev-main", title: "Reviewer 2" }] });
+    return f;
+  };
+  const refusal = (id: string, name: string) => `${name} is a bot, not a person, so nothing was sent and no answer will come. Use coordinate_bots with bot_ids ["${id}"] (${name}). For the person, leave out to.`;
+
+  it("off a team, puts nothing in the person's Inbox for a bot, however it is written, and names coordinate_bots with its id", async () => {
+    const f = solo();
+    for (const to of ["Reviewer 2", "reviewer 2", "@Reviewer 2", " REVIEWER 2 ", "reviewer-2", "reviewer_2", REVIEWER, REVIEWER.slice(0, 8).toUpperCase()]) {
+      expect(await send(f, { to, message: "Send me the Q4 numbers." }), to).toEqual({ status: 409, body: { error: refusal(REVIEWER, "Reviewer 2") } });
+    }
+    expect(await send(f, { to: "Scout", message: "Note to self" })).toEqual({ status: 409, body: { error: '"Scout" is you, so nothing was sent and no answer will come. For the person, leave out to.' } });
+    expect(f.lines("scout-main"), "no line, so no Inbox row").toEqual([]);
+    expect(f.notified).toEqual([]);
+    expect(await send(f, { message: "The report is ready." }), "the hourly cap was not spent on the refusals").toEqual({ status: 200, body: { text: POSTED } });
+  });
+
+  it("names every bot that shares a name, each by its id", async () => {
+    const f = solo();
+    f.bots.push({ id: "0d9e8f7a-6b5c-4d3e-2f1a-0b9c8d7e6f5a", name: "Reviewer 2", color: "red", threadId: "rev2-main", tasks: [{ threadId: "rev2-main", title: "Reviewer 2" }] });
+    expect((await send(f, { to: "reviewer 2", message: "Hi" })).body.error).toBe(`"reviewer 2" names 2 bots, not a person, so nothing was sent and no answer will come. Use coordinate_bots with the id of the one you mean: Reviewer 2 (id ${REVIEWER}); Reviewer 2 (id 0d9e8f7a-6b5c-4d3e-2f1a-0b9c8d7e6f5a). For the person, leave out to.`);
+  });
+
+  it("gives the person what is meant for them, even when a bot shares their name, and says nothing more", async () => {
+    const f = solo({ personNames: () => ["Reviewer 2", undefined] });
+    for (const to of ["Reviewer 2", "reviewer", "me", "You", "the person", "@owner", "the user"]) expect(await send(f, { to, message: `For you: ${to}` }), to).toEqual({ status: 200, body: { text: POSTED } });
+    expect(f.lines("scout-main")).toHaveLength(7);
+  });
+
+  it("never sends a bot to coordinate_bots when its tool selection leaves it out", async () => {
+    const f = solo();
+    f.bots.find((bot) => bot.id === "scout")!.toolScope = { deny: ["mcp:agents:coordinate_bots"] };
+    expect(await send(f, { to: "Reviewer 2", message: "Hi" })).toEqual({ status: 409, body: { error: "Reviewer 2 is a bot, not a person, so nothing was sent and no answer will come. You cannot reach other bots: tell the person in your reply. For the person, leave out to." } });
+    expect(f.lines("scout-main")).toEqual([]);
+  });
+
+  it("refuses a bot of the person's other place: by its address through the link, or where it lives when the link is off", async () => {
+    const linked = solo({ personNames: () => [], elsewhere: (to) => (to === "Atlas" ? { linked: [{ id: "link-laptop-1234", name: "Atlas" }] } : null) });
+    expect(await send(linked, { to: "Atlas", message: "Hi" })).toEqual({ status: 409, body: { error: refusal("link-laptop-1234", "Atlas") } });
+    const away = solo({ personNames: () => [], elsewhere: (to) => (to === "Atlas" ? { where: "Atlas lives on Laptop, the person's computer, not here. Tell the person plainly." } : null) });
+    expect(await send(away, { to: "Atlas", message: "Hi" })).toEqual({ status: 409, body: { error: "Atlas lives on Laptop, the person's computer, not here. Tell the person plainly. Nothing was sent." } });
+    expect([...linked.lines("scout-main"), ...away.lines("scout-main")]).toEqual([]);
+  });
+
+  it("off a team, says plainly that a name nobody here has went to the person's own Inbox", async () => {
+    const f = solo();
+    const answer = await send(f, { to: "Bob", message: "Can you send the slides?" });
+    expect(answer).toEqual({ status: 200, body: { text: `No bot here is called "Bob", and only the person you work for can be messaged from here, so this went to their own Inbox. ${POSTED}` } });
+    expect(f.lines("scout-main")).toEqual([expect.objectContaining({ kind: "text", text: "Can you send the slides?", inbox: expect.objectContaining({ kind: "message" }) })]);
+  });
+
+  it("on a team, leaves a name nobody has to the team's own refusal", async () => {
+    const f = fixture();
+    expect(await send(f, { to: "reporter", message: "Hi" })).toMatchObject({ status: 404, body: { error: expect.stringContaining("The people here: Ada, Ben, Cleo.") } });
+  });
+});
+
+describe("the bots of the person's other place message_person can name", () => {
+  const link = (on: boolean) => ({ on: () => on, candidates: (raw: string) => (raw === "Atlas" ? [{ peer: "laptop", bot: { id: "b1", name: "Atlas" } }, { peer: "desk", bot: { id: "b2", name: "Atlas", paused: true } }] : []) });
+  const explain = (name: string) => (name === "Atlas" ? { where: "Atlas lives on Laptop." } : { hint: "Bots work together only within one place." });
+
+  it("asks the link first, leaving out a paused bot when another has the name, then where the person's app said it lives", () => {
+    expect(botsElsewhere(link(true), explain, "Atlas")).toEqual({ linked: [{ id: "link-laptop-b1", name: "Atlas" }] });
+    expect(botsElsewhere(link(false), explain, "Atlas")).toEqual({ where: "Atlas lives on Laptop." });
+    expect(botsElsewhere(null, explain, "Atlas")).toEqual({ where: "Atlas lives on Laptop." });
+    expect(botsElsewhere(link(true), explain, "Bob"), "a hint is no bot").toBeNull();
   });
 });
 

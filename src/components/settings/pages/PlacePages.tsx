@@ -40,7 +40,7 @@ import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "..
 import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
-import { AdvancedSection } from "../AdvancedSection";
+import { AdvancedPagePart, AdvancedSection } from "../AdvancedSection";
 
 const GROUPED_NOTE = "omb-settings-grouped-note";
 const GROUPED_DAYS = 30;
@@ -88,7 +88,7 @@ export function OverviewPage() {
     {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
-        {!ctx.client && <SettingsLinkRow title={t("settings.section.phoneDevices")} value={phoneValue} onClick={() => go("phone")} data={{ "data-glance": "phone" }} />}
+        {!ctx.client && <SettingsLinkRow title={t("settings.page.devices")} value={phoneValue} onClick={() => go("devices", "phones")} data={{ "data-glance": "devices" }} />}
         {!ctx.client && <SettingsLinkRow title={t("settings.group.ai")} onClick={() => go("ai", "providers")} data={{ "data-glance": "ai" }}
           value={ctx.admin ? engines > 0 ? t("settings.glance.aiReady", { count: engines }) : t("settings.glance.aiStart") : t("settings.glance.aiAdmin")} />}
         {/* Simple's sidebar footer has Connect apps right beside the avatar, so Simple's Overview leaves the jump out and
@@ -103,7 +103,7 @@ export function OverviewPage() {
     {ctx.desktop && ctx.cloud && team && team.cloudPage && <div data-settings-block="people-and-plan"><TeamPeopleCard team={team} admin={ctx.admin} owner={teamOwner} /></div>}
     {/* Address: a self-hosted server's own web address, Advanced only. A Cloud's address is MausBot's to manage, so it
         has none here (no administrator or proxy steps for a person who has no server to set up). */}
-    {place.kind === "server" && !ctx.client && ctx.advanced && <CustomDomainSettings />}
+    {place.kind === "server" && !ctx.client && <AdvancedSection anchor="address"><CustomDomainSettings /></AdvancedSection>}
   </>;
 }
 
@@ -156,17 +156,17 @@ export function BotsPage() {
   const config = useStoreSelector((state) => state.config);
   const paused = (config?.pausedBots?.length ?? 0) > 0;
   return <>
-    {paused && <SettingsGroup block="awake"><SettingsRows><SettingRow title={t("settings.bots.awakeTitle")} subtitle={t("settings.bots.awakeLine")}><PausedBotsButton /></SettingRow></SettingsRows></SettingsGroup>}
-    <SettingsGroup label={t("settings.bots.aboutYou")} block="about-you"
+    {paused && <AdvancedPagePart anchor="awake"><SettingsGroup block="awake"><SettingsRows><SettingRow title={t("settings.bots.awakeTitle")} subtitle={t("settings.bots.awakeLine")}><PausedBotsButton /></SettingRow></SettingsRows></SettingsGroup></AdvancedPagePart>}
+    <AdvancedPagePart anchor="about-you"><SettingsGroup label={t("settings.bots.aboutYou")} block="about-you"
       footnote={ctx.here || !ctx.desktop ? t("settings.bots.aboutYouHome", { app: productName() }) : undefined}>
       <div className="flex flex-col gap-2">
         <Card><ProfileFields /></Card>
         <SettingsRows><DisplayNameSetting /><AwayEmailsSetting row /></SettingsRows>
       </div>
-    </SettingsGroup>
-    <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
+    </SettingsGroup></AdvancedPagePart>
+    <AdvancedPagePart anchor="new-bots"><SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
     {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="remote-teammates"><AdminOnly><RemoteTeammatesSettings /></AdminOnly></AdvancedSection>}
     {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="limits" also={["parallel", "group-turns", "tool-time", "keep-warm"]}><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
       <SettingsRows selectWidth={160}>
@@ -176,7 +176,7 @@ export function BotsPage() {
         <div data-settings-block="keep-warm" className="contents"><CacheKeepWarmSettings /></div>
       </SettingsRows>
     </SettingsGroup></AdvancedSection>}
-    {skillsLibraryEnabled(config) && <div data-settings-block="skills"><SkillsSection /></div>}
+    {skillsLibraryEnabled(config) && <AdvancedPagePart anchor="skills"><div data-settings-block="skills"><SkillsSection /></div></AdvancedPagePart>}
     <AdvancedSection anchor="early"><div data-settings-block="early"><ExperimentalFeaturesRow /></div></AdvancedSection>
   </>;
 }
@@ -185,11 +185,11 @@ export function DesktopsPage() {
   const { ctx, anchor } = useSettingsShell();
   const [details, setDetails] = useState(anchor === "desktop-details");
   return <>
-    <SettingsGroup label={t("settings.desktops.browserSection")} block="browser">
+    <AdvancedPagePart anchor="browser"><SettingsGroup label={t("settings.desktops.browserSection")} block="browser">
       <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow />{ctx.advanced && <div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
-    </SettingsGroup>
-    <AdminOnly><DesktopKinds /></AdminOnly>
-    <BrowserProfilesRow />
+    </SettingsGroup></AdvancedPagePart>
+    <AdvancedPagePart anchor="desktops"><AdminOnly><DesktopKinds /></AdminOnly></AdvancedPagePart>
+    <AdvancedPagePart anchor="browser"><BrowserProfilesRow /></AdvancedPagePart>
     {ctx.advanced && (
       <AdminOnly>
         <SettingsDisclosureRow id="desktop-details" block="desktop-details" title={t("settings.desktops.detailsTitle")} subtitle={t("settings.desktops.detailsLine")}
@@ -198,7 +198,7 @@ export function DesktopsPage() {
         </SettingsDisclosureRow>
       </AdminOnly>
     )}
-    <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>
+    {ctx.savedSteps && <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>}
   </>;
 }
 

@@ -7,8 +7,9 @@ import { answeredByPerson } from "./cloud-lending.ts";
 import { routinePrompt } from "./routine-execution.ts";
 import { WEBHOOK_EVENT_DATA } from "./webhooks.ts";
 
-/** My Cloud's owner as the owner's own session is: their person key, and the name their lines read as. */
-export interface CloudOwner { person: string; name: string }
+/** My Cloud's owner as the owner's own session is: their person key, and the name their lines read as. `here`: the person on
+ * their own computer, whose app moves a bot into it (move-back.ts): nothing is stamped with it. */
+export interface CloudOwner { person: string; name: string; here?: true }
 
 /** Security invariant: only a user line nobody else's words or no automation made. A peer's ask or aside, a line a
  * script or an outside interface relayed, and a routine's, webhook's or app event's own prompt are never the owner's,

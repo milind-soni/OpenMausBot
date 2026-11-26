@@ -69,7 +69,7 @@ smoke as an authenticated connection to a customer's server.
 ## User flow
 
 In a desktop build with this feature, choose the server dropdown above the
-sidebar search → **Connect to a server…**, or open **Settings →
+sidebar search → **Connect to another computer…**, or open **Settings →
 Servers**. Enter the server's HTTPS address or full pairing link and an
 optional name. Confirm the host in the native dialog, then complete pairing or
 email sign-in on that server. To generate an owner link without the CLI's

@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; teamBoard?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -96,4 +96,20 @@ export function savedStepsHere(config: FeatureFlagConfig | null | undefined): bo
 
 export function usbPhoneTakeoverEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.usbPhoneTakeover === true;
+}
+
+export function skillBurgerEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillBurger !== false;
+}
+
+export function threadTabsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.threadTabs === true;
+}
+
+export function roomFeedEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.roomFeed === true;
+}
+
+export function teamBoardEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.teamBoard === true;
 }

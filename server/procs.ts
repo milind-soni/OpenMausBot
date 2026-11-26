@@ -28,6 +28,8 @@ import { spawnBotWork } from "./oom-score.ts";
 import { noticeFailure } from "./chat-notices.ts";
 import { processBudget } from "./process-room.ts";
 import { shortageCode } from "./process-shortage.ts";
+import { inconclusiveMark } from "./harness/probe-hold.ts";
+import { unboxedGitCredential } from "./github/git-credential.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -330,7 +332,7 @@ export type CliOwner = "bot" | "openmausbot";
 /** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
  * paths or the host's network, and `false` keeps a spawn out of it. */
 export interface BoxSpawnOptions {
-  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured">;
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured" | "engine">;
   /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
   engineHome?: boolean;
   /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
@@ -418,6 +420,9 @@ export function spawnCli(
     : homed ? { ...opts, env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
   const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
+  // An unboxed bot's git gets this server's GitHub sign-in after the person's own credentials (git-credential.ts).
+  const github = !boxed && owner === "bot" ? unboxedGitCredential(spawnOpts.env ?? process.env) : null;
+  if (github) spawnOpts.env = github.env as NodeJS.ProcessEnv;
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   // A server that restarts in place stops what an earlier one left by this tag (engine-records.ts).
@@ -436,6 +441,7 @@ export function spawnCli(
   } catch (error) {
     // Node throws some refusals (ENOMEM) at once rather than reporting them on the child.
     if (shortageCode(error)) refused((error as NodeJS.ErrnoException).code);
+    github?.release();
     throw error;
   } finally {
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
@@ -445,6 +451,7 @@ export function spawnCli(
   child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) refused(error.code); });
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
+  if (github) { child.once("exit", github.release); child.once("error", () => { if (!child.pid) github.release(); }); }
   if (process.platform !== "win32") cliGroups.add(child);
   if ((process.platform === "linux" || process.platform === "darwin") && child.pid) {
     const tree = new Map<number, string>();
@@ -558,7 +565,8 @@ function cutOffError(cli: string, timeout: number | undefined): Error {
 
 export const CLI_VERSION_TIMEOUT_MS = 30_000;
 
-export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
+/** `busy`: the check could not finish (probe-hold.ts), which says nothing about whether the CLI is installed. */
+export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string; busy?: true } {
   let last: string | null = null;
   return (err, stdout) => {
     const version = err ? "" : stdout.trim();
@@ -576,7 +584,7 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
     if (last && (timedOut || !err || typeof failure?.code === "number")) return { version: last };
     return { reason: timedOut
       ? `\`${cli}\` took longer than ${CLI_VERSION_TIMEOUT_MS / 1000} seconds to answer --version. The machine may be busy; check again.`
-      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.` };
+      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.`, ...inconclusiveMark(err) };
   };
 }
 

@@ -12,6 +12,18 @@ describe("tool-choice scoring", () => {
     expect(scoreCase({ tools: ["trigger"] }, [])).toEqual({ pass: false, chosen: undefined, searched: false });
   });
 
+  it("fails a turn that reaches a tool the case rules out, and a publish that does not say the link is public", () => {
+    const justForMe = { tools: [], never: ["publish_page", "publish_app"] };
+    expect(scoreCase(justForMe, ["Write", "attach_file"])).toEqual({ pass: true, chosen: "Write", searched: false });
+    expect(scoreCase(justForMe, ["Write", "mcp__agents__publish_page"])).toEqual({ pass: false, chosen: "publish_page", searched: false });
+    const share = { tools: ["publish_page"], publishSays: "anyone with (the |this )?link" };
+    expect(scoreCase(share, ["publish_page"], "Here it is: https://x.page. Anyone with the link can open it.").pass).toBe(true);
+    expect(scoreCase(share, ["publish_page"], "Here it is: https://x.page").pass).toBe(false);
+    const family = { tools: [], publishSays: "anyone with (the |this )?link" };
+    expect(scoreCase(family, ["Write"], "Here is the file.").pass).toBe(true);
+    expect(scoreCase(family, ["publish_page"], "Shared: https://x.page").pass).toBe(false);
+  });
+
   it("strips the server from a tool name, including one with an underscore", () => {
     expect(bareToolName("mcp__agents__session_search")).toBe("session_search");
     expect(bareToolName("mcp__own_apps__GMAIL_SEND")).toBe("GMAIL_SEND");
@@ -28,7 +40,7 @@ describe("tool-choice scoring", () => {
     const cases = JSON.parse(readFileSync(new URL("./cases.json", import.meta.url), "utf8")) as ToolChoiceCase[];
     expect(new Set(cases.map((item) => item.id)).size).toBe(cases.length);
     for (const item of cases) {
-      expect(item.tools.length, item.id).toBeGreaterThan(0);
+      expect(item.tools.length + (item.never?.length ?? 0) + (item.publishSays ? 1 : 0), item.id).toBeGreaterThan(0);
       expect(item.why.length, item.id).toBeGreaterThan(0);
     }
   });

@@ -16,3 +16,14 @@ export function modelgoOfferable(policy: ManagedPolicySummary | null | undefined
   if (!policy || policy.team) return true;
   return !policy.companyModelsOnly && (policy.allowedEngines === "all" || policy.allowedEngines.includes("modelgo"));
 }
+
+/** The sponsor's row moves up to third place, or higher to stand directly above the first row `under` picks; a row
+ * already higher keeps its place, and the other rows keep their order. */
+export function sponsorRowRaised<T>(rows: readonly T[], sponsor: T | undefined, under: (row: T) => boolean): T[] {
+  const from = sponsor === undefined ? -1 : rows.indexOf(sponsor);
+  if (from < 0) return [...rows];
+  const rest = rows.filter((_, index) => index !== from);
+  const above = rest.findIndex(under);
+  const at = Math.min(from, 2, above < 0 ? 2 : above);
+  return [...rest.slice(0, at), rows[from], ...rest.slice(at)];
+}

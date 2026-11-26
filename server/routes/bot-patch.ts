@@ -25,6 +25,8 @@ import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
+import { heldFrom } from "../host/room-reads.ts";
+import { unreadTargetTask } from "../task-record.ts";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
@@ -242,6 +244,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       // Same 400 for unknown and ineligible ids, so a private thread's existence is not revealed.
       if (body.mainThreadChoice !== undefined) {
         const chosen = typeof body.mainThreadChoice === "string" ? deps.mainThreadTasks(m[1]).find((task) => task.threadId === body.mainThreadChoice) : null;
+        patch.mainThreadKept = undefined;
         if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
         else if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) patch.mainThreadChoice = chosen.threadId;
         else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
@@ -252,16 +255,22 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
           return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
         }
-        const chain: Array<{ instanceId: string; model: string }> = [];
+        const chain: ModelSelection[] = [];
         for (const entry of body.fallback as unknown[]) {
-          const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown }) : null;
+          const row = entry && typeof entry === "object" ? (entry as Partial<Record<keyof ModelSelection, unknown>>) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
           if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
           const model = row.model.trim();
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
-          chain.push({ instanceId: row.instanceId, model });
+          if (row.effort === undefined && row.variant === undefined) {
+            chain.push({ instanceId: row.instanceId, model });
+          } else {
+            const checked = deps.checkedModelSelection(row);
+            if (!checked.ok) return json(res, checked.status, refusalBody(checked));
+            chain.push(checked.selection);
+          }
         }
         patch.fallback = chain;
       }
@@ -724,6 +733,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
+      // A mark goes out with its hold in one frame, below.
+      delete patch.unread;
       if (Array.isArray(patch.alwaysAllow)) dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
       if (profile.patch.soul !== undefined) {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
@@ -734,9 +745,15 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         bot = store.patchBotProfile(m[1], profile.patch);
       } else {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
-        bot = store.patchBot(m[1], patch);
+        bot = Object.keys(patch).length ? store.patchBot(m[1], patch) : store.bot(m[1]) ?? null;
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (typeof body.unread === "boolean") {
+        // A mark skips a routine run or an archived conversation for the open main one (task-record.ts).
+        const target = unreadTargetTask(bot, store.activeTask(bot.id), body.unread);
+        if (target) store.patchTask(bot.id, target.threadId, { unread: body.unread, heldUnread: body.unread ? heldFrom(store.activePath(target.threadId), store.messagesFor(target.threadId)) : undefined });
+        else if (!bot.tasks?.length) bot = store.patchBot(bot.id, { unread: body.unread }) ?? bot;
+      }
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       if (body.cacheKeepWarm !== undefined) cacheKeepWarm.refresh();

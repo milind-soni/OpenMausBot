@@ -14,13 +14,14 @@ const fixture = vi.hoisted(() => {
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     computers: [] as MapComputer[],
     computersAnswer: true,
+    teamMap: { collaborations: [], queued: [], running: [] } as object,
   };
 });
 
 async function fakeApi(path: string) {
   await new Promise((resolve) => setTimeout(resolve, 5));
   if (path.startsWith("/.well-known/openmausbot/environment")) return { environmentId: "fixture" };
-  if (path.startsWith("/api/team-map")) return { collaborations: [], queued: [], running: [] };
+  if (path.startsWith("/api/team-map")) return structuredClone(fixture.teamMap);
   if (path.startsWith("/api/computers/frames")) {
     if (!fixture.computersAnswer) return new Promise(() => {});
     return { computers: structuredClone(fixture.computers), configured: true, available: true, now: Date.now() };
@@ -72,6 +73,7 @@ beforeEach(() => {
   const stored = new Map([["omb-team-canvas:fixture", JSON.stringify({ Ops: { x: 900, y: 60 } })]]);
   vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });
   fixture.computersAnswer = true;
+  fixture.teamMap = { collaborations: [], queued: [], running: [] };
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -141,4 +143,22 @@ it("shows the teams anyway when the computers never answer", async () => {
   expect(early.at(-1)).toBeNull();
   await new Promise((resolve) => setTimeout(resolve, 3_000));
   expect(look()).toContain("cards 5");
+});
+
+it("draws a line between bots that hand work to each other, labelled with what the hand-off is doing", async () => {
+  fixture.computers = [];
+  fixture.teamMap = {
+    collaborations: [{ groupId: "group", botIds: ["ana", "ben"], lastAt: 1 }],
+    queued: [],
+    running: [{ sourceBotId: "chief", targetBotId: "cy", threadId: "thread-cy" }],
+  };
+  fixture.set({ ...initialState, bots: team(false), sections: ["Sales", "Ops"] });
+  root.render(createElement(TeamMapPage));
+  await watch(200, []);
+  const world = container.querySelector("[data-canvas-world]")!;
+  const lines = [...world.querySelectorAll<SVGPathElement>("[data-handoff-line]")];
+  expect(lines.map((line) => line.dataset.state)).toEqual(["running", "connected"]);
+  expect(lines.every((line) => /^M [\d.]+ [\d.]+ C /.test(line.getAttribute("d") ?? ""))).toBe(true);
+  expect([...world.querySelectorAll("[data-handoff-label]")].map((label) => label.textContent)).toEqual(["Running"]);
+  expect(world.querySelectorAll("[data-handoff-arrow]")).toHaveLength(1);
 });

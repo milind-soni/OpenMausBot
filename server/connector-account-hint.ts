@@ -12,6 +12,10 @@ import { annotateFailedCall } from "./connector-scope-hint.ts";
 /** GitHub's wording when the connected account's app installation cannot reach what the call asks for. */
 const ACCOUNT_ERROR = /not accessible by integration/i;
 
+/** Composio's wording when a call names no account and the app has more than one connected account. The tool schema
+ * calls the account field optional, so a bot that has one account in mind leaves it out and the call fails wholesale. */
+const MISSING_ACCOUNT_ERROR = /multiple .* accounts connected/i;
+
 /** Marks the note a frame carries, so a frame that must not get one can be told from one that does. */
 const NOTE = "\u0000omb-account-hint:";
 
@@ -60,14 +64,34 @@ export function accountHint(slugs: readonly string[], accounts: ConnectedAccount
     + `before telling the person you have no access to ${app}.`;
 }
 
+/** The note for a call refused because it named no account and the app has more than one connected account: the
+ * accounts the bot can use, by alias or id, so the model names one and retries instead of failing the task. */
+export function missingAccountHint(slugs: readonly string[], accounts: ConnectedAccounts): string {
+  const toolkit = oneToolkit(slugs);
+  if (!toolkit) return "";
+  const known = usable(accounts, toolkit);
+  if (!known.length) return "";
+  const app = appName(toolkit);
+  const names = known.map((account) => account.alias?.trim() || account.id).join(", ");
+  if (known.length === 1)
+    return `OpenMausBot note: ${app} refused this because the call named no account and ${app} has more than one `
+      + `connected account, of which one can run a call (${names}). Name that one in the call's account field `
+      + `(an alias or an id) and try the call again.`;
+  return `OpenMausBot note: ${app} refused this because the call named no account and ${app} has ${known.length} `
+    + `connected accounts (${names}). Name one of them in the call's account field (an alias or an id) and try the `
+    + `call again.`;
+}
+
+/** The refusals a note answers, and the note for each: an account the call used cannot reach it, or the call named no
+ * account at all and the app has more than one. A refusal both name answers with the first note. */
+const NOTES: readonly (readonly [RegExp, (slugs: readonly string[], accounts: ConnectedAccounts) => string])[] = [
+  [ACCOUNT_ERROR, accountHint],
+  [MISSING_ACCOUNT_ERROR, missingAccountHint],
+];
+
 /** The accounts of every app, as the services inventory gives them. */
 export function accountsByApp(services: Record<string, { accounts: readonly ConnectedAccount[] }>): ConnectedAccounts {
   return Object.fromEntries(Object.entries(services).map(([slug, state]) => [slug, state.accounts]));
-}
-
-/** The note a frame carries, marked so that a frame which earns none can be recognised afterwards. */
-function markedNote(failed: readonly string[], accounts: ConnectedAccounts): string {
-  return `${NOTE}${accountHint(failed, accounts)}`;
 }
 
 /** Takes the mark out of a frame: the note stays as it is, and a frame that earned none loses the mark again.
@@ -91,25 +115,27 @@ export async function withAccountHint(
   slugs: readonly string[],
   loadAccounts: () => Promise<ConnectedAccounts>,
 ): Promise<Uint8Array> {
-  if (!ACCOUNT_ERROR.test(new TextDecoder().decode(bytes))) return bytes;
+  const text = new TextDecoder().decode(bytes);
+  const matched = NOTES.find(([pattern]) => pattern.test(text));
+  if (!matched) return bytes;
+  const [pattern, noteFor] = matched;
   const accounts = await loadAccounts().catch(() => ({}) as ConnectedAccounts);
   // The shared helper hands the hint the tools that frame names, so the note is the one of that frame's own app.
-  const hint = (failed: readonly string[]) => markedNote(failed, accounts);
+  const hint = (failed: readonly string[]) => `${NOTE}${noteFor(failed, accounts)}`;
   let noted = false;
   try {
-    const text = new TextDecoder().decode(bytes);
     if (/text\/event-stream/i.test(contentType)) {
       const lines = text.split("\n").map((line) => {
         if (!line.startsWith("data:")) return line;
         const frame = JSON.parse(line.slice(5));
-        if (!annotateFailedCall(frame, ACCOUNT_ERROR, hint, slugs)) return line;
+        if (!annotateFailedCall(frame, pattern, hint, slugs)) return line;
         noted = unmarked(frame) || noted;
         return `data: ${JSON.stringify(frame)}`;
       });
       return noted ? new TextEncoder().encode(lines.join("\n")) : bytes;
     }
     const frame = JSON.parse(text);
-    if (!annotateFailedCall(frame, ACCOUNT_ERROR, hint, slugs)) return bytes;
+    if (!annotateFailedCall(frame, pattern, hint, slugs)) return bytes;
     if (!unmarked(frame)) return bytes;
     return new TextEncoder().encode(JSON.stringify(frame));
   } catch {

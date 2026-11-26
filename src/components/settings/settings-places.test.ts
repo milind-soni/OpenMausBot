@@ -20,7 +20,7 @@ describe("the places bots cite", () => {
   it("name a row by its page, its section and its own label, and say where Simple mode shows it", () => {
     const place = (id: string) => (SETTINGS_PLACES as readonly SettingsPlace[]).find((one) => one.id === id);
     expect(place("keys")).toMatchObject({ path: "Settings → AI → Other services" });
-    expect(place("wifi")).toMatchObject({ path: "Settings → Phone & devices → How your phone reaches this computer → Same Wi-Fi", only: "the desktop app, on this computer's own page" });
+    expect(place("wifi")).toMatchObject({ path: "Settings → Devices → How your phone reaches this computer → Same Wi-Fi", only: "the desktop app, on this computer's own page" });
     expect(place("language")).toMatchObject({ path: "Settings → General → Language", advanced: true, simplePath: "Settings → This app → Language" });
     expect(place("this-week")?.path).toBe("Settings → Plan & billing → This week");
     expect(place("apps")?.path).toMatch(/^the Apps panel/);

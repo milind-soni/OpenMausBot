@@ -17,10 +17,9 @@
 //     apps/server/src/provider/acp/AntigravityAcpSupport.ts:186-193 and
 //     apps/server/src/provider/AntigravityInstallation.ts:501-503 at
 //     b732621b51 (the native CLI's launch, its session mode and its name);
-//   - apps/server/src/provider/antigravityAuthSupport.ts:167-177, 222-244,
-//     575-644 at 38067630229 (the native CLI's environment: no self-update and
-//     the SSH_CONNECTION value that keeps each profile's sign-in in its own
-//     file; the `--login` link and the code pasted back).
+//   - apps/server/src/provider/antigravityAuthSupport.ts:167-177, 222-244 at
+//     38067630229 (the native CLI's environment: no self-update and the
+//     SSH_CONNECTION value that keeps each profile's sign-in in its own file).
 // The temp folder stays one per instance, the redirect can go through a relay into a boxed runtime, and startup waits
 // while a Windows unpack is still growing.
 import { execFile } from "node:child_process";
@@ -88,6 +87,7 @@ const REMOVED_ENVIRONMENT_KEYS = new Set([
   "AGY_ACP_DEFAULT_MODEL",
   "GEMINI_HOME",
   "AGY_ACP_FORCE_FILE_STORAGE",
+  "AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
   "ANTIGRAVITY_HARNESS_PATH",
   "BROWSER",
   "PYTHONUNBUFFERED",
@@ -215,7 +215,7 @@ export function antigravityCliTokenPath(instanceId: string, baseDir = DATA_DIR):
   return join(antigravityProfileDirectory(instanceId, baseDir), "antigravity-acp", ANTIGRAVITY_CLI_TOKEN_FILE);
 }
 
-/** Both runtimes' sign-in files. The pinned runtime's stays when an account moves to the CLI, so a rollback finds it. */
+/** Both runtimes' sign-in files. An account that switched to the CLI keeps the Classic runtime's file. */
 export function antigravitySignInPaths(instanceId: string, baseDir = DATA_DIR): string[] {
   return [antigravityCliTokenPath(instanceId, baseDir), antigravityTokenPath(instanceId, baseDir)];
 }
@@ -297,10 +297,14 @@ export async function prepareAntigravityProfile(input: {
       ? {
           // Updates come only through this app's updater; the release folder is read-only besides.
           AGY_CLI_DISABLE_AUTO_UPDATE: "1",
-          // The CLI ignores AGY_ACP_FORCE_FILE_STORAGE and keeps every profile's Google sign-in in one OS keyring entry
-          // unless it believes it runs over SSH: then it uses the profile's own file. A fixed value, so no address of
-          // the host reaches the box.
+          // The CLI ignores AGY_ACP_FORCE_FILE_STORAGE and keeps one Google sign-in per computer in the OS keyring,
+          // whatever --gemini-dir says. 1.5.14 and 1.5.15 keep each profile's in its file instead while they believe
+          // they run over SSH. 1.5.16 ignores SSH_CONNECTION and uses the keychain whenever it can open one, unless
+          // AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set (both measured on macOS). With both, every account here has its
+          // own sign-in, the keychain and the CLI in a terminal are never touched, and a box without a keyring works
+          // the same. SSH_CONNECTION is a fixed value, so no address of the host reaches the box.
           SSH_CONNECTION: ANTIGRAVITY_SSH_CONNECTION,
+          AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1",
         }
       : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath! }),
     BROWSER: browserCommand,
@@ -317,7 +321,7 @@ export async function prepareAntigravityProfile(input: {
   }
   return {
     directory,
-    tokenPath: join(acpDirectory, nativeCli ? ANTIGRAVITY_CLI_TOKEN_FILE : "acp_token.json"),
+    tokenPath: join(acpDirectory, "acp_token.json"),
     environment,
     ...(tempDirectory ? { tempDirectory } : {}),
   };
@@ -579,12 +583,7 @@ export class AntigravityAcpClient {
   }
 }
 
-/** Where `agy acp --login` sends Google; the page shows a code the person pastes back. */
-export const ANTIGRAVITY_CODE_REDIRECT_URI = "https://antigravity.google/oauth-callback";
-
-/** `loopback`: the pinned runtime's link, which redirects to its listener on 127.0.0.1. `code`: the native CLI's
- * `--login` link, which redirects to Google's Antigravity page that shows a code. */
-export function parseAntigravityAuthorizationUrl(authorizationUrl: string, kind: "loopback" | "code" = "loopback"): {
+export function parseAntigravityAuthorizationUrl(authorizationUrl: string): {
   authorizationUrl: string;
   redirectUri: string;
   state: string;
@@ -597,36 +596,20 @@ export function parseAntigravityAuthorizationUrl(authorizationUrl: string, kind:
   const redirectUri = url.searchParams.get("redirect_uri");
   if (
     url.origin !== "https://accounts.google.com" ||
-    url.pathname !== (kind === "loopback" ? "/o/oauth2/v2/auth" : "/o/oauth2/auth") ||
+    url.pathname !== "/o/oauth2/v2/auth" ||
     url.username || url.password || url.hash ||
     url.searchParams.getAll("state").length !== 1 ||
     url.searchParams.getAll("redirect_uri").length !== 1 ||
     url.searchParams.getAll("response_type").length !== 1 ||
     url.searchParams.get("response_type") !== "code" ||
     !state || state.length > 512 || /\s/u.test(state) ||
-    !redirectUri || (kind === "loopback" ? !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/$/u.test(redirectUri) : redirectUri !== ANTIGRAVITY_CODE_REDIRECT_URI)
+    !redirectUri || !/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/$/u.test(redirectUri)
   ) throw new Error("Antigravity returned an invalid Google sign-in URL.");
-  if (kind === "code") return { authorizationUrl, redirectUri, state };
   const redirect = new URL(redirectUri);
   if (Number(redirect.port) < 1024 || Number(redirect.port) > 65535) {
     throw new Error("Antigravity returned an invalid Google sign-in URL.");
   }
   return { authorizationUrl, redirectUri, state };
-}
-
-/** What `agy acp --login` reads after its link: the code the Antigravity page shows, or that page's URL, which must answer
- * this sign-in. Undefined for anything else, including any line break. */
-export function antigravityLoginResponse(pending: { redirectUri: string; state: string }, response: string): string | undefined {
-  const value = response.trim();
-  if (/^[\w./~-]{1,2048}$/u.test(value)) return value;
-  if (value.length > 16_384 || /\s/u.test(value)) return undefined;
-  const url = URL.parse(value);
-  if (
-    url === null || `${url.origin}${url.pathname}` !== pending.redirectUri || url.username || url.password ||
-    url.searchParams.getAll("state").length !== 1 || url.searchParams.get("state") !== pending.state ||
-    url.searchParams.getAll("code").length !== 1 || !url.searchParams.get("code")
-  ) return undefined;
-  return value;
 }
 
 export function validateAntigravityCallbackUrl(
@@ -722,6 +705,7 @@ export async function probeAntigravityModels(input: {
   cwd?: string;
   fallbackDefault: string;
   timeoutMs?: number;
+  onProcess?: (child: ChildProcess) => void;
 }): Promise<ModelCatalog> {
   const deadline = Date.now() + (input.timeoutMs ?? STARTUP_CAP_MS);
   const remaining = () => {
@@ -731,8 +715,10 @@ export async function probeAntigravityModels(input: {
   };
   const client = new AntigravityAcpClient(input.runtime, input.profile, input.cwd ?? input.profile.directory);
   try {
+    input.onProcess?.(client.child);
     const initialized = await client.initialize(remaining(), deadline);
-    await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
+    // Native CLI 1.5.14 opens the system browser on `authenticate` and waits 300 s for it; its sign-in is `acp --login`.
+    if (input.runtime.harnessPath !== null) await client.request("authenticate", { methodId: "oauth-personal" }, remaining());
     const session = await client.request(
       "session/new",
       { cwd: input.cwd ?? input.profile.directory, mcpServers: [], ...antigravitySessionSetup(initialized) },
@@ -775,10 +761,32 @@ const runtimeVersion = (value: unknown) => typeof value === "string" ? value.rep
 
 /** agy_acp_server 1.4.2 to 1.4.5 create or overwrite skills/system/run-workflow/SKILL.md in the session's folder unless
  * the session turns its `run_workflow` tool off. Sent with session/new, session/load and session/resume. */
-export function antigravitySessionSetup(initialized: any): { _meta?: { antigravity: { disabledTools: string[] } } } {
+export function antigravitySessionSetup(
+  initialized: any,
+  system?: string,
+): { _meta?: { antigravity: { disabledTools?: string[]; systemPrompt?: { append: string } } } } {
   const match = /^1\.4\.(\d+)(?!\d)/u.exec(runtimeVersion(initialized?.agentInfo?.version));
   const patch = match ? Number(match[1]) : -1;
-  return patch >= 2 && patch <= 5 ? { _meta: { antigravity: { disabledTools: ["run_workflow"] } } } : {};
+  const antigravity = {
+    ...(patch >= 2 && patch <= 5 ? { disabledTools: ["run_workflow"] } : {}),
+    ...(system === undefined ? {} : { systemPrompt: { append: system } }),
+  };
+  return Object.keys(antigravity).length > 0 ? { _meta: { antigravity } } : {};
+}
+
+/** The native CLI (1.5.14) advertises `_meta.antigravity.systemPrompt.append` in initialize: session/new, session/load and
+ * session/resume then take the system prompt there, kept with the conversation, and it never reaches the scan that turns
+ * a `/word` anywhere in a prompt's first text block into that command. */
+export function antigravityTakesSystemPrompt(initialized: any): boolean {
+  return initialized?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
+}
+
+/** The native CLI (1.5.16) advertises no MCP transport in `initialize`, yet connects to a session's `type: "http"` servers.
+ * It gives a session's MCP servers about 5 s to list their tools during session/new or session/resume ("Failed to preload
+ * the session's MCP servers: context deadline exceeded"), then prompts without the ones still starting, so a stdio proxy
+ * whose process starts slowly loses its tools; a URL answers in milliseconds. */
+export function antigravityCliTakesHttpMcp(initialized: unknown): boolean {
+  return (initialized as { agentInfo?: { name?: unknown } } | null | undefined)?.agentInfo?.name === "Antigravity ACP Server";
 }
 
 /** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath

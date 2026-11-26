@@ -2108,6 +2108,13 @@ body {
   -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
   mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px));
 }
+/* A room's feed of threads: its header is plain words, so nothing that scrolls under it shows through. Rows fade in over
+   the last --feed-fade above the bar's edge, where the top row rests; a mask, so any skin's ground shows. */
+.glass-scroller[data-feed-fade] {
+  --feed-fade: 12px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--feed-fade)), #000 var(--glass-top, 0px));
+  mask-image: linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--feed-fade)), #000 var(--glass-top, 0px));
+}
 [data-chathead-float] {
   pointer-events: none;
 }
@@ -2215,6 +2222,8 @@ body {
 [data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
   outline-offset: -2px;
 }
+/* A whole-row button in a card takes the card's corners, so its inset ring never cuts across a rounded corner. */
+[data-settings-look] [data-settings-rows] > button:focus-visible { border-radius: 12px; }
 /* A menu row shows keyboard focus as its hover fill. */
 [role="menu"] :is(button, [role^="menuitem"]):focus-visible {
   outline: none;
@@ -2615,6 +2624,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
    without touching system settings; the welcome flow also reads it to skip
    its view transitions. Mirrors the media block above for its own classes. */
 :root[data-reduced-motion="true"] .animate-rise,
+:root[data-reduced-motion="true"] .animate-link-flow,
 :root[data-reduced-motion="true"] .animate-spot-in,
 :root[data-reduced-motion="true"] .animate-pop-in,
 :root[data-reduced-motion="true"] .animate-pop-out,
@@ -3870,7 +3880,7 @@ button:disabled.bg-danger {
 @keyframes burger-drop {
   0% { opacity: 0; min-height: 0; max-height: 0; transform: translateY(-12px) scale(0.96); filter: blur(4px); }
   45% { opacity: 1; min-height: 2.25rem; max-height: 3rem; filter: blur(0); }
-  100% { opacity: 1; min-height: 2.25rem; max-height: 3rem; transform: none; filter: none; }
+  100% { opacity: 1; min-height: 2.25rem; max-height: none; transform: none; filter: none; }
 }
 @keyframes burger-land {
   from { background-color: color-mix(in srgb, var(--color-accent) 14%, var(--color-card)); }
@@ -3891,9 +3901,85 @@ button:disabled.bg-danger {
 }
 :root[data-reduced-motion="true"] :is(.burger-layer, .burger-stacked .burger-bun-bottom, .burger-stacked .burger-bun-bottom > *) { animation: none; }
 :root[data-reduced-motion="true"] .skill-burger .thinking-sheen { display: none; }
+/* The pill's count ticks over in place, and a new app's mark slides in at its end. */
+@keyframes burger-tick { from { opacity: 0; transform: translateY(45%); } }
+.burger-tick { animation: burger-tick 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes burger-mark-in { from { opacity: 0; transform: translateX(-6px) scale(0.96); } }
+.burger-mark-in { animation: burger-mark-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) { .burger-tick, .burger-mark-in { animation: none; } }
+:root[data-reduced-motion="true"] :is(.burger-tick, .burger-mark-in) { animation: none; }
 /* Folding the layers: the list's row collapses to nothing and fades, so the bun below glides up rather than jumping. */
 .burger-fold { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out; }
 .burger-fold[data-folded="true"] { grid-template-rows: 0fr; opacity: 0; }
-.burger-fold > ol { overflow: hidden auto; }
+.burger-fold > ol, .burger-fold > div { overflow: hidden auto; min-width: 0; }
+.burger-fold { grid-template-columns: minmax(0, 1fr); }
+/* Rows that open to show more (a finished run's steps, its inputs and outcome, a step's replies) keep the landing glow
+   but not the drop's height cap. */
+.burger-layer.burger-open { animation: burger-land 1100ms ease-out 180ms both; }
 @media (prefers-reduced-motion: reduce) { .burger-fold { transition: none; } }
 :root[data-reduced-motion="true"] .burger-fold { transition: none; }
+/* Thread tabs, from tablet width up: the sidebar and the chat header's band are one frame in the sidebar's ground, and
+   the chat is a card set into it, its top corners rounded where it meets the band (the right one square while a panel
+   sits beside the chat). A hairline in the frame's edge colour runs along the card's top, round its corners and down
+   the sidebar's side. The open tab's ground is the card's and slides between tabs; its foot curves out into the band.
+   Separators sit only between two closed tabs, neither under the pointer. Every control in the band is 32px tall on
+   the sidebar buttons' centre line, 10px apart as the sidebar's are, and the band's end inset mirrors the sidebar's;
+   Simple's sidebar buttons step down to 32px beside it on the same line. Midnight's frame sits a step darker than its
+   sidebar elsewhere, so the card's corners read as clearly as Daylight's. */
+@media (min-width: 768px) {
+  [data-chathead-tabs] {
+    --chat-card-radius: var(--radius-xl);
+    position: relative; padding-top: 12px; padding-bottom: 0;
+    background: linear-gradient(var(--color-edge), var(--color-edge)) var(--chat-card-radius) 100% / calc(100% - 2 * var(--chat-card-radius)) 0.5px no-repeat, var(--color-panel);
+  }
+  [data-chathead-tabs="advanced"] { padding-top: 6px; }
+  [data-chathead-tabs]:has([data-panel-beside]) { background-size: calc(100% - var(--chat-card-radius)) 0.5px, auto; }
+  [data-chathead-tabs]::before,
+  [data-chathead-tabs]::after { content: ""; position: absolute; top: 100%; width: var(--chat-card-radius); height: var(--chat-card-radius); pointer-events: none; }
+  [data-chathead-tabs]::before { left: 0; background: radial-gradient(circle at 100% 100%, transparent calc(var(--chat-card-radius) - 0.5px), var(--color-edge) calc(var(--chat-card-radius) - 0.5px), var(--color-edge) var(--chat-card-radius), var(--color-panel) calc(var(--chat-card-radius) + 0.5px)); }
+  [data-chathead-tabs]::after { right: 0; background: radial-gradient(circle at 0 100%, transparent calc(var(--chat-card-radius) - 0.5px), var(--color-edge) calc(var(--chat-card-radius) - 0.5px), var(--color-edge) var(--chat-card-radius), var(--color-panel) calc(var(--chat-card-radius) + 0.5px)); }
+  [data-chathead-tabs]:has([data-panel-beside])::after { display: none; }
+  :root[data-chat-tabs-frame="simple"] [data-sidebar] { border-image: linear-gradient(to bottom, transparent 60px, var(--color-edge) 60px) 1; }
+  :root[data-chat-tabs-frame="advanced"] [data-sidebar] { border-image: linear-gradient(to bottom, transparent 54px, var(--color-edge) 54px) 1; }
+  :root[data-skin="midnight"][data-chat-tabs-frame] { --color-frame: #0a0a0a; }
+  :root[data-skin="midnight"][data-chat-tabs-frame] :is([data-sidebar], [data-places-rail], [data-chathead-tabs]) { --color-panel: #0a0a0a; }
+  :root[data-chat-tabs-frame="simple"] [data-sidebar-top-row="simple"] { padding-top: 14px; }
+  :root[data-chat-tabs-frame="simple"] [data-sidebar-top-row="simple"] :is([data-rail-toggle], [data-sidebar-top-buttons] button.size-9) { width: 32px; height: 32px; }
+  [data-chathead-tabs] [data-chathead-row] { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; height: 100%; }
+  [data-chathead-tabs] [data-chathead-identity] { grid-column: 2; justify-self: stretch; align-self: stretch; -webkit-app-region: drag !important; }
+  [data-chathead-tabs] [data-chathead-identity] > :not([data-thread-tabs], [data-chathead-status]) { display: none; }
+  [data-chathead-tabs="advanced"] [data-chathead-identity] { margin-inline-start: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] { grid-column: 3; margin-inline-start: 8px; gap: 10px; }
+  [data-chathead-tabs="simple"] { height: 48px; padding-inline-end: 16px; }
+  [data-chathead-tabs="advanced"] { height: 42px; padding-inline-end: 8px; }
+  [data-chathead-tabs] [data-chathead-controls] :is(.size-9, .h-9, [data-model-pill]) { height: 32px; }
+  [data-chathead-tabs] [data-chathead-controls] .size-9 { width: 32px; }
+  [data-chathead-tabs] [data-chathead-controls] .min-w-9 { min-width: 32px; }
+}
+.thread-tab-indicator {
+  --tab-foot: 10px;
+  position: absolute; left: 0; bottom: 0; height: 34px; border-radius: var(--tab-foot) var(--tab-foot) 0 0; background: var(--color-app); pointer-events: none;
+}
+.thread-tab-indicator[data-glide] { transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), width 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.thread-tab-indicator::before,
+.thread-tab-indicator::after { content: ""; position: absolute; bottom: 0; width: var(--tab-foot); height: var(--tab-foot); }
+.thread-tab-indicator::before { right: 100%; background: radial-gradient(circle at 0 0, transparent calc(var(--tab-foot) - 0.5px), var(--color-app) var(--tab-foot)); }
+.thread-tab-indicator::after { left: 100%; background: radial-gradient(circle at 100% 0, transparent calc(var(--tab-foot) - 0.5px), var(--color-app) var(--tab-foot)); }
+.thread-tab + .thread-tab::before {
+  content: ""; position: absolute; inset-inline-start: -1.5px; top: 8px; width: 1px; height: 16px; background: var(--color-hairline);
+  transition: opacity 120ms ease-out;
+}
+.thread-tab[aria-selected="true"]::before,
+.thread-tab[aria-selected="true"] + .thread-tab::before,
+.thread-tab:hover::before,
+.thread-tab:hover + .thread-tab::before { opacity: 0; }
+.thread-tab[data-entering] { animation: thread-tab-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.thread-tab[data-leaving] { animation: thread-tab-out 180ms cubic-bezier(0.22, 1, 0.36, 1) both; pointer-events: none; }
+@keyframes thread-tab-in { from { max-width: 0; padding-inline: 0; opacity: 0; } }
+@keyframes thread-tab-out { to { max-width: 0; padding-inline: 0; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .thread-tab, .thread-tab::before, .thread-tab-indicator { animation: none !important; transition: none !important; }
+}
+:root[data-reduced-motion="true"] .thread-tab,
+:root[data-reduced-motion="true"] .thread-tab::before,
+:root[data-reduced-motion="true"] .thread-tab-indicator { animation: none !important; transition: none !important; }

@@ -115,21 +115,33 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(menuOf(createElement(ChatMoreMenu, { bot: fresh })).items.find((one) => one.key === "start-fresh")!.disabled).toBe(true);
   });
 
-  it("starts a new thread with the bot", () => {
+  it("starts a new thread with the bot and displays the platform shortcut hint", () => {
+    const win = globalThis.window as { ogb?: { platform?: string } };
+    try {
+      for (const [platform, expected] of [["darwin", "⌘ ⇧ N"], ["win32", "Ctrl Shift N"], ["linux", "Ctrl Shift N"]] as const) {
+        win.ogb = { platform };
+        const menu = menuOf(createElement(ChatMoreMenu, { bot }));
+        const newThread = menu.items.find((item) => item.key === "new-thread")!;
+        expect(renderToStaticMarkup(createElement("div", null, newThread.trailing))).toContain(expected);
+      }
+    } finally {
+      delete win.ogb;
+    }
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     menu.items.find((item) => item.key === "new-thread")!.onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "pepper" });
   });
 
-  it("lists the bot's threads newest first, without routine runs, marks the open one and opens another", () => {
+  it("lists the bot's main thread first, then newest first, without routine runs, marks the open one and opens another", () => {
     const threads = menuOf(createElement(ChatMoreMenu, { bot })).items.find((item) => item.key === "threads")!;
     expect(threads).toMatchObject({ label: "All threads", value: "3" });
     expect(threads.submenu!.map((item) => [item.label, Boolean(item.active)])).toEqual([
+      ["Our chat", false],
       ["Trip plan", true],
       ["Untitled chat", false],
-      ["Our chat", false],
     ]);
-    threads.submenu![2].onSelect();
+    expect(threads.submenu!.map((item) => renderToStaticMarkup(createElement("div", null, item.trailing)).includes('aria-label="Main thread"'))).toEqual([true, false, false]);
+    threads.submenu![0].onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "pepper", threadId: "main" });
   });
 

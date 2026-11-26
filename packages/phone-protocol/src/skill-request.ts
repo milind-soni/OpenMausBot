@@ -53,6 +53,8 @@ export interface SkillRequestCardData {
   previous?: { preview: string; source: string; references?: Array<{ path: string; content: string }>; enabled?: boolean };
   shared?: SkillShareRecord;
   shareError?: string;
+  /** The change is to a skill on all of the person's bots, not this bot's own. */
+  allBots?: true;
 }
 
 /** The hash a current client may echo after it displayed the complete

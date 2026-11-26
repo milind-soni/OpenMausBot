@@ -18,6 +18,7 @@ function stagedSkillMatches(target: string, paths: string[], hash: string): bool
       const path = prefix + name;
       const full = join(folder, name);
       const info = lstatSync(full);
+      if (skillFilePathProblem(path, info.isDirectory())) return true;
       return info.isDirectory() ? folders.has(path) && visit(full, path + "/") : info.isFile() && expected.has(path);
     });
   };

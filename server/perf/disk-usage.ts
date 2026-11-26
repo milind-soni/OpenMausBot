@@ -50,6 +50,8 @@ export interface StorageReport {
   bots: Array<{ id: string } & Tally>;
   /** The other bot folders: bots not shown, and folders of ids the store does not know. */
   botsRest: Tally & { count: number };
+  /** The part of `botsRest` in folders of ids the store does not know now: bots deleted since, mostly. */
+  botsGone?: Tally & { count: number };
   other: { named: Array<{ name: string } & Tally>; unlisted: Tally & { entries: number } } | null;
   skipped: WalkSkipped | null;
   linksCapped: boolean;
@@ -59,6 +61,8 @@ export interface StorageReport {
   resumes: number;
   /** The last pass failed; the figures are from the one before, if any. */
   failed: boolean;
+  /** What the cache cap removed (cache-sweep/sweeper.ts): every clear, and the emergency passes; absent before it ran. */
+  caches?: { cacheCleared: { count: number; bytes: number; entries: number; at: number | null; reason: string | null }; emergency: { count: number; bytes: number; at: number | null } };
 }
 
 export interface CompletedPass { at: number; tookMs: number; totals: WalkTotals; volume: VolumeBytes | null }
@@ -239,8 +243,11 @@ export function createDiskUsage(options: DiskUsageOptions) {
       const known = (id: string) => ID.test(id) && (() => { try { return options.knownBot?.(id) === true; } catch { return false; } })();
       const bots = [...totals?.bots ?? []].filter(([id]) => known(id)).sort(([, a], [, b]) => b.bytes - a.bytes);
       const shown = bots.slice(0, BOTS_SHOWN);
-      const rest = { bytes: 0, files: 0, count: 0 };
-      for (const [id, tally] of totals?.bots ?? []) if (!shown.some(([shownId]) => shownId === id)) { rest.bytes += tally.bytes; rest.files += tally.files; rest.count += 1; }
+      const rest = { bytes: 0, files: 0, count: 0 }, gone = { bytes: 0, files: 0, count: 0 };
+      for (const [id, tally] of totals?.bots ?? []) if (!shown.some(([shownId]) => shownId === id)) {
+        rest.bytes += tally.bytes; rest.files += tally.files; rest.count += 1;
+        if (!known(id)) { gone.bytes += tally.bytes; gone.files += tally.files; gone.count += 1; }
+      }
       if (totals) { rest.bytes += totals.botsOverflow.bytes; rest.files += totals.botsOverflow.files; }
       const volume = last?.volume ?? null;
       return {
@@ -258,6 +265,7 @@ export function createDiskUsage(options: DiskUsageOptions) {
           .filter((row) => row.bytes > 0 || row.files > 0).sort((a, b) => b.bytes - a.bytes) : [],
         bots: shown.map(([id, tally]) => ({ id, ...tally })),
         botsRest: rest,
+        botsGone: gone,
         other: totals ? {
           named: [...totals.otherNamed].filter(([name]) => OTHER_NAMES.has(name)).sort(([, a], [, b]) => b.bytes - a.bytes).slice(0, OTHER_SHOWN).map(([name, tally]) => ({ name, ...tally })),
           unlisted: { ...totals.otherUnlisted },

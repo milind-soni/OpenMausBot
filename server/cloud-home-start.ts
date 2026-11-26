@@ -34,6 +34,9 @@ export function passwdIds(passwd: string, name: string): { uid: number; gid: num
  * gives the server belongs here too (docker-image.test.ts checks): without OMB_DUCKDB_DIR the server found neither the
  * 1Password SDK nor DuckDB, which the image keeps in /app/duckdb, and said 1Password was "not available in this build". */
 const SERVER_ENV_NAMES = new Set([
+  // Antigravity accounts with no runtime of their own run Google's native CLI (server/drivers/antigravity-cli-install.ts):
+  // the Admin or a test home sets it, and without the name here a Cloud home could never turn it on.
+  "OMB_ANTIGRAVITY_NATIVE_CLI",
   "PATH", "SHELL", "HOSTNAME", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "NO_COLOR", "NODE_ENV", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
   "AGENT_BROWSER_EXECUTABLE_PATH", "OMB_STATIC_DIR", "OMB_DATA_DIR", "OMB_DUCKDB_DIR",
   "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
@@ -47,6 +50,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_BOT_BOX",
   // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
   "OMB_CACHE_ROOT",
+  // Their cap (server/cache-sweep/limits.ts): the sweeper's switch, off unless the Admin turns it on, and the caps' overrides.
+  "OMB_CACHE_SWEEP", "OMB_CACHE_CAP_TOOLS", "OMB_CACHE_CAP_APP",
   // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
   "OMB_IMAGE_ENGINES",
   // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
@@ -59,6 +64,8 @@ const SERVER_ENV_NAMES = new Set([
   "OMB_CONVERSATION_FOLDER_CLEANUP",
   // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
   "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
+  // The idle reclaim's switch (server/host/idle-reclaim.ts): off, report or remove, set per home by the Admin.
+  "OMB_IDLE_RECLAIM",
   // The full tool results' day-old sweep (server/host/tool-results-sweep.ts), off unless the Admin sets it.
   "OMB_TOOL_RESULTS_SWEEP",
 ]);

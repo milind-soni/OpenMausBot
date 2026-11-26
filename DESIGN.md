@@ -46,14 +46,21 @@ where they belong instead of adding new places.
   pinned message) is fine: it opens a menu and is gone when there is nothing
   to show. One exception: **New thread** (a plus, also ⌘T) sits at the end of the
   header in both modes, because starting a thread is an everyday action people
-  look for at the top.
+  look for at the top. With Thread tabs on, the bot's threads take the pill's
+  place in the header as tabs, with the plus at their end. With it off, Simple
+  mode's pill opens a bot's threads once it has two, and the plus sits at their end.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
   Settings. Don't add a second home for the same setting.
 - **No new settings.** No new global settings, toggles or hidden flags. Make
   the behaviour automatic with a good default. An optional field on something
-  the person sets up is fine.
+  the person sets up is fine. One exception: **Settings → Features**, a short
+  list of plain on/off switches for whole features some people don't want
+  (Skill Burger, thread tabs, room feed). It's there so
+  Simple mode can turn off one feature at a time without switching to
+  Advanced. A switch goes there only when its off state is clean: the feature
+  is hidden whole, and nothing the person made is lost.
 - **No new asks.** No new permission asks, approval cards, confirm dialogs,
   nags or waits that interrupt the person, and no default below Full access.
   A bot gets on with the work; a change that needs undoing gets **Undo**.
@@ -180,12 +187,24 @@ element's job and never a pixel value:
   chevrons at the end of a row, not before the label.
 - **Control heights: 24, 28, 32 or 36px.** Menu rows are 30px (32px in the
   composer's menu). The chat header's controls and the sidebar's top buttons
-  are 36px. On touch screens, targets grow to 40–44px with the `touch:`
+  are 36px; beside the thread tabs band both are 32px, on the same centre
+  line. On touch screens, targets grow to 40–44px with the `touch:`
   variant.
 - **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
   in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
   pages never join them: a bot's pages are in its bot panel's Library tab.
+- **With Room feed on, a room is a feed of its threads.** Each row is a
+  thread's first line, its reply count, who replied and when; a row, a room
+  thread opened from anywhere, and an Inbox line open their thread in a panel
+  beside the chat (`ForkPanel`), never by moving the room's current thread,
+  which is everyone's. The feed's composer starts a new thread. A row carries
+  the sidebar thread row's menu behind a quiet More (hover, focus and touch),
+  a pin mark when pinned, and its unread or waiting dot; the thread beside the
+  feed has the same menu in its header, with its export. Archived threads come
+  back under "Show archived threads" at the top of the feed. The header is plain
+  words, so the feed is masked under it. Below 768px the room is today's single
+  transcript.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:
   from 1040px with a 320px panel (a room, Simple's inbox, Notifications), from
   1280px with a wider one. Narrower, it folds to its avatars.

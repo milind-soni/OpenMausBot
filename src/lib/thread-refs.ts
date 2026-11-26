@@ -1,3 +1,5 @@
+import { replaceUrl } from "./replace-url";
+
 export interface ThreadRefCandidate {
   botId: string;
   botName: string;
@@ -149,7 +151,7 @@ export function takeThreadLinkFromLocation(): string | null {
   params.delete("thread");
   params.delete("bot");
   const search = params.toString();
-  window.history.replaceState(null, "", location.pathname + (search ? `?${search}` : "") + location.hash);
+  replaceUrl(location.pathname + (search ? `?${search}` : "") + location.hash);
   return THREAD_URL_PREFIX + encodeURIComponent(thread) + (bot === null ? "" : "?bot=" + encodeURIComponent(bot));
 }
 

@@ -9,6 +9,22 @@ export const BACKGROUND_TEXT_TIMEOUT_MS = 120_000;
 export const BACKGROUND_TEXT_MAX_CHARS = 200_000;
 const MAX_STDOUT_BYTES = 4_000_000;
 
+/** Resolves a one-shot turn model for drivers that accept it outside `selectModel` (for example `-m` and `session/set_model`). */
+export function oneShotTurnModel(
+  support: Pick<AcpSupport, "oneShotModel" | "selectModel">,
+  env: Record<string, string | undefined>,
+  options: TextGenerationOptions,
+  models: ModelCatalog,
+): string | undefined {
+  const requested = options.model ?? options.fallback?.model;
+  if (!support.oneShotModel || support.selectModel || !requested) return undefined;
+  try {
+    return support.oneShotModel(requested, env, models) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Sets a one-shot's env for the bot's own model, not the engine's default (a local model server may hold only the
  * model its chats run on), and returns that model for the session to pick. */
 export function applyOneShotEnv(
@@ -16,14 +32,16 @@ export function applyOneShotEnv(
   env: Record<string, string | undefined>,
   options: TextGenerationOptions,
   models: ModelCatalog,
-  ctx: { fullAuto: false; cwd: string; threadId: string; mcpServers: [] },
+  ctx: { fullAuto: false; cwd: string; threadId: string; mcpServers: []; model?: string },
 ): AcpOneShotInput["model"] {
   const selection = support.selectModel;
-  const requestedModel = selection ? options.model ?? options.fallback?.model : undefined;
-  const model = requestedModel && requestedModel !== selection?.agentDefault
-    ? resolveOneShotModel(support, requestedModel, env, models)
-    : undefined;
-  support.applyTurnEnv?.(env, { ...(model ? { model, requestedModel } : {}), ...ctx });
+  const requestedModel = selection || ctx.model ? options.model ?? options.fallback?.model : undefined;
+  const model = selection
+    ? (requestedModel && requestedModel !== selection.agentDefault
+      ? resolveOneShotModel(support, requestedModel, env, models)
+      : undefined)
+    : ctx.model;
+  support.applyTurnEnv?.(env, { ...ctx, ...(model ? { model, requestedModel } : {}) });
   return model && selection ? { configId: selection.configId, id: model } : undefined;
 }
 
@@ -58,9 +76,13 @@ export interface AcpOneShotInput {
   defaultModel: string;
   /** Picked through this session config option when the session offers it; otherwise the session's own model runs. */
   model?: { configId: string; id: string } | undefined;
+  /** Model applied outside `selectModel` (e.g. via argv or `configure`), used for usage attribution once configured. */
+  configuredModel?: string;
   pickAuthMethod: (methods: Array<{ id?: string }>) => string | null;
   authRequired: boolean | "if-requested";
   loginNote: string;
+  /** Whether a session/new refusal asks for a sign-in; it then fails with `loginNote`. */
+  signInRefused?: (error: unknown) => boolean;
   clientCapabilitiesMeta?: Record<string, unknown>;
   configure?: (ctx: { request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>; sessionId: string; session: any }) => Promise<void>;
   options?: TextGenerationOptions;
@@ -127,7 +149,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
         const waiter = pending.get(msg.id);
         pending.delete(msg.id);
         if (!waiter) return;
-        if (msg.error) waiter.reject(new Error(`${name} background ${typeof msg.error?.message === "string" ? msg.error.message.slice(0, 200) : "request failed"}`));
+        if (msg.error) waiter.reject(Object.assign(new Error(`${name} background ${typeof msg.error?.message === "string" ? msg.error.message.slice(0, 200) : "request failed"}`), { code: msg.error?.code, data: msg.error?.data }));
         else waiter.resolve(msg.result);
         return;
       }
@@ -201,7 +223,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       } else if (input.authRequired === true) {
         throw new Error(input.loginNote);
       }
-      const session = await request("session/new", { cwd: input.cwd, mcpServers: [] });
+      const session = await request("session/new", { cwd: input.cwd, mcpServers: [] }).catch((error: unknown) => { throw input.signInRefused?.(error) ? new Error(input.loginNote) : error; });
       if (typeof session?.sessionId !== "string") throw new Error(`${name} background session/new returned no sessionId`);
       sessionId = session.sessionId;
       model = typeof session?.models?.currentModelId === "string" ? session.models.currentModelId
@@ -218,6 +240,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
         model = wanted.id;
       }
       await input.configure?.({ request: (method, params) => request(method, params), sessionId: session.sessionId, session });
+      if (!input.model && input.configuredModel) model = input.configuredModel;
       const result = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: input.prompt }] });
       const reported = result?.usage ?? result?._meta ?? {};
       const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);

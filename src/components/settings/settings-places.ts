@@ -27,6 +27,7 @@ const KINDS: ReadonlyArray<{ only: string; ctx: Partial<SettingsContext> }> = [
   { only: "a company's managed MausBot", ctx: { organization: true } },
   { only: "a place with the skills library on", ctx: { skills: true } },
   { only: "a server that manages installations", ctx: { installations: true } },
+  { only: "a MausBot Cloud's Settings, for its owner or admins", ctx: { cloud: true, storage: true } },
 ];
 
 function onlyOn(shows: (ctx: SettingsContext) => boolean): string | undefined {

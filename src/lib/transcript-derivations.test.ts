@@ -69,6 +69,19 @@ describe("transcriptLookups", () => {
     expect(transcriptLookups([digest], [digest]).retryableId).toBeUndefined();
   });
 
+  it("keeps Retry on a turn its AI's sign-out stopped, past the notice about that sign-in", () => {
+    const failed = msg("e", { kind: "activity", tool: { name: "error: Not logged in · Please run /login", ok: false, setup: true }, at: 40, parentId: "f" });
+    const signedOut = msg("n", { kind: "activity", tool: { name: "notice: Claude is signed out on this computer.", ok: true, setup: true }, at: 41, parentId: "e" });
+    const signedIn = msg("n", { kind: "activity", tool: { name: "notice: Claude is signed in again.", nameCode: "chat.notice.signedInAgain", nameParams: { engine: "Claude" }, ok: true }, at: 41, parentId: "e" });
+    const turnDigest = msg("d2", { kind: "digest", text: "turn failed", at: 42, parentId: "n" });
+    for (const notice of [signedOut, signedIn]) {
+      const path = [root, q3, a3, follow, failed, notice, turnDigest];
+      expect(transcriptLookups(path, path).retryableId).toBe("e");
+    }
+    const partlyRan = msg("p", { kind: "activity", tool: { name: "notice: switched to Codex. Part of your request had already run, so it was not sent again.", nameCode: "chat.notice.backupAlreadyRan", nameParams: { name: "Codex" }, ok: false }, at: 41, parentId: "e" });
+    expect(transcriptLookups([root, follow, failed, partlyRan], [root, follow, failed, partlyRan]).retryableId).toBe("p");
+  });
+
   it("keeps Retry on the last conversational row when a live call's record follows it", () => {
     const record = msg("call", {
       kind: "call",

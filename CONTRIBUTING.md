@@ -149,6 +149,14 @@ Such a change ships in **two releases**:
 2. **Write it one release later.** Start writing the new format and raise
    `writes` to match. The release before can already read it.
 
+**Clouds need one more step.** The Cloud Admin keeps its own list of data
+formats (`DATA_FORMATS` in the `openmaus-cloud` repo's
+`server/cloud-home-image.ts`): for each format, its first reader and first
+writer release. With it, a Cloud below the reader updates to the reader first,
+and a failed update never rolls a Cloud back to a version that refuses its
+data. Add the new format there, and deploy the Admin, **before** the release
+that raises `writes` is published.
+
 For Vault values over 4 KiB, **Prepare next release** advances `writes` to 2
 when the preceding published release's tag confirms format 2 read support.
 

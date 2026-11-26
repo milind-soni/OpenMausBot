@@ -37,6 +37,7 @@ import {
   type CommandRunner,
   type LocalVmTarget,
   autoLocalVmAttachable,
+  dockerWorkspaceMountIsSafe,
 } from "./container-computer.ts";
 import { DESKTOP_FLAGS_LABEL, DESKTOP_FLAGS_VERSION, dockerSecurityIsHardened, podmanSecurityIsHardened } from "./container-isolation.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
@@ -366,6 +367,31 @@ describe("containerRuntimeStatus probe of a hung runtime", () => {
 
     expect(both.map((status) => status.daemonUp)).toEqual([true, true]);
     expect(infos).toBe(1);
+  });
+});
+
+describe("dockerWorkspaceMountIsSafe", () => {
+  const workspace = "C:\\Users\\light\\.openmausbot\\vm-home";
+  const mount = (Source: string) => [{ Type: "bind", Source, Destination: VM_WORKSPACE_GUEST, RW: true }];
+
+  it.each([
+    "/mnt/c/Users/light/.openmausbot/vm-home",
+    "/mnt/c/Users/light/.openmausbot/vm-home/",
+    "/mnt//c/Users/light//.openmausbot/vm-home",
+    "\\mnt\\C\\Users\\light\\.openmausbot\\vm-home",
+  ])("accepts the WSL translation of a Windows workspace for any runtime: %s", (source) => {
+    expect(dockerWorkspaceMountIsSafe(mount(source), "win32", workspace)).toBe(true);
+  });
+
+  it("still rejects a different folder, other platforms and a non-bind mount", () => {
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/c/Users/light/other"), "win32", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/d/Users/light/.openmausbot/vm-home"), "win32", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/c/Users/light/.openmausbot/vm-home"), "linux", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(
+      [{ Type: "volume", Source: "/mnt/c/Users/light/.openmausbot/vm-home", Destination: VM_WORKSPACE_GUEST, RW: true }],
+      "win32",
+      workspace,
+    )).toBe(false);
   });
 });
 
@@ -1030,9 +1056,12 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("prepare-openmausbot-workspace.sh");
     expect(dockerfile).toContain('if ! chmod 0700 "$workspace"');
     expect(dockerfile).toContain('test -r "$directory" && test -w "$directory" && test -x "$directory"');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.config/google-chrome" google-chrome');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.config/chromium" chromium');
-    expect(dockerfile).toContain('migrate_profile "$HOME/.mozilla" mozilla');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.config/google-chrome" "$profiles/google-chrome"');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.config/chromium" "$profiles/chromium"');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.mozilla" "$profiles/mozilla"');
+    expect(dockerfile).toContain('migrate_profile "$HOME/.local" "$apps/local"');
+    expect(dockerfile).toContain("cp -an");
+    expect(dockerfile).toContain("unmerged-");
     expect(dockerfile).toContain("SingletonLock");
     expect(dockerfile).toContain(`${IMAGE_LAYER_LABEL}="${IMAGE_LAYER_VERSION}"`);
     expect(dockerfile).toContain("did not become ready within 45 seconds");
@@ -1046,7 +1075,7 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("9");
+    expect(IMAGE_LAYER_VERSION).toBe("10");
   });
 
   it("starts the driver's Chrome without its own sandbox inside the hardened container", () => {

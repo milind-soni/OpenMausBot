@@ -205,6 +205,21 @@ describe("Settings → AI: Sign out on other CLI sign-ins", () => {
     expect(server.calls.some((call) => call.method === "PATCH")).toBe(false);
   });
 
+  // The native CLI keeps each account's sign-in in its own profile (antigravity-acp.ts), so signing out ends that one alone.
+  it.each([["antigravity", true], ["agy", false]] as const)("asks the usual question before signing out an account on %s (native CLI: %s)", async (cli, native) => {
+    server.all = [codex, {
+      instanceId: "antigravity", driverKind: "antigravityAgent", displayName: "Antigravity", cli,
+      snapshot: { state: "available", authenticated: true, ...(native ? { nativeCli: true as const } : {}) }, models: { default: "gemini", options: [] },
+      authentication: { method: "callback-url", signOut: true },
+    }];
+    fixture.state = { ...fixture.state, instances: [...server.all] };
+    await render();
+    await click(rowButton("antigravity"));
+    await click([...container.querySelectorAll('[data-engine-card="antigravity"] button')].find((button) => button.textContent === "Sign out"));
+    expect(document.body.textContent).toContain("Bots that use this account need it signed in again before their next task.");
+    expect(document.body.textContent).not.toContain("keeps one sign-in");
+  });
+
   it("offers no Sign out to an engine an API key signs in", async () => {
     server.all = [codex, vibe({ method: "api-key" })];
     fixture.state = { ...fixture.state, instances: [...server.all] };

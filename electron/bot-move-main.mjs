@@ -116,7 +116,9 @@ export function createBotMove({ journal, local, send, session, lease = null, rea
           if (!arrived.ok) throw Object.assign(new Error(arrived.body?.error ?? "My Cloud did not finish the move."), { status: arrived.status });
           const going = new Set(ids());
           const bots = list((await local.call("GET", "/api/bots?messages=0").catch(() => null))?.body?.bots);
-          note(move.bot.id, { lend: [...new Set(bots.filter((bot) => going.has(bot?.id) && typeof bot.cwd === "string" && bot.cwd).map((bot) => bot.cwd))] });
+          // The working folders go with the person's say in the move step: a choice made before the step said nothing lends them.
+          const lendFolders = current().keepFolders !== false;
+          note(move.bot.id, { lend: lendFolders ? [...new Set(bots.filter((bot) => going.has(bot?.id) && typeof bot.cwd === "string" && bot.cwd).map((bot) => bot.cwd))] : [] });
         },
       },
       close: async () => { await lease?.release().catch(() => {}); },
@@ -127,16 +129,24 @@ export function createBotMove({ journal, local, send, session, lease = null, rea
 
   return {
     kick: () => engine.kick().finally(lendWaiting),
-    /** Moves this choice of bots for this account; bots already on their way are left out. Null when none is left to move. */
-    start(bots, account = null) {
+    /** Moves this choice of bots for this account; bots already on their way are left out. Null when none is left to move.
+     * `keepFolders`: false when the person chose not to lend the bots' working folders to My Cloud. `commandsError`: why
+     * letting the Clouds run commands here, asked for with this move, failed; the move's line says it. */
+    start(bots, account = null, { keepFolders = true, commandsError = null } = {}) {
       const moving = new Set(moves().filter((move) => move.phase !== "done" && !move.stopped).flatMap((move) => list(move.bots).map((bot) => bot.id)));
       const fresh = bots.filter((bot) => !moving.has(bot.id));
       if (!fresh.length) return null;
       const id = `bots-${randomUUID()}`;
-      void engine.start({ bot: { id, name: fresh[0].name }, team: MY_CLOUD, bots: fresh, account }).finally(lendWaiting).catch((error) => log(`bot move: ${error?.message ?? error}`));
+      void engine.start({ bot: { id, name: fresh[0].name }, team: MY_CLOUD, bots: fresh, account, ...(keepFolders ? {} : { keepFolders: false }),
+        ...(typeof commandsError === "string" && commandsError ? { commandsError: commandsError.slice(0, 300) } : {}) }).finally(lendWaiting).catch((error) => log(`bot move: ${error?.message ?? error}`));
       return id;
     },
-    view: () => engine.view(),
+    /** The move's line, and why commands asked for with it weren't lent, when they weren't. */
+    view: () => {
+      const shown = engine.view();
+      const failed = shown ? moves().find((entry) => entry.bot.id === shown.bot.id)?.commandsError : undefined;
+      return shown && typeof failed === "string" ? { ...shown, commandsError: failed } : shown;
+    },
     seen: () => engine.seen(),
     retry: () => engine.retry(),
     /** The bots on their way now, by id. */

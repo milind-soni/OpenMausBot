@@ -13,6 +13,7 @@ import {
   type SkillListing, type StagedSkillWrite,
 } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
+import { withAllBotsOffer } from "./skills-for-all-bots.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BotSkillsRouteDeps {
@@ -25,7 +26,7 @@ export interface BotSkillsRouteDeps {
 
 export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
   const { store, cfg, listBotSkills, readBotSkillFile, stagedSkillListing } = deps;
-  return async ({ req, res, url, path, method, json, readBody }) => {
+  return async ({ req, res, url, path, method, json, readBody, auth }) => {
     let m: RegExpMatchArray | null = null;
     // Imports land DISABLED: a person enables one after reading SKILL.md and its scan warnings.
     m = path.match(/^\/api\/bots\/([\w-]+)\/skill-template$/);
@@ -55,14 +56,14 @@ export function createBotSkillsRoutes(deps: BotSkillsRouteDeps): RouteHandler {
         const { skills, library } = listBotSkillsWithOrigin(m[1]!, store.bot(m[1])!.assignedSkills);
         const names = new Set(skills.map((skill) => skill.name));
         return json(res, 200, {
-          skills: [...skills, ...listBotSkills(bot, threadId).filter((skill) => !names.has(skill.name))],
+          skills: withAllBotsOffer(bot, auth, [...skills, ...listBotSkills(bot, threadId).filter((skill) => !names.has(skill.name))]),
           library,
           assignedSkills: store.bot(m[1])!.assignedSkills,
           staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
         });
       }
       return json(res, 200, {
-        skills: listBotSkills(bot, threadId),
+        skills: withAllBotsOffer(bot, auth, listBotSkills(bot, threadId)),
         staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
       });
     }

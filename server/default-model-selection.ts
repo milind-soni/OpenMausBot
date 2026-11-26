@@ -1,4 +1,5 @@
 import { freeFallback, rankAis } from "../shared/ai-ranking.ts";
+import { offeredEffortLevels } from "../shared/wire.ts";
 import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
@@ -37,13 +38,19 @@ export function withInstanceConfig<T extends SelectableInstance>(instances: read
   }));
 }
 
+/** Available by a check that answered: an engine only found installed while its checks could not finish (`unverified`,
+ * harness/probe-hold.ts) is never chosen to run a turn, a new bot's default, or a backup; its sign-in is not known yet. */
+export function confirmedAvailable(instance: Pick<SelectableInstance, "snapshot">): boolean {
+  return instance.snapshot.state === "available" && instance.snapshot.unverified !== true;
+}
+
 /** A custom endpoint brings its own credential, so its sign-in state does not count. */
 export function signedOut(instance: SelectableInstance): boolean {
   return instance.snapshot.state === "available" && instance.access !== "custom" && instance.snapshot.authenticated === false;
 }
 
 export function readyToRun(instance: SelectableInstance, context: DefaultSelectionContext = {}): boolean {
-  return instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && !signedOut(instance);
+  return instance.enabled !== false && confirmedAvailable(instance) && context.refusal?.(instance) === undefined && !signedOut(instance);
 }
 
 const defaultModel = (instance: SelectableInstance) => instance.models.default.trim()
@@ -72,11 +79,11 @@ export function selectDefaultModelSelection(
       return { instanceId: "", model: "" };
     }
     const selection = { ...preferred };
-    // A saved effort can outlive driver support: keep the model, let the provider use its default effort.
-    if (selection.effort && !instance.capabilities?.effortLevels?.includes(selection.effort)) delete selection.effort;
+    // A saved effort can outlive driver or per-model support: keep the model, let the provider use its default effort.
+    if (selection.effort && !offeredEffortLevels(instance, selection.model).includes(selection.effort)) delete selection.effort;
     return selection;
   }
-  const available = instances.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
+  const available = instances.filter((instance) => instance.enabled !== false && confirmedAvailable(instance) && context.refusal?.(instance) === undefined && defaultModel(instance));
   const ready = available.filter((instance) => readyToRun(instance, context));
   const company = context.company;
   const personal = company && instances.some((instance) => company(instance.instanceId))

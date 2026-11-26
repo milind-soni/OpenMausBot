@@ -128,6 +128,7 @@ export const CHAT_NOTICE = {
   "chat.notice.engineSignedOut": "{name} is signed out.",
   "chat.notice.failoverSignedInAgain": "{engine} is signed in again, so this conversation is back on {engine}.",
   "chat.notice.failoverSignedOut": "{from} is signed out, so {to} took over.",
+  "chat.notice.signedInAgain": "{engine} is signed in again.",
   "chat.notice.backupCardWaiting": "switched to {name}. Your request waits on a card above and continues on {name} once you act on it.",
   "chat.notice.backupRequestUnderWay": "switched to {name}. Your request is still under way here and continues on {name}.",
   "chat.notice.backupConversationBusy": "switched to {name}. This conversation is working, so your message was not sent again.",
@@ -165,6 +166,8 @@ export const CHAT_NOTICE = {
   "chat.notice.memoryReclaimedOnly": "Ran out of room, so I stopped this task to keep everything here from freezing.",
   "chat.notice.memoryReclaimedOnlyDetail": "Ran out of room, so I stopped this task to keep everything here from freezing. ({detail})",
   "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",
+  "chat.notice.cloudBusyStart": "This Cloud is too busy right now to start the AI, so this task did not run. Wait a minute and send it again, stop a heavy task that is running, or move to a bigger plan for more room.",
+  "chat.notice.cloudOutOfCpu": "The Cloud ran out of CPU for this task, so the AI could not start and nothing ran. Wait a minute and send it again, stop a heavy task that is running, or move to a bigger plan for more CPU.",
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;

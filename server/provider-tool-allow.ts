@@ -9,11 +9,15 @@ const BUILTIN_SERVERS: ReadonlySet<string> = new Set(["composio", "own_apps", "a
 const CONTROLS_A_DEVICE: ReadonlySet<string> = new Set(["computer", "phone", "openmausbot_phone"]);
 const CONTROL_TOOLS: ReadonlySet<string> = new Set(["agents:shared_computer"]);
 
-/** What a grant on `server` is tied to: the server as configured, a built-in bridge by its name, or nothing for a server
- * neither configured nor built in. */
-export function providerToolConfig(server: string, configured: Record<string, unknown>): unknown {
+/** Engines that ask about servers from their own config, which the app cannot read (Hermes: its config.yaml). */
+const OWN_MCP_CONFIG: ReadonlySet<string> = new Set(["hermesAgent"]);
+
+/** What a grant on `server` is tied to: the server as configured, a built-in bridge by its name, a server from the
+ * engine's own config by the engine and its name, or nothing for a server none of these. */
+export function providerToolConfig(server: string, configured: Record<string, unknown>, provider?: string): unknown {
   if (Object.hasOwn(configured, server)) return configured[server];
-  return BUILTIN_SERVERS.has(server) ? { builtin: server } : undefined;
+  if (BUILTIN_SERVERS.has(server)) return { builtin: server };
+  return provider && OWN_MCP_CONFIG.has(provider) ? { engineOwn: provider, server } : undefined;
 }
 
 export interface ProviderMcpTool {

@@ -30,6 +30,7 @@ import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { PlaceBadge } from "../SettingsNav";
 import { InertRow, useSwitchToComputer } from "../inert";
+import { AdvancedPagePart, AdvancedSection } from "../AdvancedSection";
 import { useOtherPlaces } from "../settings-context";
 
 /** A row this page can't change because it lives on This computer: not on the app's own home page (main's home:page). */
@@ -108,7 +109,7 @@ function PlacesFromHere() {
             <button type="button" className="ui-button" data-place-switch={other.key} onClick={other.open}>{t("servers.switch")}</button>
           </SettingRow>
         ))}
-        {workspaces.add && <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
+        {workspaces.add && <SettingsLinkRow title={t("connect.otherTitle")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
           onClick={() => void workspaces.add?.("address")} data={{ "data-server-connect": "" }} />}
       </SettingsRows>
     </SettingsGroup>
@@ -121,26 +122,26 @@ function PlacesFromHere() {
 export function GeneralPage() {
   const { ctx, place, go } = useSettingsShell();
   return <>
-    <SettingsGroup label={t("settings.simple.group.typing")} block="typing">
+    <AdvancedPagePart anchor="typing"><SettingsGroup label={t("settings.simple.group.typing")} block="typing">
       <SettingsRows selectWidth={208}>
         <LanguageRow simple />
         <SendKeyRow simple />
         <FollowUpRow simple />
         {window.ogb?.talkShortcut ? <TalkShortcutRow /> : elsewhere(window.ogb?.talkShortcut, ctx) && ctx.cloud ? <InertRow title={t("settings.search.talk")} control={<span className="text-[13px] leading-5 text-ink-secondary">{t("settings.general.talkOff")}</span>} /> : null}
       </SettingsRows>
-    </SettingsGroup>
-    <SettingsGroup label={t("notifications.title")} block="notifications"
+    </SettingsGroup></AdvancedPagePart>
+    <AdvancedPagePart anchor="notifications"><SettingsGroup label={t("notifications.title")} block="notifications"
       footnote={!ctx.client && <>{t("settings.general.awayEmails")}{" "}<button type="button" className="cursor-pointer text-accent-text hover:underline" onClick={() => go("bots", "about-you")}>{`${place.name} › ${t("settings.page.bots")}`}</button></>}>
       <SettingsRows><NotificationRows simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
     {ctx.desktop && !ctx.client && (
-      <SettingsGroup label={t("settings.general.startup")} block="startup">
+      <AdvancedPagePart anchor="startup"><SettingsGroup label={t("settings.general.startup")} block="startup">
         <SettingsRows>{window.ogb?.openAtLogin ? <OpenAtLoginRow simple /> : <InertRow title={t("settings.openAtLogin.title")} control={<Switch checked={false} tabIndex={-1} aria-label={t("settings.openAtLogin.title")} />} />}</SettingsRows>
-      </SettingsGroup>
+      </SettingsGroup></AdvancedPagePart>
     )}
-    <SettingsGroup label={t("settings.general.privacy")} block="privacy">
+    <AdvancedPagePart anchor="privacy"><SettingsGroup label={t("settings.general.privacy")} block="privacy">
       <SettingsRows><AnalyticsRow simple /></SettingsRows>
-    </SettingsGroup>
+    </SettingsGroup></AdvancedPagePart>
   </>;
 }
 
@@ -176,16 +177,16 @@ export function AppearancePage() {
       </SettingsRows>
     </SettingsGroup>
     {/* Simple keeps the Look card and Tool calls; the window's layout is Advanced. */}
-    {ctx.advanced && <SettingsGroup label={t("settings.appearance.layout")} block="appearance">
+    <AdvancedSection anchor="appearance"><SettingsGroup label={t("settings.appearance.layout")} block="appearance">
       <SettingsRows>
         <ChromeRailRow />
         <WindowFrameRow />
-        {ctx.advanced && <ShowThreadsRow />}
-        {ctx.advanced && <SidebarToolsLayoutRow />}
-        {ctx.advanced && <PinnedCirclesRow />}
-        {ctx.advanced && <UniversalPinsRow />}
+        <ShowThreadsRow />
+        <SidebarToolsLayoutRow />
+        <PinnedCirclesRow />
+        <UniversalPinsRow />
       </SettingsRows>
-    </SettingsGroup>}
+    </SettingsGroup></AdvancedSection>
     {ctx.advanced && <PinnedPanelsSettings />}
   </>;
 }

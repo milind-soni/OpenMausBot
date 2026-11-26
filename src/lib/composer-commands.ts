@@ -1,6 +1,9 @@
 import { blankCode, offersSkillCommand } from "../../shared/skill-command";
 
-export type ComposerSlashCommandId = "goal" | "learn" | "setup" | "burst" | "fork";
+export type ComposerSlashCommandId = "goal" | "learn" | "setup" | "burst" | "fork" | "archive" | "delete";
+
+/** A command that acts on the conversation itself instead of sending a message. */
+export type ComposerThreadCommand = "archive" | "delete";
 
 export type ComposerSlashCommand =
   | { kind: "command"; id: ComposerSlashCommandId; label: `/${ComposerSlashCommandId}`; description: string }
@@ -42,6 +45,12 @@ export function composerSlashTrigger(text: string, caretInput: number): Composer
 export function goalTextFromComposer(text: string): string | null {
   const match = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
   return match ? (match[1] ?? "").trimStart() : null;
+}
+
+/** A whole `/archive` or `/delete` on its own, which acts on the conversation rather than sending words. */
+export function threadCommandFromComposer(text: string): ComposerThreadCommand | null {
+  const match = /^\/(archive|delete)\s*$/i.exec(text);
+  return match ? (match[1]!.toLowerCase() as ComposerThreadCommand) : null;
 }
 
 /** The text a picked built-in leaves in the composer; /goal only flips the composer's mode. */

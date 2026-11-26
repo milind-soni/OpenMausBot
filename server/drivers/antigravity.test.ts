@@ -543,10 +543,12 @@ describe("official Antigravity runtime", () => {
     expect(runtime).toMatchObject({ executablePath: officialExecutable, source: "path" });
   });
 
-  it("explains the official setup when a legacy CLI has no replacement installed", async () => {
+  it("explains the setup when a legacy CLI has no replacement installed: the Google Antigravity CLI a new install takes, or the pinned runtime alone", async () => {
     if (!resolveAntigravityReleaseAsset()) return;
     const fake = fakeRuntime();
     await expect(resolveAntigravityRuntime("/old/bin/agy", { PATH: "" }, fake.directory))
+      .rejects.toThrow(/Google Antigravity CLI is not installed yet/);
+    await expect(resolveAntigravityRuntime("/old/bin/agy", { PATH: "" }, fake.directory, { nativeByDefault: false }))
       .rejects.toThrow(/Install official Antigravity, then Sign in with Google/);
   });
 
@@ -884,7 +886,7 @@ describe("Antigravity driver over shared ACP", () => {
     expect(AntigravityDriver.defaultConfig()).toEqual({ cli: "agy", fullAuto: false, workspace: undefined });
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
     // The native CLI is opt-in: by default the card offers the pinned runtime with its download size, as before it.
-    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0 });
+    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0, sizeUnknown: true });
     expect(antigravityPermissionMode(false)).toBe("default");
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");
@@ -1019,8 +1021,14 @@ describe("Antigravity driver over shared ACP", () => {
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "mode", value: approvalMode === "full" ? "yolo" : approvalMode === "edits" ? "auto_edit" : "default" } },
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "thinking_level", value: "high" } },
     ]);
-    const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
-    expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);
+    const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")) as Array<{ name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }>;
+    // Under a schema profile (the Gemini engine) the person's stdio server goes through the MCP gate.
+    const docs = mcp.find((server) => server.name === "docs");
+    expect(docs).toBeDefined();
+    expect(docs!.command).toBe(process.execPath);
+    expect(docs!.args[0]).toContain("mcp-gate");
+    const upstream = JSON.parse(docs!.env.find((entry) => entry.name === "OMB_GATE_UPSTREAM")!.value) as { command: string; args: string[]; env: Record<string, string> };
+    expect(upstream).toEqual({ command: "docs-mcp", args: ["serve"], env: { TOKEN: "scoped" } });
     // Checked on every OS, so the macOS and Linux runs prove the dump carries TEMP.
     const expectedTemp = process.platform === "win32" ? antigravityTempDir(DATA_DIR, instanceId) : fake.directory;
     expect([dumpState.env.TEMP, dumpState.env.TMP]).toEqual([expectedTemp, expectedTemp]);

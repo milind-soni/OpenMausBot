@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { CAPTURE_MARKER } from "./memory-capture.ts";
 import { TIDY_MARKER } from "./memory-tidy.ts";
-import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
+import { replyHabitsPrompt } from "./reply-habits.ts";
 import { REMEMBER_AND_FORGET } from "./workspace.ts";
 
 type Step = { tool: string; arguments: Record<string, unknown> };
@@ -60,12 +60,12 @@ it("remembers at once, learns only what the person said, forgets everywhere, and
 
     // Every bot is told how to talk: the preview and a real turn's prompt both carry it, with the memory habits.
     const preview = await api<{ sections: Array<{ id: string; text: string }> }>(`/api/bots/${bot.id}/system-prompt`);
-    expect(preview.sections.find((section) => section.id === "reply-habits")?.text).toBe(REPLY_HABITS_PROMPT);
+    expect(preview.sections.find((section) => section.id === "reply-habits")?.text).toBe(replyHabitsPrompt(true));
 
     // 1. Questions and tasks are not facts about the person.
     const asked = await turn(bot, "What are the 3 best AI meeting note-takers for a 10-person startup right now? Price and a one-line verdict each.", [],
       "For most 10-person teams, Fathom. Checked today on each vendor's site.");
-    expect(asked.system).toContain(REPLY_HABITS_PROMPT);
+    expect(asked.system).toContain(replyHabitsPrompt(true));
     expect(asked.system).toContain(REMEMBER_AND_FORGET);
     await expect.poll(() => captured(bot.id), { timeout: 20_000 }).toBeGreaterThan(0);
     await turn(bot, "Write a one-page launch plan for an open-source AI agent app, with a 7-day timeline.", [], "Goal: 1,000 stars in week one.");
