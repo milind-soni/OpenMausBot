@@ -79,11 +79,11 @@ describe.skipIf(!found || process.platform !== "win32")("Windows speech helpers 
       };
       const heard = helper("param([int]$EndpointMs = 0)\nSend-Line @{ partial = $false; text = (Join-Text 'from' 'onecore') }\nexit 0\n");
       expect(heard.status).toBe(0);
-      expect(heard.stdout.trim()).toBe(JSON.stringify({ partial: false, text: "from onecore" }));
+      expect(JSON.parse(heard.stdout.trim())).toEqual({ partial: false, text: "from onecore" });
       if (installed === 0) {
         const missing = helper("param([int]$EndpointMs = 0)\nexit 3\n");
         expect(missing.status).toBe(1);
-        expect(missing.stdout.trim()).toBe(JSON.stringify({ error: "speech-language-missing" }));
+        expect(JSON.parse(missing.stdout.trim())).toEqual({ error: "speech-language-missing" });
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });

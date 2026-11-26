@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const viewer = vi.hoisted(() => ({ open: false }));
-vi.mock("../vps-computer.ts", () => ({
+vi.mock("../vps-computer.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../vps-computer.ts")>(),
   vpsDesktopConnection: vi.fn(() => (viewer.open ? { port: 5901, password: "p", live: () => true, retain: () => () => {} } : undefined)),
   vpsComputerAction: vi.fn(async (_action: string, _cfg: unknown, _botId: string, _runner: unknown, shouldStop?: () => boolean) =>
     ({ container: shouldStop && !shouldStop() ? "running" : "stopped" })),
