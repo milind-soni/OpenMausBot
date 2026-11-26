@@ -680,13 +680,13 @@ export class Runtime {
         if (!ownsConversation(snapshot, owner)) continue;
         const n = this.store.get(snapshot.id);
         if (!n || isTerminal(n)) continue;
-        for (const child of this.store.children(n.id)) {
-          if (isTerminal(child)) continue;
-          const unstarted = child.status === "queued" && (child.executions === 0 || child.restart === "rerun");
-          this.cancelTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? STOPPED_BEFORE_RESUME : STOPPED_BEFORE_START,
-            "cancelled", "stopped");
-        }
+        const children = this.store.children(n.id).filter(child => !isTerminal(child));
+        // The request ends first, so the report of each piece of its work already finds whose stop it was up the line.
         this.settle(n, "cancelled", "stopped", reason);
+        for (const child of children) {
+          const unstarted = child.status === "queued" && (child.executions === 0 || child.restart === "rerun");
+          this.stopTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? STOPPED_BEFORE_RESUME : STOPPED_BEFORE_START);
+        }
       }
     });
   }
@@ -749,6 +749,15 @@ export class Runtime {
     }
     const fresh = this.store.get(n.id);
     if (fresh && !isTerminal(fresh)) this.settle(fresh, status, outcome, reason);
+  }
+
+  /** Stops `n`, then what it handed on, each down the line after the request it went down with. */
+  private stopTree(n: Assignment, reason: string): void {
+    const fresh = this.store.get(n.id);
+    if (!fresh || isTerminal(fresh)) return;
+    const children = this.store.children(n.id).filter(child => !isTerminal(child));
+    this.settle(fresh, "cancelled", "stopped", reason);
+    for (const child of children) this.stopTree(child, STOPPED_WITH_REQUEST);
   }
 
   private settle(n: Assignment, status: TerminalStatus, outcome: Outcome, detail?: string, ownTurn = false): void {

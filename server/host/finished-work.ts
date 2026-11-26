@@ -196,6 +196,8 @@ export function createHandedClose(deps: HandedCloseDeps): HandedClose {
   };
 
   const unsubscribe = store.onChange((change) => {
+    // A deleted bot's threads went with it, so its due ones leave the index.
+    if (change.type === "bot.deleted") { due.delete(change.botId); arm(); return; }
     if (looking || !started) return;
     if (change.type === "bot") { if (due.has(change.botId)) look(change.botId, change.threadId !== undefined && due.get(change.botId)!.has(change.threadId) ? change.threadId : undefined); return; }
     if (change.type !== "message" && change.type !== "message.patch") return;

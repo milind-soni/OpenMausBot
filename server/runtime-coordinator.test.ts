@@ -9,6 +9,8 @@ import type { RoomAddress } from "./coordinator.ts";
 import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import { TURN_CUT, type Assignment, type Level, type Limits } from "./runtime/types.ts";
+import { createHandedClose, type HandedCloseDeps, STOP_GRACE_MS, SYSTEM_STOP } from "./host/finished-work.ts";
+import type { TaskRecord } from "./store.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -917,6 +919,82 @@ describe("RuntimeCoordinator: stops", () => {
     expect(w.coordinator.outstandingDirect("chief-chat")).toEqual([]);
     expect(w.coordinator.assignerOf("builder-work")).toBeUndefined();
     expect(w.coordinator.active()).toEqual([]);
+  });
+});
+
+describe("RuntimeCoordinator: a Stop's cause reaches the close of each thread it ended", () => {
+  /** The host's close of hand-off threads, fed by the coordinator's reports as they happen: the due time it gives each thread. */
+  const closing = (w: World, openers: Record<string, string> = {}) => {
+    const tasks = new Map<string, TaskRecord>();
+    const record = (botId: string, threadId: string) => {
+      const key = `${botId}/${threadId}`;
+      if (!tasks.has(key)) tasks.set(key, { threadId, title: "Work", unread: true, openedBy: { botId: openers[botId] ?? "chief", name: "Opener", threadId: "chief-chat", at: 0, oneShot: true } } as TaskRecord);
+      return tasks.get(key)!;
+    };
+    const close = createHandedClose({
+      store: {
+        bots: [], bot: () => undefined, botByThread: () => undefined, onChange: () => () => {},
+        taskByThread: (botId: string, threadId: string) => record(botId, threadId),
+        setTaskOpenedBy: (botId: string, threadId: string, openedBy: TaskRecord["openedBy"]) => { record(botId, threadId).openedBy = openedBy; return null; },
+        setTaskClosedBy: () => null, patchTask: () => null,
+      } as unknown as HandedCloseDeps["store"],
+      working: () => false, waitArmed: () => false, node: (id) => w.coordinator.node(id), now: () => 1_000,
+    });
+    const report = w.host.report.bind(w.host);
+    w.host.report = (child, parent) => { report(child, parent); if (parent) close.ended(child, parent, false); };
+    return { closesAt: (address: RoomAddress) => record(address.botId, address.threadId).openedBy?.closesAt, dispose: () => close.dispose() };
+  };
+
+  it("gives work that never started the person's hour, and closes it at once for a system stop", () => {
+    for (const [cause, due] of [[undefined, 1_000 + STOP_GRACE_MS], [SYSTEM_STOP.bot, 1_000]] as const) {
+      const w = world(hold);
+      const close = closing(w);
+      const { node: t } = send(w, chief, "gen-1", undefined, tester, "Test it");
+      w.host.busyAnswer = node => node.botId === "tester";
+      w.coordinator.tick();
+      w.coordinator.stopAwaitingDirect("chief-chat", cause);
+      expect(w.coordinator.node(t.id)).toMatchObject({ status: "cancelled", result: "Stopped before it started" });
+      expect(close.closesAt(tester)).toBe(due);
+      close.dispose();
+    }
+  });
+
+  it("gives work handed on twice the person's hour, the stop read up the line as each report comes", () => {
+    for (const [cause, due] of [[undefined, 1_000 + STOP_GRACE_MS], [SYSTEM_STOP.bot, 1_000]] as const) {
+      const w = world(hold);
+      const close = closing(w, { tester: "builder" });
+      const { node: b } = send(w, chief, "gen-1", undefined, builder, "Build it");
+      w.coordinator.tick();
+      const { node: t } = send(w, builder, "gen-1", b.id, tester, "Test it");
+      w.host.busyAnswer = node => node.botId === "tester";
+      w.coordinator.tick();
+      expect(w.coordinator.node(t.id)?.status).toBe("queued");
+      w.coordinator.stopAwaitingDirect("chief-chat", cause);
+      expect(w.coordinator.node(t.id)).toMatchObject({ status: "cancelled", result: "Stopped with the request it was for" });
+      expect(close.closesAt(builder)).toBe(due);
+      expect(close.closesAt(tester)).toBe(due);
+      close.dispose();
+    }
+  });
+
+  it("gives work a restart left to resume the person's hour, and closes it at once for a system stop", async () => {
+    for (const [cause, due] of [[undefined, 1_000 + STOP_GRACE_MS], [SYSTEM_STOP.bot, 1_000]] as const) {
+      const dir = mkdtempSync(join(tmpdir(), "runtime-coordinator-"));
+      try {
+        const before = world(hold, {}, dir);
+        const { node } = send(before, chief, "gen-1", undefined, builder, "Build it");
+        before.coordinator.tick();
+        before.coordinator.close();
+        const after = world(undefined, {}, dir);
+        const close = closing(after);
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "queued", restart: "rerun" });
+        after.coordinator.stopAwaitingDirect("chief-chat", cause);
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "cancelled", result: "Stopped before it resumed" });
+        expect(close.closesAt(builder)).toBe(due);
+        close.dispose();
+        after.coordinator.close();
+      } finally { await removeTempDir(dir); }
+    }
   });
 });
 

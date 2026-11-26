@@ -407,6 +407,15 @@ describe("createHandedClose", () => {
     expect(record.archivedAt).toBe(1_000_000 + STOP_GRACE_MS);
   });
 
+  it("forgets a deleted bot's due threads: the hour that comes closes nothing", () => {
+    const { record, start, emit } = world({ openedBy: oneShot() });
+    start().ended(personStop, chief, false);
+    emit({ type: "bot.deleted", botId: "lead" });
+    vi.advanceTimersByTime(STOP_GRACE_MS);
+    expect(record.closedBy).toBeUndefined();
+    expect(record.archivedAt).toBeUndefined();
+  });
+
   it("keeps a stopped thread open for good when anyone writes in it within the hour", () => {
     for (const message of [{ role: "user" as const }, { role: "bot" as const, threadPost: { deliveryId: "d", fromBotId: "chief", fromThreadId: "chief-chat" } }]) {
       const { record, start, write } = world({ openedBy: oneShot() });
