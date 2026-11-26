@@ -13,7 +13,7 @@ const OWNER: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; };
 beforeEach(() => { rmSync(DATA_DIR, { recursive: true, force: true }); restoreSteeredMessages(); });
 
-function harness(queued = true) {
+function harness(queued = true, inbox = false) {
   const store = new Store(() => ({ instanceId: "fixture", model: "fixture" }));
   const bot = store.createBot({ name: "Scout" });
   const asked = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Shall I send the email?" });
@@ -30,7 +30,11 @@ function harness(queued = true) {
       return { queued: true };
     },
   });
-  const reactions = createReactions({ store, reply: (input) => replies.deliver({ ...input, about: "message" }), answerCard: async () => ({ ok: true }), withdraw: replies.withdraw });
+  const deliver = (input: Parameters<typeof replies.deliver>[0]) => replies.deliver(input);
+  const reactions = createReactions({
+    store, reply: (input) => deliver({ ...input, about: "message" }), inboxAnswer: (input) => inbox ? deliver({ ...input, about: "message" }) : null,
+    answerCard: async () => ({ ok: true }), withdraw: replies.withdraw,
+  });
   const tap = (emoji: "👍" | "👎", by = "user") => reactions.react({ auth: OWNER, threadId: bot.threadId, messageId: asked.id, emoji, reactor: { by } });
   return { bot, store, tap, entered, release, sends };
 }
@@ -49,8 +53,29 @@ it("withdraws a queued answer that finishes after its reaction was cleared", asy
   expect(queuedSteeredMessage(h.bot.id, h.bot.threadId, h.sends[0]!)).toBeNull();
 });
 
-it("keeps a newer opposite answer when the older queued answer finishes last", async () => {
+it("retires an older 👍 still on its way when the person switches to a quiet 👎", async () => {
   const h = harness();
+  const first = h.tap("👍");
+  await h.entered.promise;
+  expect((await h.tap("👎")).delivery).toBe("noted");
+  h.release.resolve();
+  expect((await first).delivery).toBe("none");
+  expect(queuedSteeredMessage(h.bot.id, h.bot.threadId, h.sends[0]!)).toBeNull();
+  expect(h.sends).toHaveLength(1);
+});
+
+it("does not let another person's quiet 👎 retire this person's 👍", async () => {
+  const h = harness();
+  const first = h.tap("👍", "alice");
+  await h.entered.promise;
+  expect((await h.tap("👎", "bob")).delivery).toBe("noted");
+  h.release.resolve();
+  expect((await first).delivery).toBe("queued");
+  expect(h.sends.map((id) => queuedSteeredMessage(h.bot.id, h.bot.threadId, id)?.text)).toEqual(["👍"]);
+});
+
+it("on an inbox line, keeps a newer opposite answer when the older queued answer finishes last", async () => {
+  const h = harness(true, true);
   const first = h.tap("👍");
   await h.entered.promise;
   expect((await h.tap("👎")).delivery).toBe("queued");
@@ -61,8 +86,8 @@ it("keeps a newer opposite answer when the older queued answer finishes last", a
   expect(queuedSteeredMessage(h.bot.id, h.bot.threadId, h.sends[1]!)?.text).toBe("👎");
 });
 
-it("does not let another person's reaction retire this person's answer", async () => {
-  const h = harness();
+it("on an inbox line, does not let another person's answer retire this person's answer", async () => {
+  const h = harness(true, true);
   const first = h.tap("👍", "alice");
   await h.entered.promise;
   expect((await h.tap("👎", "bob")).delivery).toBe("queued");
