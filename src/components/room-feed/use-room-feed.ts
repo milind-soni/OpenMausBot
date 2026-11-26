@@ -1,5 +1,5 @@
 import { roomFeedEnabled } from "@/lib/feature-flags";
-import { settingUp, type FeedRoom } from "@/lib/room-feed";
+import type { FeedRoom } from "@/lib/room-feed";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { useStoreSelector } from "@/state/store-select";
 
@@ -12,5 +12,5 @@ export function useRoomFeedHere(): boolean {
 export function useRoomFeed(group: FeedRoom | undefined): boolean {
   const on = useRoomFeedHere();
   const wide = useMediaQuery(SIDEBAR_INLINE, true);
-  return Boolean(group) && on && !group!.dm && wide && !settingUp(group!);
+  return Boolean(group) && on && !group!.dm && wide;
 }
