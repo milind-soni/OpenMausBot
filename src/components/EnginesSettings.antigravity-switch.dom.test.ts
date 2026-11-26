@@ -109,7 +109,9 @@ it("moves the account to the CLI, installs it, and shows the sign-in card with n
   ]);
   await act(async () => { root.render(createElement(EnginesSettings)); });
   expect(card().querySelector("[data-antigravity-switch-cli]")).toBeNull();
-  expect(button("Sign in with Google")).toHaveLength(1);
+  expect(button("Sign in")).toHaveLength(1);
+  await act(async () => { button("Sign in")[0]!.click(); });
+  expect(fixture.calls.at(-1)).toMatchObject({ method: "POST", path: "/api/instances/antigravity/auth/start" });
   expect(card().querySelector("select")).toBeNull();
   expect(card().textContent).not.toContain("Classic runtime");
 });
