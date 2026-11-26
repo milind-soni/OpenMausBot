@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -17,9 +18,12 @@ import type { RuntimeEvent } from "./contracts.ts";
 import { doctorAtStart } from "./doctor/start.ts";
 import { toolFailureMessage } from "./drivers/tool-failure.ts";
 import { STORAGE_HEALTH_MAX_BYTES, type StorageReport } from "./perf/disk-usage.ts";
+import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
 import { createCloudSignedRoutes } from "./routes/cloud-signed.ts";
 import { SessionRegistry } from "./sessions.ts";
+import { createSignInTrace } from "./sign-in-trace.ts";
 import { Store } from "./store.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 const START = 1_800_000_000_000;
 const secret = "S".repeat(43);
@@ -72,6 +76,33 @@ describe("a Cloud home's storage in its health report", () => {
     expect(broken.health.report(undefined)).not.toHaveProperty("storage");
     broken.health.report(undefined);
     expect(warned).toEqual(["cloud health: storage left out: RangeError"]);
+  });
+});
+
+describe("a Cloud home's engine sign-ins in its health report", () => {
+  it("counts attempts and says how the last one ended, with no code, link, flow or account in it; left out where there is no trace or its read throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-health-sign-ins-"));
+    try {
+      const trace = createSignInTrace({ dataDir: dir, now: () => START, log: () => {} });
+      const sessions = new ProviderAuthSessions({ trace, now: () => START });
+      const auth = { phase: "waiting" as const, flowId: "flow-secret-1", authorizationUrl: "https://claude.com/cai/oauth/authorize?state=secret-state", expiresAt: null };
+      const instance = { instanceId: "claude-ada-work", driverKind: "claudeAgent", startAuthentication: async () => auth, getAuthentication: async () => auth,
+        completeAuthentication: async () => { throw Object.assign(new Error("Paste the whole code"), { reason: "wrong_code" }); }, cancelAuthentication: async () => {} };
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await sessions.start(instance, "session-secret");
+        await expect(sessions.complete(instance.instanceId, "session-secret", "flow-secret-1", "SHORT")).rejects.toThrow();
+        if (attempt < 2) await sessions.cancel(instance.instanceId, "session-secret", "flow-secret-1");
+      }
+      const report = world({ signIns: () => trace.summary() }).health.report(undefined);
+      expect(report.signIns).toMatchObject({ attempts: 3, open: 1, engines: [{ kind: "claudeAgent", attempts: 3, completed: 0, last: { outcome: "wrong_code", at: START } }] });
+      expect(report.signIns!.recent.at(-1)).toEqual({ kind: "claudeAgent", method: "paste-code", outcome: "wrong_code", at: START });
+      for (const secret of ["SHORT", "flow-secret", "secret-state", "claude.com", "session-secret", "ada-work"]) expect(JSON.stringify(report)).not.toContain(secret);
+    } finally { await removeTempDir(dir); }
+    expect(world().health.report(undefined)).not.toHaveProperty("signIns");
+    const warned: string[] = [];
+    const broken = world({ signIns: () => { throw new TypeError("flow-secret-1"); }, log: (line) => warned.push(line) });
+    expect(broken.health.report(undefined)).not.toHaveProperty("signIns");
+    expect(warned).toEqual(["cloud health: signIns left out: TypeError"]);
   });
 });
 

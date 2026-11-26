@@ -18,6 +18,7 @@ import { withTurnScope } from "../crash-guard.ts";
 import { withWslNotice } from "./wsl-launch.ts";
 import { modelManifest, startModelManifestRefresh } from "../model-manifest/manifest.ts";
 import { machinePressure } from "../machine-pressure.ts";
+import { signInMethodOf } from "../sign-in-trace.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -63,11 +64,9 @@ function withServerInstall(install: AnyProviderDriver["install"], npmPresent: bo
 export function signInOf(inst: ProviderInstance) {
   return inst.startAuthentication
     ? {
-        method: inst.authenticationMethod ?? (inst.getAuthentication && inst.completeAuthentication
-          ? "paste-code" as const // a link to open, then a code pasted back (Claude)
-          : inst.getAuthentication
-            ? "device-code" as const // a code to enter at the provider's page (Codex)
-            : "callback-url" as const), // a link and a callback URL (managed engines)
+        // Named, else a link then a code pasted back (Claude), a code to enter at the provider's page (Codex), or a link
+        // and a callback URL (managed engines).
+        method: signInMethodOf(inst),
         signOut: inst.signOut !== undefined,
       }
     : undefined;
