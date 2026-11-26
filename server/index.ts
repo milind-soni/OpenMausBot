@@ -49,7 +49,7 @@ import { signInCardResumePrompt, signInCardWaits, signInOutcome } from "../share
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { createPlaceMoves, type ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts"; import { dispatchExternalApprovalReview, externalApprovalReviewerConfig, extractEffectiveToolName } from "./external-approval-reviewer.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey, providerToolConfig, savedToolGrant } from "./provider-tool-allow.ts";
@@ -6529,52 +6529,24 @@ bus.subscribe((event: RuntimeEvent) => {
         break;
       }
       if (linkHeld && permission && asker && event.requestId) { void (runningTurnEngines.get(event.threadId) ?? registry.get(event.providerInstanceId ?? asker.modelSelection.instanceId))?.adapter.respondToRequest(event.threadId, event.requestId, { behavior: "deny", message: LINK_ACTION_DENIED }).catch(() => {}); break; } const heldContext = { source: verdict?.source, permission };
-      const message = pushMessage({
-        role: "bot",
-        kind: "options",
-        card: {
-          title:
-            permission && event.approvalScope === "local-computer"
-              ? "Local computer approval"
-              : permission
-                ? "Approval needed"
-                : "Your bot has a question",
-          ...runtimeRequestCardFields(event, {
-            permission, guestDriven, commandAllowlist: command ?? undefined, allowKey: toolAllowKey ?? undefined,
-            held: approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined),
-            heldCode: approvalHeldNote(heldContext),
-          }),
-        },
-      });
-      if (event.requestId) { askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id); if (!permission && asker) askCards.askedAgain(event.threadId, event.requestId, asker.id); }
-      if (command && asker && event.requestId) pendingCommandRules.set(`${event.threadId}:${event.requestId}`, { botId: asker.id, candidate: command });
-      appendDecision(DATA_DIR, {
-        threadId: event.threadId,
-        requestId: event.requestId,
-        botId: asker?.id,
-        botName: asker?.name,
-        tool: event.tool,
-        summary: event.summary,
-        decision: "card-shown",
-        source: !permission ? "question" : verdict ? verdict.source : "no-grant",
-        origin: !permission && event.origin === "output" ? "output" : undefined,
-        unattended: unattended || undefined,
-      });
-      if (asker) {
-        const card = store.messagesFor(event.threadId).find((candidate) => candidate.id === message.id)?.card;
-        if (card && !card.answered) {
-          if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
-          else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
-          if (event.requestId) askCards.showWaitingOnPersonChip(event.threadId, event.requestId, asker, permission ? "approval" : "answer");
-          const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
-          notify(buildNotification(
-            permission ? "approval" : "question",
-            notificationBot,
-            (routineRun && routineSourceThread(routineRun)) || event.threadId,
-            routineRun?.attention ? `${routineRun.routineName}: ${routineRun.attention}` : event.summary,
-          ), routineRun ? { routine: true } : undefined);
-        }
+      const showApprovalCard = (extraHeld?: string) => {
+        const message = pushMessage({ role: "bot", kind: "options", card: { title: permission && event.approvalScope === "local-computer" ? "Local computer approval" : permission ? "Approval needed" : "Your bot has a question", ...runtimeRequestCardFields(event, { permission, guestDriven, commandAllowlist: command ?? undefined, allowKey: toolAllowKey ?? undefined, held: extraHeld ?? approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined), heldCode: extraHeld ? undefined : approvalHeldNote(heldContext) }) } });
+        if (event.requestId) { askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id); if (!permission && asker) askCards.askedAgain(event.threadId, event.requestId, asker.id); }
+        if (command && asker && event.requestId) pendingCommandRules.set(`${event.threadId}:${event.requestId}`, { botId: asker.id, candidate: command });
+        appendDecision(DATA_DIR, { threadId: event.threadId, requestId: event.requestId, botId: asker?.id, botName: asker?.name, tool: event.tool, summary: event.summary, decision: "card-shown", source: extraHeld ? "auto-review" : !permission ? "question" : verdict ? verdict.source : "no-grant", rule: extraHeld || undefined, origin: !permission && event.origin === "output" ? "output" : undefined, unattended: unattended || undefined });
+        if (asker) { const card = store.messagesFor(event.threadId).find((candidate) => candidate.id === message.id)?.card; if (card && !card.answered) { if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you"); else if (asker.busy) store.setActivity(asker.id, "waiting-on-you"); if (event.requestId) askCards.showWaitingOnPersonChip(event.threadId, event.requestId, asker, permission ? "approval" : "answer"); const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker; notify(buildNotification(permission ? "approval" : "question", notificationBot, (routineRun && routineSourceThread(routineRun)) || event.threadId, routineRun?.attention ? `${routineRun.routineName}: ${routineRun.attention}` : event.summary), routineRun ? { routine: true } : undefined); } }
+      };
+      const extCfg = externalApprovalReviewerConfig(cfg), extInstance = asker ? ((runningTurnEngines.get(event.threadId)?.instanceId === (event.providerInstanceId ?? asker.modelSelection.instanceId) ? runningTurnEngines.get(event.threadId) : registry.get(event.providerInstanceId ?? asker.modelSelection.instanceId))) : undefined;
+      const extEffTool = extractEffectiveToolName({ tool: event.tool, summary: event.summary });
+      if (extCfg.enabled && permission && asker && event.requestId && effectiveApprovalMode === "auto" && extInstance && !hasNativeAutoReview(extInstance.driverKind) && !guestDriven && !event.requiresExplicitApproval && !isOutboundTool(extEffTool)) {
+        const reqId = event.requestId, srcGen = directTurnGenerationByThread.get(event.threadId), srcSpk = groupSpeakers.get(event.threadId), isCur = () => !shouldIgnoreProviderEvent(event) && ((srcGen !== undefined && directTurnGenerationByThread.get(event.threadId) === srcGen) || (srcSpk !== undefined && groupSpeakers.get(event.threadId) === srcSpk));
+        if (denyAtSafetyFloor({ event, requestId: reqId, bot: asker, adapter: extInstance.adapter, isCurrent: isCur, say: pushMessage, release: () => watchdog.setWaitingOnHuman(event.threadId, false) })) break;
+        if (heldAtSafetyFloor(event, { approve: "check", source: "native-approval" }).approve === null) { showApprovalCard(); break; }
+        const pathMsgs = store.activePath(event.threadId);
+        dispatchExternalApprovalReview({ key: `${event.threadId}:${reqId}`, config: extCfg, isCurrent: isCur, input: { threadId: event.threadId, turnGeneration: srcGen ?? event.turnId ?? 0, botName: asker.name, tool: event.tool, summary: event.summary, command: event.commandLine ?? event.command?.command ?? "", cwd: event.command?.cwd ?? "", approvalScope: event.approvalScope ?? "", rawInput: { reads: event.reads, command: event.command }, computerMode: asker.computer ?? "", customMcpServers: Array.isArray(asker.mcpServers) ? asker.mcpServers : Object.keys(cfg.mcpServers ?? {}), connectedApps: asker.composio !== false && asker.connectorTools ? Object.keys(asker.connectorTools) : [], threadMessages: pathMsgs }, onApprove: async (res) => { if (denyAtSafetyFloor({ event, requestId: reqId, bot: asker, adapter: extInstance.adapter, isCurrent: isCur, say: pushMessage, release: () => watchdog.setWaitingOnHuman(event.threadId, false) })) return; const outcome = await deliverFullAccessApproval(extInstance.adapter, event.threadId, reqId, event.turnId, isCur); if (!isCur()) return; if (outcome !== "allowed-once") { watchdog.setWaitingOnHuman(event.threadId, false); if (outcome !== "unavailable") pushMessage({ role: "bot", kind: "activity", tool: undeliveredApprovalTool(outcome, "native-approval") }); return; } pushMessage({ role: "bot", kind: "activity", tool: { name: `External Auto-review approved (${res.risk}): ${event.summary.slice(0, 120)}`, ok: true } }); appendDecision(DATA_DIR, { threadId: event.threadId, requestId: reqId, botId: asker.id, botName: asker.name, tool: event.tool, summary: event.summary, decision: "auto-approved", source: "auto-review", rule: res.reason }); }, onHold: showApprovalCard });
+        break;
       }
+      showApprovalCard();
       break;
     }
     case "request.resolved": {
