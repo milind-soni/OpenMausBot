@@ -21,6 +21,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
 import { chineseConsent, NO, YES } from "../../shared/call-consent";
+import { CallWarning, speechEndWarning, type CallWarningNote } from "./CallWarning";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
@@ -75,7 +76,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<CallWarningNote | null>(null);
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
   const pushToTalk = usePushToTalk(group.id, bridge, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
@@ -313,22 +314,11 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       dispatch({ type: "sendGroup", groupId: group.id, text: routed.text, threadId: group.threadId });
       scheduleListen(false, 600);
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason, message }) => {
+    const offEnd = bridge.onSpeechEnd((info) => {
       if (!alive.current || currentCall() !== group.id) return;
-      if (code === 2) {
-        setNote(t("call.turns.needsDictation"));
-        return;
-      }
-      if (code === 1) {
-        setNote(
-          message ?? t(reason === "helper-build-failed"
-            ? "call.turns.helperBuildFailed"
-            : reason === "dictation-disabled"
-              ? "composer.dictation.disabled"
-              : reason === "speech-not-authorized"
-                ? "call.turns.speechNotAuthorized"
-                : "composer.dictation.failed"),
-        );
+      const warning = speechEndWarning(info);
+      if (warning !== undefined) {
+        setNote(warning);
         return;
       }
       if (phaseRef.current === "listening") listen();
@@ -539,17 +529,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         )}
       </div>
 
-      {note && (
-        <div className="flex max-w-[520px] flex-col items-center gap-2 text-center text-[13px] text-warning">
-          <span>{note}</span>
-          <button
-            onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
-          >
-            {t("call.turns.tryMicrophone")}
-          </button>
-        </div>
-      )}
+      <CallWarning note={note} onRetry={listen} className="max-w-[520px]" />
       {speech.error && <div className="max-w-[460px] text-center text-[13px] text-danger">{speech.error}</div>}
 
       <div className="flex items-center gap-3">

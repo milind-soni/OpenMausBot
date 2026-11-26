@@ -31,6 +31,7 @@ import { CALL_ENDPOINT_MS, listensHere, missingListenKey, speechBridge } from "@
 import { VoiceSetupDialog } from "./lazy-screens";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
+import { CallWarning, speechEndWarning, type CallWarningNote } from "./CallWarning";
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
@@ -502,7 +503,7 @@ function Call({ bot }: { bot: Bot }) {
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
-  const [note, setNote] = useState<string | null>(null);
+  const [note, setNote] = useState<CallWarningNote | null>(null);
   const pushToTalk = usePushToTalk(bot.id, bridge, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
   });
@@ -665,22 +666,11 @@ function Call({ bot }: { bot: Bot }) {
       move("sending");
       dispatch({ type: "send", botId: bot.id, text: said, threadId: bot.threadId });
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason, message }) => {
+    const offEnd = bridge.onSpeechEnd((info) => {
       if (!alive.current || currentCall() !== bot.id) return;
-      if (code === 2) {
-        setNote(t("call.turns.needsDictation"));
-        return;
-      }
-      if (code === 1) {
-        setNote(
-          message ?? t(reason === "helper-build-failed"
-            ? "call.turns.helperBuildFailed"
-            : reason === "dictation-disabled"
-              ? "composer.dictation.disabled"
-              : reason === "speech-not-authorized"
-                ? "call.turns.speechNotAuthorized"
-                : "composer.dictation.failed"),
-        );
+      const warning = speechEndWarning(info);
+      if (warning !== undefined) {
+        setNote(warning);
         return;
       }
       if (phaseRef.current === "listening") listen();
@@ -837,17 +827,7 @@ function Call({ bot }: { bot: Bot }) {
         )}
       </div>
 
-      {note && (
-        <div className="flex max-w-[460px] flex-col items-center gap-2 text-center text-[13px] text-warning">
-          <span>{note}</span>
-          <button
-            onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
-          >
-            {t("call.turns.tryMicrophone")}
-          </button>
-        </div>
-      )}
+      <CallWarning note={note} onRetry={listen} className="max-w-[460px]" />
       {speech.error && <div className="max-w-[420px] text-center text-[13px] text-danger">{speech.error}</div>}
 
       <div className="flex items-center gap-3">

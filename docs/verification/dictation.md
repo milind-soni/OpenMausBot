@@ -45,6 +45,24 @@ using the fixture's printed URL and bot ID. It must contain one user message
 with both sentences, followed by the fake engine's answer. Stop only the
 fixture launcher with Ctrl-C to remove its temporary data.
 
+## Dismissing the Dictation warning
+
+In the same isolated preview, start dictation, then run
+`window.dictationFixture.fail()` in the browser. To check the call overlays,
+open the printed `previewUrl` with `?surface=bot-call` or `?surface=group-call`;
+the fake microphone starts when the call opens. Run the same `fail()` there.
+
+Use the keyboard to activate **Dismiss**. In chat, the warning goes away and
+focus returns to the draft without changing it. In both calls, **Try microphone
+again** stays visible and gains focus; the call stays open. Dismissal does not
+change the fake microphone's start or stop counts. Retry and run `fail()` again
+to see the warning return. Add `skin=midnight` or `skin=daylight` to the preview
+URL to check either look without changing application settings.
+
+```sh
+pnpm exec vitest run src/components/Composer.dictation.test.ts src/components/CallWarning.dom.test.ts
+```
+
 ## Scope
 
 Apple's on-device Speech implementation can return a completed utterance's
