@@ -92,12 +92,14 @@ function boundedImportFetch(
     signal.throwIfAborted();
     const sent: RequestInit = { ...init, signal };
     let carried: SkillImportSignIn["refused"];
+    let signed = false;
     if (api) {
       const signIn = await credentialOnce();
       const headers = signIn.token ? withBearer(input, init, signIn.token) : null;
       if (headers) {
         sent.headers = headers;
         sent.redirect = "manual";
+        signed = true;
         carried = signIn.refused;
       }
     }
@@ -109,7 +111,7 @@ function boundedImportFetch(
     }
     // A signed-in request follows a redirect (a renamed repository) only within the API origin, sending the sign-in again;
     // anywhere else it stops at the redirect, so the sign-in never leaves api.github.com.
-    const location = carried && REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+    const location = signed && REDIRECTS.has(response.status) ? response.headers.get("location") : null;
     const moved = location && URL.canParse(location, requestHref(input)) ? new URL(location, requestHref(input)) : null;
     if (moved?.origin === API) {
       await response.body?.cancel().catch(() => {});
