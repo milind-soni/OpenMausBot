@@ -145,7 +145,7 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 import { containerComputerMcp } from "./local-vm-box.ts";
-import { attachedFileLine, attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
+import { attachedFileLine, attachForTurn, saveBotAttachment } from "./bot-attachment.ts"; import { attachNotFound } from "./attach-file-hint.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -319,7 +319,7 @@ import {
 import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
-import { createStopLineRoutes } from "./routes/stop-line.ts"; import { createSkillBurgerRoutes } from "./skill-burger/routes.ts"; import { migrateBotBurgers, skillBurgerEnabled } from "./skill-burger/store.ts"; import { createSkillBurgerRuns } from "./skill-burger/runs.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
+import { createStopLineRoutes } from "./routes/stop-line.ts"; import { createSuggestedReplyRoutes } from "./routes/suggested-reply.ts"; import { lightModelFor } from "./suggested-reply/light-model.ts"; import { createSkillBurgerRoutes } from "./skill-burger/routes.ts"; import { migrateBotBurgers, skillBurgerEnabled } from "./skill-burger/store.ts"; import { createSkillBurgerRuns } from "./skill-burger/runs.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
 import { autoRoomDefault, roomTurnMembers } from "./room-routing-members.ts";
 import { liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError } from "./live-call-controller.ts"; import { liveSessionWiring } from "./live-session-wiring.ts";
@@ -2893,8 +2893,8 @@ function previewSystemPrompt(bot: BotRecord) {
   const peers = reachablePeers(store.bots, bot);
   const coordination = chiefLevel(bot)
     ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, undefined, store.sections, linkedRoster.forChief(bot, true))
-    : peers.length > 0
-      ? peerRosterSystemPrompt(peers, bot)
+    : peers.length > 0 || linkedRoster.forPeer(bot)
+      ? peerRosterSystemPrompt(peers, bot, linkedRoster.forPeer(bot))
       : "";
   const agentsMounted = caps?.agentsMcp === true;
   const previewPlan = resolveSurface({
@@ -5051,7 +5051,7 @@ const sideJobs = createSideJobs({
   helper: cacheUntilConfigChanges((config) => helperSelection(config)),
   ...(hostedModels ? { modelAllowed: (selection: ModelSelection) => hostedModels.allows(selection) } : {}),
   assertWithinBudget: () => { assertWithinBudget(cfg, DATA_DIR); usageCapGate.assertTurn(undefined, true); },
-  book: bookTurnUsage,
+  book: bookTurnUsage, lightModel: lightModelFor,
   log: (line) => console.log(line),
 });
 
@@ -8140,9 +8140,9 @@ async function beginTurn(
         : [];
       const teamPrompt = withElsewhere(chiefLevel(bot)
         ? chiefOfStaffPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId), store.sections, linkedRoster.forChief(bot, Boolean(integrations.agents)))
-        : integrations.agents && sectionPeers.length > 0
-          ? peerRosterPrompt(sectionPeers, bot)
-          : { rules: "", roster: "" }, integrations.agents ? placesElsewhere.roster("roster", (kind) => botLink.link.on() && kind !== "team") : ""); const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
+        : integrations.agents && (sectionPeers.length > 0 || linkedRoster.forPeer(bot))
+          ? peerRosterPrompt(sectionPeers, bot, linkedRoster.forPeer(bot))
+          : { rules: "", roster: "" }, integrations.agents ? placesElsewhere.roster("roster", botLink.reaches) : ""); const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + botLogins.secretsPrompt(bot.id, vaultReaders.turn(threadId)) + THREADS_PROMPT + WIDGET_PROMPT : "";
       const routinePrompt = integrations.agents ? TRIGGER_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
@@ -8274,7 +8274,7 @@ async function beginTurn(
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : opts?.automationSource === "api" ? (botApiThread(threadId) ? BOT_API_PROMPT : BOT_API_OWNER_PROMPT) : "" },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
-        { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots) },
+        { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots, botLink.reaches) },
       ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle, rules: cfg.everyBotRules, pagesOff: (liveBot ?? bot).toolsOff?.includes("pages") }); setup.lap("prompt");
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
@@ -10363,7 +10363,7 @@ async function runClaimedGroupMemberTurn(
     const missed = unreachedMentionLines(
       replyText, members,
       reachablePeers(store.bots, bot).filter((peer) => !group.memberIds.includes(peer.id)), threadLanguage(threadId),
-    ); for (const line of placesElsewhere.missed(replyText, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
+    ); for (const line of placesElsewhere.missed(replyText, store.bots, botLink.reaches)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
     for (const line of missed) {
       store.appendMessage(threadId, {
         role: "bot",
@@ -10660,7 +10660,7 @@ function startGroupTurn(
   const snippet = titled?.title;
 
   const archived = members.filter((member) => member.hidden);
-  const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0]; for (const line of placesElsewhere.missed(text, store.bots)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
+  const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0]; for (const line of placesElsewhere.missed(text, store.bots, botLink.reaches)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } });
   if (mentionedArchived) {
     store.appendMessage(threadId, {
       role: "bot",
@@ -11616,7 +11616,7 @@ function configStatus() {
       autoRecall: autoRecallEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
-      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true, roomFeed: true, roomFeedSince: roomFeedSince(DATA_DIR), teamBoard: CLOUD_TEAM ? cfg.features?.teamBoard === true : undefined,
+      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(), skillBurger: skillBurgerEnabled(cfg), threadTabs: cfg.features?.threadTabs === true, suggestedReplies: cfg.features?.suggestedReplies !== false, roomFeed: true, roomFeedSince: roomFeedSince(DATA_DIR), teamBoard: CLOUD_TEAM ? cfg.features?.teamBoard === true : undefined,
       usbPhoneTakeover: HAS_USB_PORT ? usbPhoneTakeoverEnabled(cfg) : undefined,
     },
     onboarding: {
@@ -11914,7 +11914,7 @@ let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes();
 
 // `workspaceAccess` is assigned at boot, after this line: read it per request.
-ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes()); const skillBurgerRuns = createSkillBurgerRuns({ dataDir: DATA_DIR, host: { port: PORT, cwd: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd || store.bot(botId)?.cwd || workspaceDir(botId), mint: (turn, kind) => mintInternalCapability({ ...(turn as unknown as InternalCapability), kind, depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), browser: async (turn) => { const bot = store.bot(turn.botId); return bot ? ((await browserIntegration(bot.id, bot.browserProfile, { threadId: turn.threadId, generation: turn.generation }))?.integration as { env?: Record<string, string | undefined> } | undefined) ?? null : null; }, publish: (threadId, event) => { const engine = runningTurnEngines.get(threadId); bus.publish({ ...event, provider: engine?.driverKind, providerInstanceId: engine?.instanceId } as unknown as RuntimeEvent); }, mayEditBurgers: () => !CLOUD_TEAM, connectedApps: async (turn) => { const bot = store.bot(turn.botId); if (!bot || bot.composio === false || !composio.configured(cfg)) return []; const actor = teamConnections.relayActor(turn as unknown as { threadId: string; generation: string; connectorsFor?: string }); return actor.refusal ? null : composio.connectedServiceSlugs(...teamConnections.via(actor.access)); } } }); try { const moved = migrateBotBurgers(store.bots.map((bot) => bot.id)); if (moved.length) console.log(`skill burgers: moved ${moved.length} saved by one bot into every chat`); } catch (error) { console.warn("skill burgers: could not move bots' own burgers into every chat", error); } ROUTES.push(createSkillBurgerRoutes({ messages: (threadId) => store.activePath(threadId), botIds: () => store.bots.map((bot) => bot.id), owns: (botId, threadId) => store.bot(botId)?.threadId === threadId || Boolean(store.taskByThread(botId, threadId)), sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), summarize: (botId, prompt) => sideJobs.text("skill-burger", botId)?.generateText(prompt, { timeoutMs: 10_000 }) ?? Promise.resolve(null), levelOf, actorOf: (auth) => (auth.kind === "session" ? actorKey(auth) : null), teammate: (idOrName) => { const bot = store.bot(idOrName) ?? store.bots.find((one) => one.name.toLowerCase() === idOrName.toLowerCase()); return bot ? { id: bot.id, name: bot.name, ...(bot.title ? { role: bot.title } : {}) } : undefined; }, history: skillBurgerRuns.history }));
+ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes()); ROUTES.push(createSuggestedReplyRoutes({ enabled: () => cfg.features?.suggestedReplies !== false, owns: (botId, threadId) => store.bot(botId)?.threadId === threadId || Boolean(store.taskByThread(botId, threadId)), sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), mayChat: (auth, botId) => ["chat", "edit"].includes(levelOf(auth, botId)), messages: (threadId) => store.activePath(threadId), busy: threadBusy, writer: (botId) => sideJobs.text("suggested-reply", botId) })); const skillBurgerRuns = createSkillBurgerRuns({ dataDir: DATA_DIR, host: { port: PORT, cwd: (botId, threadId) => store.taskByThread(botId, threadId)?.cwd || store.bot(botId)?.cwd || workspaceDir(botId), mint: (turn, kind) => mintInternalCapability({ ...(turn as unknown as InternalCapability), kind, depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }), browser: async (turn) => { const bot = store.bot(turn.botId); return bot ? ((await browserIntegration(bot.id, bot.browserProfile, { threadId: turn.threadId, generation: turn.generation }))?.integration as { env?: Record<string, string | undefined> } | undefined) ?? null : null; }, publish: (threadId, event) => { const engine = runningTurnEngines.get(threadId); bus.publish({ ...event, provider: engine?.driverKind, providerInstanceId: engine?.instanceId } as unknown as RuntimeEvent); }, mayEditBurgers: () => !CLOUD_TEAM, connectedApps: async (turn) => { const bot = store.bot(turn.botId); if (!bot || bot.composio === false || !composio.configured(cfg)) return []; const actor = teamConnections.relayActor(turn as unknown as { threadId: string; generation: string; connectorsFor?: string }); return actor.refusal ? null : composio.connectedServiceSlugs(...teamConnections.via(actor.access)); } } }); try { const moved = migrateBotBurgers(store.bots.map((bot) => bot.id)); if (moved.length) console.log(`skill burgers: moved ${moved.length} saved by one bot into every chat`); } catch (error) { console.warn("skill burgers: could not move bots' own burgers into every chat", error); } ROUTES.push(createSkillBurgerRoutes({ messages: (threadId) => store.activePath(threadId), botIds: () => store.bots.map((bot) => bot.id), owns: (botId, threadId) => store.bot(botId)?.threadId === threadId || Boolean(store.taskByThread(botId, threadId)), sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), summarize: (botId, prompt) => sideJobs.text("skill-burger", botId)?.generateText(prompt, { timeoutMs: 10_000 }) ?? Promise.resolve(null), levelOf, actorOf: (auth) => (auth.kind === "session" ? actorKey(auth) : null), teammate: (idOrName) => { const bot = store.bot(idOrName) ?? store.bots.find((one) => one.name.toLowerCase() === idOrName.toLowerCase()); return bot ? { id: bot.id, name: bot.name, ...(bot.title ? { role: bot.title } : {}) } : undefined; }, history: skillBurgerRuns.history }));
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses })); ROUTES.push(createBotHoldRoutes({ holds: botHolds, named: (kind, id) => (kind === "bot" ? store.bot(id)?.name ?? null : store.sections.includes(id.trim()) ? id.trim() : null), stop: async (botIds) => { let stopped = 0; for (const botId of botIds) { for (const { threadId } of store.tasks(botId)) if (threadBusy(botId, threadId) || coordinator.activeDirect(threadId)) { await stopThreadForPerson(botId, threadId); stopped++; } for (const group of store.groups) if (roomThreadIds(group).some((threadId) => groupSpeakers.get(threadId)?.botId === botId)) { await interruptHeldMember(group.id, botId); stopped++; } } return stopped; }, audit: (entry, auth, req) => { if (!DESKTOP_MANAGED && adminActivityRecording()) appendAdminAction(DATA_DIR, { category: "bot", action: `${entry.kind}.${entry.paused ? "pause" : "resume"}`, target: { kind: entry.kind, id: entry.id, name: entry.name }, actor: adminActorFor(auth, req) }); }, bots: () => store.bots.map((bot) => bot.id) })); const cliLogin = createCliLogin({ sessions, refusal: () => (HOSTED_WORKSPACE ? "Sign in through the workspace portal." : null), loopbackRefusal: () => (LOOPBACK.trust === "service" ? "on this shared server a program here may not ask to sign in: run openmausbot login on your own computer" : null), environment: () => environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, ownHome: ownHome.takesMove() }), changed: () => broadcast({ kind: "cli-login" }, { adminOnly: true }), ...(CLOUD_TEAM ? { opened: (session) => teamHost.met(session) } : {}) }); ROUTES.push(cliLogin.routes); ROUTES.push(createWorkspaceBannerRoutes({ changed: () => broadcast({ kind: "config", ...configStatus() }) })); ROUTES.unshift(createUsageCapRoutes({ view: () => usageCapGate.view(), botExists: (botId) => Boolean(store.bot(botId)), save: (usageCaps) => { saveConfig({ usageCaps }); Object.assign(cfg, loadConfig()); } })); const starterAwakeRoutes = createStarterAwakeRoutes({ awake: starterAwake }); ROUTES.push(starterAwakeRoutes);
 ROUTES.push(createSharedComputerRoutes({ enabled: (auth) => lendingEnabled() || (ownerLends() && ownHome.owner(auth)), computers: sharedComputers, sessionLive: (id) => sessions.isLive(id), environmentId: ENVIRONMENT_ID,
@@ -11938,7 +11938,7 @@ ROUTES.push(createBotMessageRoutes({
 }));
 const liveRoots = (threadId: string, botId: string | undefined) => { const bot = botId ? store.bot(botId) : store.botByThread(threadId); return bot ? messageFileRootsForThread(bot.id, threadId).filter((root) => root !== ATTACHMENTS_DIR) : null; }; const chatApps = createChatApps({ store, dataDir: DATA_DIR, liveRows: liveAppRows, liveRoots, paused: () => workspaceMaintenance.active || moveFreeze.frozen() });
 const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, keys: mcpKeys, storedServers: () => cfg.mcpServers ?? {}, mountedServers: (bot) => teamConnections.engineMcp(bot), personMcp: teamConnections.personMcp, probeAs: (server) => mcpServersHost.probeAs(server), oauth: mcpOAuth });
-ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc, threadVisible: (auth, threadId) => (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId) }));
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc, data: dataEngine, dataOff: (botId) => serverTurnedOff(store.bot(botId)?.toolsOff, "data"), threadVisible: (auth, threadId) => (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId) }));
 const roomReactionNotes = createRoomReactionNotes({ store }), { react } = createReactions({
   store, noted: roomReactionNotes.noted, inboxAnswer: (input) => teamMessages.reactedIn(input.auth, input.threadId, input.target.id, input.answer, { sendId: input.sendId, sender: messageSender(input.auth) }), reply: (input) => personReplies.deliver({ ...input, about: "message" }),
   answerCard: (input) => respondToCard({ ...input, via: "reaction" }), withdraw: personReplies.withdraw,
@@ -13010,7 +13010,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               description: b.description || undefined,
             };
           });
-        return json(res, 200, { bots: [...bots, ...botLink.link.agents(), ...remoteHandoff.agents()], elsewhere: placesElsewhere.roster("tool", (kind) => botLink.link.on() && kind !== "team") || undefined });
+        return json(res, 200, { bots: [...bots, ...botLink.link.agents().filter((one) => linkedRoster.reaches(sender, one.id)), ...remoteHandoff.agents()], elsewhere: placesElsewhere.roster("tool", botLink.reaches) || undefined });
       }
       if (await dispatchRoutes([createInternalThreadRoutes({
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
@@ -13050,7 +13050,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         } catch (error) {
           const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
           const message = status === 404
-            ? `No file was found at ${requestedPath}. Save it under /home/cua/workspace (or your working folder) and pass its exact path.`
+            ? attachNotFound(requestedPath, localVmThreadTargets.has(threadId) ? VM_WORKSPACE_GUEST : messageFileRootsForThread(from.id, threadId).find((root) => root !== ATTACHMENTS_DIR))
             : error instanceof Error ? error.message : "could not attach that file";
           return json(res, status, { error: message });
         }

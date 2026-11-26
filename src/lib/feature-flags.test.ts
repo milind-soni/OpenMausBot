@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, usbPhoneTakeoverEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, suggestedRepliesEnabled, usbPhoneTakeoverEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -96,5 +96,12 @@ describe("saved steps flag", () => {
     expect(savedStepsEnabled(null)).toBe(true);
     expect(savedStepsEnabled({ features: {} })).toBe(true);
     expect(savedStepsEnabled({ features: { savedSteps: false } })).toBe(false);
+  });
+
+  it("follows the server's suggested replies switch, and stays off with a server that doesn't report one", () => {
+    expect(suggestedRepliesEnabled(null)).toBe(false);
+    expect(suggestedRepliesEnabled({ features: {} })).toBe(false);
+    expect(suggestedRepliesEnabled({ features: { suggestedReplies: true } })).toBe(true);
+    expect(suggestedRepliesEnabled({ features: { suggestedReplies: false } })).toBe(false);
   });
 });

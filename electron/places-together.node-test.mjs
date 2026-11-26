@@ -35,6 +35,7 @@ function setup(over = {}) {
     now: () => f.clock,
     setTimer: (run, ms) => { f.tick = { run, ms }; return {}; }, clearTimer: () => { f.cleared += 1; },
     later: (run, ms) => { const timer = { run, ms, cancelled: false }; f.timeouts.push(timer); return timer; }, cancelLater: (timer) => { if (timer) timer.cancelled = true; },
+    startQuietMs: 0,
     ...over.deps,
   });
   /** The next read of My Cloud is due: a minute has passed. */
@@ -48,7 +49,7 @@ test("the switch starts off, and off reads nothing, keeps nothing and starts no 
   f.together.linkChanged();
   assert.equal(parseTogether(null), false);
   assert.equal(parseTogether({ v: 1, on: "yes" }), false);
-  assert.deepEqual(f.together.state("computer"), { v: 1, available: true, on: false, here: "computer", other: null });
+  assert.deepEqual(f.together.state("computer"), { v: 1, available: true, on: false, here: "computer", other: null, notice: true, commands: false }, "never chosen: off until its notice is shown");
   await f.together.refresh("cloud");
   assert.equal(f.together.open("computer", "nova"), false);
   f.together.arrived();
@@ -399,13 +400,27 @@ test("turning it off forgets every list and stops the timer; the choice is kept"
   await f.together.refresh("cloud");
   f.together.open("computer", "nova");
   const off = f.together.set("computer", false);
-  assert.deepEqual([off.on, off.other, f.saved, f.cleared], [false, null, { v: 1, on: false }, 1]);
+  assert.deepEqual([off.on, off.other, f.saved, f.cleared], [false, null, { v: 1, on: false, choices: { "acct-a": false } }, 1]);
   f.shown = "cloud";
   f.together.arrived();
   assert.deepEqual(f.sent, []);
   assert.equal(f.together.open("computer", "nova"), false);
   const on = f.together.set("computer", true);
-  assert.deepEqual([on.on, on.other.bots, f.saved], [true, [], { v: 1, on: true }]);
+  assert.deepEqual([on.on, on.other.bots, f.saved], [true, [], { v: 1, on: true, choices: { "acct-a": true } }]);
+});
+
+test("a choice is the account's own: another account signed in on this computer has not chosen, and a file from before choices counts for everyone until the first choice", () => {
+  const f = setup({ saved: { v: 1, on: true } });
+  assert.equal(f.together.chosen(), true, "a file from before per-account choices: its one choice stands");
+  f.together.set("computer", false);
+  assert.deepEqual(f.saved, { v: 1, on: false, choices: { "acct-a": false } }, "`on` stays written, the last choice, for an older app");
+  f.cloud = { ...f.cloud, account: "acct-b" };
+  assert.equal(f.together.chosen(), null, "acct-b never chose: the default and its notice are theirs to see");
+  assert.equal(f.together.state("computer").notice, true);
+  f.together.set("computer", true);
+  f.cloud = { ...f.cloud, account: "acct-a" };
+  assert.equal(f.together.chosen(), false, "acct-a's off is kept");
+  assert.equal(f.together.on(), false);
 });
 
 test("without a My Cloud, or once this computer's bots moved away, there is nothing to join", async () => {
@@ -474,8 +489,9 @@ test("only this computer's page and My Cloud's own page are answered", async () 
   const handlers = new Map();
   const f = setup();
   installPlacesTogether({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, asking: (event) => event.page, together: f.together });
-  assert.deepEqual([...handlers.keys()], ["places-together:state", "places-together:set", "places-together:open", "places-together:new-bot-choice", "places-together:new-bot", "places-together:new-bot-heard"]);
-  for (const handler of handlers.values()) assert.throws(() => handler({ page: null }, "nova"), /Only this computer's page and My Cloud's page/);
+  assert.deepEqual([...handlers.keys()], ["places-together:state", "places-together:set", "places-together:open", "places-together:new-bot-choice", "places-together:new-bot", "places-together:new-bot-heard",
+    "places-together:notice-shown", "places-together:notice-done", "places-together:commands", "places-together:rail-set"]);
+  for (const [channel, handler] of handlers) assert.throws(() => handler({ page: null }, "nova"), channel === "places-together:rail-set" ? /Only the window's rail/ : /Only this computer's page and My Cloud's page/);
   assert.equal(handlers.get("places-together:state")({ page: "local" }).here, "computer");
   assert.equal(handlers.get("places-together:state")({ page: "cloud" }).here, "cloud");
   assert.equal(handlers.get("places-together:set")({ page: "local" }, "yes").on, false, "only true turns it on");
@@ -491,13 +507,21 @@ test("main wires it to the one rule for this app's own pages, and the preload of
   assert.match(main, /desktopNotifications\.arrived\(\); placesTogether\.arrived\(\);/);
   assert.match(main, /try \{ placesTogether\.scopeChanged\(\); \} catch \{\}/, "an account change or sign-out drops the lists at once");
   assert.match(main, /placesTogether\.navigated\(homeOfUrl\(url\)\)/);
-  assert.match(main, /powerChecked: async \(\) => \{ const account = cloudAccount; if \(!account\) return false; await account\.refresh\(\); return Date\.now\(\) - \(account\.state\(\)\.verifiedAt \?\? 0\) < 5_000; \}/);
+  assert.match(main, /const cloudAwakeNow = async \(\) => \{ const account = cloudAccount; if \(!account\) return false; if \(Date\.now\(\) - \(account\.state\(\)\.verifiedAt \?\? 0\) >= 5_000\) await account\.refresh\(\); return Date\.now\(\) - \(account\.state\(\)\.verifiedAt \?\? 0\) < 5_000; \};/);
+  assert.match(main, /awakeNow: async \(\) => \(await cloudAwakeNow\(\)\) && !cloudPower\.asleep\(\)/, "the Bots in two places card reads My Cloud only on a fresh awake");
+  assert.match(main, /powerChecked: cloudAwakeNow, computer:/, "the list asks the Admin just before each read of My Cloud");
+  assert.match(main, /commands: \{ on: \(\) => sharingController\(\)\.terminalOn\(\), set: on => \(on \? lendingDialogs\.lendTerminal\(true, \(\) => sharingController\(\)\.lendTerminal\(true\)\) : sharingController\(\)\.lendTerminal\(false\)\) \}/,
+    "the notice's commands switch reads lending itself and asks the icon menu's own question before turning it on");
+  assert.match(main, /linkCommandsFact\.observe\(summary\); try \{ placesTogether\.commandsChanged\(summary\.terminal === true\); \} catch \{\} \}/, "and stays live while the notice is up");
+  assert.match(main, /chosen: \(\) => placesTogether\.chosen\(\), powerChecked: cloudAwakeNow, napped: \(\) => cloudPower\.hold\(\), proved: \(\) => cloudPower\.woke\(\), quietMs: START_QUIET_MS,/, "so does the link's first pairing on by default");
+  assert.match(main, /computer: \(\) => togetherComputer\(\{ cloudHome: Boolean\(homeWindow\.cloudOrigin\(\)\), ownHome: Boolean\(ownHome\?\.origin\(\)\), frozen: cleanWorkspace\.marker\(\)\.frozen, profile: cleanWorkspace\.profile\(\), running: runningDataDir \}\)/, "the freeze marker counts before the home window knows My Cloud is home");
   assert.match(main, /focused: \(\) => powerMonitor\.getSystemIdleState\(60\) !== "locked" && Boolean\(mainWindow && !mainWindow\.isDestroyed\(\) && mainWindow\.isFocused\(\)\)/);
   assert.equal(main.match(/places-together:/g).length, 1, "main sends only that the list changed, never the list");
   const preload = readFileSync(join(HERE, "preload.cjs"), "utf8");
   assert.match(preload.match(/const REMOTE_SAFE = new Set\(\[([^\]]*)\]\)/)[1], /"placesTogether"/);
   const bridge = preload.slice(preload.indexOf("  placesTogether: "), preload.indexOf("  twoPlaces: {"));
-  assert.deepEqual(bridge.match(/"places-together:[a-z-]+"/g), ['"places-together:state"', '"places-together:set"', '"places-together:open"', '"places-together:changed"', '"places-together:changed"', '"places-together:new-bot-choice"', '"places-together:new-bot"']);
+  assert.deepEqual(bridge.match(/"places-together:[a-z-]+"/g), ['"places-together:state"', '"places-together:set"', '"places-together:open"', '"places-together:changed"', '"places-together:changed"',
+    '"places-together:notice-shown"', '"places-together:notice-done"', '"places-together:commands"', '"places-together:new-bot-choice"', '"places-together:new-bot"']);
 });
 
 test("the ＋'s other place: that place opens and is told to make the bot itself, once its page has loaded", async () => {
@@ -730,3 +754,4 @@ test("the preload forgets a new bot nobody listened for: when main says so, and 
   assert.equal(made, 0, "a page that starts listening later, such as after a sign-in, makes no bot");
   assert.deepEqual(late.invoked, []);
 });
+

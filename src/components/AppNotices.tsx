@@ -15,10 +15,11 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, TOGETHER_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { rememberNoticeSeen } from "@/lib/announcement-history";
 import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
 import { useTwoPlaces } from "@/lib/two-places";
+import { useTogetherNoticeDue } from "@/lib/places-together";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -48,6 +49,7 @@ import { NewLookNotice, reportNewLook } from "./NewLookNotice";
 import { PhoneUpdateCard, phonesToTell, useRetiredLinkPhones } from "./PhoneUpdateNotice";
 import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
 import { TwoPlacesCard } from "./TwoPlacesCard";
+import { TogetherNotice } from "./TogetherNotice";
 import { TeamsPopup } from "./whats-new/TeamsPopup";
 import { WhatsNewPopup } from "./whats-new/WhatsNewPopup";
 
@@ -110,7 +112,15 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const mausBot = useMausBotWelcomeDue(viewer);
   // Bots in two places: this computer's page only, where main knows what lives here.
   const two = useTwoPlaces();
-  const twoFact = !local || two.suggest === null ? false : two.suggest === undefined ? null : true;
+  // Together by default: this computer's page only, where the one list is; never during a live call.
+  const togetherDue = useTogetherNoticeDue();
+  // While the notice of the default is due, or main has not said yet whether it is, the bots of this computer and My
+  // Cloud are about to work together: no suggestion to move them to My Cloud goes ahead of it.
+  const cloudHeld = two.suggest?.kind === "cloud" && togetherDue !== false;
+  const twoFact = !local || two.suggest === null || (cloudHeld && togetherDue === true) ? false : two.suggest === undefined || cloudHeld ? null : true;
+  // Once drawn it stays until closed, though main stops calling it due as soon as one of its switches is used.
+  const [togetherOpen, setTogetherOpen] = useState(false);
+  const togetherFact = togetherOpen ? true : remote || !local || togetherDue === false ? false : togetherDue === null || (state.liveCall && state.liveCall.status !== "ended") ? null : true;
   // Phones whose older app lost its way in: this computer's own page only, never a Cloud, a server's page or client mode.
   const linkPhones = useRetiredLinkPhones(!remote && local);
   useEffect(() => {
@@ -257,7 +267,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // FOLLOWERS); nothing else does.
   const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : teamsHere || cards || whatsNewOwed || consentHere || simpleDue || boatHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
+    : teamsHere || cards || whatsNewOwed || consentHere || simpleDue || boatHere || announcementNow !== false || twoFact !== false || togetherFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
     [TEAMS_NOTICE]: teamsNow,
     [GROK_MOVE_NOTICE]: grokNow,
     [PHONE_UPDATE_NOTICE]: phoneNow,
@@ -272,6 +282,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null
       : Boolean(kind && !noticeSeen(record, CLOUD_NOTICE_CARD[kind].dismissed)),
+    [TOGETHER_NOTICE]: togetherFact,
     [BOAT_OFFER_NOTICE]: !boatHere || moving || afterWelcome === true || !usedBefore(state.bots) || desktopState?.seen.includes(BOAT_OFFER_NOTICE) ? false
       : organization === null || moving === null || afterWelcome === null || mausBotFirst || (desktop && !desktopState) ? null : !organization,
     [ANNOUNCEMENT_NOTICE]: announcementNow,
@@ -305,6 +316,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       markLaunchAnnouncement(announcement.id);
       reportAnnouncement(announcement, "shown");
       if (announcement.kind === "sponsor") rememberSponsorDay(seenRecord, now(), remembering);
+    } else if (shownKey === TOGETHER_NOTICE) {
+      setTogetherOpen(true);
     } else if (shownKey === GROK_MOVE_NOTICE && !grokShown) {
       setGrokShown(true);
       reportGrokMovePopup("shown");
@@ -341,6 +354,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) }).then(config => dispatch({ type: "configStatus", config })).catch(() => {}); };
     return <PhoneUpdateCard phones={retiredPhones} onOpen={() => { done(); dispatch(phonePairingSettingsAction()); }} onDismiss={done} />;
   }
+
+  if (notice === TOGETHER_NOTICE) return <TogetherNotice onClose={() => { setTogetherOpen(false); close(); }} />;
 
   if (notice === SIMPLE_MODE_NOTICE) {
     return SIMPLE_ONLY || advancedBack ? <NewLookNotice onClose={close} back={advancedBack} /> : <SimpleModePrompt onClose={close} />;

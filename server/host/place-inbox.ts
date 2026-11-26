@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import type { InboxItem, InboxRow, InboxView } from "../../shared/inbox.ts";
+import { countsForYou } from "../../shared/inbox-reason.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { overtakenQuestions, personWait, type PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
@@ -278,9 +279,9 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     view,
     message,
     route,
-    /** What waits on this viewer: every open ask, and news they have not read. */
+    /** What waits on this viewer in For you: open asks and unread news, never Activity (finished or shared). */
     count(auth: RequestAuth): number {
-      return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
+      return view(auth).rows.filter(countsForYou).length;
     },
     /** The viewer read a line or an open ask, or marked it unread again. */
     markRead(auth: RequestAuth, lineId: string, read = true): boolean {

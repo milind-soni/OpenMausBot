@@ -20,7 +20,8 @@ export class DataFailure extends Error {
   }
 }
 
-export type DataConnection = "bot" | "panel";
+/** `page`: bot pages' read-only queries, on their own connection so they never wait behind the bot or the panel. */
+export type DataConnection = "bot" | "panel" | "page";
 export type DataExtension = "httpfs" | "excel" | "azure" | "postgres" | "mysql" | "sqlite";
 
 export interface RunOptions {
@@ -56,6 +57,9 @@ export interface DescribeResult {
 export interface BotDatabase {
   readonly botId: string;
   run(sql: string, options: RunOptions): Promise<RunResult>;
+  /** One SELECT from a bot's page, judged by page-query.ts and run read-only on the page connection; at most `maxRows`
+   * rows, `truncated` when there were more. `rowCount` is the rows returned. */
+  pageQuery(sql: string, params: unknown[] | Record<string, unknown> | undefined, options: { maxRows: number; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult>;
   materialise(sql: string, name: string, options: RunOptions): Promise<MaterialiseResult>;
   /** A missing table is not an error. */
   dropResult(name: string, connection?: DataConnection): Promise<void>;
