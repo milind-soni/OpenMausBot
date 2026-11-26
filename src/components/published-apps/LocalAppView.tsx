@@ -8,8 +8,8 @@ import { t } from "@/lib/i18n";
 import { changeLocalApp, fetchLocalAppDocument, loadLocalApps, useLocalApps } from "@/lib/local-apps";
 import type { Bot } from "@/state/store";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "../app/AppFrame";
-import { InstalledMark, installItems, LocalAppMark } from "./LocalAppCard";
-import { installLocalApp, readInstalled, uninstallLocalApp, useAppInstall } from "@/lib/local-app-install";
+import { desktopFailedText, InstalledMark, installItems, LocalAppMark, type InstallActions } from "./LocalAppCard";
+import { addLocalAppToDesktop, installLocalApp, readInstalled, removeLocalAppFromDesktop, uninstallLocalApp, useAppInstall } from "@/lib/local-app-install";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "../SidebarPopoverMenu";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageActions, ToolPageHeader } from "../ToolPageShell";
 
@@ -90,11 +90,16 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
   const goToChat = app ? onGoToChat?.(app) : undefined;
   const title = app?.name ?? "";
   const installed = Boolean(app && install?.ids.has(app.id));
-  const installOne = app && install?.available ? { installed, run: () => {
+  const onDesktop = Boolean(app && install?.desktop?.has(app.id));
+  const installOne: InstallActions | undefined = app && install?.available ? { installed, run: () => {
     setInstallFailed(null);
     void (installed ? uninstallLocalApp(app.id) : installLocalApp(app))
       .catch(() => setInstallFailed(t(installed ? "localApps.install.uninstallFailed" : "localApps.install.failed", { name: app.name })));
-  } } : undefined;
+  }, ...(install.canDesktop ? { desktop: { on: onDesktop, run: () => {
+    setInstallFailed(null);
+    void (onDesktop ? removeLocalAppFromDesktop(app.id) : addLocalAppToDesktop(app))
+      .catch((error: unknown) => setInstallFailed(desktopFailedText(error, onDesktop, app.name)));
+  } } } : {}) } : undefined;
 
   const header = (
     <>

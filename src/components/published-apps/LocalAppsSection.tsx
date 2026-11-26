@@ -5,10 +5,10 @@ import { cn } from "@/lib/cn";
 import type { LocalApp } from "../../../shared/local-apps";
 import { t } from "@/lib/i18n";
 import { changeLocalApp, hideLocalApp, loadLocalApps, openLocalApp, removeLocalApp, useLocalApps } from "@/lib/local-apps";
-import { installLocalApp, uninstallLocalApp, useAppInstall } from "@/lib/local-app-install";
+import { addLocalAppToDesktop, installLocalApp, removeLocalAppFromDesktop, uninstallLocalApp, useAppInstall } from "@/lib/local-app-install";
 import type { Action, AppState } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { LocalAppCard } from "./LocalAppCard";
+import { desktopFailedText, LocalAppCard, type InstallActions } from "./LocalAppCard";
 
 export const REMOVE_UNDO_MS = 6_000;
 export const SECTION_TITLE = "text-[17px] font-semibold text-ink";
@@ -80,11 +80,17 @@ export function LocalAppsSection({ place, alone = false }: { place: "computer" |
     void changeLocalApp(app.id, { name }).catch(() => setLine({ kind: "failed", text: t("localApps.renameFailed") }));
   };
   const install = useAppInstall();
-  const installOf = (app: LocalApp) => {
+  const installOf = (app: LocalApp): InstallActions | undefined => {
     if (!install?.available) return undefined;
     const installed = install.ids.has(app.id);
-    return { installed, run: () => void (installed ? uninstallLocalApp(app.id) : installLocalApp(app)).catch(() =>
-      setLine({ kind: "failed", text: t(installed ? "localApps.install.uninstallFailed" : "localApps.install.failed", { name: app.name }) })) };
+    const onDesktop = Boolean(install.desktop?.has(app.id));
+    return {
+      installed,
+      run: () => void (installed ? uninstallLocalApp(app.id) : installLocalApp(app)).catch(() =>
+        setLine({ kind: "failed", text: t(installed ? "localApps.install.uninstallFailed" : "localApps.install.failed", { name: app.name }) })),
+      ...(install.canDesktop ? { desktop: { on: onDesktop, run: () => void (onDesktop ? removeLocalAppFromDesktop(app.id) : addLocalAppToDesktop(app))
+        .catch((error: unknown) => setLine({ kind: "failed", text: desktopFailedText(error, onDesktop, app.name) })) } } : {}),
+    };
   };
   const goToChat = (app: LocalApp) => {
     const action = chatOfApp(app, { bots });

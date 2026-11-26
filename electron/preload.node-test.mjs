@@ -97,12 +97,16 @@ test("appInstall asks main over its own channels with only the fields it underst
   const view = new DataView(new Uint8Array([9, 8]).buffer);
   await exposed.api.appInstall.install({ id: "notes", name: "Notes", iconPng: view });
   await exposed.api.appInstall.uninstall("notes");
+  await exposed.api.appInstall.addToDesktop("notes");
+  await exposed.api.appInstall.removeFromDesktop("notes");
   await exposed.api.appInstall.list();
   assert.deepEqual(invocations.slice(before), [
     ["app-install:install", { id: "notes", name: "Notes", iconPng: icon, desktopShortcut: false }],
     ["app-install:install", { id: "notes", name: "Notes", iconPng: undefined, desktopShortcut: false }],
     ["app-install:install", { id: "notes", name: "Notes", iconPng: new Uint8Array([9, 8]), desktopShortcut: false }],
     ["app-install:uninstall", "notes"],
+    ["app-install:add-to-desktop", "notes"],
+    ["app-install:remove-from-desktop", "notes"],
     ["app-install:list"],
   ]);
   const source = (await import("node:fs")).readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");

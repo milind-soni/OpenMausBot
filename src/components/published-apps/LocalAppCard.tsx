@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AppWindowMac, MessageSquare, MonitorDown, MonitorUp, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { AppWindowMac, MessageSquare, MonitorDown, MonitorUp, MoreHorizontal, Pencil, SquareMinus, SquarePlus, Trash2 } from "lucide-react";
 
 import type { LocalApp } from "../../../shared/local-apps";
 import { t } from "@/lib/i18n";
@@ -34,12 +34,28 @@ export function InlineName({ name, onDone }: { name: string; onDone: (next: stri
   );
 }
 
-/** Install on this computer or Uninstall, for a menu: nothing where the desktop app can't install launchers. */
-export function installItems(install: { installed: boolean; run(): void } | undefined): SidebarMenuItem[] {
+/** What a saved app's menu offers on this computer. `desktop`: absent where this desktop build can't add a Desktop icon. */
+export type InstallActions = { installed: boolean; run(): void; desktop?: { on: boolean; run(): void } };
+
+/** Install on this computer or Uninstall, then Add to Desktop or Remove from Desktop, for a menu: nothing where the
+ * desktop app can't install launchers. */
+export function installItems(install: InstallActions | undefined): SidebarMenuItem[] {
   if (!install) return [];
-  return [install.installed
-    ? { key: "uninstall", label: t("localApps.install.uninstall"), icon: <MonitorUp size={16} />, onSelect: install.run }
-    : { key: "install", label: t("localApps.install.install"), icon: <MonitorDown size={16} />, onSelect: install.run }];
+  const { desktop } = install;
+  return [
+    install.installed
+      ? { key: "uninstall", label: t("localApps.install.uninstall"), icon: <MonitorUp size={16} />, onSelect: install.run }
+      : { key: "install", label: t("localApps.install.install"), icon: <MonitorDown size={16} />, onSelect: install.run },
+    ...(!desktop ? [] : desktop.on
+      ? [{ key: "desktop-remove", label: t("localApps.install.removeFromDesktop"), icon: <SquareMinus size={16} />, onSelect: desktop.run }]
+      : [{ key: "desktop-add", label: t("localApps.install.addToDesktop"), icon: <SquarePlus size={16} />, onSelect: desktop.run }]),
+  ];
+}
+
+/** The one line a failed Desktop change shows: installing first failed, or the Desktop item itself. */
+export function desktopFailedText(error: unknown, removing: boolean, name: string): string {
+  if (removing) return t("localApps.install.desktopRemoveFailed", { name });
+  return t(error instanceof Error && error.message === "install" ? "localApps.install.failed" : "localApps.install.desktopFailed", { name });
 }
 
 export function InstalledMark() {
@@ -57,7 +73,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
   onGoToChat?: () => void;
   onRemove: () => void;
   /** Present only where this computer can install launchers. */
-  install?: { installed: boolean; run(): void };
+  install?: InstallActions;
 }) {
   const [renaming, setRenaming] = useState(false);
   const maker = bot?.name ?? app.bot?.name;
