@@ -10,7 +10,7 @@ import { openRouterModelUnavailable } from "./drivers/openrouter-free.ts";
 import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
 import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
 import { refusesModel } from "./quick-model-fallback.ts";
-import { lightModelFor } from "./suggested-reply/light-model.ts";
+import type { LightModel, LightModelEngine } from "./suggested-reply/light-model.ts";
 import { fastModelFor } from "./turn-route.ts";
 import type { UsageRow, UsageTrigger } from "./usage-ledger.ts";
 
@@ -85,6 +85,8 @@ export interface SideJobsDeps {
   log?: (line: string) => void;
   /** How many background jobs run at once, across bots. */
   slots?: JobSlots;
+  /** The smallest model of an engine a suggested reply may run on; without it, or when it answers null, there is none. */
+  lightModel?: (engine: LightModelEngine, refused: ReadonlySet<string>) => LightModel | null;
 }
 
 export interface SideJobs {
@@ -195,7 +197,7 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
   /** Pinned to the light model: its refusal fails the call rather than running on the bot's own model. */
   const lightText = (bot: SideJobBot, own: SideJobInstance): SideJobText | null => {
     const refused = deps.smallModels.refused(own.instanceId);
-    const light = lightModelFor(own, refused);
+    const light = deps.lightModel?.(own, refused);
     if (!light || (deps.modelAllowed && !deps.modelAllowed({ instanceId: own.instanceId, model: light.model }))) return null;
     const call = (light.call === "text" ? own.generateText : own.generateMemoryText)?.bind(own);
     if (!call) return null;

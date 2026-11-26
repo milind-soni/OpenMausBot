@@ -81,8 +81,8 @@ export function useSuggestedReply(input: SuggestedReplyInput): SuggestedReply {
     redraw((n) => n + 1);
   };
   const accept = () => {
-    if (!text || !replyId) return;
-    declined.set(threadId, replyId);
+    if (!text) return;
+    dismiss();
     fill(text);
     inputRef.current?.focus();
     requestAnimationFrame(() => inputRef.current?.setSelectionRange(text.length, text.length));
