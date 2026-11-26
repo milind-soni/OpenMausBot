@@ -111,6 +111,13 @@ export function roomTurnMayWriteSkills(claim: RoomSkillsClaim, hop: number, botI
   return hop === 0 ? !claim.claimed : claim.mentioned?.has(botId) === true;
 }
 
+/** What one room turn may do with skills: `writes` its own (it may, and its engine can), and `hands` a share to each bot it
+ * @mentions (the first answer, even when its own engine can't write skills). */
+export function roomSkillsTurn(claim: RoomSkillsClaim, hop: number, botId: string, { allowed, canWrite }: { allowed: boolean; canWrite: boolean }): { writes: boolean; hands: boolean } {
+  const may = allowed && roomTurnMayWriteSkills(claim, hop, botId);
+  return { writes: may && canWrite, hands: may && hop === 0 };
+}
+
 /** The first answer, holding the claim, @mentions `botIds`: each may change its own skills once on this message. Returns what
  * withdraws the shares still unused, for when that answer's mentions are done, so no later answer's mention can use them. */
 export function handRoomSkills(claim: RoomSkillsClaim, botIds: readonly string[]): () => void {

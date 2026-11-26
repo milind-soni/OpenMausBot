@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { agentsMcp } from "./drivers/agents-mcp.ts";
-import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, handRoomSkills, roomSkillsRefusal, roomTurnMayWriteSkills, takeRoomSkills, type AgentsConversation, type AgentsTurn, type RoomSkillsClaim } from "./agents-turn.ts";
+import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, handRoomSkills, roomSkillsRefusal, roomSkillsTurn, roomTurnMayWriteSkills, takeRoomSkills, type AgentsConversation, type AgentsTurn, type RoomSkillsClaim } from "./agents-turn.ts";
 
 const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, voiceNotes: true, x: true, research: true, imageGeneration: false, localVm: true };
 const CHAT: AgentsConversation = { threadId: "thread-1", bot: { id: "bot-1", chiefOfStaff: true }, room: false, teamComputer: false, host: HOST };
@@ -183,6 +183,17 @@ describe("what a turn that may not use a listed tool is told", () => {
       withdraw();
       expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
       expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
+    });
+
+    it("lets the first answer hand shares to the bots it @mentions even when its own engine can't write skills", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false })).toEqual({ writes: false, hands: true });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: true })).toEqual({ writes: true, hands: true });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: false, canWrite: true })).toEqual({ writes: false, hands: false });
+      handRoomSkills(claim, ["video"]);
+      expect(roomSkillsTurn(claim, 1, "video", { allowed: true, canWrite: true })).toEqual({ writes: true, hands: false });
+      takeRoomSkills(claim, 0, "editor", true);
+      expect(roomSkillsTurn(claim, 0, "other", { allowed: true, canWrite: true })).toEqual({ writes: false, hands: false });
     });
 
     it("gives the share back to a turn that never ran", () => {
