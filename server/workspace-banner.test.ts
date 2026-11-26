@@ -47,10 +47,18 @@ describe("a workspace's banner picture, as the server keeps it", () => {
     expect(has(webp, "VP8")).toBe(true);
   });
 
-  it("a template's picture loses the same metadata with no size limit, and anything else comes back as nothing", () => {
-    for (const sample of [JPEG_WITH_METADATA, WEBP_WITH_METADATA, PNG_WITH_METADATA]) {
-      expect(withoutPictureMetadata(sample)).toEqual(kept(sample).bytes);
+  it("a template's picture keeps its colour profile and loses EXIF, GPS, XMP, text and anything after its end", () => {
+    const profiles = [[JPEG_WITH_METADATA, "ICC_PROFILE"], [WEBP_WITH_METADATA, "ICCP"], [PNG_WITH_METADATA, "iCCP"]] as const;
+    for (const [sample, profile] of profiles) {
+      const clean = withoutPictureMetadata(Buffer.concat([sample, Buffer.from("TRAILING GPS 37.7749,-122.4194", "latin1")]))!;
+      expect(has(clean, profile), profile).toBe(true);
+      for (const word of ["Secret", "Exif", "EXIF", "XMP", "tEXt", "iTXt", "eXIf", "GPS", "TRAILING"]) expect(has(clean, word), `${profile}: ${word}`).toBe(false);
     }
+    const webp = withoutPictureMetadata(WEBP_WITH_METADATA)!;
+    expect(webp.readUInt32LE(4) + 8).toBe(webp.length);
+    expect(webp[20]! & 0x20).toBe(0x20);
+    // The banner still loses its profile.
+    for (const [sample, profile] of profiles) expect(has(kept(sample).bytes, profile)).toBe(false);
     expect(withoutPictureMetadata(Buffer.from("<svg/>"))).toBeNull();
     expect(withoutPictureMetadata(JPEG_WITH_METADATA.subarray(0, 40))).toBeNull();
   });
