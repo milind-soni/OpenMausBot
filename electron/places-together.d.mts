@@ -59,8 +59,9 @@ export interface PlacesTogetherState {
   commands?: boolean;
 }
 
-/** One bot's place in the one list: its key (`computer:<id>` or `cloud:<id>`), its department ("" for none) and the key of
- * the bot drawn just above it in that list (null at its top). */
+/** One bot's place in the one list: its key (`computer:<id>` or `cloud:<id>`), its department ("" for none, or the mark
+ * for the place's own department, src/lib/one-list.ts LANDING_SECTION) and the key of the bot drawn just above it in that
+ * list (null at its top). */
 export interface ArrangedBot {
   key: string;
   section: string;

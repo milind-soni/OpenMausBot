@@ -1518,13 +1518,13 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             navigateThreadMenu(event);
           }}>
           <TeamMenuItems
-            department={teamMotion.value!.name} onRead={closeTeamMenu} onAddBots={() => { closeTeamMenu(); const name = teamMotion.value!.name; void (oneList?.realize(name) ?? Promise.resolve()).then(() => setMoveToTeam(name), () => {}); }}
+            department={oneList?.virtual(teamMotion.value!.name) ? undefined : teamMotion.value!.name} onRead={closeTeamMenu} onAddBots={() => { closeTeamMenu(); const name = teamMotion.value!.name; void (oneList?.realize(name) ?? Promise.resolve()).then(() => setMoveToTeam(name), () => {}); }}
             onMoveUp={sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(-1); } : undefined}
             onMoveDown={sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(1); } : undefined}
             onRename={() => { closeTeamMenu(); (advanced && !oneList?.virtual(teamMotion.value!.name) ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
-            onShare={() => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
+            onShare={oneList?.virtual(teamMotion.value!.name) ? undefined : () => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}
-            onSetForAll={teamSettingsAllowed === true ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
+            onSetForAll={teamSettingsAllowed === true && !oneList?.virtual(teamMotion.value!.name) ? () => { closeTeamMenu(); setTeamSettings(teamMotion.value!.name); } : undefined}
           />
         </div>
       </div>, document.body)}

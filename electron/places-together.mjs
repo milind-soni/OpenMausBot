@@ -171,6 +171,8 @@ export function placeSections(body) {
   return [...new Set(names)].slice(0, MAX_SECTIONS);
 }
 
+/** "The place's own department" as a page sends it (src/lib/one-list.ts LANDING_SECTION): no department name can be it. */
+const LANDING_SECTION = "\u0000landing";
 /** A bot's key in the one list: its place and its own id there. */
 const LAID_KEY = /^(computer|cloud):[\w-]{1,128}$/;
 
@@ -178,13 +180,16 @@ const LAID_KEY = /^(computer|cloud):[\w-]{1,128}$/;
  * the key of the bot drawn just above it in that list (null at its top). Anything else is dropped. */
 export function parseArrangement(entries) {
   if (!Array.isArray(entries)) return [];
-  return entries.slice(0, MAX_LAID).flatMap((entry) => {
+  const parsed = entries.slice(0, MAX_LAID).flatMap((entry) => {
     if (!record(entry) || typeof entry.key !== "string" || !LAID_KEY.test(entry.key)) return [];
-    const section = entry.section === "" ? "" : sectionName(entry.section);
+    const section = entry.section === "" || entry.section === LANDING_SECTION ? entry.section : sectionName(entry.section);
     if (section === "" && entry.section !== "") return [];
     const after = entry.after === null ? null : typeof entry.after === "string" && LAID_KEY.test(entry.after) && entry.after !== entry.key ? entry.after : undefined;
     return after === undefined ? [] : [{ key: entry.key, section, after }];
   });
+  // One entry per bot, the last one given: a page repeating a key cannot crowd out every other bot's entry.
+  const last = new Map(parsed.map((entry) => [entry.key, entry]));
+  return parsed.filter((entry) => last.get(entry.key) === entry);
 }
 
 /** A place's `GET /api/bots` answer as rows, in that place's own order. */
@@ -536,7 +541,10 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       const next = parseArrangement(entries), keys = new Set(next.map((entry) => entry.key));
       if (!next.length) return arrangedFor(who);
       const { kept } = file();
-      const merged = [...arrangedFor(who).filter((entry) => !keys.has(entry.key)), ...next].slice(-MAX_LAID);
+      const had = arrangedFor(who), before = new Map(had.map((entry) => [entry.key, entry]));
+      // The same arrangement again (a drop where the bot already was) writes nothing and tells no page.
+      if (next.every((entry) => before.get(entry.key)?.section === entry.section && before.get(entry.key)?.after === entry.after)) return had;
+      const merged = [...had.filter((entry) => !keys.has(entry.key)), ...next].slice(-MAX_LAID);
       write({ ...kept, v: 1, arranged: { ...(record(kept.arranged) ? kept.arranged : {}), [who]: merged } });
       tell();
       return merged;

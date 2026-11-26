@@ -292,7 +292,7 @@ describe("switch on: one list", () => {
     await act(async () => root.unmount());
     resetPlacesTogetherForTest(); resetPlaceRowsForTest();
     root = createRoot(host);
-    answer = async () => said({ here: "cloud", arranged, other: { home: "computer", state: "ready", sections: ["Finance"], bots: [row("git", { home: "computer" }), row("ledger", { home: "computer" }), row("finn", { home: "computer", section: "Finance" })] } });
+    answer = async () => said({ here: "cloud", home: "computer", arranged, other: { home: "computer", state: "ready", sections: ["Finance"], bots: [row("git", { home: "computer" }), row("ledger", { home: "computer" }), row("finn", { home: "computer", section: "Finance" })] } });
     await render([bot("maus", { chiefOfStaff: true }), bot("scout", { title: "Open issues" }), bot("tech")]);
     expect(drawn()).toEqual(afterDrag);
     // There, this computer's rows stay where this computer keeps them; My Cloud's own bots are moved through main.
@@ -300,6 +300,29 @@ describe("switch on: one list", () => {
     expect(dragHost("scout")).not.toBeNull();
     // Its departments are this computer's: their menus belong to this computer's page.
     expect(q('[data-section="Finance"] [aria-haspopup="menu"]')).toBeNull();
+  });
+
+  it("an older app that does not say which place is home leaves My Cloud's page as it was: its own bots only", async () => {
+    const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout", { section: "Research" }), bot("atlas")];
+    const browser = await htmlWith(null, cloudBots);
+    answer = async () => said({ here: "cloud", other: { home: "computer", state: "ready", bots: [row("git", { home: "computer" }), row("ledger", { home: "computer" })] } });
+    const { arrange: _newer, ...older } = page;
+    expect(await htmlWith({ placesTogether: older }, cloudBots)).toBe(browser);
+    expect(browser).toContain("Research");
+  });
+
+  it("the place's own department, which only the app keeps, offers no menu item that would name it to this computer's server", async () => {
+    window.ogb = { placesTogether: page } as never;
+    await render([...OWN, bot("finn", { section: "Finance" })]);
+    const menuOf = async (name: string) => {
+      await act(async () => q(`[data-section="${name}"] [aria-haspopup="menu"]`)!.click());
+      const items = [...document.body.querySelectorAll<HTMLElement>("[role=menuitem]")];
+      const said = { share: items.some((item) => item.textContent === "Share"), read: items.some((item) => item.hasAttribute("data-team-mark-read") || item.hasAttribute("data-team-pause")), rename: items.some((item) => item.textContent === "Rename department") };
+      await act(async () => { document.body.querySelector("[role=menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+      return said;
+    };
+    expect((await menuOf("Finance")).share).toBe(true);
+    expect(await menuOf("My Cloud")).toEqual({ share: false, read: false, rename: true });
   });
 
   it("a new Cloud bot lands in My Cloud's department; one already placed stays put", async () => {

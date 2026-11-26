@@ -310,6 +310,25 @@ test("where the person put bots in the one list is kept for their account, throu
   assert.deepEqual(f.asked.filter(([, , init]) => init?.method && init.method !== "GET"), [], "nothing is written to either place's server");
 });
 
+test("an arrangement keeps one entry per bot, the last one sent, and the same arrangement again writes nothing and tells no page", async () => {
+  const f = setup();
+  f.together.state("computer");
+  f.together.arrange("computer", [{ key: "cloud:nova", section: "", after: null }]);
+  const flood = Array.from({ length: 3_000 }, (_, index) => ({ key: "cloud:scout", section: index % 2 ? "Finance" : "", after: null }));
+  const kept = f.together.arrange("computer", flood);
+  assert.deepEqual(kept.map((entry) => entry.key), ["cloud:nova", "cloud:scout"], "one call repeating a key cannot push every other bot's entry out");
+  assert.equal(kept[1].section, "Finance", "the last entry given for a bot wins");
+  assert.deepEqual(f.together.arrange("computer", [{ key: "cloud:a", section: "\u0000landing", after: null }]).at(-1), { key: "cloud:a", section: "\u0000landing", after: null }, "the place's own department is kept as its mark");
+  const writes = [], changes = f.changes, saved = f.saved;
+  const again = setup({ saved, deps: { pref: { read: () => saved, write: (value) => { writes.push(value); } } } });
+  again.together.state("computer");
+  const before = again.changes;
+  assert.deepEqual(again.together.arrange("computer", [{ key: "cloud:nova", section: "", after: null }]), saved.arranged["acct-a"], "a drop where the bot already was");
+  assert.deepEqual(writes, [], "writes nothing");
+  assert.equal(again.changes, before, "and tells no page");
+  assert.ok(f.changes >= changes);
+});
+
 test("a switch file that is not JSON at all is off and quiet until the person turns the switch in Settings, which keeps the bad file beside it and writes a good one; a newer version's file stays untouched", async (t) => {
   const { mkdtempSync, readdirSync, readFileSync: read, rmSync, writeFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

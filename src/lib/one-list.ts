@@ -12,8 +12,14 @@ import type { Bot } from "@/state/store";
 import { t } from "./i18n";
 import type { ArrangedBot, BotHome } from "./places-together";
 
-/** The department the other place's bots land in until the person moves them: the place's own name. */
+/** The department the other place's bots land in until the person moves them: the place's own name, in the person's
+ * language when drawn. */
 export const placeDepartment = (home: BotHome): string => t(home === "cloud" ? "cloudSetup.myCloud" : "place.local");
+
+/** How main keeps "the place's own department": a mark no department name can be (a server name has no control
+ * character), so a change of language never splits it. An entry kept before this, under the department's name as text,
+ * still reads the same while that is its name. */
+export const LANDING_SECTION = "\u0000landing";
 
 export interface OneListInput<B extends Bot> {
   /** The home place's bots in its own order, each in its own department (`section`). A pinned bot or a Chief outside any
@@ -44,7 +50,7 @@ function filed<B extends Bot>(bot: B, section: string): B {
 }
 
 /** Stays where its own page draws it: a pinned bot, or a Chief outside any department. */
-const pageLevel = (bot: Bot): boolean => Boolean(bot.pinned) || (Boolean(bot.chiefOfStaff) && !bot.section);
+export const pageLevel = (bot: Bot): boolean => Boolean(bot.pinned) || (Boolean(bot.chiefOfStaff) && !bot.section);
 
 /** The one list's bots in order, each in its department, and the departments in order: the home place's, then any other
  * a bot was put in (the place's department among them). Each department's bots keep the relative order given here. */
@@ -59,12 +65,16 @@ export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, a
     byKey.set(key, bot); sectionOf.set(key, section); list(section).push(key);
   }
   const entries = new Map(arranged.map((entry) => [entry.key, entry]));
+  // A department the home place no longer has (renamed or deleted elsewhere: the Team map, another window, a phone) holds
+  // nothing here: its bots go back to the place's own department, never to a department of a name the server lacks.
+  const known = new Set(["", landing, ...homeSections, ...homeBots.map((bot) => bot.section ?? "")]);
+  const sectionFor = (entry: ArrangedBot | undefined) => (!entry ? undefined : entry.section === LANDING_SECTION ? landing : known.has(entry.section) ? entry.section : undefined);
   let waiting: Array<{ key: string; section: string; after: string | null | undefined }> = [];
   for (const bot of otherBots) {
     if (pageLevel(bot)) { kept.push(bot); continue; }
-    const key = keyOf(bot), entry = entries.get(key);
+    const key = keyOf(bot), entry = entries.get(key), section = sectionFor(entry);
     byKey.set(key, bot);
-    waiting.push(entry ? { key, section: entry.section, after: entry.after } : { key, section: landing, after: undefined });
+    waiting.push(section !== undefined ? { key, section, after: entry!.after } : { key, section: landing, after: undefined });
   }
   // A bot goes in right under the bot it was put under, once that one is in place; at the top for none. One whose bot
   // above is gone, or now in another department, goes at the end of its department, as does a new one.
@@ -92,15 +102,15 @@ export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, a
  * the bot drawn just above it. `order` is the list's ids as drawn after the move; `kept` says which ids main keeps the
  * place of; `keyOf` names them. Every kept bot of the list is written again, so no entry is left pointing at a bot that
  * moved away. */
-export function arrangedEntries(list: string, order: readonly string[], kept: (id: string) => boolean, keyOf: (id: string) => string): ArrangedBot[] {
-  return order.flatMap((id, index) => (kept(id) ? [{ key: keyOf(id), section: list, after: index > 0 ? keyOf(order[index - 1]!) : null }] : []));
+export function arrangedEntries(list: string, order: readonly string[], kept: (id: string) => boolean, keyOf: (id: string) => string, landing?: string): ArrangedBot[] {
+  const section = list === landing ? LANDING_SECTION : list;
+  return order.flatMap((id, index) => (kept(id) ? [{ key: keyOf(id), section, after: index > 0 ? keyOf(order[index - 1]!) : null }] : []));
 }
 
-/** A department renamed (from either page's own menu, or the place's department, which only main holds): every entry in
- * it follows, so the bots stay in it under its new name. Null when no entry was in it. */
-export function renamedEntries(arranged: readonly ArrangedBot[], from: string, to: string): ArrangedBot[] | null {
-  const moved = arranged.filter((entry) => entry.section === from).map((entry) => ({ ...entry, section: to }));
-  return moved.length ? moved : null;
+/** A department renamed: every bot of the other place drawn in it follows, in the order drawn, whether main kept its
+ * place before or it was only there by landing. `bots` is the list as laid out (layOneList). */
+export function renamedEntries(bots: readonly Bot[], from: string, to: string, kept: (id: string) => boolean, keyOf: (id: string) => string, landing?: string): ArrangedBot[] {
+  return arrangedEntries(to, bots.filter((bot) => !pageLevel(bot) && (bot.section ?? "") === from).map((bot) => bot.id), kept, keyOf, landing);
 }
 
 /** A department deleted: its bots kept by main (`members`, in the order drawn) go to the end of the list outside any

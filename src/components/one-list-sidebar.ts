@@ -1,7 +1,7 @@
 // The sidebar's side of the one list (src/lib/one-list.ts): the bots laid out in departments for this page, and what a
 // drag, a rename or a delete does with a bot or department that main keeps rather than this page's server.
 import type { Dispatch } from "react";
-import { arrangedEntries, deletedEntries, layOneList, placeDepartment, renamedEntries } from "@/lib/one-list";
+import { arrangedEntries, deletedEntries, layOneList, pageLevel, placeDepartment, renamedEntries } from "@/lib/one-list";
 import { isPlacedBot, oneListOn, type PlacedBot } from "@/lib/place-rows";
 import { arrangeOneList, usePlacesTogetherPart, type ArrangedBot, type BotHome, type PlacesTogetherState } from "@/lib/places-together";
 import { api, type Action, type Bot } from "@/state/store";
@@ -51,29 +51,36 @@ export function useOneList(own: Bot[], placed: readonly PlacedBot[], ownSections
   const { here, home, arranged } = view, mirror = here !== home;
   const keyOf = (id: string) => (id.includes(":") ? id : `${here}:${id}`);
   const kept = (id: string) => id.includes(":") !== mirror;
+  const landing = placeDepartment(home === "cloud" ? "computer" : "cloud");
   const laid = layOneList<Bot>({
     homeBots: mirror ? placed : own, homeSections: mirror ? view.sections : ownSections, otherBots: mirror ? own : placed,
-    arranged, keyOf: (bot) => (isPlacedBot(bot) ? bot.id : keyOf(bot.id)), landing: placeDepartment(home === "cloud" ? "computer" : "cloud"),
+    arranged, keyOf: (bot) => (isPlacedBot(bot) ? bot.id : keyOf(bot.id)), landing,
   });
-  const virtual = (name: string) => !mirror && !ownSections.includes(name);
-  const renamed = (from: string, to: string) => { const moved = renamedEntries(arranged, from, to); if (moved) arrangeOneList(moved); };
+  const virtual = (name: string) => !mirror && !ownSections.includes(name) && !own.some((bot) => bot.section === name);
+  /** A department this page's server lacks is made there first (empty), so the layout, which holds a bot only in a
+   * department the home place has or in the place's own, keeps it. */
+  const create = (name: string) => api<{ sections: string[] }>("/api/sidebar-sections", { method: "POST", body: JSON.stringify({ name, botIds: [] }) })
+    .then(({ sections }) => { dispatch({ type: "sections", sections }); });
+  const renamed = (from: string, to: string) => arrangeOneList(renamedEntries(laid.bots, from, to, kept, keyOf, landing));
   const leave = (name: string) => {
-    const members = laid.bots.filter((bot) => bot.section === name && kept(bot.id)).map((bot) => keyOf(bot.id));
-    const moved = deletedEntries(members, laid.bots.filter((bot) => !bot.section).map((bot) => keyOf(bot.id)));
+    const members = laid.bots.filter((bot) => !pageLevel(bot) && bot.section === name && kept(bot.id)).map((bot) => keyOf(bot.id));
+    const moved = deletedEntries(members, laid.bots.filter((bot) => !pageLevel(bot) && !bot.section).map((bot) => keyOf(bot.id)));
     if (moved) arrangeOneList(moved);
   };
+  const place = (list: string, order: readonly string[]) => arrangeOneList(arrangedEntries(list, order, kept, keyOf, landing));
   return {
     bots: laid.bots, sections: laid.sections, mirror, virtual, renamed,
     route: {
       server: (id) => !mirror && !id.includes(":"),
       kept,
       movable: (id) => !mirror || !id.includes(":"),
-      place: (list, order) => arrangeOneList(arrangedEntries(list, order, kept, keyOf)),
-      rename: (from, to, onServer) => (virtual(from) ? Promise.resolve(renamed(from, to)) : onServer().then(() => renamed(from, to))),
+      place: (list, order) => { if (list && list !== landing && virtual(list) && order.some(kept)) void create(list).then(() => place(list, order), () => {}); else place(list, order); },
+      // The place's own department, while only main holds it, becomes a department of the new name on this page's
+      // server, and every bot drawn in it moves there; new bots of the other place land in the place's own again.
+      rename: (from, to, onServer) => (virtual(from) ? create(to) : onServer()).then(() => renamed(from, to)),
     },
     deleteDepartment: (name, onServer) => (virtual(name) ? Promise.resolve(leave(name)).then(() => ({ sections: [...ownSections] }))
       : onServer().then((answer) => { leave(name); return answer; })),
-    realize: (name) => (virtual(name) ? api<{ sections: string[] }>("/api/sidebar-sections", { method: "POST", body: JSON.stringify({ name, botIds: [] }) })
-      .then(({ sections }) => { dispatch({ type: "sections", sections }); }) : null),
+    realize: (name) => (virtual(name) ? create(name) : null),
   };
 }

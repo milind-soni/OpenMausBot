@@ -99,8 +99,10 @@ let lastList: readonly PlacedBot[] = NONE;
  * asleep, waking or can't be reached: a read never takes rows away to put them back. */
 let lastRows: { home: BotHome; rows: PlaceBotRow[] } | null = null;
 
-/** The one list is on for this page: the switch is on and main lists the other place. */
-export const oneListOn = (state: PlacesTogetherState | null): boolean => state?.on === true && state.other !== null;
+/** The one list is on for this page: the switch is on and main lists the other place. On My Cloud's page only from an
+ * app that says which place is home (and keeps where bots are moved): with an older one, that page lists its own bots
+ * only, as it did before. */
+export const oneListOn = (state: PlacesTogetherState | null): boolean => state?.on === true && state.other !== null && (state.here === "computer" || state.home !== undefined);
 
 function placedList(state: PlacesTogetherState | null): readonly PlacedBot[] {
   if (state === lastState) return lastList;
