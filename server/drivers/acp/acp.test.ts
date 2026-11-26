@@ -3135,7 +3135,10 @@ describe("ACP turns (fake CLI)", () => {
           expect(recorder.events.find((event) => event.type === "session.started" && event.turnId === ack.turnId))
             .toMatchObject({ rebuilt: true });
           const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
-          expect(prompt).toEqual([{ type: "text", text: `${recoveryText}\n\n(Your model for this conversation reads text only. Reading an image file with a file tool, or keeping a picture a tool returned, makes every later reply fail. Say you cannot see it, or attach the file unchanged.)` }]);
+          expect(prompt).toEqual([
+            { type: "text", text: recoveryText },
+            { type: "text", text: "(Your model for this conversation reads text only. Reading an image file with a file tool, or keeping a picture a tool returned, makes every later reply fail. Say you cannot see it, or attach the file unchanged.)" },
+          ]);
         });
       });
 
