@@ -3716,6 +3716,7 @@
   "engines.account.powershell": "Для этой команды используйте PowerShell.",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "Аккаунтов: {count} · вошли: {signedIn}",
   "accounts.signedIn": "Вход выполнен",
   "accounts.notSignedIn": "Не выполнен вход",

@@ -4370,6 +4370,7 @@
   "engines.account.powershell": "这道指令请使用 PowerShell 运行。",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "{count} 个账户 · {signedIn} 个已登录",
   "accounts.signedIn": "已登录",
   "accounts.notSignedIn": "未登录",

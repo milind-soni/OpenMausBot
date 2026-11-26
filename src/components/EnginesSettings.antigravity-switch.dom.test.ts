@@ -146,3 +146,23 @@ it("says the CLI is being installed while the server installs it on its own, and
   await act(async () => { installing[0]!.click(); });
   expect(fixture.calls).toEqual([]);
 });
+
+it("keeps the one-way switch on each Classic account of the shared accounts card, with no runtime menu", async () => {
+  const added = onCli({ instanceId: "antigravity-2", displayName: "Work", snapshot: { state: "available", authenticated: true, nativeCli: true, account: { email: "work@example.com" } } });
+  fixture.state = { instances: [classic, added], bots: [], config: {} };
+  await act(async () => { root.render(createElement(EnginesSettings)); });
+  const row = (id: string) => container.querySelector(`[data-account="${id}"]`)!;
+  expect(container.querySelector('[data-accounts="antigravity"]')).not.toBeNull();
+  expect(row("antigravity").querySelector("[data-antigravity-switch-cli]")).not.toBeNull();
+  expect(row("antigravity-2").querySelector("[data-antigravity-switch-cli]")).toBeNull();
+  expect(container.querySelectorAll("[data-antigravity-switch-cli]")).toHaveLength(1);
+  expect(container.querySelector("[data-antigravity-runtime]")).toBeNull();
+  expect(container.querySelector("select")).toBeNull();
+  expect(container.textContent).not.toContain("Runs on");
+  const offer = [...row("antigravity").querySelectorAll("button")].find((item) => item.textContent === "Switch to Google Antigravity CLI")!;
+  await act(async () => { offer.click(); });
+  expect(fixture.calls.map(({ path, method }) => [method, path])).toEqual([
+    ["PATCH", "/api/instances/antigravity"],
+    ["POST", "/api/instances/antigravity/install"],
+  ]);
+});

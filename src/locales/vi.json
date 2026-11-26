@@ -2984,6 +2984,7 @@
   "engines.account.powershell": "Sử dụng PowerShell cho lệnh này.",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "{count} tài khoản · {signedIn} đã đăng nhập",
   "accounts.signedIn": "Đã đăng nhập",
   "accounts.notSignedIn": "Chưa đăng nhập",

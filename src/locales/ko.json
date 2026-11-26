@@ -3973,6 +3973,7 @@
   "engines.account.powershell": "이 명령은 PowerShell에서 실행하세요.",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "계정 {count}개 · {signedIn}개 로그인됨",
   "accounts.signedIn": "로그인됨",
   "accounts.notSignedIn": "로그인 안 됨",

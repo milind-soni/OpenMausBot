@@ -4166,6 +4166,7 @@
   "engines.account.powershell": "このコマンドには PowerShell を使ってください。",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "{count}個のアカウント · {signedIn}個がサインイン済み",
   "accounts.signedIn": "サインイン済み",
   "accounts.notSignedIn": "未サインイン",

@@ -2984,6 +2984,7 @@
   "engines.account.powershell": "Bu komut için PowerShell kullanın.",
   "accounts.claude": "Claude",
   "accounts.chatgpt": "ChatGPT",
+  "accounts.antigravity": "Google Gemini (Antigravity)",
   "accounts.count": "{count} hesap · {signedIn} oturum açık",
   "accounts.signedIn": "Oturum açıldı",
   "accounts.notSignedIn": "Oturum açılmadı",
