@@ -109,6 +109,20 @@ describe("the inbox waiting filter", () => {
     expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
   });
 
+  it("keeps a search and its no-match line reachable while a fix shows", async () => {
+    shown(inboxView([messageRow, reportRow]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [
+      { kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" },
+    ] }); });
+    await type(document.querySelector<HTMLInputElement>('input[type="search"]')!, "Daily");
+    await click("[data-inbox-waiting-only]");
+    expect(document.querySelector("[data-inbox-waiting-empty]")).toBeNull();
+    expect(document.querySelector('input[type="search"]')).not.toBeNull();
+    expect(document.querySelector("[data-inbox-list]")!.textContent).toContain("Nothing in the inbox matches.");
+  });
+
   it("keeps Mark all as read working while the filter is on", async () => {
     openInbox();
     await mount(createElement(InboxPanel));
