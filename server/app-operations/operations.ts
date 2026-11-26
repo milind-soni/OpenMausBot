@@ -137,6 +137,8 @@ export class AppOperations extends EventEmitter {
   private readonly limits: AppOperationLimits;
   private readonly options: AppOperationsOptions;
   private closed = false;
+  /** Every runtime process started and not yet exited, whatever the bookkeeping says: stopAll ends them all. */
+  private readonly children = new Set<ChildProcess>();
 
   constructor(options: AppOperationsOptions) {
     super();
@@ -342,7 +344,9 @@ export class AppOperations extends EventEmitter {
   }
 
   private async startProcess(state: AppState): Promise<Running> {
+    const signature = state.app.signature;
     const [binary, hostAddress] = await Promise.all([this.options.binary(), this.host.start()]);
+    if (this.closed) throw new AppOperationError("runtime_stopped", "App operations have stopped.");
     this.host.register(state.app.id, state.secret);
     const folder = mkdtempSync(join(tmpdir(), "omb-ao-"));
     chmodSync(folder, 0o700);
@@ -357,6 +361,8 @@ export class AppOperations extends EventEmitter {
       windowsHide: true,
     });
     state.starts += 1;
+    this.children.add(child);
+    child.once("exit", () => this.children.delete(child));
     const output: string[] = [];
     const keep = (chunk: Buffer) => { output.push(chunk.toString("utf8")); if (output.length > 50) output.shift(); };
     child.stdout?.on("data", keep);
@@ -385,6 +391,12 @@ export class AppOperations extends EventEmitter {
       child.once("exit", () => { clearTimeout(timer); reject(new AppOperationError("runtime_unavailable", `The app runtime stopped while starting: ${output.join("").slice(-300)}`)); });
     });
     rmSync(join(folder, "config.capnp"), { force: true });
+    if (this.closed || this.apps.get(state.app.id) !== state || state.app.signature !== signature) {
+      running.stopping = this.closed ? "shutdown" : "reload";
+      child.kill("SIGKILL");
+      await exited;
+      throw new AppOperationError("runtime_stopped", "The app changed or stopped while its runtime started. Try again.");
+    }
     state.running = running;
     this.emit("started", { appId: state.app.id, pid: child.pid });
     return running;
@@ -434,6 +446,10 @@ export class AppOperations extends EventEmitter {
       if (state.idleTimer) clearTimeout(state.idleTimer);
       await Promise.all([this.stopProcess(state, "shutdown"), state.db.close()]);
     }));
+    await Promise.all([...this.apps.values()].map((state) => state.starting?.catch(() => {})));
+    const left = [...this.children];
+    for (const child of left) child.kill("SIGKILL");
+    await Promise.all(left.map((child) => child.exitCode !== null || child.signalCode !== null ? undefined : new Promise((resolve) => child.once("exit", resolve))));
     await this.host.stop();
   }
 

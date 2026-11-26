@@ -382,6 +382,18 @@ describe.skipIf(!binary)("app operations", () => {
     expect((await failure(ops.run({ appDir: dir, name: "list", input: {}, caller: server() }))).code).toBe("runtime_stopped");
   });
 
+  it("stopping while a runtime is still starting leaves nothing behind", async () => {
+    const ops = operations();
+    const dir = copyTracker();
+    const pids: number[] = [];
+    ops.on("started", (event: { pid: number }) => pids.push(event.pid));
+    const call = ops.run({ appDir: dir, name: "list", input: {}, caller: server() }).catch((error) => (error as AppOperationError).code);
+    await ops.stopAll();
+    expect(await call).toBe("runtime_stopped");
+    expect(pids.filter(alive)).toEqual([]);
+    expect(ops.state(dir)?.pid).toBeUndefined();
+  });
+
   it("refuses too many operations of one app at once", async () => {
     const ops = operations({ limits: { concurrent: 2 } });
     const dir = app(`export async function wait(input, ctx) { await ctx.db.query("SELECT 1"); await new Promise((r) => setTimeout(r, input.ms)); return 1; }`, { operations: { wait: { kind: "read" } } });
