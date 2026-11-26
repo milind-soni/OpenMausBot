@@ -2294,30 +2294,40 @@ a later launch, in the list's order. A new notice is one entry in `NOTICES` and
 its fact in AppNotices. So What's new and Boat's credit offer never share a
 launch: What's new comes first, and the Boat card waits for a later one.
 
-1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11`):
-   one centered popup with slides, **Next** and **Back**, its dots and the arrow
-   keys, once per person: a close is kept in the workspace record, in the page's
-   storage and in this desktop's own record (`electron/desktop-prefs.mjs`), so
-   every port the app's page is served on agrees. A new campaign id shows it
-   once more. Only on this computer's page of the installed app (never My
-   Cloud's or a saved server's page, a remote client's window, a branded build
-   or a desktop signed in with an organization), never during setup (the welcome,
-   the tour), a call, another dialog, busy work or an update being offered,
-   never in the launch whose welcome finished or before a new install's first
-   reply, and after MausBot's first-launch card. `lib/whats-new.ts` decides the
-   slides from the account the app already holds (its plan, its trial, its
-   teams and its Clouds list):
-   - **No Cloud plan** (signed out, or signed in with none): **Meet the new
-     MausBot Cloud**, the Cloud website's Home pictured in the skin's light or
-     dark, then **Team**.
-   - **A Cloud plan of one's own**, in no team: the Team slide only.
-   - **In a team** (any role, a Team or Business plan, or a team's Cloud in the
-     Clouds list), a payment being linked or needing attention, a checkout or
-     another Cloud being bought, or a sign-in that can't be checked: nothing
-     (the last ones on a later launch).
+1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11b`):
+   one centered popup with up to three slides, **Next** and **Back**, its dots
+   and the arrow keys, each slide with a short loop of the app itself (its
+   still where motion is reduced), once per person: a close is kept in the
+   workspace record (on a Team Cloud, the person's own), in the page's storage
+   and in this desktop's own record (`electron/desktop-prefs.mjs`), so every
+   port the app's page is served on agrees. A close also counts as seeing the
+   earlier What's new (`whats-new-2026-11`), the Teams popup and ModelGo's
+   sponsor card, so nobody sees those again; a new campaign id shows it once
+   more to everyone who closed them. It is the launch's notice, centred, on
+   every page but a branded build's, never during setup (the welcome, the
+   tour), before a new install's first reply, a call, a move, another dialog,
+   busy work or an update being offered, and never in the launch MausBot's
+   first-launch card took. In the launch a new install's welcome finished, it
+   comes once the first chat has had its first reply. `lib/whats-new.ts`
+   decides the slides (`whatsNewCarousel`), in this order:
+   - **Meet the new MausBot Cloud**: on this computer's page of a desktop that
+     sells the Cloud and no organization runs, for someone with no Cloud plan
+     (signed out, or signed in with none).
+   - **Team**: for anyone who can start a team (on the website, or in the
+     app's Add a Cloud for a plan of one's own on this desktop) and a Team
+     Cloud's Owner and Admins (**Invite your team**, the team's People page);
+     never someone already in a team or a Team Cloud's member, who keep the
+     Teams popup's **Got it**.
+   - **ModelGo**, the sponsor: wherever `modelgoOfferable` allows it, on a Team
+     Cloud only for its Owner and Admins. **Get a ModelGo key** opens the
+     sponsor's exact address; **Add key** opens Settings → AI, where its key
+     goes, for whoever may change this place's settings.
 
-   A slide shows only while the Admin's offer sells its plan, with that plan's
-   price from the offer (the Team plan's free trial when it has one). Every
+   No slide for someone: no popup.
+
+   A plan slide shows only while the Admin's offer sells its plan, with that
+   plan's price from the offer (the Team plan's free trial when it has one);
+   where the offer isn't read, Team's listed price. Every
    button carries the slide's tag on the Cloud's funnel (`app_whats_new_pro`,
    `app_whats_new_team`): **Get Pro** opens the Add a Cloud dialog with
    `source: app_whats_new_pro`, which its checkout sends; **See the new Cloud**

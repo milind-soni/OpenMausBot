@@ -1,6 +1,6 @@
 // Dev-only gallery of the Cloud buying sheet and the What's new popup, served at /cloud-buy-preview.html; not in the packaged app.
 // ?state=choose|choose-plain|sign-in-email|sign-in-code|sign-in-wrong|sign-in-sso|sign-in-done|sign-in-browser|pay|pay-late|setup|setup-slow|ready|has-cloud
-//   |team-setup|team-ready|unreachable|whats-new|whats-new-plan
+//   |team-setup|team-ready|unreachable|whats-new|whats-new-plan|whats-new-admin
 // &skin=midnight&staging=1&reduced=1&plan=starter&lang=de
 // &current=pro (a subscriber's own plan says Your plan; current=personal shows a Personal subscriber's own card)
 // &bots=1 (this computer has bots of its own: the offer says a bot lives in one place)
@@ -15,7 +15,7 @@ import { ChooseScreen } from "@/components/cloud-buy/ChooseScreen";
 import type { CloudAddView } from "@/lib/cloud-plan";
 import { loadLocale } from "@/lib/i18n";
 import { SKIN_IDS, type SkinId } from "@/lib/skins";
-import { whatsNewView } from "@/lib/whats-new";
+import { whatsNewCarousel, whatsNewView } from "@/lib/whats-new";
 import "./styles.css";
 
 const NOW = Date.now(), DAY = 86_400_000;
@@ -51,10 +51,12 @@ const VIEWS: Record<string, CloudAddView> = {
 };
 const FREE: CloudAccountState = { status: "connected", account: { id: "a", email: "maya@studio.co" }, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } };
 const TEAM = { tier: "team", label: "Team", amount: 4000, trialDays: 3, allowances: allowances(4, 4, 100, 4, 300, 180_000, 14) };
-const POPUPS: Record<string, { account: CloudAccountState; offer: CloudOffer }> = {
+const POPUPS: Record<string, { account: CloudAccountState | null; offer: CloudOffer }> = {
   "whats-new": { account: FREE, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
   "whats-new-plan": { account: { ...FREE, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 30 * DAY, version: 2 } }, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
+  "whats-new-admin": { account: null, offer: PLAIN },
 };
+const INVITE = { kind: "invite" as const, url: "https://cloud.openmausbot.com/team/team-acme/people?invite=1" };
 const noop = () => {};
 const actions = new Proxy({}, { get: () => noop }) as CloudAddActions;
 
@@ -80,11 +82,14 @@ function Preview() {
   document.documentElement.dataset.skin = skin;
   if (params.get("reduced") === "1") document.documentElement.dataset.reducedMotion = "true";
   const state = params.get("state") ?? "choose";
-  const asked = POPUPS[state], popup = asked ? whatsNewView(asked.account, asked.offer) : null;
+  const asked = POPUPS[state];
+  const plans = asked?.account ? whatsNewView(asked.account, asked.offer) : "none";
+  const popup = asked ? whatsNewCarousel({ plans, modelgo: true, addKey: true,
+    team: asked.account ? { kind: "start", inApp: typeof plans === "object" && plans.audience === "own", url: "" } : INVITE }) : null;
   if (popup && typeof popup === "object") {
     return <div className="relative h-screen overflow-hidden">
       <MockApp />
-      <WhatsNewPopup view={popup} report={noop} onBuy={noop} onDone={noop} />
+      <WhatsNewPopup view={popup} report={noop} onBuy={noop} onAddKey={noop} onDone={noop} />
     </div>;
   }
   const view = VIEWS[state] ?? VIEWS.choose!;
