@@ -929,6 +929,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const passedAutocompact = Boolean(compactWindow) && ownCli && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
       const refreshesRecordedPrompt = ownCli && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot");
+      const knowsRecordedPrompt = refreshesRecordedPrompt && cliVersion !== null;
       if (refreshesRecordedPrompt) args.push("--system-prompt-snapshot", "off");
       // Before any broker or process, so a bad attachment leaves nothing live.
       let promptMsg = claudeUserMessage(turn.text, turn.images);
@@ -939,7 +940,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // would never reach it: rebuild the turn from the recovery text in a fresh session instead of resuming stale.
       const recordedPrompt = createHash("sha256").update(keyedStable(turn) ?? turn.system ?? "").digest("hex");
       const recorded = sessionId === null ? undefined : recordedPrompts.get(threadId);
-      if (sessionId !== null && !refreshesRecordedPrompt && recorded !== undefined && recorded.session === sessionId && recorded.prompt !== recordedPrompt) {
+      if (sessionId !== null && !knowsRecordedPrompt && recorded !== undefined && recorded.session === sessionId && recorded.prompt !== recordedPrompt) {
         const recovery = recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure: "before-accept" });
         console.error(`claude (${instanceId}): session ${sessionId} for thread ${threadId} holds a system prompt this CLI cannot refresh, starting a new one`);
         turn = { ...turn, text: recovery.text, resumeCursor: undefined, recoveryText: undefined };
@@ -1256,14 +1257,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         replaysUserMessages,
         turn: spare ? null : { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null },
         idleTimer: null,
-        closing: false, spare, take: (taker) => { turnId = taker; }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)), spareMs, spareAt: Date.now(), ...(sessionId ? { resumed: sessionId } : {}) } : {}),
+        closing: false, spare, take: (taker) => { turnId = taker; if (sessionId === null || knowsRecordedPrompt) recordedPrompts.set(threadId, { session: sessionId ?? newSessionId!, prompt: recordedPrompt }); }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)), spareMs, spareAt: Date.now(), ...(sessionId ? { resumed: sessionId } : {}) } : {}),
         stderr: "",
         costTotal: undefined,
       };
       sessions.set(threadId, session);
       // A fresh session holds this prompt, and so does a resumed one the CLI refreshed; an older CLI's resume keeps
       // whatever it launched with, so it is not recorded as holding this one.
-      if (sessionId === null || refreshesRecordedPrompt) recordedPrompts.set(threadId, { session: sessionId ?? newSessionId!, prompt: recordedPrompt });
+      if (!spare && (sessionId === null || knowsRecordedPrompt)) recordedPrompts.set(threadId, { session: sessionId ?? newSessionId!, prompt: recordedPrompt });
 
       const settle = (
         ok: boolean,
@@ -1373,9 +1374,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 }, STEERED_CONTINUATION_SILENCE_MS * steerSilenceScale());
                 held.continuationSilence.unref?.();
               }
-              emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}), ...failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom) });
-              if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
-              retry.rebuilt = false;
+              const currentRetry = retryState.get(threadId) ?? retry;
+              emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(currentRetry.rebuilt ? { rebuilt: true } : {}), ...failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom) });
+              if (currentRetry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
+              currentRetry.rebuilt = false;
             } else if (o.subtype === "compact_boundary") {
               session.volatile = null; session.roster.now = session.roster.launched; if (!o.parent_tool_use_id) emit({ ...base(threadId, currentTurnId()), type: "context.compacted" }); // only the system prompt survives a compaction, so the next turn re-sends the volatile half; a subagent's own compaction is not the chat's
             } else if (o.subtype === "thinking_tokens") {

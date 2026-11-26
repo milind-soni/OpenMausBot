@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
+import * as procs from "../procs.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { ClaudeDriver } from "./claude.ts";
@@ -134,6 +136,49 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     await instance.adapter.sendTurn(turn("t-ahead", { text: "again" }));
     await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-ahead" && recorder.events.filter((seen) => seen.type === "turn.completed" && seen.threadId === "t-ahead").length === 2);
     expect(pids()).toHaveLength(2);
+  });
+
+  it.each(["not-a-version", "2.1.232"])("rebuilds the actual session after an unused prestart on %s", async (version) => {
+    await instance.dispose();
+    await create({ FAKE_CLAUDE_VERSION: version, FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });
+    const threadId = "t-prompt-rebuild";
+    const spawn = vi.spyOn(procs, "spawnCli");
+    const { first, child } = await (async () => {
+      try {
+        const first = await instance.adapter.sendTurn(turn(threadId, { system: "first", systemStable: "first" }));
+        const child = spawn.mock.results[0];
+        if (child?.type !== "return") throw new Error("initial Claude process missing");
+        return { first, child: child.value };
+      } finally {
+        spawn.mockRestore();
+      }
+    })();
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const initial = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId);
+    if (!initial || initial.type !== "session.started") throw new Error("initial session missing");
+    await Promise.all([once(child, "close", { signal: AbortSignal.timeout(15_000) }), instance.adapter.stopAll()]);
+    const changed = { system: "second", systemStable: "second", resumeCursor: initial.sessionId };
+    expect(await started(threadId, 2, changed)).toBe(true);
+    const second = await instance.adapter.sendTurn(turn(threadId, { ...changed, recoveryText: "earlier conversation" }));
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.turnId === second.turnId && e.itemType === "assistant_text")).toMatchObject([{ text: "second" }]);
+    expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId)).toMatchObject({ rebuilt: true });
+  });
+
+  it("records the session taken by a first turn without a cursor", async () => {
+    await instance.dispose();
+    await create({ FAKE_CLAUDE_VERSION: "2.1.232", FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });
+    const threadId = "t-prompt-adopt";
+    const original = { system: "first", systemStable: "first" };
+    expect(await started(threadId, 1, original)).toBe(true);
+    const first = await instance.adapter.sendTurn(turn(threadId, original));
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const initial = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId);
+    if (!initial || initial.type !== "session.started") throw new Error("adopted session missing");
+    const second = await instance.adapter.sendTurn(turn(threadId, { system: "second", systemStable: "second", resumeCursor: initial.sessionId, recoveryText: "earlier conversation" }));
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.turnId === second.turnId && e.itemType === "assistant_text")).toMatchObject([{ text: "second" }]);
+    expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId)).toMatchObject({ rebuilt: true });
   });
 
   it("lists the harness-served tools again before the turn's message is written", async () => {
