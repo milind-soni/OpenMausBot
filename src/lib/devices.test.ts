@@ -5,6 +5,7 @@ import { vpsServerId, type BotComputerRow } from "../../shared/bot-computers";
 import { withBots } from "./device-bots";
 import { buildDevices, groupByKind, kindFromLabel, nameKey, privateNetwork, type DeviceSources } from "./devices";
 import { setLocale } from "./i18n";
+import { networkLine, networkShort } from "../components/devices/device-words";
 import type { PublicPhone } from "./phones";
 
 const NOW = 1_800_000_000_000;
@@ -220,5 +221,12 @@ describe("the private network", () => {
     expect(privateNetwork({ routes: routes({}) }, "not-installed")?.state).toBe("not-installed");
     expect(privateNetwork({ routes: routes({ on: true, computers: true }) }, null)).toEqual({ state: "magicdns", name: null, shared: true });
     expect(privateNetwork({ routes: routes({ on: true, name: "ada.tail1.ts.net", computers: true }) }, null)).toEqual({ state: "ready", name: "ada.tail1.ts.net", shared: true });
+  });
+  it("says a tailnet with its own names (Headscale) needs a .ts.net name, and to pair over Same Wi-Fi", () => {
+    setLocale("en");
+    const network = privateNetwork({ routes: routes({}) }, "custom-name")!;
+    expect(network.state).toBe("custom-name");
+    expect(networkShort(network)).toBe("Needs a .ts.net name");
+    expect(networkLine(network)).toContain("Pair the device over Same Wi-Fi instead.");
   });
 });

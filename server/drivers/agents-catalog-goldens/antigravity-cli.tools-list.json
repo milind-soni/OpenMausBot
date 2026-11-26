@@ -212,6 +212,21 @@
       }
     },
     {
+      "name": "set_main_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "clear": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
       "name": "run_workflow",
       "inputSchema": {
         "type": "object",

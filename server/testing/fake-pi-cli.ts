@@ -4,6 +4,7 @@
 //   FAKE_PI_MODE  happy (default) | tooluse | priced | priced-stop | permission | interleave | question-select | question-input
 //     | turn-error | no-models | exit-early | compaction | compaction-recovery
 //     | compaction-recovery-upstream | prompt-reject | omp-chunk
+//     | omp-start-fail (omp accepts the prompt, then fails it before the agent starts: prompt_result agentInvoked false)
 //     | session-slow (answers new_session after FAKE_PI_SESSION_DELAY_MS, default 800, and dumps {sessionReplied})
 //   FAKE_PI_MODELS  provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP  path to append {argv, env} JSON to
@@ -441,6 +442,12 @@ function handle(cmd: any) {
         } catch {}
       }
       send({ type: "response", command: "prompt", success: true });
+      if (mode === "omp-start-fail") {
+        const error = "System prompt changed repeatedly during before_agent_start; original input was not delivered.";
+        send({ type: "response", command: "prompt", success: false, error });
+        send({ type: "prompt_result", agentInvoked: false, status: "error", error: { message: error, retryable: false }, sessionSettled: true });
+        return;
+      }
       if (streamScript(String(cmd.message ?? ""))) streamScriptTurn(streamScript(String(cmd.message ?? ""))!);
       else if (mode === "tooluse") streamToolTurn();
       else if (mode === "priced") streamPricedTurn();

@@ -24,9 +24,16 @@ function Join-Text($left, $right) {
 
 try {
   Add-Type -AssemblyName System.Speech
-  $installed = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())
 } catch {
   Send-Line @{ error = 'speech-unavailable' }
+  exit 1
+}
+# Throws (NullReferenceException) instead of returning an empty list when no desktop recognizer is registered, as
+# for languages Windows only covers with its newer speech packs (Portuguese (Brazil)).
+try {
+  $installed = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())
+} catch {
+  Send-Line @{ error = 'speech-language-missing' }
   exit 1
 }
 if ($installed.Count -eq 0) {

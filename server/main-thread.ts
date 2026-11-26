@@ -30,6 +30,14 @@ export function mainThread(tasks: readonly MainThreadCandidate[], chosenId?: str
   return oldestThread(tasks.filter((task) => !task.openedBy && open(task))) ?? oldestThread(tasks);
 }
 
+/** What saving `choice` as a bot's main thread writes: null clears it; a thread id must be one of `tasks` that can be
+ * main (not an automation run, not archived), else null comes back and nothing is saved. */
+export function mainThreadChoicePatch(tasks: readonly MainThreadCandidate[], choice: string | null): { mainThreadChoice: string | undefined; mainThreadKept: undefined } | null {
+  if (choice === null) return { mainThreadChoice: undefined, mainThreadKept: undefined };
+  const chosen = tasks.find((task) => task.threadId === choice);
+  return chosen && open(chosen) ? { mainThreadChoice: chosen.threadId, mainThreadKept: undefined } : null;
+}
+
 /** The thread to save as a bot's choice so its main thread stays put: nothing while the saved one is open. A bot that
  * never had one keeps the thread it showed until now: the open one a person last wrote in, else the selected one, else
  * the oldest open one. One whose saved thread was archived or deleted moves to the oldest open conversation a person

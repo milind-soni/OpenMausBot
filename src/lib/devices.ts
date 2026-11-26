@@ -311,7 +311,7 @@ export function buildDevices(sources: DeviceSources): Device[] {
 }
 
 /** The private network as the map draws it. `unknown`: not asked yet, since the app asks Tailscale only when told to. */
-export type PrivateNetworkState = "unknown" | "not-installed" | "no-cli" | "signed-out" | "not-running" | "needs-approval" | "needs-permission" | "magicdns" | "ready";
+export type PrivateNetworkState = "unknown" | "not-installed" | "no-cli" | "signed-out" | "not-running" | "needs-approval" | "needs-permission" | "magicdns" | "custom-name" | "ready";
 
 export interface PrivateNetwork {
   state: PrivateNetworkState;
