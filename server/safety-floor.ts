@@ -105,11 +105,15 @@ function lex(source: string, windows: boolean): Reading {
   };
 
   const nested = (shut: string) => {
+    // Bash reads a pending heredoc body after the line, not at a newline inside a substitution on it.
+    const outer = heredocs.splice(0);
     if (++nesting > MAX_NESTING) {
       at = source.length;
       synced = false;
     } else if (!script(shut)) synced = false;
     nesting--;
+    if (heredocs.length) synced = false;
+    heredocs.splice(0, heredocs.length, ...outer);
   };
   /** Reads a POSIX `$(…)` or backtick substitution at `at` as commands, and leaves `at` on its last character. */
   const substitution = (): boolean => {
