@@ -1621,6 +1621,25 @@ body {
   :root[data-skin="daylight"] .ui-button:enabled:is(:hover, :active) {
     background: color-mix(in srgb, var(--color-ink) 10%, transparent);
   }
+  /* A quiet action beside a label, on `.ui-button` or `.ui-icon-button`: no border and no fill at rest, ink at 6% under
+     the pointer and 8% pressed (DESIGN §3), 40px tall on a touch screen. After the skin rules above and as specific,
+     so it clears their wash in Midnight and Daylight too. */
+  :root :is(.ui-button, .ui-icon-button).ui-button-ghost {
+    border-color: transparent;
+    background: transparent;
+    color: var(--color-ink-secondary);
+  }
+  :root :is(.ui-button, .ui-icon-button).ui-button-ghost:enabled:hover {
+    background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+    color: var(--color-ink);
+  }
+  :root :is(.ui-button, .ui-icon-button).ui-button-ghost:enabled:active {
+    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+    color: var(--color-ink);
+  }
+  @media (hover: none), (pointer: coarse) {
+    :root :is(.ui-button, .ui-icon-button).ui-button-ghost { min-height: 2.5rem; }
+  }
   /* A dialog for the first-run surfaces: the menu tone on a hairline of ink, lifted only in Daylight. */
   .ui-modal {
     border: 0.5px solid color-mix(in srgb, var(--color-ink) 10%, transparent);

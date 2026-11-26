@@ -30,6 +30,14 @@ describe("control scale", () => {
     expect(rule(".ui-button-primary")).toMatchObject({ background: "var(--color-accent)", color: "var(--color-accent-ink)" });
   });
 
+  it("has a quiet variant with no border or fill at rest, an ink wash under the pointer and when pressed, and a 40px touch height", () => {
+    const ghost = ":root :is(.ui-button, .ui-icon-button).ui-button-ghost";
+    expect(rule(ghost)).toMatchObject({ "border-color": "transparent", background: "transparent", color: "var(--color-ink-secondary)" });
+    expect(rule(`${ghost}:enabled:hover`)).toMatchObject({ background: "color-mix(in srgb, var(--color-ink) 6%, transparent)" });
+    expect(rule(`${ghost}:enabled:active`)).toMatchObject({ background: "color-mix(in srgb, var(--color-ink) 8%, transparent)" });
+    expect(css).toContain(`@media (hover: none), (pointer: coarse) {\n    ${ghost} { min-height: 2.5rem; }`);
+  });
+
   it("gives pills, chips, code and menu rows one size each", () => {
     expect(rule(".ui-pill")).toMatchObject({ "min-height": "1.75rem", "border-radius": "9999px", "font-size": "13px", "font-weight": "500", "line-height": "1.25rem", "align-items": "center" });
     expect(rule(".ui-chip")).toMatchObject({ "min-height": "1.375rem", "border-radius": "9999px", "font-size": "12px", "font-weight": "500", "line-height": "1rem" });
