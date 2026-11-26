@@ -65,6 +65,8 @@ function offerDepartmentOrder(names: string[]): void {
 }
 
 let departmentOrderRequest = 0;
+/** Moves reach the server in the order they were made: the server keeps the last order it gets. */
+let departmentOrderSaves: Promise<unknown> = Promise.resolve();
 
 /** Shows the departments `names` in this order at once and saves it for every device; every other department keeps
  * its place. True once the workspace has it. A refused save is undone only while no newer move has been made. */
@@ -74,7 +76,9 @@ export async function saveDepartmentOrder(dispatch: Dispatch<Action>, sections: 
   const request = ++departmentOrderRequest;
   dispatch({ type: "sectionsOrdered", sections: names });
   try {
-    await api("/api/sidebar-sections/order", { method: "PUT", body: JSON.stringify({ sections: names }) });
+    const saved = departmentOrderSaves.then(() => api("/api/sidebar-sections/order", { method: "PUT", body: JSON.stringify({ sections: names }) }));
+    departmentOrderSaves = saved.catch(() => undefined);
+    await saved;
     return true;
   } catch (cause) {
     if (request === departmentOrderRequest) dispatch({ type: "sectionsOrdered", sections: before });
