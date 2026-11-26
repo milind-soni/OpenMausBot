@@ -196,9 +196,12 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       },
     }),
     writable({
-      id: "bots.groups", label: "Sidebar groups", help: "Which bots sit in which sidebar group (department). Send an object of group name to bot ids; a bot in no listed group is ungrouped.", where: "sidebar",
+      id: "bots.groups", label: "Sidebar groups", help: "Which bots sit in which sidebar group (department). Send an object of group name to bot ids; a bot in no listed group is ungrouped. This does not delete departments; delete them from the department menu.", where: "sidebar",
       synonyms: ["group", "groups", "department", "departments", "section", "sections", "team", "folder"],
-      value: z.record(z.string().trim().min(1).max(60), z.array(z.string().regex(/^[\w-]+$/)).max(100)), allowed: "an object: group name → array of bot ids",
+      value: z.record(z.string().trim().min(1).max(60), z.array(z.string().regex(/^[\w-]+$/)).max(100))
+        .refine((wanted) => Object.keys(wanted).length > 0 || !deps.sections().length || deps.bots().some((bot) => bot.section),
+          "This setting moves bots but does not delete departments. Use Delete department in each department's menu."),
+      allowed: "an object: group name → array of bot ids",
       current: groups,
       read: () => {
         const grouped = Object.entries(groups()).map(([section, ids]) => `${section}: ${names(ids) || "(empty)"}`);
