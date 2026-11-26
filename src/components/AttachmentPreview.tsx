@@ -31,7 +31,8 @@ import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server"; import { usePreviewZoom } from "./preview-zoom";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
+import { usePreviewZoom } from "./preview-zoom";
 
 export interface PreviewImage {
   src: string;
