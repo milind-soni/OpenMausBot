@@ -109,6 +109,10 @@ export function openLocalApp(id: string | null): void {
   for (const listener of listeners) listener();
 }
 
+export function openLocalAppId(): string | null {
+  return openId;
+}
+
 export function useOpenLocalApp(): string | null {
   return useSyncExternalStore(subscribe, () => openId, () => openId);
 }

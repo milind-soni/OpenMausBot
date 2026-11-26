@@ -21,6 +21,8 @@ export interface LocalAppsRouteDeps {
   visibleFor(auth: RequestAuth): { everything: boolean; thread(threadId: string): boolean };
   /** On a Cloud home, a guest changes only conversations it started. */
   threadRefusal?(auth: RequestAuth, threadId: string): string | null;
+  /** False once a session has ended: a folder app's files stop answering it. */
+  live?(auth: RequestAuth): boolean;
 }
 
 const LIST = "/api/local-apps";
@@ -40,10 +42,17 @@ const ownerOf = (auth: RequestAuth) => (auth.kind === "session" ? personKey(auth
  * bot's or another conversation's page reads as one that is not there. */
 export function createLocalAppsRoutes(deps: LocalAppsRouteDeps): RouteHandler {
   const { apps, store } = deps;
+  const chatHas = (threadId: string) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId));
   const sees = (auth: RequestAuth, record: LocalAppRecord, visible = deps.visibleFor(auth)) => {
     if (visible.everything) return true;
     if (!record.owner || record.owner !== ownerOf(auth)) return false;
-    return !store.botByThread(record.threadId) && !store.groupByThread(record.threadId) ? true : visible.thread(record.threadId);
+    return !chatHas(record.threadId) || visible.thread(record.threadId);
+  };
+  /** Renaming, keeping a version and removing: whoever saved it or an admin, and never from a conversation the caller
+   * may not change. */
+  const mayChange = (auth: RequestAuth, record: LocalAppRecord): string | null => {
+    if (!auth.scopes.includes("admin") && record.owner !== ownerOf(auth)) return "Only whoever saved this app can change it.";
+    return chatHas(record.threadId) ? deps.threadRefusal?.(auth, record.threadId) ?? null : null;
   };
 
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
@@ -76,7 +85,8 @@ export function createLocalAppsRoutes(deps: LocalAppsRouteDeps): RouteHandler {
       const asked = url.searchParams.get("rev");
       if (asked !== null && !/^\d{1,6}$/.test(asked)) return json(res, 400, { error: "rev must be a version number" });
       const origin = webOrigin(url.searchParams.get("origin")) ?? webOrigin(url.origin) ?? undefined;
-      const viewer = { key: auth.kind === "session" ? `session:${auth.session.id}` : auth.kind, allowed: () => Boolean(apps.get(record.id)) && sees(auth, apps.get(record.id)!) };
+      const viewer = { key: auth.kind === "session" ? `session:${auth.session.id}` : auth.kind,
+        allowed: () => (deps.live?.(auth) ?? true) && Boolean(apps.get(record.id)) && sees(auth, apps.get(record.id)!) };
       const doc = apps.document(record.id, asked === null ? undefined : Number(asked), origin, viewer);
       if (!doc) return json(res, 404, { error: "That version of the app is no longer kept." });
       res.setHeader("cache-control", "private, no-store");
@@ -84,11 +94,13 @@ export function createLocalAppsRoutes(deps: LocalAppsRouteDeps): RouteHandler {
     }
 
     if (method === "GET") return json(res, 200, { app: apps.view(record) });
+    if (method !== "DELETE" && method !== "PATCH") return PASS;
+    const refused = mayChange(auth, record);
+    if (refused) return json(res, 403, { error: refused });
     if (method === "DELETE") {
       apps.remove(record.id);
       return json(res, 200, { ok: true });
     }
-    if (method !== "PATCH") return PASS;
     const body = patchBody.safeParse(await readBody(req, 4_096));
     if (!body.success || (body.data.name === undefined && body.data.pinnedRev === undefined)) return json(res, 400, { error: "Change an app with name or pinnedRev." });
     let changed: LocalAppRecord | null = record;

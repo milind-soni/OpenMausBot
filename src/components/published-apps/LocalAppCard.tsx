@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquare, MoreHorizontal, PanelTopOpen, Pencil, Trash2 } from "lucide-react";
+import { MessageSquare, MoreHorizontal, AppWindowMac, Pencil, Trash2 } from "lucide-react";
 
 import type { LocalApp } from "../../../shared/local-apps";
 import { cn } from "@/lib/cn";
@@ -77,7 +77,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
           className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-start transition-colors duration-[120ms] hover:bg-ink/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none">
           <LocalAppMark app={app} bot={bot} />
           <span className="min-w-0 flex-1">
-            <h3 dir="auto" className="truncate text-[14px] font-medium leading-5 text-ink">{app.name}</h3>
+            <span dir="auto" data-local-app-name="" className="block truncate text-[14px] font-medium leading-5 text-ink">{app.name}</span>
             <span dir="auto" className="mt-0.5 block truncate text-[12px] leading-4 text-ink-tertiary">{facts}</span>
           </span>
         </button>
@@ -85,7 +85,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
       <span className="flex shrink-0 items-center">
         {onOpenWindow && (
           <button type="button" className="ui-icon-button hover:bg-ink/[0.06] hover:text-ink" onClick={onOpenWindow}
-            aria-label={t("localApps.card.openWindow")} title={t("localApps.card.openWindow")}><PanelTopOpen size={16} /></button>
+            aria-label={t("localApps.card.openWindow")} title={t("localApps.card.openWindow")}><AppWindowMac size={16} /></button>
         )}
         <SidebarPopoverMenu items={items} ariaLabel={t("localApps.card.more", { name: app.name })} placement="below" align="end"
           triggerTitle={t("localApps.card.more", { name: app.name })} triggerClassName="ui-icon-button hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06]"

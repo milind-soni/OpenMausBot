@@ -103,7 +103,7 @@ export function createLocalApps(deps: {
   const keeps = (id: string, doc: string) => Boolean(store.get(id)?.versions.some((version) => version.doc === doc));
 
   return {
-    list: () => store.list().map(followRow),
+    list: () => store.list(),
     get: (id) => {
       const record = store.get(id);
       return record ? followRow(record) : null;

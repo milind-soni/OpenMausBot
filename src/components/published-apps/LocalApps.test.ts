@@ -102,7 +102,7 @@ describe("saved apps on the apps page", () => {
 
   it("shows a card for each app with its name, its bot and when it changed", async () => {
     await show();
-    expect([...host.querySelectorAll("[data-local-app] h3")].map((title) => title.textContent)).toEqual(["Sales board", "Staff rota"]);
+    expect([...host.querySelectorAll("[data-local-app-name]")].map((title) => title.textContent)).toEqual(["Sales board", "Staff rota"]);
     expect(card(BOARD.id).textContent).toContain("Mira · 2 hr ago");
     expect(card(ROTA.id).textContent).toContain("Its bot was removed");
     expect(button(card(BOARD.id), "Open in its own window")).toBeUndefined();
@@ -134,7 +134,7 @@ describe("saved apps on the apps page", () => {
     act(() => again.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
     await settle();
     expect(calls.find((call) => call.method === "PATCH")).toEqual({ method: "PATCH", path: `/api/local-apps/${BOARD.id}`, body: { name: "Team board" } });
-    expect(card(BOARD.id).querySelector("h3")?.textContent).toBe("Team board");
+    expect(card(BOARD.id).querySelector("[data-local-app-name]")?.textContent).toBe("Team board");
   });
 
   it("removes at once with Undo, and tells the server only once Undo has passed", async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Loader2, MessageSquare, PanelTopOpen } from "lucide-react";
+import { Check, ChevronDown, Loader2, MessageSquare, AppWindowMac } from "lucide-react";
 
 import type { AppDocument } from "../../../shared/app";
 import type { LocalApp } from "../../../shared/local-apps";
@@ -21,10 +21,12 @@ function VersionMenu({ app }: { app: LocalApp }) {
   const label = t("localApps.view.version", { n: app.rev + 1 });
   if (app.versions.length < 2) return <span data-local-app-version className="text-[13px] text-ink-tertiary tabular-nums">{label}</span>;
   const pin = (rev: number | null) => void changeLocalApp(app.id, { pinnedRev: rev }).catch(() => undefined);
+  const mark = (on: boolean) => (on ? <Check size={14} aria-hidden="true" className="text-accent-text" /> : undefined);
   const items: SidebarMenuItem[] = [
-    { key: "newest", label: t("localApps.view.newest"), subtitle: t("localApps.view.newestDetail"), checked: app.pinnedRev === undefined, onSelect: () => pin(null) },
+    { key: "newest", label: t("localApps.view.newest"), subtitle: t("localApps.view.newestDetail"), checked: app.pinnedRev === undefined,
+      trailing: mark(app.pinnedRev === undefined), onSelect: () => pin(null) },
     ...[...app.versions].reverse().map((version, index) => ({
-      key: `v${version.rev}`, label: t("localApps.view.version", { n: version.rev + 1 }), checked: app.pinnedRev === version.rev,
+      key: `v${version.rev}`, label: t("localApps.view.version", { n: version.rev + 1 }), checked: app.pinnedRev === version.rev, trailing: mark(app.pinnedRev === version.rev),
       separatorBefore: index === 0, onSelect: () => pin(version.rev === newest && app.pinnedRev === undefined ? null : version.rev),
     })),
   ];
@@ -103,7 +105,7 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
             {!goToChat && !app.chat && <span className="sr-only">{t("localApps.view.chatGone")}</span>}
             {onOpenWindow && (
               <button type="button" className="ui-icon-button hover:bg-ink/[0.06] hover:text-ink" onClick={onOpenWindow}
-                aria-label={t("localApps.card.openWindow")} title={t("localApps.card.openWindow")}><PanelTopOpen size={16} /></button>
+                aria-label={t("localApps.card.openWindow")} title={t("localApps.card.openWindow")}><AppWindowMac size={16} /></button>
             )}
           </span>
         </ToolPageActions>

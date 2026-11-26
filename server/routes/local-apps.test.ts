@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 
 /** `seen`: which conversations a paired person (x-session) can read; the owner on this computer sees everything. */
-async function fixture(seen: (person: string, threadId: string) => boolean = () => true) {
+async function fixture(seen: (person: string, threadId: string) => boolean = () => true, options: { everything?: boolean; live?: (person: string) => boolean } = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const other = store.createBot({ name: "Other" });
@@ -39,8 +39,9 @@ async function fixture(seen: (person: string, threadId: string) => boolean = () 
   const routes = [createLocalAppsRoutes({
     apps: localApps, store,
     visibleFor: (auth) => auth.kind === "session"
-      ? { everything: false, thread: (threadId) => seen(auth.session.id, threadId) }
+      ? { everything: options.everything === true, thread: (threadId) => seen(auth.session.id, threadId) }
       : { everything: true, thread: () => true },
+    live: (auth) => auth.kind !== "session" || (options.live?.(auth.session.id) ?? true),
     threadRefusal: (auth, threadId) => (auth.kind === "session" && auth.session.id === "guest" && threadId === bot.threadId ? "Guests change only their own conversations." : null),
   })];
   const server = createServer(async (req, res) => {
@@ -220,5 +221,30 @@ describe("local apps", () => {
     const row = store.messagesFor(bot.threadId).find((message) => message.id === messageId)!;
     store.patchMessage(bot.threadId, messageId, { app: { ...row.app!, uses: ["data", "state", "Not valid"] } as never });
     expect((await save(messageId)).body.app.manifest).toEqual({ name: "Sales board", uses: ["data", "state"] });
+  });
+
+  it("lets only whoever saved an app, or an admin, rename or remove it, and never from a conversation they may not change", async () => {
+    const { page, save, call } = await fixture(() => true, { everything: true });
+    const mine = (await save(page())).body.app.id;
+    expect((await call("GET", `/api/local-apps/${mine}`, undefined, "bob")).status).toBe(200);
+    expect((await call("PATCH", `/api/local-apps/${mine}`, { name: "Bob's now" }, "bob")).status).toBe(403);
+    expect((await call("DELETE", `/api/local-apps/${mine}`, undefined, "bob")).status).toBe(403);
+    const bobs = (await save(page("<p>bob</p>", "Bob's"), "bob")).body.app.id;
+    expect((await call("PATCH", `/api/local-apps/${bobs}`, { name: "Bob's board" }, "bob")).body.app.name).toBe("Bob's board");
+    expect((await call("PATCH", `/api/local-apps/${bobs}`, { name: "Owner's" })).status).toBe(200);
+    const guests = (await save(page("<p>g</p>", "Guest's"), "ann")).body.app.id;
+    expect((await call("DELETE", `/api/local-apps/${guests}`, undefined, "guest")).status).toBe(403);
+    expect((await call("DELETE", `/api/local-apps/${bobs}`, undefined, "bob")).body).toEqual({ ok: true });
+  });
+
+  it("stops serving a folder app's files once the session that opened it has ended", async () => {
+    let live = true;
+    const { folderPage, save, call, base } = await fixture(() => true, { live: () => live });
+    const id = (await save(await folderPage(), "ann")).body.app.id;
+    const doc = (await call("GET", `/api/local-apps/${id}/app?origin=${encodeURIComponent(base)}`, undefined, "ann")).body;
+    const files = /<base href="([^"]+)"/.exec(doc.srcdoc)![1]!;
+    expect((await fetch(`${files}data.csv`)).status).toBe(200);
+    live = false;
+    expect((await fetch(`${files}data.csv`)).status).toBe(404);
   });
 });

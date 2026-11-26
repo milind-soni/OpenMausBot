@@ -1,10 +1,12 @@
 // Dev-only gallery of saved apps, served at /local-apps-preview.html; not in the packaged app. It mounts the real apps
 // page, app view and page toolbar over a fake store and answers every /api request itself, so nothing reaches a server.
-// ?view=list|empty|app|toolbar &place=computer|cloud &skin=midnight|daylight &long=1 (long names)
+// ?view=list|empty|app|toolbar|window &place=computer|cloud &skin=midnight|daylight &long=1 (long names) &desktop=1 (the desktop
+// app's bridge: Open in its own window shows) &act=menu|rename|removed|versions (opens that state once drawn)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppMessage } from "@/components/app/AppMessage";
 import { PublishedAppsPage } from "@/components/published-apps/PublishedAppsPage";
+import { LocalAppWindow } from "./local-app-window";
 import { loadLocale } from "@/lib/i18n";
 import { openLocalApp } from "@/lib/local-apps";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -107,11 +109,16 @@ const config = { cloudHome: params.get("place") === "cloud" };
 const state = { ...initialState, hydrated: true, bots: BOTS as never, config: config as never };
 const store = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
 if (view === "app") openLocalApp(LOCAL[0]!.id);
+if (params.get("desktop") === "1" || view === "window") {
+  (window as { ogb?: unknown }).ogb = { localApps: { openWindow: async () => true, openChat: async () => true } };
+}
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <StoreContext.Provider value={store as never}>
-      {view === "toolbar" ? (
+      {view === "window" ? (
+        <LocalAppWindow id={LOCAL[0]!.id} />
+      ) : view === "toolbar" ? (
         <main className="min-h-screen bg-app p-4 sm:p-8">
           <div className="mx-auto flex max-w-[760px] flex-col gap-6">
             {rows.map((row) => <AppMessage key={row.id} botId="mira" botName="Mira" threadId="sales" message={row} />)}
@@ -123,3 +130,23 @@ createRoot(document.getElementById("root")!).render(
     </StoreContext.Provider>
   </StrictMode>,
 );
+
+const act = params.get("act");
+const click = (element: Element | null | undefined) => (element as HTMLElement | null | undefined)?.click();
+const whenDrawn = (selector: string, run: () => void) => {
+  const look = () => (document.querySelector(selector) ? run() : window.setTimeout(look, 50));
+  look();
+};
+const menuRow = (name: string) => [...document.querySelectorAll("[role=menu] [role^=menuitem]")].find((row) => row.textContent?.includes(name));
+const ready = () => { document.body.dataset.shotReady = ""; };
+if (act === "menu" || act === "rename" || act === "removed") {
+  whenDrawn("[data-local-app]", () => {
+    click(document.querySelector("[data-local-app] [aria-haspopup], [data-local-app] [aria-expanded]"));
+    window.setTimeout(() => {
+      if (act === "rename") click(menuRow("Rename"));
+      if (act === "removed") click(menuRow("Remove"));
+      window.setTimeout(ready, 300);
+    }, 300);
+  });
+}
+if (act === "versions") whenDrawn("[data-local-app-version]", () => { click(document.querySelector("[data-local-app-version]")?.closest("button")); window.setTimeout(ready, 300); });
