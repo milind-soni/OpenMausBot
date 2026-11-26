@@ -90,6 +90,8 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
+/** A page's typed array can arrive from another realm, where `instanceof Uint8Array` is false. */
+const iconBytes = (value) => (ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : undefined);
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate", "lendComputer"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
@@ -502,6 +504,16 @@ const bridge = {
       ipcRenderer.on("update-all:state", handler);
       return () => ipcRenderer.removeListener("update-all:state", handler);
     },
+  },
+
+  /** Saved apps as launchers on this computer: this app's own page only (never REMOTE_SAFE; main checks the sender
+   * again). `install({ id, name, iconPng?, desktopShortcut? })`, `uninstall(id)`, `list()`. */
+  appInstall: {
+    install: (input) => ipcRenderer.invoke("app-install:install", {
+      id: input?.id, name: input?.name, iconPng: iconBytes(input?.iconPng), desktopShortcut: input?.desktopShortcut === true,
+    }),
+    uninstall: (id) => ipcRenderer.invoke("app-install:uninstall", id),
+    list: () => ipcRenderer.invoke("app-install:list"),
   },
 
   /** A remote page may read the list but never change where this window goes. */
