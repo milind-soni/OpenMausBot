@@ -1,11 +1,13 @@
 import { APP_LIMITS, ROOM_VIEW_ONLY, type AppPayload } from "../../shared/app.ts";
-import { APP_RPC_METHODS, type AppRpcMethod } from "../../shared/app-frame/bridge.ts";
+import { APP_RPC_METHODS, PAGE_RPC_METHODS, pageUseRefusal, RPC_HOST_REFUSED, type AppRpcMethod, type PageRpcMethod } from "../../shared/app-frame/bridge.ts";
 import { webOrigin } from "../../shared/app-frame/csp.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
+import type { DataEngine } from "../data/types.ts";
 import { messageFileDisposition } from "../message-file.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import { refusalBody, userError } from "../user-errors.ts";
+import { pageRpc } from "./bot-page-rpc.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export { createChatApps };
@@ -35,6 +37,10 @@ export interface ChatAppRouteDeps {
    * page they load, so leaving a room, or losing sight of its bot, closes its pages to them. */
   threadVisible?(auth: RequestAuth, threadId: string): boolean;
   mcpRpc?(request: McpRpcRequest): Promise<McpRpcAnswer>;
+  /** The bots' databases, which a bot's page that declared `data` reads. */
+  data?: Pick<DataEngine, "unavailable" | "forBot">;
+  /** True when the person switched this bot's Data tools off. */
+  dataOff?(botId: string): boolean;
 }
 
 const DOCUMENT = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/app(\/download)?$/;
@@ -47,6 +53,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
   const { store, apps } = deps;
   const contextRate = rowRate(120, 60_000);
+  const pageRate = rowRate(APP_LIMITS.rpcPerMinute, 60_000);
 
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m = DOCUMENT.exec(path);
@@ -96,12 +103,21 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
     const threadId = body.threadId;
     const bot = store.bot(botId);
     if (!bot) return json(res, 404, { error: "no such bot" });
-    if (store.groupByThread(threadId)) return json(res, 409, { error: ROOM_VIEW_ONLY });
+    // A bot page's own data and state calls; an MCP app's row never makes one.
+    const pageCall = (row: { app: AppPayload } | undefined) => action === "rpc" && row?.app.source === "html" && typeof body.method === "string" &&
+      (PAGE_RPC_METHODS as readonly string[]).includes(body.method);
+    if (store.groupByThread(threadId)) {
+      return json(res, 409, pageCall(appRow(store, threadId, messageId))
+        ? { error: { code: RPC_HOST_REFUSED, message: pageUseRefusal("data", true) } } : { error: ROOM_VIEW_ONLY });
+    }
     if (!store.taskByThread(bot.id, threadId)) return json(res, 404, { error: "no such conversation" });
     const refused = deps.threadRefusal?.(auth, threadId);
     if (refused) return json(res, 403, { error: refused });
     const row = appRow(store, threadId, messageId);
     if (!row || (row.from && row.from.botId !== bot.id)) return json(res, 404, { error: "That app is not in this conversation." });
+    const pageMethod = pageCall(row);
+    // A page's data and state are a read of the conversation: only for whoever may see it.
+    if (pageMethod && deps.threadVisible && !deps.threadVisible(auth, threadId)) return json(res, 404, { error: "no such conversation" });
 
     if (action === "context") {
       if (!contextRate.take(`${threadId}:${row.id}`)) return json(res, 429, { error: "Too many context updates from this app." });
@@ -109,6 +125,14 @@ export function createChatAppRoutes(deps: ChatAppRouteDeps): RouteHandler {
       return result.ok ? json(res, 200, { ok: true }) : json(res, result.status, { error: result.error });
     }
 
+    if (pageMethod) {
+      if (body.params !== undefined && !isRecord(body.params)) return json(res, 400, { error: "params must be an object" });
+      if (!pageRate.take(`${threadId}:${row.id}`)) return json(res, 429, { error: { code: -32000, message: "Too many calls from this page. Wait a moment." } });
+      const answer = await pageRpc({ apps, ...(deps.data ? { data: deps.data } : {}), ...(deps.dataOff ? { dataOff: deps.dataOff } : {}) }, {
+        botId: bot.id, threadId, messageId: row.id, method: body.method as PageRpcMethod, params: isRecord(body.params) ? body.params : {},
+      });
+      return json(res, answer.status, answer.body);
+    }
     if (row.app.source !== "mcp") return json(res, 404, { error: "That app has no server to call." });
     if (typeof body.method !== "string" || !(APP_RPC_METHODS as readonly string[]).includes(body.method)) {
       return json(res, 400, { error: `method must be one of ${APP_RPC_METHODS.join(", ")}` });

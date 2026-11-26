@@ -456,3 +456,61 @@ describe("hostCapabilitiesFor", () => {
     expect(capabilities.sandbox).toEqual({ permissions: {}, csp: { connectDomains: BOT_HTML_NETWORK.connect, resourceDomains: BOT_HTML_NETWORK.resources } });
   });
 });
+
+describe("a bot page's data and state", () => {
+  const declared = (can: Partial<AppDocument["can"]>, over: Partial<AppDocument> = {}): AppDocument => ({ ...botDoc(), can: { ...botDoc().can, ...can }, ...over });
+
+  it("refuses what the page did not declare, naming the missing declaration", async () => {
+    const h = harness(declared({ state: true }));
+    await h.connect();
+    const query = await h.request("mausbot/data/query", { sql: "SELECT 1" });
+    expect(query?.error).toEqual({ code: RPC_HOST_REFUSED, message: 'This page did not declare "data": show it with uses: ["data"] to read its bot\'s data.' });
+    expect(h.calls.rpc).toEqual([]);
+    const other = harness(declared({ data: true }));
+    await other.connect();
+    expect((await other.request("mausbot/state/set", { key: "k", value: 1 }))?.error?.message).toContain('did not declare "state"');
+    expect(other.calls.rpc).toEqual([]);
+  });
+
+  it("forwards declared calls with no click first, and hands back the host's answer", async () => {
+    const h = harness(declared({ data: true, state: true }));
+    h.setEngaged(false);
+    h.answerRpc(async (method) => (method === "mausbot/data/query" ? { columns: [], rows: [{ n: 1 }], truncated: false } : {}));
+    await h.connect();
+    expect((await h.request("mausbot/data/query", { sql: "SELECT 1 AS n", params: [1] }))?.result).toEqual({ columns: [], rows: [{ n: 1 }], truncated: false });
+    expect((await h.request("mausbot/state/set", { key: "filter", value: { region: "north" } }))?.result).toEqual({});
+    expect((await h.request("mausbot/state/keys"))?.result).toEqual({});
+    expect(h.calls.rpc.map((call) => call.method)).toEqual(["mausbot/data/query", "mausbot/state/set", "mausbot/state/keys"]);
+  });
+
+  it("checks the params before the host is asked", async () => {
+    const h = harness(declared({ data: true, state: true }));
+    await h.connect();
+    expect((await h.request("mausbot/data/query", {}))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect((await h.request("mausbot/data/query", { sql: "SELECT 1", params: "1" }))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect((await h.request("mausbot/state/get", { key: "" }))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect((await h.request("mausbot/state/get", { key: "k".repeat(201) }))?.error?.code).toBe(RPC_INVALID_PARAMS);
+    expect(h.calls.rpc).toEqual([]);
+  });
+
+  it("gives a room's page and an MCP app none of it", async () => {
+    const room = harness(declared({ data: false, state: false }, { room: true }));
+    await room.connect();
+    expect((await room.request("mausbot/data/query", { sql: "SELECT 1" }))?.error?.message).toBe("In a room, a page cannot read its bot's data or keep state.");
+    const mcp = harness(mcpDoc({ can: { ...mcpDoc().can, data: true, state: true } }));
+    await mcp.connect();
+    expect((await mcp.request("mausbot/state/keys"))?.error?.code).toBe(RPC_METHOD_NOT_FOUND);
+    expect(room.calls.rpc).toEqual([]);
+    expect(mcp.calls.rpc).toEqual([]);
+  });
+
+  it("shares the page's rpc rate", async () => {
+    const h = harness(declared({ data: true }));
+    await h.connect();
+    const [[windowMs, max]] = APP_FRAME_LIMITS.rates.rpc;
+    for (let i = 0; i < max!; i++) expect((await h.request("mausbot/data/query", { sql: "SELECT 1" }))?.error).toBeUndefined();
+    expect((await h.request("mausbot/data/query", { sql: "SELECT 1" }))?.error?.message).toBe("Too many calls from this page. Wait a moment.");
+    await h.advance(windowMs!);
+    expect((await h.request("mausbot/data/query", { sql: "SELECT 1" }))?.error).toBeUndefined();
+  });
+});

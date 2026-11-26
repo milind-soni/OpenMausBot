@@ -30,7 +30,22 @@ export const APP_LIMITS = {
   messagesPerHour: 20,
   /** rpc calls per app row per minute. */
   rpcPerMinute: 60,
+  /** mausbot.data.query: rows and JSON bytes of rows one answer holds, the SQL's length, and its wall clock. */
+  pageQueryRows: 5_000,
+  pageQueryBytes: 1_000_000,
+  pageQuerySqlChars: 20_000,
+  pageQueryMs: 10_000,
+  /** mausbot.state: a key's characters, one value's JSON bytes, all of a page's values, and its keys. */
+  pageStateKeyChars: 200,
+  pageStateValueBytes: 64 * 1024,
+  pageStateBytes: 256 * 1024,
+  pageStateKeys: 200,
 } as const;
+
+/** What a bot's page may ask the host for beyond the bridge's basics, declared with show_html `uses`: `data`, read-only
+ * SQL on its bot's database; `state`, a small store of its own that its later versions keep. */
+export const APP_USES = ["data", "state"] as const;
+export type AppUse = (typeof APP_USES)[number];
 
 /** Versions of one bot page kept for stepping back, the current one included. */
 export const APP_PAGE_VERSIONS = 10;
@@ -139,6 +154,9 @@ export interface AppCan {
   message: boolean;
   openLinks: boolean;
   modelContext: boolean;
+  /** A bot's page that declared `data` or `state` (show_html `uses`), outside a room. */
+  data?: boolean;
+  state?: boolean;
 }
 
 export interface AppToolDefinition {
@@ -197,6 +215,7 @@ export interface ShowHtmlInput {
   frameless?: boolean;
   /** Reload the page in place whenever a file in its folder changes; only with `path`. */
   live?: boolean;
+  uses?: AppUse[];
 }
 
 export interface UpdateHtmlInput {
@@ -209,6 +228,8 @@ export interface UpdateHtmlInput {
   frameless?: boolean;
   /** Turn reloading on folder changes on (only with `path`) or off; kept as it was when omitted. */
   live?: boolean;
+  /** Kept as the page's current version declared when omitted. */
+  uses?: AppUse[];
 }
 
 export type AppInputResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -298,6 +319,26 @@ function checkLive(value: unknown, path: string | undefined): AppInputResult<boo
   return { ok: true, value };
 }
 
+const USES_HELP = 'uses: a list of "data" and "state", e.g. ["data", "state"].';
+
+/** A list of names; a string holding one name, several separated by commas, or a JSON list is read as that list. */
+function checkUses(value: unknown): AppInputResult<AppUse[] | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  let list: unknown = value;
+  if (typeof list === "string") {
+    const text = list.trim();
+    try { list = text.startsWith("[") ? JSON.parse(text) : text.split(","); } catch { return { ok: false, error: USES_HELP }; }
+  }
+  if (!Array.isArray(list)) return { ok: false, error: USES_HELP };
+  const uses: AppUse[] = [];
+  for (const item of list) {
+    const name = typeof item === "string" ? item.trim().toLowerCase() : "";
+    if (!(APP_USES as readonly string[]).includes(name)) return { ok: false, error: USES_HELP };
+    if (!uses.includes(name as AppUse)) uses.push(name as AppUse);
+  }
+  return { ok: true, value: uses };
+}
+
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
   if (!isRecord(input)) return { ok: false, error: "show_html needs {html, jsx or path, title, height?, fallback_text?}." };
   const page = checkPage(input);
@@ -311,6 +352,9 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
   const live = checkLive(input.live, out.path);
   if (!live.ok) return live;
   if (live.value) out.live = true;
+  const uses = checkUses(input.uses);
+  if (!uses.ok) return uses;
+  if (uses.value?.length) out.uses = uses.value;
   if (input.height !== undefined && input.height !== null) {
     if (typeof input.height !== "number" || !Number.isFinite(input.height)) return { ok: false, error: "height: must be a number of pixels, 80 to 720." };
     out.height = Math.round(Math.min(APP_LIMITS.heightMax, Math.max(APP_LIMITS.heightMin, input.height)));
@@ -338,6 +382,9 @@ export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlI
   const live = checkLive(input.live, out.path);
   if (!live.ok) return live;
   if (live.value !== undefined) out.live = live.value;
+  const uses = checkUses(input.uses);
+  if (!uses.ok) return uses;
+  if (uses.value !== undefined) out.uses = uses.value;
   if (input.title !== undefined && input.title !== null) {
     const title = checkTitle(input.title);
     if (!title.ok) return title;
