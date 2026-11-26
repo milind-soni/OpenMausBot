@@ -408,4 +408,12 @@ describe("a Chief's retry of a thread that failed the Chief's own request", () =
     }
     expect(retriedMessage("Ada", "Invoices", "turn")).toBe("Ada's thread #Invoices is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.");
   });
+
+  it("from a room, where the server passes no coordinate_bots, retries the Chief's own request in the failed thread as a turn", async () => {
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false });
+    expect(f.turnsOf("ada")).toEqual([{ threadId: "ada-job", text: expect.stringContaining("Continue the request above from where it stopped and finish it.") }]);
+    expect(f.turnsOf("chief")).toEqual([]);
+    expect(how).toBe("turn");
+  });
 });
