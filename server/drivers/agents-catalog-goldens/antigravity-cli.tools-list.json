@@ -190,10 +190,7 @@
           "thread_id": {
             "type": "string"
           }
-        },
-        "required": [
-          "thread_id"
-        ]
+        }
       }
     },
     {
