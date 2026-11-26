@@ -12,6 +12,7 @@ import { endedOnFailure } from "@/lib/mascot";
 import { MainThreadMark, rowSelectedSurface } from "./SidebarRowMarkers";
 import { handoffStatusText } from "./HandoffStatusChip";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
+import { threadRowCloser } from "@/lib/room-thread-close";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -69,7 +70,7 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
     const waiting = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
       ...task, busy: roomThreadWorking(group, task.threadId), unread: task.unread ?? (task.threadId === group.threadId && Boolean(group.unread)),
-      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
+      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined, closedBy: threadRowCloser(task),
     };
   });
   return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))
@@ -189,7 +190,7 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
         const activity = new Map(sidebarGroupActivityTasks(group, bots, queued).map((task) => [task.threadId, task]));
         return (group.tasks ?? [])
           .filter((task) => task.pinned === true)
-          .map((task) => ({ ...task, ...activity.get(task.threadId), queued: Boolean(queued[task.threadId]?.length), groupId: group.id, groupName: group.name, groupThreadId: group.threadId }));
+          .map((task) => ({ ...task, ...activity.get(task.threadId), closedBy: threadRowCloser(task), queued: Boolean(queued[task.threadId]?.length), groupId: group.id, groupName: group.name, groupThreadId: group.threadId }));
       }),
   ];
   return orderedThreadList(flat).map(({ botId, botName, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
