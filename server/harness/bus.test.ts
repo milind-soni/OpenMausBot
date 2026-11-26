@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
@@ -408,7 +408,7 @@ describe("EventBus", () => {
     bus.publish(testEvent({ threadId: "b", eventId: "b1" }));
     bus.publish(testEvent({ threadId: "a", eventId: "a2" }));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(appends.map((append) => append.file.split("/").at(-1))).toEqual(["a.ndjson", "b.ndjson"]);
+    expect(appends.map((append) => basename(append.file))).toEqual(["a.ndjson", "b.ndjson"]);
     release();
     await bus.flush();
     expect(appends[0].data.trim().split("\n").map((line) => (JSON.parse(line) as { eventId: string }).eventId)).toEqual(["a1", "a2"]);
