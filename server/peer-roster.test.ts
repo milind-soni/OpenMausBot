@@ -462,16 +462,29 @@ describe("bot visibility between teammates", () => {
   const hr2: RosterMember = { id: "hr2", name: "Benefits", section: "Work", visibility: { people: ["ada@example.test"] } };
   const admins: RosterMember = { id: "adm", name: "Board", section: "Work", visibility: "admins" };
 
-  it("reaches only teammates exactly the same people can see", () => {
+  it("reaches only teammates everyone who sees it can also see", () => {
     expect(canReach(self, hr)).toBe(false);
     expect(peerAllowed(self, hr)).toBe(false);
-    expect(canReach(hr, self)).toBe(false);
+    expect(canReach(self, admins)).toBe(false);
+    expect(canReach(hr, self)).toBe(true);
+    expect(canReach(admins, self)).toBe(true);
+    expect(canReach(admins, hr)).toBe(true);
     expect(canReach(hr, admins)).toBe(false);
     expect(canReach(hr, hr2)).toBe(true);
     expect(reachablePeers([...fleet, hr, hr2, admins], self).map((bot) => bot.id)).toEqual(["writer", "coder", "elsewhere"]);
-    expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["hr2"]);
+    expect(reachablePeers([...fleet, hr, hr2, admins], hr).map((bot) => bot.id)).toEqual(["self", "writer", "coder", "hr2", "elsewhere"]);
+    expect(reachRefusal(admins, self)).toBeNull();
     expect(resolveTeammate([...fleet, hr], self, "Payroll")).toEqual({ error: reachRefusal(self, hr) });
     expect(peerAllowed(self, "hr")).toBe(true);
+  });
+
+  it("keeps a person's own MausBot to the same audience", () => {
+    const mausbot: RosterMember = { id: "maus", name: "MausBot", section: "Work", visibility: { people: ["ada@example.test"] }, defaultBot: { person: "ada@example.test" } };
+    expect(canReach(mausbot, self)).toBe(false);
+    expect(canReach(mausbot, hr)).toBe(true);
+    const board: RosterMember = { id: "board", name: "Board", section: "Work", visibility: "admins" };
+    expect(canReach(board, mausbot)).toBe(false);
+    expect(reachablePeers([mausbot, self], board).map(bot => bot.id)).toEqual(["self"]);
   });
 });
 

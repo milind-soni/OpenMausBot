@@ -173,13 +173,13 @@ it("lets an explicitly authorized Chief coordinate another team, which can consu
   expect(bots.find((b: any) => b.id === reviewer.id).managedSections).toBeUndefined();
 }), 45_000);
 
-it("withholds a cross-department result if the sender's audience changes while it runs", () => withRooms(async f => {
+it("withholds a cross-department result if the target's audience narrows while it runs", () => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
   const gateFile = join(f.session.info.dataDir, "cross-team-revocation.gate");
   f.plan[f.target.id] = { gateFile, reply: "PRIVATE_RESULT_AFTER_REVOCATION" };
   await f.start();
   await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 30_000 }).toBe("running");
-  await f.api(`/api/bots/${f.sender.id}`, { visibility: "admins" }, "PATCH");
+  await f.api(`/api/bots/${f.target.id}`, { visibility: "admins" }, "PATCH");
   await releaseAfterWithhold(f, gateFile);
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
@@ -257,7 +257,7 @@ it("keeps a busy recipient queued and rejects a recipient whose audience changed
   await f.cli("send", "--bot", f.target.id, "--text", "Independent direct task");
   await f.start();
   await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 10_000 }).toBe("queued");
-  await f.api(`/api/bots/${f.sender.id}`, { visibility: "admins" }, "PATCH");
+  await f.api(`/api/bots/${f.target.id}`, { visibility: "admins" }, "PATCH");
   expect((await f.wait()).status).toBe("settled");
   expect(f.nodes().find((n: any) => n.parentId).status).toBe("failed");
   expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
@@ -338,7 +338,7 @@ it.each([false, true])("retains reports behind compact receipts for later turns,
   const receipt = (await f.messages(f.source.activeTaskId)).find((m: any) => m.roomRequest?.phase === "result");
   expect(receipt.kind).toBe("activity");
   expect(receipt.text).toBeUndefined();
-  if (revoked) await f.api(`/api/bots/${f.sender.id}`, { visibility: "admins" }, "PATCH");
+  if (revoked) await f.api(`/api/bots/${f.target.id}`, { visibility: "admins" }, "PATCH");
   await f.cli("send-channel", "--channel", f.source.id, "--text", "Did the reviewer actually run tests? Do not start new work.");
   expect((await f.wait()).status).toBe("settled");
   const followup = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);

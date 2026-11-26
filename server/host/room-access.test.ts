@@ -132,6 +132,43 @@ describe("roomHandoffProblem", () => {
   it("lets a bot reach its own thread whatever its audience, and keeps the audience rule for every other bot", () => {
     expect(roomHandoffProblem({ botId: "coder", threadId: "coder-review" }, from)).toBeUndefined();
     expect(roomHandoffProblem({ botId: "tester", threadId: "tester-work" }, from)).toBeUndefined();
-    expect(roomHandoffProblem({ botId: "outsider", threadId: "outsider-work" }, from)).toMatch(/./);
+    expect(roomHandoffProblem({ botId: "outsider", threadId: "outsider-work" }, from)).toBeUndefined();
+    expect(roomHandoffProblem({ botId: "coder", threadId: "coder-work" }, { botId: "outsider", threadId: "outsider-chat" })).toMatch(/shared with different people/);
+  });
+});
+
+describe("roomHandoffProblem into a wider room", () => {
+  const bots = {
+    coder: { id: "coder", name: "Coder", threadId: "coder-chat", visibility: { people: ["ada@acme.test"] } },
+    helper: { id: "helper", name: "Helper", threadId: "helper-main" },
+    board: { id: "board", name: "Board", threadId: "board-main", visibility: "admins" },
+  } as unknown as Record<string, BotRecord>;
+  const rooms: Record<string, Record<string, unknown>> = {
+    open: { id: "open", threadId: "open-thread", dm: false, memberIds: ["helper"], name: "Open" },
+    mixed: { id: "mixed", threadId: "mixed-thread", dm: false, memberIds: ["helper", "board"], name: "Mixed" },
+    floored: { id: "floored", threadId: "floored-thread", dm: false, memberIds: ["helper"], name: "Floored", audienceFloor: "admins" },
+  };
+  const store = {
+    bot: (id: string) => bots[id],
+    group: (id: string) => rooms[id],
+    groupByThread: (threadId: string) => Object.values(rooms).find(room => room.threadId === threadId),
+    groupTaskByThread: (groupId: string, threadId: string) => rooms[groupId]?.threadId === threadId ? { threadId } : undefined,
+    taskByThread: (botId: string, threadId: string) => bots[botId]?.threadId === threadId ? { threadId } : undefined,
+    messagesFor: () => [],
+  } as unknown as Store;
+  const { roomHandoffProblem } = createRoomAccess({ store });
+  const from = { botId: "coder", threadId: "coder-chat" };
+
+  it("reaches a wider bot in a room only when everyone who sees the sender sees the whole room", () => {
+    expect(roomHandoffProblem({ groupId: "open", threadId: "open-thread", botId: "helper" }, from)).toBeUndefined();
+    expect(roomHandoffProblem({ groupId: "mixed", threadId: "mixed-thread", botId: "helper" }, from)).toMatch(/room is shared with different people/);
+    expect(roomHandoffProblem({ groupId: "floored", threadId: "floored-thread", botId: "helper" }, from)).toMatch(/room is shared with different people/);
+    expect(roomHandoffProblem({ botId: "helper", threadId: "helper-main" }, from)).toBeUndefined();
+  });
+
+  it("refuses a result from a room that narrowed while it ran, even once both bots share the sender's audience", () => {
+    const narrowed = { ...bots, helper: { ...bots.helper, visibility: { people: ["ada@acme.test"] } } } as unknown as Record<string, BotRecord>;
+    const access = createRoomAccess({ store: { ...store, bot: (id: string) => narrowed[id] } as unknown as Store });
+    expect(access.roomHandoffProblem({ groupId: "floored", threadId: "floored-thread", botId: "helper" }, from)).toMatch(/room is shared with different people/);
   });
 });

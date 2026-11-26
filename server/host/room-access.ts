@@ -1,5 +1,6 @@
 import { isLinkedId } from "../bot-link/protocol.ts";
 import type { HandoffView, RoomAddress } from "../coordinator.ts";
+import { audienceWithin, sameAudience } from "../bot-visibility.ts";
 import { peerAllowed, reachRefusal, type LookedAfterBy } from "../peer-roster.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { PersonalReach } from "./personal-reach.ts";
@@ -25,12 +26,22 @@ export type RoomTalksVerdict =
   | { ok: false; problem: "private" }
   | { ok: false; problem: "setup" };
 
+const ROOM_SHARED_APART = "That room is shared with different people from this bot, so nothing was sent; hand the work to the bot directly (leave group_id out). Never use computer control to get around this.";
 const NOT_A_MEMBER = "The addressed agent isn't a member of this room; work sent to it again goes to it directly, in a thread of its own";
 const LEFT_THE_ROOM = "The addressed agent is no longer a member of this room, so its room job stopped; work sent to it again goes to it directly, in a thread of its own";
 
 export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy, personalReach }: RoomAccessDeps) {
-  function reachProblem(from: BotRecord, bot: BotRecord, parent: Pick<HandoffView, "threadId">, node: Pick<HandoffView, "threadId"> & Partial<Pick<HandoffView, "id" | "origin">>): string | undefined {
-    if (peerAllowed(from, bot)) return undefined;
+  /** Security: work reaching a wider bot inside a room (or a room job in a thread of its own) brings that room's words
+   * back, so everyone who sees the sender must also see every member of the room and its floor. */
+  function roomWithin(from: BotRecord, room: GroupRecord | undefined): boolean {
+    if (!room || room.dm) return true;
+    const audiences = [room.audienceFloor ?? "everyone", ...room.memberIds.flatMap((id) => { const member = store.bot(id); return member ? [member.visibility] : []; })];
+    return audiences.every((audience) => sameAudience(from.visibility, audience) || audienceWithin(from.visibility, audience));
+  }
+  function reachProblem(from: BotRecord, bot: BotRecord, parent: Pick<HandoffView, "threadId">, node: Pick<HandoffView, "threadId" | "botId"> & Partial<Pick<HandoffView, "id" | "origin" | "groupId">>): string | undefined {
+    const laneThread = laneRoomThread({ botId: node.botId, threadId: node.threadId, groupId: node.groupId });
+    const room = node.groupId ? store.group(node.groupId) : laneThread ? store.groupByThread(laneThread) : undefined;
+    if (peerAllowed(from, bot)) return roomWithin(from, room) ? undefined : ROOM_SHARED_APART;
     const personal = personalReach?.();
     if (personal?.carries(from, bot, parent.threadId, node)) return undefined;
     return personal?.refusal(from, bot, parent.threadId) ?? reachRefusal(from, bot, lookedAfterBy)!;
