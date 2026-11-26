@@ -83,6 +83,20 @@ describe("the Admin's requests to the home", () => {
     expect(Buffer.concat(out).toString()).toBe("POST /api/cloud/pairing HTTP/1.1\r\ncontent-length: 2\r\n\r\n{}");
   });
 
+  it("audits a pairing body too large to record as null, never with a piece missing", async () => {
+    const bodies: (string | null)[] = [];
+    const gate = new RequestGate(() => {}, (body) => bodies.push(body));
+    gate.resume();
+    const finished = new Promise((resolve) => gate.on("finish", resolve));
+    const big = "x".repeat(70_000);
+    gate.write(`POST /api/cloud/pairing HTTP/1.1\r\ncontent-length: ${big.length + 2}\r\n\r\n`);
+    gate.write("{");
+    gate.write(big);
+    gate.end("}");
+    await finished;
+    expect(bodies).toEqual([null]);
+  });
+
   it("over the channel: the home answers the first request, a pipelined second never reaches it, and both ends hold the profile", async () => {
     const { requests, connectHome, counts } = await home();
     const audits: AuditEvent[] = [];
