@@ -6,7 +6,7 @@ import { openThreadBeside } from "@/lib/room-feed";
 import { openThread } from "@/state/store";
 import { useStoreRef } from "@/state/store-ref";
 import { useStoreSelector } from "@/state/store-select";
-import { closeInbox, doneInboxRow, openInbox, readInboxRow, refreshInbox } from "@/state/inbox";
+import { closeInbox, currentInboxPanel, doneInboxRow, openInbox, readInboxRow, refreshInbox } from "@/state/inbox";
 import type { CardResponse } from "@/lib/card-answer";
 import { answerThread, closeResponse, type QuickAction } from "./inbox-view";
 import { attentionJumpAction, type AttentionThread } from "../SidebarBotActivity";
@@ -27,7 +27,8 @@ export function useInboxActions(view: InboxView | null) {
   }, [view, dispatch]);
 
   const openInChat = useCallback((row: InboxRow) => {
-    readInboxRow(row);
+    const sidePanelReadsIt = !phone && currentInboxPanel().open;
+    if (!sidePanelReadsIt) readInboxRow(row);
     const target = row.origin ? { botId: row.origin.botId, threadId: row.origin.threadId, messageId: row.origin.messageId }
       : view?.threadId && view.botId ? { botId: view.botId, threadId: view.threadId, messageId: row.id } : null;
     if (!target) return;
@@ -42,7 +43,7 @@ export function useInboxActions(view: InboxView | null) {
     else if (action === "close") answer(row, closeResponse(row));
     else if (action === "done") doneInboxRow(row);
     else if (action === "open") openInChat(row);
-    else { readInboxRow(row); openInbox({ reading: row.id }); }
+    else openInbox({ reading: row.id });
   }, [answer, openInChat]);
 
   return { run, answer, openInChat };

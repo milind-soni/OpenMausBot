@@ -230,7 +230,7 @@ describe("@Ben", () => {
     const line = f.said("scout-main", "@Ben can you check the numbers? @Ada too", CLEO);
     const inbox = f.inboxOf(BEN);
     expect(f.lines(inbox.threadId).at(-1)).toMatchObject({ text: "@Ben can you check the numbers? @Ada too", inbox: {
-      kind: "message", from: { name: "Cleo", email: CLEO.email }, origin: { botId: "scout", threadId: "scout-main", title: "Scout", messageId: line.id }, replies: true,
+      kind: "message", reason: "mentioned", from: { name: "Cleo", email: CLEO.email }, origin: { botId: "scout", threadId: "scout-main", title: "Scout", messageId: line.id }, replies: true,
     } });
     expect(f.notified.map((one) => [one.forPerson, one.title, one.threadId])).toEqual([
       [key(BEN.email), "Cleo mentioned you in Scout", inbox.threadId], [key(ADA.email), "Cleo mentioned you in Scout", "scout-main"],
@@ -251,7 +251,8 @@ describe("@Ben", () => {
     f.team.replyIn(session(BEN.email), inbox.threadId, item.id, "Sure, after 10.", {});
     const cleos = f.inboxOf(CLEO);
     expect(cleos.bot.id).toBe("cleos-chief");
-    expect(f.lines(cleos.threadId).at(-1)).toMatchObject({ text: "Sure, after 10.", inbox: { from: { name: "Ben", email: BEN.email }, replies: true } });
+    expect(f.lines(cleos.threadId).at(-1)).toMatchObject({ text: "Sure, after 10.", inbox: { reason: "replied", from: { name: "Ben", email: BEN.email }, replies: true } });
+    expect(f.team.view(session(CLEO.email))!.rows[0]).toMatchObject({ reason: "replied", text: "Sure, after 10." });
     expect(f.continued, "nobody's turn carries on: a person asked").toEqual([]);
   });
 
@@ -271,7 +272,7 @@ describe("@Ben", () => {
     f.store.patchMessage("scout-main", reply.id, { reactions: [] });
     f.store.patchMessage("cleo-private", hidden.id, { turnSucceeded: true });
     expect(f.notified.map((one) => [one.forPerson, one.title])).toEqual([[key(BEN.email), "Scout mentioned you"]]);
-    expect(f.lines(f.inboxOf(BEN).threadId).at(-1)!.inbox).toMatchObject({ from: { name: "Scout", botId: "scout" }, origin: { threadId: "scout-main" } });
+    expect(f.lines(f.inboxOf(BEN).threadId).at(-1)!.inbox).toMatchObject({ reason: "mentioned", from: { name: "Scout", botId: "scout" }, origin: { threadId: "scout-main" } });
   });
 
   it("never tells twice what message_person already passed in the same turn, nor the writer themselves", () => {
