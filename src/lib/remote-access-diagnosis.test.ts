@@ -50,7 +50,6 @@ describe("the remote access diagnosis", () => {
   it("asks to sign in when signed out, or when the relay refused this computer's sign-in", () => {
     const signedOut = diagnoseRemoteAccess({ account: { available: true, status: "signed-out" }, companion: companion() });
     expect(signedOut.headline).toBe("Not signed in.");
-    // The relay's sign-in is not "Your account": the next step says where it is.
     expect(signedOut.next).toEqual(["Sign in under Anywhere, through MausBot in Phone & devices. It is a separate sign-in from Your account."]);
     const refused = diagnoseRemoteAccess({ account: signedIn, companion: companion({ relayToken: { state: "waiting", code: "sign_in" }, e2e: { enabled: true, relay: "off", node: null, descriptor: null } }) });
     expect(refused.headline).toBe("This computer's sign-in was not accepted.");
