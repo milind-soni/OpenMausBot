@@ -25,13 +25,13 @@ describe("Ctrl+Tab through a bot's threads", () => {
     expect(threadCycleStep(key({ defaultPrevented: true }))).toBeNull();
   });
 
-  it("goes in the header tabs' order, pinned first, skipping archived, snoozed, closed, routine and bot-opened threads", () => {
+  it("goes in the header tabs' order, pinned first, skipping archived, snoozed, closed, routine and burst threads", () => {
     const tasks = [thread("main", 1), thread("new", 9), thread("pin", 2, { pinned: true }), thread("mid", 5), thread("gone", 8, { archivedAt: 1 }),
       thread("later", 8, { snoozedUntil: 0 }), thread("done", 8, { closedBy: { botId: "x", name: "X", at: 1 } }), thread("run", 8, { routineRunId: "r" }),
-      thread("helper", 8, { openedBy: { botId: "x", name: "X", at: 1 } })];
+      thread("burst", 8, { openedBy: { botId: "x", name: "X", at: 1, burstId: "z" } }), thread("helper", 7, { openedBy: { botId: "x", name: "X", at: 1 } })];
     const bot = { id: "b", threadId: "main", tasks };
     expect(threadCycleOrder(bot)).toEqual(threadTabs(bot).map((tab) => tab.threadId));
-    expect(threadCycleOrder(bot)).toEqual(["pin", "new", "mid", "main"]);
+    expect(threadCycleOrder(bot)).toEqual(["pin", "new", "helper", "mid", "main"]);
   });
 
   it("leaves out the blank New thread chat's tab", () => {
