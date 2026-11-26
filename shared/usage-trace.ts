@@ -156,7 +156,7 @@ const BUILT_IN_ICONS: ReadonlyArray<[RegExp, TraceToolIcon]> = [
   [/^(?:websearch|web_search|search_web|google_search|x_search|research)$/, "search"],
   [/^(?:webfetch|web_fetch|fetch|open_url|read_url|fetch_url)$/, "web"],
   [/^(?:bash|shell|terminal|run_command|execute|exec|vm_exec|computer_exec|run_shell_command|local_shell|killshell|bashoutput)$/, "terminal"],
-  [/^(?:read|read_file|write|write_file|create_file|edit|multiedit|str_replace|apply_patch|notebookedit|delete|grep|glob|find|ls|list_files|attach_file|view|tool_result_read)$/, "files"],
+  [/^(?:read|read_file|write|write_file|create_file|edit|multiedit|str_replace|apply_patch|notebookedit|delete|grep|glob|find|ls|list_files|attach_file|list_chat_attachments|get_chat_attachment|view|tool_result_read)$/, "files"],
   [/^(?:memory|remember|recall|memory_[a-z_]+|search_memory|save_memory|session_search|session_read)$/, "memory"],
   [/^(?:routine|routines|schedule|cron)(?:_[a-z_]+)?$|^[a-z_]*(?:routine|trigger)[a-z_]*$/, "routine"],
   [/^(?:publish_app|publish_page|unpublish_page|[a-z_]*page_publish[a-z_]*|pages?_[a-z_]+)$/, "page"],

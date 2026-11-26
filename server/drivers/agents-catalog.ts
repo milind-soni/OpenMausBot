@@ -318,6 +318,22 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "list_chat_attachments",
+    description: "List files available to this conversation, including images generated during the current turn. Returns attachment_ref, name, mime and size. Use get_chat_attachment to obtain a readable Local VM path; do not guess host paths.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "get_chat_attachment",
+    description: "Copy one conversation attachment into this turn's Local VM. Get attachment_ref from list_chat_attachments. Optional destination_dir is relative to /home/cua/workspace; default attachments/inbox/<bot>/<thread>. Identical existing copies are reused; modified files are preserved under their names and a fresh unique copy is made. Returns local_path, attachment_ref, name, mime, size, reused. Never uses another bot's VM or downloads a supplied URL. Currently requires a Linux Local VM host.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        attachment_ref: { type: "string", description: "Exact attachment_ref returned by list_chat_attachments." },
+        destination_dir: { type: "string", description: "Optional relative directory, e.g. wechat-communication/files. No absolute path or .." },
+      }, required: ["attachment_ref"],
+    },
+  },
+  {
     name: "attach_file",
     description:
       `Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, csv, tsv, txt, md, json, rtf, and archives (zip, rar, 7z, tar, gz, tgz, bz2, xz). Up to ${limitMegabytes(FILE_MAX_BYTES)} MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.`,

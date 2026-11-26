@@ -1,5 +1,7 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+import { FILE_MAX_BYTES } from "./attachments.ts";
+import { listChatAttachments, fetchChatAttachment } from "./chat-attachment-fetch.ts";
 import { startFailureText } from "./start-failure-text.ts";
 import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
@@ -13018,6 +13020,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         shown: (id) => !proactive.fence.confines(id) && !botApiThread(id) && (CLOUD_TEAM ? teamHost.readableFrom(internalCapability.threadId)(id) : cloudLendingView(internalCapability) ? cloudOwnerOnlyThread(id) : true),
         threadBusy, queuedThreadPosition, queuedReason: queuedStatus, readBody: readInternalBody,
       }), createToolTimingRoute(usageTrace, internalCapability.threadId)], { req, res, url, path, method, auth, json, readBody })) return;
+      if (method === "POST" && (path === "/api/internal/chat-attachments/list" || path === "/api/internal/chat-attachments/get")) {
+        const threadId = internalCapability.threadId;
+        if (!connectorThread(internalSender.id, threadId)) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const body = await readInternalBody();
+        const attachments = () => [...store.messagesFor(threadId).flatMap((message) => message.attachments ?? []),
+          ...(turnAttachmentsByTurn.get(turnAttachmentKey(threadId, liveTurnByThread.get(threadId))) ?? [])];
+        if (path.endsWith("/list")) return json(res, 200, { attachments: listChatAttachments(ATTACHMENTS_DIR, attachments()) });
+        if (typeof body.attachment_ref !== "string" || (body.destination_dir !== undefined && typeof body.destination_dir !== "string")) return json(res, 400, { error: "attachment_ref is required; destination_dir is optional text" });
+        try {
+          const vm = await attachmentVmForTurn(internalCapability);
+          if (!vm) return json(res, 409, { error: "This turn has no Local VM. Select a Local VM before fetching an attachment." });
+          if (!internalCapabilityIsActive({ ...internalCapability, localVmTarget: vm }) || !connectorThread(internalSender.id, threadId)) return json(res, 409, { error: "This turn no longer owns the conversation or Local VM." });
+          const result = fetchChatAttachment({ attachmentStore: ATTACHMENTS_DIR, attachments: attachments(), workspace: vm.workspaceDir,
+            guestRoot: VM_WORKSPACE_GUEST, botId: internalSender.id, threadId, maxBytes: FILE_MAX_BYTES }, body.attachment_ref, body.destination_dir);
+          return json(res, 200, result);
+        } catch (error) {
+          const status = (error as { status?: number }).status ?? 409;
+          return json(res, status, { error: (error as { status?: number }).status ? (error as Error).message : "Cannot export attachment: check directory permissions and avoid symlink destinations." });
+        }
+      }
       if (method === "POST" && path === "/api/internal/attach-file") {
         const from = internalSender;
         const threadId = internalCapability.threadId;

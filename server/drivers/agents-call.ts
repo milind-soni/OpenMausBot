@@ -236,6 +236,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!stdout && !stderr && !body.timedOut) lines.push("(no output)"); if (typeof body.note === "string" && body.note) lines.push("--- note ---", body.note);
     return { text: lines.join("\n"), ...(exitCode !== 0 || body.timedOut ? { isError: true } : {}) };
   }
+  if (name === "list_chat_attachments" || name === "get_chat_attachment") {
+    const { ok, body } = await apiResponse(`/api/internal/chat-attachments/${name === "list_chat_attachments" ? "list" : "get"}`, {
+      method: "POST", body: JSON.stringify(name === "list_chat_attachments" ? {} : { attachment_ref: args.attachment_ref, destination_dir: args.destination_dir }),
+    });
+    return { text: JSON.stringify(body), ...(!ok ? { isError: true } : {}) };
+  }
   if (name === "attach_file") {
     const { ok, body } = await apiResponse("/api/internal/attach-file", {
       method: "POST",
