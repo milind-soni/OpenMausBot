@@ -1,6 +1,6 @@
-// The native Antigravity CLI's session budget over OpenMausBot's own tools. The golden pins what a default Chief of
-// Staff's session with agents, browser and data shows that CLI; to change it on purpose, run with
-// UPDATE_AGENTS_CATALOG_GOLDENS=1 and review the diff.
+// The native Antigravity CLI's session budget over OpenMausBot's own tools. The golden pins the tool names and schemas,
+// descriptions left out, that a default Chief of Staff's session with agents, browser and data shows that CLI; the
+// budget itself is held by the tests, so rewording a description needs no new golden.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,12 +17,13 @@ import { cliDrops } from "../testing/cli-tool-drop.ts";
 import {
   ANTIGRAVITY_CLI_TOOL_BUDGET, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, toolListShare, toolListShareProfile, type ListedTool,
 } from "../tool-list-budget.ts";
-import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
+import { fitToolListForBudget, TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFromEnv } from "../tool-schema-profile.ts";
+import type { SendTurnInput } from "../contracts.ts";
 import { agentsToolList } from "./agents-mcp.ts";
 import { antigravityCliToolBudget } from "./antigravity-acp.ts";
 import { acpSessionMcpServers } from "./own-mcp-http.ts";
 import { sessionToolShares, withSessionToolShares } from "./own-mcp-session-budget.ts";
-import type { AcpMcpServer } from "./turn-mcp.ts";
+import { acpMcpServers, type AcpMcpServer } from "./turn-mcp.ts";
 
 const GOLDEN = join(dirname(fileURLToPath(import.meta.url)), "agents-catalog-goldens", "antigravity-cli.tools-list.json");
 const UPDATE = process.env.UPDATE_AGENTS_CATALOG_GOLDENS === "1";
@@ -51,6 +52,17 @@ const harnessServer = (kind: string): AcpMcpServer => ({ name: kind, command: pr
 const notes: AcpMcpServer = { name: "notes", command: "npx", args: ["notes"], env: [] };
 const nativeCli = { agentInfo: { name: "Antigravity ACP Server" } };
 const oldRuntime = { agentInfo: { name: "antigravity-acp" } };
+/** Every description in a schema, and the schema with none of them. */
+function descriptionsIn(node: unknown): string[] {
+  if (Array.isArray(node)) return node.flatMap(descriptionsIn);
+  if (!node || typeof node !== "object") return [];
+  return Object.entries(node).flatMap(([key, value]) => (key === "description" && typeof value === "string" ? [value] : descriptionsIn(value)));
+}
+function withoutDescriptions(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutDescriptions);
+  if (!node || typeof node !== "object") return node;
+  return Object.fromEntries(Object.entries(node).filter(([key, value]) => !(key === "description" && typeof value === "string")).map(([key, value]) => [key, withoutDescriptions(value)]));
+}
 const envOf = (server: AcpMcpServer) => ("env" in server ? Object.fromEntries(server.env.map(({ name, value }) => [name, value])) : {});
 
 describe("a native Antigravity CLI session's own tools", () => {
@@ -90,15 +102,28 @@ describe("a native Antigravity CLI session's own tools", () => {
     expect(cliDrops(tools, CLI_DROP_FLOOR).filter((name) => PROTECTED_TOOLS.includes(name))).toEqual([]);
   });
 
-  it("matches the golden: a default Chief of Staff's agents, browser and data as the CLI is shown them", () => {
+  it("matches the golden: a default Chief of Staff's agents, browser and data as the CLI is shown them, words aside", () => {
     const lists = [agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)];
     const { shares } = sessionToolShares(lists, ANTIGRAVITY_CLI_TOOL_BUDGET);
     // The agents list as its endpoint serves it under its share, the others as theirs fit their catalogs.
-    const served = { agents: agentsList({ ...CHIEF, [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(shares[0]!) }),
-      browser: fitToolListToShare(lists[1]!, shares[1]!).tools, data: fitToolListToShare(lists[2]!, shares[2]!).tools };
-    const text = `${JSON.stringify({ shares, ...served }, null, 2)}\n`;
+    const served = [agentsList({ ...CHIEF, [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(shares[0]!) }),
+      fitToolListToShare(lists[1]!, shares[1]!).tools, fitToolListToShare(lists[2]!, shares[2]!).tools];
+    // Every description shown is the start of the tool's own, cut at a sentence or a word.
+    served.forEach((tools, index) => tools.forEach((tool, at) => {
+      const original = lists[index]![at]!;
+      expect(tool.name).toBe(original.name);
+      const kept = (tool.description ?? "").replace(/…$/, "");
+      expect(original.description?.startsWith(kept), tool.name).toBe(true);
+      for (const text of descriptionsIn(tool.inputSchema)) expect(descriptionsIn(original.inputSchema).some((whole) => whole.startsWith(text.replace(/…$/, ""))), tool.name).toBe(true);
+    }));
+    // Pinned: each tool's name and schema, descriptions left out, so rewording a description never touches it.
+    const pinned = Object.fromEntries(["agents", "browser", "data"].map((server, index) =>
+      [server, served[index]!.map((tool) => ({ name: tool.name, inputSchema: withoutDescriptions(tool.inputSchema) }))]));
+    const text = `${JSON.stringify(pinned, null, 2)}\n`;
     if (UPDATE) writeFileSync(GOLDEN, text);
-    expect(text).toBe(readFileSync(GOLDEN, "utf8").replace(/\r\n/g, "\n"));
+    expect(text, "The native Antigravity CLI's tool schemas changed. If on purpose, regenerate the golden with "
+      + "UPDATE_AGENTS_CATALOG_GOLDENS=1 ./node_modules/.bin/vitest run server/drivers/own-mcp-session-budget.test.ts and review its diff.")
+      .toBe(readFileSync(GOLDEN, "utf8").replace(/\r\n/g, "\n"));
   });
 });
 
@@ -168,3 +193,53 @@ describe("which sessions share a budget", () => {
       sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)], ANTIGRAVITY_CLI_TOOL_BUDGET).shares);
   });
 });
+
+describe("on Antigravity, beside the Gemini engines' schema profile", () => {
+  // As the ACP driver builds an Antigravity turn's servers: every one carries the gemini profile, and the person's stdio
+  // server goes through the MCP gate, which fits each of its tools.
+  const turn = {
+    threadId: "t1", text: "x",
+    integrations: {
+      agents: { command: process.execPath, args: [SPAWNED_PROXIES.agents], env: { OMB_HARNESS_URL: HARNESS, OMB_COMMS_TOKEN: "comms", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1", ...CHIEF } },
+      browser: { command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "browser"], env: { OMB_HARNESS_URL: HARNESS, OMB_MCP_TOKEN_BROWSER: "browser-capability" } },
+      data: { command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "data"], env: { OMB_HARNESS_URL: HARNESS, OMB_MCP_TOKEN_DATA: "data-capability" } },
+      custom: { notes: { command: "npx", args: ["-y", "notes-mcp"], env: {} } },
+    },
+  } as SendTurnInput;
+  const built = acpMcpServers(turn, { engine: "antigravityAgent" });
+  const header = (server: AcpMcpServer, name: string) => ("headers" in server ? server.headers.find((entry) => entry.name === name)?.value : undefined);
+  const settingsOf = (server: AcpMcpServer) => JSON.parse(Buffer.from(header(server, AGENTS_ENV_HEADER)!, "base64url").toString("utf8")) as Record<string, string>;
+
+  it("starts from the gemini profile on every server, the person's behind the gate", () => {
+    expect(built.map((server) => envOf(server)[TOOL_SCHEMA_PROFILE_ENV])).toEqual(["gemini", "gemini", "gemini", "gemini"]);
+    expect((built[3] as { args: string[] }).args[0]).toBe(SPAWNED_PROXIES.mcpGate);
+  });
+
+  it("the native CLI: one trim of OpenMausBot's own servers, the session's shares in place of gemini, and the person's gate as it was", () => {
+    const logged: string[] = [];
+    const sent = acpSessionMcpServers(built, "advertised", nativeCli, () => true, antigravityCliToolBudget);
+    const shares = sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)], ANTIGRAVITY_CLI_TOOL_BUDGET).shares;
+    const agentsSettings = settingsOf(sent[0]!);
+    expect(toolListShare(agentsSettings[TOOL_SCHEMA_PROFILE_ENV])).toBe(shares[0]);
+    expect([header(sent[1]!, TOOL_SHARE_HEADER), header(sent[2]!, TOOL_SHARE_HEADER)].map(toolListShare)).toEqual(shares.slice(1));
+    expect(JSON.stringify(sent.slice(0, 3))).not.toContain("gemini");
+    expect(sent[3]).toBe(built[3]);
+    // The agents endpoint under that share serves exactly the session's fit: gemini's own list budget does not run on top.
+    const env = { ...agentsSettings, OMB_HARNESS_URL: HARNESS, OMB_COMMS_TOKEN: "comms" };
+    const served = agentsToolList(env).listed as ListedTool[];
+    expect(toolSchemaProfileFromEnv(env)).toBeUndefined();
+    expect(fitToolListForBudget(served, toolSchemaProfileFromEnv(env), (line) => logged.push(line))).toEqual(served);
+    expect(logged).toEqual([]);
+    expect(definitionListBytes(served)).toBeLessThanOrEqual(shares[0]!);
+    expect(served.map((tool) => tool.name)).toEqual(agentsList(CHIEF).map((tool) => tool.name));
+  });
+
+  it("the pinned runtime: every server keeps the gemini profile, and the agents list is gemini's fit alone", () => {
+    const sent = acpSessionMcpServers(built, "advertised", oldRuntime, () => false, antigravityCliToolBudget);
+    expect(sent).toBe(built);
+    const env = envOf(sent[0]!);
+    expect(agentsToolList(env).listed).toEqual(agentsToolList({ ...env, [TOOL_SCHEMA_PROFILE_ENV]: "" }).listed);
+    expect(toolSchemaProfileFromEnv(env)?.id).toBe("gemini");
+  });
+});
+
