@@ -71,7 +71,7 @@ export function buildSettingsPlaces(labels: Readonly<Record<string, string>>): S
     const only = onlyOn((ctx) => page.when(ctx) && (entry.when?.(ctx) ?? true));
     places.push({
       id: entry.id, path, words: [...new Set([...(entry.topFor ?? []), ...(entry.synonyms ?? [])])],
-      ...(advanced ? { advanced: true as const } : {}), ...(simple ? { simplePath: simple } : {}), ...(only ? { only } : {}),
+      ...(advanced ? { advanced: true as const } : {}), ...(simple ? { simplePath: simple } : {}), ...(only ? { only } : {}), ...(entry.note ? { note: entry.note } : {}),
     });
   }
   places.push(
@@ -87,7 +87,8 @@ export function settingsPlacesFile(labels: Readonly<Record<string, string>>): st
     "// Written by scripts/gen-settings-places.ts from Settings' own index and the English catalog; edit those, then run it.",
     "",
     "/** A real place in Settings, as the person reads it in English. `advanced`: only Advanced mode shows it; `simplePath`:",
-    " * where Simple mode shows it instead. `only`: the one kind of place or app it shows on. */",
+    " * where Simple mode shows it instead. `only`: the one kind of place or app it shows on. `note`: what it is and the state",
+    " * it depends on, said with the path. */",
     "export interface SettingsPlace {",
     "  id: string;",
     "  path: string;",
@@ -95,6 +96,7 @@ export function settingsPlacesFile(labels: Readonly<Record<string, string>>): st
     "  advanced?: true;",
     "  simplePath?: string;",
     "  only?: string;",
+    "  note?: string;",
     "}",
     "",
     `export const SETTINGS_HOW_TO_OPEN = ${JSON.stringify(HOW_TO_OPEN)};`,

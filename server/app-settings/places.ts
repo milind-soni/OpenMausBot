@@ -9,6 +9,7 @@ function described(place: SettingsPlace): string {
   const notes = [
     ...(place.advanced ? [place.simplePath ? `in Simple mode it is at ${place.simplePath}` : "shown in Advanced mode; the switch is at the bottom of Settings"] : []),
     ...(place.only ? [`only in ${place.only}`] : []),
+    ...(place.note ? [place.note] : []),
   ];
   return notes.length ? `${place.path} (${notes.join("; ")})` : place.path;
 }
