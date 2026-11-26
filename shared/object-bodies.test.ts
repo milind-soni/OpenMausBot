@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { validateAvatar } from "../packages/phone-protocol/src/open-bot-avatar/validate.ts";
+import { MOODBOARD_BODIES } from "../packages/phone-protocol/src/moodboard-bodies.ts";
+import { FACES } from "../packages/phone-protocol/src/open-bot-avatar/face.ts";
+import { renderAvatarSvg } from "../packages/phone-protocol/src/open-bot-avatar/render.ts";
+import { analyzeBody, validateAvatar } from "../packages/phone-protocol/src/open-bot-avatar/validate.ts";
+import { buildVolume } from "../packages/phone-protocol/src/open-bot-avatar/volume.ts";
 import { MASCOT_BODY_IDS } from "./mascot-bodies.ts";
 import { OBJECT_BODIES, OBJECT_BODY_IDS, SHAPE_BODIES, engineBody } from "./object-bodies.ts";
 
@@ -15,9 +19,9 @@ describe("object bodies", () => {
     }
   });
 
-  it("carries every starter and gallery avatar once, leaving Shield and Star to our shapes", () => {
-    expect(OBJECT_BODY_IDS).toHaveLength(21);
-    expect(new Set(OBJECT_BODY_IDS).size).toBe(21);
+  it("carries every starter, gallery and moodboard avatar once, leaving Shield and Star to our shapes", () => {
+    expect(OBJECT_BODY_IDS).toHaveLength(31);
+    expect(new Set(OBJECT_BODY_IDS).size).toBe(31);
     expect(OBJECT_BODY_IDS).not.toContain("obj-shield");
   });
 
@@ -27,6 +31,23 @@ describe("object bodies", () => {
       const result = validateAvatar(definition);
       expect(result.ok ? [] : result.errors).toEqual([]);
     }
+  });
+
+  it("gives every moodboard body its own face, with no smile", () => {
+    for (const { id } of MOODBOARD_BODIES) expect(FACES.get(id)?.mouth).toBe(false);
+    for (const { id } of MOODBOARD_BODIES) expect(FACES.get(id)?.front).toBe(true);
+    const svg = renderAvatarSvg(OBJECT_BODIES["obj-chibi-ninja"], { color: "#151515", time: 0 });
+    expect(svg).toContain('fill="#e0a36a"');
+  });
+
+  it("sets a face part into a hood: the hole cuts the hood, a shallow part fills it in its own colour", () => {
+    const hood = OBJECT_BODIES["obj-maus-hood"];
+    expect(analyzeBody(hood.body.path).subpaths.map((s) => s.hole)).toEqual([false, true, false]);
+    const volume = buildVolume(hood);
+    expect(volume.parts.map((part) => part.kind)).toEqual(["inflate", "inflate"]);
+    expect(volume.eyePart).toBe(1);
+    expect(volume.parts[1]!.depth).toBeLessThan(volume.parts[0]!.depth);
+    expect(renderAvatarSvg(hood, { color: "#f2f4f3", time: 0 })).toContain('fill="#111111"');
   });
 
   it("finds an engine definition only for engine bodies", () => {

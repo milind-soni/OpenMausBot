@@ -194,6 +194,17 @@ export function analyzeBody(path: string): BodyAnalysis {
     if (hole) holes.push({ d, area: Math.round(cut / 4) });
     subpaths.push({ d, polys: own, hole, probe: hole ? cutProbe : probe });
   }
+  // MausBot: a counter-clockwise subpath inside a clockwise one is a hole even where another part
+  // fills it (a face set into a hood), which the emptiness test above cannot see.
+  const signed = (pts: Point[]) => pts.reduce((a, p, i) => { const q = pts[(i + 1) % pts.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0);
+  for (const s of subpaths) {
+    if (s.hole || !s.probe || signed(s.polys[0]) >= 0) continue;
+    const sb = bounds(s.polys);
+    const host = subpaths.find((o) => o !== s && signed(o.polys[0]) > 0 && (() => { const ob = bounds(o.polys); return ob.minX <= sb.minX && ob.maxX >= sb.maxX && ob.minY <= sb.minY && ob.maxY >= sb.maxY; })());
+    if (!host) continue;
+    s.hole = true;
+    holes.push({ d: s.d, area: Math.round(Math.abs(signed(s.polys[0])) / 2) });
+  }
   return { polys, bounds: b, area: filledArea(polys, b), holes, subpaths };
 }
 

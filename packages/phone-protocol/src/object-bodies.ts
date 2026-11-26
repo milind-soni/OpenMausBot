@@ -4,6 +4,7 @@
  */
 
 import type { MascotBodyId } from "./mascot-bodies.ts";
+import { MOODBOARD_BODIES } from "./moodboard-bodies.ts";
 import { examples } from "./open-bot-avatar/examples.ts";
 import type { AvatarDefinition } from "./open-bot-avatar/types.ts";
 
@@ -13,6 +14,9 @@ export const OBJECT_BODY_IDS = [
   "obj-watering-can", "obj-book", "obj-brain", "obj-bull", "obj-bunny", "obj-camera",
   "obj-cat", "obj-cloud", "obj-egg", "obj-ghost", "obj-magnifier", "obj-paint-brush",
   "obj-palette", "obj-rocket", "obj-witch-hat",
+  // Mascot rebrand candidates (moodboard-bodies.ts).
+  "obj-ninja-ball", "obj-infinity-eyes", "obj-drop-face", "obj-fireball", "obj-chibi-ninja", "obj-plush-ninja",
+  "obj-tall-ears", "obj-cat-mask", "obj-maus-hood", "obj-maus-helmet",
 ] as const;
 
 export type ObjectBodyId = (typeof OBJECT_BODY_IDS)[number];
@@ -136,7 +140,7 @@ const SHIELD = GALLERY.find((one) => one.id === "shield") as AvatarDefinition;
 const STAR = GALLERY.find((one) => one.id === "star") as AvatarDefinition;
 
 export const OBJECT_BODIES = Object.fromEntries(
-  [...examples, ...GALLERY].filter((one) => one !== SHIELD && one !== STAR).map((definition) => [`obj-${definition.id}`, definition]),
+  [...examples, ...GALLERY, ...MOODBOARD_BODIES].filter((one) => one !== SHIELD && one !== STAR).map((definition) => [`obj-${definition.id}`, definition]),
 ) as Record<ObjectBodyId, AvatarDefinition>;
 
 const shape = (id: string, name: string, path: string, eyes: AvatarDefinition["eyes"]): AvatarDefinition => ({ version: 1, id, name, body: { path }, eyes });
