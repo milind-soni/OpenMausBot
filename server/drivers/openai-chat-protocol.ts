@@ -22,12 +22,19 @@ export class ChatProtocolError extends Error {}
 export const CUT_REPLY_NOTE = "[OpenMausBot: your reply was cut at the output limit. Continue exactly where you stopped.]";
 const MAX_LENGTH_CONTINUATIONS = 8;
 
-/** True when a reply cut at the output limit should be continued; throws once the cap is reached. A local model writes
- * tool calls as text, so a cut reply there may be half a call and stays a failure. */
+/** True when a reply cut at the output limit has a continuation left. A local model writes tool calls as text, so a
+ * cut reply there may be half a call and stays a failure. */
+export function cutReplyWillContinue(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
+  return completion.finishReason === "length" && Boolean(completion.text.trim()) && !localTools && state.count < MAX_LENGTH_CONTINUATIONS;
+}
+
+/** True when a reply cut at the output limit should be continued; throws once the cap is reached. */
 export function cutReplyContinues(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
-  if (completion.finishReason !== "length" || !completion.text.trim() || localTools) return false;
-  if (state.count >= MAX_LENGTH_CONTINUATIONS) {
-    throw new ChatProtocolError(`The reply was still cut at the output limit after ${MAX_LENGTH_CONTINUATIONS} continuations; the turn was stopped.`);
+  if (!cutReplyWillContinue(state, completion, localTools)) {
+    if (completion.finishReason === "length" && completion.text.trim() && !localTools) {
+      throw new ChatProtocolError(`The reply was still cut at the output limit after ${MAX_LENGTH_CONTINUATIONS} continuations; the turn was stopped.`);
+    }
+    return false;
   }
   state.count += 1;
   return true;

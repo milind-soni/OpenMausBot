@@ -20,19 +20,20 @@ afterEach(() => vi.unstubAllGlobals());
 const sse = (body: string) => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 
 /** `body` is every request's stream, or a factory per chat completion (the catalog fetch then gets a 404). */
-async function runTurn(body: string | (() => Response), driver: "openai-compat" | "minimax" = "openai-compat") {
+async function runTurn(body: string | (() => Response), driver: "openai-compat" | "minimax" = "openai-compat",
+  environment: Record<string, string> = { MINIMAX_API_KEY: "secret" }) {
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => typeof body === "string" ? sse(body)
     : String(url).endsWith("/chat/completions") ? body() : new Response("", { status: 404 })));
   const instance = driver === "minimax"
     ? await MinimaxDriver.create({
         instanceId: "minimax", displayName: "MiniMax", enabled: true,
         config: MinimaxDriver.defaultConfig(),
-        environment: { MINIMAX_API_KEY: "secret" },
+        environment,
       })
     : await OpenAICompatDriver.create({
         instanceId: "minimax", displayName: "MiniMax", enabled: true,
         config: OpenAICompatDriver.decodeConfig({ url: "https://api.minimax.io/v1", apiKeyEnv: "MINIMAX_API_KEY", model: "MiniMax-M3" }),
-        environment: { MINIMAX_API_KEY: "secret" },
+        environment,
       });
   const events: RuntimeEvent[] = [];
   instance.adapter.onEvent((event) => events.push(event));
@@ -1183,6 +1184,22 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
       { role: "assistant", content: "The report is" },
       { role: "user", content: LENGTH_CONTINUATION },
     ]);
+  });
+
+  it("never shows either half of a credential split at a continuation boundary", async () => {
+    const secret = "abcdefgh12345678";
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1 ? sse(text("before abcdefgh", "length")) : sse(text("12345678 after", "stop")),
+      "openai-compat",
+      { MINIMAX_API_KEY: secret },
+    );
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["before ", "[redacted] after"]);
+    const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
+      : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
+    expect(shown.join("")).not.toContain("abcdefgh");
+    expect(shown.join("")).not.toContain("12345678");
   });
 
   it("still fails a length finish with no text", async () => {
