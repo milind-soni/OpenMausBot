@@ -14,6 +14,8 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
   ".webmanifest": "application/manifest+json",
   ".woff2": "font/woff2",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
 };
 
 /** Never framed (a hidden frame could act on a pair or sign-in page unseen), and no Referer. */
