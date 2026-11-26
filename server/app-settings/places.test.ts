@@ -19,7 +19,8 @@ describe("places", () => {
     expect(placePath("wifi")).toMatch(/\(only in the desktop app, on this computer's own page\)$/);
     // The move to My Cloud is a switch only someone with a My Cloud sees: a bot never sends a Team plan's owner to it.
     expect(placePath("move")).toMatch(/^Settings → Import & export → Move to My Cloud \(only in the desktop app, on this computer's own page; it is the switch "Keep this computer's bots on this computer", shown only with a My Cloud of the person's own;/);
-    expect(placePath("move")).toContain("A Team plan's Cloud is a team, not My Cloud: to move all bots to a new one, Export full backup here, then Import backup");
+    expect(placePath("move")).toContain("A Team plan's Cloud is a team, not My Cloud: there is no one-step move into it, and this computer's bots stay and keep working here.");
+    expect(placePath("move")).toContain("Never suggest Import backup on a team's Cloud");
   });
 
   it("find a place by the person's words", () => {
