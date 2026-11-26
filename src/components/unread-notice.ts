@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 import { botShowsUnread } from "@/lib/bot-unread";
-import { nextUnreadHold, unreadFilterOrder, unreadFilterSince, unreadSinceByBot, type UnreadHold } from "@/lib/sidebar-layout";
+import { withOtherPlace, type PlacedBot } from "@/lib/place-rows";
+import { nextUnreadHold, partitionSidebarBots, unreadFilterOrder, unreadFilterSince, unreadSinceByBot, withPrimaryTile, type UnreadHold } from "@/lib/sidebar-layout";
 import { newChatThreadId } from "@/state/new-chat";
 import type { Bot } from "@/state/store";
 
@@ -49,21 +50,30 @@ export function useUnreadHold(openId: string | null, bots: readonly Bot[], newCh
 
 const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, index) => id === b[index]);
 
-/** The sidebar's Unread filter: how many bots show unread or wait on the person, and while it is open, those bots in a
- * fixed order. The open bot stays listed until another conversation is open. Nothing is saved; it starts closed.
- * While `paused` (a search narrows `bots`), its order holds and the bots the search left out keep their last times, so
- * they come back in place; the open bot it keeps still follows each change of conversation. */
-export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null, paused = false) {
+/** The bots the sidebar's Unread filter looks at: every bot the sidebar lists when nothing is searched (the bots hidden
+ * from it, the welcome screen's bot, the pins and the top tile or Chief slot left out; the other place's rows in), so a
+ * search changes neither its count nor its order. */
+export function unreadFilterBots(
+  bots: Bot[],
+  options: { universalPins: boolean; viewerEmail?: string | null; welcoming: string | null; tile: boolean; defaultBotId?: string; placed: readonly PlacedBot[] },
+): Bot[] {
+  const parts = partitionSidebarBots(bots, options);
+  const listed = withOtherPlace(options.tile ? withPrimaryTile(parts, options.defaultBotId) : parts, options.placed);
+  return [...(listed.unsectionedChief ? [listed.unsectionedChief] : []), ...listed.sectionChiefs, ...listed.sectionedBots, ...listed.unsectionedBots];
+}
+
+/** The sidebar's Unread filter: how many of `bots` show unread or wait on the person, and while it is open, those bots
+ * in a fixed order. The open bot stays listed until another conversation is open. Nothing is saved; it starts closed. */
+export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null) {
   const [open, setOpen] = useState(false);
   const since = unreadFilterSince(bots, waiting);
   const shown = bots.find((bot) => bot.id === openId);
   const chat = shown?.switchingTo ?? shown?.threadId;
   const [seen, setSeen] = useState<{ since: ReadonlyMap<string, number>; held: UnreadHold | null; order: string[] }>({ since, held: null, order: [] });
-  const byId = new Map(bots.map((bot) => [bot.id, bot]));
-  const known = paused ? new Map([...[...seen.since].filter(([id]) => !byId.has(id)), ...since]) : since;
   const held = open ? nextUnreadHold(seen.held, openId, seen.since, chat) : null;
-  const order = !open ? [] : paused ? seen.order : unreadFilterOrder(seen.order, since, held);
-  if (held !== seen.held || !sameTimes(known, seen.since) || !sameIds(order, seen.order)) setSeen({ since: known, held, order });
+  const order = open ? unreadFilterOrder(seen.order, since, held) : [];
+  if (held !== seen.held || !sameTimes(since, seen.since) || !sameIds(order, seen.order)) setSeen({ since, held, order });
+  const byId = new Map(bots.map((bot) => [bot.id, bot]));
   return {
     open,
     count: since.size,

@@ -171,6 +171,24 @@ describe("the sidebar's Unread filter", () => {
     expect(ids()).toEqual(["eve"]);
   });
 
+  it("keeps the open bot listed through a search that leaves it out", async () => {
+    mode.advanced = true;
+    const eve = unread("eve", 20), read = [bot("ann"), bot("ben"), eve];
+    await render([bot("ann"), unread("ben", 10), eve], "ben");
+    await click();
+    await render(read, "ben");
+    const type = async (text: string) => act(async () => {
+      const search = host.querySelector<HTMLInputElement>('input[aria-label="Search bots and messages"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, text);
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await type("eve");
+    await type("");
+    expect(ids()).toEqual(["ben", "eve"]);
+    await render(read, "eve");
+    expect(ids()).toEqual(["eve"]);
+  });
+
   it("renames a listed bot from its menu", async () => {
     await render([bot("ann"), unread("ben", 20)]);
     await click();

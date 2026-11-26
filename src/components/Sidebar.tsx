@@ -85,7 +85,7 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useBotUnread, useUnreadFilter } from "./unread-notice";
+import { unreadFilterBots, useBotUnread, useUnreadFilter } from "./unread-notice";
 import { attentionHasRunningWork, attentionJump, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles"; import { SidebarUnreadFilterList, SidebarUnreadFilterRow } from "./SidebarUnreadFilter";
 import { BotContextMenu } from "./SidebarBotMenu";
@@ -1089,8 +1089,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), unreadFilterShown = !q && density !== "icons";
-  const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placedAll = useOtherPlaceBots(""), welcoming = useWelcomingBot(), placeHere = useOneListHere(), unreadFilterShown = !q && density !== "icons";
+  const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming, searching: Boolean(q) });
   const saved = withOtherPlace(simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null }, placed);
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
   // as a move to the top or into an Unread list. Only a pin, a drag, Alt+Up/Down or a move to a department moves a row.
@@ -1111,7 +1111,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const layout = sections.arrange(naturalSectionIds);
   const sectionIds = withUnreadSection(layout.sectionIds, unreadBots.length > 0);
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
-  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0), filterInList = naturalSectionIds.includes(PINNED_SECTION_ID); const unreadFilter = useUnreadFilter([...(unsectionedChief ? [unsectionedChief] : []), ...saved.sectionChiefs, ...saved.sectionedBots, ...saved.unsectionedBots], (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null, Boolean(q)), filterOpen = unreadFilterShown && unreadFilter.open;
+  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0), filterInList = naturalSectionIds.includes(PINNED_SECTION_ID); const unreadFilter = useUnreadFilter(unreadFilterBots(sideLists.bots, { universalPins, viewerEmail, welcoming, tile: simpleDesk, defaultBotId: myDefaultBot(state.bots, viewerEmail)?.id, placed: placedAll }), (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null), filterOpen = unreadFilterShown && unreadFilter.open;
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
