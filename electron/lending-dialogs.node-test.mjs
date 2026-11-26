@@ -143,3 +143,17 @@ test("main asks in its own dialog before a server gets this computer, and Cancel
   assert.deepEqual({ path: folder.path, write: folder.write }, { path: "/Users/me/Plans", write: false });
   assert.equal(allowed.calls.at(-1)[2].title, "Choose a folder or drive to share");
 });
+
+test("a whole drive or the folders above home are refused with words that say why, in the app's language; other refusals stay as they are", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const refuse = (code) => async () => { throw Object.assign(new Error("Choose specific folders or a separate drive, not the entire computer or home folder"), { code }); };
+  const { dialog } = fakeDialog({ picked: { canceled: false, filePaths: ["C:\\"] } });
+  for (const [language, words] of [
+    ["en", "This can’t be shared as a whole: it holds this computer’s system or your home folder. Choose folders inside it, or a separate drive."],
+    ["pt-br", "Isto não pode ser compartilhado por inteiro: contém o sistema deste computador ou sua pasta pessoal. Escolha pastas dentro dele ou um disco separado."],
+  ]) {
+    text.set(language);
+    await assert.rejects(createLendingDialogs({ dialog, window: liveWindow, validate: refuse("HOME_OR_ROOT"), t: text.t }).chooseFolder("Choose"), { code: "HOME_OR_ROOT", message: words });
+  }
+  await assert.rejects(createLendingDialogs({ dialog, window: liveWindow, validate: refuse("NOT_FOLDER"), t: text.t }).chooseFolder("Choose"), { code: "NOT_FOLDER", message: /not the entire computer/ });
+});

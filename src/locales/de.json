@@ -4517,5 +4517,7 @@
   "server.github.card.description": "Verbinde GitHub, damit {bot} seine Arbeit in deine Repositorys pushen kann.",
   "server.github.card.connectInApps": "Verbinde GitHub über diese Karte in der App auf deinem Computer oder unter Apps.",
   "githubSignIn.title": "GitHub-Anmeldung",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "computerSharing.homeReadOnly": "Dein ganzer persönlicher Ordner wird hier immer nur zum Lesen geteilt. Um Änderungen zu erlauben, wähle einen Ordner darin.",
+  "native.lend.wholeDrive": "Das kann nicht als Ganzes geteilt werden: Es enthält das System dieses Computers oder deinen persönlichen Ordner. Wähle Ordner darin oder ein separates Laufwerk."
 }

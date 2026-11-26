@@ -59,7 +59,12 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         if (response !== 0) return null;
         folder.home = true;
       }
-      return (await validate([folder]))[0];
+      try {
+        return (await validate([folder]))[0];
+      } catch (error) {
+        if (error?.code !== "HOME_OR_ROOT") throw error;
+        throw Object.assign(new Error(t("native.lend.wholeDrive")), { code: error.code });
+      }
     },
     async confirmServerAccess(env, grant) {
       const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.allow.title", { name: env.name }), detail: serverAccessDetail(env, grant, t),

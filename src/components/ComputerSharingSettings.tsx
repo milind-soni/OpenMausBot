@@ -64,8 +64,8 @@ export function ComputerSharingSettings({ workspace, own = false, onClose }: { w
         <legend className="mb-2 font-medium text-ink">{t("computerSharing.folders")}</legend>
         {folders.length === 0 && <p className="text-[12px] text-ink-secondary">{t("computerSharing.noFolders")}</p>}
         {folders.map(folder => <div key={folder.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-hairline/40 p-3">
-          <div className="min-w-0 flex-1"><p className="font-medium text-ink">{folder.name}</p><p className="break-all text-[12px] text-ink-secondary">{folder.path}</p></div>
-          <label className="flex items-center gap-2 text-[12px] text-ink-secondary"><input type="checkbox" checked={folder.write} onChange={event => setFolders(current => current.map(entry => entry.id === folder.id ? { ...entry, write: event.target.checked } : entry))} />{t("computerSharing.allowEdits")}</label>
+          <div className="min-w-0 flex-1"><p className="font-medium text-ink">{folder.name}</p><p className="break-all text-[12px] text-ink-secondary">{folder.path}</p>{folder.home && <p className="mt-1 text-[12px] text-ink-secondary">{t("computerSharing.homeReadOnly")}</p>}</div>
+          <label className="flex items-center gap-2 text-[12px] text-ink-secondary"><input type="checkbox" disabled={folder.home} checked={folder.write && !folder.home} onChange={event => setFolders(current => current.map(entry => entry.id === folder.id ? { ...entry, write: event.target.checked } : entry))} />{t("computerSharing.allowEdits")}</label>
           <button type="button" aria-label={t("lending.removeFolder", { name: folder.name })} onClick={() => setFolders(current => current.filter(entry => entry.id !== folder.id))} className="rounded p-1 text-ink-secondary hover:bg-control"><X size={14} /></button>
         </div>)}
         <button type="button" disabled={folders.length >= 20} onClick={() => void perform(async () => {
