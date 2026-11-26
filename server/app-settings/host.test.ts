@@ -135,7 +135,7 @@ describe("reads", () => {
     const none = await host.handle({ action: "find", query: "invoice" }, turn);
     expect(none.body.text).toMatch(/^No setting you can change matches "invoice"\. Where the person finds it in the app: Settings → Plan & billing/);
     expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending$/m);
-    expect((await host.handle({ action: "places", query: "storage" }, turn)).body.text).toMatch(/^Settings → Data.*\(shown in Advanced mode; the switch is at the bottom of Settings\. Don't switch modes for it/m);
+    expect((await host.handle({ action: "places", query: "storage" }, turn)).body.text).toMatch(/^Settings → Data.*\(shown in Advanced mode; the switch is at the bottom of Settings\)$/m);
     const every = String((await host.handle({ action: "places" }, turn)).body.text).split("\n");
     expect(every[0]).toMatch(/^Settings opens from/);
     expect(every).toContain("Settings → AI → Other services");
@@ -455,9 +455,14 @@ describe("Simple mode: a bot changes settings in the background and never switch
 
   it("changes a setting only Advanced mode shows while the app stays on Simple", async () => {
     const fx = simple();
-    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "threads.maxConcurrentPerBot" }, fx.turn)).body.text)) as { where: string };
-    expect(got.where).toMatch(/\(shown in Advanced mode; the switch is at the bottom of Settings\. Don't switch modes for it: change its setting yourself/);
+    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "threads.maxConcurrentPerBot" }, fx.turn)).body.text)) as { where: string; inSimple: string };
+    expect(got).toMatchObject({ where: expect.stringMatching(/\(shown in Advanced mode; the switch is at the bottom of Settings\)$/), inSimple: "set it as usual; never switch modes for it" });
     expect(got.where).not.toContain("appearance.advanced");
+    const found = JSON.parse(String((await fx.host.handle({ action: "find", query: "parallel threads" }, fx.turn)).body.text)) as Array<{ id: string; inSimple?: string }>;
+    expect(found.find((hit) => hit.id === "threads.maxConcurrentPerBot")?.inSimple).toBe("set it as usual; never switch modes for it");
+    const personOnly = JSON.parse(String((await fx.host.handle({ action: "get", id: "remote.httpsAddress" }, fx.turn)).body.text)) as Record<string, unknown>;
+    expect(personOnly).toMatchObject({ change: "only the person, in Settings → Devices → How your phone reaches this computer → HTTPS address (shown in Advanced mode; the switch is at the bottom of Settings; only in the desktop app, on this computer's own page)" });
+    expect(personOnly).not.toHaveProperty("inSimple");
     expect((await fx.set("threads.maxConcurrentPerBot", "5")).status).toBe(200);
     expect(fx.cfg.threads?.maxConcurrentPerBot).toBe(5);
     expect(fx.windowValues.get("appearance.advanced")).toBe(false);
@@ -479,7 +484,7 @@ describe("Simple mode: a bot changes settings in the background and never switch
     const fx = simple();
     const refused = await fx.set(id, value);
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toMatch(/shows only in Advanced mode and this app is on Simple, so nothing changed\. Don't switch modes for it.*the switch at the bottom of Settings/);
+    expect(refused.body.error).toMatch(/shows only in Advanced mode and this app is on Simple, so nothing changed\. Don't switch modes for it.*the switch at the bottom of Settings, then ask again\.$/);
     expect(fx.windowValues.has(id)).toBe(false);
     expect(fx.windowValues.get("appearance.advanced")).toBe(false);
     expect(fx.cards()).toEqual([]);

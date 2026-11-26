@@ -10,7 +10,7 @@ export function windowEntries(windowPref: WindowPref, read: (id: WindowPrefId) =
   /** Simple mode draws this one as if unset (unless `shown`), so a change while the window is on Simple would show nothing:
    * it is refused, and the bot never switches modes for it. */
   const advancedOnly = (label: string, shown = () => false) => () => (read("appearance.advanced") === false && !shown()
-    ? `${label} shows only in Advanced mode and this app is on Simple, so nothing changed. Don't switch modes for it: tell the person in one line it applies once they turn on Advanced mode, with the switch at the bottom of Settings.`
+    ? `${label} shows only in Advanced mode and this app is on Simple, so nothing changed. Don't switch modes for it: tell the person in one line that it shows in Advanced mode, which they turn on with the switch at the bottom of Settings, then ask again.`
     : null);
   const flag = (id: Parameters<WindowPref>[0], label: string, help: string, where: Parameters<WindowPref>[3], synonyms: string[], yes: string, no: string, refusal?: () => string | null) =>
     windowPref(id, label, help, where, synonyms, "true or false", { says: (on: boolean) => turn(on, yes, no), ...(refusal ? { refusal } : {}) });
