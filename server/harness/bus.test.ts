@@ -459,6 +459,12 @@ describe("EventBus", () => {
       OMB_EVENT_LOG_QUEUE_BYTES: "-5",
       OMB_EVENT_LOG_DRAIN_THREADS: "eight",
     })).toEqual({ batchLines: 512, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 8 });
+    expect(eventLogLimits({
+      OMB_EVENT_LOG_BATCH_LINES: "999999",
+      OMB_EVENT_LOG_QUEUE_EVENTS: "999999999999",
+      OMB_EVENT_LOG_QUEUE_BYTES: "999999999999999",
+      OMB_EVENT_LOG_DRAIN_THREADS: "9999",
+    })).toEqual({ batchLines: 4096, queueEvents: 1_000_000, queueBytes: 1024 * 1024 * 1024, drainThreads: 64 });
   });
 
   it("does not report a successful shutdown flush after an append fails", async () => {

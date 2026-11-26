@@ -6,6 +6,7 @@ import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } fro
 import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions, type DecisionRow } from "../decision-log.ts";
 import { doctorSummary } from "../doctor/start.ts";
 import { flushNativeLog } from "../drivers/native.ts";
+import type { EventLogDrops } from "../harness/bus.ts";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
 import { reportableServerVersion } from "../environment.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
@@ -39,7 +40,7 @@ export interface StatusRouteDeps {
   /** Whether bots run in the bot box: the MausBot connector reads it on a server its owner runs, on or off and nothing more. */
   boxOn?(): boolean;
   /** Canonical-log events dropped because its queue was full since this server started. */
-  eventLogDrops?(): { events: number; bytes: number };
+  eventLogDrops?(): EventLogDrops;
 }
 
 

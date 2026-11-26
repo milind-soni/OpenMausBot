@@ -22,6 +22,8 @@ const DELTA_MERGE_MS = 50;
 
 /** Lines per drain batch, queued events and bytes before new ones are dropped, and threads appended at once. */
 const EVENT_LOG_DEFAULTS = { batchLines: 64, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 8 };
+/** A cap on each setting, so a mistyped size cannot switch the queue's memory guard off altogether. */
+const EVENT_LOG_MAX = { batchLines: 4_096, queueEvents: 1_000_000, queueBytes: 1024 * 1024 * 1024, drainThreads: 64 };
 
 export interface EventLogLimits {
   batchLines: number;
@@ -37,15 +39,15 @@ export interface EventLogDrops {
 
 /** A zero, negative or non-numeric setting falls back to its default rather than stopping the log. */
 export function eventLogLimits(env: Record<string, string | undefined> = process.env): EventLogLimits {
-  const positive = (raw: string | undefined, fallback: number) => {
+  const positive = (raw: string | undefined, fallback: number, max: number) => {
     const value = Number(raw);
-    return Number.isInteger(value) && value > 0 ? value : fallback;
+    return Number.isInteger(value) && value > 0 ? Math.min(value, max) : fallback;
   };
   return {
-    batchLines: positive(env.OMB_EVENT_LOG_BATCH_LINES, EVENT_LOG_DEFAULTS.batchLines),
-    queueEvents: positive(env.OMB_EVENT_LOG_QUEUE_EVENTS, EVENT_LOG_DEFAULTS.queueEvents),
-    queueBytes: positive(env.OMB_EVENT_LOG_QUEUE_BYTES, EVENT_LOG_DEFAULTS.queueBytes),
-    drainThreads: positive(env.OMB_EVENT_LOG_DRAIN_THREADS, EVENT_LOG_DEFAULTS.drainThreads),
+    batchLines: positive(env.OMB_EVENT_LOG_BATCH_LINES, EVENT_LOG_DEFAULTS.batchLines, EVENT_LOG_MAX.batchLines),
+    queueEvents: positive(env.OMB_EVENT_LOG_QUEUE_EVENTS, EVENT_LOG_DEFAULTS.queueEvents, EVENT_LOG_MAX.queueEvents),
+    queueBytes: positive(env.OMB_EVENT_LOG_QUEUE_BYTES, EVENT_LOG_DEFAULTS.queueBytes, EVENT_LOG_MAX.queueBytes),
+    drainThreads: positive(env.OMB_EVENT_LOG_DRAIN_THREADS, EVENT_LOG_DEFAULTS.drainThreads, EVENT_LOG_MAX.drainThreads),
   };
 }
 
@@ -110,10 +112,10 @@ export class EventBus {
     this.gate = gate;
     // A batch or worker count below one would leave drain() unable to empty the queue.
     this.limits = {
-      batchLines: Math.max(1, Math.floor(limits.batchLines) || 1),
-      queueEvents: Math.max(1, Math.floor(limits.queueEvents) || 1),
-      queueBytes: Math.max(1, Math.floor(limits.queueBytes) || 1),
-      drainThreads: Math.max(1, Math.floor(limits.drainThreads) || 1),
+      batchLines: Math.min(EVENT_LOG_MAX.batchLines, Math.max(1, Math.floor(limits.batchLines) || 1)),
+      queueEvents: Math.min(EVENT_LOG_MAX.queueEvents, Math.max(1, Math.floor(limits.queueEvents) || 1)),
+      queueBytes: Math.min(EVENT_LOG_MAX.queueBytes, Math.max(1, Math.floor(limits.queueBytes) || 1)),
+      drainThreads: Math.min(EVENT_LOG_MAX.drainThreads, Math.max(1, Math.floor(limits.drainThreads) || 1)),
     };
   }
 
