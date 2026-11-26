@@ -139,14 +139,14 @@ describe("the diagnose walk's budget", () => {
 });
 
 describe("GET /api/cloud/diagnose", () => {
-  function routes() {
+  function routes(clock?: Parameters<typeof createCloudSignedRoutes>[0]["clock"]) {
     const { home, data } = homeFixture();
     let counter = 0;
     const now = () => T0;
     const diagnose = createCloudDiagnose({ health: health(data, now), storage: () => null, dataDir: data, home, now, uptimeS: () => ({ process: 1, machine: 2 }) });
-    const handle = createCloudSignedRoutes({ secret, sessions: new SessionRegistry({ file: join(data, "sessions.json"), now }), health: health(data, now), diagnose, now });
-    const sign = (method = "GET", key = secret) => {
-      const timestamp = String(Math.floor(now() / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
+    const handle = createCloudSignedRoutes({ secret, sessions: new SessionRegistry({ file: join(data, "sessions.json"), now }), health: health(data, now), diagnose, now, ...(clock ? { clock } : {}) });
+    const sign = (method = "GET", key = secret, at = now()) => {
+      const timestamp = String(Math.floor(at / 1000)), nonce = `nonce-${String(++counter).padStart(12, "0")}`;
       return { "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudRequestSignature(key, timestamp, nonce, method, CLOUD_DIAGNOSE_PATH, "")}` };
     };
     const send = async (method: string, headers: Record<string, string>) => {
@@ -169,6 +169,16 @@ describe("GET /api/cloud/diagnose", () => {
     expect((await send("GET", sign("GET", "W".repeat(43)))).status).toBe(401);
     expect((await send("GET", {})).status).toBe(401);
     expect((await send("POST", sign("POST"))).status).toBe(405);
+  });
+
+  it("answers the Admin while a resume left this clock behind: judged by the measured time, as health and power reads are", async () => {
+    // The home measured itself 40 minutes behind (server/cloud-clock.ts); the Admin signs with the true time.
+    const BEHIND = 40 * 60_000;
+    const clock = { noteSigned() {}, fits: (timestampS: number) => Math.abs(timestampS * 1000 - (T0 + BEHIND)) <= 300_000, report: () => ({ v: 1 as const, errorMs: BEHIND, measuredAt: T0 + BEHIND }) };
+    const { sign, send } = routes(clock);
+    expect(await send("GET", sign("GET", secret, T0 + BEHIND))).toMatchObject({ answered: true, status: 200 });
+    // One signed for the wrong clock is refused now that the true time is known, and says by how much.
+    expect(await send("GET", sign("GET", secret, T0))).toMatchObject({ status: 401, body: { error: "stale_request", clockErrorMs: BEHIND } });
   });
 
   it("is not a route on a server with no diagnose", async () => {

@@ -246,12 +246,11 @@ const TOOL_DEFINITIONS = [
   {
     name: "close_thread",
     description:
-      "Mark a thread you opened (or one of your own) as finished once you have read its result: it leaves the person's default sidebar list (still under all threads, with a note saying you closed it) and list_threads reports it as closed. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
+      "Mark a thread you opened (or one of your own) as finished once you have read its result: it leaves the person's default sidebar list (still under all threads, with a note saying you closed it) and list_threads reports it as closed. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. In a room thread, leave thread_id out to close the one you are in once your reply ends. If a close is refused, do not retry it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: { thread_id: { type: "string", description: "The thread id from list_threads or start_thread." } },
-      required: ["thread_id"],
     },
   },
   RENAME_THREAD_TOOL_DEFINITION,

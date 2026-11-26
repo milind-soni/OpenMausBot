@@ -16,6 +16,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { attentionJump, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
 import { Select } from "./Select";
+import { threadRowCloser } from "@/lib/room-thread-close";
 
 export const TASK_PICKER_DISMISS_MS = 500;
 
@@ -473,6 +474,7 @@ export function GroupTaskPicker({ group }: { group: Group }) {
     return (group.tasks ?? []).map((task) => ({
       ...task,
       busy: Boolean(task.working || task.busyBotId),
+      closedBy: threadRowCloser(task),
     }));
   }, [group.tasks]);
   return (
