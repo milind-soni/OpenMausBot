@@ -69,7 +69,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
     { key: "remove", label: t("localApps.card.remove"), icon: <Trash2 size={16} />, separatorBefore: true, onSelect: onRemove },
   ];
   return (
-    <li data-local-app={app.id} className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card transition-colors duration-[120ms] focus-within:border-hairline hover:border-hairline motion-reduce:transition-none">
+    <li data-local-app={app.id} className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card transition-colors duration-[120ms] hover:border-hairline motion-reduce:transition-none">
       <button type="button" onClick={onOpen} aria-label={t("localApps.card.openOf", { name: app.name })} title={app.name}
         className="absolute inset-0 z-[1] rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus" />
       <div className="border-b border-hairline/30">
