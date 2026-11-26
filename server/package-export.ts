@@ -313,6 +313,8 @@ export interface TeamExportInput {
   mcpServers?: Readonly<Record<string, unknown>>;
   skipped?: readonly TeamExportSkip[];
   preset?: DefaultsPreset | null;
+  /** Sees the package before key- and password-shaped values are replaced, so a caller can refuse one instead. */
+  beforeRedaction?(definition: Readonly<PackageDefinition>): void;
 }
 
 export interface TeamExportResult {
@@ -693,6 +695,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   if (packageSkills.size) definition.skills = { version: 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   if (connections.length) definition.connections = connections;
 
+  input.beforeRedaction?.(definition);
   const { document: redactedDocument, redacted } = redactPackageSecrets({
     format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);

@@ -65,6 +65,16 @@ describe("team library", () => {
     expect(() => parseTeamCatalog(unsafe)).toThrow("safe catalog path");
   });
 
+  it("keeps who published an entry as one line, and drops a credit it can't show", () => {
+    const entry = catalog.teams[0]!;
+    const credited = (author: unknown) => parseTeamCatalog({ ...catalog, teams: [{ ...entry, author }] }).teams[0]!.author;
+    expect(credited("Jane Doe")).toBe("Jane Doe");
+    expect(credited({ name: " Jane\n Doe " })).toBe("Jane Doe");
+    expect(credited("x".repeat(101))).toBeUndefined();
+    expect(credited(42)).toBeUndefined();
+    expect(parseTeamCatalog(catalog).teams[0]).not.toHaveProperty("author");
+  });
+
   it("keeps a template's kind and each bot's face, leaving out faces it can't trust", () => {
     const entry = {
       ...catalog.teams[0]!, kind: "bot",

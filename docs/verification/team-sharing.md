@@ -6,10 +6,16 @@ department's "…" → Share makes one at once. Publish sends it to the communit
 without a MausBot sign-in the card offers Save folder… and GitHub's upload page instead. Import (+ → Import…) adds one
 from a GitHub link or a folder.
 
+Before anything leaves the computer, every text in a template loses home folders (`~`), the app's workspace folders
+(`<workspace>`), email addresses, phone numbers and the publisher's own names (`shared/publish-scrub.ts`); the card says
+how many in one line, and a template with a key or token in it is never published. Publish has one optional field,
+Published by, which becomes the template's `author.name` ("Community" when empty) and shows on the card and in the
+Templates gallery.
+
 ## Automated checks
 
 ```sh
-pnpm exec vitest run shared/share-folder.test.ts shared/skill-files.test.ts server/share.test.ts server/share-github.test.ts server/share-skill-files.test.ts server/share-team-templates.test.ts src/components/TemplateCard.test.ts src/components/ImportDialog.test.ts src/lib/template-share.test.ts
+pnpm exec vitest run shared/publish-scrub.test.ts shared/share-folder.test.ts shared/skill-files.test.ts server/share.test.ts server/share-github.test.ts server/share-skill-files.test.ts server/share-team-templates.test.ts src/components/TemplateCard.test.ts src/components/ImportDialog.test.ts src/lib/template-share.test.ts
 pnpm exec vitest run server/share.e2e.test.ts server/cloud-team-templates.e2e.test.ts --silent=false
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/team-share-ui.e2e.test.ts scripts/testing/team-template-ui.e2e.test.ts --maxWorkers=1
 ```

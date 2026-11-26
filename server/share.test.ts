@@ -12,7 +12,7 @@ import { createShareToolRoute, importSource, type ShareToolContext } from "./rou
 import { GithubTemplateError } from "./share-github.ts";
 import { createCommunityPublisher, type CommunityResult } from "./share-publish.ts";
 import { pagesHomeSignature } from "./pages/access.ts";
-import { createShareHost, readFolderFromDisk } from "./share.ts";
+import { createShareHost, creditName, readFolderFromDisk } from "./share.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord } from "./store.ts";
 
@@ -38,7 +38,11 @@ function bot(overrides: Partial<BotRecord> = {}): BotRecord {
 const routine = { id: "r1", name: "Morning sweep", botId: "bot-1", prompt: "Sweep the inbox.", runOn: "maus", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30 } as unknown as Routine;
 
-function host(options: { submit?: (submission: unknown) => Promise<CommunityResult>; signedIn?: boolean; bots?: BotRecord[]; picture?: (bot: BotRecord) => string | undefined; brief?: string } = {}) {
+/** A bot whose words hold no key, which Publish sends. */
+const clean = (overrides: Partial<BotRecord> = {}) => bot({ soul: "Be brief.", ...overrides });
+
+function host(options: { submit?: (submission: unknown) => Promise<CommunityResult>; signedIn?: boolean; bots?: BotRecord[]; picture?: (bot: BotRecord) => string | undefined; brief?: string;
+  personNames?: Array<string | undefined>; suggestedCredit?: string } = {}) {
   const dataDir = scratch(), botFolder = scratch();
   const patches: Array<{ messageId: string; card: TemplateCard }> = [];
   const bots = options.bots ?? [bot()];
@@ -49,6 +53,8 @@ function host(options: { submit?: (submission: unknown) => Promise<CommunityResu
     picture: options.picture ?? (() => undefined), botFolder: (id) => join(botFolder, id),
     publisher: options.submit ? { ...publisher, submit: options.submit } : publisher,
     patch: (_threadId, messageId, _text, card) => patches.push({ messageId, card }),
+    ...(options.personNames ? { personNames: () => options.personNames! } : {}),
+    ...(options.suggestedCredit ? { suggestedCredit: () => options.suggestedCredit } : {}),
   });
   return { share, dataDir, botFolder, patches, bots };
 }
@@ -110,8 +116,8 @@ describe("making a template", () => {
 
 describe("publishing", () => {
   it("offers the folder and GitHub's upload page when this app isn't signed in or the service isn't there", async () => {
-    const { share } = host({ signedIn: false });
-    const made = share.export({ scope: "bot", bot: bot() }, []);
+    const { share } = host({ signedIn: false, bots: [clean()] });
+    const made = share.export({ scope: "bot", bot: clean() }, []);
     expect(made.card.fallback).toBe("sign_in");
     expect(await share.publish(made.card.id)).toMatchObject({ status: "draft", fallback: "sign_in" });
     for (const status of [404, 501]) {
@@ -155,10 +161,10 @@ describe("publishing", () => {
 
   it("sends a folder the Admin's checks accept: BotMRR v2 frontmatter, skills named as their folders, pictures as base64, paused routines, under the caps", async () => {
     let sent: { slug: string; files: Record<string, string | { base64: string }> } | null = null;
-    const pictured = bot({ id: "bot-2", name: "Painter" });
+    const pictured = clean({ id: "bot-2", name: "Painter" });
     const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-    const { share } = host({ bots: [bot(), pictured], picture: (each) => each.id === "bot-2" ? png : undefined, submit: async (submission) => { sent = submission as never; return { ok: false, reason: "failed", message: "x" }; } });
-    const made = share.export({ scope: "department", section: "Ops", bots: [bot(), pictured] }, [routine]);
+    const { share } = host({ bots: [clean(), pictured], picture: (each) => each.id === "bot-2" ? png : undefined, submit: async (submission) => { sent = submission as never; return { ok: false, reason: "failed", message: "x" }; } });
+    const made = share.export({ scope: "department", section: "Ops", bots: [clean(), pictured] }, [routine]);
     await share.publish(made.card.id);
     const files = sent!.files;
     expect(Object.keys(files).filter((path) => path.startsWith("avatars/"))).toHaveLength(1);
@@ -181,7 +187,7 @@ describe("publishing", () => {
     expect(meta.routines.every((each: { enabledAfterInstall: boolean }) => each.enabledAfterInstall === false)).toBe(true);
     for (const agent of meta.agents) for (const name of agent.skills ?? []) expect(files[`skills/${name}/SKILL.md`]).toBeTypeOf("string");
     const single = host({ submit: async (submission) => { sent = submission as never; return { ok: false, reason: "failed", message: "x" }; } });
-    await single.share.publish(single.share.export({ scope: "bot", bot: bot() }, []).card.id);
+    await single.share.publish(single.share.export({ scope: "bot", bot: clean() }, []).card.id);
     expect(parseYaml(String(sent!.files["bot.md"]).match(/^---\n([\s\S]*?)\n---/)![1]!).agents).toHaveLength(1);
   });
 
@@ -194,7 +200,7 @@ describe("publishing", () => {
   it("re-draws every card that shows the template as it is published, fails and is deleted", async () => {
     let answer: CommunityResult = { ok: false, reason: "failed", message: "You've published a lot today. Try again tomorrow." };
     const { share, patches } = host({ submit: async () => answer });
-    const made = share.export({ scope: "bot", bot: bot() }, []);
+    const made = share.export({ scope: "bot", bot: clean() }, []);
     share.shown(made.card.id, "thread-1", "message-1");
     expect(await share.publish(made.card.id)).toMatchObject({ status: "failed", error: "You've published a lot today. Try again tomorrow." });
     expect(patches.map((patch) => patch.card.status)).toEqual(["publishing", "failed"]);
@@ -203,6 +209,98 @@ describe("publishing", () => {
     expect(share.delete(made.card.id).status).toBe("gone");
     expect(existsSync(made.dir)).toBe(false);
     expect(patches.at(-1)!.card.status).toBe("gone");
+  });
+});
+
+describe("publishing without the person's details", () => {
+  const botFile = (submission: unknown) => String((submission as { files: Record<string, string> }).files["bot.md"]);
+  const frontmatter = (text: string) => parseYaml(text.match(/^---\n([\s\S]*?)\n---/)![1]!);
+  const ok: CommunityResult = { ok: true, link: "https://github.com/milind-soni/openmausbot-teams/tree/a/teams/helper", prUrl: "https://github.com/milind-soni/openmausbot-teams/pull/1" };
+
+  it("never publishes a template with a key in what it carries, even scrubbed, and sends nothing", async () => {
+    let sent = 0;
+    const { share } = host({ submit: async () => { sent += 1; return ok; } });
+    const made = share.export({ scope: "bot", bot: bot() }, []);
+    expect(made.card.secret).toBe(true);
+    expect(await share.publish(made.card.id)).toMatchObject({ status: "failed", secret: true, error: expect.stringMatching(/looks like a key or token/) });
+    expect(sent).toBe(0);
+    const remade = share.export({ scope: "bot", bot: clean() }, []);
+    expect(remade.card.secret).toBeUndefined();
+    expect(await share.publish(remade.card.id)).toMatchObject({ status: "published" });
+    expect(sent).toBe(1);
+  });
+
+  it("takes home folders, the app's workspace folders, emails and phone numbers out of the folder before it can be published, and says how many", async () => {
+    let sent: unknown = null;
+    const words = "Work in /Users/janedoe/WorkSpace/acme. Reports go to /Users/janedoe/.openmausbot/workspaces/0b9c3a52-8d61-4f0e-a2b7-5c1e9d4f3a10/out.md. "
+      + "Ask jane@acme.io or +1 (415) 555-0132. Runs at anchorAt 1794748391525.";
+    const helper = clean({ description: words });
+    const { share } = host({ bots: [helper], submit: async (submission) => { sent = submission; return ok; } });
+    const made = share.export({ scope: "bot", bot: helper }, []);
+    expect(made.card.scrubbed).toEqual({ paths: 2, emails: 1, phones: 1, names: 0 });
+    const onDisk = readFileSync(join(made.dir, "bot.md"), "utf8");
+    expect(onDisk).toContain("Work in ~/WorkSpace/acme. Reports go to <workspace>/out.md. Ask <email> or <phone>. Runs at anchorAt 1794748391525.");
+    expect(share.get(made.card.id).details.bots[0]!.description).not.toMatch(/janedoe|acme\.io|555/);
+    await share.publish(made.card.id);
+    expect(botFile(sent)).not.toMatch(/janedoe|acme\.io|555-0132/);
+    expect((await share.publish(made.card.id)).scrubbed).toEqual({ paths: 2, emails: 1, phones: 1, names: 0 });
+  });
+
+  it("takes out what the bot wrote into the folder after the template was made", async () => {
+    let sent: unknown = null;
+    const { share } = host({ bots: [clean()], submit: async (submission) => { sent = submission; return ok; } });
+    const made = share.export({ scope: "bot", bot: clean() }, []);
+    const file = join(made.dir, "bot.md");
+    writeFileSync(file, readFileSync(file, "utf8").replace("Keeps the inbox tidy.", "Keeps C:\\Users\\Jane\\inbox tidy."));
+    const card = await share.publish(made.card.id);
+    expect(botFile(sent)).toContain("Keeps ~\\inbox tidy.");
+    expect(card.scrubbed).toEqual({ paths: 1, emails: 0, phones: 0, names: 0 });
+  });
+
+  it("credits the name in Published by, the community when it is cleared, and the last one when a bot publishes", async () => {
+    let sent: unknown = null;
+    const { share } = host({ bots: [clean()], suggestedCredit: "Jane Doe", submit: async (submission) => { sent = submission; return ok; } });
+    const made = share.export({ scope: "bot", bot: clean() }, []);
+    expect(made.card.author).toBeUndefined();
+    expect(frontmatter(readFileSync(join(made.dir, "bot.md"), "utf8")).author).toEqual({ name: "Community" });
+    const published = await share.publish(made.card.id, { author: "Jane D." });
+    expect(frontmatter(botFile(sent)).author).toEqual({ name: "Jane D." });
+    expect(published).toMatchObject({ status: "published", publishedBy: "Jane D.", author: "Jane D." });
+    expect((await share.publish(made.card.id)).author).toBe("Jane D.");
+    expect(frontmatter(botFile(sent)).author).toEqual({ name: "Jane D." });
+    const cleared = await share.publish(made.card.id, { author: "" });
+    expect(frontmatter(botFile(sent)).author).toEqual({ name: "Community" });
+    expect(cleared.publishedBy).toBeUndefined();
+    expect(cleared.author).toBe("");
+  });
+
+  it("credits the community when a bot publishes a template nobody named", async () => {
+    let sent: unknown = null;
+    const { share } = host({ bots: [clean()], suggestedCredit: "Jane Doe", submit: async (submission) => { sent = submission; return ok; } });
+    await share.publish(share.export({ scope: "bot", bot: clean() }, []).card.id);
+    expect(frontmatter(botFile(sent)).author).toEqual({ name: "Community" });
+  });
+
+  it("takes out the person's user name, and their profile name unless they publish under it", async () => {
+    let sent: unknown = null;
+    const helper = clean({ description: "Made by Jane Doe on ~janedoe/laptop for root, and janedoe will know." });
+    const { share } = host({ bots: [helper], personNames: ["janedoe", "Jane Doe"], suggestedCredit: "Jane Doe", submit: async (submission) => { sent = submission; return ok; } });
+    const made = share.export({ scope: "bot", bot: helper }, []);
+    expect(made.card.scrubbed).toEqual({ paths: 0, emails: 0, phones: 0, names: 1 });
+    await share.publish(made.card.id, { author: "Jane Doe" });
+    expect(frontmatter(botFile(sent)).agents[0].description).toBe("Made by Jane Doe on ~<name>/laptop for root, and janedoe will know.");
+    const card = await share.publish(made.card.id, { author: "JD" });
+    expect(frontmatter(botFile(sent)).agents[0].description).toBe("Made by <name> on ~<name>/laptop for root, and janedoe will know.");
+    expect(card.scrubbed).toEqual({ paths: 0, emails: 0, phones: 0, names: 2 });
+  });
+
+  it("reads Published by as one line of plain words and never an email address", () => {
+    expect(creditName(undefined)).toBeUndefined();
+    expect(creditName("")).toBe("");
+    expect(creditName("  Jane\n\u200b Doe ")).toBe("Jane Doe");
+    expect(creditName("jane@acme.io")).toBeNull();
+    expect(creditName(42)).toBeNull();
+    expect(creditName("x".repeat(300))).toHaveLength(100);
   });
 });
 

@@ -1,6 +1,6 @@
 import type { TeamTemplate, TemplateCard, TemplateDetails, TemplateRepoPublish } from "../../shared/share-card";
 import { SKILL_FILE_LIMITS, skillFilePathProblem } from "../../shared/skill-files";
-import { t } from "./i18n";
+import { activeLocale, t } from "./i18n";
 import { api, type Action, type Bot, type Group } from "@/state/store";
 import type { Routine } from "@/lib/routines";
 import { serverFetch } from "./relay-server";
@@ -30,7 +30,9 @@ const post = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) })
 
 export const exportDepartment = (department: string) => api<TemplateCard>("/api/share/export", post({ department }));
 export const templateDetails = (id: string) => api<{ card: TemplateCard; details: TemplateDetails }>(`/api/share/${encodeURIComponent(id)}`);
-export const publishTemplate = (id: string) => api<TemplateCard>(`/api/share/${encodeURIComponent(id)}/publish`, post({}));
+/** `author` is "Published by": "" publishes it as the community's. */
+export const publishTemplate = (id: string, author?: string) =>
+  api<TemplateCard>(`/api/share/${encodeURIComponent(id)}/publish`, post(author === undefined ? {} : { author }));
 export const deleteTemplate = (id: string) => api<{ ok: true }>(`/api/share/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 export type ImportSource = { url: string } | { path: string } | { files: Record<string, string> } | { library: string };
@@ -74,6 +76,27 @@ export function countsLine(card: Pick<TemplateCard, "scope" | "counts">): string
     ...(routines ? [routines === 1 ? t("template.routinesOne") : t("template.routinesMany", { count: routines })] : []),
     ...(apps ? [apps === 1 ? t("template.appsOne") : t("template.appsMany", { count: apps })] : []),
   ].join(" · ");
+}
+
+/** "We removed 3 local paths and 1 email before publishing"; empty when nothing was taken out. */
+export function scrubbedLine(card: Pick<TemplateCard, "scrubbed">): string {
+  const { paths = 0, emails = 0, phones = 0, names = 0 } = card.scrubbed ?? {};
+  const parts = [
+    ...(paths ? [paths === 1 ? t("template.scrub.pathsOne") : t("template.scrub.pathsMany", { count: paths })] : []),
+    ...(emails ? [emails === 1 ? t("template.scrub.emailsOne") : t("template.scrub.emailsMany", { count: emails })] : []),
+    ...(phones ? [phones === 1 ? t("template.scrub.phonesOne") : t("template.scrub.phonesMany", { count: phones })] : []),
+    ...(names ? [names === 1 ? t("template.scrub.namesOne") : t("template.scrub.namesMany", { count: names })] : []),
+  ];
+  return parts.length ? t("template.scrubbed", { list: new Intl.ListFormat(activeLocale(), { type: "conjunction" }).format(parts) }) : "";
+}
+
+/** Credits that name nobody: what templates carried before "Published by", and the community's own. */
+const NOBODY = new Set(["community", "mausbot community", "mausbot user", "openmausbot user", "a mausbot user"]);
+
+/** The name a "Published by" line shows, or null when the credit names nobody. */
+export function creditShown(name: string | undefined): string | null {
+  const trimmed = name?.trim();
+  return trimmed && !NOBODY.has(trimmed.toLowerCase()) ? trimmed : null;
 }
 
 /** Puts the template's folder on this device: a folder the person picks on the desktop app, a .zip download elsewhere.

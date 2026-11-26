@@ -2,6 +2,7 @@ import { Loader2, Plus } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { catalogCopy, catalogFaces, type TeamCatalogEntry } from "@/lib/team-catalog";
+import { creditShown } from "@/lib/template-share";
 import { TemplateFaces } from "./TemplateCard";
 
 /** A community template in the Templates gallery: the same card the ready-made bots have, with every bot's face. */
@@ -12,6 +13,7 @@ export function TeamCatalogCard({ entry, busy, disabled, onAdd }: {
   onAdd: () => void;
 }) {
   const copy = catalogCopy(entry);
+  const credit = creditShown(entry.author);
   const bots = entry.members === 1 ? t("template.botsOne") : t("template.botsMany", { count: entry.members });
   const details = [
     entry.skills.length > 0 && (entry.skills.length === 1 ? t("template.skillsOne") : t("template.skillsMany", { count: entry.skills.length })),
@@ -35,6 +37,7 @@ export function TeamCatalogCard({ entry, busy, disabled, onAdd }: {
       </div>
       <h4 dir="auto" className="mt-3 truncate text-[14px] font-medium text-ink" title={copy.name}>{copy.name}</h4>
       <p dir="auto" className="truncate text-[12px] text-ink-secondary">{bots} · {entry.category}</p>
+      {credit && <p dir="auto" data-catalog-published-by className="truncate text-[12px] text-ink-tertiary" title={credit}>{t("template.publishedBy", { name: credit })}</p>}
       <p dir="auto" className="mt-2 line-clamp-3 text-[13px] leading-[1.45] text-ink-secondary">{copy.outcome ?? copy.summary}</p>
       {details && <p className="mt-auto truncate pt-2 text-[12px] text-ink-tertiary" title={details}>{details}</p>}
     </article>
