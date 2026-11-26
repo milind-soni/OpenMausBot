@@ -444,7 +444,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   text?: string;
   digest?: TurnDigest;
   /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
-  engineCompaction?: true;
+  engineCompaction?: true; progressUpdate?: true;
   compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness";
     /** The divider "Start fresh" leaves: no summary, and a provider reads nothing before it. */ fresh?: true };
   /** Renderers receive only the allowlisted /api/attachments URL. `file` entries are opened through the message-scoped

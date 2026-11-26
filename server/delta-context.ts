@@ -30,7 +30,8 @@ export function contextText(m: Pick<Message, "text" | "attachments" | "peerPost"
 
 /** A Live call's row (kind "call") and an engine's own compaction marker (kind "compaction", engineCompaction) are
  * records for people, never context. */
-export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "engineCompaction" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
+export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "engineCompaction" | "progressUpdate" | "roomRequest" | "attachments" | "peerPost" | "webhookPost">): boolean {
+  if (m.progressUpdate) return false;
   return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && contextText(m)) || (m.kind === "digest" && m.digest) || (m.kind === "compaction" && !m.engineCompaction) || m.roomRequest?.phase === "result");
 }
 

@@ -41,7 +41,7 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
 
 /** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
 /** "suggested-reply": the composer's next-line suggestion, only ever on the bot's own engine's smallest model. */
-export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger" | "suggested-reply";
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger" | "suggested-reply" | "progress-update";
 
 export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable" | "openRouter"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
@@ -108,7 +108,7 @@ function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined 
 /** A turn or a person is waiting on these, so they start at once. */
 const NEVER_QUEUED: ReadonlySet<SideJob> = new Set(["compaction", "representative", "status-reply"]);
 /** A person sees these soon (a new bot's suggestions card): they wait ahead of memory upkeep and skill review. */
-const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions", "skill-burger", "suggested-reply"]);
+const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions", "skill-burger", "suggested-reply", "progress-update"]);
 
 function memoryModelFailure(error: unknown): MemoryModelFailure {
   if (error instanceof DOMException && error.name === "TimeoutError") return "timeout";

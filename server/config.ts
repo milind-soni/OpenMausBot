@@ -23,7 +23,7 @@ import { API_KEY_FLEET, DEFAULT_FLEET, OPENAI_API_INSTANCE, OPENROUTER_API_INSTA
 export { CLAUDE_API_INSTANCE, OPENAI_API_INSTANCE, OPENROUTER_API_INSTANCE, XAI_API_INSTANCE } from "./instance-fleets.ts";
 import { DEFAULT_WINDOW_MINUTES, MAX_WINDOW_MINUTES } from "./cache-keepwarm.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
-import { helperStoredShape, type HelperConfig } from "./side-jobs.ts";
+import { helperStoredShape, type HelperConfig } from "./side-jobs.ts"; import { progressUpdatesStoredShape, type ProgressUpdatesConfig } from "./progress-updates.ts";
 import { loopGuardConfigSchema, type LoopGuardConfig } from "./host/loop-guard.ts";
 import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
 import { settledFileCache, settledFileStamp } from "./settled-file.ts";
@@ -399,7 +399,7 @@ const appConfigSchema = z.object({
   /** Loose on purpose: one bad server entry is skipped later, never fails the whole file. */
   mcpServers: z.record(z.string(), z.unknown()).optional(),
 });
-const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
+const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend(progressUpdatesStoredShape).extend({
   vpsServers: storedVpsServersSchema,
   browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
@@ -414,7 +414,7 @@ const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers:
   .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }); export const CONFIG_PATCH_FIELDS = appConfigPatchSchema.shape;
 const jsonObjectSchema = z.record(z.string(), z.json());
 
-export interface AppConfig extends HelperConfig {
+export interface AppConfig extends HelperConfig, ProgressUpdatesConfig {
   customDomain?: string;
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */

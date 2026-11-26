@@ -330,7 +330,7 @@ import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, logFailedTurn, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, replaysNatively } from "./turn-context.ts"; import { resumePlan } from "./resume-plan.ts";
-import { Handoffs, isContextMessage, recordHanded, renderUnseen, sessionStart, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
+import { Handoffs, isContextMessage, recordHanded, renderUnseen, sessionStart, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts"; import { attachProgressUpdates, progressUpdatesConfig } from "./progress-updates.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle } from "./thread-title-generate.ts"; import { createHandedThreadTitle } from "./host/handed-thread-title.ts"; import { handedMainThread, postHandedLine, writeHandedLine, type HandedLineDeps } from "./host/handed-line.ts";
@@ -7000,7 +7000,7 @@ bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) 
 const firstReplyRescue = createFirstReplyRescue({ store, botForThread, speaker: (threadId) => groupSpeakers.get(threadId), runningEngine: (threadId) => runningTurnEngines.get(threadId)?.instanceId,
   engineName: (instanceId) => engineName(instanceId), quiet: (threadId) => isInternalTurn(threadId) || activeRoutineRunForThread(threadId) !== null,
   live: (threadId, turnId) => liveTurns.running(threadId) === turnId, requests: directRequestOwners });
-bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) liveTurns.onEvent(event); }); bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) firstReplyRescue.onEvent(event); });
+bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) liveTurns.onEvent(event); }); bus.subscribe((event: RuntimeEvent) => { if (!shouldIgnoreProviderEvent(event)) firstReplyRescue.onEvent(event); }); attachProgressUpdates({ bus, store, sideJobs, botForThread: (tid) => { const owner = store.botByThread(tid); return owner ? (botForThread(owner.id, tid) ?? owner) : undefined; }, isInternalTurn, isRoutineTurn: (tid) => activeRoutineRunForThread(tid) !== null, isThreadBusy: threadBusy, shouldIgnoreProviderEvent, getConfig: () => progressUpdatesConfig(cfg) });
 
 // Registered after the main fold, so busy is already false here; not gated on event.ok, since queued messages are the user's own words.
 bus.subscribe((event: RuntimeEvent) => {

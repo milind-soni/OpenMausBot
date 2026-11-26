@@ -528,5 +528,11 @@ describe("isContextMessage", () => {
     expect(isContextMessage({ kind: "app", text: "[App] Sales by month\nRevenue up 12%" })).toBe(true);
     expect(isContextMessage({ kind: "app", text: "" })).toBe(false);
     expect(isContextMessage({ kind: "app" })).toBe(false);
+    expect(isContextMessage({ kind: "app" })).toBe(false);
+  });
+
+  it("drops progressUpdate messages so periodic status lines never pollute replay context", () => {
+    expect(isContextMessage({ kind: "text", text: "Running command...", progressUpdate: true })).toBe(false);
+    expect(isContextMessage({ kind: "text", text: "Normal reply" })).toBe(true);
   });
 });
