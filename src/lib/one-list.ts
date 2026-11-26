@@ -16,7 +16,8 @@ import type { ArrangedBot, BotHome } from "./places-together";
 export const placeDepartment = (home: BotHome): string => t(home === "cloud" ? "cloudSetup.myCloud" : "place.local");
 
 export interface OneListInput<B extends Bot> {
-  /** The home place's bots in its own order, each in its own department (`section`). */
+  /** The home place's bots in its own order, each in its own department (`section`). A pinned bot or a Chief outside any
+   * department is left where it comes, as for the other place. */
   homeBots: readonly B[];
   /** The home place's departments in its own order. */
   homeSections: readonly string[];
@@ -52,6 +53,8 @@ export function layOneList<B extends Bot>({ homeBots, homeSections, otherBots, a
   const list = (section: string) => { let ids = lists.get(section); if (!ids) lists.set(section, (ids = [])); return ids; };
   const kept: B[] = [];
   for (const bot of homeBots) {
+    // Pinned bots are one list drawn across departments, in their own order: they are left as they come.
+    if (pageLevel(bot)) { kept.push(bot); continue; }
     const key = keyOf(bot), section = bot.section ?? "";
     byKey.set(key, bot); sectionOf.set(key, section); list(section).push(key);
   }

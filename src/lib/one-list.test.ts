@@ -73,6 +73,13 @@ describe("the one list's departments", () => {
     expect(laid.bots.map((b) => [b.id, b.section ?? ""])).toEqual([["maus", ""], ["pin", ""], ["scout", "My Cloud"]]);
   });
 
+  it("pinned bots keep their own order across departments, as with the switch off", () => {
+    const home = [bot("a", { section: "A" }), bot("p1", { pinned: true, section: "B" }), bot("p2", { pinned: true, section: "A" }), bot("p3", { pinned: true })];
+    const laid = layOneList({ homeBots: home, homeSections: ["A", "B"], otherBots: [], arranged: [], keyOf: keyed("computer"), landing: "My Cloud" });
+    expect(laid.bots.filter((b) => b.pinned).map((b) => b.id)).toEqual(["p1", "p2", "p3"]);
+    expect(laid.bots.filter((b) => b.pinned).every((b, index) => b === home.filter((h) => h.pinned)[index])).toBe(true);
+  });
+
   it("a row that did not move is the same value from one layout to the next, so it is not drawn again", () => {
     const rows = cloud.map((b) => bot(`cloud:${b.id}`));
     const lay = () => layOneList({ homeBots: computer, homeSections: ["Finance"], otherBots: rows, arranged: [], keyOf: keyed("computer"), landing: "My Cloud" }).bots;
