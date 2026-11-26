@@ -74,8 +74,8 @@ function TemplateTile({ title, selected, disabled, onClick, children }: {
       <div className="relative aspect-[16/10] overflow-hidden bg-inset">
         {children}
         <span className={cn(
-          "absolute right-2 top-2 flex size-6 items-center justify-center rounded-full bg-accent text-accent-ink transition-[opacity,transform] duration-150 motion-reduce:transition-none",
-          selected ? "scale-100 opacity-100" : "scale-90 opacity-0 group-hover:scale-100 group-hover:opacity-100 group-focus-visible:scale-100 group-focus-visible:opacity-100",
+          "absolute end-2 top-2 flex size-6 items-center justify-center rounded-full bg-accent text-accent-ink transition-[opacity,transform] duration-150 motion-reduce:transition-none",
+          selected ? "scale-100 opacity-100" : "scale-95 opacity-0",
         )}>
           <Check size={14} aria-hidden="true" />
         </span>

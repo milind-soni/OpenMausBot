@@ -400,6 +400,24 @@ export function calendarsFromData(data: unknown): Array<{ id: string; name: stri
   return calendars;
 }
 
+const CALENDAR_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+export function calendarChoicesFromData(data: unknown): Array<{ id: string; name: string; primary: boolean; color?: string }> {
+  const list = listIn(data, ["items", "calendars"]);
+  if (!list) throw new Error("the answer had no calendar list");
+  return list.flatMap((raw) => {
+    const item = record(raw);
+    if (!item || typeof item.id !== "string" || !item.id || item.hidden === true) return [];
+    const primary = item.primary === true;
+    const role = typeof item.accessRole === "string" ? item.accessRole : "";
+    if (!primary && !["owner", "writer", "writerWithoutPrivateAccess", "reader"].includes(role)) return [];
+    const color = typeof item.backgroundColor === "string" && CALENDAR_HEX_COLOR.test(item.backgroundColor.trim())
+      ? item.backgroundColor.trim()
+      : undefined;
+    return [{ id: item.id, name: oneLine(item.summary, CALENDAR_NAME_MAX) || item.id, primary, ...(color ? { color } : {}) }];
+  });
+}
+
 export const READ_TIMEOUT_MS = 60_000;
 
 /** `promise`, or a rejection with the signal's reason once `signal` aborts first (after `onAbort`). */
@@ -448,6 +466,8 @@ export interface ReadSession {
 
 /** The reads for a one-time code: a message's body, never kept or passed to a bot. */
 export interface MailBodySession extends ReadSession {
+  selectedCalendarEvents(input: { account?: string; calendarIds: readonly string[]; fromMs: number; toMs: number }): Promise<CalendarEvent[]>;
+  calendarChoices(account?: string): Promise<Array<{ id: string; name: string; primary: boolean; color?: string }>>;
   /** Null only when Gmail says the message is gone. */
   messageBody(messageId: string): Promise<string | null>;
   /** Outlook's inbox since `sinceMs`, newest first, at most `limit`, without bodies. */
@@ -561,7 +581,59 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       throw new SourceError("googlecalendar", `${slug}: too many pages to read completely`);
     }
 
+    async function calendarEventPages(calendarId: string, owned: boolean, fromMs: number, toMs: number, signal: AbortSignal, pin: AccountPin, showDeleted = false): Promise<CalendarEvent[]> {
+      const results: CalendarEvent[] = [];
+      const seen = new Set<string>();
+      let page: string | undefined;
+      let size = 100;
+      for (let pages = 0; pages < CALENDAR_PAGES;) {
+        const args = {
+          calendarId, timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(),
+          singleEvents: true, orderBy: "startTime", maxResults: size, ...(showDeleted ? { showDeleted: true } : {}), ...(page ? { pageToken: page } : {}),
+        };
+        const data = await call(CALENDAR_LIST_TOOL, args, { signal, pin, shortened: size > GMAIL_PAGE_MIN });
+        if (data === SHORTENED) {
+          size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
+          continue;
+        }
+        results.push(...parsed("googlecalendar", () => eventsFromData(data, { id: calendarId, owned })));
+        pages++;
+        page = nextPageOf(data);
+        if (!page) return results;
+        if (seen.has(page)) throw new SourceError("googlecalendar", `${CALENDAR_LIST_TOOL}: repeated page token`);
+        seen.add(page);
+      }
+      throw new SourceError("googlecalendar", `${CALENDAR_LIST_TOOL}: too many pages to read completely`);
+    }
+
     return {
+      async calendarChoices(account) {
+        const signal = AbortSignal.timeout(readTimeoutMs);
+        const pin: AccountPin = { accounts: Promise.resolve(account ? { googlecalendar: account } : {}) };
+        return calendarPages(CALENDARS_TOOL, {}, calendarChoicesFromData, signal, pin);
+      },
+      async selectedCalendarEvents({ account, calendarIds, fromMs, toMs }) {
+        requireFinite("googlecalendar", fromMs, toMs);
+        if ((account !== undefined && !account.trim()) || calendarIds.some((id) => !id.trim())) {
+          throw new SourceError("googlecalendar", "A valid account and calendar IDs are required");
+        }
+        if (toMs <= fromMs || toMs - fromMs > 93 * 24 * 60 * 60 * 1000 || calendarIds.length > 50) {
+          throw new SourceError("googlecalendar", "The calendar request exceeds the supported range");
+        }
+        const failed = new AbortController();
+        const signal = AbortSignal.any([AbortSignal.timeout(readTimeoutMs), failed.signal]);
+        const pin: AccountPin = { accounts: Promise.resolve(account ? { googlecalendar: account } : {}) };
+        const calendars = [...new Set(calendarIds)];
+        const results = await inParallel(calendars, CALENDAR_READS_AT_ONCE, async (id) => {
+          try {
+            return await calendarEventPages(id, false, fromMs, toMs, signal, pin);
+          } catch (error) {
+            failed.abort();
+            throw error;
+          }
+        });
+        return results.flat();
+      },
       async events(fromMs, toMs) {
         requireFinite("googlecalendar", fromMs, toMs);
         const failed = new AbortController();
@@ -571,10 +643,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         const read = [...(listed.some((calendar) => calendar.primary) ? [] : [PRIMARY_CALENDAR]), ...listed.filter((calendar) => calendar.read)];
         const perCalendar = await inParallel(read, CALENDAR_READS_AT_ONCE, async (calendar) => {
           try {
-            return await calendarPages(CALENDAR_LIST_TOOL, {
-              calendarId: calendar.id, timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(),
-              singleEvents: true, orderBy: "startTime", maxResults: 100, showDeleted: true,
-            }, (data) => eventsFromData(data, { id: calendar.id, owned: calendar.owned }), signal, pin);
+            return await calendarEventPages(calendar.id, calendar.owned, fromMs, toMs, signal, pin, true);
           } catch (error) {
             failed.abort();
             throw new SourceError("googlecalendar", `calendar ${calendar.name}: ${errorText(error)}`, error instanceof SourceError && error.severalAccounts);

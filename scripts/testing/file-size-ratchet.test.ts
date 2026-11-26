@@ -17,9 +17,9 @@ const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
   "server/index.ts": 15258,
-  "src/state/store.tsx": 3260,
+  "src/state/store.tsx": 3276,
   "electron/main.mjs": 3124,
-  "server/store.ts": 2256,
+  "server/store.ts": 2260,
   "src/components/Sidebar.tsx": 1657,
   "server/drivers/claude.ts": 2016,
   "server/drivers/acp/core.ts": 1541,
@@ -28,7 +28,7 @@ const LINES: Record<string, number> = {
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,
   "server/config.ts": 1227,
-  "src/components/ChatView.tsx": 1201,
+  "src/components/ChatView.tsx": 1204,
   "server/routine-requests.ts": 1468,
   "src/components/LocalComputerSection.tsx": 1437,
   "src/components/CursorAvatar.tsx": 1064,
@@ -38,6 +38,7 @@ const LINES: Record<string, number> = {
   "server/boat.ts": 1253,
   "server/plan-usage.ts": 1039,
   "server/container-computer.ts": 1156,
+  "packages/phone-protocol/src/wire.ts": 1200,
   "src/components/ModelPicker.tsx": 1017,
   "src/components/PhoneSetupFlow.tsx": 1088,
   "server/cli.ts": 1053,

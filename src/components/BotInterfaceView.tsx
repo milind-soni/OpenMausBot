@@ -52,14 +52,16 @@ export function BotInterfaceView({ bot }: { bot: Bot }) {
   const { dragProps, noDragStyle } = useCaptionChrome();
   return (
     <main aria-label={t("botPanel.uiInterface")} className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
-      <div {...dragProps} className="absolute inset-x-0 top-0 flex justify-center px-5 py-2.5 max-md:ps-14 max-md:pe-3">
-        <div style={noDragStyle} className="min-w-0 max-w-full">
-          <BotViewSwitcher botId={bot.id} view="ui-interface">
-            <ChatHeadPill bot={bot} avatar={{}} privacy={null} onToggle={() => dispatch({ type: "toggleSettings", open: !settingsOpen })} />
-          </BotViewSwitcher>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center px-5 py-2.5 max-md:ps-14 max-md:pe-3">
+        <div {...dragProps} className="pointer-events-auto min-w-0 max-w-full rounded-full p-1">
+          <div style={noDragStyle} className="min-w-0 max-w-full">
+            <BotViewSwitcher botId={bot.id} view="ui-interface">
+              <ChatHeadPill bot={bot} avatar={{}} privacy={null} onToggle={() => dispatch({ type: "toggleSettings", open: !settingsOpen })} />
+            </BotViewSwitcher>
+          </div>
         </div>
       </div>
-      <div data-bot-interface-page="" className="min-h-0 w-full flex-1">
+      <div data-bot-interface-page="" className="relative z-0 min-h-0 w-full flex-1">
         {renderInterfaceLayout(bot.uiInterfaceLayout)}
       </div>
     </main>

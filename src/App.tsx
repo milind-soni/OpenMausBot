@@ -217,7 +217,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     closeFilePreview();
   });
   // A 320 panel leaves room for the open sidebar from 1040 up; a wider one from 1280. Narrower, the sidebar folds.
-  const collapseSidebar = sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
+  const collapseSidebar = state.activeView === "ui-interface"
+    || sidebarFoldsForPanel(sidePanels, { wide: sidebarAndPanelFit, narrow: sidebarAndNarrowPanelFit });
   // Open beside a panel below 1280, the sidebar keeps to 280 so the chat keeps its 440; Simple's bot panel never moves it.
   const sidebarBesidePanel = anySidePanel(panelsMovingSidebar(sidePanels)) && !sidebarAndPanelFit;
   const notificationTray = notificationFeed && !calendarFocus;

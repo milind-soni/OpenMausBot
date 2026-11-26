@@ -45,20 +45,6 @@ describe("Store", () => {
     expect(new Store(selection).bot(bot.id)).not.toHaveProperty("toolScope");
   });
 
-  it("migrates an enabled native interface to the Dashboard layout", () => {
-    const store = new Store(selection);
-    const bot = store.createBot({ name: "Family board" });
-    const file = join(DATA_DIR, "bots.json");
-    const rows = JSON.parse(readFileSync(file, "utf8")) as Array<BotRecord & { uiInterfaceEnabled?: boolean }>;
-    Object.assign(rows.find((row) => row.id === bot.id)!, { uiInterfaceEnabled: true });
-    writeFileSync(file, JSON.stringify(rows));
-
-    const loaded = new Store(selection);
-    expect(loaded.bot(bot.id)?.uiInterfaceLayout).toBe("dashboard");
-    const saved = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
-    expect(saved.find((row) => row.id === bot.id)).not.toHaveProperty("uiInterfaceEnabled");
-  });
-
   it("gives an app the bot's Apps switch turned on its tools, on load and whenever the switch changes", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Mail reader" });

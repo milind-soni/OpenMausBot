@@ -111,6 +111,20 @@ afterEach(() => {
 });
 
 describe("Simple-mode sidebar layout", () => {
+  it("uses an icon rail while forced collapsed and restores the saved mode afterward", () => {
+    const simpleRail = render(true);
+    expect(simpleRail.root.props.className).toContain("w-[92px]");
+    expect(simpleRail.tree.some((node) => node.type === SidebarResizeHandle)).toBe(false);
+
+    fixture.advanced = true;
+    const advancedRail = render(true);
+    expect(advancedRail.root.props.className).toContain("w-[80px]");
+    expect(advancedRail.tree.some((node) => node.type === SidebarResizeHandle)).toBe(false);
+
+    fixture.advanced = false;
+    expect(render(false).root.props.className).toContain("w-[280px]");
+  });
+
   it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with no count", () => {
     const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
