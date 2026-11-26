@@ -118,4 +118,15 @@ describe("a saved app that reads its bot's data and keeps state", () => {
     expect((await rpc(app, messageId, "mausbot/data/query", { sql: "SELECT 1 AS one" })).status).toBe(404);
     expect((await rpc(app, messageId, "mausbot/state/keys")).status).toBe(404);
   });
+
+  it("carries the connector tools a page declared into its document and manifest", async () => {
+    const { call, show, save } = await fixture();
+    const messageId = show({ uses: ["data", "gmail:GMAIL_FETCH_EMAILS", "gmail:GMAIL_TRASH_MESSAGE"] });
+    const app = await save(messageId);
+    expect(app.manifest.uses).toEqual(["data", "gmail:GMAIL_FETCH_EMAILS", "gmail:GMAIL_TRASH_MESSAGE"]);
+    const { can } = (await call("GET", `/api/local-apps/${app.id}/app`)).body;
+    expect(can).toMatchObject({ data: true, connectors: [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS", "GMAIL_TRASH_MESSAGE"] }] });
+    expect(can.state ?? false).toBe(false);
+  });
 });
+

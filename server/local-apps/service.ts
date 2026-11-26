@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { APP_USES, oneLine, type AppDocument, type AppPayload, type AppUse } from "../../shared/app.ts";
+import { APP_USES, appUsesList, oneLine, type AppConnectorUse, type AppDocument, type AppPayload, type AppUse } from "../../shared/app.ts";
 import { botHtmlDocument } from "../../shared/app-frame/document.ts";
 import { LOCAL_APP_NAME_MAX, type LocalApp, type LocalAppManifest } from "../../shared/local-apps.ts";
 import type { AppDocs } from "../app-docs.ts";
@@ -27,17 +27,19 @@ export type SaveRefusal = { ok: false; status: 404 | 409 | 507; error: string };
 
 const NOT_HERE = "That page is not in this conversation.";
 
-/** What a stored version of the page declared it uses (show_html `uses`), as the chat reads it. */
-function docUses(docs: AppDocs, doc: string): AppUse[] | undefined {
-  const declared = docs.read(doc)?.data?.uses;
-  const uses = Array.isArray(declared) ? declared.filter((use): use is AppUse => (APP_USES as readonly string[]).includes(use)) : [];
-  return uses.length ? uses : undefined;
+/** What a stored version of the page declared (show_html `uses`), as the chat reads it: data and state, and connector
+ * tools. */
+function docUses(docs: AppDocs, doc: string): { uses: AppUse[]; connectors: AppConnectorUse[] } {
+  const data = docs.read(doc)?.data;
+  const uses = Array.isArray(data?.uses) ? data.uses.filter((use): use is AppUse => (APP_USES as readonly string[]).includes(use)) : [];
+  return { uses, connectors: Array.isArray(data?.connectors) ? data.connectors : [] };
 }
 
-/** The manifest says what the newest version declared. */
-function withUses(manifest: LocalAppManifest, uses: AppUse[] | undefined): LocalAppManifest {
+/** The manifest says what the newest version declared, each connector tool as "gmail:TOOL" or "mcp:server:TOOL". */
+function withUses(manifest: LocalAppManifest, declared: ReturnType<typeof docUses>): LocalAppManifest {
   const { uses: _was, ...rest } = manifest;
-  return uses ? { ...rest, uses } : rest;
+  const uses = appUsesList(declared.uses, declared.connectors);
+  return uses.length ? { ...rest, uses } : rest;
 }
 
 /** The versions a page's row still keeps, oldest first. */
@@ -130,9 +132,8 @@ export function createLocalApps(deps: {
       const existing = store.fromPage(threadId, messageId, owner);
       if (existing) return { ok: true, app: followRow(existing), created: false };
       if (store.full()) return { ok: false, status: 507, error: "There are too many saved apps here. Remove one first." };
-      const uses = docUses(deps.docs, row.app.doc);
       const name = nameOf(row.app.title) || "App";
-      const manifest: LocalAppManifest = { name, ...(uses ? { uses } : {}) };
+      const manifest = withUses({ name }, docUses(deps.docs, row.app.doc));
       const app = store.add({ name, botId, threadId, messageId, ...(owner ? { owner } : {}), versions: rowVersions(row.app, now()), manifest }, now());
       return { ok: true, app, created: true };
     },
@@ -160,9 +161,10 @@ export function createLocalApps(deps: {
       const folder = stored.data?.folder && origin
         ? files.folder(target, { key: viewer?.key ?? "", allowed: () => keeps(id, version.doc) && (viewer?.allowed() ?? true) }) : undefined;
       const filesAt = folder ? `${origin}${LOCAL_APP_FILES_PREFIX}${folder.slice(PAGE_FILES_PREFIX.length)}` : undefined;
-      const uses = docUses(deps.docs, version.doc);
+      const { uses, connectors } = docUses(deps.docs, version.doc);
       return botHtmlDocument({ messageId: record.messageId, rev: version.rev, html: stored.html, title: record.name,
-        ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(filesAt ? { files: filesAt } : {}), ...(uses ? { uses } : {}) });
+        ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(filesAt ? { files: filesAt } : {}),
+        ...(uses.length ? { uses } : {}), ...(connectors.length ? { connectors } : {}) });
     },
     serveFile(req, res, path, method) {
       if (!path.startsWith(LOCAL_APP_FILES_PREFIX)) return false;
