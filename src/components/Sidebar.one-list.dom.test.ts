@@ -228,6 +228,8 @@ describe("switch on: one list", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(ids()).toEqual(["cloud:scout"]);
+    // This place has nothing that matches: its heading is left out rather than shown over nothing.
+    expect(headings().filter((name) => name?.startsWith("On "))).toEqual(["On My Cloud"]);
   });
 
   it("in the avatars-only sidebar the place joins each row's own label", async () => {
@@ -294,12 +296,19 @@ describe("switch on: one list", () => {
     expect(ids(ON_CLOUD)).toEqual(["cloud:scout", "cloud:tech"]);
   });
 
-  it("no heading while the other place has nothing to show, and none with the switch off", async () => {
-    window.ogb = { placesTogether: page } as never;
-    answer = async () => said({ other: { home: "cloud", state: "loading", bots: [] } });
-    await render();
-    expect(q("[data-sidebar-place-heading]")).toBeNull();
-    expect(headings()).not.toContain("On this computer");
+  it("while the other place has nothing to show, either page is exactly as with the switch off: no heading, no place mark", async () => {
+    const cloudBots = [bot("maus", { chiefOfStaff: true }), bot("scout"), bot("atlas")];
+    for (const advanced of [false, true]) {
+      mode.advanced = advanced;
+      const browser = await htmlWith(null);
+      answer = async () => said({ other: { home: "cloud", state: "loading", bots: [] } });
+      expect(await htmlWith({ placesTogether: page })).toBe(browser);
+      const cloudBrowser = await htmlWith(null, cloudBots);
+      for (const power of ["loading", "ready"] as const) {
+        answer = async () => said({ here: "cloud", other: { home: "computer", state: power, bots: [] } });
+        expect(await htmlWith({ placesTogether: page }, cloudBots), `${advanced ? "Advanced" : "Simple"}, My Cloud's page, ${power}`).toBe(cloudBrowser);
+      }
+    }
   });
 
   it("rows of the other place come in below this place's own and show their marks at once, with the pointer on the list, moving no row", async () => {

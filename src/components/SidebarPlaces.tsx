@@ -2,7 +2,8 @@
 // or a line to show (src/lib/place-rows.ts placeParts): each place under the sidebar's own section heading naming it, the
 // person's home place first and the other second, the same on both pages. This page's own part is its sections as ever;
 // the other place's part is its rows, in the order that place gave them, or its one line. A heading folds its part like
-// any section's heading, and is never dragged: the order of the places is fixed. Otherwise the sidebar is as it was.
+// any section's heading, and is never dragged: the order of the places is fixed. Otherwise the sidebar is as it was, and
+// its rows carry no place marks.
 import { Fragment, type ReactNode } from "react";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import type { SidebarDensityMode } from "@/lib/sidebar-layout";
@@ -21,11 +22,14 @@ export function usePlaceParts(placed: readonly PlacedBot[], query: string): read
 /** A part's heading folds it as a section's does; its key is the place's, so each place keeps its own. */
 export const placeSectionId = (part: PlacePart): string => `place:${part.home}`;
 
-export function SidebarPlaces({ parts, placed, own, row, query, density, simple, rail, interactive, collapsed, toggle, children }: {
+export function SidebarPlaces({ parts, placed, own, ownEmpty, row, query, density, simple, rail, interactive, collapsed, toggle, children }: {
   parts: readonly [PlacePart, PlacePart] | null;
   placed: readonly PlacedBot[];
   /** This page's own bots shown in the list: what a folded heading of its part counts. */
   own: readonly Bot[];
+  /** This page's own part draws nothing (a search that finds only the other place's rows, or a place whose only bot is
+   * the tile above): its heading is left out rather than shown over nothing. */
+  ownEmpty: boolean;
   row: (bot: PlacedBot) => ReactNode;
   query: string;
   density: SidebarDensityMode;
@@ -44,7 +48,7 @@ export function SidebarPlaces({ parts, placed, own, row, query, density, simple,
   const icons = density === "icons";
   return <>{parts.flatMap((part, index) => {
     const id = placeSectionId(part), folded = !icons && collapsed(id);
-    const heading = icons ? rail && index > 0 ? <SidebarRailSeparator key={`head:${id}`} /> : null
+    const heading = part.own && ownEmpty ? null : icons ? rail && index > 0 ? <SidebarRailSeparator key={`head:${id}`} /> : null
       : <div key={`head:${id}`} data-sidebar-place-heading={part.home} className={index > 0 && !simple ? "pt-3" : undefined}>
         <SidebarSectionHeader name={placeHeading(part.home)} line={simple} reserveMenu={simple} collapsed={folded} reorderable={false} dragging={false}
           onToggle={interactive ? () => toggle(id) : undefined}

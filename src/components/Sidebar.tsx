@@ -1089,7 +1089,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), placeParts = usePlaceParts(placed, q);
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), oneListHere = useOneListHere(), placeParts = usePlaceParts(placed, q), placeHere = placeParts ? oneListHere : null;
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null };
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
@@ -1355,7 +1355,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
-          <SidebarPlaces parts={placeParts} placed={placed} own={matchingBots} row={(bot) => <BotListItem key={bot.id} {...botRow(bot)} />} query={query} density={density} simple={simple} rail={rail} interactive={layoutInteractive} collapsed={sectionCollapsed} toggle={toggleSection}>{sectionIds.map((id, index) => {
+          <SidebarPlaces parts={placeParts} placed={placed} own={matchingBots} ownEmpty={sectionIds.length === 0} row={(bot) => <BotListItem key={bot.id} {...botRow(bot)} />} query={query} density={density} simple={simple} rail={rail} interactive={layoutInteractive} collapsed={sectionCollapsed} toggle={toggleSection}>{sectionIds.map((id, index) => {
             const sectionName = userSectionName(id);
             const sectionChiefItems = sectionName
               ? sectionChiefs.filter((bot) => bot.section === sectionName)

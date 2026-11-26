@@ -32,7 +32,8 @@ const here = (id: string, name: string, color: string, title: string, line: stri
 }) as Bot;
 const page: BotHome = params.get("page") === "cloud" ? "cloud" : "computer", homePlace: BotHome = params.get("home") === "cloud" ? "cloud" : "computer";
 const otherState = (["asleep", "waking", "offline", "signin"] as const).find((name) => name === params.get("other")) ?? null;
-// Each place's own bots: the page's are its store, the other place's come as rows. Each has its own MausBot on its own page.
+// Each place's own bots: the page's are its store, the other place's come as rows. Each place has its own MausBot: the
+// tile on its own page, and a row (first, as main lists it) among its rows on the other page.
 const chief = here("mausbot", "MausBot", "violet", "Today", "Your week is planned; three things need you.", { chiefOfStaff: true } as Partial<Bot>);
 const computerBots: Bot[] = [
   here("ledger", "Ledger", "orange", "Invoices", "The March invoices are filed in your Drive."),
@@ -44,9 +45,9 @@ const cloudBots: Bot[] = [
 ];
 const bots: Bot[] = [chief, ...(page === "cloud" ? cloudBots : computerBots)];
 const rowOf = (home: BotHome, bot: Bot): PlaceBotRow => ({ home, id: bot.id, threadId: bot.threadId, name: bot.name, color: bot.color, lastAt: AT + 20 * 60_000,
-  preview: (bot.messages[0] as { text: string }).text, chat: bot.tasks?.[0]?.title, ...(bot.unread ? { unread: true as const } : {}) });
+  preview: (bot.messages[0] as { text: string }).text, chat: bot.tasks?.[0]?.title, ...(bot.unread ? { unread: true as const } : {}), ...(bot.chiefOfStaff ? { chief: true as const } : {}) });
 const otherHome: BotHome = page === "cloud" ? "computer" : "cloud";
-const otherRows: PlaceBotRow[] = otherState ? [] : (page === "cloud" ? computerBots : cloudBots).map((bot) => rowOf(otherHome, bot));
+const otherRows: PlaceBotRow[] = otherState ? [] : [chief, ...(page === "cloud" ? computerBots : cloudBots)].map((bot) => rowOf(otherHome, bot));
 const joined = !["before", "rail-before"].includes(view) && view !== "notice-off";
 const together: PlacesTogetherState = joined
   ? { v: 1, available: true, on: true, here: page, home: homePlace, other: { home: otherHome, state: otherState ?? "ready", bots: otherRows, newBot: true }, ...(view.startsWith("notice") ? { notice: true, commands: false, ...(view === "notice-cloud-home" ? { profileHome: true as const } : {}) } : {}) }
