@@ -248,9 +248,10 @@ export function VoiceSettings({
   };
 
   const saveServer = () => {
+    const savedUrl = tts?.baseUrl?.trim() ?? "";
     const next = serverUrl.trim();
-    if (!next || savingServer) return Promise.resolve();
-    if (!/^https?:\/\//i.test(next)) {
+    if (savingServer || (!next && !savedUrl)) return Promise.resolve();
+    if (next && !/^https?:\/\//i.test(next)) {
       setError(t("voice.serverAddressError"));
       return Promise.resolve();
     }
@@ -465,7 +466,7 @@ export function VoiceSettings({
           />
           <button
             onClick={() => void saveServer()}
-            disabled={savingServer || !serverUrl.trim()}
+            disabled={savingServer || (!serverUrl.trim() && !tts?.baseUrl?.trim())}
             className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             {savingServer ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}

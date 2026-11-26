@@ -64,4 +64,28 @@ describe("importedSkillRequest", () => {
     expect(body).toEqual({ importError: expect.stringMatching(/^Could not import a skill from /) });
     expect(calls).toBe(1);
   });
+
+  it("forwards a sign-in getter onto GitHub API requests and leaves raw downloads anonymous", async () => {
+    const token = "gho_syntheticSkillImportToken";
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers) });
+      return github.fetch(input, init);
+    };
+    const body = await importedSkillRequest(
+      { action: "import", source: "https://github.com/acme/skills/tree/main/skills/pdf" },
+      fetcher,
+      undefined,
+      async () => ({ token }),
+    );
+    expect(body).toMatchObject({ action: "create", skill_md: SKILL("pdf") });
+    const api = calls.filter((call) => call.url.startsWith("https://api.github.com/"));
+    const raw = calls.filter((call) => call.url.startsWith("https://raw.githubusercontent.com/"));
+    expect(api.length).toBeGreaterThan(0);
+    expect(raw.length).toBeGreaterThan(0);
+    expect(api.every((call) => call.headers.get("authorization") === `Bearer ${token}`)).toBe(true);
+    expect(raw.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(JSON.stringify(body)).not.toContain(token);
+    expect(calls.every((call) => !call.url.includes(token))).toBe(true);
+  });
 });

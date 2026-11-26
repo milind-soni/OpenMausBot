@@ -98,12 +98,25 @@ export function openChatLink(dispatch: (action: Action) => void, link: string, s
   const address = parseThreadRefUrl(link);
   const ref = address ? resolveThreadRefAddress(collectThreadRefs(state.bots, state.groups), address) : null;
   if (ref) return openThread(dispatch, ref, state, threadsShown);
-  const owner = address?.botId ? openOwner(address.botId) : undefined;
-  if (owner) {
-    dispatch({ type: "notice", notice: { kind: "thread-gone", botName: owner.name } });
-  } else {
-    showLinkNotice(dispatch, state, { kind: "thread-gone", botName: null });
+  // A thread the loaded task lists do not know yet (a cold launch can open the link before every task list has
+  // landed) still exists on the server. Ask the pinned owner for exactly that thread: the server loads it or
+  // refuses the pair, so the transcript arrives without ever showing another chat's messages.
+  if (address?.botId) {
+    const group = state.groups.find((candidate) => candidate.id === address.botId && !candidate.dm);
+    if (group) {
+      dispatch({ type: "select", id: group.id });
+      dispatch({ type: "switchGroupTask", groupId: group.id, threadId: address.threadId });
+    } else if (state.bots.some((candidate) => candidate.id === address.botId)) {
+      openOwner(address.botId);
+      dispatch({ type: "switchTask", botId: address.botId, threadId: address.threadId });
+    } else {
+      showLinkNotice(dispatch, state, { kind: "thread-gone", botName: null });
+      return false;
+    }
+    dispatch({ type: "revealThread", threadId: address.threadId });
+    return true;
   }
+  showLinkNotice(dispatch, state, { kind: "thread-gone", botName: null });
   return false;
 }
 

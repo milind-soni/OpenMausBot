@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { addedLine, countsLine, folderFiles, TEMPLATE_FOLDER_MAX_BYTES } from "./template-share";
+import { addedLine, countsLine, creditShown, folderFiles, scrubbedLine, TEMPLATE_FOLDER_MAX_BYTES } from "./template-share";
 import { templateDetailsOf } from "./template-details";
 
 const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "shared", "package-fixtures", name), "utf8"));
@@ -15,6 +15,18 @@ describe("a template's words", () => {
     expect(countsLine({ scope: "department", counts: { bots: 1, skills: 1, routines: 0, apps: 0 } })).toBe("1 bot · 1 skill");
     expect(addedLine({ appsToConnect: 0 })).toBe("Added");
     expect(addedLine({ appsToConnect: 3 })).toBe("Added · 3 apps to connect");
+  });
+
+  it("says what was taken out in one sentence, and nothing when nothing was", () => {
+    expect(scrubbedLine({ scrubbed: { paths: 3, emails: 1, phones: 0, names: 0 } })).toBe("We removed 3 local paths and 1 email before publishing");
+    expect(scrubbedLine({ scrubbed: { paths: 0, emails: 2, phones: 1, names: 0 } })).toBe("We removed 2 emails and 1 phone number before publishing");
+    expect(scrubbedLine({ scrubbed: { paths: 0, emails: 0, phones: 0, names: 0 } })).toBe("");
+    expect(scrubbedLine({})).toBe("");
+  });
+
+  it("shows a credit only when it names somebody", () => {
+    expect(creditShown(" Jane Doe ")).toBe("Jane Doe");
+    for (const nobody of [undefined, "", " ", "Community", "MausBot community", "MausBot user", "mausbot USER"]) expect(creditShown(nobody)).toBeNull();
   });
 });
 

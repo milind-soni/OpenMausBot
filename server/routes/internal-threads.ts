@@ -1,5 +1,6 @@
 import { chiefTidies } from "../chief-of-staff.ts";
 import type { Coordinator, HandoffView } from "../coordinator.ts";
+import { mainThreadChoicePatch } from "../main-thread.ts";
 import { reachablePeers } from "../peer-roster.ts";
 import { threadTitleFrom, type BotRecord, type Store, type TaskRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -22,11 +23,13 @@ interface ThreadRow {
 
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps: {
-  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask">;
+  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask" | "patchBot">;
   coordinator: Pick<Coordinator, "awaitingAnswer" | "parkedDirect" | "activeDirect" | "active">;
   from: BotRecord;
   fromThreadId: string;
   ownsThread(botId: string, threadId: string): boolean;
+  /** The bot's threads that may be its main thread (server/index.ts mainThreadTasks), as the person's own choice uses. */
+  mainThreadTasks(botId: string): TaskRecord[];
   /** A turn that may use the lent Mac sees only owner-only conversations: a title is words too. */
   shown(threadId: string): boolean;
   threadBusy(botId: string, threadId: string): boolean;
@@ -107,6 +110,30 @@ export function createInternalThreadRoutes(deps: {
       const renamed = store.renameTask(from.id, fromThreadId, threadTitleFrom(title));
       if (!renamed) return json(res, 404, { error: "this conversation is not one of your own threads" });
       return json(res, 200, { renamed: true, title: renamed.title, previous });
+    }
+    // set_main_thread: a bot sets or clears its own main thread, as the person's "Set as main thread" does, under the same
+    // rule (an open conversation, never an automation run or an archived one). Never a teammate's.
+    if (method === "POST" && path === "/api/internal/main-thread") {
+      if (!deps.ownsThread(from.id, fromThreadId)) {
+        return json(res, 403, { error: "source conversation does not belong to sender" });
+      }
+      const body = await deps.readBody() as { mainThreadId?: unknown; clear?: unknown } | null;
+      if (body?.clear === true) {
+        store.patchBot(from.id, mainThreadChoicePatch([], null)!);
+        return json(res, 200, { cleared: true });
+      }
+      const threadId = typeof body?.mainThreadId === "string" && body.mainThreadId.trim() ? body.mainThreadId.trim() : fromThreadId;
+      const task = store.taskByThread(from.id, threadId);
+      if (!task || !deps.shown(threadId)) {
+        return json(res, 404, { error: "that is not one of your own threads (a room's thread or a teammate's cannot be your main thread) — call list_threads" });
+      }
+      const choice = mainThreadChoicePatch(deps.mainThreadTasks(from.id), threadId);
+      if (!choice) {
+        const why = task.routineRunId ? "it holds an automation run" : task.archivedAt !== undefined ? "it is archived" : "it is not one of your conversations that can be main";
+        return json(res, 409, { error: `#${task.title} cannot be your main thread: ${why}` });
+      }
+      store.patchBot(from.id, choice);
+      return json(res, 200, { threadId, title: task.title });
     }
     // close_thread folds a thread, never deletes it (a person's confirmed action), and never while it runs.
     const closeMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/close$/) : null;

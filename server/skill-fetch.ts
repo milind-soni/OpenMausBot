@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { GitHubSkillOrigin, SkippedSkillFile } from "../shared/skill-import.ts";
-import { SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
+import { readSkillFrontmatter, SKILL_FILE_MAX_BYTES } from "../shared/skill-md.ts";
+import { githubToken, reportGithubAuthFailure } from "./github/token.ts";
 import { planSkillFolder, SKILL_FOLDER_LIMITS, type FolderEntry, type SkillFolderFile } from "./skill-folder.ts";
 
 const API = "https://api.github.com";
@@ -15,20 +16,107 @@ const PARALLEL_DOWNLOADS = 4;
 class ImportLimitError extends Error {}
 class GitHubApiError extends Error {}
 
+export interface SkillImportSignIn {
+  token: string | null;
+  /** Set only when `token` is this audience's sign-in. A 401 on a request that sent it marks that sign-in stale. */
+  refused?(): void;
+}
+
+/** A refused audience (`null`) stays anonymous and has no `refused`. `githubToken(null)` is the server sign-in off a Team Cloud. */
+export function skillImportToken(audience?: string | null): Promise<SkillImportSignIn> {
+  if (audience === null) return Promise.resolve({ token: null });
+  return githubToken(audience).then((token) => token
+    ? { token, refused: () => reportGithubAuthFailure(audience ?? "owner") }
+    : { token: null });
+}
+
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+
+function requestHref(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
+function isGitHubApiRequest(input: Parameters<typeof fetch>[0]): boolean {
+  try {
+    return new URL(requestHref(input)).origin === API;
+  } catch {
+    return false;
+  }
+}
+
+function withBearer(input: Parameters<typeof fetch>[0], init: RequestInit | undefined, credential: string): Headers | null {
+  // Headers.set quotes an illegal value in its TypeError, which would return the sign-in in the import error.
+  if (!/^[A-Za-z0-9_]+$/.test(credential)) return null;
+  const headers = new Headers(input instanceof Request ? input.headers : undefined);
+  if (init?.headers) new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  headers.set("authorization", `Bearer ${credential}`);
+  return headers;
+}
+
 // One budget for the whole import, enforced while reading the stream.
-function boundedImportFetch(fetcher: typeof fetch, cancel?: AbortSignal): typeof fetch {
+function boundedImportFetch(
+  fetcher: typeof fetch,
+  cancel?: AbortSignal,
+  authorization: () => Promise<SkillImportSignIn> = () => skillImportToken(),
+): typeof fetch {
   let apiRequests = 0;
   let downloads = 0;
   let bytes = 0;
+  let reported = false;
+  let credential: Promise<SkillImportSignIn> | undefined;
   const timeout = AbortSignal.timeout(IMPORT_LIMITS.ms);
   const signal = cancel ? AbortSignal.any([timeout, cancel]) : timeout;
-  return async (input, init) => {
-    const listing = String(input).startsWith(`${API}/`);
-    if (listing ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
+  // `gh auth token` starts a process; a null answer stays null for this import.
+  const credentialOnce = (): Promise<SkillImportSignIn> => {
+    if (credential) return credential;
+    if (signal.aborted) return (credential = Promise.reject(signal.reason));
+    const lookup = authorization();
+    void lookup.catch(() => {});
+    return (credential = new Promise((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      if (signal.aborted) {
+        abort();
+        return;
+      }
+      signal.addEventListener("abort", abort, { once: true });
+      lookup.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    }));
+  };
+  const bounded: typeof fetch = async (input, init) => {
+    const api = isGitHubApiRequest(input);
+    if (api ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
       throw new ImportLimitError("Import request limit reached — paste a specific skill folder instead.");
     }
     signal.throwIfAborted();
-    const response = await fetcher(input, { ...init, signal });
+    const sent: RequestInit = { ...init, signal };
+    let carried: SkillImportSignIn["refused"];
+    let signed = false;
+    if (api) {
+      const signIn = await credentialOnce();
+      const headers = signIn.token ? withBearer(input, init, signIn.token) : null;
+      if (headers) {
+        sent.headers = headers;
+        sent.redirect = "manual";
+        signed = true;
+        carried = signIn.refused;
+      }
+    }
+    signal.throwIfAborted();
+    const response = await fetcher(input, sent);
+    if (carried && response.status === 401 && !reported) {
+      reported = true;
+      carried();
+    }
+    // A signed-in request follows a redirect (a renamed repository) only within the API origin, sending the sign-in again;
+    // anywhere else it stops at the redirect, so the sign-in never leaves api.github.com.
+    const location = signed && REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+    const moved = location && URL.canParse(location, requestHref(input)) ? new URL(location, requestHref(input)) : null;
+    if (moved?.origin === API) {
+      await response.body?.cancel().catch(() => {});
+      return bounded(moved.href, init);
+    }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       return response;
@@ -43,7 +131,7 @@ function boundedImportFetch(fetcher: typeof fetch, cancel?: AbortSignal): typeof
         if (chunk.done) break;
         size += chunk.value.byteLength;
         bytes += chunk.value.byteLength;
-        if (size > (listing ? LISTING_MAX_BYTES : SKILL_FOLDER_LIMITS.fileBytes) || bytes > IMPORT_LIMITS.bytes) {
+        if (size > (api ? LISTING_MAX_BYTES : SKILL_FOLDER_LIMITS.fileBytes) || bytes > IMPORT_LIMITS.bytes) {
           throw new ImportLimitError("Import size limit reached — paste a smaller skill folder instead.");
         }
         chunks.push(chunk.value);
@@ -53,6 +141,7 @@ function boundedImportFetch(fetcher: typeof fetch, cancel?: AbortSignal): typeof
     }
     return new Response(Buffer.concat(chunks), { status: response.status, headers: response.headers });
   };
+  return bounded;
 }
 
 export interface FetchedSkill {
@@ -159,7 +248,7 @@ function encodePath(path: string): string {
 function apiError(response: Response, url: string): GitHubApiError {
   const limited = response.status === 429 || (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0");
   return new GitHubApiError(limited
-    ? "GitHub's limit for requests without sign-in was reached — try again within the hour"
+    ? "GitHub's API rate limit was reached — try again later"
     : `GitHub API ${response.status} for ${url}`);
 }
 
@@ -223,12 +312,12 @@ const passThrough = (error: unknown) => error instanceof ImportLimitError || (er
 const toSkillSlug = (name: string) =>
   name.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
 
-async function skillNameFrom(entries: ContentEntry[], fetcher: typeof fetch): Promise<string | undefined> {
-  const skillMd = entries.find((entry) => entry.type === "file" && entry.name === "SKILL.md" && entry.download_url);
+async function skillNameFrom(snapshot: Snapshot, entries: ContentEntry[], fetcher: typeof fetch): Promise<string | undefined> {
+  const skillMd = entries.find((entry) => entry.type === "file" && entry.name === "SKILL.md");
   if (!skillMd) return undefined;
   try {
-    const text = (await fetchBytes(skillMd.download_url!, fetcher)).toString("utf8");
-    return text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1]?.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+    const text = (await fetchBytes(`https://${RAW_HOST}/${snapshot.owner}/${snapshot.repo}/${snapshot.commit}/${encodePath(skillMd.path)}`, fetcher)).toString("utf8");
+    return readSkillFrontmatter(text)?.fields.name;
   } catch (error) {
     if (passThrough(error)) throw error;
     return undefined;
@@ -243,7 +332,7 @@ async function discoverSkillDirs(target: Target, snapshot: Snapshot, fetcher: ty
   const isWanted = async (dir: string, entries: ContentEntry[]) => {
     if (!wanted) return true;
     if (dirMatches(dir)) return true;
-    const name = await skillNameFrom(entries, fetcher);
+    const name = await skillNameFrom(snapshot, entries, fetcher);
     return !!name && toSkillSlug(name) === wanted;
   };
   if (root.some((entry) => entry.type === "file" && entry.name === "SKILL.md") && (await isWanted(target.path, root))) {
@@ -359,10 +448,11 @@ export async function fetchSkillFromSource(
   input: string,
   fetcher: typeof fetch = fetch,
   cancel?: AbortSignal,
+  authorization?: () => Promise<SkillImportSignIn>,
 ): Promise<{ skills: FetchedSkill[] } | { error: string }> {
   const parsed = parseSkillSource(input);
   if ("error" in parsed) return parsed;
-  fetcher = boundedImportFetch(fetcher, cancel);
+  fetcher = boundedImportFetch(fetcher, cancel, authorization);
   try {
     return { skills: await fetchSkills(parsed, fetcher) };
   } catch (error) {
@@ -377,9 +467,13 @@ export async function fetchSkillFromSource(
 }
 
 /** The commit a GitHub skill's link names now: newer than `origin.commit` means an update is available. */
-export async function latestSkillCommit(origin: GitHubSkillOrigin, fetcher: typeof fetch = fetch): Promise<string | { error: string }> {
+export async function latestSkillCommit(
+  origin: GitHubSkillOrigin,
+  fetcher: typeof fetch = fetch,
+  authorization?: () => Promise<SkillImportSignIn>,
+): Promise<string | { error: string }> {
   try {
-    return await resolveCommit(origin.owner, origin.repo, origin.ref, boundedImportFetch(fetcher));
+    return await resolveCommit(origin.owner, origin.repo, origin.ref, boundedImportFetch(fetcher, undefined, authorization));
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }

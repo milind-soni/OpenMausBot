@@ -43,11 +43,14 @@ async function until(check) {
 app.whenReady().then(async () => {
   const { createLoginHandoffClient } = await import(pathToFileURL(join(root, "electron/cloud-logins.mjs")).href);
   const port = await freePort();
+  // Picked after the first listener closed, so the OS can hand the same port back.
+  let webhookPort = await freePort();
+  while (webhookPort === port) webhookPort = await freePort();
   writeFileSync(join(home, "config.json"), JSON.stringify({ instances: {
     claude: { driver: "claudeAgent", config: { cli: join(root, "server/testing/fake-claude-cli.ts") } },
   } }));
   harness = utilityProcess.fork(join(root, "dist-server/index.js"), [], { cwd: root, stdio: "pipe", env: {
-    HOME: home, USERPROFILE: home, OMB_DATA_DIR: home, PATH: "", OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(await freePort()),
+    HOME: home, USERPROFILE: home, OMB_DATA_DIR: home, PATH: "", OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
     OMB_DESKTOP_PARENT: "1", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
   } });
   harness.stdout.on("data", (chunk) => { logs += chunk; });

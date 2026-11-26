@@ -771,3 +771,31 @@ describe("Your own servers (SSH)", () => {
     expect(field("Server name").value).toBe("Lab");
   });
 });
+
+describe("Voice server address in Other services", () => {
+  const voiceInput = () => host.querySelector<HTMLInputElement>('input[aria-label="Chatterbox server address"]')!;
+  const voiceAction = (label: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>("[data-voice-server-url] button")].find((button) => button.textContent === label)!;
+
+  it("shows, validates, updates, and clears a stale voice server address even when another voice provider is active", async () => {
+    setConfig({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "http://127.0.0.1:4123", model: "" } });
+    page();
+    expect(expanded("voice")).toBe("true");
+    expect(voiceInput().value).toBe("http://127.0.0.1:4123");
+
+    type(voiceInput(), "not-a-url");
+    flushSync(() => voiceAction("Save").click());
+    expect(host.querySelector("[data-voice-server-url] [role=alert]")!.textContent).toContain("http:// or https://");
+    expect(fx.api).not.toHaveBeenCalled();
+
+    fx.api.mockResolvedValueOnce({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "http://127.0.0.1:4124", model: "" } });
+    type(voiceInput(), "http://127.0.0.1:4124");
+    await answered(() => voiceAction("Save").click());
+    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "http://127.0.0.1:4124" } }) });
+
+    fx.api.mockResolvedValueOnce({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "", model: "" } });
+    await answered(() => voiceAction("Remove").click());
+    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "" } }) });
+    expect(voiceInput().value).toBe("");
+  });
+});

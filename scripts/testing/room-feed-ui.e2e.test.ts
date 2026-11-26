@@ -1,12 +1,13 @@
-// A room as a feed of its threads, in the real renderer: with Settings → Features → Room feed on, a room of two bots
-// shows each thread's first line and its replies, a row opens its thread beside the feed, and a line sent from the
-// feed's composer starts a thread of its own there while the room's current thread stays where it was. A row's menu
-// pins, archives and deletes its thread, archived ones come back under Show archived threads, and the panel beside
-// the feed renames and deletes the thread it holds. With the switch off the room is its single transcript again.
+// A room as a feed of its threads, in the real renderer, with no switch: a room of two bots shows each thread's first
+// line and its replies, the room's "+" in the sidebar brings the room up with the cursor in the feed's composer, a row
+// opens its thread beside the feed, and a line sent from the feed's composer starts a thread of its own there while the
+// room's current thread stays where it was. A row's menu pins, archives and deletes its thread, archived ones come back
+// under Show archived threads, and the panel beside the feed renames and deletes the thread it holds. Below 768px the
+// room is its single transcript.
 // Needs the pinned agent-browser binary: runs when one resolves (tools directory, OMB_AGENT_BROWSER_PATH or PATH) or
 // OMB_UI_E2E=1 asks for the verified download; otherwise skipped.
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,9 +81,19 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     const current = async () => ((await api("GET", "/api/bots")).groups as Array<{ id: string; threadId: string }>).find((group) => group.id === room.id)!.threadId;
     expect(await current()).toBe(room.threadId);
 
-    await ui("flag", "--set", "features.roomFeed=true");
-    await evaluate(`document.querySelector('[data-sidebar-group-row="${room.id}"]').click(); true`);
+    await evaluate(`document.querySelector('[data-sidebar-bot-row="${info.botId}"]').click(); true`);
+    await until(() => evaluate("!document.querySelector('[data-room-feed]')"), "the bot's chat on screen");
+    await evaluate(`document.querySelector('[data-sidebar-group-row="${room.id}"]').parentElement.querySelector('button[aria-label="New thread"]').click(); true`);
     await until(() => evaluate("document.querySelectorAll('[data-feed-thread]').length === 3"), "the feed to list the room's three threads");
+    await until(() => evaluate("document.activeElement === document.querySelector('[data-room-feed-composer] textarea')"), "the cursor in the feed's composer after the room's +");
+    expect(await current()).toBe(room.threadId);
+    // The sidebar's top + offers the same, for the room that is open.
+    await evaluate("document.activeElement.blur(); document.querySelector('button[aria-label=\"New or share\"]').click(); true");
+    await until(() => evaluate(`Boolean(document.querySelector('[data-plus-room-thread="${room.id}"]'))`), "New thread in the room on the + menu");
+    expect(await evaluate(`document.querySelector('[data-plus-room-thread="${room.id}"]').textContent`)).toBe("New thread in Launch room");
+    await evaluate(`document.querySelector('[data-plus-room-thread="${room.id}"]').click(); true`);
+    await until(() => evaluate("document.activeElement === document.querySelector('[data-room-feed-composer] textarea')"), "the cursor in the feed's composer after the top +");
+    expect(await current()).toBe(room.threadId);
     expect(await evaluate("[...document.querySelectorAll('[data-feed-thread]')].map((row) => row.textContent.includes('1 reply'))")).toEqual([true, true, true]);
     expect(await evaluate(`Boolean(document.querySelector('[aria-expanded][aria-label*="Launch room"]'))`)).toBe(false);
     await ui("screenshot", "--out", join(evidenceDir, "room-feed.png"));
@@ -158,8 +169,67 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await until(async () => !(await tasks()).some((task) => task.threadId === logos), "the open thread to be deleted");
     await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the panel to close");
 
-    await ui("flag", "--set", "features.roomFeed=false");
-    await until(() => evaluate("!document.querySelector('[data-room-feed]') && Boolean(document.querySelector('[data-look=\"chat\"] [role=\"log\"]'))"), "the room's transcript to come back");
+    // An Inbox line for a bot's own thread opens in the chat, as before the feed; only room threads use the side panel.
+    await api("POST", `/api/bots/${basil.id}/messages`, { text: "Check the invoices" });
+    await idle();
+    const inboxOpen = () => evaluate("Boolean(document.querySelector('[data-inbox-panel=\"side\"]'))");
+    const toggleInbox = () => evaluate("document.querySelector('[data-sidebar-inbox]').click(); true");
+    if (!(await inboxOpen())) await toggleInbox();
+    await until(() => evaluate("[...document.querySelectorAll('[data-inbox-panel] button[aria-label]')].some((b) => b.getAttribute('aria-label').includes('Basil'))"), "Basil's thread in the Inbox");
+    await evaluate("[...document.querySelectorAll('[data-inbox-panel] button[aria-label]')].find((b) => b.getAttribute('aria-label').includes('Basil')).click(); true");
+    await until(() => evaluate(`document.querySelector('[data-sidebar-bot-row="${basil.id}"]')?.getAttribute('aria-current') === 'page'`), "Basil's chat on screen");
+    expect(await evaluate("Boolean(document.querySelector('[data-thread-panel]'))")).toBe(false);
+    if (await inboxOpen()) await toggleInbox();
+
+    // A room thread sits beside the feed only while the feed keeps 420px; otherwise it takes the feed's place, with a way back.
+    const layouts: Array<Record<string, unknown>> = [];
+    for (const width of ["1100", "900", "800"]) {
+      for (const withInbox of [false, true]) {
+        await browse("set", "viewport", width, "900");
+        await evaluate(`document.querySelector('[data-sidebar-group-row="${room.id}"]')?.click(); true`);
+        await until(() => evaluate("document.querySelectorAll('[data-feed-thread]').length > 0"), `the feed at ${width}px`);
+        if (withInbox !== await inboxOpen()) await toggleInbox();
+        await evaluate("document.querySelector('[data-feed-thread] > button:first-child').click(); true");
+        await until(() => evaluate("Boolean(document.querySelector('[data-thread-panel]'))"), `the thread at ${width}px`);
+        const measure = () => evaluate(`(() => {
+          const feed = document.querySelector('[data-room-feed]'), panel = document.querySelector('[data-thread-panel]');
+          return { width: ${width}, withInbox: ${withInbox}, inboxAfter: Boolean(document.querySelector('[data-inbox-panel="side"]')),
+            inPlace: panel.hasAttribute('data-thread-in-place'), feed: feed ? Math.round(feed.getBoundingClientRect().width) : 0,
+            panel: Math.round(panel.getBoundingClientRect().width), back: Boolean(document.querySelector('[data-thread-back]')) };
+        })()`) as Promise<Record<string, unknown>>;
+        // The sidebar folds and the panel slides in first: read the layout once it holds still.
+        let layout = await measure();
+        for (let tries = 0; tries < 20; tries++) {
+          await new Promise((done) => setTimeout(done, 600));
+          const again = await measure();
+          if (JSON.stringify(again) === JSON.stringify(layout)) break;
+          layout = again;
+        }
+        layouts.push(layout);
+        if (layout.inPlace) {
+          expect(layout, JSON.stringify(layout)).toMatchObject({ feed: 0, back: true });
+          await ui("screenshot", "--out", join(evidenceDir, `room-feed-thread-in-place-${width}${withInbox ? "-inbox" : ""}.png`));
+          await evaluate("document.querySelector('[data-thread-back]').click(); true");
+          await until(() => evaluate("Boolean(document.querySelector('[data-room-feed]')) && !document.querySelector('[data-thread-panel]')"), "back to the feed");
+        } else {
+          expect(layout.feed as number, JSON.stringify(layout)).toBeGreaterThanOrEqual(420);
+          expect(layout.panel as number).toBeGreaterThanOrEqual(360);
+          await evaluate("document.querySelector('[data-thread-panel] header button[aria-label=\"Close thread\"]').click(); true");
+          await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the thread to close");
+        }
+      }
+    }
+    writeFileSync(join(evidenceDir, "room-feed-layouts.json"), JSON.stringify(layouts, null, 1));
+    const at = (width: number, withInbox: boolean) => layouts.find((layout) => layout.width === width && layout.withInbox === withInbox);
+    // Opened with the Inbox open, where the Inbox is what leaves too little room, the Inbox closes and the thread sits beside.
+    expect(at(1100, true)).toMatchObject({ inPlace: false, inboxAfter: false });
+    // At 800px the feed and the thread never both fit: the thread takes the feed's place, and an open Inbox stays.
+    expect(at(800, false)).toMatchObject({ inPlace: true });
+    expect(at(800, true)).toMatchObject({ inPlace: true, inboxAfter: true });
+    if (await inboxOpen()) await toggleInbox();
+
+    await browse("set", "viewport", "700", "900");
+    await until(() => evaluate("!document.querySelector('[data-room-feed]') && Boolean(document.querySelector('[data-look=\"chat\"] [role=\"log\"]'))"), "the room's transcript below 768px");
     const logs = await ui("console");
     expect((logs.messages as Array<{ type: string; text: string }>).filter((message) => message.type === "error")).toEqual([]);
   } finally {

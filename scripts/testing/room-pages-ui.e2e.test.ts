@@ -121,9 +121,9 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await evaluate(`document.querySelector('${row}').click(); true`);
     await until(() => evaluate(`Boolean(document.querySelector('${row}[aria-current="page"]'))`), "the room to open");
 
-    // Pepper answers the room and shows a page there through the same internal route show_html uses.
-    await ui("type", "--name", "Message Launch room", "--text", "Pepper, show us the coffee counter");
-    await ui("press", "--keys", "Enter");
+    // Pepper answers the room's thread and shows a page there through the same internal route show_html uses. The room
+    // is its feed, whose composer starts a new thread, so the line goes to the room's own thread by the room's route.
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "Pepper, show us the coffee counter", threadId: room.threadId, sendId: "room-pages-ui-send-0000" });
     const pepper = await roomTurn(info.botId);
     const shown = await card(pepper.token, { tool: "show_html", html: PAGE, title: "Coffee counter", height: 180 });
     expect(shown, JSON.stringify(shown.body)).toMatchObject({ status: 201, body: { messageId: expect.any(String) } });
@@ -153,9 +153,19 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(pageDoc).toMatchObject({ room: true, can: { message: false, modelContext: false, serverTools: false, openLinks: true } });
     expect(await api("GET", `/api/threads/${room.threadId}/messages/${boardRow.id}/app`)).toMatchObject({ room: true, can: { serverTools: false, serverResources: false, message: false } });
 
-    // Both rows render in the room for the person, view-only. The page is a card that keeps its tools for when it is open.
+    // The room's thread opens beside its feed, where both rows render for the person, view-only. The page is a card that
+    // keeps its tools for when it is open.
+    await until(() => evaluate(`Boolean(document.querySelector('[data-feed-thread="${room.threadId}"]'))`), "the thread's row in the feed");
+    await evaluate(`document.querySelector('[data-feed-thread="${room.threadId}"] > button:first-child').click(); true`);
+    await until(() => evaluate(`Boolean(document.querySelector('[data-thread-panel="${room.threadId}"]'))`), "the thread beside the feed");
     const live = (id: string) => `[data-app="${id}"][data-app-room][data-app-state="live"] iframe[data-app-frame]`;
-    await until(() => evaluate(`Boolean(document.querySelector('${live(pageId)}') && document.querySelector('${live(boardRow.id)}'))`), "both frames to go live", 30_000);
+    // The panel is narrower than the chat, so each frame is brought into view to go live.
+    for (const id of [pageId, boardRow.id]) {
+      await until(async () => {
+        await evaluate(`document.querySelector('[data-app="${id}"]')?.scrollIntoView({ block: "center" }); true`);
+        return evaluate(`Boolean(document.querySelector('${live(id)}'))`);
+      }, `the frame of ${id} to go live`, 30_000);
+    }
     expect(await evaluate(`Boolean(document.querySelector('[data-app="${pageId}"] [data-page-tools]'))`)).toBe(false);
     mkdirSync(evidenceDir, { recursive: true });
 

@@ -2,7 +2,7 @@
 // it autosaves (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text,
 // 12-byte nonce first, 16-byte tag last); signing out clears all three. The key stays in this server process; no bot or page ever sees it.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,6 +14,12 @@ export interface SignedInSite {
   site: string;
   cookies: number;
   storage: number;
+  /**
+   * The site kept a cookie only a page of its own could set, or kept storage: one the bot opened
+   * itself, where a sign-in can live. False when every cookie is SameSite=None, the kind ads,
+   * trackers and embeds set from other sites' pages.
+   */
+  direct: boolean;
 }
 
 export interface SignedInSites {
@@ -44,7 +50,7 @@ export interface BrowserSitesDeps {
   stop?: (target: BrowserSitesTarget) => Promise<boolean>;
 }
 
-interface Cookie { name: string; domain: string; path: string; partitionKey?: unknown }
+interface Cookie { name: string; domain: string; path: string; partitionKey?: unknown; sameSite?: unknown }
 interface SavedOrigin { origin: string; localStorage?: unknown; sessionStorage?: unknown }
 interface SavedState { cookies: unknown[]; origins: unknown[] }
 
@@ -84,6 +90,12 @@ function hostOfCookie(cookie: Cookie): string {
   return cookie.domain.replace(/^\./u, "").toLowerCase();
 }
 
+// Chrome refuses a SameSite=Lax or Strict cookie from a cross-site subresource, and treats a cookie
+// without the attribute as Lax: only SameSite=None can come from another site's page.
+function firstParty(cookie: Cookie): boolean {
+  return typeof cookie.sameSite !== "string" || cookie.sameSite.toLowerCase() !== "none";
+}
+
 function hostOfOrigin(origin: string): string | null {
   try { return new URL(origin).hostname.toLowerCase().replace(/^\[|\]$/gu, "") || null; }
   catch { return null; }
@@ -109,18 +121,26 @@ function inSite(host: string, site: string): boolean {
 }
 
 export function signedInSites(cookies: readonly unknown[], origins: readonly unknown[]): SignedInSite[] {
-  const cookieHosts = cookies.filter(isCookie).map(hostOfCookie);
+  const saved = cookies.filter(isCookie).filter((cookie) => hostOfCookie(cookie));
   const storageHosts = origins.filter(isOrigin).filter(hasStorage).flatMap((origin) => hostOfOrigin(origin.origin) ?? []);
-  const hosts = new Set([...cookieHosts, ...storageHosts].filter(Boolean));
+  const hosts = new Set([...saved.map(hostOfCookie), ...storageHosts]);
   const sites = new Map<string, SignedInSite>();
   const entry = (host: string) => {
     const site = siteOf(host, hosts);
     let found = sites.get(site);
-    if (!found) sites.set(site, found = { site, cookies: 0, storage: 0 });
+    if (!found) sites.set(site, found = { site, cookies: 0, storage: 0, direct: false });
     return found;
   };
-  for (const host of cookieHosts) if (host) entry(host).cookies += 1;
-  for (const host of storageHosts) entry(host).storage += 1;
+  for (const cookie of saved) {
+    const found = entry(hostOfCookie(cookie));
+    found.cookies += 1;
+    if (firstParty(cookie)) found.direct = true;
+  }
+  for (const host of storageHosts) {
+    const found = entry(host);
+    found.storage += 1;
+    found.direct = true;
+  }
   return [...sites.values()].sort((a, b) => a.site.localeCompare(b.site));
 }
 
@@ -189,6 +209,31 @@ function rewriteSavedState(directory: string, session: string, key: string, site
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
   }
+}
+
+/** A session's saved sign-ins (its newest restore file) and when they last changed, for the Cloud's browser sandbox to carry
+ * over (server/cloud-browser/sign-ins.ts): null when it has none, "unreadable" when the file is there but cannot be read
+ * (a save under way, or another key), so the sandbox never opens signed out by mistake. */
+export function readSignIns(directory: string, session: string, key: string): { state: SavedState; modified: number } | null | "unreadable" {
+  for (const base of stateBases(session)) {
+    const path = [".json.enc", ".json"].map((suffix) => join(directory, base + suffix)).filter(existsSync)
+      .sort((a, b) => modified(b) - modified(a))[0];
+    if (!path) continue;
+    try { return { state: readState(path, key), modified: modified(path) }; }
+    catch { return "unreadable"; }
+  }
+  return null;
+}
+
+/** The sandbox's cookies written back as the session's saved cookies (its storage kept), so a browser that opens in the
+ * home sees the sign-ins made in the sandbox. Returns when the file changed. */
+export function writeSignIns(directory: string, session: string, key: string, cookies: unknown[]): number {
+  const current = readSignIns(directory, session, key);
+  const origins = current && current !== "unreadable" ? current.state.origins : [];
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const path = join(directory, `${stateBases(session)[0]}.json.enc`);
+  writeState(path, { cookies: cookies.filter(isCookie), origins }, key);
+  return modified(path);
 }
 
 export function connectCdp(url: string, timeoutMs = 10_000, listeners: CdpListeners = {}): Promise<Cdp> {

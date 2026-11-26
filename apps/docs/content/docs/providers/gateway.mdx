@@ -1,0 +1,57 @@
+---
+title: Using a gateway
+description: Route bots through OmniRoute, LiteLLM or another gateway, and choose the connection that keeps the terminal.
+icon: Waypoints
+---
+
+A gateway such as OmniRoute or LiteLLM puts several upstream models behind one
+address and one key, and can switch accounts or models when one runs out. How
+you connect it decides what a bot on it can do.
+
+## An OpenAI-compatible server is a chat runtime
+
+Adding the gateway as an **OpenAI-compatible server** (the Chat engine) gives a
+bot chat completions and MausBot's own tools: browser, computer, connected
+apps, agents and data. It does not give the bot a terminal or workspace files,
+and each tool call follows the bot's approval level. This is the right
+connection for chat, research and tool-using bots that do not need a shell.
+
+Use it when the gateway speaks only OpenAI's chat-completions API, or when the
+bot does not need to run commands. If a bot needs `Bash`, `Read`, `Edit` or
+another native tool, use the next connection instead.
+
+## Keep the terminal with a Claude custom endpoint
+
+If the gateway also speaks the Anthropic Messages API (`POST /v1/messages`)
+with tool use, connect it as a **Claude custom endpoint** instead:
+**Settings → AI → Providers → Claude → Add endpoint**. The bot then runs Claude
+Code's native tools — `Bash`, `Read`, `Edit` and the rest — against the
+gateway, together with MausBot's own tools.
+
+- **Base URL:** the gateway's root, without `/v1/messages`. For a local
+  OmniRoute that is `http://localhost:20128`; for a hosted gateway it is
+  usually the address before `/v1`.
+- **Token:** the gateway's key. A gateway that accepts any non-empty token
+  while no key is required still needs one here.
+- **Model:** type the exact model or combo id (for example
+  `auto/pro-coding`). Leaving it empty reads the gateway's `/v1/models`; if the
+  gateway protects that route and rejects the placeholder key, discovery
+  fails, so type the id.
+
+Each endpoint is its own engine, so different bots can use different gateway
+models. [Other model providers](./model-providers.mdx#claude-code) covers the
+rest of the endpoint fields.
+
+## Models that drive a web chat UI
+
+Some gateways can send a request to a consumer web-session provider — a chat
+site the gateway drives with a session cookie. Those providers have no native
+function calling. Depending on the gateway, the tool definitions may be
+dropped, emulated in the prompt, or the provider may run the work in its own
+sandbox and answer in text. Keep such models out of the models and `auto/*`
+combos a tool-using bot can land on: a bot that reports a result from another
+machine is worse than one that says it has no tool.
+
+Check the gateway's model list for a tool-calling field, and prefer models
+that advertise native tool calls for work that must act on a computer or an
+app.

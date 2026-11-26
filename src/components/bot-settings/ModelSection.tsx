@@ -8,6 +8,7 @@ import { CheckWorkSetting } from "./CheckWorkSetting";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
+import { BackupReasoning } from "../BackupReasoning";
 import { backupNote } from "@/lib/engine-rail";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
@@ -126,9 +127,11 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
               <span className="min-w-0 flex-1 truncate text-ink">{nameOf(entry.instanceId)}</span>
               <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}
                 aria-label={t("model.fallback.model", { name: nameOf(entry.instanceId) })}
-                onChange={(event) => onChange(chain.map((candidate, at) => at === index ? { ...candidate, model: event.target.value } : candidate))}>
+                onChange={(event) => onChange(chain.map((candidate, at) => at === index ? { instanceId: candidate.instanceId, model: event.target.value } : candidate))}>
                 {modelsOf(entry, index).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </Select>
+              <BackupReasoning instance={state.instances.find((instance) => instance.instanceId === entry.instanceId)} selection={entry}
+                onChange={(next) => onChange(chain.map((candidate, at) => at === index ? next : candidate))} />
               <button
                 type="button"
                 onClick={() => onChange(chain.filter((_, at) => at !== index))}

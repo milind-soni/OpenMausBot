@@ -171,9 +171,11 @@ export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: nu
     if (!sections.has(id)) sections.set(id, { box, path: new Path2D(d), rule: evenOdd ? 'evenodd' : 'nonzero' });
   }
   const { matrices, bounds } = framePlacement(frame);
-  const volume = material === 'fluffy' ? surface.volume : null;
+  // MausBot: matte and metallic take the fluffy path with their own lighting and no pile.
+  const finish = material === 'flat' ? null : material;
+  const volume = finish ? surface.volume : null;
   const fluffy = volume !== null;
-  if (fluffy) {
+  if (fluffy && finish === 'fluffy') {
     bounds.x0 -= PILE_MARGIN;
     bounds.y0 -= PILE_MARGIN;
     bounds.x1 += PILE_MARGIN;
@@ -198,7 +200,7 @@ export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: nu
 
   // The whole body and its eyes as one image, unless it has shrunk away into a mark.
   const { view, scale: bodyScale, eyes } = frame.surface;
-  const coat = volume && bodyScale > 0.001 ? renderFluffy(volume(), view, { color: fill, ink, eyes }, scale) : null;
+  const coat = volume && bodyScale > 0.001 ? renderFluffy(volume(), view, { color: fill, ink, eyes, finish: finish ?? undefined }, scale) : null;
   let coatPainted = false;
   ctx.lineCap = 'round';
   ctx.strokeStyle = ink;
@@ -210,7 +212,7 @@ export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: nu
     if (shape.kind === 'slice') {
       const section = sections.get(shape.path) as Section;
       if (isMark(shape)) {
-        if (!fluffy || !paintFluffyMark(ctx, section.box, scale, fill)) ctx.fill(section.path, section.rule);
+        if (!finish || !fluffy || !paintFluffyMark(ctx, section.box, scale, fill, finish)) ctx.fill(section.path, section.rule);
       } else if (!coat) {
         ctx.fill(section.path, section.rule);
       } else if (!coatPainted) {

@@ -52,7 +52,7 @@ export const DATA_TOOLS = [
     "data_load",
     "Load data into a named table of this bot's database: a local file, folder or glob (csv, tsv, json, ndjson, parquet, xlsx, sqlite; .gz/.zst too), an http(s)/s3/gs/az URL, a postgres:// or mysql:// connection string (snapshots the tables read-only), or a Google Sheets URL. Replaces a table of the same name unless replace is false. Returns each table's columns, row count and sample values.",
     {
-      source: { type: "string", minLength: 1, maxLength: 4000 },
+      source: { type: "string", minLength: 1, maxLength: 4000, description: "Local paths are relative to this conversation's working folder." },
       name: { type: "string", pattern: IDENT, description: "Table name. Default: from the file name." },
       kind: { type: "string", enum: ["auto", "csv", "tsv", "parquet", "json", "xlsx", "sqlite", "folder", "url", "postgres", "mysql", "gsheet"], description: "Default auto: decided from the source." },
       sheet: { type: "string", maxLength: 200, description: "The workbook sheet, or the table (schema.table) to snapshot from a database. Default: the first sheet; every table." },
@@ -283,6 +283,7 @@ export function toDataError(error: unknown, sql?: string, signal?: AbortSignal):
 export interface DataContext {
   database: BotDatabase;
   sheet: DataSheetStore;
+  cwd?: string;
   compileChart: ChartCompiler;
   validateVegaLite: VegaLiteValidator;
   renderer: ChartRenderer;
@@ -392,7 +393,7 @@ export function tableNameFrom(stem: string): string {
   return name;
 }
 
-export function planLoad(input: LoadInput): LoadPlan[] {
+export function planLoad(input: LoadInput, cwd?: string): LoadPlan[] {
   const { source } = input;
   const kind = input.kind ?? "auto";
   const warnings: string[] = [];
@@ -417,7 +418,7 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     if (reader === "xlsx") extensions.push("excel");
     return [{ kind: "url", source: stripCredentials(source), stem: input.name ?? (stemOf(pathname) || "download"), reader: readerExpression(reader, source, input, false), extensions, warnings }];
   }
-  const local = source.startsWith("~/") || source === "~" ? join(homedir(), source.slice(1)) : source;
+  const local = source.startsWith("~/") || source === "~" ? join(homedir(), source.slice(1)) : cwd ? resolve(cwd, source) : source;
   if ((GLOB_CHARS.test(local) || kind === "folder") && !existsSync(local)) {
     const reader = readerFor(extensionOf(local), kind === "folder" ? undefined : kind);
     if (!reader || reader === "sqlite" || reader === "xlsx") throw fail("source_unsupported", "A glob needs a file extension DuckDB reads many of: *.csv, *.parquet, *.json.", { hint: "Pass kind: csv, json or parquet with the glob." });
@@ -463,7 +464,7 @@ export interface LoadOutput { tables: LoadedTable[]; warnings: string[]; elapsed
 
 export async function loadData(ctx: DataContext, input: LoadInput): Promise<LoadOutput> {
   const started = Date.now();
-  const plans = planLoad(input);
+  const plans = planLoad(input, ctx.cwd);
   const replace = input.replace !== false;
   const existing = new Set((await ctx.database.listTables()).map((table) => table.name.toLowerCase()));
   const tables: LoadedTable[] = [];
@@ -546,7 +547,7 @@ export async function describeTarget(ctx: DataContext, target: string): Promise<
   let name: string | undefined;
   let sql: string | undefined;
   if (tableIdentifierParts(target)) {
-    name = await ctx.database.resolveTable(target.trim());
+    name = await ctx.database.resolveTable(target.trim(), ctx.connection);
     relation = name;
   } else {
     const kind = gateSql(target);
@@ -699,7 +700,7 @@ export async function showCard(context: DataContext, input: ShowInput, onCardRea
       if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "A card shows a SELECT's result.", { sql: input.sql });
       from = queryRelation(input.sql);
     } else {
-      from = await ctx.database.resolveTable(input.table!);
+      from = await ctx.database.resolveTable(input.table!, ctx.connection);
       cardSql = `SELECT * FROM ${from}`;
     }
     ctx.signal.throwIfAborted();
@@ -865,7 +866,7 @@ export async function exportData(ctx: DataContext, input: ExportInput): Promise<
     else throw fail("invalid_input", `${card.id} has no data to export.`);
     stem = card.title;
   } else if (input.table) {
-    relation = await ctx.database.resolveTable(input.table);
+    relation = await ctx.database.resolveTable(input.table, ctx.connection);
     stem = input.table;
   } else {
     const kind = gateSql(input.sql!);

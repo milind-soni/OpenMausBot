@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -78,6 +78,19 @@ describe("Antigravity skill staging", () => {
     expect(readdirSync(folder).sort()).toEqual(["SKILL.md", "references"]);
     expect(readdirSync(join(folder, "references"))).toEqual(["guide.md"]);
     expect(stageAntigravitySkills(turn, cwd).text).toBe(staged.text);
+
+    mkdirSync(join(folder, "references", "__pycache__"));
+    writeFileSync(join(folder, "references", "__pycache__", "guide.pyc"), "bytecode");
+    mkdirSync(join(folder, "node_modules", "x"), { recursive: true });
+    writeFileSync(join(folder, "node_modules", "x", "index.js"), "module.exports = 1;");
+    writeFileSync(join(folder, ".DS_Store"), "Finder");
+    const again = stageAntigravitySkills(turn, cwd);
+    expect(again.skillFiles).toEqual(staged.skillFiles);
+    expect(again.text).toBe(staged.text);
+    if (process.platform !== "win32") {
+      chmodSync(join(folder, "SKILL.md"), 0o700);
+      expect(() => stageAntigravitySkills(turn, cwd)).toThrow("Antigravity staged skill files changed.");
+    }
   });
 
   it("never stages through a task directory link", () => {

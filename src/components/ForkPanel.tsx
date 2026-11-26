@@ -1,25 +1,29 @@
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/cn";
-import { useFeature } from "@/lib/use-feature";
 import { useInboxPanel } from "@/state/inbox";
 import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { ChatView } from "./ChatView";
 import { GroupView } from "./GroupView";
 import { ThreadPanelHeading } from "./room-feed/ThreadPanelHeading";
+import { useRoomFeedHere } from "./room-feed/use-room-feed";
+import { useThreadTurnStart } from "./room-feed/thread-turn-start";
+import { FEED_MIN_WIDTH } from "./room-feed/feed-fit";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
 
 const BESIDE_INBOX_MAX = 400;
 
-/** Any thread beside the chat: a fork, and with the room feed on, the thread a feed row or the Inbox opened. */
-export function ForkPanel() {
+/** Any thread beside the chat: a fork, and where the server has the room feed, the room thread a feed row or the Inbox
+ * opened. `full`: that room thread takes the feed's place, because the two don't fit side by side; its back button
+ * returns to the feed. */
+export function ForkPanel({ full = false }: { full?: boolean }) {
   const { state, dispatch } = useStore();
   const panel = state.forkPanel;
   const asideRef = useRef<HTMLElement>(null);
   const focusedLoad = useRef<string | undefined>(undefined);
-  const beside = useFeature("roomFeed");
-  const resize = useComputerPanelResize({ key: "omb-thread-panel-width", defaultWidth: 440 });
+  const beside = useRoomFeedHere();
+  const resize = useComputerPanelResize({ key: "omb-thread-panel-width", defaultWidth: 440, chatMin: panel?.kind === "group" ? FEED_MIN_WIDTH : undefined });
   // Beside the Inbox the chat keeps the 440 it has beside any other side panel.
   const width = useInboxPanel().open ? Math.min(resize.panelWidth, BESIDE_INBOX_MAX) : resize.panelWidth;
   useLayoutEffect(() => {
@@ -29,6 +33,8 @@ export function ForkPanel() {
     focusedLoad.current = panel.loadId;
     (aside.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea:not([disabled])') ?? aside).focus();
   }, [panel?.focusComposer, panel?.loadId, panel?.loading]);
+  const panelGroup = panel?.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
+  const turnStartedAt = useThreadTurnStart(panelGroup, panelGroup?.tasks?.find((candidate) => candidate.threadId === panel?.threadId));
   if (!panel) return null;
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
@@ -38,18 +44,21 @@ export function ForkPanel() {
   const openedBot = bot && botTask ? { ...currentTaskBot(bot, panel.threadId), messages: panel.messages, activeLeafId: panel.activeLeafId, hasMore: false } : null;
   const openedGroup = group && groupTask ? { ...group, threadId: panel.threadId, messages: panel.messages, hasMore: false,
     working: groupTask.working ?? false, busyBotId: groupTask.busyBotId ?? null,
-    turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
+    turnStartedAt, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
   const fork = !beside || Boolean(task?.origin);
   const label = fork ? t("chat.forkPanel") : t("room.thread.panel");
   const close = () => dispatch({ type: "closeForkPanel" });
+  const roomThread = beside && !fork && Boolean(group);
+  const inPlace = full && roomThread;
 
   return (
     <aside ref={asideRef} tabIndex={panel.focusComposer ? -1 : undefined} aria-label={label} data-thread-panel={panel.threadId}
-      style={beside ? { width, ["--side-panel-w" as string]: `${width}px` } : undefined}
-      className={cn("relative flex h-full flex-col bg-app", beside
+      data-feed-area={roomThread ? "" : undefined} data-thread-in-place={inPlace ? "" : undefined}
+      style={beside && !inPlace ? { width, ["--side-panel-w" as string]: `${width}px` } : undefined}
+      className={cn("relative flex h-full flex-col bg-app", inPlace ? "min-w-0 flex-1" : beside
         ? "shrink-0 border-s-[0.5px] border-edge md:animate-panel-beside-in motion-reduce:animate-none"
         : "w-[min(48vw,640px)] min-w-[360px] border-s border-hairline")}>
-      {beside && <div
+      {beside && !inPlace && <div
         ref={resize.separatorRef}
         role="separator"
         aria-orientation="vertical"
@@ -67,12 +76,14 @@ export function ForkPanel() {
       />}
       {beside ? (
         <header className="flex shrink-0 items-center gap-2 py-2.5 ps-4 pe-3">
+          {inPlace && group && <button type="button" aria-label={t("room.thread.backToFeed", { name: group.name })} title={t("room.thread.backToFeed", { name: group.name })}
+            data-thread-back="" className="ui-icon-button shrink-0" onClick={close}><ArrowLeft size={16} aria-hidden="true" /></button>}
           {!fork && group && groupTask ? <ThreadPanelHeading group={group} task={groupTask} messages={panel.messages} working={Boolean(openedGroup?.working || openedGroup?.busyBotId)} /> : <div className="min-w-0 flex-1">
             <h2 dir="auto" title={task?.title} className="truncate text-[15px] font-semibold leading-5 text-ink">{fork ? task?.title ?? label : label}</h2>
             <p dir="auto" className="truncate text-[12px] leading-4 text-ink-secondary">{group?.name ?? bot?.name}</p>
           </div>}
-          <button type="button" aria-label={fork ? t("chat.closeForkPanel") : t("room.thread.close")} title={fork ? t("chat.closeForkPanel") : t("room.thread.close")}
-            className="ui-icon-button shrink-0" onClick={close}><X size={16} aria-hidden="true" /></button>
+          {!inPlace && <button type="button" aria-label={fork ? t("chat.closeForkPanel") : t("room.thread.close")} title={fork ? t("chat.closeForkPanel") : t("room.thread.close")}
+            className="ui-icon-button shrink-0" onClick={close}><X size={16} aria-hidden="true" /></button>}
         </header>
       ) : (
         <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-sm font-medium text-ink">
