@@ -193,6 +193,9 @@ const bridge = {
       ? ipcRenderer.invoke("workspaces:make-home", String(id)) : Promise.reject(new Error("Choose Make my home.")),
     // The ids of the servers main offers Make … my home for now (this computer's own page and the rail's only).
     homeOffers: () => ipcRenderer.invoke("workspaces:home-offers"),
+    // Show bots together (This computer and My Cloud together), from a click in a circle's menu on the rail's own page (main refuses any other page).
+    together: (on) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:rail-set", on === true) : Promise.reject(new Error("Choose Show bots together.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
@@ -609,8 +612,8 @@ const bridge = {
   // This computer's page and My Cloud's own page (main refuses any other): the other one's bots, listed beside this one's.
   placesTogether: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("places-together:state"),
-    set: on => isLocalPage || navigator.userActivation?.isActive === true
-      ? ipcRenderer.invoke("places-together:set", on === true) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
+    set: (on, from) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:set", on === true, ...(from === "notice" ? ["notice"] : [])) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
     open: botId => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
     onChanged: cb => {
@@ -618,6 +621,11 @@ const bridge = {
       ipcRenderer.on("places-together:changed", handler);
       return () => ipcRenderer.removeListener("places-together:changed", handler);
     },
+    // The notice of the default was drawn on this page, and the person closed it (main answers this computer's page only).
+    noticeShown: () => ipcRenderer.invoke("places-together:notice-shown"),
+    noticeDone: () => ipcRenderer.invoke("places-together:notice-done"),
+    setCommands: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:commands", on === true) : Promise.reject(new Error("Turn the switch to let My Cloud's bots run commands.")),
     newBotChoice: () => ipcRenderer.invoke("places-together:new-bot-choice"),
     newBot: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("places-together:new-bot") : Promise.reject(new Error("Choose where the new bot lives.")),

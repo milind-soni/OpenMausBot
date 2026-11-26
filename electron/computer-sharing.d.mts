@@ -190,6 +190,8 @@ export function createComputerSharing(options: {
   resume(): Promise<void> | undefined;
   /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
   lendTerminal(on: boolean): Promise<void> | undefined;
+  /** Every Cloud of the signed-in account's own may run commands here now (what lendTerminal last set, for that account). */
+  terminalOn(): boolean;
   screenChanged(): Promise<void>;
   cloudChanged(): void;
   start(options?: { maintainer?: boolean }): void;

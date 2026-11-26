@@ -101,15 +101,19 @@ export function createLinkedRoster(deps: LinkedRosterDeps) {
   /** Only when it matters: the place cannot be reached now. */
   const state = (row: LinkedRow): string => row.online ? "" : row.kind === "cloud" && deps.link.role() === "dialer" && deps.link.sleeps() ? "asleep: work sent there waits" : "offline: work sent there waits";
 
-  /** The far bots in their place's order, the person's Chief first. `busy`: past the cap, the ones this place has work
-   * out with now come next; only a hand-off's [LIVE TEAMMATES] uses it, so a system prompt never changes with work. */
+  /** The far bots, the person's Chief first and any other Chief next, then those of places that can be reached now (a computer that never came
+   * back would otherwise crowd out the one in use), each group by name: so a system prompt's roster changes only when a
+   * bot or the reachable places change, never with the order a place lists its bots in. `busy`: past the cap, the ones
+   * this place has work out with now are kept first; only a hand-off's [LIVE TEAMMATES] uses that, so a system prompt
+   * never changes with work. */
   function ordered(rows: readonly LinkedRow[], chief: LinkedRow | null, busy: boolean): LinkedRow[] {
-    const first = (a: LinkedRow) => Number(a.id === chief?.id);
-    const order = new Map(rows.map((row, index) => [row, index]));
+    const first = (a: LinkedRow) => (a.id === chief?.id ? 2 : a.bot.chief ? 1 : 0);
+    const byName = (a: LinkedRow, b: LinkedRow) => farLabel(a.bot.name, NAME_MAX).localeCompare(farLabel(b.bot.name, NAME_MAX), "en", { numeric: true, sensitivity: "base" }) || a.id.localeCompare(b.id);
+    const settled = (a: LinkedRow, b: LinkedRow) => first(b) - first(a) || Number(b.online) - Number(a.online) || byName(a, b);
     const used = new Map<string, number>();
     if (busy && rows.length > FAR_ROSTER_MAX) for (const node of deps.active?.() ?? []) used.set(node.botId, Math.max(used.get(node.botId) ?? 0, node.createdAt));
-    const kept = new Set([...rows].sort((a, b) => first(b) - first(a) || (used.get(b.id) ?? 0) - (used.get(a.id) ?? 0) || order.get(a)! - order.get(b)!).slice(0, FAR_ROSTER_MAX));
-    return rows.filter((row) => kept.has(row)).sort((a, b) => first(b) - first(a) || order.get(a)! - order.get(b)!);
+    const kept = new Set([...rows].sort((a, b) => first(b) - first(a) || (used.get(b.id) ?? 0) - (used.get(a.id) ?? 0) || settled(a, b)).slice(0, FAR_ROSTER_MAX));
+    return rows.filter((row) => kept.has(row)).sort(settled);
   }
 
   /** The far bots, fenced, within FAR_BLOCK_MAX characters. `about`: a Chief's lines, with each bot's role and
