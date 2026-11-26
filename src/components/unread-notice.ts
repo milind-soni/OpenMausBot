@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { botShowsUnread } from "@/lib/bot-unread";
-import { nextUnreadHold, unreadSinceByBot, type UnreadHold } from "@/lib/sidebar-layout";
+import { nextUnreadHold, unreadFilterOrder, unreadFilterSince, unreadSinceByBot, type UnreadHold } from "@/lib/sidebar-layout";
 import { newChatThreadId } from "@/state/new-chat";
 import type { Bot } from "@/state/store";
 
@@ -45,4 +45,26 @@ export function useUnreadHold(openId: string | null, bots: readonly Bot[], newCh
   const held = nextUnreadHold(seen.held, openId, seen.unread, chat);
   if (held !== seen.held || !sameTimes(unread, seen.unread)) setSeen({ unread, held });
   return held;
+}
+
+const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, index) => id === b[index]);
+
+/** The sidebar's Unread filter: how many bots show unread or wait on the person, and while it is open, those bots in a
+ * fixed order. The open bot stays listed until another conversation is open. Nothing is saved; it starts closed. */
+export function useUnreadFilter(bots: readonly Bot[], waiting: (bot: Bot) => boolean, openId: string | null) {
+  const [open, setOpen] = useState(false);
+  const since = unreadFilterSince(bots, waiting);
+  const shown = bots.find((bot) => bot.id === openId);
+  const chat = shown?.switchingTo ?? shown?.threadId;
+  const [seen, setSeen] = useState<{ since: ReadonlyMap<string, number>; held: UnreadHold | null; order: string[] }>({ since, held: null, order: [] });
+  const held = open ? nextUnreadHold(seen.held, openId, seen.since, chat) : null;
+  const order = open ? unreadFilterOrder(seen.order, since, held) : [];
+  if (held !== seen.held || !sameTimes(since, seen.since) || !sameIds(order, seen.order)) setSeen({ since, held, order });
+  const byId = new Map(bots.map((bot) => [bot.id, bot]));
+  return {
+    open,
+    count: since.size,
+    bots: order.flatMap((id) => byId.get(id) ?? []),
+    toggle: () => setOpen((value) => !value),
+  };
 }

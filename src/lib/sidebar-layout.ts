@@ -206,6 +206,22 @@ export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs:
   return { unreadBots, sectionChiefs: inPlace(parts.sectionChiefs), sectionedBots: inPlace(parts.sectionedBots), unsectionedBots: inPlace(parts.unsectionedBots) };
 }
 
+/** Each bot showing unread or waiting on the person, with the time the Unread filter lists it by. */
+export function unreadFilterSince<T extends UnreadListBot>(bots: readonly T[], waiting: (bot: T) => boolean): Map<string, number> {
+  return new Map(bots.filter((bot) => botShowsUnread(bot) || waiting(bot)).map((bot) => [bot.id, unreadSince(bot)]));
+}
+
+/** The ids the Unread filter lists, in the order they joined it: the ones listed when it opened, oldest first, then
+ * each newcomer at the end. A row never moves while the filter is open; it only leaves once read, and `held` stays. */
+export function unreadFilterOrder(previous: readonly string[], since: ReadonlyMap<string, number>, held: UnreadHold | null = null): string[] {
+  const listed = (id: string) => since.has(id) || id === held?.id;
+  const kept = previous.filter(listed);
+  const at = (id: string) => since.get(id) ?? held?.since ?? 0;
+  const added = [...since.keys(), ...(held ? [held.id] : [])].filter((id, index, all) => all.indexOf(id) === index && !kept.includes(id))
+    .sort((a, b) => at(a) - at(b));
+  return [...kept, ...added];
+}
+
 /** The rows of the bot list as shown, busy bots first and unread ones in a list of their own, with `filed`, every
  * shown bot that belongs to a department. `inPlace` is the saved order of the rows left where they belong: what a drag
  * or Alt+Up/Down arranges, so neither stores the shown order nor counts a row that Unread is listing. `unreadCount`

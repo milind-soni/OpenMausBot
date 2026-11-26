@@ -25,6 +25,8 @@ import {
   sidebarBotRows,
   nextUnreadHold,
   unreadBotsApart,
+  unreadFilterOrder,
+  unreadFilterSince,
   unreadSinceByBot,
   userSectionId,
   userSectionName,
@@ -459,5 +461,32 @@ describe("the unread section", () => {
     expect(withUnreadSection([], true)).toEqual([UNREAD_SECTION_ID]);
     expect(withUnreadSection([BOTS_SECTION_ID], false)).toEqual([BOTS_SECTION_ID]);
     expect(sidebarSectionLabel(UNREAD_SECTION_ID)).toBe("Unread");
+  });
+});
+
+describe("the Unread filter", () => {
+  const bots = [
+    { id: "a", unread: true, messages: [{ at: 30 }] },
+    { id: "b", unread: false, messages: [{ at: 50 }] },
+    { id: "c", unread: false, activity: "waiting-on-you", messages: [{ at: 10 }] },
+    { id: "d", unread: true, tasks: [{ unread: true, routineRunId: "r", updatedAt: 90 }] },
+  ];
+  const waiting = (bot: { activity?: string }) => bot.activity === "waiting-on-you";
+
+  it("lists bots showing unread and bots waiting on the person, as their dots do", () => {
+    expect([...unreadFilterSince(bots, waiting)]).toEqual([["a", 30], ["c", 10]]);
+  });
+
+  it("opens oldest first and adds each newcomer at the end without moving the rest", () => {
+    const first = unreadFilterOrder([], new Map([["a", 30], ["c", 10]]));
+    expect(first).toEqual(["c", "a"]);
+    expect(unreadFilterOrder(first, new Map([["a", 99], ["b", 5], ["c", 10]]))).toEqual(["c", "a", "b"]);
+  });
+
+  it("drops a read bot, except the one held open, which keeps its place", () => {
+    const order = ["c", "a", "b"];
+    expect(unreadFilterOrder(order, new Map([["c", 10], ["b", 50]]))).toEqual(["c", "b"]);
+    expect(unreadFilterOrder(order, new Map([["c", 10], ["b", 50]]), { id: "a", since: 30 })).toEqual(order);
+    expect(unreadFilterOrder([], new Map(), null)).toEqual([]);
   });
 });

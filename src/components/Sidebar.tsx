@@ -85,9 +85,9 @@ import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BU
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useBotUnread } from "./unread-notice";
+import { useBotUnread, useUnreadFilter } from "./unread-notice";
 import { attentionHasRunningWork, attentionJump, crossBotAttentionThreads, hasCrossBotRunningWork, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
-import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
+import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles"; import { SidebarUnreadFilterList, SidebarUnreadFilterRow } from "./SidebarUnreadFilter";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
 import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedSurface, rowSurface } from "./SidebarRowMarkers";
@@ -1089,7 +1089,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
   const visibleGroups = sideLists.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
-  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere();
+  const viewerEmail = useViewerEmail(), placed = useOtherPlaceBots(q), placeHere = useOneListHere(), unreadFilterShown = !q && density !== "icons", unreadFilter = useUnreadFilter(sideLists.bots.filter((bot) => !bot.hidden), (bot) => sidebarBotStatus(bot, state.pendingQueued).waiting, state.activeView === "chat" ? state.selectedId : null);
   const parts = partitionSidebarBots(botDrag.preview(matchingBots), { universalPins, viewerEmail, welcoming: useWelcomingBot(), searching: Boolean(q) });
   const saved = withOtherPlace(simpleDesk ? withPrimaryTile(parts, myDefaultBot(state.bots, viewerEmail)?.id) : { ...parts, primary: null }, placed);
   // Rows keep their place while the app is in use: unread, work and a wait on the person show as marks on the row, never
@@ -1336,7 +1336,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       )}
 
       {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
-      {simpleDesk && !tiles && <SidebarNoBots />}
+      {simpleDesk && !tiles && <SidebarNoBots />}{unreadFilterShown && <SidebarUnreadFilterRow count={unreadFilter.count} open={unreadFilter.open} large={!advanced} onToggle={unreadFilter.toggle} />}
       </GlassBar>
 
       {!collapseToIcons && !phone && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} avatars={density === "icons"} avatarsWidth={rail ? 92 : 80}
@@ -1347,7 +1347,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           {matchingBots.length === 0 && visibleGroups.length === 0 && !placed.length && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
-          {!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />}
+          {unreadFilterShown && unreadFilter.open ? <SidebarUnreadFilterList bots={unreadFilter.bots} item={(bot) => <BotListItem key={bot.id} {...botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere })} />} /> : <>{!q && <NeedsYouButton compact={rail} />}{!q && <SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />}
           {unsectionedChief && (phone ? (
             <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
           ) : (
@@ -1465,7 +1465,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               onToggle={() => setPinnedCircleThreadsCollapsed((collapsed) => !collapsed)}
               row={botRow}
             />
-          )}
+          )}</>}
         </div>
       </GlassScroller>
       <p className="sr-only" aria-live="polite" aria-atomic="true">
