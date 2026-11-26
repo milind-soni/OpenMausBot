@@ -85,10 +85,10 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
     { key: "remove", label: t("localApps.card.remove"), icon: <Trash2 size={16} />, separatorBefore: true, onSelect: onRemove },
   ];
   return (
-    <li data-local-app={app.id} className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card transition-colors duration-[120ms] hover:border-hairline motion-reduce:transition-none">
+    <li data-local-app={app.id} className="group relative flex min-w-0 flex-col rounded-2xl border border-hairline/40 bg-card transition-colors duration-[120ms] hover:border-hairline motion-reduce:transition-none">
       <button type="button" onClick={onOpen} aria-label={t("localApps.card.openOf", { name: app.name })} title={app.name}
         className="absolute inset-0 z-[1] rounded-2xl focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus" />
-      <div className="border-b border-hairline/30">
+      <div className="overflow-hidden rounded-t-2xl border-b border-hairline/30">
         <LocalAppThumb app={app} bot={bot} />
       </div>
       <div className="min-w-0 pb-3 pe-2 ps-3.5 pt-2">
