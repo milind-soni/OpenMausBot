@@ -102,9 +102,10 @@ export function skillBurgerEnabled(config: FeatureFlagConfig | null | undefined)
   return config?.features?.skillBurger !== false;
 }
 
-/** A faded next-line suggestion in an empty composer after a bot replies; on unless false. */
+/** A faded next-line suggestion in an empty composer after a bot replies. The server reports it on unless switched off; a
+ * server that doesn't report it has no suggestions to give. */
 export function suggestedRepliesEnabled(config: FeatureFlagConfig | null | undefined): boolean {
-  return config?.features?.suggestedReplies !== false;
+  return config?.features?.suggestedReplies === true;
 }
 
 export function threadTabsEnabled(config: FeatureFlagConfig | null | undefined): boolean {

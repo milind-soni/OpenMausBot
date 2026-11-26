@@ -102,6 +102,14 @@ describe("useSuggestedReply", () => {
     expect(fixture.calls.map((call) => call.body.after)).toEqual(["b2"]);
   });
 
+  it("asks nothing when an older page or an aside arrives after opening", async () => {
+    render({ messages: [ask("u2"), reply("b2")] });
+    render({ messages: [ask("u1"), reply("b1"), ask("u2"), reply("b2")] });
+    render({ messages: [ask("u1"), reply("b1"), ask("u2"), reply("b2"), { id: "a1", role: "user", kind: "text", text: "peer note", aside: true }] });
+    await settle();
+    expect(fixture.calls).toHaveLength(0);
+  });
+
   it("asks nothing for a conversation that was already finished when it opened", async () => {
     render({ messages: TURN });
     await settle();

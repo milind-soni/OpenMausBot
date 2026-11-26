@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ModelCatalog } from "../contracts.ts";
+import { codexBackgroundRoute } from "../drivers/codex-background-text.ts";
 import { lightModelFor, type LightModelEngine } from "./light-model.ts";
 
 const catalog = (...ids: string[]): ModelCatalog => ({ default: ids[0] ?? "", options: ids.map((id) => ({ id, label: id })) });
@@ -19,6 +20,14 @@ describe("lightModelFor", () => {
       .toEqual({ model: "gpt-6-luna", call: "background" });
     expect(lightModelFor(backgroundEngine("codex", catalog("gpt-6", "gpt-5.4-mini"))))
       .toEqual({ model: "gpt-5.4-mini", call: "background" });
+  });
+
+  it("keeps Codex's background call on the small model it was pinned to, with no retry on a bigger one", () => {
+    const models = catalog("gpt-6", "gpt-6-luna", "gpt-5.4-mini");
+    const light = lightModelFor(backgroundEngine("codex", models))!.model;
+    const pinned = { model: light, refused: new Set<string>(), onRefused: () => {} };
+    expect(codexBackgroundRoute(models, true, pinned)).toEqual({ model: "gpt-6-luna" });
+    expect(codexBackgroundRoute(models, true, pinned, true)).toEqual({ model: "gpt-6-luna" });
   });
 
   it("picks Grok's mini model, then its fast one", () => {

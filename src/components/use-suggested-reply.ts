@@ -45,12 +45,16 @@ export function useSuggestedReply(input: SuggestedReplyInput): SuggestedReply {
   const exchange = useMemo(() => lastExchange(input.messages), [input.messages]);
   const replyId = exchange?.replyId ?? null;
   const [, redraw] = useState(0);
-  const askId = input.messages.length ? input.messages.findLast((row) => row.role === "user")?.id ?? null : undefined;
-  const [watched, setWatched] = useState({ threadId, worked: working, askAtOpen: askId });
-  if (watched.threadId !== threadId) setWatched({ threadId, worked: working, askAtOpen: askId });
+  const lastRowId = input.messages.at(-1)?.id;
+  const [watched, setWatched] = useState({ threadId, worked: working, lastAtOpen: lastRowId });
+  if (watched.threadId !== threadId) setWatched({ threadId, worked: working, lastAtOpen: lastRowId });
   else if (working && !watched.worked) setWatched({ ...watched, worked: true });
-  else if (watched.askAtOpen === undefined && askId !== undefined) setWatched({ ...watched, askAtOpen: askId });
-  const sent = watched.threadId === threadId && watched.askAtOpen !== undefined && exchange !== null && exchange.askId !== watched.askAtOpen;
+  else if (watched.lastAtOpen === undefined && lastRowId !== undefined) setWatched({ ...watched, lastAtOpen: lastRowId });
+  const sent = useMemo(() => {
+    if (watched.threadId !== threadId || watched.lastAtOpen === undefined || !exchange) return false;
+    const openedAt = input.messages.findIndex((row) => row.id === watched.lastAtOpen);
+    return openedAt >= 0 && input.messages.findIndex((row) => row.id === exchange.askId) > openedAt;
+  }, [watched, threadId, exchange, input.messages]);
   const lastThread = useRef(threadId);
 
   useEffect(() => {

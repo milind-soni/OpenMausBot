@@ -8,6 +8,10 @@ export interface SuggestionRow {
   text?: string;
   automated?: unknown;
   aside?: unknown;
+  /** Another bot's ask, not the person's. */
+  peerAsk?: unknown;
+  from?: unknown;
+  stoppedBy?: unknown;
 }
 
 export interface LastExchange {
@@ -44,17 +48,18 @@ function interactive(row: SuggestionRow): boolean {
 }
 
 /** The person's last message and the bot's finished plain reply to it, or null when there is nothing to suggest after:
- * no reply yet, a card or choice to answer, an automated ask, or a reply too short to answer ("Done."). */
+ * no reply yet, a card or choice to answer, an automated or another bot's ask, a stopped reply, or one too short to
+ * answer ("Done."). */
 export function lastExchange(rows: readonly SuggestionRow[]): LastExchange | null {
   const askAt = rows.findLastIndex((row) => row.role === "user" && row.kind === "text" && !row.aside);
   if (askAt < 0) return null;
   const ask = rows[askAt]!;
-  if (ask.automated || !ask.text?.trim()) return null;
+  if (ask.automated || ask.peerAsk || ask.from || !ask.text?.trim()) return null;
   const after = rows.slice(askAt + 1);
   if (!after.length || after.some((row) => row.role !== "bot" || interactive(row))) return null;
   const reply = after.findLast((row) => row.kind === "text");
   const text = reply?.text?.trim();
-  if (!reply || !text || text.length < TRIVIAL_CHARS || words(text) < TRIVIAL_WORDS) return null;
+  if (!reply || reply.stoppedBy || !text || text.length < TRIVIAL_CHARS || words(text) < TRIVIAL_WORDS) return null;
   return { ask: ask.text.trim().slice(0, ASK_MAX), askId: ask.id, reply: text.length > REPLY_MAX ? `…${text.slice(-REPLY_MAX)}` : text, replyId: reply.id };
 }
 

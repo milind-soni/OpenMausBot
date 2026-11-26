@@ -29,6 +29,8 @@ describe("lastExchange", () => {
   it("has nothing after a trivial reply or an automated ask", () => {
     expect(lastExchange([ask("u", "send it"), reply("b", "Done.")])).toBeNull();
     expect(lastExchange([ask("u", "daily brief", { automated: { kind: "routine" } }), reply("b", LONG)])).toBeNull();
+    expect(lastExchange([ask("u", "check this", { peerAsk: { botId: "b2", name: "Rex" } }), reply("b", LONG)])).toBeNull();
+    expect(lastExchange([ask("u", "go"), reply("b", LONG, { stoppedBy: "person" })])).toBeNull();
   });
 
   it("keeps the end of a very long reply", () => {

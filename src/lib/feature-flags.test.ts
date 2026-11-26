@@ -98,9 +98,9 @@ describe("saved steps flag", () => {
     expect(savedStepsEnabled({ features: { savedSteps: false } })).toBe(false);
   });
 
-  it("keeps suggested replies on unless switched off", () => {
-    expect(suggestedRepliesEnabled(null)).toBe(true);
-    expect(suggestedRepliesEnabled({ features: {} })).toBe(true);
+  it("follows the server's suggested replies switch, and stays off with a server that doesn't report one", () => {
+    expect(suggestedRepliesEnabled(null)).toBe(false);
+    expect(suggestedRepliesEnabled({ features: {} })).toBe(false);
     expect(suggestedRepliesEnabled({ features: { suggestedReplies: true } })).toBe(true);
     expect(suggestedRepliesEnabled({ features: { suggestedReplies: false } })).toBe(false);
   });
