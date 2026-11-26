@@ -11029,6 +11029,23 @@ describe("harness HTTP API", () => {
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
   });
 
+  it("keeps VPS and private desktop idle timeouts independent", async () => {
+    const get = async () => (await api("GET", "/api/config")).body;
+    expect((await get()).vpsIdle).toEqual({ timeoutMinutes: 480 });
+    try {
+      for (const timeoutMinutes of [4, 1441, 5.5, "5", null]) {
+        expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes } })).status).toBe(400);
+      }
+      const saved = await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 5 } });
+      expect(saved.body).toMatchObject({ vpsIdle: { timeoutMinutes: 5 }, localVm: { idleTimeoutMinutes: 480 } });
+      await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
+      expect(await get()).toMatchObject({ vpsIdle: { timeoutMinutes: 5 }, localVm: { idleTimeoutMinutes: 30 } });
+      expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).vpsIdle).toEqual({ timeoutMinutes: 5 });
+    } finally {
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 }, localVm: { idleTimeoutMinutes: 480 } });
+    }
+  });
+
   it("validates, persists and applies the Local VM idle timeout in shared and per-bot modes", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     try {

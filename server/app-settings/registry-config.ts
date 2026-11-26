@@ -10,6 +10,7 @@ import { DEFAULT_WINDOW_MINUTES } from "../cache-keepwarm.ts";
 import { botsTowardLimit } from "../../shared/bot-limit.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { CONFIG_PATCH_FIELDS as F, MAX_THREAD_EVENT_LOG_BYTES, MIN_THREAD_EVENT_LOG_BYTES } from "../config.ts";
+import { vpsIdleTimeoutMinutes } from "../vps-config.ts";
 import { display, withoutKeys, type RegistryDeps, type SettingEntry, type Where, type WritableSpec } from "./registry.ts";
 
 /** Security: what a bot or card reads of a section never carries a key, token, secret or password field. */
@@ -150,6 +151,11 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       synonyms: ["private desktop", "vm", "docker", "podman", "container", "sandbox"],
       value: nonEmpty(F.localVm.unwrap().pick({ mode: true, maxInstances: true, idleTimeoutMinutes: true }).strict()), allowed: '{"mode"?:"shared"|"per-bot"|"pool","maxInstances"?,"idleTimeoutMinutes"?}',
       current: () => cfg().localVm ?? {}, patch: (localVm) => ({ localVm }), says: (localVm) => `Private desktops: ${fields(localVm)}`,
+    }),
+    section({
+      id: "desktops.vpsIdle", label: "Server desktop idle timeout", help: "Minutes before an idle SSH server desktop stops.", where: "page:desktops",
+      synonyms: ["VPS", "SSH", "idle timer"], value: F.vpsIdle.unwrap().shape.timeoutMinutes.unwrap(), allowed: "5 to 1440 whole minutes",
+      current: () => vpsIdleTimeoutMinutes(cfg()), patch: (timeoutMinutes) => ({ vpsIdle: { timeoutMinutes } }),
     }),
     feature("computer.sharing", "Computer sharing", "Whether every paired device may lend its computer to bots here. Each lent folder or app is still picked and confirmed on that device.", "page:desktops",
       ["share computer", "shared computers", "lend", "lending"], "sharedComputers", false,

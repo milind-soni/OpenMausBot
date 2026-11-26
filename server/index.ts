@@ -175,7 +175,7 @@ import {
   builtInBrowserEnabled,
   persistableInstanceConfigs,
   type AppConfig,
-  vpsResources, vpsSshAlias,
+  vpsIdleTimeoutMinutes, vpsResources, vpsSshAlias,
   DATA_DIR, EVENTS_DIR,
   onConfigSaved,
   CLAUDE_API_INSTANCE,
@@ -435,7 +435,7 @@ import { loopGuardSettings } from "./host/loop-guard.ts"; import { createUnatten
 import { claudeUserSkillsEnabled } from "./turn-settings.ts";
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
-import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts"; import { vpsContainerExec } from "./vps-exec.ts";
+import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts"; import { vpsContainerExec } from "./vps-exec.ts"; import { createVpsIdleHost } from "./host/vps-idle.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type Routine, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineModelRefusal, routineThreadModel, type RoutineModelChecks } from "./routine-input.ts"; import { routineHistoryFor, routineRunsFor } from "./routine-run-window.ts"; import { routineRunLimits } from "./routine-run-limits.ts"; import { runTurnLive } from "./routine-turn-live.ts"; import { batchSaves, flushLaterSaves } from "./save-batch.ts"; import { restartCutStop } from "./memory-freeze-restart.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
@@ -5582,18 +5582,6 @@ function waitForLocalVmUpdate(target: LocalVmTarget, threadId: string, isCurrent
   return localVmUpdates.waitFor(target, { isCurrent, cancelled: () => new DirectTurnSetupCancelled("turn stopped while its desktop was being updated"),
     announce: (text) => { store.appendMessage(threadId, { role: "bot", kind: "activity", ...(from ? { from } : {}), tool: { name: text } }); } });
 }
-const activeVpsThreads = new Map<string, Set<string>>();
-function vpsThreadStarted(botId: string, threadId: string): void {
-  const threads = activeVpsThreads.get(botId) ?? new Set<string>();
-  threads.add(threadId);
-  activeVpsThreads.set(botId, threads);
-}
-function vpsThreadEnded(botId: string, threadId: string): void {
-  const threads = activeVpsThreads.get(botId);
-  if (!threads) return;
-  threads.delete(threadId);
-  if (!threads.size) activeVpsThreads.delete(botId);
-}
 const boatLifecycleBusyBots = new Set<string>();
 const computerPreviews = createComputerPreviews();
 const vpsJoinRequests = new Map<string, Promise<void>>();
@@ -5604,6 +5592,8 @@ const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
 const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, ComputerIdleTimer>();
+const { activeVpsThreads, vpsThreadStarted, vpsThreadEnded, vpsIdles, vpsIdleMs, cancelVpsIdle, touchVpsIdle, vpsServerSwitched, recover: recoverVpsIdles, cancelAll: cancelAllVpsIdles } = createVpsIdleHost({ cfg, store, botHasActiveTurn, hasActiveRoutine: (id) => Boolean(routines?.activeRunForBot(id)), isSharedVmHeld: (id) => sharedVm.snapshot(id).held, hasComputerPreview: (id) => computerPreviews.has(id), isVpsConfigTransitioning: () => computerProviderConfigTransitions.has("vps"), isLifecycleBusy: (id) => boatLifecycleBusyBots.has(id), claimBotComputerLifecycle, isShuttingDown: () => companyShutdown });
+
 const meetingsHost = createMeetingsHost({ cfg, dataDir: DATA_DIR, store, startTurn: (botId, text, opts) => startTurn(botId, text, opts), threadBusy, power: () => cloudComputerPower, computerOwner: (bot) => botComputerControlKey(bot), routines: () => routines, log: (line) => console.warn(line) }, () => ({ personName: personNameIn, sendsFreely: (botId, threadId) => roomTurnLevels.forRequest(threadId, botId, () => sourceApprovalMode(botId, threadId)) === "full", outbound: () => outboundHold, markOutside: (threadId) => outsideLineage.mark(threadId), folder: (botId, threadId) => messageFileRootsForThread(botId, threadId).filter((root) => root !== ATTACHMENTS_DIR)[0] ?? null })); const cloudComputerPower = createCloudComputerPower({
   cfg, owners: managedBoatOwners, broadcast, log: line => console.warn(line), routines: () => routines?.listRoutines() ?? [], wakeTimedOut: (owner, boxId, ctx) => boatRecovery.wakeTimedOut(owner, boxId, ctx),
   routineComputer: routine => { const bot = store.bot(routine.botId); return bot && turnProvider(bot, routine.runOn) === "box" ? botComputerControlKey(bot) : null; },
@@ -5792,6 +5782,7 @@ async function mountBotVps(
   const vpsResource = `computer:vps:${vpsSshAliasForBot(cfg, bot)}:${bot.id}`;
   const remote = await (opts.start ? vps.vpsComputerAction("provision", botVpsConfig, bot.id) : vps.inspectVpsForAuto(botVpsConfig, bot.id));
   if (!remote?.ready || !remote.sshAlias) return { problem: remote?.problem ?? null, reachable: remote?.daemonUp === true, outdated: vpsDesktopOutdated(remote) };
+  touchVpsIdle(bot);
   const targetCfg = { ...cfg, vps: { sshAlias: remote.sshAlias } };
   const vpsMcp = vps.vpsComputerMcp(targetCfg, bot.id, remote.container_id ?? undefined);
   const vpsControl = controlIntegration(bot.id, owner.threadId, owner.generation);
@@ -6211,6 +6202,7 @@ function releaseLocalVmThread(threadId: string): void {
   localVmThreadTargets.delete(threadId);
 }
 
+recoverVpsIdles();
 void recoverLocalVms({ // at once: a queued or channel turn sent as the server listens finds a running VM
   mode: localVmMode(cfg), seats: localVmMaxInstances(cfg), bots: store.bots, seen: localVmSeen,
   status: (target) => containerComputerStatus(undefined, undefined, target).catch(() => null),
@@ -9017,6 +9009,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // Re-check the reviewed receipt at the final durable mutation, so a concurrent profile edit cannot be erased under a stale approval.
           revalidate();
           store.deleteBot(bot.id, setupRequest); sharedVm.botDeleted(bot.id); computerControlRevision.delete(bot.id);
+          vps.stopVpsDesktopTunnel(bot.id); cancelVpsIdle(bot.id);
           skillReview.dropBot(bot.id);
           memoryUpkeep.forgetBot(bot.id);
           calendarCalls!.removeBot(bot.id);
@@ -11585,6 +11578,7 @@ function configStatus() {
       configured: composio.configured(cfg), mode: composio.connectionMode(cfg),
     },
     box: { ...boat.describeBoatAccount(cfg), ...(boat.boatAccount(cfg)?.included ? {} : keyHint(cfg.box?.token)) },
+    vpsIdle: { timeoutMinutes: vpsIdleTimeoutMinutes(cfg) },
     vps: { configured: Boolean(vpsSshAlias(cfg)), sshAlias: vpsSshAlias(cfg) ?? "", servers: cfg.vpsServers ?? [], ...vpsResources(cfg) },
     opencodeGo: { ...keyStatus(cfg.opencodeGo?.apiKey), providerKeys: Object.keys(openCodeProviderKeys(cfg)) },
     tts: tts.describeVoice(cfg),
@@ -11987,7 +11981,7 @@ ROUTES.push(createBotSettingsRoutes({
   canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal, threadRead: teamMessages.seen, levelOf, personMarkThread: personRooms.personMarkThread, personHeldUnread: personRooms.personHeldUnread,
 }));
 const botOrderRoutes = createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(botOrders ? { own: { person: botOrders.personOf, order: botOrders, told: (person, botIds) => broadcast({ kind: "bots.order", botIds }, { person }) } } : {}) }); ROUTES.push(createGroupOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), botOrderRoutes, createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }), shared: createShareNotice({ people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, store: () => store, inbox: () => teamMessages.inbox }) }), accessRequests.routes);
-const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots, modelSwitched: noTerminal.modelSwitched,
+const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots, modelSwitched: noTerminal.modelSwitched, vpsServerSwitched,
   store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
@@ -12210,7 +12204,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,
   hostedModels: Boolean(hostedModels),
   cloudHome: Boolean(CLOUD_HOME), cloudTeam: CLOUD_TEAM !== null, sharedMembership,
-  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy,
+  lendingEnabled: () => lendingEnabled() || ownerLends(), providerConfigs, localVmIdleMs, localVmIdles, vpsIdleMs, vpsIdles, vpsServerSwitched, localVmActiveThreads, localVmLifecycleBusy,
   localVmImageBusy: { get: () => localVmImageBusy },
   localVmModeChangeBusy: { set: (busy) => { localVmModeChangeBusy = busy; } },
   localVmModeChanging: sharedVm.modeChanging,
@@ -14973,12 +14967,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           if (m[2] === "join") {
             const remote = auth.kind !== "loopback";
-            const result = await vps.vpsComputerJoin(vpsConfigForBot(cfg, bot), botId, undefined, remote);
+            const result = await vps.vpsComputerJoin(vpsConfigForBot(cfg, bot), botId, undefined, remote,
+              () => vpsIdles.get(botId)?.touch());
+            touchVpsIdle(bot);
             return json(res, 200, { ...result, joinUrl: remote
               ? desktopViewerUrl(`vps/${botId}`, bot.threadId) : result.joinUrl });
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
-          return json(res, 200, await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId));
+          const status = await vps.vpsComputerAction(action, vpsConfigForBot(cfg, bot), botId);
+          if (status.container === "running") touchVpsIdle(bot); else cancelVpsIdle(botId);
+          return json(res, 200, status);
         } finally {
           releaseComputerLifecycle();
           if (joinSettled) {
@@ -15197,6 +15195,7 @@ const gracefulShutdown = createGracefulShutdown({
       desktopViewer.closeAll();
       upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();
+      cancelAllVpsIdles();
       cloudComputerPower.close(); boatRecovery.close();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();

@@ -666,11 +666,11 @@ export function parseLocalVmIdleTimeoutMinutes(value: string): number | null {
 export function LocalVmIdleTimeoutSetting({
   minutes,
   disabled,
-  onSave,
+  onSave, id = "local-vm-idle-timeout", detail = t("vm.idle.detail"),
 }: {
   minutes: number;
   disabled: boolean;
-  onSave: (minutes: number) => Promise<void>;
+  onSave: (minutes: number) => Promise<void>; id?: string; detail?: string;
 }) {
   const [value, setValue] = useState(String(minutes));
   const [dirty, setDirty] = useState(false);
@@ -705,12 +705,12 @@ export function LocalVmIdleTimeoutSetting({
     <div className="mt-3 flex flex-col gap-1">
       <div className="flex items-center justify-between gap-6">
         <div className="min-w-0">
-          <label htmlFor="local-vm-idle-timeout" className="text-[14px] leading-5 text-ink">{t("vm.idle.label")}</label>
-          <div id="local-vm-idle-timeout-help" className="text-[13px] leading-[18px] text-ink-secondary">{t("vm.idle.detail")}</div>
+          <label htmlFor={id} className="text-[14px] leading-5 text-ink">{t("vm.idle.label")}</label>
+          <div id={`${id}-help`} className="text-[13px] leading-[18px] text-ink-secondary">{detail}</div>
         </div>
         <span className="flex shrink-0 items-center gap-2">
           <input
-            id="local-vm-idle-timeout"
+            id={id}
             type="number"
             min={MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
             max={MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
@@ -719,7 +719,7 @@ export function LocalVmIdleTimeoutSetting({
             value={value}
             disabled={disabled || saving}
             aria-invalid={Boolean(error)}
-            aria-describedby={error ? "local-vm-idle-timeout-error local-vm-idle-timeout-help" : "local-vm-idle-timeout-help"}
+            aria-describedby={error ? `${id}-error ${id}-help` : `${id}-help`}
             onChange={(event) => {
               setValue(event.target.value);
               setDirty(true);
@@ -735,7 +735,7 @@ export function LocalVmIdleTimeoutSetting({
         </span>
       </div>
       {error ? (
-        <p id="local-vm-idle-timeout-error" role="alert" className="text-[12px] leading-4 text-danger">
+        <p id={`${id}-error`} role="alert" className="text-[12px] leading-4 text-danger">
           {error}
         </p>
       ) : null}
