@@ -1,6 +1,10 @@
 // The bot that handed work on can stop it, as the person's Stop does: its running turn is interrupted, a command still
 // running included, and everything it handed on ends. Handed-off work that shows nothing for a while is reported to that
 // bot, which may stop it; the runtime stops it itself at its limit (runtime Limits.handoffQuietMaxMs).
+//
+// Privacy: these lines land in the requester's conversation, which may be a room. Where the work's result would be
+// withheld from it (access changed, or the work stays in one person's private chat), they name no title, command or
+// link: only who, how long and how to stop.
 import type { Coordinator, HandoffView } from "../coordinator.ts";
 import { composeQuiet } from "../runtime/envelope.ts";
 import type { Store } from "../store.ts";
@@ -8,6 +12,8 @@ import type { Store } from "../store.ts";
 export interface HandoffStopDeps {
   coordinator: Pick<Coordinator, "node" | "stopHandoff">;
   store: Pick<Store, "bot" | "appendMessage" | "taskByThread">;
+  /** The rule that withholds a hand-off's result from its requester's conversation; true keeps the work's details out. */
+  withheld(node: HandoffView, parent: HandoffView): boolean;
 }
 
 export interface StopRequest {
@@ -35,10 +41,15 @@ export function stopHandedOn(deps: HandoffStopDeps, input: StopRequest): { statu
     return { status: 409, body: { error: `${assignee}'s work "${input.id}" already ended (${node.status}): nothing to stop. Its result came back to you, or comes back now.` } };
   }
   deps.store.appendMessage(input.senderThreadId, { role: "bot", kind: "activity", from: senderFrom(deps, input.senderId),
-    tool: { name: `Stopped ${assignee}'s work`, ok: true, output: input.why.slice(0, 400) },
-    threadRef: { botId: node.botId, threadId: node.threadId, title: deps.store.taskByThread(node.botId, node.threadId)?.title ?? assignee } });
+    tool: { name: `Stopped ${assignee}'s work`, ok: true, output: input.why.slice(0, 400) }, ...workRef(deps, node, parent, assignee) });
   return { status: 200, body: { stopped: true, requestId: input.id, botId: node.botId, botName: assignee,
     detail: `${assignee}'s turn on it was interrupted now, a running command included, and what it handed on ended too. It closes as stopped by you, and that result resumes you; do not wait for anything else from it.` } };
+}
+
+/** A link to the work, titled, only where its result would reach this conversation. */
+function workRef(deps: HandoffStopDeps, node: HandoffView, parent: HandoffView, assignee: string): { threadRef?: { botId: string; threadId: string; title: string } } {
+  if (deps.withheld(node, parent)) return {};
+  return { threadRef: { botId: node.botId, threadId: node.threadId, title: deps.store.taskByThread(node.botId, node.threadId)?.title ?? assignee } };
 }
 
 function senderFrom(deps: HandoffStopDeps, botId: string): { botId: string; name: string; color: string } | undefined {
@@ -59,10 +70,10 @@ export function noticeQuiet(deps: QuietNoticeDeps, node: HandoffView, parent: Ha
   if (!parent) return;
   const assignee = deps.store.bot(node.botId)?.name ?? "Teammate";
   const minutes = Math.max(1, Math.floor(quietMs / 60_000)), closesIn = Math.max(1, Math.ceil(closesInMs / 60_000));
-  const command = deps.command(node.threadId);
+  const command = deps.withheld(node, parent) ? null : deps.command(node.threadId);
   deps.store.appendMessage(parent.threadId, { role: "bot", kind: "activity", from: senderFrom(deps, node.botId),
     tool: { name: `${assignee} has shown no progress for ${minutes} min`, ok: true,
       output: `${command ? `Still running: ${command.command.slice(0, 300)} (${command.minutes} min). ` : ""}It is stopped in ${closesIn} min if nothing moves.` },
-    threadRef: { botId: node.botId, threadId: node.threadId, title: deps.store.taskByThread(node.botId, node.threadId)?.title ?? assignee } });
+    ...workRef(deps, node, parent, assignee) });
   if (parent.status === "running") void deps.steer(parent.threadId, composeQuiet(node.id, assignee, minutes, closesIn, command)).catch(() => false);
 }

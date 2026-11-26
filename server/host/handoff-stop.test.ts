@@ -8,7 +8,8 @@ import { noticeQuiet, stopHandedOn, type HandoffStopDeps } from "./handoff-stop.
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 /** A host whose every handed-off turn is a command that never ends by itself: only an abort ends it, as an interrupt does. */
-function rig() {
+/** `kept`: the work's result is withheld from the requester's conversation (a room reading one person's private work). */
+function rig(kept = false) {
   const aborted: string[] = [];
   const reports: Array<{ child: HandoffView; parent?: HandoffView }> = [];
   const host: CoordinatorHost = {
@@ -31,12 +32,13 @@ function rig() {
   const store = {
     bot: (id: string) => bots[id],
     appendMessage: (threadId: string, row: Partial<Message>) => { rows.push({ threadId, row }); return row; },
-    taskByThread: () => undefined,
+    taskByThread: (_botId: string, threadId: string) => threadId === "lead-work" ? { title: "Private: salary review" } : undefined,
   } as unknown as HandoffStopDeps["store"];
+  const withheld = () => kept;
   coordinator.beginTurn({ id: "gen-maus", address: { botId: "maus", threadId: "maus-chat" }, brief: "Open the PR", level: "full", origin: { kind: "user", request: "Open the PR" } });
   const { node } = coordinator.enqueue({ botId: "maus", threadId: "maus-chat" }, "gen-maus", undefined, { botId: "lead", threadId: "lead-work" }, "Build the PR", {});
   coordinator.tick();
-  return { coordinator, store, rows, aborted, reports, node };
+  return { coordinator, store, withheld, rows, aborted, reports, node };
 }
 
 describe("stopHandedOn: the bot that handed work on stops it", () => {
@@ -85,6 +87,31 @@ describe("noticeQuiet: handed-off work that shows nothing", () => {
     expect(steered[0]!.threadId).toBe("maus-chat");
     expect(steered[0]!.text).toContain(`stop "${w.node.id}"`);
     expect(steered[0]!.text).toContain(JSON.stringify("pnpm test"));
+  });
+
+  it("names no title, command or link where the work's result is withheld from the requester's conversation", async () => {
+    const w = rig(true);
+    const steered: string[] = [];
+    noticeQuiet({ ...w, command: () => ({ command: "cat private-notes.md", minutes: 45 }), steer: async (_threadId, text) => { steered.push(text); return true; } },
+      w.coordinator.node(w.node.id)!, { ...w.coordinator.node("gen-maus")!, status: "running" }, 20 * 60_000, 40 * 60_000);
+    expect(w.rows).toHaveLength(1);
+    expect(w.rows[0]!.row).not.toHaveProperty("threadRef");
+    expect(w.rows[0]!.row.tool).toEqual({ name: "Dev Lead has shown no progress for 20 min", ok: true, output: "It is stopped in 40 min if nothing moves." });
+    expect(steered).toHaveLength(1);
+    expect(steered[0]).toContain(`stop "${w.node.id}"`);
+    expect(JSON.stringify([w.rows, steered])).not.toMatch(/private-notes|salary/);
+    stopHandedOn(w, { senderId: "maus", senderName: "MausBot", senderThreadId: "maus-chat", id: w.node.id, why: "enough" });
+    expect(w.rows[1]!.row).not.toHaveProperty("threadRef");
+    expect(JSON.stringify(w.rows)).not.toMatch(/salary/);
+  });
+
+  it("links the work by its title, with its command, where the requester's conversation reads its result", () => {
+    const w = rig();
+    noticeQuiet({ ...w, command: () => ({ command: "pnpm test", minutes: 45 }), steer: async () => true },
+      w.coordinator.node(w.node.id)!, { ...w.coordinator.node("gen-maus")!, status: "waiting" }, 20 * 60_000, 40 * 60_000);
+    stopHandedOn(w, { senderId: "maus", senderName: "MausBot", senderThreadId: "maus-chat", id: w.node.id, why: "enough" });
+    expect(w.rows.map(r => r.row.threadRef)).toEqual([0, 1].map(() => ({ botId: "lead", threadId: "lead-work", title: "Private: salary review" })));
+    expect(w.rows[0]!.row.tool?.output).toContain("Still running: pnpm test");
   });
 
   it("steers nothing when the requester has no turn running", () => {

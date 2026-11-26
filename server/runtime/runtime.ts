@@ -62,7 +62,7 @@ const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performanc
 
 /** `interruption`: a resume for a teammate's question while other work is still out; the node's restart note waits for its real resume.
  * `carried`: the settled children whose results the turn's input carried; one that settles later owes the node another resume. */
-interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string>; quietTold?: boolean }
+interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string>; quietTold?: boolean; quietFrom?: number }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
 
@@ -331,7 +331,7 @@ export class Runtime {
         if (turn && this.away(n)) turn.activeAt = mono;
         else if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
           this.cancelTree(n, `no activity for ${duration(this.limits.turnStallMs)}`, "failed", "stalled");
-        } else if (turn && n.parentId !== undefined) this.quietHandoff(n, turn, mono - turn.activeAt);
+        } else if (turn && n.parentId !== undefined) this.quietHandoff(n, turn, mono);
       }
     }
     // Access is rechecked every tick, not only at dispatch, so no result crosses a boundary that closed under it.
@@ -908,10 +908,17 @@ export class Runtime {
   }
 
   /** Handed-off work quiet for `quiet`: its requester hears it once per quiet stretch, and at handoffQuietMaxMs it fails as
-   * stalled, which aborts its turn even with a command still running. A turn waiting on a person or a computer is not quiet. */
-  private quietHandoff(n: Assignment, turn: LiveTurn, quiet: number): void {
+   * stalled, which aborts its turn even with a command still running. A turn waiting on a person or a computer is not quiet,
+   * and its quiet stretch starts over when the wait ends: a long wait never stops the work the moment it is answered. */
+  private quietHandoff(n: Assignment, turn: LiveTurn, mono: number): void {
     const { handoffQuietNoticeMs: notice, handoffQuietMaxMs: max } = this.limits;
-    if (quiet <= Math.min(notice, max) || this.safe("waiting", () => this.runner.waiting?.(n) ?? false) !== false) return;
+    if (this.safe("waiting", () => this.runner.waiting?.(n) ?? false) !== false) {
+      turn.quietFrom = mono;
+      turn.quietTold = false;
+      return;
+    }
+    const quiet = mono - Math.max(turn.activeAt, turn.quietFrom ?? turn.activeAt);
+    if (quiet <= Math.min(notice, max)) return;
     if (quiet > max) {
       this.cancelTree(n, `no activity for ${duration(max)} on this handed-off work, so it was stopped, along with any command it was running`, "failed", "stalled");
       return;

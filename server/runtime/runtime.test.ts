@@ -359,7 +359,7 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
-  it("does not count the silence of handed-off work waiting on a person or a computer, nor of a root", () => {
+  it("does not count the silence of handed-off work waiting on a person or a computer, and starts its quiet stretch over when the wait ends", () => {
     const w = world(() => "hold", { handoffQuietNoticeMs: 1_000, handoffQuietMaxMs: 3_000 });
     let waiting = true;
     const told: string[] = [];
@@ -374,8 +374,20 @@ describe("Runtime: one tree, one lane", () => {
     expect(told).toEqual([]);
     waiting = false;
     w.runtime.tick();
+    expect(w.store.get(a.id)?.status).toBe("running");
+    expect(told).toEqual([]);
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    expect(told).toEqual([a.id]);
+    expect(w.store.get(a.id)?.status).toBe("running");
+    w.clock.advance(1_999);
+    w.runtime.tick();
+    expect(w.store.get(a.id)?.status).toBe("running");
+    w.clock.advance(2);
+    w.runtime.tick();
     expect(w.store.get(a.id)).toMatchObject({ status: "failed", outcome: "stalled" });
     expect(w.store.get(root.id)?.status).not.toBe("failed");
+    invariants(w);
   });
 
   it("stalls a turn with no activity on the monotonic clock, and a tree with no progress, but never a parked tree", async () => {
