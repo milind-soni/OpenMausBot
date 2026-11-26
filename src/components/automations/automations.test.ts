@@ -274,6 +274,68 @@ describe("the Automations list switch", () => {
     expect(container.querySelector('[data-automation="orphan-hook"]')).toBeNull();
   });
 
+  describe("Pause all / Resume all", () => {
+    const setAll = () => container.querySelector<HTMLButtonElement>("[data-automations-set-all]");
+    const writes = () => fixture.api.mock.calls.filter(([, init]) => (init as { body?: string } | undefined)?.body)
+      .map(([calledPath, init]) => [calledPath, JSON.parse((init as { body: string }).body).enabled]);
+    /** Each write answers with the automation as now saved, as the server does. */
+    function answerWrites() {
+      fixture.api.mockImplementation(async (path: unknown, init: unknown) => {
+        const body = (init as { body?: string } | undefined)?.body;
+        if (!body) return {};
+        const { enabled } = JSON.parse(body) as { enabled: boolean };
+        const id = String(path).split("/").pop();
+        if (String(path).startsWith("/api/routines/")) return { routine: { ...(fixture.state.routines as Array<{ id: string }>).find((item) => item.id === id), enabled } };
+        return { webhook: { ...(fixture.state.webhooks as Array<{ id: string }>).find((item) => item.id === id), enabled } };
+      });
+    }
+    /** The confirm "Pause all" asks first, answering `answer`. */
+    function stubConfirm(answer: boolean) {
+      const confirm = vi.fn((_question?: string) => answer);
+      vi.stubGlobal("confirm", confirm);
+      return confirm;
+    }
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    it("pauses every automation listed after one confirm that says how many, then resumes them all", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      answerWrites();
+      const confirm = stubConfirm(true);
+      expect(setAll()!.textContent).toBe("Pause all");
+      flushSync(() => setAll()!.click());
+      expect(confirm).toHaveBeenCalledWith("Pause all? This turns off 3 of the automations listed here. None of them runs until you resume it.");
+      await vi.waitFor(() => expect(setAll()!.textContent).toBe("Resume all"));
+      expect(writes()).toEqual([["/api/routines/routine-2", false], ["/api/routines/routine-1", false], ["/api/webhooks/hook-1", false]]);
+      expect([...container.querySelectorAll<HTMLElement>("[data-automation]")].map((item) => item.dataset.automationStatus)).toEqual(["paused", "paused", "paused"]);
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      flushSync(() => setAll()!.click());
+      expect(confirm).toHaveBeenLastCalledWith("Resume all? This turns 3 of the automations listed here back on.");
+      await vi.waitFor(() => expect(setAll()!.textContent).toBe("Pause all"));
+      expect(writes().slice(3)).toEqual([["/api/routines/routine-2", true], ["/api/routines/routine-1", true], ["/api/webhooks/hook-1", true]]);
+    });
+
+    it("pauses only the ones still on, and changes nothing when the confirm is cancelled", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest", enabled: false, nextRunAt: null }];
+      mountPage();
+      answerWrites();
+      const confirm = stubConfirm(false);
+      flushSync(() => setAll()!.click());
+      expect(confirm).toHaveBeenCalledWith("Pause all? This turns off 2 of the automations listed here. None of them runs until you resume it.");
+      expect(writes()).toEqual([]);
+      confirm.mockReturnValue(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(setAll()!.textContent).toBe("Resume all"));
+      expect(writes()).toEqual([["/api/routines/routine-1", false], ["/api/webhooks/hook-1", false]]);
+    });
+
+    it("offers nothing when fewer than two automations have a switch", () => {
+      fixture.state.routines = [{ ...routine, enabled: false, nextRunAt: null, schedule: { type: "once", at: now - 60_000 } }];
+      mountPage();
+      expect(setAll()).toBeNull();
+    });
+  });
+
   describe("by department", () => {
     const sectioned = [{ ...botA, section: "Social" }, { ...botB, section: "Dev" }, { ...botB, id: "bot-c", name: "Atlas", threadId: "thread-c" }] as unknown as Bot[];
     const department = () => container.querySelector<HTMLSelectElement>('select[aria-label="All departments"]');

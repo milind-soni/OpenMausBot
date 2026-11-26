@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, Zap } from "lucide-react";
+import { Pause, Play, Plus, Zap } from "lucide-react";
 
 import { automationsFrom, automationSentence, automationStatus, orderAutomations, runLine, statusLine, type Automation } from "@/lib/automations";
 import { cn } from "@/lib/cn";
@@ -77,6 +77,14 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const listed = orderAutomations(all.filter((automation) => inDepartment(automation.botId) && (!showFilter || botFilter === "all" || automation.botId === botFilter)));
   const open = all.find((automation) => automation.id === openId) ?? null;
   const sentenceOf = (automation: Automation) => automationSentence(automation, botName(automation.botId));
+  // A one-time automation that already happened has no switch, so "Pause all" leaves it out.
+  const switchable = view === "list" ? listed.filter((automation) => automationStatus(automation).state !== "done") : [];
+  const pausing = switchable.some((automation) => automation.enabled);
+  const setAll = () => {
+    const changing = switchable.filter((automation) => automation.enabled === pausing);
+    if (!window.confirm(t(pausing ? "automations.pauseAllConfirm" : "automations.resumeAllConfirm", { count: changing.length }))) return;
+    void actions.setAllEnabled(changing, !pausing);
+  };
 
   const editRoutine = editing?.kind === "schedule" ? state.routines.find((routine) => routine.id === editing.id) : undefined;
   const editWebhook = editing?.kind === "webhook" ? state.webhooks.find((webhook) => webhook.id === editing.id) : undefined;
@@ -99,6 +107,12 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                 <option value="all">{t("automations.allBots")}</option>
                 {departmentBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
               </Select>
+            )}
+            {switchable.length > 1 && (
+              <button type="button" onClick={setAll} disabled={actions.busy !== null} data-automations-set-all="" aria-label={t(pausing ? "automations.pauseAll" : "automations.resumeAll")}
+                className="flex items-center gap-1.5 rounded-lg border border-hairline/50 bg-panel px-3 py-1.5 text-[13px] font-medium text-ink-secondary hover:text-ink disabled:cursor-wait disabled:opacity-50">
+                {pausing ? <Pause size={14} aria-hidden="true" /> : <Play size={14} aria-hidden="true" />}<span className="hidden sm:inline">{t(pausing ? "automations.pauseAll" : "automations.resumeAll")}</span>
+              </button>
             )}
             <div role="group" aria-label={t("automations.view")} className="flex items-center rounded-lg border border-hairline/50 bg-panel p-0.5">
               {(["list", "calendar"] as const).map((option) => (

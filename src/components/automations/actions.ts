@@ -30,15 +30,18 @@ export function useAutomationActions() {
     finally { setBusy(null); }
   };
 
-  const toggle = (automation: Automation) => attempt(`toggle:${automation.id}`, async () => {
+  /** Turns a schedule or another app's automation on or off: what its switch does, and "Pause all" does for each. */
+  const setEnabled = async (automation: Automation, enabled: boolean) => {
     if (automation.kind === "schedule") {
-      const response = await api(`/api/routines/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled }) });
+      const response = await api(`/api/routines/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
       dispatch({ type: "routinePatched", routine: response.routine });
       return;
     }
-    const response = await api(`/api/webhooks/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled, verificationPending: false }) });
+    const response = await api(`/api/webhooks/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled, verificationPending: false }) });
     dispatch({ type: "webhookPatched", webhook: response.webhook });
-  });
+  };
+
+  const toggle = (automation: Automation) => attempt(`toggle:${automation.id}`, () => setEnabled(automation, !automation.enabled));
 
   const runNow = (automation: Automation) => attempt(`run:${automation.id}`, () => automation.kind === "schedule"
     ? new Promise<void>((resolve, reject) => dispatch({ type: "runRoutine", routineId: automation.id, onStarted: () => resolve(), onError: reject }))
@@ -90,5 +93,5 @@ export function useAutomationActions() {
     if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
   });
 
-  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun, cancelRun };
+  return { busy, error, errorFor, setError, copied, setEnabled, toggle, runNow, remove, copyAddress, openRun, cancelRun };
 }

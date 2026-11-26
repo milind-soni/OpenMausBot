@@ -22,6 +22,13 @@ export function useAllAutomationActions() {
     busy: busy ?? base.busy,
     error: error || base.error,
     setError: (message: string) => { setError(message); base.setError(message); },
+    /** "Pause all" / "Resume all": turns each of `automations` on or off in turn, stopping at the first refusal. */
+    setAllEnabled: (automations: readonly Automation[], enabled: boolean) => attempt("toggle:all", async () => {
+      for (const automation of automations) {
+        if (automation.kind === "app") await appTriggerApi.update(automation.id, { enabled });
+        else await base.setEnabled(automation, enabled);
+      }
+    }),
     toggle: (automation: Automation) => automation.kind === "app"
       ? void attempt(`toggle:${automation.id}`, () => appTriggerApi.update(automation.id, { enabled: !automation.enabled }))
       : base.toggle(automation),
