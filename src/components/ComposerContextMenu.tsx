@@ -12,6 +12,7 @@ import { api } from "@/state/api";
 import { visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { useContextAction } from "./ContextWarning";
+import { ShortcutHint } from "./ShortcutHint";
 import { MENU_ICON, MENU_LABEL, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 
 const TONE_INK: Record<ContextTone, string> = { quiet: "", warning: "text-warning", danger: "text-danger" };
@@ -164,7 +165,8 @@ function ChatContext({ bot, reading, breakdown, detailed, onDone }: { bot: Bot; 
         title={t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint")}
         onClick={() => { fresh.run(`/api/bots/${bot.id}/start-fresh`, { threadId: bot.threadId }); onDone(); }}>
         <RotateCcw size={16} className={MENU_ICON} />
-        <span className="min-w-0 truncate">{t("chat.startFresh")}</span>
+        <span className="min-w-0 flex-1 truncate">{t("chat.startFresh")}</span>
+        <ShortcutHint id="start-fresh" />
       </button>
     </>
   );

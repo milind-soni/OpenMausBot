@@ -11,7 +11,9 @@ import {
   type ShortcutItem,
 } from "@/lib/keyboard-shortcuts";
 import { useSendKey } from "@/lib/send-key";
+import { useStartFreshShortcut } from "@/lib/start-fresh-shortcut";
 import { t } from "@/lib/i18n";
+import { StartFreshShortcutControl } from "./StartFreshShortcutControl";
 
 export interface KeyboardShortcutsModalProps {
   open: boolean;
@@ -24,16 +26,20 @@ function ShortcutRow({ item, isMac }: { item: ShortcutItem; isMac: boolean }) {
   return (
     <div className="flex items-center justify-between gap-4 py-1.5">
       <span className="text-[13px] text-ink">{shortcutDescription(item)}</span>
-      <div className="flex shrink-0 items-center gap-1">
-        {keys.map((key, index) => (
-          <kbd
-            key={index}
-            className="inline-flex min-w-[22px] items-center justify-center rounded-md border border-hairline/60 bg-control px-1.5 py-0.5 font-mono text-[12px] font-semibold text-ink shadow-xs"
-          >
-            {key}
-          </kbd>
-        ))}
-      </div>
+      {item.id === "start-fresh" ? (
+        <StartFreshShortcutControl compact />
+      ) : (
+        <div className="flex shrink-0 items-center gap-1">
+          {keys.map((key, index) => (
+            <kbd
+              key={index}
+              className="inline-flex min-w-[22px] items-center justify-center rounded-md border border-hairline/60 bg-control px-1.5 py-0.5 font-mono text-[12px] font-semibold text-ink shadow-xs"
+            >
+              {key}
+            </kbd>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -44,6 +50,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
   const inputRef = useRef<HTMLInputElement>(null);
   const isMac = isMacPlatform();
   const sendKey = useSendKey();
+  const startFresh = useStartFreshShortcut();
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
@@ -57,7 +64,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   if (!open) return null;
 
-  const groups = filterShortcutGroups(shortcutGroupsFor(sendKey), query, isMac);
+  const groups = filterShortcutGroups(shortcutGroupsFor(sendKey, startFresh), query, isMac);
 
   return (
     <dialog

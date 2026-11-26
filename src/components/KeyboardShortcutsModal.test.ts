@@ -39,6 +39,12 @@ describe("KeyboardShortcutsModal", () => {
     fixture.sendKey = "enter";
   });
 
+  it("renders the configurable Start fresh shortcut controls", () => {
+    const html = renderToStaticMarkup(createElement(KeyboardShortcutsModal, { open: true, onClose: vi.fn() }));
+    expect(html).toContain("Start fresh in the current conversation");
+    expect(html).toContain('data-start-fresh-change=""');
+  });
+
   it("does not render when closed", () => {
     expect(renderToStaticMarkup(createElement(KeyboardShortcutsModal, { open: false, onClose: vi.fn() }))).toBe("");
   });

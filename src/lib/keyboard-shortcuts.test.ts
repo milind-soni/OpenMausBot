@@ -218,5 +218,14 @@ describe("botCycleStep", () => {
       expect(shortcutKeysForPlatform(item, false)).toEqual(["Ctrl", "D"]);
       expect(shortcutDescription(item)).toBe("Start or stop dictation");
     });
+
+    it("lists start-fresh with the default chord and customizes when passed", () => {
+      const base = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "start-fresh")!;
+      expect(shortcutKeysForPlatform(base, true)).toEqual(["⌘", "⇧", "K"]);
+      expect(shortcutKeysForPlatform(base, false)).toEqual(["Ctrl", "Shift", "K"]);
+      const cleared = shortcutGroupsFor("enter", null).flatMap((group) => group.items).find((entry) => entry.id === "start-fresh")!;
+      expect(cleared.macKeys).toEqual([]);
+      expect(cleared.winKeys).toEqual([]);
+    });
   });
 });

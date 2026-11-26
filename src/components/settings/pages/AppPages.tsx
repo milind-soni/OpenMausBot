@@ -22,6 +22,7 @@ import { PinnedPanelsSettings } from "../../PinnedPanelsSettings";
 import { RemoteComputerSection } from "../../RemoteComputerSection";
 import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "../../SettingsPrimitives";
 import { SkinPicker } from "../../SkinPicker";
+import { StartFreshShortcutRow } from "../../StartFreshShortcutControl";
 import { TalkShortcutRow } from "../../TalkShortcutRow";
 import { useSkinChoice, ThemeRow } from "../../ThemeRow";
 import { WindowFrameRow } from "../../WindowFrameRow";
@@ -127,6 +128,7 @@ export function GeneralPage() {
         <LanguageRow simple />
         <SendKeyRow simple />
         <FollowUpRow simple />
+        <StartFreshShortcutRow />
         {window.ogb?.talkShortcut ? <TalkShortcutRow /> : elsewhere(window.ogb?.talkShortcut, ctx) && ctx.cloud ? <InertRow title={t("settings.search.talk")} control={<span className="text-[13px] leading-5 text-ink-secondary">{t("settings.general.talkOff")}</span>} /> : null}
       </SettingsRows>
     </SettingsGroup></AdvancedPagePart>

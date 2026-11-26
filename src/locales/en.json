@@ -12176,5 +12176,17 @@
   "server.github.card.clone": "{bot} couldn't clone {repo}: GitHub isn't connected.",
   "server.github.card.fetch": "{bot} couldn't fetch from {repo}: GitHub isn't connected.",
   "server.github.card.description": "Connect GitHub so {bot} can push its work to your repositories.",
-  "server.github.card.connectInApps": "Connect GitHub from this card in the app on your computer, or in Apps."
+  "server.github.card.connectInApps": "Connect GitHub from this card in the app on your computer, or in Apps.",
+  "shortcuts.start-fresh": "Start fresh in the current conversation",
+  "shortcuts.notSet": "Not set",
+  "shortcuts.change": "Change",
+  "shortcuts.clear": "Clear",
+  "shortcuts.reset": "Reset",
+  "shortcuts.pressKeys": "Press shortcut…",
+  "shortcuts.cancel": "Cancel",
+  "settings.startFreshShortcut.title": "Start fresh shortcut",
+  "settings.startFreshShortcut.subtitle": "Resets context for the active conversation while keeping all messages visible.",
+  "settings.startFreshShortcut.needModifier": "Include Command (⌘) or Ctrl in the shortcut.",
+  "settings.startFreshShortcut.conflict": "Already used for “{name}”. Pick another shortcut.",
+  "settings.startFreshShortcut.reserved": "That shortcut is reserved by the app or system. Pick another shortcut."
 }

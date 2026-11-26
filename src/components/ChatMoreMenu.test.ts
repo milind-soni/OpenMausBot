@@ -101,9 +101,10 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(menu.items.find((item) => item.key === "inspector")?.separatorBefore).toBe(false);
   });
 
-  it("starts the open conversation fresh with one press, and not while it is working or already fresh", () => {
+  it("starts the open conversation fresh with one press, shows its shortcut badge, and stays disabled while busy or fresh", () => {
     const item = menuOf(createElement(ChatMoreMenu, { bot })).items.find((one) => one.key === "start-fresh")!;
     expect(item.disabled).toBe(false);
+    expect(renderToStaticMarkup(createElement("div", null, item.trailing))).toContain('<kbd aria-hidden="true"');
     item.onSelect();
     expect(fixture.run).toHaveBeenCalledWith("/api/bots/pepper/start-fresh", { threadId: "side" });
 

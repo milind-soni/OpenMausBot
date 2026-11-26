@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextReading, contextRows, roomContextReadings } from "@/lib/context-usage";
 import { ADVANCED_MODE_KEY } from "@/lib/interface-mode";
+import { parseShortcutChord, resetStartFreshShortcutCache, setStartFreshShortcut } from "@/lib/start-fresh-shortcut";
 import { BotEditorStore, type Bot, type Group, type Message, type TaskUsage, type useStore } from "@/state/store";
 import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { ComposerContextMenu } from "./ComposerContextMenu";
@@ -31,7 +32,12 @@ const render = (props: Parameters<typeof ComposerContextMenu>[0]) => act(async (
 const trigger = () => host.querySelector<HTMLButtonElement>("[data-composer-context] > button")!;
 const panel = () => host.querySelector<HTMLElement>("[data-context-panel]");
 const press = (element: HTMLElement) => act(async () => { element.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
-const words = () => panel()!.textContent!.replace(/\s+/g, " ");
+const labelText = (element: Element) => {
+  const clone = element.cloneNode(true) as Element;
+  for (const hidden of clone.querySelectorAll('[aria-hidden="true"]')) hidden.remove();
+  return clone.textContent!.replace(/\s+/g, " ");
+};
+const words = () => labelText(panel()!);
 const requests = () => fetched.mock.calls.map(([url, init]) => [String(url).replace(/^.*(?=\/api\/)/, ""), JSON.parse(String((init as RequestInit).body))]);
 const advancedMode = () => localStorage.setItem(ADVANCED_MODE_KEY, "1");
 const posted = () => requests().filter(([path]) => !path.endsWith("/context"));
@@ -50,6 +56,7 @@ const counted: ContextBreakdown = {
 
 beforeEach(() => {
   breakdown = null;
+  resetStartFreshShortcutCache();
   fetched = vi.fn(async (url: unknown) => new Response(String(url).endsWith("/context") ? JSON.stringify({ threadId: "t1", breakdown }) : "{}", { status: 200, headers: { "content-type": "application/json" } }));
   vi.stubGlobal("fetch", fetched);
   localStorage.setItem(ADVANCED_MODE_KEY, "0");
@@ -62,6 +69,7 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   localStorage.clear();
+  resetStartFreshShortcutCache();
   vi.unstubAllGlobals();
 });
 
@@ -76,8 +84,15 @@ describe("the composer's context button", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
     expect(words()).toBe("Context68% usedCompact contextStart fresh");
     expect(panel()!.querySelector("[data-context-meter]")!.getAttribute("data-context-meter")).toBe("68");
-    expect([...panel()!.querySelectorAll("button")].map((button) => [button.textContent, button.disabled]))
+    expect([...panel()!.querySelectorAll("button")].map((button) => [labelText(button), button.disabled]))
       .toEqual([["Compact context", false], ["Start fresh", false]]);
+    const freshButton = panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!;
+    expect(freshButton.querySelector("kbd[aria-hidden='true']")?.textContent).toBeTruthy();
+
+    await act(async () => { setStartFreshShortcut(parseShortcutChord("mod+shift+l")!); });
+    expect(freshButton.querySelector("kbd[aria-hidden='true']")?.textContent).toContain("L");
+    await act(async () => { setStartFreshShortcut(null); });
+    expect(freshButton.querySelector("kbd")).toBeNull();
     expect(requests()).toEqual([]);
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(panel()).toBeNull();

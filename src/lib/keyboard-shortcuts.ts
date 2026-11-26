@@ -1,6 +1,9 @@
 import type { SendKey } from "./send-key";
 import { t } from "@/lib/i18n";
 import { en, type LocaleKey } from "@/locales";
+import { DEFAULT_START_FRESH_CHORD, isMacPlatform, shortcutChordKeys, type ShortcutChord } from "./start-fresh-shortcut";
+
+export { isMacPlatform };
 
 export interface ShortcutItem {
   id: string;
@@ -113,6 +116,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         macKeys: ["⌘", "/"],
         winKeys: ["Ctrl", "/"],
       },
+      {
+        id: "start-fresh",
+        description: "Start fresh in the current conversation",
+        macKeys: shortcutChordKeys(DEFAULT_START_FRESH_CHORD, true),
+        winKeys: shortcutChordKeys(DEFAULT_START_FRESH_CHORD, false),
+      },
     ],
   },
   {
@@ -176,16 +185,27 @@ const SEND_ROWS: Record<Exclude<SendKey, "enter">, [Keys, Keys, Keys]> = {
   "mod-enter": [MOD_ENTER, ENTER, { macKeys: ["⌘", "⇧", "Return"], winKeys: ["Ctrl", "Shift", "Enter"] }],
 };
 
-export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
-  if (sendKey === "enter") return SHORTCUT_GROUPS;
-  const [send, newLine, followUp] = SEND_ROWS[sendKey];
+export function shortcutGroupsFor(
+  sendKey: SendKey,
+  startFresh?: ShortcutChord | null,
+): readonly ShortcutGroup[] {
+  if (sendKey === "enter" && startFresh === undefined) return SHORTCUT_GROUPS;
+  const sendRow = sendKey === "enter" ? null : SEND_ROWS[sendKey];
   return SHORTCUT_GROUPS.map((group) => ({
     ...group,
-    items: group.items.map((item) =>
-      item.id === "send-message" ? { ...item, ...send }
-        : item.id === "new-line" ? { ...item, ...newLine }
-          : item.id === "send-follow-up" ? { ...item, ...followUp }
-            : item),
+    items: group.items.map((item) => {
+      if (sendRow && item.id === "send-message") return { ...item, ...sendRow[0] };
+      if (sendRow && item.id === "new-line") return { ...item, ...sendRow[1] };
+      if (sendRow && item.id === "send-follow-up") return { ...item, ...sendRow[2] };
+      if (startFresh !== undefined && item.id === "start-fresh") {
+        return {
+          ...item,
+          macKeys: startFresh ? shortcutChordKeys(startFresh, true) : [],
+          winKeys: startFresh ? shortcutChordKeys(startFresh, false) : [],
+        };
+      }
+      return item;
+    }),
   }));
 }
 
@@ -235,16 +255,6 @@ export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {
   return !(target instanceof HTMLElement && (
     target.isContentEditable || target.closest("input, textarea, select, dialog, [role=dialog]")
   ));
-}
-
-export function isMacPlatform(): boolean {
-  if (typeof window !== "undefined" && window.ogb?.platform) {
-    return window.ogb.platform === "darwin";
-  }
-  if (typeof navigator !== "undefined" && navigator.userAgent) {
-    return navigator.userAgent.includes("Mac");
-  }
-  return true;
 }
 
 export function shortcutKeysForPlatform(

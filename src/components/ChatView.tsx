@@ -93,6 +93,7 @@ import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated"; import { NewThreadH
 import { ModelPicker } from "./ModelPicker"; import { useFailedTurnFix } from "./FailedTurnFix";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine"; import { ownChatStarted } from "@/state/team-chats"; import { isNewChatThread } from "@/state/new-chat";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
+import { useStartFreshShortcutAction } from "./start-fresh-shortcut";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { SpeakButton, speakReady } from "./SpeakButton";
 import { CallOverlay } from "./CallView";
@@ -754,6 +755,15 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
   const { messages: allMessages, activeLeafId } = bot;
   const messages = useMemo(() => visibleMessages({ messages: allMessages, activeLeafId }), [allMessages, activeLeafId]), chatMessages = useMemo(() => chatActivityMessages(messages, advanced, activity, bot.pinnedMessageId), [advanced, activity, messages, bot.pinnedMessageId]);
+  useStartFreshShortcutAction({
+    botId: bot.id,
+    threadId: bot.threadId,
+    active: inForkPanel === state.forkPanelOpen,
+    mayWrite,
+    busy: Boolean(bot.busy),
+    messageCount: messages.length,
+    atFreshStart: messages.at(-1)?.compaction?.fresh === true,
+  });
   const pinnedSignIns = useMemo(() => messages.filter(isPinnedSignIn).map((m) => ({ message: m, botId: bot.id, botName: bot.name, color: bot.color, threadId: bot.threadId })), [messages, bot.id, bot.name, bot.color, bot.threadId]);
   const pinnedSignInIds = useMemo(() => new Set(pinnedSignIns.map((card) => card.message.id)), [pinnedSignIns]);
   const lookups = useMemo(() => transcriptLookups(allMessages, messages), [allMessages, messages]);

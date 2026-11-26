@@ -250,6 +250,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "help", page: "app", anchor: "help", labelKey: "sidebar.menu.helpShort", synonyms: ["help center", "feedback", "diagnostics", "logs", "tour", "welcome tour"] },
   { id: "language", page: "general", anchor: "typing", labelKey: "settings.language.title", simple: { page: "app", anchor: "typing" }, synonyms: ["language", "translate"] },
   { id: "send-key", page: "general", anchor: "typing", labelKey: "settings.sendKey.title", synonyms: ["enter", "return", "shift+enter", "new line", "keyboard"] },
+  { id: "start-fresh-shortcut", page: "general", anchor: "typing", labelKey: "settings.startFreshShortcut.title", synonyms: ["start fresh", "fresh start", "shortcut", "hotkey", "keyboard", "reset context", "clear context"] },
   { id: "talk", page: "general", anchor: "typing", labelKey: "settings.search.talk", when: desk, topFor: ["voice", "microphone", "mic", "dictation", "talk"] },
   { id: "notifications", page: "general", anchor: "notifications", labelKey: "notifications.title", simple: { page: "app", anchor: "typing" }, topFor: ["notifications", "notify", "alerts", "sounds"], synonyms: ["mute", "silent", "chime", "feed"] },
   { id: "startup", page: "general", anchor: "startup", labelKey: "settings.general.startup", when: desk, synonyms: ["open at login", "startup", "launch"] },
