@@ -670,10 +670,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               willContinue = !completion.toolCalls.length
                 && cutReplyWillContinue(cutReplies, completion, Boolean(options.localModel && tools.definitions.length));
-              // A held prefix that no continuation will complete is dropped, not shown as half a credential.
-              if (prefix && (!completion.text.trim() || completion.toolCalls.length > 0)) { prefix = ""; deltas.seed("assistant_text", ""); }
-              delta("", "assistant_text", !willContinue);
-              delta("", "reasoning_text", !willContinue);
+              // Held text is flushed only when the turn's answer ends, so a credential prefix is never shown in halves.
+              const flushHeld = !willContinue && !completion.toolCalls.length;
+              delta("", "assistant_text", flushHeld);
+              delta("", "reasoning_text", flushHeld);
               carried = willContinue ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willContinue ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
               break;
             } catch (value) {
@@ -742,7 +742,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
-          const shownReply = prefix || willContinue ? maskSecrets(prefix + completion.text, !willContinue).visible : safeText(reply);
+          const shownReply = prefix || willContinue || completion.text.trim() ? maskSecrets(prefix + completion.text, !willContinue && !completion.toolCalls.length).visible : safeText(reply);
           if (reply.trim()) { spoke = true; answer.add(shownReply); }
           if (!willContinue) answer.end();
           abort.signal.throwIfAborted();

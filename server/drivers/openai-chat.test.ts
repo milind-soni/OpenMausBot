@@ -1261,6 +1261,22 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     expect(shown).toContain("before");
   });
 
+  it("keeps a released prefix in both the deltas and the item when a tool call follows", async () => {
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1
+        ? sse(text("before abcdefgh", "length"))
+        : requests === 2
+          ? sse(two({ content: "Let me check." }, { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "no_such_tool", arguments: "{}" } }] }, "tool_calls"))
+          : new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400, headers: { "content-type": "application/json" } }),
+      "openai-compat",
+      { MINIMAX_API_KEY: "abcdefgh12345678" },
+    );
+    const deltas = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta] : []).join("");
+    expect(textOf(events)).toEqual(["before abcdefghLet me check."]);
+    expect(deltas).toBe("before abcdefghLet me check.");
+  });
+
   it("keeps the partial answer when the continuation request fails", async () => {
     let requests = 0;
     const events = await runTurn(() => ++requests === 1

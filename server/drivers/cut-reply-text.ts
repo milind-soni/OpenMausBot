@@ -23,7 +23,6 @@ export class MaskedDeltas {
     this.emit = emit;
   }
   seed(kind: StreamKind, text: string) { this.held[kind] = text; }
-  heldText(kind: StreamKind) { return this.held[kind]; }
   feed(text: string, kind: StreamKind, flush = false) {
     const masked = maskSecretHalves(this.held[kind] + text, this.secrets, this.safe, flush);
     this.held[kind] = masked.held;
