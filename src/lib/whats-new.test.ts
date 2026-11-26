@@ -7,7 +7,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 import { track } from "@/lib/analytics";
 import { setLocale } from "@/lib/i18n";
 import { WHATS_NEW_NOTICE } from "@/lib/notices";
-import { newCloudUrl, reportWhatsNew, startTeamUrl, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewCarousel, whatsNewSlides, whatsNewView, type WhatsNewView } from "./whats-new";
+import { newCloudUrl, reportWhatsNew, startTeamUrl, togetherSlideDue, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewCarousel, whatsNewSlides, whatsNewView, type WhatsNewView } from "./whats-new";
 
 const DAY = 86_400_000, NOW = Date.UTC(2026, 10, 12);
 const OFFER: CloudOffer = { recommended: "pro", refundDays: 14, plans: [
@@ -183,5 +183,49 @@ describe("the three slides: the new Cloud, Team and the sponsor's", () => {
 
   it("waits while the plan slides are read", () => {
     expect(carousel({ plans: "loading" })).toBe("loading");
+  });
+});
+
+describe("the update that brings bots together: which slides, for whom", () => {
+  const offerTeam = { kind: "start" as const, inApp: false, url: "" };
+  const slides = (account: CloudAccountState, over: Partial<Parameters<typeof whatsNewCarousel>[0]> = {}) => {
+    const plans = whatsNewView(account, OFFER), teams = whatsNewAudience(account) === "team" ? { kind: "got-it" as const } : { ...offerTeam, inApp: whatsNewAudience(account) === "own" };
+    const view = whatsNewCarousel({ plans, team: teams, teamSold: true, modelgo: true, addKey: true, ...over });
+    return typeof view === "object" ? view.slides : view;
+  };
+  const inTeam = onPlan("pro", { teams: [team] });
+
+  it("updater from 0.1.181 (What's new not seen): the notice's slide first, then the Cloud and the team, then the sponsor's", () => {
+    const due = togetherSlideDue({ here: true, due: true, drawn: false, kept: false });
+    expect(due).toBe(true);
+    expect(slides(inTeam, { together: due === true, seen: false })).toEqual(["together", "cloudNews", "teamNews", "modelgo"]);
+    expect(slides(onPlan("pro"), { together: true }), "a plan of one's own: Team is still offered, as before").toEqual(["together", "cloudNews", "team", "modelgo"]);
+    expect(slides({ status: "signed-out" }, { together: true }), "sold to: the selling slides, unchanged").toEqual(["together", "pro", "team", "modelgo"]);
+    expect(slides(inTeam), "before this release, for the same person: the sponsor's alone").toEqual(["modelgo"]);
+  });
+
+  it("updater from 0.1.182 with the corner notice already drawn: no slide, and What's new it saw stays seen", () => {
+    expect(togetherSlideDue({ here: true, due: true, drawn: true, kept: false })).toBe(false);
+    expect(togetherSlideDue({ here: true, due: false, drawn: false, kept: false }), "closed: main no longer calls it due").toBe(false);
+    expect(slides(inTeam, { together: false, seen: true })).toBe("none");
+  });
+
+  it("updater from 0.1.182 who saw What's new but never the notice: the notice, the Cloud and the team again, never the sponsor's twice", () => {
+    expect(togetherSlideDue({ here: true, due: true, drawn: false, kept: false })).toBe(true);
+    expect(slides(inTeam, { together: true, seen: true })).toEqual(["together", "cloudNews", "teamNews"]);
+    expect(slides(onPlan("pro"), { together: true, seen: true })).toEqual(["together", "cloudNews", "team"]);
+  });
+
+  it("fresh install: What's new as before, with the slide when main says the notice is due (AppNotices falls back to the corner when What's new can't show)", () => {
+    expect(togetherSlideDue({ here: true, due: false, drawn: false, kept: false }), "no My Cloud yet: nothing to bring together").toBe(false);
+    expect(slides(free, { together: false, seen: false })).toEqual(["pro", "team", "modelgo"]);
+  });
+
+  it("not eligible: another place's page, a branded build or a browser never gets the slide; while main has not answered it waits; once shown it stays", () => {
+    expect(togetherSlideDue({ here: false, due: true, drawn: false, kept: false })).toBe(false);
+    expect(togetherSlideDue({ here: true, due: null, drawn: false, kept: false })).toBeNull();
+    expect(togetherSlideDue({ here: true, due: false, drawn: true, kept: true }), "kept in the carousel that showed it").toBe(true);
+    expect(slides(inTeam, { together: false, seen: true })).toBe("none");
+    expect(slides(inTeam, { together: true, seen: true, team: null }), "an organization's desktop: no team slide of any kind").toEqual(["together", "cloudNews"]);
   });
 });

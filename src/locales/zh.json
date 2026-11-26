@@ -474,7 +474,7 @@
   "whatsNew.team.memory": "机器人共享的团队记忆",
   "whatsNew.team.handoff": "机器人之间在整个团队中互相交接工作",
   "whatsNew.team.accessUse": "为每个机器人选择谁可以使用",
-  "whatsNew.cloudNews.title": "你的 Cloud 有什么新变化",
+  "whatsNew.cloudNews.title": "MausBot Cloud 有什么新变化",
   "whatsNew.cloudNews.body": "当你的 Cloud 正在更新或非常繁忙时，应用现在会直接说明，而不是加载失败或要求你重新设置。睡眠后时钟变慢的 Cloud 会自行校正。",
   "whatsNew.teamNews.title": "你的团队有什么新变化",
   "whatsNew.teamNews.body": "群聊以动态流显示其话题，打开的话题显示在旁边。聊天中的任何人都可以关闭已完成的话题，新的回复会重新打开它。",

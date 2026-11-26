@@ -1901,10 +1901,10 @@ describe("the Teams What's new", () => {
 
 describe("bots together by default", () => {
   let saved: unknown, reads: string[], lent: boolean, lends: boolean[];
-  const install = () => {
+  const install = (workspace = "computer:/data") => {
     const together = createPlacesTogether({
       pref: { read: () => { if (saved === undefined) throw Object.assign(new Error("none"), { code: "ENOENT" }); return saved; }, write: (value: unknown) => { saved = JSON.parse(JSON.stringify(value)); } },
-      cloud: () => ({ origin: MY_CLOUD, account: "a", asleep: false }), computer: () => "computer:/data",
+      cloud: () => ({ origin: MY_CLOUD, account: "a", asleep: false }), computer: () => workspace,
       powerChecked: async () => { reads.push("admin"); return true; },
       local: async (route: string) => { reads.push(`computer ${route}`); return new Response(JSON.stringify({ bots: [] })); },
       cloudFetch: async (url: string) => { reads.push(`cloud ${url}`); return new Response(JSON.stringify({ bots: [] })); },
@@ -1934,7 +1934,7 @@ describe("bots together by default", () => {
     expect(html).not.toContain(CORNER);
     expect(html).toContain("Your bots are in one list now");
     expect(html).toContain("Let your Clouds&#x27; bots run commands on this computer");
-    expect(html).toContain("What&#x27;s new on your Cloud");
+    expect(html).toContain("What&#x27;s new in MausBot Cloud");
     expect(html).toContain("What&#x27;s new for your team");
     expect(html, "nothing sold to someone with a plan and a team").not.toContain("Get Pro");
     expect(html).not.toContain("Start a Team");
@@ -1949,6 +1949,19 @@ describe("bots together by default", () => {
     expect(next, "the slide was the notice: never in the corner after").not.toContain(CORNER);
     expect(next).not.toContain(SLIDE);
     expect(together.on(), "and it stays on").toBe(true);
+  });
+
+  it("My Cloud as home: the slide keeps its line that this computer's bots now run while the app is open, though main stops saying it once shown", async () => {
+    returning(); account = paid({ teams: [team] });
+    install("profile:default");
+    const html = await launch();
+    expect(html).toContain(SLIDE);
+    expect(html).toContain("data-together-notice-background");
+    // Main tells the page it changed (here: the window is focused, which asks again): the notice is no longer due.
+    for (const [type, listener] of vi.mocked(window.addEventListener).mock.calls) if (type === "focus") (listener as () => void)();
+    await flush();
+    expect(desk.handlers.get("places-together:state")!({ page: "local" }), "main no longer says it").not.toHaveProperty("profileHome");
+    expect(await settle()).toContain("This computer&#x27;s bots and their routines now run while the app is open.");
   });
 
   it("updater from 0.1.181 with no Cloud plan of the kind sold here: the selling Cloud and Team slides, unchanged, after the notice's", async () => {
@@ -2036,6 +2049,8 @@ describe("bots together by default", () => {
     showWindow(LOCAL_ORIGIN); f.brand = "file";
     resetPlacesTogetherForTest();
     install();
-    expect(await launch()).not.toContain(SLIDE);
+    const branded = await relaunch();
+    expect(branded).not.toContain(SLIDE);
+    expect(branded, "a branded build has no What's new: the corner notice, as before").toContain(CORNER);
   });
 });
