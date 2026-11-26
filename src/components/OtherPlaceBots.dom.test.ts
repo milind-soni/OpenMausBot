@@ -113,12 +113,14 @@ it("a line is no search result: hidden while the sidebar is searched", async () 
   expect(q("[data-other-place]")).toBeNull();
 });
 
-it("the switch: marked Early, off until turned on, and hidden where main does not offer it", async () => {
+it("the switch: no longer marked Early, says it is on by default, and is hidden where main does not offer it", async () => {
   said = state({ on: false, other: null });
   await render(createElement(SettingsLook.Provider, { key: "switch", value: true }, createElement(PlacesTogetherSwitch)));
   expect(q("[data-places-together]")!.getAttribute("data-places-together")).toBe("off");
   expect(q("[data-places-together]")!.textContent).toContain("This computer and My Cloud together");
-  expect(q("[data-places-together] [data-settings-tag]")!.textContent).toBe("Early");
+  expect(q("[data-places-together]")!.textContent).toContain("On by default.");
+  expect(q("[data-places-together]")!.textContent, "the grant covers every Cloud of the account").toContain("your Clouds' bots run commands on this computer");
+  expect(q("[data-places-together] [data-settings-tag]")).toBeNull();
   await act(async () => q("[data-places-together] [role=switch]")!.click());
   expect(page.set.mock.calls).toEqual([[true]]);
   expect(q("[data-places-together]")!.getAttribute("data-places-together")).toBe("on");
