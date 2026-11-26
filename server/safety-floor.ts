@@ -458,8 +458,8 @@ function inlineScript(args: string[]): string | null {
       if (arg === "--rcfile" || arg === "--init-file") index++;
     } else if (/^[-+][A-Za-z]+$/.test(arg)) {
       if (arg[0] === "-" && arg.includes("c")) inline = true;
-      // -o pipefail and -O extglob take a value
-      if (/[oO]$/.test(arg)) index++;
+      // Each -o or -O in a cluster takes the next word: `bash -oc pipefail CMD` runs CMD.
+      index += arg.replace(/[^oO]/g, "").length;
     } else return inline ? arg : null;
   }
   return null;

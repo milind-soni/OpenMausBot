@@ -134,6 +134,9 @@ const BLOCKED: Case[] = [
   ["bash -c 'rm -rf \"$HOME\"'", "delete-home"],
   ["zsh -ic 'sudo rm -rf /etc'", "delete-system-directory"],
   ["bash -o pipefail -c 'rm -rf /'", "delete-root"],
+  ["bash -oc pipefail 'rm -rf /'", "delete-root"],
+  ["bash -eoOc pipefail extglob 'rm -rf ~'", "delete-home"],
+  ["sh -oc errexit 'mkfs.ext4 /dev/sda1'", "format-disk"],
   ["sudo sh -c \"bash -c 'rm -rf /'\"", "delete-root"],
   ["eval 'rm -rf /'", "delete-root"],
   // chains
@@ -401,6 +404,7 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   ['export CLEAN_CMD="rm -rf /"'],
   ["bash -c 'echo \"rm -rf /\"'"],
   ["bash script.sh -c 'rm -rf /'"],
+  ["bash -oc pipefail 'echo rm -rf /'"],
   ["docker run --rm alpine rm -rf /"],
   ["ssh build-host 'rm -rf /'"],
   ["man rm"],
