@@ -18,6 +18,7 @@ export interface PageRpcAnswer {
   body: Record<string, unknown>;
 }
 
+const PAUSED = "This page waits while this computer is backed up. Try again in a moment.";
 const answer = (body: Record<string, unknown>): PageRpcAnswer => ({ status: 200, body });
 const refuse = (status: number, message: string, code = RPC_HOST_REFUSED): PageRpcAnswer => ({ status, body: { error: { code, message } } });
 
@@ -54,6 +55,7 @@ export function pageRows(result: Pick<RunResult, "columns" | "rows">): { columns
 
 async function query(deps: PageRpcDeps, botId: string, params: Record<string, unknown>): Promise<PageRpcAnswer> {
   if (!deps.data) return refuse(503, "This page cannot read data on this computer.");
+  if (deps.apps.paused()) return refuse(503, PAUSED);
   if (deps.dataOff?.(botId)) return refuse(409, "Data is switched off for this bot, so its pages cannot read it.");
   const unavailable = deps.data.unavailable();
   if (unavailable !== null) return refuse(503, unavailable);
@@ -105,7 +107,7 @@ export async function pageRpc(deps: PageRpcDeps, call: { botId: string; threadId
     const got = states.get(call.threadId, call.messageId, key as string);
     return got.ok ? answer(got.value === undefined ? {} : { value: got.value }) : refuse(got.status, got.error);
   }
-  if (deps.apps.paused()) return refuse(503, "Saving is paused while this computer is backed up. Try again in a moment.");
+  if (deps.apps.paused()) return refuse(503, PAUSED);
   const set = states.set(call.threadId, call.messageId, key as string, call.params.value);
   return set.ok ? answer({}) : refuse(set.status, set.error, set.status === 400 ? RPC_INVALID_PARAMS : RPC_HOST_REFUSED);
 }

@@ -54,6 +54,7 @@ describe("pageQuery", () => {
     expect((await db.pageQuery(`FROM ${DATA_RESULTS_SCHEMA}.r1`, undefined, LIMITS)).rows).toEqual([[1]]);
     expect((await db.pageQuery("WITH recent AS (SELECT * FROM sales WHERE id > 295) SELECT count(*) FROM recent, range(2)", undefined, LIMITS)).rows).toEqual([["10"]]);
     expect((await db.pageQuery("SELECT 1 AS a;", undefined, LIMITS)).rows).toEqual([[1]]);
+    expect((await db.pageQuery("WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 3), u AS (SELECT n FROM t) SELECT sum(n) FROM u", undefined, LIMITS)).rows).toEqual([["6"]]);
   });
 
   it("stops at maxRows and says the rest was left out", async () => {
@@ -105,6 +106,9 @@ describe("pageQuery", () => {
       // A CTE named like a file covers only its own scope, and only a plain name counts as one.
       `SELECT * FROM (WITH "${csv}" AS (SELECT 1) SELECT * FROM "${csv}")`,
       `SELECT * FROM (WITH x AS (SELECT 1) SELECT * FROM x), "${csv}"`,
+      "WITH duckdb_databases AS (SELECT * FROM duckdb_databases) SELECT * FROM duckdb_databases",
+      "WITH a AS (SELECT * FROM duckdb_databases), duckdb_databases AS (SELECT 1) SELECT * FROM a",
+      "WITH RECURSIVE duckdb_databases AS (SELECT * FROM duckdb_databases UNION ALL SELECT 1) SELECT 1",
     ]) {
       const failure = await refused(sql);
       expect(failure.error.code, sql).toBe("write_refused");

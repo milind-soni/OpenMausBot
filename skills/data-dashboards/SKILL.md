@@ -24,8 +24,8 @@ Publish only when the person wants others to open it (share, send to someone, po
 
 ## Live data in a chat page
 
-Show the page with `uses: ["data"]` (add `"state"` to remember the person's filters) and query your Data tables from
-it. Every query is one `SELECT` on your own tables and views, read-only: no files, URLs or writes, at most 5,000 rows
+Show the page with `uses: ["data"]` (and `"state"` to remember the person's filters, as this example does) and query
+your Data tables from it. Every query is one `SELECT` on your own tables and views, read-only: no files, URLs or writes, at most 5,000 rows
 and 1 MB an answer, 10 seconds each, about 10 calls in 10 seconds. Aggregate in SQL and load the page in a few
 queries. Rows come as objects; whole numbers and decimals as numbers, dates as text.
 

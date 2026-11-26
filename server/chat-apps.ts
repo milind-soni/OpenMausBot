@@ -25,6 +25,7 @@ const NOT_A_PAGE = "That app came from an MCP server, not from show_html; it can
 
 export interface ChatAppsStore extends AgentCardStore {
   onChange?(listener: (change: StoreChange) => void): () => void;
+  botByThread?(threadId: string): unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -513,7 +514,9 @@ export function createChatApps(deps: {
     try { removed += docs.sweep(references()); } catch (error) {
       console.error("chat apps: document sweep failed", error);
     }
-    try { removed += states.sweep((threadId, messageId) => Boolean(appRow(deps.store, threadId, messageId))); } catch (error) {
+    // A conversation that is gone is never read: reading one would bring it back into the store.
+    const known = (threadId: string) => Boolean(deps.store.groupByThread(threadId) || deps.store.botByThread?.(threadId));
+    try { removed += states.sweep((threadId, messageId) => known(threadId) && Boolean(appRow(deps.store, threadId, messageId))); } catch (error) {
       console.error("chat apps: page state sweep failed", error);
     }
     return removed;

@@ -123,6 +123,10 @@ describe("mausbot.data.query on the rpc route", () => {
     const room = store.createGroup("Launch", [bot.id, other.id]);
     const inRoom = show({ uses: ["data"] }, bot, room.threadId);
     expect(await rpc(inRoom, "mausbot/data/query", { sql: "SELECT 1" }, bot, room.threadId)).toEqual({ status: 409, body: { error: ROOM_VIEW_ONLY } });
+    let paused = true;
+    const waiting = await fixture({ paused: () => paused });
+    expect((await waiting.rpc(waiting.show({ uses: ["data"] }), "mausbot/data/query", { sql: "SELECT 1" })).status).toBe(503);
+    paused = false;
     const off = await fixture({ dataOff: true });
     expect((await off.rpc(off.show({ uses: ["data"] }), "mausbot/data/query", { sql: "SELECT 1" })).body.error.message).toContain("Data is switched off");
   });
@@ -163,6 +167,7 @@ describe("mausbot.state on the rpc route", () => {
     expect((await rpc(id, "mausbot/state/set", { key: "big", value: "x".repeat(APP_LIMITS.pageStateValueBytes) })).status).toBe(413);
     paused = true;
     expect((await rpc(id, "mausbot/state/set", { key: "a", value: 1 })).status).toBe(503);
+    expect((await rpc(id, "mausbot/state/get", { key: "a" })).status).toBe(200);
     paused = false;
     expect((await rpc(id, "mausbot/state/set", { key: "a", value: 1 })).status).toBe(200);
   });

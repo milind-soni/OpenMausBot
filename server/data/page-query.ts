@@ -5,7 +5,8 @@
 // 1. DuckDB splits the text: exactly one statement.
 // 2. DuckDB's own parser serializes it (json_serialize_sql serializes only a SELECT) and the tree is walked before
 //    anything binds (binding a file reader already opens the file): table functions only from PURE_TABLE_FUNCTIONS,
-//    every table a table or view of this database (or a CTE in scope with a plain name, so no file path can pass as one),
+//    every table a table or view of this database (or, by a plain name, a CTE the reference can see: an earlier one, or
+//    itself from a recursive one's recursive side), so neither a file path nor a built-in view can pass as one,
 //    and no function from SETTINGS_FUNCTIONS.
 // 3. DuckDB prepares it and names its type: SELECT only.
 // 4. It runs inside a read-only transaction, which DuckDB refuses to write the database file from.
@@ -54,12 +55,17 @@ export function checkPageTree(tree: unknown, catalog: Catalog, database: string,
   const visit = (node: unknown, ctes: ReadonlySet<string>): void => {
     if (Array.isArray(node)) { for (const item of node) visit(item, ctes); return; }
     if (!isRecord(node)) return;
-    let scope = ctes;
     const map = isRecord(node.cte_map) && Array.isArray(node.cte_map.map) ? node.cte_map.map : [];
-    if (map.length) {
-      const names = new Set(ctes);
-      for (const entry of map) if (isRecord(entry) && typeof entry.key === "string" && PLAIN_NAME.test(entry.key)) names.add(entry.key.toLowerCase());
-      scope = names;
+    // A CTE's body sees the CTEs before it, and itself only from the recursive side of a recursive one; the query sees all.
+    let scope = new Set(ctes);
+    for (const entry of map) {
+      const name = isRecord(entry) && typeof entry.key === "string" && PLAIN_NAME.test(entry.key) ? entry.key.toLowerCase() : null;
+      const body = isRecord(entry) && isRecord(entry.value) && isRecord(entry.value.query) ? entry.value.query.node : undefined;
+      if (isRecord(body) && body.type === "RECURSIVE_CTE_NODE" && name) {
+        const own = new Set(scope).add(name);
+        for (const [key, value] of Object.entries(body)) visit(value, key === "left" ? scope : own);
+      } else visit(entry, scope);
+      if (name) scope = new Set(scope).add(name);
     }
     if (node.class === "FUNCTION" && typeof node.function_name === "string" && SETTINGS_FUNCTIONS.has(node.function_name.toLowerCase())) {
       throw refuse(`${node.function_name}() cannot run from a page.`, sql);
@@ -75,7 +81,6 @@ export function checkPageTree(tree: unknown, catalog: Catalog, database: string,
       if (type === "BASE_TABLE") checkTable(node, scope);
     }
     for (const [key, value] of Object.entries(node)) if (key !== "cte_map") visit(value, scope);
-    for (const entry of map) visit(entry, scope);
   };
   const checkTable = (node: Record<string, unknown>, ctes: ReadonlySet<string>) => {
     const name = String(node.table_name ?? "").toLowerCase();
