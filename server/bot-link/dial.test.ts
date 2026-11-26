@@ -462,7 +462,7 @@ describe("a wake for work is bounded", () => {
     const cloudSide = unanswering("network", clock, 0);
     const { link, observed, want } = sleepyLink("https://cloud.invalid");
     const later = vi.fn();
-    Object.assign(observed, { wakeLater: later, hasOutgoing: () => true });
+    Object.assign(observed, { wakeLater: later, personWaiting: () => true });
     const dialer = createDialer({ link, fetch: cloudSide.fetch, firstRetryMs: 1, now: () => clock.at });
     cleanups.push(() => dialer.close());
     dialer.start({ gentle: true });

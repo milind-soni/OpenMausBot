@@ -30,7 +30,7 @@ import type { PassedFile } from "../host/handoff-files.ts";
 import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
-import { BACKGROUND_WAIT_MS, backgroundWaitNote, cloudUnreachableTooLong, neverSent } from "./away.ts";
+import { armBackground, BACKGROUND_WAIT_MS, backgroundWaitNote, cloudUnreachableTooLong, neverSent } from "./away.ts";
 import { endedSchema, stateSchema, type EndedLink, type LinkState, type Work } from "./link-state.ts";
 import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedId, parseLinked, peerKey,
   type FileMeta, type FileWay, type Frame, type HandoffFrame, type LinkedBot, type Numbered, type Place, type ResultFrame } from "./protocol.ts";
@@ -50,6 +50,7 @@ const ALIVE_EVERY_MS = 60_000;
 /** How often a place's last contact is written down. */
 const SEEN_WRITE_MS = 60 * 60_000;
 const STOPPED = "Coordinated work was stopped";
+const OFF_STOP = "The link to the person's other place was turned off, so this work was stopped.";
 const SPOOL = "bot-link-files";
 /** Bytes that crossed and were never stored (their hand-off was dropped, a side restarted) are removed after this long,
  * and the oldest go first when all of them together pass the size. */
@@ -584,7 +585,7 @@ export function createBotLink(deps: BotLinkDeps) {
         deps.coordinator().cancelDirect(work.root, `Stopped by ${work.from || "the requester"}`);
         return;
       }
-      case "bye": return state.role === "acceptor" ? dropPeer(peer, `The link to ${placeName(peer)} was turned off before the work came back.`, `The link to ${placeName(peer)} was turned off, so this work was stopped.`) : off(true);
+      case "bye": return state.role === "acceptor" ? dropPeer(peer, `The link to ${placeName(peer)} was turned off before the work came back.`, `The link to ${placeName(peer)} was turned off, so this work was stopped.`) : off(true, OFF_STOP);
     }
   }
 
@@ -646,7 +647,7 @@ export function createBotLink(deps: BotLinkDeps) {
     live.delete(peer);
     if (known.sessionId) deps.revoke?.(known.sessionId);
     failPending(peer, reason);
-    if (Object.keys(state.peers).length === 0) { off(true); return; }
+    if (Object.keys(state.peers).length === 0) { off(true, stopped); return; }
     save();
     deps.directoryChanged?.();
     for (const listener of outboundListeners) listener(peer);
@@ -663,9 +664,10 @@ export function createBotLink(deps: BotLinkDeps) {
 
   /** The link is off here: nothing more is sent, and work waiting on another place ends with the reason. `told`: the other
    * side knows. A computer whose Cloud could not be told keeps what it takes to tell it later. */
-  function off(told: boolean): void {
+  function off(told: boolean, stopped?: string): void {
     if (!state) return;
-    stopWorkFor(null, "The link to the person's other place was turned off, so this work was stopped.");
+    // Only a real turn-off (the person's switch, the other side's goodbye) stops what runs here for the other place.
+    if (stopped) stopWorkFor(null, stopped);
     const was = state;
     state = null;
     clearTimeout(telling);
@@ -774,7 +776,7 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!node.parentId) return undefined;
         // Never "not delivered" for work that went: it was, and the link going stops it there.
         if (!state) return node.status === "queued" ? "The link to the person's other place was turned off, so this was not sent."
-          : `The link to the person's other place was turned off while ${nameOf(node.botId)} worked on this, so it was stopped and its result will not come back.`;
+          : `The link to the person's other place was turned off while ${nameOf(node.botId)} worked on this, so its result will not come back.`;
         const left = deps.rooms?.problem(node);
         if (left) return left;
         if (!remoteOf(node.botId)) return "That bot's place is no longer linked, or the bot is no longer there.";
@@ -898,7 +900,7 @@ export function createBotLink(deps: BotLinkDeps) {
       for (const peer of computerId === undefined ? Object.keys(state.peers) : [peerKey(computerId)]) dropPeer(peer, reason, `The link to ${placeName(peer)} was turned off, so this work was stopped.`);
     },
     /** Turned off on a computer. `told`: its Cloud knows; otherwise the Cloud is told when it can next be reached. */
-    turnOff(told: boolean): void { off(told); },
+    turnOff(told: boolean): void { off(told, OFF_STOP); },
     ended: readEnded,
     /** These ended links' Clouds know now. */
     forgetEnded(tokens: readonly string[]): void { writeEnded(readEnded().filter((one) => !tokens.includes(one.token))); },
@@ -912,7 +914,7 @@ export function createBotLink(deps: BotLinkDeps) {
       for (const [id, work] of Object.entries(state.work)) if (work.peer === peer && work.done && work.ackedAt === undefined) dispatchResult(id);
     },
     /** Housekeeping, at start and once a day: old records go, and on the Cloud a computer long gone is unlinked. */
-    tidy(): void { prune(); expire(); sweep(); },
+    tidy(): void { prune(); expire(); sweep(); if (state?.role === "dialer") armBackground(deps.coordinator().active().filter((node) => isLinkedId(node.botId) && node.parentId), now(), backgroundWait, deps.kick); },
     /** This place's bots changed (one was made, renamed, hidden, moved, deleted, paused, its look, model or level changed):
      * once changes settle (or every TELL_WITHIN_MS while they do not), the other places hear the new list, and nothing when
      * what they are told did not change. */
@@ -979,6 +981,8 @@ export function createBotLink(deps: BotLinkDeps) {
       return taken;
     },
     hasOutgoing: (peer: string, ack = 0) => live.get(peer)?.outbox.some((entry) => entry.seq > ack) === true,
+    /** Work a person waits on, for `peer`, that has not ended (held while the link is parked, so not in the outbox). */
+    personWaiting: (peer: string) => deps.coordinator().active().some((node) => parseLinked(node.botId)?.peer === peer && Boolean(node.parentId) && deps.coordinator().status(node.id)?.assignment?.origin?.kind === "person"),
     onOutgoing(listener: (peer: string) => void): () => void { outboundListeners.add(listener); return () => outboundListeners.delete(listener); },
     /** Work was handed to a place that is not connected: a computer asks its Cloud for it now. */
     /** There is work for a place that is not connected, handed over outside `coordinate` (a room turn). */

@@ -358,3 +358,17 @@ test("work a person waits on that wakes the Cloud during the hold ends the hold 
   assert.equal(h.localCalls.some((call) => call.method === "PUT" && call.body.cloud === "asleep"), false);
   assert.equal(h.localCalls.filter((call) => call.method === "PUT").every((call) => typeof call.body.heardAt === "number"), true, "every word main passes on says when it was heard");
 });
+
+test("one look that needs the Admin's fresh awake twice (tell an ended link, then pair) asks it once and uses that answer for both", async (t) => {
+  const h = harness({ deps: (the) => ({ wanted: () => Boolean(the.origin), switchedOff: () => false, chosen: () => null, powerChecked: async () => { the.checks = (the.checks ?? 0) + 1; return true; } }) });
+  t.after(() => h.link.close());
+  await h.link.look();
+  const pairs = h.pairs(), checks = h.the.checks ?? 0;
+  h.localCalls.length = 0;
+  h.the.clock += ADMIN_EVERY_MS;
+  h.server = { on: false, ended: [CLOUD] };
+  await h.link.look();
+  assert.equal(h.localCalls.some((call) => call.method === "PUT" && call.body.cloud === "awake"), true, "the ended link is told");
+  assert.equal(h.pairs() - pairs, 1, "and the pairing goes in the same look, on the same answer");
+  assert.equal(h.the.checks - checks, 1);
+});

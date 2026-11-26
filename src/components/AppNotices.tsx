@@ -114,9 +114,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const two = useTwoPlaces();
   // Together by default: this computer's page only, where the one list is; never during a live call.
   const togetherDue = useTogetherNoticeDue();
-  // While the notice of the default is due, the bots of this computer and My Cloud are about to work together: no
-  // suggestion to move them to My Cloud goes ahead of it.
-  const twoFact = !local || two.suggest === null || (two.suggest?.kind === "cloud" && togetherDue === true) ? false : two.suggest === undefined ? null : true;
+  // While the notice of the default is due, or main has not said yet whether it is, the bots of this computer and My
+  // Cloud are about to work together: no suggestion to move them to My Cloud goes ahead of it.
+  const cloudHeld = two.suggest?.kind === "cloud" && togetherDue !== false;
+  const twoFact = !local || two.suggest === null || (cloudHeld && togetherDue === true) ? false : two.suggest === undefined || cloudHeld ? null : true;
   // Once drawn it stays until closed, though main stops calling it due as soon as one of its switches is used.
   const [togetherOpen, setTogetherOpen] = useState(false);
   const togetherFact = togetherOpen ? true : remote || !local || togetherDue === false ? false : togetherDue === null || (state.liveCall && state.liveCall.status !== "ended") ? null : true;

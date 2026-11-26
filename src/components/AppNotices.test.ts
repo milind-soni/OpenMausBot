@@ -1945,6 +1945,18 @@ describe("bots together by default", () => {
     expect(html).not.toContain('data-notice="together-default"');
   });
 
+  it("no suggestion to move bots to My Cloud goes ahead of it: not while it is due, nor while main has not said whether it is", async () => {
+    returning(); storage.set(CLOUD_INTRO, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1");
+    desk.handlers.set("two-places:state", async () => ({ suggest: { key: "cloud:mine", name: "My Cloud", kind: "cloud" } }));
+    desk.handlers.set("places-together:state", () => new Promise(() => {}));
+    expect(await launch(), "main has not said yet").not.toContain('data-notice="two-places"');
+    resetPlacesTogetherForTest();
+    install();
+    const due = await launch();
+    expect(due).not.toContain('data-notice="two-places"');
+    expect(due).toContain('data-notice="together-default"');
+  });
+
   it("never for a person who chose either way, nor on My Cloud's page", async () => {
     returning();
     saved = { v: 1, on: false };

@@ -21,3 +21,15 @@ export function cloudUnreachableTooLong(node: HandoffView, place: string, unsent
   if (!unsent || node.restart !== undefined || now - node.createdAt < waitMs) return null;
   return `${place} could not be reached for ${Math.round(waitMs / 3_600_000)} hours (asleep, off or not connected), so this was not sent there. Work no person waits on does not wake it.`;
 }
+
+const armed = new Set<string>();
+/** After a restart, waiting work's give-up is looked at again when its wait is over, not at the next unrelated kick:
+ * `kick` once at each node's deadline (once per node per run). */
+export function armBackground(nodes: readonly Pick<HandoffView, "id" | "createdAt">[], now: number, waitMs: number, kick: () => void): void {
+  for (const node of nodes) {
+    if (armed.has(node.id)) continue;
+    armed.add(node.id);
+    const timer = setTimeout(kick, Math.max(0, node.createdAt + waitMs - now) + 50);
+    timer.unref?.();
+  }
+}

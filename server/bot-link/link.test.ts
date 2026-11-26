@@ -15,7 +15,7 @@ import type { SessionRecord } from "../sessions.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
 import { readBody } from "../harness/http.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { createDialer } from "./dial.ts";
+import { createDialer, WAKES_PER_HOUR } from "./dial.ts";
 import { createBotLink, SPOOL_KEEP_MS, type BotLink } from "./link.ts";
 import { createBotLinkRoutes as routesOf, linkSessionRefusal } from "../routes/bot-link.ts";
 import { createLinkedRooms, type LinkedRooms } from "../host/bot-link-rooms.ts";
@@ -133,7 +133,7 @@ function place(label: string, bots: Bot[], version?: number) {
       },
     };
     coordinator = createCoordinator({ dataDir: dir, host: link.host(inner), log: () => {}, ...(options.limits ? { runtimeLimits: options.limits } : {}) });
-    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20, ...(version ? { level: version } : {}) });
+    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20, now: () => Date.now() + skew, recheckMs: 50, ...(version ? { level: version } : {}) });
     ticker = setInterval(() => coordinator.tick(), 15);
     return api;
   }
@@ -1544,6 +1544,52 @@ describe("a Cloud that sleeps", () => {
     expect(receipts[0]!.detail).toContain("My Cloud was woken for work several times in the last hour already, so this waits and is sent by itself when it may be woken again, in about 10 minutes");
     computer.link.wakeLater(CLOUD, 0);
     expect(cloud.runs).toEqual([]);
+  });
+
+  it("a person's hand-off past the hour's wakes is told the wait, wakes nothing now, and goes by itself once the oldest wake is an hour old, using one wake", async () => {
+    const { computer, cloud, cloudOrigin } = await two();
+    /** The app's word that the Cloud sleeps, heard after its last answer: the computer's end parks. */
+    const park = async () => {
+      // Said again until it holds: a word heard before the Cloud's last answer to a person's work parks nothing.
+      await until(() => computer.dialer.state().asleep || (void computer.fetch("PUT", STATE_PATH, { cloud: "asleep", origin: cloudOrigin, heardAt: Date.now() + 60 * 60_000 * (parkedLater ? 1 : 0) }), false), "the computer's end parks");
+    };
+    let parkedLater = false;
+    for (let wake = 1; wake <= WAKES_PER_HOUR; wake += 1) {
+      await park();
+      const { receipts } = await computer.handOff("local-writer", call(["Analyst"], `Job ${wake}`));
+      expect(receipts[0]!.detail, `wake ${wake}`).toContain("waking up for this now");
+      await until(() => computer.results.length === wake, `the result of job ${wake}`);
+    }
+    await park();
+    const before = cloud.syncs.length;
+    const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Job 4"));
+    expect(receipts[0]!.detail).toContain("was woken for work several times in the last hour already, so this waits and is sent by itself");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(cloud.syncs.length, "nothing wakes it now").toBe(before);
+    computer.later(60 * 60_000);
+    parkedLater = true;
+    await until(() => computer.results.length === WAKES_PER_HOUR + 1, "it goes by itself once the oldest wake is an hour old");
+    expect(cloud.syncs.slice(before).some((one) => !one.background), "as a wake, a person's").toBe(true);
+    await park();
+    const settled = cloud.syncs.length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(cloud.syncs.length, "nothing waits, so nothing more is sent: no loop").toBe(settled);
+  });
+
+  it("the only computer linked to the Cloud expires after thirty days: as before, no work there is cancelled with words of a turn-off", async () => {
+    const { computer, cloud } = await two();
+    cloud.engine(() => new Promise(() => {}));
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders"));
+    await until(() => cloud.runs.length === 1, "the Cloud runs it");
+    const reasons: string[] = [];
+    const original = cloud.coordinator.cancelDirect.bind(cloud.coordinator);
+    cloud.coordinator.cancelDirect = ((root: string, why?: string) => { reasons.push(why ?? ""); return original(root, why); }) as typeof cloud.coordinator.cancelDirect;
+    await computer.dialer.stop();
+    await until(() => !cloud.link.online(), "the computer goes quiet");
+    cloud.later(LINK_EXPIRES_MS + 60_000);
+    cloud.link.tidy();
+    expect(cloud.link.on()).toBe(false);
+    expect(reasons).toEqual([]);
   });
 
   it("a routine's hand-off to a sleeping Cloud waits for it to be awake for another reason, and is given up with a plain line after the bound, never sent", async () => {

@@ -29,6 +29,8 @@ export const RETRY_MS = 6 * 60 * 60_000;
 export const OUTDATED_RETRY_MS = 24 * 60 * 60_000;
 /** The Admin is asked again about the Cloud's sleep for the link at most this often. */
 export const ADMIN_EVERY_MS = 60_000;
+/** An answer from the Admin that the Cloud is awake still counts as "just now" this long (one look's own steps). */
+export const FRESH_AWAKE_MS = 5_000;
 
 async function body(response) {
   try { return await response.json(); } catch { return null; }
@@ -126,11 +128,13 @@ export function createBotLinkMain({ wanted, pref = null, switchedOff = null, cho
   let retryAt = -Infinity, choseOn = null, looking = null, idle = false;
   const quietUntil = now() + quietMs;
   let heardNap = -Infinity, heardProof = -Infinity;
-  let askedAdminAt = -Infinity;
+  let askedAdminAt = -Infinity, awakeAt = -Infinity;
   /** When the Admin said just now, after `after`, that the Cloud is awake (this computer's clock), else null: what main
    * needs before it sends the Cloud anything, or tells this computer's server it is awake. Never in the quiet start. */
   async function awakeNow(after = -Infinity) {
     if (now() < quietUntil || cloud().asleep) return null;
+    // The Admin's answer from a moment ago (the same look) is still its answer just now: not asked again, nor refused.
+    if (now() - awakeAt < FRESH_AWAKE_MS) return awakeAt > after ? awakeAt : null;
     if (powerChecked) {
       if (now() - askedAdminAt < ADMIN_EVERY_MS) return null;
       askedAdminAt = now();
@@ -138,7 +142,7 @@ export function createBotLinkMain({ wanted, pref = null, switchedOff = null, cho
       try { answered = await powerChecked(); } catch {}
       if (!answered || cloud().asleep) return null;
     }
-    const at = now();
+    const at = awakeAt = now();
     return at > after ? at : null;
   }
   /** The Admin's "asleep" and when main first heard it, on this computer's clock: heard again when the Admin's `since`

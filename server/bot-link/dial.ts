@@ -41,6 +41,7 @@ const FILE_MS = 10 * 60_000;
  * start), and this many wakes in any hour. */
 export const WAKE_MS = 150_000, WAKE_TRIES = 6, WAKES_PER_HOUR = 3;
 const HOUR_MS = 60 * 60_000;
+export const WAKE_RECHECK_MS = 60_000;
 
 export interface DialerOptions {
   link: BotLink;
@@ -51,9 +52,11 @@ export interface DialerOptions {
   /** What this computer says its version reads; a test stands in for an older app with it. */
   level?: number;
   now?: () => number;
+  /** How often a person's work waiting for the hour's wakes to allow another looks again (WAKE_RECHECK_MS). */
+  recheckMs?: number;
 }
 
-export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS, level = PROTOCOL_LEVEL, now = Date.now }: DialerOptions) {
+export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS, level = PROTOCOL_LEVEL, now = Date.now, recheckMs = WAKE_RECHECK_MS }: DialerOptions) {
   let running = false, stopped = true, asleep = false, needsPairing = false;
   /** `wake`: work a person waits on is waking the Cloud until `wakeUntil` or WAKE_TRIES exchanges (`wakeTries`), so
    * exchanges are not background until one is answered; `wakes`: when each wake of the last hour began. `provedAt`: when
@@ -139,12 +142,7 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
         wake = true; wakeUntil = at + WAKE_MS; wakeTries = 0;
         link.wakeLater?.(peer, 0);
         link.setWaking(peer, true);
-      } else if (!wakeAgain) {
-        const ms = wakes[0]! + HOUR_MS - at + 1_000;
-        link.wakeLater?.(peer, ms);
-        wakeAgain = setTimeout(() => { wakeAgain = null; if (asleep && link.hasOutgoing(peer)) wanted(true); }, ms);
-        wakeAgain.unref?.();
-      }
+      } else if (!wakeAgain) waitForWake(peer, at);
     }
     // Background work, or a person's past the wakes an hour allows (tried again as above): a parked link stays parked; it
     // goes with the next "awake".
@@ -152,6 +150,20 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     asleep = false; retryMs = firstRetryMs;
     wakeUp?.();
   };
+  /** The wakes of the last hour are used up: the bot is told when, and it is looked at again (at most every `recheckMs`,
+   * so a clock that moves on is noticed) until a wake is allowed, while a person's work for the Cloud still waits. */
+  function waitForWake(peer: string, at: number): void {
+    const ms = wakes[0]! + HOUR_MS - at + 1_000;
+    link.wakeLater?.(peer, ms);
+    wakeAgain = setTimeout(() => {
+      wakeAgain = null;
+      if (stopped || !asleep || !link.personWaiting?.(peer)) { link.wakeLater?.(peer, 0); return; }
+      const now2 = now();
+      while (wakes.length && now2 - wakes[0]! >= HOUR_MS) wakes.shift();
+      if (wakes.length < WAKES_PER_HOUR) wanted(true); else waitForWake(peer, now2);
+    }, Math.min(ms, recheckMs));
+    wakeAgain.unref?.();
+  }
   const stopWanted = link.onWanted(wanted);
   /** The Cloud answered that it sleeps, the app's word parks the link, or a wake got no answer: nothing asks it until
    * there is new work for it or the app says it is awake. */
