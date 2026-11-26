@@ -261,6 +261,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "layout", page: "appearance", anchor: "appearance", labelKey: "settings.appearance.layout", advanced: true, synonyms: ["show your computers", "rail", "window frame", "title bar", "threads", "tools layout", "pinned", "circles", "universal pins", "pinned panels"] },
   { id: "skill-burger-switch", page: "features", anchor: "features", labelKey: "settings.features.skillBurger", topFor: ["skill burger", "skill burgers"], synonyms: ["burger", "saved runs", "workflows"] },
   { id: "thread-tabs", page: "features", anchor: "features", labelKey: "settings.features.threadTabs", synonyms: ["tabs", "threads"] },
+  { id: "suggested-replies", page: "features", anchor: "features", labelKey: "settings.features.suggestedReplies", synonyms: ["suggestions", "autocomplete", "next reply", "tab"] },
   { id: "apps", page: "overview", labelKey: "settings.search.apps", jump: "apps", synonyms: ["apps", "gmail", "slack", "calendar", "notion", "connect app", "integrations"] },
   { id: "bot-settings", page: "overview", labelKey: "settings.search.bot", jump: "bot", synonyms: ["approvals", "safety", "routines", "memory", "bot's notifications"] },
   { id: "shortcuts", page: "app", labelKey: "sidebar.menu.shortcuts", jump: "shortcuts", synonyms: ["keyboard shortcuts", "hotkeys", "cheat sheet"] },

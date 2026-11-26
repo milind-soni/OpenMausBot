@@ -10,6 +10,7 @@ import { openRouterModelUnavailable } from "./drivers/openrouter-free.ts";
 import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
 import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
 import { refusesModel } from "./quick-model-fallback.ts";
+import type { LightModel, LightModelEngine } from "./suggested-reply/light-model.ts";
 import { fastModelFor } from "./turn-route.ts";
 import type { UsageRow, UsageTrigger } from "./usage-ledger.ts";
 
@@ -39,7 +40,8 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
 }
 
 /** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
-export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger";
+/** "suggested-reply": the composer's next-line suggestion, only ever on the bot's own engine's smallest model. */
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger" | "suggested-reply";
 
 export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable" | "openRouter"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
@@ -83,6 +85,8 @@ export interface SideJobsDeps {
   log?: (line: string) => void;
   /** How many background jobs run at once, across bots. */
   slots?: JobSlots;
+  /** The smallest model of an engine a suggested reply may run on; without it, or when it answers null, there is none. */
+  lightModel?: (engine: LightModelEngine, refused: ReadonlySet<string>) => LightModel | null;
 }
 
 export interface SideJobs {
@@ -104,7 +108,7 @@ function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined 
 /** A turn or a person is waiting on these, so they start at once. */
 const NEVER_QUEUED: ReadonlySet<SideJob> = new Set(["compaction", "representative", "status-reply"]);
 /** A person sees these soon (a new bot's suggestions card): they wait ahead of memory upkeep and skill review. */
-const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions", "skill-burger"]);
+const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions", "skill-burger", "suggested-reply"]);
 
 function memoryModelFailure(error: unknown): MemoryModelFailure {
   if (error instanceof DOMException && error.name === "TimeoutError") return "timeout";
@@ -189,6 +193,17 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
         },
       });
     };
+
+  /** Pinned to the light model: its refusal fails the call rather than running on the bot's own model. */
+  const lightText = (bot: SideJobBot, own: SideJobInstance): SideJobText | null => {
+    const refused = deps.smallModels.refused(own.instanceId);
+    const light = deps.lightModel?.(own, refused);
+    if (!light || (deps.modelAllowed && !deps.modelAllowed({ instanceId: own.instanceId, model: light.model }))) return null;
+    const call = (light.call === "text" ? own.generateText : own.generateMemoryText)?.bind(own);
+    if (!call) return null;
+    const pinned: TextGenerationOptions = { model: light.model, fallback: { model: light.model, refused, onRefused: (model) => deps.smallModels.remember(own.instanceId, model) } };
+    return { via: "engine", generateText: rememberRefusal(booked("suggested-reply", bot, own, call, { kind: "bot", botId: bot.id }, () => pinned), own, light.model) };
+  };
 
   const writeMemory = (bot: SideJobBot, own: SideJobInstance, call: TextCall, selected: MemoryModelSelection): SideJobText["generateText"] =>
     async (prompt, { onMemoryModel, ...options } = {}) => {
@@ -282,6 +297,7 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     const bot = deps.bot(botId);
     const own = at.instance ?? (bot ? deps.instance(bot.modelSelection.instanceId) : null);
     if (!bot || !own || deps.refusal(own)) return null;
+    if (job === "suggested-reply") return lightText(bot, own);
     const selectedMemory = job === "memory" && bot.memoryModel?.instanceId === own.instanceId ? bot.memoryModel : undefined;
     if (selectedMemory && (!own.openRouter || !own.enabled || !own.generateText)) return null;
     // The review's changes are written with the bot's own skill tools, whoever read the conversation.
