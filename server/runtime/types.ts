@@ -356,7 +356,8 @@ export interface Limits {
   totalExecutions: number;
   /** Handed-off work that may fail in a row, with none completing between, before the root's tree is stopped. */
   failedInARow: number;
-  /** A queued assignment that never started within this is expired. */
+  /** A queued assignment that never started within this is expired. Half an hour by default; a deployment tunes it
+   * with OMB_QUEUE_TIMEOUT_MINUTES or OMB_QUEUE_TIMEOUT_MS (see runtime/queue-limits.ts). */
   queueMs: number;
   /** No durable progress on a root for this long fails the tree. */
   stallMs: number;
@@ -378,7 +379,7 @@ export const DEFAULT_LIMITS: Limits = {
   wakes: 48,
   totalExecutions: 300,
   failedInARow: 5,
-  queueMs: 24 * 60 * 60_000,
+  queueMs: 30 * 60_000,
   stallMs: 4 * 60 * 60_000,
   turnStallMs: 20 * 60_000,
   inputWaitMs: Number.POSITIVE_INFINITY,
