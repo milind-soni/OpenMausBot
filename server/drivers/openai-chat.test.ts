@@ -1373,6 +1373,14 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
   });
 
+  it("keeps the current failure for other finish reasons", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(text("partial", "content_filter"))));
+    expect(requests).toBe(1);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("provider did not finish the response (content_filter)") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
   it("stops at the continuation cap instead of looping forever", async () => {
     let requests = 0;
     const events = await runTurn(() => (requests++, sse(text(`part ${requests}`, "length"))));
