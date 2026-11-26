@@ -3,7 +3,8 @@
 // it is open beside the feed (Up next, Writer working, Needs you, Needs Mira, Done, Stopped), with no switch and no
 // "Board" anywhere a person reads. A live change moves a row's status, and an empty room says a bot can split big work.
 // The pieces' states are written to board.json and the Cloud restarted on it; the dispatcher's quiet minutes last hours
-// here, so nothing moves them. Run with OMB_UI_E2E=1; OMB_WORK_STATUS_SHOTS=DIR keeps the screenshots.
+// here, so nothing moves them. Asked where the work stands, Lead (the synthetic Claude CLI) shows it in the thread with
+// show_html, grouped by the same statuses. Run with OMB_UI_E2E=1; OMB_WORK_STATUS_SHOTS=DIR keeps the screenshots.
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,6 +28,20 @@ const SHOTS = process.env.OMB_WORK_STATUS_SHOTS || join(REPO_ROOT, ".omb-scratch
 const WIDE = ["1440", "900"] as const, NARROW = ["900", "800"] as const;
 const OLIVE = { email: "olive@acme.test", role: "owner" as const };
 const MIRA = { email: "mira@acme.test", role: "member" as const };
+/** The synthetic CLI calls the tools tool-calls.json names for a word of the turn's newest line. */
+const ENGINE = `const dir = process.env.FAKE_CLAUDE_FIXTURE_DIR;
+process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = dir + "/tool-calls.json";
+process.env.FAKE_CLAUDE_MARKERS_LATEST = "1";`;
+/** What a bot's work view looks like: one compact page, grouped by what people see on the threads. */
+function workPage(groups: Array<[string, string[]]>): string {
+  const section = ([status, titles]: [string, string[]]) => `<section><h3>${status}</h3><ul>${titles.map((title) => `<li>${title}</li>`).join("")}</ul></section>`;
+  return `<style>body{margin:0;font:13px/18px var(--font-sans);color:var(--color-text-primary);background:transparent}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:12px}
+section{border:0.5px solid var(--color-border-primary);border-radius:10px;padding:8px 10px}
+h3{margin:0 0 4px;font-size:12px;font-weight:600;opacity:.85}
+ul{margin:0;padding:0;list-style:none}li{padding:2px 0}</style>
+<main>${groups.map(section).join("")}</main>`;
+}
 const DISMISS = `(() => { [...document.querySelectorAll('[role="dialog"] button, dialog button')].find((button) => button.textContent.trim() === "Not now")?.click(); return true; })()`;
 
 type Bot = { id: string; name: string };
@@ -93,10 +108,11 @@ async function openApp(size: readonly [string, string]) {
     mkdirSync(SHOTS, { recursive: true });
     tools = await ensureUiBrowser(process.env);
     fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-work-status-${randomBytes(8).toString("hex")}`,
-      team: { id: "team-acme-work-ui", name: "Acme", env: { OMB_BOARD_TIME_SCALE: "1000" } } });
+      team: { id: "team-acme-work-ui", name: "Acme", engine: ENGINE, env: { OMB_BOARD_TIME_SCALE: "1000" } } });
     team = fx.team!;
     olive = (await team.pair(OLIVE)).token!;
     mira = (await team.pair(MIRA)).token!;
+    writeFileSync(join(team.home, "tool-calls.json"), "{}");
     const onboarding = { completedAt: new Date().toISOString(), version: WELCOME_VERSION, hintsSeen: [...TOUR_STEPS.map((step) => step.id), ...SPOTLIGHTS, "cloud-welcome-done", "cloud-setup-hidden"] };
     expect((await team.as(olive, "PATCH", "/api/config", { onboarding, language: "en" })).status).toBe(200);
     for (const token of [olive, mira]) await team.as(token, "PUT", "/api/me/welcome", { welcomed: true });
@@ -197,5 +213,23 @@ async function openApp(size: readonly [string, string]) {
     await app!.until("document.querySelector('[data-feed-split-hint]')");
     expect(await app!.evaluate<string>("document.querySelector('[data-feed-split-hint]').textContent")).toBe("Ask a bot to split big work into threads.");
     await app!.skins("04-empty-room-hint-1440");
+  }, hostTimeout(300_000));
+
+  it("shows where the work stands in the thread when a person asks, as one page grouped by the same statuses", async () => {
+    const page = workPage([["Needs you", ["Book the venue"]], ["Needs Mira", ["Pick the launch date"]], ["Up next", ["Review the post"]],
+      ["Done", ["Research venues", "Draft the launch post"]], ["Stopped", ["Order printed banners"]]]);
+    writeFileSync(join(team.home, "tool-calls.json"), JSON.stringify({ stand: [
+      { name: "board_list", server: "agents", input: { room: "Launch" } },
+      { name: "show_html", server: "agents", input: { title: "Launch: where the work stands", html: page, height: 200 } },
+    ] }));
+    await app!.click(`[data-sidebar-group-row="${launch.id}"]`);
+    await app!.until(`document.querySelector('[data-feed-thread="${launch.threadId}"]')`);
+    await app!.evaluate(`document.querySelector('[data-feed-thread="${launch.threadId}"] > button').click(); true`);
+    await app!.until(`document.querySelector('[data-thread-panel="${launch.threadId}"]')`);
+    const sent = await team.as(olive, "POST", `/api/groups/${launch.id}/messages`, { text: "@Lead where does the work stand?", threadId: launch.threadId });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(202);
+    await app!.until(`document.querySelector('[data-thread-panel="${launch.threadId}"] iframe[data-app-frame]')`, 90_000);
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await app!.skins("05-work-view-in-thread-1440");
   }, hostTimeout(300_000));
 });

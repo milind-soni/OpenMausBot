@@ -91,6 +91,7 @@ it("lists the board tools to every bot of a Team Cloud with no switch, and tells
   expect(dump().mcpConfig?.mcpServers?.agents?.env?.OMB_TEAM_BOARD).toBe("1");
   expect(dump().systemPrompt).toBeTruthy();
   expect(dump().systemPrompt ?? "", "the split line is for rooms").not.toContain("board_add");
+  expect(dump().systemPrompt ?? "", "and so is the work view").not.toContain("call board_list and show it here with show_html");
   await idle();
   rmSync(file("dump.json"), { force: true });
   const room = await team.as(mira, "POST", `/api/groups/${launch.id}/messages`, { text: "Hello room", threadId: launch.threadId });
@@ -98,6 +99,8 @@ it("lists the board tools to every bot of a Team Cloud with no switch, and tells
   await until(() => existsSync(file("dump.json")), "a room turn");
   expect(dump().mcpConfig?.mcpServers?.agents?.env?.OMB_TEAM_BOARD).toBe("1");
   expect(dump().systemPrompt ?? "").toContain("When a person here asks you to split up or share out work");
+  expect(dump().systemPrompt ?? "").toContain("When someone asks to see the work or where it stands, call board_list and show it here with show_html");
+  expect(dump().systemPrompt ?? "").toContain("asked again, replace that page by its app_id. Never show it unasked.");
   // Every bot must be idle before the next case: a busy one would hand its first item to another bot.
   await idle();
 }, hostTimeout(90_000));

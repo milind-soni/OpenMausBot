@@ -34,7 +34,9 @@ threads. The feed reads `GET /api/board?groupId=` and follows `board.item` frame
 
 Every room turn on a Team Cloud carries one line (`ROOM_SPLIT_PROMPT`, `server/system-prompt.ts`): when a person asks to
 split or share out work, or hands over a goal with clearly separate parts, use `board_add`; otherwise just answer; never
-split a small request or a piece you were handed. `board_add` itself refuses a call from a thread that is already an
+split a small request or a piece you were handed. When someone asks to see the work or where it stands, the bot calls
+`board_list` and shows it in the chat with the existing `show_html` tool, one compact page grouped by the statuses above,
+and replaces that page by its `app_id` when asked again; never unasked. No tool was added for it. `board_add` itself refuses a call from a thread that is already an
 item, so a bot working one piece cannot turn it into more turns.
 
 ## The item
