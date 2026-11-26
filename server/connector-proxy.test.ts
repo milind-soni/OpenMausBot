@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
+import { definitionListBytes, toolListShareProfile, type ListedTool } from "./tool-list-budget.ts";
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "connector-proxy.ts");
 /** What the bridge lists when the connected-apps service does not answer discovery. */
@@ -450,6 +451,23 @@ describe("connector MCP bridge", () => {
     expect(search).toEqual(tools[0]);
     expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
     expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+  });
+
+  it("fits a connected app's tools into its share of the native Antigravity CLI's session budget", async () => {
+    const long = (topic: string) => Array.from({ length: 30 }, (_, at) => `Rule ${at + 1} for ${topic}: follow it closely.`).join(" ");
+    const tools = ["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_MULTI_EXECUTE_TOOL"].map((name) => ({ name, description: long(name),
+      inputSchema: { type: "object", properties: { thought: { type: "string", description: long("thought") } }, required: ["thought"] } }));
+    const upstream = await listen((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: 4, result: { tools } }));
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(1_500) });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} })}\n`);
+    const listed = (await nextJson(lines)).result.tools as ListedTool[];
+    expect(listed.map((tool) => tool.name)).toEqual(tools.map((tool) => tool.name));
+    expect(definitionListBytes(tools)).toBeGreaterThan(1_500);
+    expect(definitionListBytes(listed)).toBeLessThanOrEqual(1_500);
+    for (const tool of listed) expect(tool.inputSchema).toMatchObject({ properties: { thought: { type: "string" } }, required: ["thought"] });
   });
 
   it("lists no more connected-app tools than its share of the model's tool limit", async () => {

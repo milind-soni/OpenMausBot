@@ -17,7 +17,8 @@ import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
-import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { toolListShare, toolsListResultForShareProfile } from "./tool-list-budget.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 import { readStdioLines } from "./stdio-lines.ts";
 
@@ -31,6 +32,8 @@ const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? 
 const ALLOWED_TOOLS = parseConnectorAllowedToolsEnv(process.env[CONNECTOR_ALLOWED_TOOLS_ENV]);
 const SERVICE_SLUGS = parseConnectorServiceSlugsEnv(process.env[CONNECTOR_SERVICE_SLUGS_ENV]);
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
+/** The native Antigravity CLI's session gives this list a byte share in place of a provider profile. */
+const SHARE_PROFILE = process.env[TOOL_SCHEMA_PROFILE_ENV];
 const TOOL_LIMIT = toolLimitFromEnv(process.env);
 const APP_TOOLS = parseAppToolsEnv(process.env[APP_TOOLS_ENV]);
 const APP_TOOL_NAMES = process.env[APP_TOOL_NAMES_ENV] === "dotted" ? "dotted" : "plain";
@@ -267,9 +270,10 @@ function withArgumentNotes(name: string, response: Json, changed: readonly strin
 }
 
 function fittedList(frame: Json): Json {
-  if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
+  if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined && toolListShare(SHARE_PROFILE) === undefined) || !("result" in frame)) return frame;
   const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
-  return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
+  const fitted = toolsListResultForShareProfile(fitToolListResult(frame.result, SCHEMA_PROFILE, log), SHARE_PROFILE, log);
+  return { ...frame, result: capToolListResult(fitted, TOOL_LIMIT, log) };
 }
 
 /** A refusal that answers the same way every time: an HTTP 4xx other than 429, or a result that is not a list (the

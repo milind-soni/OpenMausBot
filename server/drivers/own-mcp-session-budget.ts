@@ -3,10 +3,12 @@
 // what its list comes to at that cut plus its part of what is left, as its OMB_TOOL_SCHEMA_PROFILE. Each server then fits
 // the list it really serves into that share: a browser engine listing more than the estimate here only cuts its own.
 // The agents list is sized exactly; the others by the catalogs their endpoints serve (email and phone show fewer when
-// the bot may use fewer, and agent-browser's own list replaces the browser catalog). The person's servers and the
-// connected-apps server are not ours to trim and are not sized: their lists are only known once they answer.
+// the bot may use fewer, and agent-browser's own list replaces the browser catalog). The connected-apps proxy is sized by the
+// stand-in list it serves when the service does not answer, and fits the service's real list into its share. The person's
+// servers are not ours to trim and are not sized: their lists are only known once they answer.
 import { TOOL_LIST as BROWSER_TOOLS } from "../browser/tools.ts";
 import { CLOUD_COMPUTER_TOOLS } from "../cloud-computer-tools.ts";
+import { DISCOVERY_FALLBACK_TOOLS } from "../connector-discovery-fallback.ts";
 import { DATA_TOOLS } from "../data/tools.ts";
 import { EMAIL_TOOLS } from "../email/tools.ts";
 import { PHONE_TOOLS } from "../phones/tools.ts";
@@ -18,12 +20,15 @@ import {
 import { agentsToolList } from "./agents-mcp.ts";
 import { ownMcpOverHttp, type AcpMcpServer } from "./turn-mcp.ts";
 
-type OwnKind = "agents" | HarnessMcpKind;
+type OwnKind = "agents" | keyof typeof CATALOGS;
 
-const CATALOGS: Record<HarnessMcpKind, readonly ListedTool[]> = {
+const CATALOGS: Record<HarnessMcpKind | "connectors", readonly ListedTool[]> = {
   browser: BROWSER_TOOLS, data: DATA_TOOLS as readonly ListedTool[], computer: CLOUD_COMPUTER_TOOLS as readonly ListedTool[],
   email: EMAIL_TOOLS as readonly ListedTool[], device: PHONE_TOOLS as readonly ListedTool[],
+  connectors: DISCOVERY_FALLBACK_TOOLS as readonly ListedTool[],
 };
+
+const CONNECTOR_PROXY = /(?:^|[\\/])connector-proxy\.[jt]s$/;
 
 export interface SessionShares {
   /** Each list's share of the budget, in bytes, in the order given. */
@@ -51,6 +56,7 @@ const pairsToRecord = (env: Array<{ name: string; value: string }>) => Object.fr
 function ownKind(server: AcpMcpServer): { kind: OwnKind; env: Record<string, string> } | null {
   if (!("command" in server)) return null;
   const env = pairsToRecord(server.env);
+  if (server.args.some((arg) => CONNECTOR_PROXY.test(arg))) return { kind: "connectors", env };
   const url = ownMcpOverHttp({ ...server, env })?.url;
   const kind = url?.slice(url.lastIndexOf("/") + 1);
   return kind === "agents" || (kind !== undefined && kind in CATALOGS) ? { kind: kind as OwnKind, env } : null;
@@ -60,7 +66,7 @@ function ownKind(server: AcpMcpServer): { kind: OwnKind; env: Record<string, str
 export function withSessionToolShares(servers: AcpMcpServer[], budget: number, log: (line: string) => void = (line) => console.warn(line)): AcpMcpServer[] {
   const own = servers.map((server) => ({ server, own: ownKind(server) })).filter((entry) => entry.own !== null);
   if (!own.length) return servers;
-  const lists = own.map(({ own: found }) => (found!.kind === "agents" ? agentsToolList({ ...found!.env, [TOOL_SCHEMA_PROFILE_ENV]: undefined }).listed as ListedTool[] : CATALOGS[found!.kind as HarnessMcpKind]));
+  const lists = own.map(({ own: found }) => (found!.kind === "agents" ? agentsToolList({ ...found!.env, [TOOL_SCHEMA_PROFILE_ENV]: undefined }).listed as ListedTool[] : CATALOGS[found!.kind as keyof typeof CATALOGS]));
   const { shares, bytes, fits } = sessionToolShares(lists, budget);
   if (!fits) {
     const others = servers.filter((server) => !own.some((entry) => entry.server === server)).map((server) => server.name);

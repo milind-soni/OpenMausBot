@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { TOOL_LIST as BROWSER_TOOLS } from "../browser/tools.ts";
 import { CLOUD_COMPUTER_TOOLS } from "../cloud-computer-tools.ts";
 import { DATA_TOOLS } from "../data/tools.ts";
+import { DISCOVERY_FALLBACK_TOOLS } from "../connector-discovery-fallback.ts";
 import { EMAIL_TOOLS } from "../email/tools.ts";
 import { PHONE_TOOLS } from "../phones/tools.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
@@ -49,6 +50,13 @@ const agentsServer = (settings: Record<string, string>): AcpMcpServer => ({ name
   env: pairs({ OMB_HARNESS_URL: HARNESS, OMB_COMMS_TOKEN: "comms", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1", ...settings }) });
 const harnessServer = (kind: string): AcpMcpServer => ({ name: kind, command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, kind],
   env: pairs({ OMB_HARNESS_URL: HARNESS, [`OMB_MCP_TOKEN_${kind.toUpperCase()}`]: `${kind}-capability` }) });
+const connectorServer: AcpMcpServer = { name: "composio", command: process.execPath, args: [SPAWNED_PROXIES.connectors],
+  env: pairs({ OMB_HARNESS_URL: HARNESS, OMB_CONNECTOR_UPSTREAM_URL: "https://apps.invalid/mcp", OMB_TOOL_SCHEMA_PROFILE: "gemini" }) };
+/** A connected-apps list the size the service sends, its long usage rules and all (the stand-in list is far shorter). */
+const rules = (topic: string, count: number) => Array.from({ length: count }, (_, at) => `Rule ${at + 1} for ${topic}: follow it closely.`).join(" ");
+const CONNECTED_APPS = ["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MULTI_EXECUTE_TOOL", "COMPOSIO_MANAGE_CONNECTIONS", "COMPOSIO_REMOTE_WORKBENCH"]
+  .map((name, index) => ({ name, description: rules(name, 40 + index * 10), inputSchema: { type: "object", required: ["thought"],
+    properties: { thought: { type: "string", description: rules("thought", 6) }, items: { type: "array", items: { type: "string" }, description: rules("items", 4) } } } }));
 const notes: AcpMcpServer = { name: "notes", command: "npx", args: ["notes"], env: [] };
 const nativeCli = { agentInfo: { name: "Antigravity ACP Server" } };
 const oldRuntime = { agentInfo: { name: "antigravity-acp" } };
@@ -162,6 +170,29 @@ describe("sharing out a session's budget", () => {
     expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's own MCP tools \(agents, browser, data, computer, email, device\) come to (\d+) bytes at their shortest, \d+ over the 40000-byte tool budget; the engine leaves out its largest tools first \(notes not counted\)$/)]);
     expect(withSessionToolShares([notes], 40_000, (line) => logged.push(line))).toEqual([notes]);
     expect(logged).toHaveLength(1);
+  });
+});
+
+describe("a native Antigravity CLI session with connected apps", () => {
+  // The bug in 0.1.181 reports: the connected-apps server was neither trimmed nor counted, so its long tools went over the
+  // CLI's budget on top of OpenMausBot's own and the CLI left out the largest of them.
+  it("counts the connected-apps server in the session's shares, so the CLI leaves out none of its tools", () => {
+    const lists = [agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)];
+    expect(cliDrops([...shown(lists).lists.flatMap((list) => list.tools), ...CONNECTED_APPS], CLI_DROP_FLOOR)).toContain("COMPOSIO_REMOTE_WORKBENCH");
+    const shared = withSessionToolShares([agentsServer(CHIEF), harnessServer("browser"), harnessServer("data"), connectorServer, notes], ANTIGRAVITY_CLI_TOOL_BUDGET);
+    const shares = shared.slice(0, 4).map((server) => toolListShare(envOf(server)[TOOL_SCHEMA_PROFILE_ENV])!);
+    expect(shares).toEqual(sessionToolShares([...lists, catalog(DISCOVERY_FALLBACK_TOOLS)], ANTIGRAVITY_CLI_TOOL_BUDGET).shares);
+    expect(shared[4]).toBe(notes);
+    const tools = [...lists, CONNECTED_APPS].flatMap((list, index) => fitToolListToShare(list, shares[index]!).tools);
+    expect(tools.map((tool) => tool.name)).toEqual([...lists, CONNECTED_APPS].flat().map((tool) => tool.name));
+    expect(cliDrops(tools, CLI_DROP_FLOOR)).toEqual([]);
+  });
+
+  it("keeps the connected-apps server a stdio proxy when the own servers go by URL", () => {
+    const sent = acpSessionMcpServers([agentsServer(CHIEF), connectorServer], "advertised", nativeCli, () => true, antigravityCliToolBudget);
+    expect("headers" in sent[0]!).toBe(true);
+    expect((sent[1] as { args: string[] }).args).toEqual(connectorServer.args);
+    expect(toolListShare(envOf(sent[1]!)[TOOL_SCHEMA_PROFILE_ENV])).toBeGreaterThan(0);
   });
 });
 
