@@ -722,7 +722,7 @@ describe("encrypted full workspace backups", () => {
     expect(existsSync(join(data, "task-workspaces", "bot", "thread", "node_modules"))).toBe(false);
     expect(existsSync(join(data, "task-workspaces", "bot", "thread", "linked-secret"))).toBe(false);
     expect(existsSync(join(data, "workspaces", "bot", "project", "node_modules"))).toBe(false);
-    symlinkSync(join(outside, "secret"), join(root, "workspaces", "bot", "external"));
+    symlinkSync(join(outside, "secret"), join(root, "external"));
     await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/outside the workspace/);
   });
 
@@ -763,8 +763,45 @@ describe("encrypted full workspace backups", () => {
     expect(existsSync(join(data, "task-workspaces", "bot", "thread", "env"))).toBe(false);
     expect(existsSync(join(data, "workspaces", "bot", "app", "__pycache__"))).toBe(false);
 
-    symlinkSync(join(outside, "python3"), join(bot, "venv", "python"));
-    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow("Cannot back up symbolic link outside the workspace: workspaces/bot/venv/python");
+    expect(exported.summary.warnings.some((warning) => warning.includes("symbolic link(s) in bot folders"))).toBe(false);
+  });
+
+  it("leaves out a bot folder's links to nothing or outside, and browser profiles, and names them; elsewhere such links still stop it", async () => {
+    const root = directory();
+    const outside = directory();
+    writeFileSync(join(outside, "secret"), "must never be read");
+    const bot = join(root, "workspaces", "bot");
+    // A Chromium profile a bot's project keeps: known by its "Local State", left out whole with its lock links.
+    const profile = join(bot, "broker", "state", "chrome-profile");
+    mkdirSync(join(profile, "Default"), { recursive: true });
+    writeFileSync(join(profile, "Local State"), "{}");
+    writeFileSync(join(profile, "Default", "Cookies"), "cookies");
+    symlinkSync("gone-12345", join(profile, "SingletonLock"));
+    symlinkSync(join(outside, "missing"), join(profile, "RunningChromeVersion"));
+    // The same kinds of link outside a browser profile: left out and named.
+    mkdirSync(join(bot, "notes"), { recursive: true });
+    writeFileSync(join(bot, "notes", "todo.md"), "keep me");
+    symlinkSync(join(outside, "missing"), join(bot, "notes", "dangling"));
+    symlinkSync(join(outside, "secret"), join(bot, "notes", "outside"));
+    symlinkSync(outside, join(bot, "outside-folder"), process.platform === "win32" ? "junction" : "dir");
+
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    expect(exported.summary.warnings).toContain("1 browser profile folder(s) in bot folders were left out with their sign-ins, cookies and caches; sign in again after restoring: workspaces/bot/broker/state/chrome-profile.");
+    expect(exported.summary.warnings).toContain("3 symbolic link(s) in bot folders were left out because they point to nothing or outside this backup: workspaces/bot/notes/dangling, workspaces/bot/notes/outside, workspaces/bot/outside-folder.");
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const data = join(target, ".backups", staged.id, "staged", "data", "workspaces", "bot");
+    expect(readFileSync(join(data, "notes", "todo.md"), "utf8")).toBe("keep me");
+    expect(existsSync(join(data, "broker", "state"))).toBe(true);
+    expect(existsSync(join(data, "broker", "state", "chrome-profile"))).toBe(false);
+    for (const left of ["notes/dangling", "notes/outside", "outside-folder"]) expect(existsSync(join(data, left)), left).toBe(false);
+
+    // Outside a bot's folder the rules stand: a dangling link still stops the backup, and so does a loop.
+    symlinkSync(join(outside, "missing"), join(root, "dangling"));
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow("Cannot back up dangling symbolic link: dangling");
+    rmSync(join(root, "dangling"));
+    symlinkSync(".", join(bot, "notes", "loop"), process.platform === "win32" ? "junction" : "dir");
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow("symbolic link to the folder that contains it");
   });
 
   it("counts the app's skill links in work folders as managed, not as outside data", async () => {

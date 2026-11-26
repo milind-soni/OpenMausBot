@@ -94,5 +94,15 @@ export function installedDependencyFolder(source: string, name: string, stat: St
   try { return lstatSync(join(source, "pyvenv.cfg")).isFile(); } catch { return false; }
 }
 
+/** A Chromium browser's own profile folder (it holds "Local State"), as a bot's project may keep one: its sign-ins and
+ * cookies stay on the computer they were made on, as the app's own browser profiles do, and its caches are large. */
+export function browserProfileFolder(source: string, stat: Stats): boolean {
+  if (!stat.isDirectory()) return false;
+  try { return lstatSync(join(source, "Local State")).isFile(); } catch { return false; }
+}
+
+/** Up to three of `paths`, for a note that names what was left out. */
+export const examplePaths = (paths: readonly string[]): string => `${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ", …" : ""}`;
+
 /** Python's bytecode cache, written again the next time the code runs. */
 export const bytecodeCache = (name: string, stat: Stats): boolean => name === "__pycache__" && (stat.isDirectory() || stat.isSymbolicLink());
