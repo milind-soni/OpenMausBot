@@ -593,7 +593,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let toolFailed = false, spoke = false, unfloored = 0, blockedAfterReply = false; // unfloored: failed calls the safety floor did not block after the bot spoke
       let correctiveRounds = 0;
       const cutReplies = { count: 0 };
-      let carried = "";
+      let carried = "", continuedReply = "";
       const denials: string[] = [], failedCalls: string[] = [];
       const seenCalls = new Set<string>();
       let nudges = 0;
@@ -744,7 +744,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
           const shownReply = prefix || willContinue ? maskSecrets(prefix + completion.text, !willContinue).visible : safeText(reply);
-          if (reply.trim()) { spoke = true; emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: shownReply }); }
+          if (reply.trim()) { spoke = true; continuedReply += shownReply; }
+          if (!willContinue && continuedReply) { emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: continuedReply }); continuedReply = ""; }
           abort.signal.throwIfAborted();
           if (unreadable) {
             askedAgain = true;

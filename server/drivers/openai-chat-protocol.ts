@@ -20,22 +20,28 @@ export const MAX_REASONING_DETAIL_CHARS = 4_000_000;
 export class ChatProtocolError extends Error {}
 
 export const CUT_REPLY_NOTE = "[OpenMausBot: your reply was cut at the output limit. Continue exactly where you stopped.]";
+/** Continuations per turn, shared by every reply the turn produces, so one turn cannot bill forever. */
 const MAX_LENGTH_CONTINUATIONS = 8;
 
-/** True when a reply cut at the output limit has a continuation left. A local model writes tool calls as text, so a
- * cut reply there may be half a call and stays a failure. */
-export function cutReplyWillContinue(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
-  return completion.finishReason === "length" && Boolean(completion.text.trim()) && !localTools && state.count < MAX_LENGTH_CONTINUATIONS;
+/** Null when the completion is not a cut reply that can be continued; `exhausted` when the turn's budget is spent. A
+ * local model writes tool calls as text, so a cut reply there may be half a call and stays a failure. */
+function cutReplyOutcome(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): "continue" | "exhausted" | null {
+  if (completion.finishReason !== "length" || !completion.text.trim() || localTools) return null;
+  return state.count < MAX_LENGTH_CONTINUATIONS ? "continue" : "exhausted";
 }
 
-/** True when a reply cut at the output limit should be continued; throws once the cap is reached. */
+/** True when a cut reply has a continuation left in this turn's budget. */
+export function cutReplyWillContinue(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
+  return cutReplyOutcome(state, completion, localTools) === "continue";
+}
+
+/** True when a cut reply should be continued and consumes one continuation; throws once the turn's budget is spent. */
 export function cutReplyContinues(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
-  if (!cutReplyWillContinue(state, completion, localTools)) {
-    if (completion.finishReason === "length" && completion.text.trim() && !localTools) {
-      throw new ChatProtocolError(`The reply was still cut at the output limit after ${MAX_LENGTH_CONTINUATIONS} continuations; the turn was stopped.`);
-    }
-    return false;
+  const outcome = cutReplyOutcome(state, completion, localTools);
+  if (outcome === "exhausted") {
+    throw new ChatProtocolError(`The reply was still cut at the output limit after ${MAX_LENGTH_CONTINUATIONS} continuations; the turn was stopped.`);
   }
+  if (!outcome) return false;
   state.count += 1;
   return true;
 }

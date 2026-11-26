@@ -1173,7 +1173,7 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     let requests = 0;
     const events = await runTurn(() => ++requests === 1 ? sse(text("The report is", "length")) : sse(text(" written.", "stop")));
     expect(requests).toBe(2);
-    expect(textOf(events)).toEqual(["The report is", " written."]);
+    expect(textOf(events)).toEqual(["The report is written."]);
     expect(events.some((event) => event.type === "runtime.error")).toBe(false);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
 
@@ -1195,7 +1195,7 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
       { MINIMAX_API_KEY: secret },
     );
     expect(requests).toBe(2);
-    expect(textOf(events)).toEqual(["before ", "[redacted] after"]);
+    expect(textOf(events)).toEqual(["before [redacted] after"]);
     const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
       : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
     expect(shown.join("")).not.toContain("abcdefgh");
@@ -1222,7 +1222,9 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     let requests = 0;
     const events = await runTurn(() => (requests++, sse(text(`part ${requests}`, "length"))));
     expect(requests).toBe(9);
-    expect(textOf(events)).toHaveLength(9);
+    expect(textOf(events)).toHaveLength(1);
+    expect(textOf(events)[0]).toContain("part 1");
+    expect(textOf(events)[0]).toContain("part 9");
     expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("output limit") });
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
   });
