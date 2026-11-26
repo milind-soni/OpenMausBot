@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const sent: { body: string; finish: () => void }[] = [];
+const sent: { body: string; timeoutMs?: number; finish: () => void }[] = [];
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
-  api: vi.fn((_path: string, init: { body: string }) => new Promise<void>((resolve) => sent.push({ body: init.body, finish: resolve }))),
+  api: vi.fn((_path: string, init: { body: string; timeoutMs?: number }) =>
+    new Promise<void>((resolve) => sent.push({ body: init.body, timeoutMs: init.timeoutMs, finish: resolve }))),
 }));
 const { saveDepartmentOrder } = await import("./bot-sections");
 
@@ -22,5 +23,14 @@ describe("saving the department order", () => {
     expect(sent.map(({ body }) => JSON.parse(body).sections)).toEqual([["Ops", "Sales", "Legal"], ["Legal", "Ops", "Sales"]]);
     sent[1].finish();
     expect(await Promise.all([first, second])).toEqual([true, true]);
+  });
+
+  it("bounds each save, so a save the server never answers cannot hold back the moves after it", async () => {
+    const saving = saveDepartmentOrder(vi.fn(), ["Sales", "Ops"], ["Ops", "Sales"]);
+    await settle();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].timeoutMs).toBeGreaterThan(0);
+    sent[0].finish();
+    expect(await saving).toBe(true);
   });
 });

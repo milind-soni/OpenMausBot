@@ -76,7 +76,7 @@ export async function saveDepartmentOrder(dispatch: Dispatch<Action>, sections: 
   const request = ++departmentOrderRequest;
   dispatch({ type: "sectionsOrdered", sections: names });
   try {
-    const saved = departmentOrderSaves.then(() => api("/api/sidebar-sections/order", { method: "PUT", body: JSON.stringify({ sections: names }) }));
+    const saved = departmentOrderSaves.then(() => api("/api/sidebar-sections/order", { method: "PUT", body: JSON.stringify({ sections: names }), timeoutMs: 10_000 }));
     departmentOrderSaves = saved.catch(() => undefined);
     await saved;
     return true;
