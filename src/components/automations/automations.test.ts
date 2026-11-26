@@ -329,6 +329,52 @@ describe("the Automations list switch", () => {
       expect(writes()).toEqual([["/api/routines/routine-1", false], ["/api/webhooks/hook-1", false]]);
     });
 
+    it("forgets an earlier refusal beside one automation, and says a refusal of its own below the list", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      fixture.api.mockRejectedValueOnce(new Error("The assigned bot no longer exists"));
+      flushSync(() => toggle("Morning summary").click());
+      await vi.waitFor(() => expect(row("routine-1").querySelector("[role=alert]")?.textContent).toBe("The assigned bot no longer exists"));
+      await vi.waitFor(() => expect(setAll()!.disabled).toBe(false));
+      fixture.api.mockImplementation(async (_path: unknown, init: unknown) => {
+        if ((init as { body?: string } | undefined)?.body) throw new Error("The server is restarting");
+        return {};
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(container.querySelectorAll("[role=alert]")).toHaveLength(1));
+      expect(container.querySelector("[role=alert]")!.textContent).toBe("The server is restarting");
+      expect(row("routine-1").querySelector("[role=alert]")).toBeNull();
+    });
+
+    it("keeps every switch waiting while it writes, so a click cannot be undone by it", async () => {
+      fixture.state.routines = [routine, { ...routine, id: "routine-2", name: "Evening digest" }];
+      mountPage();
+      let release = () => {};
+      fixture.api.mockImplementation(async (path: unknown, init: unknown) => {
+        const body = (init as { body?: string } | undefined)?.body;
+        if (!body) return {};
+        await new Promise<void>((resolve) => { release = resolve; });
+        const id = String(path).split("/").pop();
+        return String(path).startsWith("/api/routines/")
+          ? { routine: { ...(fixture.state.routines as Array<{ id: string }>).find((item) => item.id === id), enabled: false } }
+          : { webhook: { ...webhook, enabled: false } };
+      });
+      stubConfirm(true);
+      flushSync(() => setAll()!.click());
+      await vi.waitFor(() => expect(writes()).toHaveLength(1));
+      expect(toggle("Morning summary").disabled).toBe(true);
+      expect(toggle("Sales form leads").disabled).toBe(true);
+      flushSync(() => toggle("Morning summary").click());
+      expect(writes()).toHaveLength(1);
+      for (let written = 1; written <= 3; written++) {
+        await vi.waitFor(() => expect(writes()).toHaveLength(written));
+        release();
+      }
+      await vi.waitFor(() => expect(toggle("Morning summary").disabled).toBe(false));
+      expect(writes().map(([, enabled]) => enabled)).toEqual([false, false, false]);
+    });
+
     it("offers nothing when fewer than two automations have a switch", () => {
       fixture.state.routines = [{ ...routine, enabled: false, nextRunAt: null, schedule: { type: "once", at: now - 60_000 } }];
       mountPage();

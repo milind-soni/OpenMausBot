@@ -13,7 +13,7 @@ import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-se
 import { useAppTriggers } from "@/lib/app-triggers";
 import { useMinuteTick } from "@/lib/minute-tick";
 import { AppEventEditor } from "./automations/AppEventEditor";
-import { useAllAutomationActions } from "./automations/app-actions";
+import { SET_ALL_BUSY, useAllAutomationActions } from "./automations/app-actions";
 import { AutomationPanel } from "./automations/AutomationPanel";
 import { AutomationsCalendar } from "./automations/AutomationsCalendar";
 import { LimitWarnings } from "./automations/LimitWarnings";
@@ -162,7 +162,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                           {!!automation.noStartStreak && <div className="mt-1 text-[13px] text-warning" data-automation-no-start="">{t("routines.noStartStreak", { count: automation.noStartStreak })}</div>}
                           {actions.error && actions.errorFor?.endsWith(`:${automation.id}`) && <p role="alert" className="mt-1 text-[12px] text-danger">{actions.error}</p>}
                         </div>
-                        {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}`} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="relative z-10 mt-0.5 shrink-0" />}
+                        {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}` || actions.busy === SET_ALL_BUSY} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="relative z-10 mt-0.5 shrink-0" />}
                       </li>
                     );
                   })}

@@ -43,6 +43,9 @@ export function useAutomationActions() {
 
   const toggle = (automation: Automation) => attempt(`toggle:${automation.id}`, () => setEnabled(automation, !automation.enabled));
 
+  /** Forgets the last refusal and what it was about, so it no longer shows beside that automation. */
+  const clearError = () => { setError(""); setErrorFor(null); };
+
   const runNow = (automation: Automation) => attempt(`run:${automation.id}`, () => automation.kind === "schedule"
     ? new Promise<void>((resolve, reject) => dispatch({ type: "runRoutine", routineId: automation.id, onStarted: () => resolve(), onError: reject }))
     : api(`/api/webhooks/${automation.id}/test`, { method: "POST", body: JSON.stringify({ event: "openmaus.test", message: "A test run from Automations" }) }));
@@ -93,5 +96,5 @@ export function useAutomationActions() {
     if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
   });
 
-  return { busy, error, errorFor, setError, copied, setEnabled, toggle, runNow, remove, copyAddress, openRun, cancelRun };
+  return { busy, error, errorFor, setError, clearError, copied, setEnabled, toggle, runNow, remove, copyAddress, openRun, cancelRun };
 }

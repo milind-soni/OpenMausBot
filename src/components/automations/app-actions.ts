@@ -5,6 +5,9 @@ import { appTriggerApi } from "@/lib/app-triggers";
 import type { Automation } from "@/lib/automations";
 import { useAutomationActions } from "./actions";
 
+/** What `busy` is while "Pause all" / "Resume all" writes: every switch waits for it. */
+export const SET_ALL_BUSY = "toggle:all";
+
 export function useAllAutomationActions() {
   const base = useAutomationActions();
   const [busy, setBusy] = useState<string | null>(null);
@@ -23,7 +26,9 @@ export function useAllAutomationActions() {
     error: error || base.error,
     setError: (message: string) => { setError(message); base.setError(message); },
     /** "Pause all" / "Resume all": turns each of `automations` on or off in turn, stopping at the first refusal. */
-    setAllEnabled: (automations: readonly Automation[], enabled: boolean) => attempt("toggle:all", async () => {
+    setAllEnabled: (automations: readonly Automation[], enabled: boolean) => attempt(SET_ALL_BUSY, async () => {
+      // An earlier refusal is about one automation; this change is about all of them, so its own refusal shows below the list.
+      base.clearError();
       for (const automation of automations) {
         if (automation.kind === "app") await appTriggerApi.update(automation.id, { enabled });
         else await base.setEnabled(automation, enabled);
@@ -31,7 +36,7 @@ export function useAllAutomationActions() {
     }),
     toggle: (automation: Automation) => automation.kind === "app"
       ? void attempt(`toggle:${automation.id}`, () => appTriggerApi.update(automation.id, { enabled: !automation.enabled }))
-      : base.toggle(automation),
+      : busy ? undefined : base.toggle(automation),
     runNow: (automation: Automation) => automation.kind === "app"
       ? attempt(`run:${automation.id}`, () => appTriggerApi.test(automation.id))
       : base.runNow(automation),
