@@ -27,7 +27,7 @@ import { InstanceProviderMark } from "./ProviderIcons";
 import { GEMINI_PRESET, GeminiServer, hasGeminiServer } from "./OpenAiCompatServers";
 import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
 import { AdminOnly } from "./AdminOnly";
-import { modelgoOfferable } from "@/lib/modelgo-offer";
+import { modelgoOfferable, sponsorRowRaised } from "@/lib/modelgo-offer";
 import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
 
 export { HiddenEngines };
@@ -500,18 +500,19 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   accountsOnly?: boolean;
   /** Offer the Google AI Studio row: no Gemini server is added yet and this workspace can add one. */
   offerGemini?: boolean;
-  /** The sponsor's provider sits in the main list, after the Google AI Studio row, where it may be offered (modelgoOfferable). */
+  /** The sponsor's provider sits in the main list, among its first three rows, where it may be offered (modelgoOfferable). */
   offerModelgo?: boolean;
 }) {
   const [opened, setOpened] = useState<string | null>(null);
   // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
   const allHidden = useHiddenProviders(), hidden = accountsOnly ? [] : allHidden;
   const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined || hasGeminiServer([instance]));
-  const modelgo = offerModelgo && !accountsOnly && !featured.some((instance) => instance.driverKind === "modelgo")
-    ? rows.find((instance) => instance.driverKind === "modelgo") : undefined;
+  const modelgo = offerModelgo && !accountsOnly ? rows.find((instance) => instance.driverKind === "modelgo") : undefined;
   const others = rows.filter((instance) => !featured.includes(instance) && instance !== modelgo);
   // A hidden Gemini server comes back through its own hidden row; adding another would only make a second one.
   const gemini = offerGemini && !hidden.some((provider) => provider.driverKind === "openai-compat" && provider.displayName === GEMINI_PRESET.name);
+  const main = sponsorRowRaised<InstanceInfo | "google-ai-studio">([...featured, ...(gemini ? ["google-ai-studio" as const] : []),
+    ...(modelgo && !featured.includes(modelgo) ? [modelgo] : [])], modelgo, (entry) => entry !== "google-ai-studio" && entry.driverKind === "cursorAgent");
   const folded = others.length + hidden.length;
   const row = (instance: InstanceInfo, compact: boolean) => {
     const open = opened === instance.instanceId;
@@ -521,9 +522,8 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   return (
     <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
       <SettingsRows icons>
-        {featured.map((instance) => row(instance, false))}
-        {gemini && <GeminiProviderRow open={opened === "google-ai-studio"} onToggle={() => setOpened(opened === "google-ai-studio" ? null : "google-ai-studio")} />}
-        {modelgo && row(modelgo, false)}
+        {main.map((entry) => entry !== "google-ai-studio" ? row(entry, false)
+          : <GeminiProviderRow key={entry} open={opened === entry} onToggle={() => setOpened(opened === entry ? null : entry)} />)}
         {folded > 0 && (
           <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(folded)} open={more.open} onToggle={more.onToggle}
             leading={<span aria-hidden="true" />}>
@@ -601,7 +601,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
         </div>
         <RefreshEngines />
       </div>
-      <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
+      <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} offerModelgo={modelgoOfferable(state.policy)} />
       {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
       {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
       <HiddenEngines />

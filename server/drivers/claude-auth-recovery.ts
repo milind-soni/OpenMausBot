@@ -7,7 +7,9 @@ type Frame = {
   message?: { model?: unknown; content?: unknown };
 };
 type Refusal = { text: string; kind: "auth" | "limit"; said?: string; resetsAt?: number; scope?: "engine" | "model" | "credits" };
-type Pending = { refusal?: Refusal; refused?: boolean; buffered: RuntimeEvent[]; settle: (error?: Error) => void };
+/** One turn's frames, read in order: a refusal before any model activity, and whether the error result ending it cost nothing. */
+export interface RefusalRead { refusal?: Refusal; refused?: boolean; active?: boolean }
+type Pending = RefusalRead & { buffered: RuntimeEvent[]; settle: (error?: Error) => void };
 
 /** Claude's saved sign-in ran out and could not refresh, in the CLI's own words ("OAuth session expired"). */
 export const claudeOAuthExpired = (text: string): boolean => /\boauth\b(?!.{0,40}\bnot\b).{0,40}\b(?:expired|revoked)\b/i.test(text);
@@ -38,6 +40,18 @@ const preamble = (frame: Frame) =>
 
 const refusedStop = { auth: "auth_required", limit: "quota" } as const;
 
+export function readRefusalFrame(read: RefusalRead, frame: Frame, priorCost?: number | null): void {
+  if (read.active || preamble(frame)) return;
+  const refusal = syntheticRefusal(frame);
+  if (refusal) read.refusal = refusal;
+  else if (read.refusal && frame.type === "result" && frame.is_error === true &&
+      (frame.total_cost_usd === undefined || frame.total_cost_usd === 0 || frame.total_cost_usd === priorCost)) read.refused = true;
+  else read.active = true;
+}
+
+/** The CLI refused the turn as signed out before the model saw any of it. */
+export const refusedSignedOut = (read: RefusalRead): boolean => read.refused === true && read.refusal?.kind === "auth" && read.active !== true;
+
 /** Holds a recoverable turn's ACK and events until its first model activity, so a signed-out or usage-limit refusal
  * rejects it once its process has stopped. */
 export function claudeAuthRecovery(
@@ -55,12 +69,9 @@ export function claudeAuthRecovery(
   return {
     frame(threadId: string, frame: Frame, priorCost?: number | null) {
       const held = pending.get(threadId);
-      if (!held || preamble(frame)) return;
-      const refusal = syntheticRefusal(frame);
-      if (refusal) held.refusal = refusal;
-      else if (held.refusal && frame.type === "result" && frame.is_error === true &&
-          (frame.total_cost_usd === undefined || frame.total_cost_usd === 0 || frame.total_cost_usd === priorCost)) held.refused = true;
-      else accept(threadId, held);
+      if (!held) return;
+      readRefusalFrame(held, frame, priorCost);
+      if (held.active) accept(threadId, held);
     },
     emit(event: RuntimeEvent) {
       const held = pending.get(event.threadId);

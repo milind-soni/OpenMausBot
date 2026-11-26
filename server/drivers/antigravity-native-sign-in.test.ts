@@ -35,8 +35,8 @@ describe("the access token of the native CLI's stored sign-in", () => {
   });
 });
 
-// The app starts the CLI as over SSH (antigravity-acp.ts), so each account's sign-in is its profile's file, on every
-// system: the OS keychain is never asked.
+// The app starts the CLI as over SSH and with file token storage, so each account's sign-in is its profile's file and
+// the usage report reads only that file.
 describe("which stored sign-in's access token is used", () => {
   const profileFile = join(antigravityProfileDirectory("native"), "antigravity-acp", "antigravity-oauth-token");
   const store = (file: string | null) => {

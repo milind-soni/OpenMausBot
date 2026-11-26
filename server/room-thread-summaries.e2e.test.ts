@@ -86,6 +86,24 @@ describe("a room's thread summaries", () => {
     expect(shown.find((row) => row.threadId === thread)?.first?.text).toBe("Old idea");
   });
 
+  it("reads several of the room's threads for one person in one request", async () => {
+    const threads: string[] = [];
+    for (const text of ["First question", "Second question"]) {
+      const thread = (await as("bob", "POST", `/api/groups/${room}/tasks`, { activate: false })).body.task.threadId as string;
+      expect((await as("bob", "POST", `/api/groups/${room}/messages`, { text, threadId: thread })).status).toBeLessThan(300);
+      threads.push(thread);
+    }
+    const bobsTasks = async () => ((await as("bob", "GET", "/api/bots")).body.groups as Array<{ id: string; tasks: Array<{ threadId: string; unread?: boolean }> }>)
+      .find((group) => group.id === room)!.tasks.filter((task) => threads.includes(task.threadId));
+    await until(async () => (await bobsTasks()).filter((task) => task.unread).length === 2);
+    expect((await as("bob", "POST", `/api/groups/${room}/read`, { threadIds: [threads[0], 7] })).status).toBe(400);
+    expect((await as("eve", "POST", `/api/groups/${room}/read`, { threadIds: threads })).status).toBe(404);
+    const read = await as("bob", "POST", `/api/groups/${room}/read`, { threadIds: [...threads, "no-such-thread"] });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(read.body.read).toBe(2);
+    expect((await bobsTasks()).map((task) => task.unread ?? false)).toEqual([false, false]);
+  });
+
   it("answers someone who cannot see the room as if it did not exist", async () => {
     expect((await as("eve", "GET", `/api/groups/${room}/threads/summary`)).status).toBe(404);
     expect((await as("bob", "GET", "/api/groups/no-such-room/threads/summary")).status).toBe(404);

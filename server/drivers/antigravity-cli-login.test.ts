@@ -68,7 +68,7 @@ const cliRuntime = (executablePath: string): AntigravityRuntime => ({ executable
 const pinnedRuntime: AntigravityRuntime = { executablePath: "/r/agy_acp_server.par", harnessPath: "/r/localharness_external", source: "managed", version: "1.4.3" };
 
 describe("the native CLI's environment and sign-in file", () => {
-  it("turns its self-update off and sets the SSH_CONNECTION that keeps the sign-in in the profile, a fixed value even over SSH", async () => {
+  it("turns its self-update off and keeps the sign-in in the profile: a fixed SSH_CONNECTION even over SSH, and file storage", async () => {
     const baseDir = folder();
     const cli = await prepareAntigravityProfile({
       instanceId: "cli", baseDir, runtime: cliRuntime("/cli/antigravity"),
@@ -76,14 +76,18 @@ describe("the native CLI's environment and sign-in file", () => {
     });
     expect(cli.environment.AGY_CLI_DISABLE_AUTO_UPDATE).toBe("1");
     expect(cli.environment.SSH_CONNECTION).toBe(ANTIGRAVITY_SSH_CONNECTION);
+    expect(cli.environment.AGY_CLI_FORCE_FILE_TOKEN_STORAGE).toBe("1");
     // `tokenPath` is the pinned runtime's file on either runtime: the CLI's sign-in is asked of the CLI itself.
     expect(cli.tokenPath).toBe(join(cli.directory, "antigravity-acp", "acp_token.json"));
     const pinned = await prepareAntigravityProfile({
-      instanceId: "pinned", baseDir, runtime: pinnedRuntime, baseEnv: { PATH: "/usr/bin", SSH_CONNECTION: "203.0.113.9 52144 10.0.0.2 22" },
+      instanceId: "pinned", baseDir, runtime: pinnedRuntime,
+      baseEnv: { PATH: "/usr/bin", SSH_CONNECTION: "203.0.113.9 52144 10.0.0.2 22", AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1" },
     });
-    // The pinned runtime gets the environment as before: the server's own value passes, nothing is set.
+    // The pinned runtime gets the environment as before: the server's own value passes, nothing is set, and the
+    // native CLI's file storage switch is not inherited.
     expect(pinned.environment.SSH_CONNECTION).toBe("203.0.113.9 52144 10.0.0.2 22");
     expect(pinned.environment.AGY_CLI_DISABLE_AUTO_UPDATE).toBeUndefined();
+    expect(pinned.environment.AGY_CLI_FORCE_FILE_TOKEN_STORAGE).toBeUndefined();
     expect(pinned.tokenPath).toBe(join(pinned.directory, "antigravity-acp", "acp_token.json"));
   });
 
@@ -101,7 +105,7 @@ describe("the native CLI's environment and sign-in file", () => {
 });
 
 describe.skipIf(WINDOWS)("signing in with `antigravity acp --login`", () => {
-  it("starts the CLI with no display, the fixed SSH_CONNECTION and no self-update, so it prints its link and keeps the sign-in in the profile", async () => {
+  it("starts the CLI with no display, the fixed SSH_CONNECTION, file storage and no self-update, so it prints its link and keeps the sign-in in the profile", async () => {
     const fake = fakeCli();
     const profile = await prepareAntigravityProfile({
       instanceId: "login", baseDir: folder(), runtime: cliRuntime(fake.executable),
@@ -117,6 +121,7 @@ describe.skipIf(WINDOWS)("signing in with `antigravity acp --login`", () => {
     expect(launch.env.DISPLAY).toBeUndefined();
     expect(launch.env.WAYLAND_DISPLAY).toBeUndefined();
     expect(launch.env.SSH_CONNECTION).toBe(ANTIGRAVITY_SSH_CONNECTION);
+    expect(launch.env.AGY_CLI_FORCE_FILE_TOKEN_STORAGE).toBe("1");
     expect(launch.env.AGY_CLI_DISABLE_AUTO_UPDATE).toBe("1");
     await login.complete(flow.flowId!, `${ANTIGRAVITY_LOGIN_REDIRECT}?state=fixture-state&code=good-code`);
     expect(signedIn).toBe(1);

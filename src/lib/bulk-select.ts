@@ -8,7 +8,7 @@ export type SelectableRow = {
   createdAt?: number;
 };
 
-export type DeleteRefusal = { threadId: string; reason: "not-found" | "busy" };
+export type DeleteRefusal = { threadId: string; reason: "not-found" | "busy" | "not-closed" };
 export type DeleteResponse = { deleted: string[]; refused: DeleteRefusal[] };
 
 export const BULK_DELETE_CHUNK = 200;
@@ -75,12 +75,12 @@ export function chunkIds(ids: readonly string[], size = BULK_DELETE_CHUNK): stri
   return chunks;
 }
 
-export function summarizeDelete(responses: readonly DeleteResponse[]): { deleted: number; busy: number; missing: number } {
-  const summary = { deleted: 0, busy: 0, missing: 0 };
+export function summarizeDelete(responses: readonly DeleteResponse[]): { deleted: number; busy: number; missing: number; notClosed: number } {
+  const summary = { deleted: 0, busy: 0, missing: 0, notClosed: 0 };
   for (const response of responses) {
     summary.deleted += response.deleted.length;
     for (const refusal of response.refused) {
-      if (refusal.reason === "busy") summary.busy++; else summary.missing++;
+      if (refusal.reason === "busy") summary.busy++; else if (refusal.reason === "not-closed") summary.notClosed++; else summary.missing++;
     }
   }
   return summary;

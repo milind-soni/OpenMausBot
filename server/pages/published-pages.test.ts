@@ -181,6 +181,20 @@ describe("publishing a page", () => {
       card: { state: "limit", title: "Second", upgrade: true, plan: "free", usage: { pages: 1, limit: 1 } } });
   });
 
+  it("shows the limit card once a conversation: asked again there, the bot gives the file instead", async () => {
+    const f = setup({ quota: 1 });
+    signIn();
+    for (const name of ["one", "two", "three"]) writeSite(join(f.work, name));
+    await f.publish({ path: "one" });
+    await f.publish({ path: "two" });
+    const again = await f.publish({ path: "three" });
+    expect(again.status).toBe(402);
+    expect(again.text).toContain("give the person the file instead, in one sentence, and do not publish again");
+    expect(f.cards.filter(({ card }) => card.state === "limit")).toHaveLength(1);
+    await f.publish({ path: "three", threadId: "thread-2" });
+    expect(f.cards.filter(({ card }) => card.state === "limit").map(({ threadId }) => threadId)).toEqual(["thread-1", "thread-2"]);
+  });
+
   it("publishes as a Cloud home with a request signed by its bootstrap secret", async () => {
     const f = setup({ home: true });
     writeSite(join(f.work, "site"));

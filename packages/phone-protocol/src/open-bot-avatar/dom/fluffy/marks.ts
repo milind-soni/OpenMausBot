@@ -5,7 +5,7 @@
  */
 import { viewBasis, type FramePath } from '../../render.ts';
 import type { Capsule } from './mesh.ts';
-import { renderFluffy } from './renderer.ts';
+import { renderFluffy, type FluffyFinish } from './renderer.ts';
 
 /** Radius of a mark's model, viewBox units: enough for the short pile to read on a small dot. */
 const RADIUS = 12;
@@ -21,7 +21,7 @@ const sprites = new Map<string, { canvas: HTMLCanvasElement; radius: number }>()
  * (which animates it). `scale` is device pixels per viewBox unit. False where fluffy can't be
  * drawn: the caller fills the mark's path instead.
  */
-export function paintFluffyMark(ctx: CanvasRenderingContext2D, box: FramePath['box'], scale: number, color: string): boolean {
+export function paintFluffyMark(ctx: CanvasRenderingContext2D, box: FramePath['box'], scale: number, color: string, finish: FluffyFinish = 'fluffy'): boolean {
   const aspect = Math.round((1000 * box.h) / box.w) / 1000;
   let model = models.get(aspect);
   if (!model) {
@@ -33,10 +33,10 @@ export function paintFluffyMark(ctx: CanvasRenderingContext2D, box: FramePath['b
   const unit = box.w / (2 * RADIUS);
   // Whole powers of two, so a mark that grows or shrinks keeps the same fibers.
   const density = Math.min(8, Math.max(0.5, 2 ** Math.ceil(Math.log2(HEADROOM * scale * unit))));
-  const key = `${aspect}|${color}|${density}`;
+  const key = `${aspect}|${color}|${density}|${finish}`;
   let sprite = sprites.get(key);
   if (!sprite) {
-    const image = renderFluffy(model, FRONT, { color, ink: color, eyes: [] }, density);
+    const image = renderFluffy(model, FRONT, { color, ink: color, eyes: [], finish }, density);
     if (!image) return false;
     // The renderer's canvas is shared with the body: keep a copy.
     const canvas = document.createElement('canvas');

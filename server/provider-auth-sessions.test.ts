@@ -40,6 +40,17 @@ describe("a finished sign-in", () => {
     await sessions.start({ ...instance, instanceId: "claude" }, "owner");
     expect(signedIn.mock.calls).toEqual([["codex"], ["codex"], ["claude"]]);
   });
+
+  it("is told once for a flow its client reads again after it finished", async () => {
+    const { instance, auth } = fixture();
+    const signedIn = vi.fn();
+    const sessions = new ProviderAuthSessions({ signedIn });
+    await sessions.start(instance, "owner");
+    instance.getAuthentication.mockResolvedValue({ ...auth, phase: "succeeded" } as never);
+    await sessions.status("codex", "owner", "random-flow");
+    await sessions.status("codex", "owner", "random-flow");
+    expect(signedIn.mock.calls).toEqual([["codex"]]);
+  });
 });
 
 describe("provider login ownership", () => {

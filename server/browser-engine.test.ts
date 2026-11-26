@@ -684,7 +684,7 @@ describe("finding the browser engine", () => {
       bytes: asset.bytes, sha256: asset.sha256, executable: "agent-browser.exe",
     });
     for (const [platform, arch] of [["darwin", "arm64"], ["darwin", "x64"], ["linux", "arm64"], ["linux", "x64"]] as const) {
-      expect(agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, arch))).toBe("0.37.0");
+      expect(agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset(platform, arch))).toBe("0.39.0");
     }
   });
 

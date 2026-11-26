@@ -456,6 +456,11 @@ describe("post_to_room", () => {
     expect(receipt, "no receipt in the poster's own conversation").toBeDefined();
     expect(receipt?.tool?.ok, "the receipt never settled").toBe(true);
     expect(receipt?.comm).toMatchObject({ groupId: room.id, withName: "Standup" });
+    // Posted from the bot's own chat, outside the room: the room's thread it landed in is marked unread.
+    const groups = field((await api("GET", "/api/bots")).body, "groups") as Array<{ id: string; unread?: boolean; tasks?: Array<{ threadId: string; unread?: boolean }> }>;
+    const roomNow = groups.find((group) => group.id === room.id);
+    expect(roomNow?.tasks?.find((task) => task.threadId === room.threadId)?.unread, "the post left the room's thread read").toBe(true);
+    expect(roomNow?.unread).toBe(true);
   }, 40_000);
 
   it("writes the poster's receipt in the language set for this place", async () => {

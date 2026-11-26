@@ -11,7 +11,9 @@ import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createOwnMcpHttpRoutes, ownMcpHttpRoutes } from "./own-mcp-http.ts";
 import type { RouteHandler } from "./table.ts";
-import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "./own-mcp-http-path.ts";
+import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH, TOOL_SHARE_HEADER } from "./own-mcp-http-path.ts";
+import { definitionListBytes, toolListShareProfile, type ListedTool } from "../tool-list-budget.ts";
+import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV, TOOL_LIMIT_HEADER } from "../tool-count-limit.ts";
 
 /** This server's own internal endpoints, as the stdio proxies reach them: the turn's capability is checked there. */
@@ -120,6 +122,18 @@ describe("OpenMausBot's own MCP servers over HTTP", () => {
         .result.tools.map((tool) => tool.name);
     const whole = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2" });
     expect(await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2", [TOOL_LIMIT_ENV]: "3" })).toEqual(whole.slice(0, 3));
+  });
+
+  it("fits each server's list into its share of the session's tool budget, every tool kept", async () => {
+    const agents = async (settings: Record<string, string>) =>
+      ((await (await post("agents", { jsonrpc: "2.0", id: 8, method: "tools/list" }, agentsHeaders(settings))).json()) as { result: { tools: ListedTool[] } }).result.tools;
+    const whole = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2" });
+    const shared = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2", [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(definitionListBytes(whole) - 5_000) });
+    expect(shared.map((tool) => tool.name)).toEqual(whole.map((tool) => tool.name));
+    expect(definitionListBytes(shared)).toBeLessThanOrEqual(definitionListBytes(whole) - 5_000);
+    const browser = await (await post("browser", { jsonrpc: "2.0", id: 9, method: "tools/list" },
+      { authorization: "Bearer turn-capability", [TOOL_SHARE_HEADER]: toolListShareProfile(1) })).json();
+    expect(browser).toEqual({ jsonrpc: "2.0", id: 9, result: { tools: [{ name: "agent_browser_open", inputSchema: { type: "object" } }] } });
   });
 });
 

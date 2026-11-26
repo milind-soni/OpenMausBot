@@ -24,7 +24,7 @@ async function serve() {
       if ("bot" in which && which.bot === "guest-bot") return { status: 409, error: "A temporary browser saves no sign-ins." };
       return { binaryPath: "/engine", session: "bot-pepper", env: {}, encryptionKey: "k" } satisfies BrowserSitesTarget;
     },
-    list: async () => ({ running: false, sites: [{ site: "example.com", cookies: 2, storage: 1 }] }),
+    list: async () => ({ running: false, sites: [{ site: "example.com", cookies: 2, storage: 1, direct: true }] }),
     signOut: async (target, site) => { signedOut.push({ session: target.session, site }); return { running: true, sites: [] }; },
   })];
   const server = createServer(async (req, res) => {
@@ -50,7 +50,7 @@ describe("signed-in sites routes", () => {
     const response = await fetch(`${base}/api/browser-sites?profile=profile-work`);
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({ running: false, sites: [{ site: "example.com", cookies: 2, storage: 1 }] });
+    expect(await response.json()).toEqual({ running: false, sites: [{ site: "example.com", cookies: 2, storage: 1, direct: true }] });
     expect((await fetch(`${base}/api/browser-sites?bot=pepper`)).status).toBe(200);
     expect(asked).toEqual([{ profile: "profile-work" }, { bot: "pepper" }]);
   });
