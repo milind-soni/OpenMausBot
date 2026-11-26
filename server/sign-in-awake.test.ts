@@ -129,6 +129,8 @@ describe("an engine sign-in on a Cloud home", () => {
     expect(started).toMatchObject({ phase: "waiting" });
     settle();
     expect(busy()).toEqual(["maintenance"]);
+    // While it is open, nothing the trace wrote holds the link, the flow or the account.
+    for (const secret of [...secrets(), started.flowId!]) expect(written()).not.toContain(secret);
     expect(power.prepareSleep()).toEqual({ ok: false, busy: ["maintenance"] });
 
     // Too short to be a code: refused before it reaches Claude, and the sign-in is still open.
@@ -174,6 +176,7 @@ describe("an engine sign-in on a Cloud home", () => {
     expect(started).toMatchObject({ phase: "waiting", userCode: DEVICE_CODE });
     settle();
     expect(busy()).toEqual(["maintenance"]);
+    for (const secret of [...secrets(), started.flowId!]) expect(written()).not.toContain(secret);
     expect(power.prepareSleep()).toMatchObject({ ok: false });
 
     writeFileSync(join(home, "approve"), "fixture only");

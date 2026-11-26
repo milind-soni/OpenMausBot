@@ -104,18 +104,20 @@ export function createSignInTrace(options: {
   let stopping = false;
   /** Flows open when the server last stopped, by hash: the sign-in screen's next read of one hears `interrupted`. */
   const interruptedFlows = new Set<string>();
+  /** Each engine kind's newest attempt in this process: an older one that ends later (a late expiry) never becomes its `last`. */
+  const newest = new Map<string, string>();
 
   const save = () => {
     try { writeFileAtomic(path, `${JSON.stringify(state)}\n`, { durable: false }); }
     catch (error) { log(`sign-in: the record could not be saved: ${error instanceof Error ? error.name : "error"}`); }
   };
-  const record = (file: TraceFile, event: SignInEvent) => {
+  const record = (file: TraceFile, event: SignInEvent, isLast = true) => {
     file.recent = [...file.recent, event].slice(-RECENT);
     const totals = file.engines[event.kind] ?? (Object.keys(file.engines).length < ENGINES ? (file.engines[event.kind] = { attempts: 0, completed: 0, last: null }) : null);
     if (!totals) return;
     if (event.outcome === "started") totals.attempts = Math.min(totals.attempts + 1, COUNT_MAX);
     if (event.outcome === "completed") totals.completed = Math.min(totals.completed + 1, COUNT_MAX);
-    totals.last = { outcome: event.outcome, at: event.at };
+    if (isLast) totals.last = { outcome: event.outcome, at: event.at };
   };
   const line = (event: SignInEvent, startedAt: number | null, by?: SignInInterruption) =>
     log(`sign-in: ${event.kind} ${event.method} ${event.outcome}${startedAt !== null && event.outcome !== "started" ? ` after ${seconds(event.at - startedAt)}` : ""}${by ? ` (${INTERRUPTED_BY[by]})` : ""}`);
@@ -149,6 +151,7 @@ export function createSignInTrace(options: {
       const attempt: OpenAttempt = { id: randomUUID(), kind: kindOf(kind), method: methodOf(method), at: now() };
       const started: SignInEvent = { kind: attempt.kind, method: attempt.method, outcome: "started", at: attempt.at };
       file.open = [...file.open, attempt].slice(-OPEN);
+      newest.set(attempt.kind, attempt.id);
       record(file, started);
       save();
       line(started, null);
@@ -164,7 +167,7 @@ export function createSignInTrace(options: {
         note(outcome) {
           if (ended) return;
           const noted = event(outcome);
-          record(file, noted);
+          record(file, noted, newest.get(attempt.kind) === attempt.id);
           save();
           line(noted, attempt.at);
         },
@@ -174,7 +177,7 @@ export function createSignInTrace(options: {
           if (stopping && outcome !== "completed") return;
           const done = event(outcome);
           file.open = file.open.filter((open) => open !== attempt);
-          record(file, done);
+          record(file, done, newest.get(attempt.kind) === attempt.id);
           save();
           line(done, attempt.at, by);
         },

@@ -59,8 +59,13 @@ export class ProviderAuthSessions {
     const attempt = flow.attempt;
     if (!attempt || attempt.ended || flow.settling) return;
     flow.settling = true;
-    const read = flow.flowId && flow.instance.getAuthentication ? flow.instance.getAuthentication(flow.flowId).catch(() => null) : Promise.resolve(null);
-    void read.then((status) => attempt.end(status && finished(status.phase) ? outcomeOf(status) : "expired"));
+    const { flowId, instance } = flow;
+    // Read on a later tick and caught either way: this runs inside `active`, the power probe, which must never throw.
+    void Promise.resolve()
+      .then(() => flowId && instance.getAuthentication ? instance.getAuthentication(flowId) : null)
+      .catch(() => null)
+      .then((status) => attempt.end(status && finished(status.phase) ? outcomeOf(status) : "expired"))
+      .catch(() => {});
   }
 
   private end(flow: Flow | undefined, outcome: SignInOutcome, by?: SignInInterruption): void {
@@ -130,8 +135,9 @@ export class ProviderAuthSessions {
   }
 
   async status(instanceId: string, owner: string, flowId: string): Promise<ProviderAuthenticationStatus> {
-    // The screen polling a flow the server's stop cut short hears why, as a finished status.
-    if (this.cutShort(instanceId, flowId)) return { phase: "failed", flowId, authorizationUrl: null, expiresAt: null, message: INTERRUPTED, reason: "interrupted" };
+    // The screen polling a flow the server's stop cut short hears why, as a finished status. No `message`: the screen words
+    // `reason` in the person's own language.
+    if (this.cutShort(instanceId, flowId)) return { phase: "failed", flowId, authorizationUrl: null, expiresAt: null, reason: "interrupted" };
     const flow = this.owned(instanceId, owner, flowId);
     if (!flow.instance.getAuthentication) throw failure("Sign-in status is unavailable for this provider.", 404);
     const revision = flow.revision;

@@ -52,11 +52,42 @@ describe("the sign-in trace", () => {
     expect(lines.at(-1)).toBe("sign-in: claudeAgent paste-code expired after 15m 00s");
   });
 
+  it("never lets an engine's read throw out of the power probe: a flow it can't read counts as expired", async () => {
+    const signIns = trace();
+    const sessions = new ProviderAuthSessions({ trace: signIns, now: () => clock });
+    const instance = engine();
+    await sessions.start(instance, "session-1");
+    instance.getAuthentication.mockImplementation((() => { throw new Error("broken engine"); }) as never);
+    clock += 15 * MINUTE;
+    expect(() => sessions.active).not.toThrow();
+    expect(sessions.active).toBe(false);
+    await vi.waitFor(() => expect(signIns.summary().engines[0]?.last?.outcome).toBe("expired"));
+  });
+
+  it("keeps a newer attempt as the engine's last when an older one's expiry is recorded after it began", async () => {
+    const signIns = trace();
+    const sessions = new ProviderAuthSessions({ trace: signIns, now: () => clock });
+    const first = engine();
+    await sessions.start(first, "session-1");
+    let answer: (status: ProviderAuthenticationStatus) => void = () => {};
+    first.getAuthentication.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    clock += 15 * MINUTE;
+    expect(sessions.active).toBe(false);
+    await vi.waitFor(() => expect(first.getAuthentication).toHaveBeenCalled());
+    // The person signs in again before the engine answers how the first one ended.
+    await sessions.start(engine(first.instanceId, "claudeAgent", { flowId: "flow-second" }), "session-1");
+    answer({ phase: "expired", flowId: FLOW, authorizationUrl: null, expiresAt: null, reason: "expired" });
+    await vi.waitFor(() => expect(signIns.summary().recent.map((event) => event.outcome)).toEqual(["started", "started", "expired"]));
+    expect(signIns.summary()).toMatchObject({ attempts: 2, open: 1, engines: [{ kind: "claudeAgent", attempts: 2, last: { outcome: "started" } }] });
+  });
+
   it("records a flow that was open when the server stopped as interrupted on the next start, and the sign-in screen hears it", async () => {
     const before = new ProviderAuthSessions({ trace: trace(), now: () => clock });
     const instance = engine();
     await before.start(instance, "session-1");
     expect(JSON.parse(file()).open).toHaveLength(1);
+    // While it is open, the file recognises the flow by a hash only: never the flow, the instance or the session.
+    for (const hidden of [FLOW, instance.instanceId, "session-1", LINK]) expect(file()).not.toContain(hidden);
 
     // The machine is stopped to sleep and boots again: a new process, the same data folder.
     clock += 4 * MINUTE + 5_000;
@@ -71,8 +102,8 @@ describe("the sign-in trace", () => {
     const after = new ProviderAuthSessions({ trace: signIns, now: () => clock });
     // The screen's poll: a finished status that says why. The browser's session id is not kept, so any session asking
     // about that flow hears it, and nothing more.
-    expect(await after.status(instance.instanceId, "session-1", FLOW)).toEqual({ phase: "failed", flowId: FLOW, authorizationUrl: null, expiresAt: null,
-      message: "This sign-in was interrupted because the server stopped. Start sign-in again.", reason: "interrupted" });
+    // No message: the screen words the reason in the person's own language.
+    expect(await after.status(instance.instanceId, "session-1", FLOW)).toEqual({ phase: "failed", flowId: FLOW, authorizationUrl: null, expiresAt: null, reason: "interrupted" });
     // The paste-code screen finds out when it sends the code.
     await expect(after.complete(instance.instanceId, "session-1", FLOW, CODE)).rejects.toMatchObject({ status: 404, reason: "interrupted" });
     await expect(after.cancel(instance.instanceId, "session-1", FLOW)).resolves.toBeUndefined();
