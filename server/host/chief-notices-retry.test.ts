@@ -7,6 +7,7 @@ import { memoryStopText } from "../engine-memory.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
 import { FROZE_BROWSING } from "../memory-freeze-restart.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
+import { _queuedCount, cancelSteeredMessage, drainSteeredMessages, queuedSteerSnapshot } from "../steer-queue.ts";
 import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
@@ -63,6 +64,62 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
       vi.setSystemTime(2_000);
       f.store.appendMessage("ada-job", { role: "bot", kind: "text", text: "Done.", turnSucceeded: true });
       expect(f.notices.retryRefusal("ada", "ada-job")).toMatch(/^that thread has finished a run since it was reported/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a Chief's retry of a teammate's busy thread", () => {
+  type Drained = { botId: string; threadId: string; prompt: string; unattended: boolean; peerAsk: unknown };
+  function drain(f: ReturnType<typeof fixture>, drained: Drained[]): void {
+    drainSteeredMessages(
+      { bot: (id: string) => f.store.bot(id) ?? null, appendMessage: (threadId: string, row: never) => f.store.appendMessage(threadId, row) } as never,
+      (botId, threadId, prompt, _message, _ids, unattended, head) => { drained.push({ botId, threadId, prompt, unattended, peerAsk: head.peerAsk }); },
+    );
+  }
+
+  it("queues the retry while its bot is mid-turn elsewhere, and the queue starts it when the bot frees up", async () => {
+    const f = fixture({ threadBusy: (botId) => botId === "ada", groupTurnActive: (botId) => botId === "ada" });
+    const queued = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, note: "The service was down." });
+    expect(queued).toEqual({ queued: true });
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(_queuedCount("ada-job")).toBe(1);
+    const drained: Drained[] = [];
+    drain(f, drained);
+    expect(drained).toEqual([{ botId: "ada", threadId: "ada-job",
+      prompt: expect.stringContaining("requested by Clive, your Chief of Staff, after this thread's last run stopped. Note from Clive: The service was down."),
+      unattended: true, peerAsk: { botId: "chief", name: "Clive", unattended: true } }]);
+    expect(drained[0]!.prompt).toContain("Continue the request above from where it stopped and finish it.");
+    expect(_queuedCount("ada-job")).toBe(0);
+  });
+
+  it("queues with the capacity reason at its bot's turn limit, answering queued rather than failed", async () => {
+    const f = fixture({ threadQueued: () => true, botAtThreadCapacity: () => true });
+    const queued = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false });
+    expect(queued).toEqual({ queued: true });
+    const snapshot = queuedSteerSnapshot(() => true);
+    expect(snapshot["ada-job"]?.[0]).toMatchObject({ reason: "capacity", text: expect.stringContaining("requested by Clive") });
+    cancelSteeredMessage("ada", snapshot["ada-job"]![0]!.queueId, "ada-job");
+  });
+
+  it("still refuses while the thread only shuts down, or when its bot has room and no room turn", async () => {
+    const settling = fixture({ threadBusy: () => true, threadSettling: () => true, groupTurnActive: () => true });
+    await expect(settling.notices.retryThread({ chief: settling.chief as never, bot: settling.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(RETRY_BLOCKED.settling);
+    const withRoom = fixture({ threadBusy: () => true });
+    await expect(withRoom.notices.retryThread({ chief: withRoom.chief as never, bot: withRoom.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(RETRY_BLOCKED.running);
+    expect(_queuedCount("ada-job")).toBe(0);
+  });
+
+  it("still refuses a thread that finished a run since it was reported, even at its bot's turn limit", async () => {
+    vi.useFakeTimers({ now: 1_000 });
+    try {
+      const f = fixture({ botAtThreadCapacity: () => true });
+      f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity for 20 minutes" });
+      vi.setSystemTime(2_000);
+      f.store.appendMessage("ada-job", { role: "bot", kind: "text", text: "Done.", turnSucceeded: true });
+      await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(/finished a run since it was reported/);
+      expect(_queuedCount("ada-job")).toBe(0);
     } finally {
       vi.useRealTimers();
     }
