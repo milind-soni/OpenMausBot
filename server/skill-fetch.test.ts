@@ -111,7 +111,7 @@ describe("importing a skill's whole folder", () => {
     expect(recorded.calls.every((call) => !call.url.includes(SIGNED_IN))).toBe(true);
     expect(api.every((call) => call.headers.get("authorization") === `Bearer ${SIGNED_IN}`)).toBe(true);
     expect(api.find((call) => call.url.includes("/commits/"))?.headers.get("accept")).toBe("application/vnd.github.sha");
-    expect(api.every((call) => call.redirect === "error")).toBe(true);
+    expect(api.every((call) => call.redirect === "manual")).toBe(true);
     expect(raw.length).toBeGreaterThan(0);
     expect(raw.every((call) => call.headers.get("authorization") === null && call.redirect === "error")).toBe(true);
   });
@@ -471,15 +471,15 @@ describe("skill fetch host pinning", () => {
     expect(vi.mocked(fetcher).mock.calls.map(([input]) => String(input))).not.toContain(offhost);
   });
 
-  it("does not follow an API redirect when the request carries a sign-in", async () => {
+  it("does not follow an API redirect off api.github.com when the request carries a sign-in", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL });
     const offhost = "https://evil.example.com/repos/a/b/commits/HEAD";
     const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url === offhost) return new Response("relocated");
       if (url.startsWith("https://api.github.com/") && url.includes("/commits/")) {
-        // Like the platform fetch: redirect "error" refuses, anything else follows the 302 off-origin.
-        if (init?.redirect === "error") throw new TypeError("fetch failed");
+        // Like the platform fetch: redirect "manual" hands back the 302, anything else follows it off-origin.
+        if (init?.redirect === "manual") return new Response(null, { status: 302, headers: { location: offhost } });
         return fetcher(offhost, init);
       }
       return github.fetch(input, init);
@@ -492,7 +492,26 @@ describe("skill fetch host pinning", () => {
     expect(JSON.stringify(result)).not.toContain(SIGNED_IN);
     const api = vi.mocked(fetcher).mock.calls.find(([input]) => String(input).includes("/commits/"));
     expect(new Headers(api?.[1]?.headers).get("authorization")).toBe(`Bearer ${SIGNED_IN}`);
-    expect(api?.[1]?.redirect).toBe("error");
+    expect(api?.[1]?.redirect).toBe("manual");
+  });
+
+  it("follows a renamed repository's API redirect within api.github.com, still signed in", async () => {
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const moved = "https://api.github.com/repositories/70107786";
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("https://api.github.com/repos/old/b/")) {
+        return new Response(null, { status: 301, headers: { location: url.replace("https://api.github.com/repos/old/b", moved) } });
+      }
+      if (url.startsWith(`${moved}/`)) return github.fetch(url.replace(moved, "https://api.github.com/repos/a/b"), init);
+      return github.fetch(input, init);
+    }) as typeof fetch;
+    expect(await latestSkillCommit({ owner: "old", repo: "b", ref: "HEAD", commit: "", path: "" }, fetcher, async () => ({ token: SIGNED_IN })))
+      .toBe(github.commitOf("a/b"));
+    const followed = vi.mocked(fetcher).mock.calls.find(([input]) => String(input).startsWith(`${moved}/`));
+    expect(followed).toBeDefined();
+    expect(new Headers(followed?.[1]?.headers).get("authorization")).toBe(`Bearer ${SIGNED_IN}`);
+    expect(followed?.[1]?.redirect).toBe("manual");
   });
 
   it("leaves a sign-in that cannot be a header out of the error", async () => {

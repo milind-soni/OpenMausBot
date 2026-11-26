@@ -30,6 +30,8 @@ export function skillImportToken(audience?: string | null): Promise<SkillImportS
     : { token: null });
 }
 
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+
 function requestHref(input: Parameters<typeof fetch>[0]): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.href;
@@ -82,7 +84,7 @@ function boundedImportFetch(
       lookup.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
     }));
   };
-  return async (input, init) => {
+  const bounded: typeof fetch = async (input, init) => {
     const api = isGitHubApiRequest(input);
     if (api ? ++apiRequests > IMPORT_LIMITS.apiRequests : ++downloads > IMPORT_LIMITS.downloads) {
       throw new ImportLimitError("Import request limit reached — paste a specific skill folder instead.");
@@ -95,7 +97,7 @@ function boundedImportFetch(
       const headers = signIn.token ? withBearer(input, init, signIn.token) : null;
       if (headers) {
         sent.headers = headers;
-        sent.redirect = "error";
+        sent.redirect = "manual";
         carried = signIn.refused;
       }
     }
@@ -104,6 +106,14 @@ function boundedImportFetch(
     if (carried && response.status === 401 && !reported) {
       reported = true;
       carried();
+    }
+    // A signed-in request follows a redirect (a renamed repository) only within the API origin, sending the sign-in again;
+    // anywhere else it stops at the redirect, so the sign-in never leaves api.github.com.
+    const location = carried && REDIRECTS.has(response.status) ? response.headers.get("location") : null;
+    const moved = location && URL.canParse(location, requestHref(input)) ? new URL(location, requestHref(input)) : null;
+    if (moved?.origin === API) {
+      await response.body?.cancel().catch(() => {});
+      return bounded(moved.href, init);
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
@@ -129,6 +139,7 @@ function boundedImportFetch(
     }
     return new Response(Buffer.concat(chunks), { status: response.status, headers: response.headers });
   };
+  return bounded;
 }
 
 export interface FetchedSkill {
