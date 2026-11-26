@@ -1073,6 +1073,12 @@ export class Store {
     return this.thread(threadId).messages;
   }
 
+  newestMessageId(threadId: string): string | undefined {
+    const cached = this.threads.get(threadId);
+    if (cached) return cached.messages.at(-1)?.id;
+    return lastMessageId(threadId) ?? undefined;
+  }
+
   messagesBefore(threadId: string, before: string, limit: number) {
     return messagesBefore(threadId, before, limit, this.threads.get(threadId), () => this.thread(threadId));
   }
