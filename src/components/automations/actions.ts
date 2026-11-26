@@ -51,9 +51,8 @@ export function useAutomationActions() {
     ? new Promise<void>((resolve, reject) => dispatch({ type: "runRoutine", routineId: automation.id, onStarted: () => resolve(), onError: reject }))
     : api(`/api/webhooks/${automation.id}/test`, { method: "POST", body: JSON.stringify({ event: "openmaus.test", message: "A test run from Automations" }) }));
 
-  /** Asks once (a person deleting their own automation), then deletes it; false when it is kept, so a refusal stays in view. */
-  const remove = async (automation: Automation, question: string): Promise<boolean> => {
-    if (!window.confirm(question)) return false;
+  /** Deletes it once the person said yes to the question; false when it is kept, so a refusal stays in view. */
+  const removeConfirmed = async (automation: Automation): Promise<boolean> => {
     if (automation.kind === "schedule") {
       dispatch({ type: "deleteRoutine", routineId: automation.id });
       return true;
@@ -64,6 +63,9 @@ export function useAutomationActions() {
       removeWebhookCredential(webhookCredentialStore(), automation.id);
     });
   };
+
+  /** Asks once (a person deleting their own automation), then deletes it. */
+  const remove = async (automation: Automation, question: string) => window.confirm(question) && removeConfirmed(automation);
 
   /** The address another app sends to, as the server keeps it: the owning bot may already have given it to an app, so
    * copying never replaces it. Only one from before addresses were kept, and not copied here before, gets a new one. */
@@ -96,5 +98,5 @@ export function useAutomationActions() {
     if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
   });
 
-  return { busy, error, errorFor, setError, clearError, copied, setEnabled, toggle, runNow, remove, copyAddress, openRun, cancelRun };
+  return { busy, error, errorFor, setError, clearError, copied, setEnabled, toggle, runNow, remove, removeConfirmed, copyAddress, openRun, cancelRun };
 }

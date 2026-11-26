@@ -18,6 +18,8 @@ export function useAllAutomationActions() {
     if (busy || base.busy) return false;
     setBusy(key);
     setError("");
+    // An earlier refusal of a schedule's or webhook's action is no longer the latest word either.
+    base.clearError();
     try { await work(); return true; }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); return false; }
     finally { setBusy(null); }
@@ -34,8 +36,6 @@ export function useAllAutomationActions() {
     setError: (message: string) => { setError(message); base.setError(message); },
     /** "Pause all" / "Resume all": turns each of `automations` on or off in turn, stopping at the first refusal. */
     setAllEnabled: (automations: readonly Automation[], enabled: boolean) => attempt(SET_ALL_BUSY, async () => {
-      // An earlier refusal is about one automation; this change is about all of them, so its own refusal shows below the list.
-      base.clearError();
       for (const automation of automations) {
         if (automation.kind === "app") await appTriggerApi.update(automation.id, { enabled });
         else await base.setEnabled(automation, enabled);
@@ -47,13 +47,15 @@ export function useAllAutomationActions() {
     runNow: (automation: Automation) => automation.kind === "app"
       ? attempt(`run:${automation.id}`, () => appTriggerApi.test(automation.id))
       : handOn(() => base.runNow(automation)),
+    copyAddress: (webhookId: string, replace?: boolean) => handOn(() => base.copyAddress(webhookId, replace)),
+    cancelRun: (...args: Parameters<typeof base.cancelRun>) => handOn(() => base.cancelRun(...args)),
     remove: async (automation: Automation, question: string): Promise<boolean> => {
+      if (!window.confirm(question)) return false;
       if (automation.kind !== "app") {
-        const removed = await base.remove(automation, question);
+        const removed = await handOn(() => base.removeConfirmed(automation));
         if (removed) setError("");
         return removed;
       }
-      if (!window.confirm(question)) return false;
       return attempt(`delete:${automation.id}`, () => appTriggerApi.remove(automation.id));
     },
   };
