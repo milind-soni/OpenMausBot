@@ -109,7 +109,7 @@ export function describeVoice(cfg: AppConfig) {
     ready: voiceConfigured(cfg),
     voice: cfg.tts?.voice ?? "",
     provider,
-    baseUrl: provider === "chatterbox" ? (cfg.tts?.baseUrl ?? "") : "",
+    baseUrl: cfg.tts?.baseUrl ?? "",
     model: provider === "gemini" ? (cfg.tts?.model || gemini.DEFAULT_GEMINI_MODEL) : provider === "chatterbox" ? (cfg.tts?.model ?? "") : "",
     ...(provider === "fish" ? { fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL } : {}),
     ...(included ? { included: true as const } : {}),

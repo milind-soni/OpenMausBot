@@ -10,6 +10,9 @@ import { SOCKET_PAD } from './socket.ts';
 /** The values of the `pass` uniform. */
 export const PASS = { body: 0, shell: 1, strand: 2 } as const;
 
+/** MausBot: the values of the `finish` uniform. Matte and metallic draw the body pass alone. */
+export const FINISH = { fluffy: 0, matte: 1, metallic: 2 } as const;
+
 /** A number as a GLSL float literal. */
 const float = (n: number) => (Number.isInteger(n) ? `${n}.` : `${n}`);
 
@@ -43,6 +46,41 @@ float socketDistance(vec3 p, vec3 normal, out vec2 uv, out vec3 local) {
     }
   }
   return FAR;
+}`;
+
+// MausBot: the body with no pile. `d` is the distance to the nearer eye's contour.
+const bareSurface = `
+vec3 bareSurface(vec3 n, vec3 light, float d) {
+  float lambert = dot(n, light);
+  float socket = 1. - smoothstep(-.1, 1.7, d);
+  if (finish == ${FINISH.matte}) {
+    // Clay: light wraps far round the body, and nothing shines.
+    float wrap = clamp((lambert + .8) / 1.8, 0., 1.);
+    float sky = .5 - .5 * n.y;
+    vec3 lit = color * (.66 + .40 * wrap * wrap + .05 * sky);
+    // Shadows keep their hue: darker, not greyer.
+    lit = mix(lit * lit, lit, .55 + .45 * wrap);
+    return lit * (1. - .22 * socket);
+  }
+  // Polished metal: the body color tints everything it reflects. The surroundings are looked up
+  // by the normal, not the mirrored view: a flat front face would otherwise swing from sky to
+  // ground with every small turn.
+  float up = -n.y;
+  // A light body (all three channels high) would mirror the white page: soften its horizon,
+  // narrow its range and darken its rim so it reads as silver, not as a hole in the page.
+  float pale = smoothstep(.62, .92, min(color.r, min(color.g, color.b)));
+  float sky = mix(1., .58, smoothstep(.08, .95, up));
+  float ground = mix(.46, .68, smoothstep(.12, .95, -up));
+  float surroundings = mix(ground, sky, smoothstep(mix(-.24, -.75, pale), mix(.08, .50, pale), up));
+  surroundings = mix(surroundings, .70, .40 * pale);
+  float fresnel = pow(1. - clamp(n.z, 0., 1.), 3.);
+  vec3 tint = mix(color, vec3(1.), (.10 + .45 * fresnel) * (1. - .6 * pale));
+  vec3 metal = tint * (.14 + .20 * clamp(lambert, 0., 1.) + .90 * surroundings);
+  vec3 halfway = normalize(light + vec3(0., 0., 1.));
+  float highlight = pow(clamp(dot(n, halfway), 0., 1.), 48.);
+  metal += mix(color, vec3(1.), .75) * (.85 * highlight + .22 * fresnel * (1. - .7 * pale));
+  metal *= 1. - .28 * pale * fresnel;
+  return metal * (1. - .30 * socket);
 }`;
 
 export const vertexShader = `#version 300 es
@@ -145,7 +183,7 @@ uniform sampler2D dyeRamp;
 uniform highp sampler3D brushedPile;
 uniform vec3 color, ink;
 uniform mat3 view;
-uniform int pass;
+uniform int pass, finish;
 uniform float shell;
 in vec3 P, N, V, pilePosition, lean;
 in float tip, variation, across, pocketDepth;
@@ -172,6 +210,8 @@ float brushedHeight() {
   float tuft = texture(brushedPile, uvw * .42).r;
   return clamp(.5 + 1.65 * (locks / 16. - .5) + .16 * (tuft - .5), 0., 1.);
 }
+
+${bareSurface}
 
 void main() {
   vec3 n = normalize(N);
@@ -258,6 +298,8 @@ void main() {
     float brightness = clamp(value * diffuseLevel + (.35 + .65 * value) * fiberLight, 0., 1.);
     base = mix(base, (dye + scatter) * brightness * pileFill, ramp.a);
   }
+
+  if (finish != ${FINISH.fluffy}) base = bareSurface(n, light, d);
 
   if (pass == BODY && d < 3.7) {
     // The eye: a glossy bead in the socket.

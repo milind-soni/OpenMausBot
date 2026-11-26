@@ -198,18 +198,31 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(renderToStaticMarkup(line())).not.toContain("lucide-chevron-right");
   });
 
-  it("marks a collapsed line with one dot, the most urgent of waiting, unread and working, and no number", () => {
+  it("marks a collapsed line with a dot for waiting and one for unread, so a wait never hides unread rows", () => {
     const marks = (attention: { waiting: number; unread: number; working: number }) =>
       renderToStaticMarkup(line({ collapsed: true, attention })).match(/data-section-mark="(\w+)"/g) ?? [];
-    expect(marks({ waiting: 1, unread: 2, working: 1 })).toEqual(['data-section-mark="waiting"']);
+    expect(marks({ waiting: 1, unread: 3, working: 1 })).toEqual(['data-section-mark="waiting"', 'data-section-mark="unread"']);
+    expect(marks({ waiting: 1, unread: 0, working: 1 })).toEqual(['data-section-mark="waiting"']);
     expect(marks({ waiting: 0, unread: 2, working: 1 })).toEqual(['data-section-mark="unread"']);
     expect(marks({ waiting: 0, unread: 0, working: 3 })).toEqual(['data-section-mark="working"']);
     expect(marks({ waiting: 0, unread: 0, working: 0 })).toEqual([]);
-    const html = renderToStaticMarkup(line({ collapsed: true, attention: { waiting: 0, unread: 12, working: 0 } }));
-    expect(html).not.toContain(">12<");
-    expect(html).not.toContain("text-[9px]");
-    expect(html).toContain('title="12 unread"');
     expect(renderToStaticMarkup(line({ collapsed: false, attention: { waiting: 1, unread: 0, working: 0 } }))).not.toContain("data-section-mark");
+  });
+
+  it("shows how many rows inside need the person, in the count's own type, beside the dots", () => {
+    const needs = (attention: { waiting: number; unread: number; working: number; needsYou?: number }) =>
+      /data-section-needs=""[^>]*>(\d+)</.exec(renderToStaticMarkup(line({ collapsed: true, attention })))?.[1];
+    expect(needs({ waiting: 1, unread: 3, working: 0 })).toBe("4");
+    expect(needs({ waiting: 0, unread: 12, working: 0 })).toBe("12");
+    // A waiting bot that is also unread is one row.
+    expect(needs({ waiting: 1, unread: 3, working: 0, needsYou: 3 })).toBe("3");
+    expect(needs({ waiting: 0, unread: 0, working: 2 })).toBeUndefined();
+    const html = renderToStaticMarkup(line({ collapsed: true, attention: { waiting: 0, unread: 12, working: 0 } }));
+    expect(html).toContain("text-[12px] leading-4 tabular-nums text-ink-tertiary");
+    expect(html).toContain('title="12 unread"');
+    expect(html).not.toContain("text-[9px]");
+    expect(renderToStaticMarkup(line({ collapsed: false, attention: { waiting: 0, unread: 2, working: 0 } }))).not.toContain("data-section-needs");
+    expect(renderToStaticMarkup(line({ collapsed: true, alert: true, attention: { waiting: 1, unread: 2, working: 0 } }))).not.toContain("data-section-needs");
   });
 
   it("draws the working pulse still when motion is reduced", () => {

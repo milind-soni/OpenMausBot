@@ -4278,7 +4278,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const { done, errors } = await runTurn("t-no-login");
       expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
       expect(codexNotSignedIn().includes("Sign-ins don't copy over when you move to My Cloud.")).toBe(Boolean(role));
-      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required", unsent: true });
       expect(spawn).not.toHaveBeenCalled();
     });
 

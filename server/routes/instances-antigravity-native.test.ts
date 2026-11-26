@@ -1,6 +1,6 @@
 // The native Antigravity CLI through the server's own instance routes, with a real registry and driver and a fake CLI
 // on disk: the sign-in, the status, a turn, the check and the sign-out the app offers, and removing the account.
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -187,11 +187,11 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(Object.keys(cfg.instances!)).not.toContain("antigravity-added");
   }, 180_000);
 
-  // 1.5.14 keeps one keyring entry per computer unless it runs over SSH; the app always starts it so, so every account
-  // keeps its own sign-in in its own profile, even where the CLI's keyring would be shared.
-  it("keeps each account's sign-in its own: another account is not signed in by it, and a sign-out or removal ends only its own", async () => {
+  // The CLI keeps one keyring entry per computer unless it runs over SSH (1.5.14) or is told to use files (1.5.16); the
+  // app always starts it with both, so every account keeps its own sign-in in its own profile.
+  it.each(["1.5.14", "1.5.16"])("keeps each account's sign-in its own on %s: another account is not signed in by it, and a sign-out or removal ends only its own", async (version) => {
     const keyring = folder();
-    const { cfg, registry } = await nativeSetup(["antigravity-a", "antigravity-b"], { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1" });
+    const { cfg, registry } = await nativeSetup(["antigravity-a", "antigravity-b"], { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1", FAKE_AGY_VERSION: version });
     const { request, call, status } = await serve(registry, cfg);
     for (const id of ["antigravity-a", "antigravity-b"]) {
       const flow = (await call("POST", `/api/instances/${id}/auth/start`, {})).auth;
@@ -209,6 +209,24 @@ describe.skipIf(WINDOWS)("the native Antigravity CLI through the instance routes
     expect(await registry.get("antigravity")!.getAuthentication!(waiting.flowId)).toMatchObject({ phase: "waiting" });
     await call("POST", "/api/instances/antigravity-b/check", {});
     expect(await status("antigravity-b")).toMatchObject({ authenticated: false });
+  }, 180_000);
+
+  it.each(["1.5.14", "1.5.16"])("never takes up or changes a sign-in the computer's keyring already holds, on %s", async (version) => {
+    const keyring = folder();
+    writeFileSync(join(keyring, "shared"), "the keyring's own sign-in\n");
+    const { cfg, registry } = await nativeSetup([], { FAKE_AGY_KEYRING: keyring, FAKE_AGY_KEYRING_SHARED: "1", FAKE_AGY_VERSION: version });
+    const { request, call, status } = await serve(registry, cfg);
+    expect(await status("antigravity")).toMatchObject({ authenticated: false });
+
+    const flow = (await call("POST", "/api/instances/antigravity/auth/start", {})).auth;
+    await call("POST", "/api/instances/antigravity/auth/complete", { flowId: flow.flowId, callbackUrl: "fixture-code" });
+    expect(await status("antigravity")).toMatchObject({ authenticated: true });
+    expect((await request("POST", "/api/instances/antigravity/auth/sign-out", {})).status).toBe(200);
+    await call("POST", "/api/instances/antigravity/check", {});
+    expect(await status("antigravity")).toMatchObject({ authenticated: false });
+
+    expect(readdirSync(keyring)).toEqual(["shared"]);
+    expect(readFileSync(join(keyring, "shared"), "utf8")).toBe("the keyring's own sign-in\n");
   }, 180_000);
 
   it("ends a sign-in that waits for its code, with the CLI's process gone, when the person signs out", async () => {

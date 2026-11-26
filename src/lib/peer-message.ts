@@ -56,7 +56,12 @@ const PREVIEW_CHARS = 240;
 export function peerPreview(body: string): string | null {
   const text = body.trim();
   if (text.length <= COMPACT_CHARS && text.split("\n").length <= COMPACT_LINES) return null;
-  const flat = text.replace(/\s+/g, " ");
+  return flatPreview(text);
+}
+
+/** `body` on one line, cut to a preview. */
+export function flatPreview(body: string): string {
+  const flat = body.trim().replace(/\s+/g, " ");
   return flat.length > PREVIEW_CHARS ? `${flat.slice(0, PREVIEW_CHARS).trimEnd()}…` : flat;
 }
 

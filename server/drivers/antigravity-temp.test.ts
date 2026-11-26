@@ -157,6 +157,17 @@ describe("the automatic sweep", () => {
     expect(readdirSync(directory).sort()).toEqual([hexName(0x1111), hexName(0x4444), decimalName(17348), "keep-me", "tmp_python_scratch"].sort());
   });
 
+  it("scans again for a sweep asked for while one is running", async () => {
+    const dataDir = tempRoot("rerun");
+    const directory = antigravityTempDir(dataDir, "work");
+    const folder = unpackFolder(directory, hexName(0x2222));
+    const running = sweepAntigravityTemp("work", { dataDir, isAlive: () => true });
+    const after = sweepAntigravityTemp("work", { dataDir, isAlive: () => false });
+    expect(await running).toBe(0);
+    expect(await after).toBe(1);
+    expect(existsSync(folder)).toBe(false);
+  });
+
   it("counts a process it may not inspect (EPERM) as alive", async () => {
     const dataDir = tempRoot("eperm");
     const directory = antigravityTempDir(dataDir, "work");
