@@ -10876,7 +10876,7 @@
   "remote.diagnosis.route.off": "No way in is on.",
   "remote.diagnosis.next.internet": "Check this computer's internet connection. {app} tries again on its own.",
   "remote.diagnosis.next.vpn": "A VPN or firewall on this computer can block {app} Relay.",
-  "remote.diagnosis.next.signIn": "Sign in again.",
+  "remote.diagnosis.next.signIn": "Sign in under Anywhere, through {app} in Phone & devices. It is a separate sign-in from Your account.",
   "remote.diagnosis.next.wait": "Wait a few minutes. {app} tries again on its own.",
   "remote.diagnosis.next.removeComputer": "Remove a computer you no longer use from your account, then try again.",
   "remote.diagnosis.next.update": "Update {app}, then try again.",
