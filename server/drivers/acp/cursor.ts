@@ -363,7 +363,9 @@ export async function fetchCursorModels(
   env: Record<string, string | undefined>,
   run: typeof execCli = execCli,
 ): Promise<ModelCatalog> {
-  const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, clientCapabilitiesMeta: CURSOR_CLIENT_META })
+  // cursor-agent's cold start can take longer than the shared 8s request budget before session/new answers
+  // (#4371): give it its own, so a slow but working session does not collapse to the static list for six hours.
+  const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, requestTimeoutMs: 20_000, clientCapabilitiesMeta: CURSOR_CLIENT_META })
     .then((catalog) => cursorCatalogFromSession(catalog.options), () => null);
   if (fromSession) return fromSession;
   // Live CLI prints plain text (`slug - Label`); `--format json` is not supported yet.
