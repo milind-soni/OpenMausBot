@@ -104,7 +104,25 @@ function lex(source: string, windows: boolean): Reading {
     return key.startsWith("env:") ? WINDOWS_VARIABLES[key.slice(4)] ?? DYNAMIC : DYNAMIC;
   };
 
-  /** Returns the text up to the matching `shut`. Inside `"${…}"` double quotes still quote but `'` is literal. */
+  const nested = (shut: string) => {
+    if (++nesting > MAX_NESTING) {
+      at = source.length;
+      synced = false;
+    } else if (!script(shut)) synced = false;
+    nesting--;
+  };
+  /** Reads a POSIX `$(…)` or backtick substitution at `at` as commands, and leaves `at` on its last character. */
+  const substitution = (): boolean => {
+    const tick = source[at] === "`";
+    if (windows || !(tick || source.startsWith("$(", at))) return false;
+    at += tick ? 1 : 2;
+    nested(tick ? "`" : ")");
+    at--;
+    return true;
+  };
+
+  /** Returns the text up to the matching `shut`. Inside `"${…}"` double quotes still quote but `'` is literal.
+   * A substitution inside (`${X:-$(…)}`, `name=( $(…) )`) runs, so its commands are read. */
   const balanced = (open: string, shut: string, inDoubleQuotes: boolean): string => {
     const from = at;
     for (let depth = 1; at < source.length; at++) {
@@ -112,8 +130,9 @@ function lex(source: string, windows: boolean): Reading {
       if (c === "\\" && !windows) at++;
       else if (c === "'" && !inDoubleQuotes) at = endOf("'", at + 1);
       else if (c === '"') {
-        for (at++; at < source.length && source[at] !== '"'; at++) if (source[at] === "\\" && !windows) at++;
-      } else if (c === open) depth++;
+        for (at++; at < source.length && source[at] !== '"'; at++) if (source[at] === "\\" && !windows) at++; else substitution();
+      } else if (substitution()) continue;
+      else if (c === open) depth++;
       else if (c === shut && --depth === 0) return source.slice(from, at++);
     }
     synced = false;
@@ -186,13 +205,6 @@ function lex(source: string, windows: boolean): Reading {
       if (command.words.length || command.writes.length) commands.push(command);
       at += skip;
       command = { words: [], starts: [], writes: [], from: at, to: at };
-    };
-    const nested = (shut: string) => {
-      if (++nesting > MAX_NESTING) {
-        at = source.length;
-        synced = false;
-      } else if (!script(shut)) synced = false;
-      nesting--;
     };
     const quoted = () => {
       while (at < source.length) {

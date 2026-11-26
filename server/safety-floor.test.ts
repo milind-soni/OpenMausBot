@@ -148,6 +148,11 @@ const BLOCKED: Case[] = [
   ["if true; then rm -rf /; fi", "delete-root"],
   ["echo $(rm -rf /)", "delete-root"],
   ["echo `rm -rf ~`", "delete-home"],
+  // a substitution inside `${…}` or an array runs
+  ["echo ${X:-$(rm -rf /)}", "delete-root"],
+  ['echo "${X:-"$(rm -rf /)"}"', "delete-root"],
+  [': "${DIR:=`rm -rf ~`}"', "delete-home"],
+  ["files=( $(mkfs.ext4 /dev/sda1) )", "format-disk"],
   ["rm -rf \\\n  /", "delete-root"],
   // formatting or overwriting a disk
   ["mkfs.ext4 /dev/sda1", "format-disk"],
@@ -452,6 +457,8 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   ["rm -rf $BUILD_DIR/"],
   ['rm -rf "${TMPDIR:-/tmp}/work"'],
   ['rm -rf "$(mktemp -d)"'],
+  ['DIR="${DIR:-$(mktemp -d)}"'],
+  ["files=( $(ls) )"],
   ["rm -rf /$NAME"],
   ["rm -rf ~/../shared-scratch"],
   ["rm -rf ~other"],
