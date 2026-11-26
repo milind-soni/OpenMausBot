@@ -550,6 +550,17 @@ const __APP_VERSION__: string;
         retry(id: string): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
         onState(cb: (view: import("../../electron/update-all-run.mjs").UpdateAllView) => void): () => void;
       };
+      /** Saved apps as launchers on this computer (electron/app-install/), this computer's own page only: a bundle in
+       * ~/Applications/MausBot Apps (macOS), a Start menu shortcut (Windows), a desktop entry (Linux), each opening
+       * openmausbot://app/<id>. Installing again replaces the launcher; a new name replaces the old one. Absent in older
+       * desktop builds and on any other page. */
+      appInstall?: {
+        install(input: { id: string; name: string; iconPng?: Uint8Array; desktopShortcut?: boolean }): Promise<
+          | { ok: true; app: { id: string; name: string; path: string | null } }
+          | { ok: false; reason: "unavailable" | "invalid-id" | "taken" | "failed" }>;
+        uninstall(id: string): Promise<{ ok: true; removed: boolean; left?: string[] } | { ok: false; reason: "invalid-id" }>;
+        list(): Promise<{ available: boolean; apps: Array<{ id: string; name: string; path: string | null }> }>;
+      };
       /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
        * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */
       appUpdate?: {
