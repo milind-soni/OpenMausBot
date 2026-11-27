@@ -3,7 +3,8 @@
 // only once its upload completes.
 // A sandbox made to take no direct connections (the Cloud's browser sandbox, by the relay's choice) gets no link: the relay
 // answers `409 inbound_closed`, and the Cloud's browser copies through the provider's JSON file read and write instead
-// (readFromComputerInline, writeToComputerInline), at most INLINE_MAX_BYTES a call, with no range or append.
+// (readFromComputerInline, writeToComputerInline): one call a file, with no range or append, so at most
+// INLINE_READ_MAX_BYTES comes from it and INLINE_WRITE_MAX_BYTES goes to it.
 // Security: the link is a secret until it expires, so no result, error or log ever carries it. A copy reads or writes
 // only inside the bot's working folder, judged after every existing link is followed, and never under its secret folder.
 import { randomBytes } from "node:crypto";
@@ -31,10 +32,13 @@ export type CopyOutcome = { path: string; bytes: number } | { error: string; inb
 /** The relay's word that a sandbox takes no direct connections, so no transfer link works on it. */
 export const INBOUND_CLOSED_CODE = "inbound_closed";
 const INBOUND_CLOSED = "This cloud computer takes no direct connections, so its files can't be copied with transfer links.";
-/** What the provider's JSON file read and write move in one call, after decoding (docs: "Files up to 5 MiB"). */
-export const INLINE_MAX_BYTES = 5 * MiB;
+/** What the provider's JSON file read moves in one call, after decoding (docs: "Files up to 5 MiB"); the relay streams it. */
+export const INLINE_READ_MAX_BYTES = 5 * MiB;
+/** What one JSON file write can carry through the relay, whose request cap is 2 MiB of JSON: the file's base64 and its
+ * path within it (the provider itself takes 5 MiB). */
+export const INLINE_WRITE_MAX_BYTES = 1536 * 1024 - 3 * 1024;
 /** The JSON around a read's base64 content: never buffered past this. */
-const INLINE_MAX_JSON = Math.ceil(INLINE_MAX_BYTES / 3) * 4 + 64 * 1024;
+const INLINE_MAX_JSON = Math.ceil(INLINE_READ_MAX_BYTES / 3) * 4 + 64 * 1024;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 export interface CopyOptions {
   /** Bytes free on the disk that holds `dir`. */
@@ -237,14 +241,19 @@ export async function copyToComputer(
 }
 
 // Through the provider's JSON file calls, for a sandbox that takes no direct connections. Each moves the whole file in one
-// call of at most INLINE_MAX_BYTES (the relay may take less: its 413 is the same answer), and neither takes a range, so a
+// call (the relay may take less than the provider: its 413 is the same answer), and neither takes a range, so a
 // larger file can never move this way; that is said plainly, and never tried again.
 
-const inlineTooBig = (path: string, bytes: number | null) => ({
-  error: `${path}${bytes === null ? "" : ` (${sized(bytes)})`} is too large to copy: this browser's sandbox takes no direct connections, so a file moves between it and the Cloud in one piece of at most ${INLINE_MAX_BYTES / MiB} MiB.`,
+const inlineTooBig = (path: string, bytes: number | null, way: "from" | "to") => ({
+  error: `${path}${bytes === null ? "" : ` (${sized(bytes)})`} is too large to copy: this browser's sandbox takes no direct connections, so a file moves ${way} it in one piece of at most ${way === "from" ? "5 MiB" : "about 1.5 MiB"}.`,
   final: true as const,
 });
 const inlineBadPlace = (path: string) => ({ error: `${path} is in a place this browser's sandbox can't copy from or to while it takes no direct connections.`, final: true as const });
+/** A refusal that will not change on a retry (the file is not there, or the Cloud's service does not copy such files). */
+const inlineRefused = (path: string, way: "from" | "to", status: number) => ({
+  error: `${path} could not be copied ${way} this browser's sandbox (it answered ${status}): the sandbox takes no direct connections, and its files can't be copied another way here.`,
+  final: true as const,
+});
 const codeOf = (body: unknown): unknown => (body as { error?: { code?: unknown }; code?: unknown } | null)?.error?.code ?? (body as { code?: unknown } | null)?.code;
 
 /** The response's text, never buffered past `max` bytes: null past it. */
@@ -283,20 +292,21 @@ export async function readFromComputerInline(
   assertBoatNotDeleting(boxId);
   const response = await boatFetch(cfg, `/sandboxes/${boxId}/files?path=${encodeURIComponent(args.path)}&encoding=base64`, { signal });
   const text = await boundedText(response, INLINE_MAX_JSON);
-  if (text === null) return inlineTooBig(args.path, null);
+  if (text === null) return inlineTooBig(args.path, null, "from");
   let body: { ok?: unknown; content?: unknown; encoding?: unknown; size?: unknown } | null = null;
   try { body = JSON.parse(text); } catch { /* judged below */ }
-  if (response.status === 413 || codeOf(body) === "file_too_large") return inlineTooBig(args.path, typeof body?.size === "number" ? body.size : null);
+  if (response.status === 413 || codeOf(body) === "file_too_large") return inlineTooBig(args.path, typeof body?.size === "number" ? body.size : null, "from");
   if (response.status === 400 && codeOf(body) === "invalid_path") return inlineBadPlace(args.path);
   if (!response.ok || body?.ok === false) {
-    if (response.status === 404) return { error: `${args.path} is not on the cloud computer.` };
+    if (response.status === 404 || response.status === 403 || response.status === 405) return inlineRefused(args.path, "from", response.status);
     return { error: boatErrorMessage(response.status, `Copying ${args.path} from the cloud computer`, body, boatAccount(cfg)?.included === true) };
   }
   const content = body?.content;
-  if (typeof content !== "string" || content.length % 4 !== 0 || !BASE64.test(content) || (body?.encoding !== undefined && body.encoding !== "base64")) return { error: UNUSABLE_LINK };
+  const unusable = { error: `${args.path} came back from this browser's sandbox in a form that can't be used, so it was not brought over.`, final: true as const };
+  if (typeof content !== "string" || content.length % 4 !== 0 || !BASE64.test(content) || (body?.encoding !== undefined && body.encoding !== "base64")) return unusable;
   const bytes = Buffer.from(content, "base64");
-  if (typeof body?.size === "number" && body.size !== bytes.length) return { error: UNUSABLE_LINK };
-  if (bytes.length > INLINE_MAX_BYTES) return inlineTooBig(args.path, bytes.length);
+  if (typeof body?.size === "number" && body.size !== bytes.length) return unusable;
+  if (bytes.length > INLINE_READ_MAX_BYTES) return inlineTooBig(args.path, bytes.length, "from");
   const free = (options.freeBytes ?? diskFree)(placed.root);
   if (bytes.length + DISK_RESERVE_BYTES > free) return { error: noSpace(args.path, bytes.length, free) };
   const landed = land(placed, wanted);
@@ -340,7 +350,7 @@ export async function writeToComputerInline(
   try {
     const info = await handle.stat();
     if (!info.isFile()) return { error: `${args.from} is not a file.` };
-    if (info.size > INLINE_MAX_BYTES) return inlineTooBig(args.from, info.size);
+    if (info.size > INLINE_WRITE_MAX_BYTES) return inlineTooBig(args.from, info.size, "to");
     content = Buffer.alloc(info.size);
     let read = 0;
     while (read < info.size) {
@@ -356,8 +366,9 @@ export async function writeToComputerInline(
     method: "PUT", signal, body: JSON.stringify({ path: args.path, content: content.toString("base64"), encoding: "base64" }),
   });
   const body = await boundedText(response, 64 * 1024).then((text) => { try { return JSON.parse(text ?? "") as { ok?: unknown; path?: unknown }; } catch { return null; } });
-  if (response.status === 413 || codeOf(body) === "file_too_large" || codeOf(body) === "request_too_large") return inlineTooBig(args.from, content.length);
+  if (response.status === 413 || codeOf(body) === "file_too_large" || codeOf(body) === "request_too_large") return inlineTooBig(args.from, content.length, "to");
   if (response.status === 400 && codeOf(body) === "invalid_path") return inlineBadPlace(args.path);
+  if (response.status === 404 || response.status === 403 || response.status === 405) return inlineRefused(args.from, "to", response.status);
   if (!response.ok || body?.ok === false) return { error: boatErrorMessage(response.status, `Copying ${args.from} to the cloud computer`, body, boatAccount(cfg)?.included === true) };
   return { path: typeof body?.path === "string" ? body.path : args.path, bytes: content.length };
 }

@@ -53,6 +53,8 @@ export interface FakeComputer {
   inbound: "open" | "boat-only";
   /** The relay's cap on a request's JSON body (its 413 `request_too_large` past it), or null for none. */
   relayJsonMax: number | null;
+  /** Whether the relay lets a browser sandbox use the JSON file calls (an Admin before that answers them 404). */
+  jsonFiles: boolean;
   /** Whether the launch could write the Chrome policy (sudo in the sandbox). */
   policy: boolean;
   requests: Request[];
@@ -89,7 +91,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, resumeGone: false, inbound: "open", relayJsonMax: null, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, cookieCap: null, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, resumeGone: false, inbound: "open", relayJsonMax: null, jsonFiles: true, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, cookieCap: null, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -186,6 +188,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       // The provider's JSON file read and write, as the relay lets a browser sandbox use them: one file in a profile's
       // downloads (read) or uploads (write) folder, under /home/user or /tmp, at most 5 MiB after decoding.
       if (rest === `/sandboxes/${boxId}/files` && (req.method === "GET" || req.method === "PUT")) {
+        if (!fake.jsonFiles) return send(404, { ok: false, error: { code: "not_found", message: "Not found." } });
         const read = req.method === "GET";
         const path = String(read ? url.searchParams.get("path") ?? "" : body.path ?? "");
         if (!new RegExp(`^${HOME}/\\.omb-browser/\\.${read ? "downloads" : "uploads"}/[a-f0-9]{16}/[^/.][^/]*$`).test(path)) return send(404, { ok: false, code: "not_found" });

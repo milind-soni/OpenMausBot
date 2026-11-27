@@ -33,12 +33,32 @@ export function browserRestoreKey(session: string): string {
   return `omb-${createHash("sha256").update(session).digest("hex")}`;
 }
 
-/** The session's saved sign-ins as they were before the Cloud's browser sandbox last wrote them back (browser-sites.ts
- * writeSignIns): one generation, encrypted like the restore file and named apart from it, so agent-browser never restores
- * it. It goes wherever the sign-ins are cleared. */
-export function signInsBackupFile(session: string): string {
-  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
-  return `home-backup-${session}.json.enc`;
+/** The session's saved sign-ins as they were when a session in the Cloud's browser sandbox opened (browser-sites.ts
+ * backupSignIns): one file per such session, named by its time in ms (its id), encrypted like the restore file and named
+ * apart from it, so agent-browser never restores it. They go wherever the sign-ins are cleared. */
+export function signInsBackupFile(session: string, id: string): string {
+  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session) || !/^\d{13}$/.test(id)) throw new Error("Invalid browser session.");
+  return `home-backup-${session}-${id}.json.enc`;
+}
+
+/** The id of one of this session's backups from its file name, or null for any other file (another session's included). */
+export function signInsBackupId(session: string, name: string): string | null {
+  const prefix = `home-backup-${session}-`;
+  if (!name.startsWith(prefix) || !name.endsWith(".json.enc")) return null;
+  const id = name.slice(prefix.length, -".json.enc".length);
+  return /^\d{13}$/.test(id) ? id : null;
+}
+
+/** Every backup of the session's sign-ins, removed. */
+export function removeSignInsBackups(directory: string, session: string): void {
+  let names: string[] = [];
+  try { names = readdirSync(directory); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  for (const name of names) {
+    if (signInsBackupId(session, name) === null) continue;
+    try { unlinkSync(join(directory, name)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
 }
 
 const PROFILES_DIR = "agent-browser-profiles";
@@ -737,7 +757,7 @@ export async function clearBrowserSessionState(
   };
   try {
     for (const base of bases) for (const suffix of [".json", ".json.enc", ".json.previous", ".json.enc.previous"]) remove(join(directory, base + suffix));
-    remove(join(directory, signInsBackupFile(session)));
+    removeSignInsBackups(directory, session);
     const pendingDirectory = join(directory, ".tmp");
     let pendingFiles: string[] = [];
     try { pendingFiles = readdirSync(pendingDirectory); }

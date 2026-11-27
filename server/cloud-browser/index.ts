@@ -230,7 +230,7 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
       if (bots().size > 0) return;
       const removed = await ops.remove(box.id);
       for (const key of rails.pendingErasures()) rails.erased(key);
-      boxId = null;
+      if (boxId === box.id) boxId = null;
       log(`browser sandbox: ${removed ? "deleted" : "deletion requested and journaled"}: no bot with a browser profile is left in it`);
       return;
     }
@@ -255,6 +255,9 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     const quit = async () => { if (box) await ops.quit(box.id, key).catch(() => undefined); };
     // Past the deadline this call already opened the home's browser: what follows only readies the sandbox for the next.
     const home = (_request: OpenRequest, reason: HomeReason): Opened => (gaveUp() ? { home: reason } : fallback(request, reason));
+    // An erase of a deleted bot's profile under way (a sandbox being deleted, or woken for it) finishes first: this open then
+    // finds the sandbox as that left it, never one half deleted.
+    await erasing;
     try {
       box = await wake(ops);
       if (gaveUp()) return { home: "slow" };

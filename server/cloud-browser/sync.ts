@@ -83,54 +83,78 @@ export function mergeInSession(homeCookies: readonly unknown[], baseline: readon
   return { merged: [...merged.values()].slice(0, MAX_COOKIES), changed };
 }
 
-// What comes home from the sandbox is what its Chrome reports, so whoever controls that Chrome decides it. These bounds keep
-// such a report from emptying or bloating the home's copy; no real session comes near them.
+// What comes home from the sandbox is what its Chrome reports, so whoever controls that Chrome decides it. Removals are
+// taken as they come (a sign-out is one; a count cannot tell it from a wipe): the home keeps a backup of its copy from each
+// session's open instead (browser-sites.ts backupSignIns). What is bounded is what no real Chrome holds, and the size.
 
 /** Chrome refuses a cookie whose name and value pass 4096 bytes, or an attribute past 1024: a larger one never comes home. */
 export const MAX_COOKIE_BYTES = 4_096;
 const MAX_ATTRIBUTE_BYTES = 1_024;
 /** The home's copy is never grown past this many bytes of names and values by what the sandbox reports. */
 export const MAX_SIGN_IN_BYTES = 2 * 1024 * 1024;
-/** A write-back that would remove more than half of the home's cookies, and more than this many, is refused whole: a site's
- * own sign-out removes that site's few. No bot tool clears a browser's site data, so no session is exempt. */
-export const MASS_REMOVAL_MIN = 10;
 
 const bytes = (text: string) => Buffer.byteLength(text, "utf8");
+const sizeOf = (cookie: SavedCookie) => bytes(cookie.name) + bytes(cookie.value);
 /** A cookie a real Chrome could hold. */
 export const plausibleCookie = (cookie: SavedCookie): boolean =>
-  bytes(cookie.name) + bytes(cookie.value) <= MAX_COOKIE_BYTES && bytes(cookie.domain) <= MAX_ATTRIBUTE_BYTES && bytes(cookie.path) <= MAX_ATTRIBUTE_BYTES;
-const cookieBytes = (cookies: readonly unknown[]) => cookies.filter(isCookie).reduce((sum, cookie) => sum + bytes(cookie.name) + bytes(cookie.value), 0);
-/** Grown past MAX_SIGN_IN_BYTES by this merge (a home copy already past it is never made unwritable). */
-const tooLarge = (merged: readonly SavedCookie[], home: readonly unknown[]) => {
-  const size = cookieBytes(merged);
-  return size > MAX_SIGN_IN_BYTES && size > cookieBytes(home);
-};
+  sizeOf(cookie) <= MAX_COOKIE_BYTES && bytes(cookie.domain) <= MAX_ATTRIBUTE_BYTES && bytes(cookie.path) <= MAX_ATTRIBUTE_BYTES;
+const cookieBytes = (cookies: readonly unknown[]) => cookies.filter(isCookie).reduce((sum, cookie) => sum + sizeOf(cookie), 0);
+const hostOf = (cookie: SavedCookie) => cookie.domain.replace(/^\./, "").toLowerCase();
 
-export type WriteBack = { merged: SavedCookie[]; changed: number } | { refused: "mass-removal" | "too-large"; removed: number };
+/** The merge brought within MAX_SIGN_IN_BYTES (or the home's own size, if that is larger already): cookies the sandbox
+ * set or changed are dropped, those of hosts the home's copy never had first, then the largest first, a dropped change
+ * keeping the home's value. Never a cookie the sandbox did not bring. `dropped`: the ids not taken home. */
+function fit(merged: readonly SavedCookie[], homeCookies: readonly unknown[]): { merged: SavedCookie[]; dropped: string[] } {
+  const limit = Math.max(MAX_SIGN_IN_BYTES, cookieBytes(homeCookies));
+  let size = cookieBytes(merged);
+  if (size <= limit) return { merged: [...merged], dropped: [] };
+  const home = byId(homeCookies);
+  const homeHosts = new Set([...home.values()].map(hostOf));
+  const brought = merged.filter((cookie) => { const was = home.get(cookieId(cookie)); return !was || fingerprint(was) !== fingerprint(cookie); });
+  brought.sort((a, b) => Number(homeHosts.has(hostOf(a))) - Number(homeHosts.has(hostOf(b))) || sizeOf(b) - sizeOf(a));
+  const out = new Map(merged.map((cookie) => [cookieId(cookie), cookie]));
+  const dropped: string[] = [];
+  for (const cookie of brought) {
+    if (size <= limit) break;
+    const id = cookieId(cookie);
+    const was = home.get(id);
+    size -= sizeOf(cookie) - (was ? sizeOf(was) : 0);
+    if (was) out.set(id, was); else out.delete(id);
+    dropped.push(id);
+  }
+  return { merged: [...out.values()], dropped };
+}
 
-/** mergeInSession with the bounds above: a cookie no real Chrome holds counts as unchanged, and a merge that would remove
- * most of the home's cookies, or grow the copy past its cap, is refused whole, so the home's copy stays as it is. */
-export function writeBack(homeCookies: readonly unknown[], baseline: readonly SavedCookie[], current: readonly SavedCookie[], last: SyncState | null): WriteBack {
+/** The sandbox's fingerprints to record as agreed: never one of a cookie that was not taken home, so it is asked again. */
+export function agreed(sandbox: readonly SavedCookie[], dropped: readonly string[]): Prints {
+  const recorded = prints(sandbox);
+  for (const id of dropped) delete recorded[id];
+  return recorded;
+}
+
+/** mergeInSession with the bounds above: a cookie no real Chrome holds counts as unchanged, and the merge is brought within
+ * its cap (fit). Removals are taken as mergeInSession takes them. */
+export function writeBack(homeCookies: readonly unknown[], baseline: readonly SavedCookie[], current: readonly SavedCookie[], last: SyncState | null): { merged: SavedCookie[]; changed: number; dropped: string[] } {
   const before = byId(baseline);
+  const implausible: string[] = [];
   const sane = current.flatMap((cookie) => {
     if (plausibleCookie(cookie)) return [cookie];
-    const was = before.get(cookieId(cookie));
+    const id = cookieId(cookie);
+    implausible.push(id);
+    const was = before.get(id);
     return was ? [was] : [];
   });
   const result = mergeInSession(homeCookies, baseline, sane, last);
-  const home = byId(homeCookies);
-  const kept = new Set(result.merged.map(cookieId));
-  const removed = [...home.keys()].filter((id) => !kept.has(id)).length;
-  if (removed > MASS_REMOVAL_MIN && removed * 2 > home.size) return { refused: "mass-removal", removed };
-  if (tooLarge(result.merged, homeCookies)) return { refused: "too-large", removed };
-  return result;
+  const { merged, dropped } = fit(result.merged, homeCookies);
+  return { merged, changed: Math.max(0, result.changed - dropped.length), dropped: [...implausible, ...dropped] };
 }
 
-/** mergeAtOpen with the same bounds: a cookie no real Chrome holds never comes home, and nothing comes home at all when
- * the sandbox's would grow the copy past its cap. */
-export function openMerge(homeCookies: readonly unknown[], sandboxCookies: readonly SavedCookie[], last: SyncState | null): { merged: SavedCookie[]; fromSandbox: number } {
+/** mergeAtOpen with the same bounds: a cookie no real Chrome holds never comes home, and what comes home fits the cap. */
+export function openMerge(homeCookies: readonly unknown[], sandboxCookies: readonly SavedCookie[], last: SyncState | null): { merged: SavedCookie[]; fromSandbox: number; dropped: string[] } {
+  const implausible = sandboxCookies.filter((cookie) => !plausibleCookie(cookie)).map(cookieId);
   const result = mergeAtOpen(homeCookies, sandboxCookies.filter(plausibleCookie), last);
-  return result.fromSandbox > 0 && tooLarge(result.merged, homeCookies) ? mergeAtOpen(homeCookies, [], last) : result;
+  const { merged, dropped } = fit(result.merged, homeCookies);
+  return { merged, fromSandbox: Math.max(0, result.fromSandbox - dropped.length), dropped: [...implausible, ...dropped] };
 }
 
 /** Whether the sandbox already holds what the merge asks of it: the same cookies, the same values. A cookie Chrome would

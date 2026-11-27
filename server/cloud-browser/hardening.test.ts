@@ -9,18 +9,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import { signInsBackupFile } from "../browser-engine.ts";
-import { decryptBrowserState, readSignIns, signOutOfSites, writeSignIns } from "../browser-sites.ts";
+import { backupSignIns, decryptBrowserState, readSignIns, restoreSignIns, signInBackups, signOutOfSites, writeSignIns } from "../browser-sites.ts";
+import { createSignInBackupRoutes } from "../routes/browser-sign-in-backups.ts";
 import { RuntimeRouter } from "../browser/engines.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { ChromeEngine } from "../browser/engines.ts";
 import { SIGN_IN_SYNC_MS, type SignInStore } from "./companion.ts";
-import { INLINE_MAX_BYTES } from "../cloud-computer-files.ts";
-import { addressGuard, PRIVATE_ADDRESS_REFUSAL } from "./guards.ts";
+import { INLINE_READ_MAX_BYTES, INLINE_WRITE_MAX_BYTES } from "../cloud-computer-files.ts";
+import { addressGuard, PRIVATE_ADDRESS_REFUSAL, UNREADABLE_ADDRESS_REFUSAL } from "./guards.ts";
 import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, REOPENED_NOTE, type CloudBrowserDeps } from "./index.ts";
 import { createCloudBrowserRails } from "./rails.ts";
 import { profileKey, providerOps } from "./remote.ts";
 import type { SavedCookie } from "./sign-ins.ts";
-import { MASS_REMOVAL_MIN, MAX_COOKIE_BYTES, MAX_SIGN_IN_BYTES, mergeAtOpen, mergeInSession, openMerge, prints, writeBack } from "./sync.ts";
+import { agreed, MAX_COOKIE_BYTES, MAX_SIGN_IN_BYTES, mergeAtOpen, mergeInSession, openMerge, prints, writeBack } from "./sync.ts";
 import { RELAY_KEY, startFakeComputer, type FakeComputer } from "./testing/fake-computer.ts";
 
 let fake: FakeComputer;
@@ -81,11 +82,13 @@ function memorySignIns(initial: { cookies: unknown[]; origins: unknown[] } | nul
   let saved = initial;
   let modified = initial ? 1_000 : 0;
   const writes: unknown[][] = [];
+  const counts = { backups: 0 };
   const store: SignInStore = {
     load: () => (saved === null ? null : { state: saved, modified }),
     save: (_session, cookies) => { writes.push(cookies); saved = { cookies, origins: saved?.origins ?? [] }; modified += 1; return modified; },
+    backup: () => { counts.backups += 1; },
   };
-  return { store, writes, cookies: () => (saved?.cookies ?? []) as SavedCookie[] };
+  return { store, writes, cookies: () => (saved?.cookies ?? []) as SavedCookie[], get backups() { return counts.backups; } };
 }
 
 const cookie = (name: string, domain: string, value = "v"): SavedCookie => ({ name, value, domain, path: "/", secure: true });
@@ -109,12 +112,13 @@ describe("what the sandbox writes back into the home's sign-ins", () => {
     const current = [asChrome(cookie("sid", ".example.com", "s2")), asChrome(cookie("keep", "keep.example", "home")), asChrome(cookie("new", "new.example", "n"))];
     const last = { home: prints(home), sandbox: prints(baseline) };
     for (const state of [last, null]) {
-      expect(JSON.stringify(writeBack(home, baseline, current, state))).toBe(JSON.stringify(mergeInSession(home, baseline, current, state)));
-      expect(JSON.stringify(openMerge(home, current, state))).toBe(JSON.stringify(mergeAtOpen(home, current, state)));
+      const back = writeBack(home, baseline, current, state);
+      expect(JSON.stringify({ merged: back.merged, changed: back.changed })).toBe(JSON.stringify(mergeInSession(home, baseline, current, state)));
+      expect(back.dropped).toEqual([]);
+      const open = openMerge(home, current, state);
+      expect(JSON.stringify({ merged: open.merged, fromSandbox: open.fromSandbox })).toBe(JSON.stringify(mergeAtOpen(home, current, state)));
+      expect(open.dropped).toEqual([]);
     }
-    // A site's own sign-out removes its few cookies, even from a small home.
-    const signedOut = baseline.filter((one) => one.name !== "gone");
-    expect(writeBack(home, baseline, signedOut, last)).toEqual(mergeInSession(home, baseline, signedOut, last));
   });
 
   it("a normal session through the sandbox saves byte for byte what the old merge gives", async () => {
@@ -132,50 +136,101 @@ describe("what the sandbox writes back into the home's sign-ins", () => {
     expect(JSON.stringify(home.writes[0])).toBe(JSON.stringify(expected));
   });
 
-  it("refuses an empty cookie list that would wipe the home: the home keeps its set, says so once, and carries it back in at the next open", async () => {
-    const home = memorySignIns({ cookies: manySites(20), origins: [] });
+  it("honours a sign-out of a big site: its cookies are gone at home, never carried back in, and the session's new sign-ins come home", async () => {
+    const big = Array.from({ length: 14 }, (_, i) => cookie(`s${i}`, ".bigsite.example", `b${i}`));
+    const others = manySites(10);
+    const home = memorySignIns({ cookies: [...big, ...others], origins: [] });
     const cloud = browser({ signIns: home.store });
     urlOf(await cloud.open(request()));
     const key = profileKey("scout");
-    expect(fake.cookies.get(key)).toHaveLength(20);
-    fake.cookies.set(key, []);
+    expect(fake.cookies.get(key)).toHaveLength(24);
+    // The bot signs out of the big site (14 of the 24 cookies go) and signs in somewhere new.
+    holds(key, [...others, cookie("fresh", "new.example", "n1")]);
     await closeSession(cloud);
-    expect(home.writes, "nothing written: the home's copy is exactly as it was").toEqual([]);
-    expect(home.cookies()).toEqual(manySites(20));
-    expect(lines.filter((line) => line.includes("kept the home's sign-ins"))).toEqual([
-      "browser bot-scout: kept the home's sign-ins as they were: the browser sandbox's cookies would have removed 20 of them at once",
-    ]);
-    // The next open finds the sandbox without them, and the home's copy goes in again.
+    expect(home.cookies().map((one) => one.name).sort()).toEqual([...others.map((one) => one.name), "fresh"].sort());
+    expect(lines.filter((line) => line.includes("left") && line.includes("out of the home's sign-ins"))).toEqual([]);
+    // The next open carries nothing of the big site back into the sandbox.
     urlOf(await cloud.open(request()));
-    expect(fake.cookies.get(key)).toHaveLength(20);
+    expect((fake.cookies.get(key) ?? []).some((one) => one.domain === ".bigsite.example")).toBe(false);
+    expect((fake.cookies.get(key) ?? []).map((one) => one.name)).toContain("fresh");
   });
 
-  it("a refused session says so once, and writes nothing while the removal stands", async () => {
-    const home = memorySignIns({ cookies: manySites(30), origins: [] });
-    // A long turn holds the browser: its sign-ins are written home every 10 minutes while it stays open.
+  it("keeps one backup of the home's copy as each session opens, and none at a write-back", async () => {
+    const home = memorySignIns({ cookies: manySites(3), origins: [] });
     const cloud = browser({ signIns: home.store, held: () => true });
     urlOf(await cloud.open(request()));
-    const key = profileKey("scout");
-    holds(key, [cookie("attacker", "site0.example")]);
+    expect(home.backups).toBe(1);
+    holds(profileKey("scout"), manySites(2));
     clock += SIGN_IN_SYNC_MS;
     await cloud.closeIdle();
-    clock += SIGN_IN_SYNC_MS;
-    await cloud.closeIdle();
-    expect(cloud.active("bot-scout"), "the session goes on").not.toBeNull();
+    expect(home.writes, "a periodic write-back went home").toHaveLength(1);
+    expect(home.backups, "no backup at a write-back").toBe(1);
     await cloud.close("bot-scout");
-    expect(home.writes).toEqual([]);
-    expect(lines.filter((line) => line.includes("kept the home's sign-ins"))).toHaveLength(1);
+    urlOf(await cloud.open(request()));
+    expect(home.backups, "one per session").toBe(2);
+    // A home with nothing saved yet has nothing to keep.
+    const empty = memorySignIns(null);
+    const other = browser({ signIns: empty.store });
+    await cloud.close("bot-scout");
+    urlOf(await other.open(request("writer")));
+    expect(empty.backups).toBe(0);
   });
 
-  it("removes a handful, or half of a small home, as before: the bound is more than half and more than a handful", () => {
-    const home = manySites(MASS_REMOVAL_MIN * 4);
-    const baseline = home.map(asChrome);
-    const last = { home: prints(home), sandbox: prints(baseline) };
-    const fewer = (removed: number) => baseline.slice(removed);
-    expect(writeBack(home, baseline, fewer(MASS_REMOVAL_MIN * 2), last), "half, not more").not.toHaveProperty("refused");
-    expect(writeBack(home, baseline, fewer(MASS_REMOVAL_MIN * 2 + 1), last)).toEqual({ refused: "mass-removal", removed: MASS_REMOVAL_MIN * 2 + 1 });
-    const small = manySites(MASS_REMOVAL_MIN);
-    expect(writeBack(small, small.map(asChrome), [], { home: prints(small), sandbox: prints(small) }), "all of a handful").not.toHaveProperty("refused");
+  it("keeps a week of backups, five at most, restores one, and removes them all at a sign-out", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-sign-ins-backup-"));
+    try {
+      const directory = join(root, ".agent-browser", "sessions");
+      const key = "a".repeat(64);
+      const day = 24 * 60 * 60_000;
+      const start = Date.UTC(2026, 10, 1);
+      writeSignIns(directory, "bot-scout", key, [cookie("first", "a.example")]);
+      const firstId = backupSignIns(directory, "bot-scout", key, start)!;
+      const backup = join(directory, signInsBackupFile("bot-scout", firstId));
+      expect(readFileSync(backup).toString("utf8"), "encrypted").not.toContain("first");
+      expect(JSON.parse(decryptBrowserState(readFileSync(backup), key)).cookies).toEqual([cookie("first", "a.example")]);
+      // A session that wiped the sign-ins, then the owner puts them back.
+      writeSignIns(directory, "bot-scout", key, []);
+      expect(restoreSignIns(directory, "bot-scout", key, firstId, start + 1_000)).toBe(true);
+      expect(readSignIns(directory, "bot-scout", key)).toMatchObject({ state: { cookies: [cookie("first", "a.example")] } });
+      expect(signInBackups(directory, "bot-scout").map((one) => one.id), "the wiped copy was kept too, so the restore can be undone").toHaveLength(2);
+      expect(restoreSignIns(directory, "bot-scout", key, "1234567890123")).toBe(false);
+      // Older than a week, or past five: removed at the next backup.
+      for (let i = 1; i <= 7; i++) backupSignIns(directory, "bot-scout", key, start + i * day);
+      const kept = signInBackups(directory, "bot-scout");
+      expect(kept).toHaveLength(5);
+      expect(kept[0]!.takenAt).toBe(start + 7 * day);
+      expect(kept.every((one) => one.takenAt >= start + 3 * day)).toBe(true);
+      // Another session's backups are its own.
+      writeSignIns(directory, "bot-scout-2", key, [cookie("x", "x.example")]);
+      backupSignIns(directory, "bot-scout-2", key, start + 7 * day);
+      await signOutOfSites({ binaryPath: "/fake/agent-browser", session: "bot-scout", env: { HOME: root, USERPROFILE: root }, encryptionKey: key }, null, { engine: async () => null });
+      expect(signInBackups(directory, "bot-scout")).toEqual([]);
+      expect(signInBackups(directory, "bot-scout-2")).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("the owner's routes list a bot's backups and restore one; nobody else's do", async () => {
+    const restored: Array<[string, string]> = [];
+    const route = createSignInBackupRoutes({
+      isOwner: (auth) => (auth as unknown as { owner: boolean }).owner,
+      backups: (botId) => (botId === "scout" ? [{ id: "1764200000000", takenAt: 1764200000000, bytes: 512 }] : null),
+      restore: async (botId, id) => { restored.push([botId, id]); return botId === "scout" ? (id === "1764200000000" ? "restored" : "no-backup") : "no-bot"; },
+    });
+    const call = async (method: string, path: string, owner: boolean, body?: unknown) => {
+      const replies: Array<{ status: number; body: unknown }> = [];
+      await route({ req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path, method, auth: { owner } as never,
+        json: ((_res: unknown, status: number, sent: unknown) => { replies.push({ status, body: sent }); }) as never, readBody: (async () => body) as never });
+      return replies[0];
+    };
+    expect(await call("GET", "/api/bots/scout/browser-sign-ins/backups", true)).toEqual({ status: 200, body: { backups: [{ id: "1764200000000", takenAt: "2025-11-26T23:33:20.000Z", bytes: 512 }] } });
+    expect((await call("GET", "/api/bots/scout/browser-sign-ins/backups", false))?.status).toBe(403);
+    expect((await call("POST", "/api/bots/scout/browser-sign-ins/restore", false, { backup: "1764200000000" }))?.status).toBe(403);
+    expect(await call("POST", "/api/bots/scout/browser-sign-ins/restore", true, { backup: "1764200000000" })).toEqual({ status: 200, body: { ok: true } });
+    expect((await call("POST", "/api/bots/scout/browser-sign-ins/restore", true, { backup: "nope" }))?.status).toBe(400);
+    expect((await call("GET", "/api/bots/ghost/browser-sign-ins/backups", true))?.status).toBe(404);
+    expect(restored).toEqual([["scout", "1764200000000"]]);
   });
 
   it("never brings home a cookie no real Chrome holds, and keeps the home's value of one replaced by such a cookie", async () => {
@@ -188,30 +243,43 @@ describe("what the sandbox writes back into the home's sign-ins", () => {
     expect(home.cookies().map((one) => [one.name, one.value])).toEqual([["sid", "s1"], ["fine", "ok"]]);
   });
 
-  it("never grows the home's copy past its cap, at a write-back or at an open", () => {
-    const home = [cookie("sid", ".example.com")];
-    const big = Array.from({ length: Math.ceil(MAX_SIGN_IN_BYTES / 4_000) + 1 }, (_, i) => asChrome(cookie(`c${i}`, `s${i}.example`, "y".repeat(3_990))));
-    expect(writeBack(home, home.map(asChrome), [...home.map(asChrome), ...big], { home: prints(home), sandbox: prints(home) })).toEqual({ refused: "too-large", removed: 0 });
-    expect(openMerge(home, big, null)).toEqual({ merged: home, fromSandbox: 0 });
+  /** Three hostile domains of 180 cookies of 4 KB each: past the cap together. */
+  const flood = () => ["a", "b", "c"].flatMap((site) => Array.from({ length: 180 }, (_, i) => cookie(`f${i}`, `${site}.flood.example`, "y".repeat(4_000))));
+
+  it("past the cap, leaves out the largest cookies of hosts the home never had, and still brings a real sign-in home", async () => {
+    const start = [cookie("sid", ".example.com", "s1")];
+    const home = memorySignIns({ cookies: start, origins: [] });
+    const cloud = browser({ signIns: home.store });
+    urlOf(await cloud.open(request()));
+    const key = profileKey("scout");
+    holds(key, [...start, cookie("session", "bank.example", "signed-in"), ...flood()]);
+    await closeSession(cloud);
+    const saved = home.cookies();
+    expect(saved.map((one) => one.name)).toEqual(expect.arrayContaining(["sid", "session"]));
+    const size = saved.reduce((sum, one) => sum + one.name.length + one.value.length, 0);
+    expect(size).toBeLessThanOrEqual(MAX_SIGN_IN_BYTES);
+    expect(saved.length, "only as many left out as the cap needs").toBeGreaterThan(500);
+    expect(lines.filter((line) => line.includes("out of the home's sign-ins"))).toEqual([expect.stringMatching(/^browser bot-scout: left \d+ of the browser sandbox's cookies out of the home's sign-ins/)]);
   });
 
-  it("keeps the copy a write-back replaces as one encrypted backup, which a sign-out removes too", async () => {
-    const home = mkdtempSync(join(tmpdir(), "omb-sign-ins-backup-"));
-    try {
-      const directory = join(home, ".agent-browser", "sessions");
-      const key = "a".repeat(64);
-      writeSignIns(directory, "bot-scout", key, [cookie("first", "a.example")]);
-      const backup = join(directory, signInsBackupFile("bot-scout"));
-      expect(existsSync(backup), "nothing to keep before the first write").toBe(false);
-      writeSignIns(directory, "bot-scout", key, [cookie("second", "b.example")]);
-      expect(readFileSync(backup).toString("utf8")).not.toContain("first");
-      expect(JSON.parse(decryptBrowserState(readFileSync(backup), key)).cookies).toEqual([cookie("first", "a.example")]);
-      expect(readSignIns(directory, "bot-scout", key), "the restore file is the new copy").toMatchObject({ state: { cookies: [cookie("second", "b.example")] } });
-      await signOutOfSites({ binaryPath: "/fake/agent-browser", session: "bot-scout", env: { HOME: home, USERPROFILE: home }, encryptionKey: key }, null, { engine: async () => null });
-      expect(existsSync(backup)).toBe(false);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
+  it("never records a cookie it left out as agreed, so it is weighed again at the next open", () => {
+    const home = [cookie("sid", ".example.com", "s1")];
+    const sandbox = [...home, cookie("session", "bank.example", "signed-in"), ...flood()];
+    const { merged, dropped } = openMerge(home, sandbox, null);
+    expect(merged.map((one) => one.name)).toContain("session");
+    expect(dropped.length).toBeGreaterThan(0);
+    const recorded = agreed(sandbox, dropped);
+    for (const id of dropped) expect(recorded[id]).toBeUndefined();
+    expect(Object.keys(recorded).length).toBe(sandbox.length - dropped.length);
+    // A home copy already past the cap is never made unwritable (a change that does not grow it goes through), and it is
+    // never grown further.
+    const bigHome = flood();
+    const baseline = bigHome.map(asChrome);
+    const shorter = [asChrome({ ...bigHome[0]!, value: "short" }), ...baseline.slice(1)];
+    expect(writeBack(bigHome, baseline, shorter, null).merged[0]!.value).toBe("short");
+    const grown = writeBack(bigHome, baseline, [...baseline, asChrome(cookie("new", "new.example", "n"))], null);
+    expect(grown.merged.map((one) => one.name)).not.toContain("new");
+    expect(grown.merged).toHaveLength(bigHome.length);
   });
 });
 
@@ -224,7 +292,7 @@ describe("the addresses a call in the sandbox may open", () => {
     const guard = addressGuard(resolve);
     for (const url of ["http://127.0.0.1:9222/json/list", "127.1:9222", "http://2130706433/", "http://0x7f.1/", "http://[::1]:9222/", "http://[::ffff:127.0.0.1]/",
       "http://169.254.169.254/latest/meta-data/", "http://100.100.100.200/", "http://[fd00:ec2::254]/", "http://10.1.2.3/", "https://192.168.0.1/", "http://172.16.0.9/",
-      "http://100.64.0.1/", "http://[fdaa::1]/", "http://[fe80::1]/", "http://0.0.0.0:8080/", "ws://127.0.0.1:39231/x"]) {
+      "http://100.64.0.1/", "http://[fdaa::1]/", "http://[fe80::1]/", "http://0.0.0.0:8080/", "ws://127.0.0.1:39231/x", "http:127.0.0.1", "https:127.0.0.1/json", "localhost:9222"]) {
       expect(await guard(open(url)), url).toBe(PRIVATE_ADDRESS_REFUSAL);
     }
   });
@@ -232,10 +300,16 @@ describe("the addresses a call in the sandbox may open", () => {
   it("refuses names that are never a public site, and names the home resolves to such an address", async () => {
     const guard = addressGuard(resolve);
     for (const url of ["http://localhost:9222/", "https://LOCALHOST./", "http://app.localhost/", "http://metadata.google.internal/computeMetadata/v1/", "http://metadata/",
-      "http://router/", "http://printer.local/", "http://db.internal/", "https://rebind.example/", "https://loop.example/"]) {
+      "http://router/", "http://printer.local/", "http://db.internal/", "https://rebind.example/", "https://loop.example/", "http://metadata.goog/computeMetadata/v1/"]) {
       expect(await guard(open(url)), url).toBe(PRIVATE_ADDRESS_REFUSAL);
     }
     expect(await guard({ name: "agent_browser_tab_new", arguments: { options: { url: "http://127.0.0.1/" } } }), "however deep").toBe(PRIVATE_ADDRESS_REFUSAL);
+    expect(await guard({ name: "agent_browser_batch", arguments: { steps: [{ a: { b: { c: { d: { e: { url: "http://169.254.169.254/" } } } } } }] } }), "deeper still").toBe(PRIVATE_ADDRESS_REFUSAL);
+  });
+
+  it("refuses a url it cannot read", async () => {
+    const guard = addressGuard(resolve);
+    for (const url of ["exa mple.com", "http://[::1", "https://"]) expect(await guard(open(url)), url).toBe(UNREADABLE_ADDRESS_REFUSAL);
   });
 
   it("opens public sites, and never refuses text a page is given", async () => {
@@ -243,23 +317,48 @@ describe("the addresses a call in the sandbox may open", () => {
     expect(await guard(open("https://public.example/path"))).toBeNull();
     expect(await guard(open("public.example"))).toBeNull();
     expect(await guard(open("https://93.184.215.14/"))).toBeNull();
+    expect(await guard(open("http://[2606:4700:4700::1111]/")), "a public IPv6 address").toBeNull();
     expect(await guard(open("about:blank"))).toBeNull();
     expect(await guard({ name: "agent_browser_fill", arguments: { selector: "#q", text: "http://127.0.0.1:9222" } })).toBeNull();
     expect(await guard({ name: "agent_browser_snapshot", arguments: {} })).toBeNull();
   });
 
-  it("goes ahead when the home cannot resolve a name, or not in time, and asks its resolver once a minute per name", async () => {
+  it("goes ahead when the home cannot resolve a name, or not in time, and keeps every answer a minute, a late one too", async () => {
     let now = 0;
-    const slow = vi.fn((host: string) => (host === "slow.example" ? new Promise<string[]>(() => {}) : resolve(host)));
+    let answerSlow: (addresses: string[]) => void = () => {};
+    const slow = vi.fn((host: string) => (host === "slow.example" ? new Promise<string[]>((done) => { answerSlow = done; }) : resolve(host)));
     const guard = addressGuard(slow, () => now, 20);
     expect(await guard(open("https://unknown.example/"))).toBeNull();
-    expect(await guard(open("https://slow.example/"))).toBeNull();
+    expect(await guard(open("https://unknown.example/again")), "a failed answer is kept").toBeNull();
+    expect(slow.mock.calls.filter(([host]) => host === "unknown.example")).toHaveLength(1);
+    expect(await guard(open("https://slow.example/")), "not answered in time: goes ahead").toBeNull();
+    expect(await guard(open("https://slow.example/b")), "still unanswered: not waited for again").toBeNull();
+    answerSlow(["10.0.0.7"]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(await guard(open("https://slow.example/c")), "the late answer counts for the rest of the minute").toBe(PRIVATE_ADDRESS_REFUSAL);
+    expect(slow.mock.calls.filter(([host]) => host === "slow.example")).toHaveLength(1);
     await guard(open("https://rebind.example/a"));
     await guard(open("https://rebind.example/b"));
     expect(slow.mock.calls.filter(([host]) => host === "rebind.example")).toHaveLength(1);
     now += 60_000;
     await guard(open("https://rebind.example/c"));
     expect(slow.mock.calls.filter(([host]) => host === "rebind.example")).toHaveLength(2);
+  });
+
+  it("asks for every name of a call at once", async () => {
+    let asking = 0;
+    let most = 0;
+    const counting: Parameters<typeof addressGuard>[0] = async (host) => {
+      asking += 1;
+      most = Math.max(most, asking);
+      await new Promise((done) => setImmediate(done));
+      asking -= 1;
+      return host === "loop.example" ? ["127.0.0.1"] : ["93.184.215.14"];
+    };
+    const guard = addressGuard(counting);
+    expect(await guard({ name: "agent_browser_batch", arguments: { steps: [{ url: "https://one.example/" }, { url: "https://two.example/" }, { url: "https://loop.example/" }] } })).toBe(PRIVATE_ADDRESS_REFUSAL);
+    expect(most).toBe(3);
   });
 
   it("is asked only for a session it checks, before the call reaches the engine", async () => {
@@ -326,6 +425,31 @@ describe("a deleted bot's profile in a sandbox that sleeps", () => {
     expect(fake.erased).toEqual([profileKey("scout")]);
   });
 
+  it("an open that comes while the sandbox is being deleted waits for it, then makes a fresh one: never resumes the one going", async () => {
+    // The delete is held until the open has come: the open must wait for it.
+    const real = providerOps(() => ({}) as AppConfig);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((done) => { release = done; });
+    let removing = false;
+    const ops = { ...real, remove: async (id: string) => { removing = true; await gate; return real.remove(id); } };
+    const cloud = browser({ signIns: memorySignIns(null).store, ops: () => ops });
+    await profiles(cloud, ["scout"]);
+    const first = fake.boxId;
+    await cloud.erase("scout");
+    await vi.waitFor(() => expect(removing).toBe(true));
+    const opened = cloud.open(request("writer"));
+    await new Promise((done) => setTimeout(done, 20));
+    expect(fake.resumes(), "nothing sent while the delete is under way").toBe(0);
+    release();
+    urlOf(await opened);
+    await cloud.erased();
+    expect(deletes().map((one) => one.path)).toEqual([`/api/v1/sandboxes/${first}`]);
+    expect(fake.resumes(), "the sandbox being deleted was never woken").toBe(0);
+    expect(fake.creates()).toBe(1);
+    expect(fake.boxId).not.toBe(first);
+    expect(cloud.active("bot-writer")).not.toBeNull();
+  });
+
   it("a bot that never had a profile there wakes nothing and deletes nothing", async () => {
     const cloud = browser({ signIns: memorySignIns(null).store });
     await profiles(cloud, ["scout"]);
@@ -367,6 +491,24 @@ describe("a sandbox that can never resume", () => {
     expect(cloud.report()).toMatchObject({ resumes: 1, held: null });
   });
 
+  it("today's control plane answers a resume of an ended sandbox 503 no_ready_machine: that browser opens in the home with nothing held against it, and the next open makes a fresh one", async () => {
+    const cloud = browser();
+    fake.state = "archived";
+    fake.startStatus = 503;
+    fake.startBody = { ok: false, error: { code: "no_ready_machine", message: "No machine is ready." } };
+    expect(await cloud.open(request())).toEqual({ home: "no-machine" });
+    // The relay then leaves the ended sandbox out of the list.
+    fake.exists = false;
+    fake.startStatus = 200;
+    fake.startBody = { ok: true };
+    const first = fake.boxId;
+    urlOf(await cloud.open(request()));
+    expect(fake.creates()).toBe(1);
+    expect(cloud.report()).toMatchObject({ held: null, fallbacks: { "no-machine": 1 } });
+    expect(deletes(), "nothing to delete: the relay ended it").toEqual([]);
+    expect(first).toBeTruthy();
+  });
+
   it("every other refusal of a resume is what it was: a 410 without that code is a failed start", async () => {
     fake.state = "archived";
     fake.startStatus = 410;
@@ -392,7 +534,7 @@ describe("files of a sandbox that takes no direct connections", () => {
     fake.emit(profileKey("scout"), "Browser.downloadProgress", { guid, totalBytes: bytes.length, receivedBytes: bytes.length, state: "completed" });
   };
   const fileCalls = () => fake.requests.filter((one) => one.path.endsWith("/files")).map((one) => one.method);
-  const tooLarge = (name: string, size: string) => `${name} (${size}) is too large to copy: this browser's sandbox takes no direct connections, so a file moves between it and the Cloud in one piece of at most 5 MiB.`;
+  const tooLarge = (name: string, size: string) => `${name} (${size}) is too large to copy: this browser's sandbox takes no direct connections, so a file moves to it in one piece of at most about 1.5 MiB.`;
 
   it("brings a download over through the provider's JSON file read, byte for byte, and removes it from the sandbox", async () => {
     const cloud = browser({ folder: () => folder });
@@ -409,8 +551,8 @@ describe("files of a sandbox that takes no direct connections", () => {
   it("says plainly that a download over 5 MiB can't be brought over, and neither keeps it nor tries it again", async () => {
     const cloud = browser({ folder: () => folder });
     urlOf(await cloud.open(request()));
-    finish("big-guid", "video.mp4", Buffer.alloc(INLINE_MAX_BYTES + 1));
-    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toEqual([`"video.mp4" was downloaded in the browser but could not be brought to your working folder: ${downloadPath("big-guid")} is too large to copy: this browser's sandbox takes no direct connections, so a file moves between it and the Cloud in one piece of at most 5 MiB.`]));
+    finish("big-guid", "video.mp4", Buffer.alloc(INLINE_READ_MAX_BYTES + 1));
+    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toEqual([`"video.mp4" was downloaded in the browser but could not be brought to your working folder: ${downloadPath("big-guid")} is too large to copy: this browser's sandbox takes no direct connections, so a file moves from it in one piece of at most 5 MiB.`]));
     await vi.waitFor(() => expect(fake.files.has(downloadPath("big-guid")), "removed from the sandbox").toBe(false));
     const before = fake.requests.length;
     await cloud.close("bot-scout");
@@ -440,21 +582,39 @@ describe("files of a sandbox that takes no direct connections", () => {
     expect(await cloud.upload("bot-scout", join(folder, "in", "cv.pdf"), null, cv.length)).toEqual({ path });
     expect(fake.files.get(path)).toEqual(cv);
     expect(fileCalls()).toEqual(["PUT"]);
-    writeFileSync(join(folder, "in", "big.bin"), Buffer.alloc(INLINE_MAX_BYTES + 1));
-    expect(await cloud.upload("bot-scout", join(folder, "in", "big.bin"), null, INLINE_MAX_BYTES + 1))
-      .toEqual({ error: `big.bin could not be given to the browser: ${tooLarge("big.bin", "5.0 MiB")} Tell the person in one sentence and ask them to upload it themselves.` });
+    writeFileSync(join(folder, "in", "big.bin"), Buffer.alloc(INLINE_WRITE_MAX_BYTES + 1));
+    expect(await cloud.upload("bot-scout", join(folder, "in", "big.bin"), null, INLINE_WRITE_MAX_BYTES + 1))
+      .toEqual({ error: `big.bin could not be given to the browser: ${tooLarge("big.bin", "1.5 MiB")} Tell the person in one sentence and ask them to upload it themselves.` });
     expect(fileCalls(), "never sent").toEqual(["PUT"]);
   });
 
-  it("takes the relay's own cap on a request the same way: one plain line, nothing written", async () => {
+  it("the largest upload it sends fits the relay's 2 MiB request cap, and a 413 from the relay is the same plain line", async () => {
     fake.relayJsonMax = 2 * 1024 * 1024;
     const cloud = browser();
     urlOf(await cloud.open(request()));
     mkdirSync(join(folder, "in"), { recursive: true });
-    writeFileSync(join(folder, "in", "scan.pdf"), Buffer.alloc(3 * 1024 * 1024));
-    expect(await cloud.upload("bot-scout", join(folder, "in", "scan.pdf"), null, 3 * 1024 * 1024))
-      .toEqual({ error: `scan.pdf could not be given to the browser: ${tooLarge("scan.pdf", "3.0 MiB")} Tell the person in one sentence and ask them to upload it themselves.` });
-    expect([...fake.files.keys()].some((key) => key.includes(".uploads"))).toBe(false);
+    writeFileSync(join(folder, "in", "fits.bin"), Buffer.alloc(INLINE_WRITE_MAX_BYTES, 7));
+    expect(await cloud.upload("bot-scout", join(folder, "in", "fits.bin"), null, INLINE_WRITE_MAX_BYTES)).toEqual({ path: expect.stringContaining("fits.bin") });
+    fake.relayJsonMax = 1024 * 1024;
+    writeFileSync(join(folder, "in", "scan.pdf"), Buffer.alloc(1024 * 1024));
+    expect(await cloud.upload("bot-scout", join(folder, "in", "scan.pdf"), null, 1024 * 1024))
+      .toEqual({ error: `scan.pdf could not be given to the browser: ${tooLarge("scan.pdf", "1.0 MiB")} Tell the person in one sentence and ask them to upload it themselves.` });
+    expect([...fake.files.keys()].some((key) => key.endsWith("scan.pdf"))).toBe(false);
+  });
+
+  it("while the relay does not open the JSON file calls to it, a download is refused plainly once and never tried again", async () => {
+    fake.jsonFiles = false;
+    const cloud = browser({ folder: () => folder });
+    urlOf(await cloud.open(request()));
+    finish("closed-guid", "report.pdf", Buffer.from("x"));
+    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toEqual([`"report.pdf" was downloaded in the browser but could not be brought to your working folder: ${downloadPath("closed-guid")} could not be copied from this browser's sandbox (it answered 404): the sandbox takes no direct connections, and its files can't be copied another way here.`]));
+    const before = fake.requests.length;
+    await cloud.close("bot-scout");
+    expect(fake.requests.slice(before).filter((one) => one.path.includes("/files")), "not tried again at close").toEqual([]);
+    mkdirSync(join(folder, "in"), { recursive: true });
+    writeFileSync(join(folder, "in", "a.txt"), "y");
+    urlOf(await cloud.open(request()));
+    expect(await cloud.upload("bot-scout", join(folder, "in", "a.txt"), null, 1)).toEqual({ error: expect.stringContaining("could not be copied to this browser's sandbox (it answered 404)") });
   });
 
   it("a sandbox that takes direct connections copies through its links only, as before", async () => {
