@@ -4561,6 +4561,7 @@
   "githubSignIn.title": "GitHub-Anmeldung",
   "githubSignIn.tokenPlaceholder": "github_pat_…",
   "vm.idle.detailAll": "Gilt für private Desktops und für Desktops auf deinen eigenen Servern. Ein Desktop mit einem laufenden Zug wird nie gestoppt. Beim Stoppen wegen Inaktivität bleiben Dateien und installierte Apps erhalten.",
+  "vm.idle.serverOverride": "Desktops auf deinen eigenen Servern stoppen stattdessen nach {minutes} Minuten, festgelegt durch vpsIdle.timeoutMinutes in config.json.",
   "vm.idle.shared": "Inaktive Desktops stoppen nach {minutes} Minuten.",
   "vm.idle.change": "In Desktop-Details ändern"
 }

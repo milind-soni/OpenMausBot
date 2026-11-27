@@ -5244,6 +5244,7 @@
   "vm.isolation.maxAria": "Numero massimo di desktop per bot",
   "vm.idle.label": "Ferma i desktop inattivi dopo",
   "vm.idle.detailAll": "Vale per i desktop privati e per i desktop sui tuoi server. Un desktop con un turno in corso non viene mai fermato. Lo spegnimento per inattività conserva i file e le app installate.",
+  "vm.idle.serverOverride": "I desktop sui tuoi server si fermano invece dopo {minutes} minuti, come impostato da vpsIdle.timeoutMinutes in config.json.",
   "vm.idle.shared": "I desktop inattivi si fermano dopo {minutes} minuti.",
   "vm.idle.change": "Cambia in Dettagli desktop",
   "vm.idle.minutes": "minuti",

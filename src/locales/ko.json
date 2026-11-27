@@ -4280,6 +4280,7 @@
   "vm.isolation.maxAria": "최대 봇별 데스크톱 수",
   "vm.idle.label": "쉬고 있는 데스크톱을 멈추는 시간",
   "vm.idle.detailAll": "개인 데스크톱과 내 서버의 데스크톱에 모두 적용돼요. 실행 중인 턴이 있는 데스크톱은 멈추지 않아요. 쉬어서 멈춰도 파일과 설치한 앱은 유지돼요.",
+  "vm.idle.serverOverride": "내 서버의 데스크톱은 config.json의 vpsIdle.timeoutMinutes 설정에 따라 대신 {minutes}분 후에 멈춰요.",
   "vm.idle.shared": "쉬고 있는 데스크톱은 {minutes}분 뒤에 멈춰요.",
   "vm.idle.change": "데스크톱 자세히에서 바꾸기",
   "vm.idle.minutes": "분",

@@ -3944,6 +3944,7 @@
   "vm.isolation.maxAria": "Maksymalna liczba pulpitów dla botów",
   "vm.idle.label": "Zatrzymuj bezczynne pulpity po",
   "vm.idle.detailAll": "Dotyczy prywatnych pulpitów i pulpitów na twoich serwerach. Pulpit z trwającą turą nigdy nie jest zatrzymywany. Wyłączenie z powodu bezczynności zachowuje jego pliki i zainstalowane aplikacje.",
+  "vm.idle.serverOverride": "Pulpity na twoich serwerach zatrzymują się zamiast tego po {minutes} minutach, zgodnie z vpsIdle.timeoutMinutes w config.json.",
   "vm.idle.shared": "Bezczynne pulpity zatrzymują się po {minutes} min.",
   "vm.idle.change": "Zmień w Szczegółach pulpitów",
   "vm.idle.minutes": "minut",

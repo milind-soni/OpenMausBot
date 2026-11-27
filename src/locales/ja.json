@@ -4483,6 +4483,7 @@
   "vm.isolation.maxAria": "ボットごとのデスクトップ上限",
   "vm.idle.label": "使われていないデスクトップを停止するまで",
   "vm.idle.detailAll": "プライベートデスクトップと、自分のサーバー上のデスクトップに適用されます。実行中のターンがあるデスクトップは停止しません。非稼働時に停止しても、ファイルとインストール済みアプリは残ります。",
+  "vm.idle.serverOverride": "自分のサーバー上のデスクトップは、config.json の vpsIdle.timeoutMinutes の設定により、代わりに {minutes} 分後に停止します。",
   "vm.idle.shared": "使われていないデスクトップは {minutes} 分後に停止します。",
   "vm.idle.change": "デスクトップの詳細で変更",
   "vm.idle.minutes": "分",

@@ -624,4 +624,15 @@ describe("Local VM idle timeout setting", () => {
       storeFixture.config = null;
     }
   });
+
+  it("translates the server-only override note", () => {
+    storeFixture.config = { vpsIdle: { timeoutMinutes: 15 } };
+    setLocale("de");
+    try {
+      const markup = renderToStaticMarkup(createElement(LocalVmIdleTimeoutSetting, { minutes: 30, disabled: false, onSave: async () => {} }));
+      expect(markup).toContain("Desktops auf deinen eigenen Servern stoppen stattdessen nach 15 Minuten, festgelegt durch vpsIdle.timeoutMinutes in config.json.");
+    } finally {
+      storeFixture.config = null;
+    }
+  });
 });

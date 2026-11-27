@@ -3590,6 +3590,7 @@
   "vm.isolation.maxAria": "Máximo de escritorios por bot",
   "vm.idle.label": "Detener los escritorios inactivos tras",
   "vm.idle.detailAll": "Se aplica a los escritorios privados y a los escritorios en tus propios servidores. Un escritorio con un turno en curso nunca se detiene. El apagado por inactividad conserva sus archivos y apps instaladas.",
+  "vm.idle.serverOverride": "Los escritorios en tus propios servidores se detienen tras {minutes} minutos, según vpsIdle.timeoutMinutes en config.json.",
   "vm.idle.shared": "Los escritorios inactivos se detienen tras {minutes} minutos.",
   "vm.idle.change": "Cambiar en Detalles del escritorio",
   "vm.idle.minutes": "minutos",
