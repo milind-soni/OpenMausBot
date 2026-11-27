@@ -21,7 +21,7 @@ const LINES: Record<string, number> = {
   "electron/main.mjs": 3124,
   "server/store.ts": 2254,
   "src/components/Sidebar.tsx": 1654,
-  "server/drivers/claude.ts": 1954,
+  "server/drivers/claude.ts": 1960, // the turn loop holds the MCP mounts, session reuse and recovery together
   "server/drivers/acp/core.ts": 1538,
   "server/drivers/codex.ts": 1577,
   "server/routines.ts": 1553,
