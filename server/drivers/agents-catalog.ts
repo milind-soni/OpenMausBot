@@ -181,7 +181,7 @@ const TOOL_DEFINITIONS = [
       bot_ids: { type: "array", items: { type: "string", description: "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too." }, minItems: 1, maxItems: 4, uniqueItems: true },
       message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX, description: "The question or task; separate calls for different responsibilities." },
       reason: { type: "string", maxLength: 200, description: "Optional one line for the person on why (shown as a chip)." },
-      rework: { type: "boolean", description: "True only to resend finished or failed work: a fix, a re-check or a retry." },
+      rework: { type: "boolean", description: "True only to send concrete work again to a teammate whose work finished or failed: a fix, a re-check, a retry or a follow-up task." },
       thread: { type: "string", description: "standing (default), new (its own history and run), or a threadId from your receipts or list_threads." },
       title: { type: "string", maxLength: 80, description: "With thread \"new\": its short sidebar name." }, in_my_folder: { type: "boolean", description: "Default true." },
       reply: { type: "string", enum: ["resume", "none"], description: "none: a one-way notice; nothing comes back." },
