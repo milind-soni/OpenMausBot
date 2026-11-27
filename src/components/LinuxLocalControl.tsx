@@ -11,7 +11,9 @@ import {
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { pageOnRemoteServer } from "@/lib/local-computer";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { serverFetch } from "@/lib/relay-server";
 
 const LINUX_GUIDE_URL =
   "https://github.com/milind-soni/OpenMausBot/blob/main/docs/linux-desktop.md#enable-local-control";
@@ -25,10 +27,12 @@ export function LinuxLocalControl() {
   const [pending, setPending] = useState<"enable" | "disable" | "retry" | null>(null);
   const [error, setError] = useState<string | { key: "computer.linux.stopFailed" } | null>(null);
 
-  if (capabilities.host.platform !== "linux") return null;
+  if (capabilities.host.platform !== "linux" || pageOnRemoteServer(capabilities)) return null;
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
   const ready = local.available;
   const waylandSafetyBlocked = local.reasonCode === "linux-wayland-seat-safety-blocked";
+  // Fedora's GNOME and other desktops that aren't Ubuntu may offer no Xorg session to switch to.
+  const otherWaylandDesktop = waylandSafetyBlocked && local.ubuntuDesktop === false;
   const pluginRequired = local.reasonCode === "linux-hyprland-plugin-required";
   const hyprland = local.compositor === "hyprland";
   const wayland = capabilities.host.session === "wayland";
@@ -40,7 +44,7 @@ export function LinuxLocalControl() {
     setError(null);
     try {
       if (action === "disable" || action === "retry") {
-        const response = await fetch("/api/local-computer/interrupt", { method: "POST" });
+        const response = await serverFetch("/api/local-computer/interrupt", { method: "POST" });
         if (!response.ok) {
           setError({ key: "computer.linux.stopFailed" });
           return;
@@ -98,11 +102,15 @@ export function LinuxLocalControl() {
         <div className="mt-3 rounded-lg border border-danger/20 bg-danger/5 p-3">
           <div className="flex gap-2 text-[12px] leading-relaxed text-ink-secondary">
             <AlertTriangle size={15} className="mt-0.5 shrink-0 text-danger" />
-            <span>
-              {t("computer.linux.waylandBefore")}{" "}
-              <strong className="font-medium text-ink">{t("computer.linux.waylandXorg")}</strong>
-              {" "}{t("computer.linux.waylandAfter")}
-            </span>
+            {otherWaylandDesktop ? (
+              <span>{t("computer.linux.waylandOtherDesktop")}</span>
+            ) : (
+              <span>
+                {t("computer.linux.waylandBefore")}{" "}
+                <strong className="font-medium text-ink">{t("computer.linux.waylandXorg")}</strong>
+                {" "}{t("computer.linux.waylandAfter")}
+              </span>
+            )}
           </div>
         </div>
       ) : pluginRequired ? (

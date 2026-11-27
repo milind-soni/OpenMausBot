@@ -53,7 +53,8 @@ export interface ConfigStatus {
   composio: SavedKey & { mode?: "managed" | "self-hosted" | "unavailable" };
   /** `included`: cloud computers come with Cloud Pro, no key is saved. */
   box: SavedKey & { included?: boolean };
-  vps: { configured: boolean; sshAlias: string };
+  /** `servers`: named servers for the per-bot picker; empty for client sessions, missing from an older server. */
+  vps: { configured: boolean; sshAlias: string; servers?: { name: string; sshAlias: string; memoryGb?: number; cpus?: number }[]; memoryGb?: number; cpus?: number };
   rooms: { turnTimeoutMinutes: number };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
    * older than the setting; read it with mcpCallTimeoutMinutes(). */
@@ -168,7 +169,7 @@ export interface ConfigStatus {
   /** What a paired phone calls this computer; "" uses the default. */
   computerName?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean };
+  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; roomFeedSince?: number; suggestedReplies?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -223,6 +224,13 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  /** The desktop app shows the Chrome engine's browsers as panes the person uses directly (browserEngine.surface "pane"). */
+  pane?: true;
+  /** browserEngine.cloudDisplay is on and this server can run it: the panel shows the browser's window as a remote
+   * desktop (GET /api/bots/:id/browser/desktop), and falls back to the picture view when that closes with 4415. */
+  desktopView?: true;
+  /** The person can import a site's sign-in from their own browsers into a bot's (the desktop app, Chrome engine). */
+  cookieImport?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;

@@ -6,6 +6,8 @@ const BUSY_CHECKS_PER_WINDOW = 10;
 export class ComputerIdleTimer {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastActivityAt = 0;
+  /** The end of the longest window any activity asked for. */
+  private quietAt = 0;
   private failures = 0;
   private busySeen = false;
   /** Bumped by every cancel, so a stop still in flight from an earlier window neither re-arms nor reports. */
@@ -28,11 +30,15 @@ export class ComputerIdleTimer {
     this.onFailure = onFailure;
   }
 
-  touch(): void {
-    this.lastActivityAt = Date.now();
+  /** `windowMs`: this activity's own quiet window, shorter or longer than the timer's; a shorter one never cuts a window
+   * an earlier activity asked for. */
+  touch(windowMs: number = this.idleMs): void {
+    const at = Date.now();
+    this.lastActivityAt = at;
     this.failures = 0;
     this.busySeen = false;
-    this.arm(this.idleMs);
+    this.quietAt = Math.max(this.quietAt, at + checkedIdleMs(windowMs));
+    this.arm(this.quietAt - at);
   }
 
   cancel(): void {
@@ -43,6 +49,7 @@ export class ComputerIdleTimer {
 
   setIdleMs(idleMs: number): void {
     this.idleMs = checkedIdleMs(idleMs);
+    this.quietAt = this.lastActivityAt + this.idleMs;
     if (!this.timer) return;
     this.arm(Math.max(0, this.lastActivityAt + this.idleMs - Date.now()));
   }

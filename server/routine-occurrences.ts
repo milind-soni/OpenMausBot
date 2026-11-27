@@ -25,9 +25,12 @@ type Row = Pick<RoutineRun, "id" | "routineId" | "scheduledFor" | "status" | "ma
   "retried" | "skipped" | "error" | "errorCode" | "errorParams" | "attentionCode">;
 type Scheduled = Pick<Routine, "id" | "enabled" | "nextRunAt" | "updatedAt">;
 
+/** A run its schedule started (its checks included): not one a person, a start-up or an outside event started. */
+export const isScheduledRun = (run: Pick<RoutineRun, "manual" | "triggerSource">): boolean => (run.triggerSource ?? (run.manual ? "manual" : "schedule")) === "schedule";
+
 /** A run row made for a scheduled occurrence: not one a person, a start-up, an event or a routine's checks made. */
 export const isOccurrenceRun = (run: Pick<RoutineRun, "manual" | "triggerSource" | "checkKey" | "webhookId">): boolean =>
-  (run.triggerSource ?? (run.manual ? "manual" : "schedule")) === "schedule" && run.checkKey === undefined && run.webhookId === undefined;
+  isScheduledRun(run) && run.checkKey === undefined && run.webhookId === undefined;
 
 const ACTIVE = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
 const signature = (run: Row) => [run.status, run.startedAt, run.finishedAt, run.attentionCode, run.errorCode, run.error === undefined ? "" : run.error.length, run.skipped?.count, run.skipped?.lastAt].join("|");

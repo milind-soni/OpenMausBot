@@ -9,7 +9,7 @@ import { threadUpdatedLabel } from "../SidebarThreadRow";
 import { accessRequestWords } from "../bot-access/access-card";
 import { InboxAnswer } from "./InboxAnswer";
 import { answerKindOf, headlineOf, singleQuestion } from "./inbox-answer";
-import { askOf, closeResponse, senderLabel, textOf } from "./inbox-view";
+import { askOf, closeResponse, reasonOf, senderLabel, textOf } from "./inbox-view";
 import { useAskContext } from "./use-ask-context";
 import { useInboxActions, useInboxAsker } from "./use-inbox-actions";
 
@@ -78,7 +78,7 @@ export function InboxReading({ view, row, now, position, onStep }: {
       </header>
       <nav aria-label={t("inbox.breadcrumb")} className="flex min-w-0 items-center gap-1 border-b border-hairline/40 px-3.5 pb-2 text-[12px] text-ink-tertiary">
         <button type="button" data-inbox-action="open" onClick={() => openInChat(row)} title={t("inbox.action.openInChat")}
-          className="min-w-0 max-w-[45%] shrink truncate rounded hover:text-ink hover:underline">{place}</button>
+          className="min-w-0 max-w-[45%] shrink-0 truncate rounded hover:text-ink hover:underline">{place}</button>
         <ChevronRight size={12} aria-hidden="true" className="shrink-0 rtl:rotate-180" />
         <span className="min-w-0 truncate font-medium text-ink-secondary">{headline}</span>
       </nav>
@@ -88,7 +88,8 @@ export function InboxReading({ view, row, now, position, onStep }: {
           <div className="min-w-0 flex-1">
             <div className="flex items-baseline gap-2">
               <span className="min-w-0 truncate text-[13px] font-semibold text-ink">{senderLabel(row)}</span>
-              <span className="shrink-0 text-[11px] tabular-nums text-ink-tertiary">{threadUpdatedLabel(row.at, now)}</span>
+              <span data-inbox-reason className="shrink-0 text-[12px] text-ink-tertiary">{reasonOf(row)}</span>
+              <span className="ms-auto shrink-0 text-[12px] tabular-nums text-ink-tertiary">{threadUpdatedLabel(row.at, now)}</span>
             </div>
             {row.via && <div className="truncate text-[12px] text-ink-tertiary">{t("inbox.via", { name: row.via.name })}</div>}
             <div data-inbox-words className="mt-1 space-y-2 text-[14px] leading-6 text-ink">

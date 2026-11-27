@@ -63,7 +63,7 @@ describe("the inbox panel", () => {
     expect(document.querySelector(`[data-inbox-row="${approvalRow.id}"]`)!.hasAttribute("data-unread")).toBe(true);
     await click(`[data-inbox-row="${messageRow.id}"] button`);
     expect(document.querySelector(`[data-inbox-reading="${messageRow.id}"]`)?.textContent).toContain("The launch moved to Friday.");
-    expect(server.calls).toContainEqual({ path: `/api/inbox/${messageRow.id}/read`, method: "POST" });
+    expect(server.calls, "it is read after a moment on screen, not at once").not.toContainEqual({ path: `/api/inbox/${messageRow.id}/read`, method: "POST" });
     expect(document.querySelector("textarea"), "a message that waits on an answer takes a reply").not.toBeNull();
     await click('[aria-label="Back to the list"]');
     expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
@@ -136,7 +136,7 @@ describe("the inbox panel", () => {
     expect(document.querySelector('[data-inbox-panel="side"]')).toBeNull();
   });
 
-  it("shows a pinned conversation once, and counts its unread news once", async () => {
+  it("shows a pinned conversation once, and counts none of its finished work", async () => {
     const reporter = {
       id: "reporter", name: "Reporter", threadId: "rep-main", tasks: [
         { threadId: "rep-daily", title: "Daily digest", createdAt: 0, updatedAt: INBOX_NOW, pinned: true, unread: true },
@@ -151,7 +151,7 @@ describe("the inbox panel", () => {
     expect(active, "the pinned section already shows it").not.toContain("Daily digest");
     const finished = [...document.querySelectorAll("[data-inbox-finished] button")].map((button) => button.textContent).join(" ");
     expect(finished).not.toContain("Older digest");
-    expect(document.querySelector("[data-inbox-tab-count]")?.textContent, "one line plus the same conversation is one").toBe("1");
+    expect(document.querySelector("[data-inbox-tab-count]"), "finished work is Activity, which has no number").toBeNull();
   });
 });
 
@@ -242,5 +242,63 @@ describe("keeping the list live", () => {
     await mount(createElement(Loader, { version: inboxVersion(task(6, 1))! }));
     await settle();
     expect(reads()).toBe(2);
+  });
+});
+
+describe("the inbox's bot and status filters", () => {
+  const minutes = (count: number) => INBOX_NOW - count * 60_000;
+  const ada = {
+    id: "ada", name: "Ada", threadId: "ada-main", tasks: [
+      { threadId: "ada-run", title: "Ada running", createdAt: 0, updatedAt: minutes(1), busy: true },
+      { threadId: "ada-ask", title: "Ada asking", createdAt: 0, updatedAt: minutes(2), activity: "waiting-on-you" },
+      { threadId: "ada-done", title: "Ada finished", createdAt: 0, updatedAt: minutes(500) },
+    ],
+  } as unknown as Bot;
+  const ben = {
+    id: "ben", name: "Ben", threadId: "ben-main",
+    tasks: Array.from({ length: 10 }, (_, index) => ({ threadId: `ben-${index}`, title: `Ben finished ${index}`, createdAt: 0, updatedAt: minutes(10 + index) })),
+  } as unknown as Bot;
+  const titles = (section: string) => [...document.querySelectorAll<HTMLElement>(`[${section}] button[title]:not([data-inbox-pin])`)].map((row) => row.querySelector("span.min-w-0 > span")?.textContent ?? row.textContent);
+  const choose = (selector: string, value: string) => act(async () => {
+    const select = document.querySelector<HTMLSelectElement>(selector)!;
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  it("lists every bot that has a conversation, and keeps the lists whole until the person picks", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel), [ada, ben]);
+    const owners = [...document.querySelectorAll<HTMLOptionElement>("[data-inbox-filter-owner] option")].map((option) => option.textContent);
+    expect(owners).toEqual(["All bots and rooms", "Ada", "Ben"]);
+    expect(titles("data-inbox-active")).toEqual(["Ada asking", "Ada running"]);
+    expect(titles("data-inbox-finished"), "the newest ten").toEqual(Array.from({ length: 10 }, (_, index) => `Ben finished ${index}`));
+  });
+
+  it("shows one bot's conversations, including a finished one older than the newest ten", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel), [ada, ben]);
+    await choose("[data-inbox-filter-owner]", "bot:ada");
+    expect(titles("data-inbox-active")).toEqual(["Ada asking", "Ada running"]);
+    expect(titles("data-inbox-finished")).toEqual(["Ada finished"]);
+    await choose("[data-inbox-filter-status]", "waiting");
+    expect(titles("data-inbox-active")).toEqual(["Ada asking"]);
+    expect(document.querySelector("[data-inbox-finished]"), "finished conversations are not waiting").toBeNull();
+    await choose("[data-inbox-filter-status]", "finished");
+    expect(document.querySelector("[data-inbox-active] button[title]")).toBeNull();
+    expect(titles("data-inbox-finished")).toEqual(["Ada finished"]);
+  });
+
+  it("says when nothing matches, and clears both pickers from there", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel), [ada, ben]);
+    await choose("[data-inbox-filter-owner]", "bot:ben");
+    await choose("[data-inbox-filter-status]", "working");
+    expect(document.querySelector("[data-inbox-filter-empty]")?.textContent).toContain("No conversations match these filters.");
+    expect(document.querySelector<HTMLSelectElement>("[data-inbox-filter-owner]")!.value, "the picker shows the choice in force").toBe("bot:ben");
+    await click("[data-inbox-filter-empty] button");
+    expect(document.querySelector("[data-inbox-filter-empty]")).toBeNull();
+    expect(document.querySelector<HTMLSelectElement>("[data-inbox-filter-owner]")!.value).toBe("");
+    expect(document.querySelector<HTMLSelectElement>("[data-inbox-filter-status]")!.value).toBe("");
+    expect(titles("data-inbox-active")).toEqual(["Ada asking", "Ada running"]);
   });
 });

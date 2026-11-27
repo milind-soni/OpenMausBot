@@ -815,8 +815,9 @@ describe("the prompt of a bridged turn", () => {
   const bridged = { env: { OMB_AGENTS_TOOL_BRIDGE: "1", OMB_BOT_ID: "bot-1" } };
 
   it("is unchanged, to the byte, without the bridge", () => {
-    const plain = buildSystemPrompt("You are Kiwi.", "Be brief.", parts);
-    expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, undefined)).toEqual(plain);
+    // With the agents tools mounted the reply habits also say how to publish; nothing else differs.
+    expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, undefined)).toEqual(buildSystemPrompt("You are Kiwi.", "Be brief.", parts));
+    const plain = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: {} });
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: { OMB_AGENTS_TOOL_BRIDGE: "0" } })).toEqual(plain);
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: {} })).toEqual(plain);
     expect(buildSystemPrompt("You are Kiwi.", "Be brief.", parts, {})).toEqual(plain);
@@ -832,7 +833,7 @@ describe("the prompt of a bridged turn", () => {
     expect(section.bytes).toBe(Buffer.byteLength(AGENTS_TOOL_BRIDGE_PROMPT, "utf8"));
     expect(built.text.split(AGENTS_TOOL_BRIDGE_PROMPT)).toHaveLength(2);
     // every other section is exactly what it was
-    const plain = buildSystemPrompt("You are Kiwi.", "Be brief.", parts);
+    const plain = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: {} });
     expect(built.sections.filter((entry) => entry.id !== "tool-bridge")).toEqual(plain.sections);
     expect(built.text.replace(AGENTS_TOOL_BRIDGE_PROMPT, "")).toBe(plain.text);
     // the decision's own output is what switches it: off for an engine or a bot that is turned down

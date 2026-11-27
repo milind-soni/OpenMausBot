@@ -4,6 +4,7 @@
 //   FAKE_PI_MODE  happy (default) | tooluse | priced | priced-stop | permission | interleave | question-select | question-input
 //     | turn-error | no-models | exit-early | compaction | compaction-recovery
 //     | compaction-recovery-upstream | prompt-reject | omp-chunk
+//     | omp-start-fail (omp accepts the prompt, then fails it before the agent starts: prompt_result agentInvoked false)
 //     | session-slow (answers new_session after FAKE_PI_SESSION_DELAY_MS, default 800, and dumps {sessionReplied})
 //   FAKE_PI_MODELS  provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP  path to append {argv, env} JSON to
@@ -12,18 +13,22 @@
 //   FAKE_PI_PERSIST_SESSION  persist prompts to disk and load them on switch_session
 //   FAKE_PI_STEER_REFUSE  answer a steer with an explicit success:false
 //   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
+//   FAKE_PI_CONTEXT_WINDOW  positive token count attached to every listed model
+//   FAKE_PI_TOOLS  JSON tool calls ({name, args, result?, isError?}) for tooluse mode
 
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { playStreamScript, streamScript, type StreamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
+const listedWindow = Number(process.env.FAKE_PI_CONTEXT_WINDOW);
+const modelWindow = Number.isFinite(listedWindow) && listedWindow > 0 ? { contextWindow: listedWindow } : {};
 const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/gpt-4o")
   .split(",")
   .filter(Boolean)
   .map((pair) => {
     const [provider, id] = pair.split("/");
-    return { provider: provider ?? "x", id: id ?? "m", name: id ?? "m" };
+    return { provider: provider ?? "x", id: id ?? "m", name: id ?? "m", ...modelWindow };
   });
 
 const argv = process.argv.slice(2);
@@ -226,8 +231,12 @@ const streamCompactionRecoveryUpstreamTurn = () => {
 const streamToolTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
-  send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi", password: "pi-input-secret" } });
-  send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false, result: { content: [{ type: "text", text: "hi" }], api_key: "pi-output-secret" } });
+  const calls = process.env.FAKE_PI_TOOLS ? JSON.parse(process.env.FAKE_PI_TOOLS) : [{ name: "bash", args: { command: "echo hi", password: "pi-input-secret" }, result: { content: [{ type: "text", text: "hi" }], api_key: "pi-output-secret" } }];
+  for (const [index, call] of calls.entries()) {
+    const toolCallId = `call_${index + 1}`;
+    send({ type: "tool_execution_start", toolCallId, toolName: call.name, args: call.args });
+    send({ type: "tool_execution_end", toolCallId, toolName: call.name, isError: call.isError ?? false, result: call.result ?? { content: [{ type: "text", text: "Tool completed" }] } });
+  }
   send({ type: "turn_end", message: { stopReason: "toolUse", usage: { input: 5, output: 1 } }, usage: { input: 5, output: 1 } });
   send({ type: "turn_start" });
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "done" } });
@@ -438,6 +447,12 @@ function handle(cmd: any) {
         } catch {}
       }
       send({ type: "response", command: "prompt", success: true });
+      if (mode === "omp-start-fail") {
+        const error = "System prompt changed repeatedly during before_agent_start; original input was not delivered.";
+        send({ type: "response", command: "prompt", success: false, error });
+        send({ type: "prompt_result", agentInvoked: false, status: "error", error: { message: error, retryable: false }, sessionSettled: true });
+        return;
+      }
       if (streamScript(String(cmd.message ?? ""))) streamScriptTurn(streamScript(String(cmd.message ?? ""))!);
       else if (mode === "tooluse") streamToolTurn();
       else if (mode === "priced") streamPricedTurn();

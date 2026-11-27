@@ -13,15 +13,15 @@ export const levelWithin = (level: ApprovalMode, limit: ApprovalMode): boolean =
 /** Only providers with an implemented permission mapping may expose a level.
  * `edits` (auto-accept edits) exists where the engine has such a mode:
  * Claude and Grok `acceptEdits`, Antigravity `auto_edit`, Qwen `auto-edit`,
- * Gemini `auto_edit`. Codex's Ask already runs `workspace-write`, so an edits
- * level would change nothing there. Full access, the default level, runs on
- * every engine: in the engine's own most permissive mode, or, where it has
- * none, with the harness answering the permission requests it leaves (the
- * chat-completions family, ACP agents such as Kimi or Hermes, Pi's computer
- * confirms). */
+ * Gemini `auto_edit`, and Hermes `accept_edits`. Codex's Ask already runs
+ * `workspace-write`, so an edits level would change nothing there. Full
+ * access, the default level, runs on every engine: in the engine's own most
+ * permissive mode, or, where it has none, with the harness answering the
+ * permission requests it leaves (the chat-completions family, ACP agents such
+ * as Kimi, Pi's computer confirms). */
 export function supportsApprovalMode(driverKind: string | undefined, mode: ApprovalMode): boolean {
   if (mode === "custom") return driverKind === "codex";
-  if (mode === "edits") return ["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent"].includes(driverKind ?? "");
+  if (mode === "edits") return ["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent", "hermesAgent"].includes(driverKind ?? "");
   return true;
 }
 
@@ -41,7 +41,8 @@ export function modelSwitchNeedsAsk(
 export function hasNativeAutoReview(driverKind: string | undefined): boolean {
   // Qwen Code's `--approval-mode auto` is an LLM classifier that approves
   // safe actions and blocks risky ones — a reviewer, not a rubber stamp.
-  return ["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent"].includes(driverKind ?? "");
+  // dsh's session model reviews requests to leave workspace-write and sends denials to the user.
+  return ["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent", "deepseekAgent"].includes(driverKind ?? "");
 }
 
 const APPROVAL_RANK: Record<ApprovalMode, number> = { ask: 0, edits: 1, auto: 2, full: 3, custom: 4 };

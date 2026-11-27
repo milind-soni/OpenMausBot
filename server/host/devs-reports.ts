@@ -33,6 +33,7 @@ import { personKey } from "../person-key.ts";
 import type { RecentLog } from "../recent-log.ts";
 import { PASS } from "../routes/table.ts";
 import { serverLine, type LineLanguage } from "../server-lines.ts";
+import { browserInputLog } from "../browser/input-log.ts";
 import { cloudComputerCounters } from "../cloud-computer-counters.ts";
 import type { PublicSession } from "../sessions.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
@@ -355,7 +356,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
       threadId: entry.threadId, messageId: entry.messageId, ...(groupId ? { groupId } : {}), where, message: entry.text, words: entry.words,
       bots: bots.map((bot) => reported(bot, entry.threadId)),
       ...("bot" in author ? { summary: { by: author.bot.name, text: author.summary } } : { noSummary: author.why }),
-      problems: conversationProblems(store.activePath(entry.threadId)), log: deps.recentLog(), cloudComputers: cloudComputerCounters.lines(), contactEmail: contact,
+      problems: conversationProblems(store.activePath(entry.threadId)), log: deps.recentLog(), cloudComputers: cloudComputerCounters.lines(), browserInput: browserInputLog.lines(), contactEmail: contact,
       ...(deps.performance ? { performance: performanceLines(deps.performance, entry.threadId, bots.map((bot) => bot.id)) } : {}),
     }, secrets());
     return { payload, ...(contact ? { contact } : {}) };
@@ -489,7 +490,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
   const unsubscribe = store.onChange((change: StoreChange) => {
     if (change.type === "message") {
       const line = change.message;
-      if (line.role === "user" && line.kind === "text" && !line.peerAsk && !line.aside && line.via !== "api") personWrote(change.threadId, line);
+      if (line.role === "user" && line.kind === "text" && !line.peerAsk && !line.aside && !line.automated && line.via !== "api") personWrote(change.threadId, line);
     } else if (change.type === "thread.deleted") {
       const before = waiting.length + tracked.length;
       waiting = waiting.filter((entry) => entry.threadId !== change.threadId);

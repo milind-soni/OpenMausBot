@@ -53,4 +53,13 @@ describe("whether this server can give a bot a Local VM", () => {
     await flush();
     expect(availability.available()).toBe(true);
   });
+
+  it("starts its first read at once, so the first turn already lists the tools every later turn lists", async () => {
+    let probes = 0;
+    const availability = createLocalVmAvailability(async () => { probes += 1; return { available: [] }; });
+    expect(probes).toBe(1);
+    await flush();
+    const turns = [availability.available(), availability.available()];
+    expect(turns).toEqual([false, false]);
+  });
 });

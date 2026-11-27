@@ -132,7 +132,7 @@ describe("the scroll fade", () => {
 });
 
 describe("a fading bar", () => {
-  const css = readFileSync("src/styles.css", "utf8");
+  const css = readFileSync("src/styles.css", "utf8").replace(/\r\n/g, "\n");
   const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(/[[\]().:"]/g, "\\$&")} \\{[^}]*\\}`))?.[0] ?? "";
 
   it("marks itself, and a plain bar stays glass", () => {
@@ -148,5 +148,24 @@ describe("a fading bar", () => {
     expect(fade).toMatch(/[^-]backdrop-filter: none/);
     expect(fade).toContain("mask-image: none");
     expect(rule('.glass-bar[data-glass-fade]')).toContain("--glass-fade: 60px");
+  });
+});
+
+describe("Simple mode's floating chat header", () => {
+  const css = readFileSync("src/styles.css", "utf8").replace(/\r\n/g, "\n");
+  const rule = (selector: string) => css.match(new RegExp(`(?:^|\\n)${selector.replace(/[[\]().:"]/g, "\\$&")} \\{[^}]*\\}`))?.[0] ?? "";
+
+  it("draws no band, and the transcript fades in linearly over the 60px above the bar's bottom edge", () => {
+    expect(rule(".glass-bar[data-chathead-float]::before")).toContain("content: none");
+    const fade = rule(".glass-scroller[data-top-fade]");
+    expect(fade).toContain("--top-fade: 60px");
+    const gradient = "linear-gradient(to bottom, transparent calc(var(--glass-top, 0px) - var(--top-fade)), #000 var(--glass-top, 0px))";
+    expect(fade).toContain(`-webkit-mask-image: ${gradient}`);
+    expect(fade).toContain(`\n  mask-image: ${gradient}`);
+  });
+
+  it("lets clicks between its controls through to the transcript", () => {
+    expect(rule("[data-chathead-float]")).toContain("pointer-events: none");
+    expect(css).toContain('[data-chathead-float] > :not([data-look="chat-header"]),\n[data-chathead-float] :is([data-chathead-identity], [data-chathead-controls]) > * {\n  pointer-events: auto;');
   });
 });

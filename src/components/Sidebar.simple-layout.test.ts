@@ -1,9 +1,10 @@
-import { Children, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
+import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { AppState, Bot, Group } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
-  values: [] as unknown[], index: 0, effects: [] as EffectCallback[], advanced: false,
+  values: [] as unknown[], index: 0, effects: [] as EffectCallback[], advanced: false, owner: true,
   state: {} as AppState, dispatch: vi.fn(), storage: new Map<string, string>(),
 }));
 vi.mock("react", async (original) => ({
@@ -26,7 +27,7 @@ vi.mock("react", async (original) => ({
   useLayoutEffect: () => {},
 }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.owner }));
 vi.mock("./MenuMotion", () => ({
   useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }),
   useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
@@ -43,10 +44,11 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
 });
 
-import { initialState } from "@/state/store";
-import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
+import { initialState, reducer } from "@/state/store";
+import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, UNREAD_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
 import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
+import type { BotRowDrag } from "./SidebarBotDrag";
 const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { SidebarFooter } from "./SidebarFooter";
@@ -87,6 +89,7 @@ const labelled = (tree: ReactElement<Props>[], label: string) => tree.some((node
 beforeEach(() => {
   fixture.values = [];
   fixture.advanced = false;
+  fixture.owner = true;
   fixture.storage = new Map();
   fixture.dispatch.mockClear();
   fixture.state = {
@@ -146,6 +149,19 @@ describe("Simple-mode sidebar layout", () => {
     const advanced = render();
     expect(advanced.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
     expect(advanced.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
+  });
+
+  it("stacks the top bar, and the + menu that drops from it, above the list's scroll fade in both modes", () => {
+    const zOf = (markup: string, attribute: string) => Number(new RegExp(`${attribute}[^>]*class="[^"]*\\bz-\\[?(\\d+)`).exec(markup)?.[1]);
+    for (const advanced of [false, true]) {
+      fixture.advanced = advanced;
+      const head = render().tree.find((node) => node.type === GlassBar && node.props.edge === "top")!;
+      const markup = renderToStaticMarkup(createElement(GlassScrollFrame, { fade: true, children: [
+        createElement(GlassBar, { key: "head", edge: "top", className: head.props.className, children: "head" }),
+        createElement(GlassScroller, { key: "list", children: "list" }),
+      ] }));
+      expect(zOf(markup, 'data-glass-bar="top"')).toBeGreaterThan(zOf(markup, 'data-scroll-fade-edge="top"'));
+    }
   });
 
   it("keeps Advanced's Pinned heading and rows, with the Chief as a row", () => {
@@ -210,6 +226,9 @@ describe("Simple-mode sidebar layout", () => {
   });
 
   it("starts from the shared order for the departments, and a Simple move is saved for Simple only", () => {
+    // This device's own department order: a person who may not change the workspace's (an owner's departments follow
+    // the workspace's order instead; SidebarSections.test.ts).
+    fixture.owner = false;
     fixture.state = { ...fixture.state, sections: ["Work", "Home"] };
     const saved = [userSectionId("Home"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")];
     fixture.storage.set(SIDEBAR_SECTION_ORDER_KEY, JSON.stringify(saved));
@@ -401,5 +420,80 @@ describe("Simple-mode sidebar layout", () => {
     search();
     expect(opened).toHaveBeenCalledOnce();
     expect(render(true).tree.some((node) => node.type === SimpleRailFooter)).toBe(true);
+  });
+});
+
+describe("unread bots keep their place", () => {
+  const thread = (id: string, updatedAt: number, unread = true) => ({ threadId: `${id}-thread`, title: id, createdAt: 1, updatedAt, unread });
+  const withUnread = () => {
+    fixture.state = { ...fixture.state, bots: [
+      bot("atlas"),
+      bot("bea", { unread: true, tasks: [thread("bea", 20)] }),
+      bot("cora", { unread: true, tasks: [thread("cora", 40)] }),
+      bot("dodo", { section: "Work", unread: true, tasks: [thread("dodo", 30)] }),
+      bot("eve", { section: "Work" }),
+    ] };
+  };
+  const rowOf = (tree: ReactElement<Props>[], id: string) => tree.find((node) => (node.props.bot as Bot | undefined)?.id === id)!.props as { botDrag: BotRowDrag };
+
+  it("lists an unread bot in its own place, with no Unread list and no Bots heading", () => {
+    withUnread();
+    const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(sectionOrder(tree)).not.toContain(UNREAD_SECTION_ID);
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo", "eve"]);
+    expect(headers(tree).map((header) => header.props.name)).toEqual(["Group chats", "Work"]);
+  });
+
+  it("moves no row when a bot is opened, gets a reply, is marked unread, works or waits on the person while the app is in use", () => {
+    const shown = () => { const { tree } = render(); return { sections: sectionOrder(tree), bots: listedBots(tree) }; };
+    const before = shown();
+    fixture.state = reducer(fixture.state, { type: "select", id: "bea" });
+    expect(shown()).toEqual(before);
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, unread: true, tasks: [thread("bea", 90)] } : candidate)) };
+    expect(shown()).toEqual(before);
+    fixture.state = reducer(fixture.state, { type: "markUnread", botId: "dodo" });
+    expect(shown()).toEqual(before);
+    fixture.state = { ...fixture.state, bots: fixture.state.bots.map((candidate) => (candidate.id === "bea" ? { ...candidate, busy: true, activity: "working" as const } : candidate.id === "dodo" ? { ...candidate, activity: "waiting-on-you" as const } : candidate)) };
+    expect(shown()).toEqual(before);
+    fixture.state = reducer(fixture.state, { type: "select", id: "room" });
+    expect(shown()).toEqual(before);
+  });
+
+  it("moves a bot past an unread one with Alt+arrow, as the person sees them", () => {
+    vi.stubGlobal("requestAnimationFrame", () => 0);
+    vi.stubGlobal("fetch", () => new Promise(() => {}));
+    fixture.state = { ...fixture.state, bots: [bot("atlas"), bot("bea", { unread: true }), bot("cora"), bot("dodo", { section: "Work" })] };
+    let tree = render().tree;
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo"]);
+    rowOf(tree, "atlas").botDrag.step("atlas", 1);
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botsOrdered", botIds: ["bea", "atlas", "cora"] });
+    fixture.state = reducer(fixture.state, { type: "botsOrdered", botIds: ["bea", "atlas", "cora"] });
+    tree = render().tree;
+    expect(listedBots(tree)).toEqual(["bea", "atlas", "cora", "dodo"]);
+  });
+
+  it("keeps the rail's groups as they are", () => {
+    withUnread();
+    setSidebarDensity("icons");
+    const { tree } = render();
+    expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
+    expect(listedBots(tree)).toEqual(["atlas", "bea", "cora", "dodo", "eve"]);
+  });
+
+  it("leaves pinned bots and the Chief where they are, in Simple and Advanced", () => {
+    fixture.state = { ...fixture.state, bots: [
+      bot("chief", { chiefOfStaff: true, unread: true }), bot("atlas", { pinned: true, unread: true }), bot("bea", { unread: true }), bot("cora"),
+    ] };
+    let tree = render().tree;
+    const grid = tree.find((node) => node.type === SidebarTileGrid)!.props as Parameters<typeof SidebarTileGrid>[0];
+    expect([grid.primary?.id, ...grid.pinned.map((candidate) => candidate.id)]).toEqual(["chief", "atlas"]);
+    expect(sectionOrder(tree)[0]).toBe(BOTS_SECTION_ID);
+    expect(listedBots(tree)).toEqual(["bea", "cora"]);
+
+    fixture.advanced = true;
+    tree = render().tree;
+    expect(sectionOrder(tree)).toEqual([PINNED_SECTION_ID, CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")]);
+    expect(listedBots(tree)).toEqual(["chief", "bea", "cora"]);
   });
 });

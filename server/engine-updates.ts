@@ -15,6 +15,7 @@ import { enginesBinDir, enginesPrefix, npmCopyVersion, npmLatestVersion, npmModu
 import { EngineInUse, npmCommandNames, removeNpmCopy, sweepNpmLeftovers, updateNpmEngineStaged, type StagedNpmUpdate } from "./engine-npm-update.ts";
 import { installStandaloneEngine, standaloneAssetFor, standaloneCurrentVersion, standaloneEngineDir, type StandaloneInstallOptions } from "./engine-standalone.ts";
 import { ENGINE_VERSIONS, LATEST, type EngineVersionPin } from "./engine-versions.ts";
+import { imageCopyTooOld, orderImageEngines, runningImageVersion } from "./image-engines.ts";
 import { liveCliCommands } from "./procs.ts";
 import { isNewerVersion } from "./update-check.ts";
 
@@ -31,9 +32,13 @@ const SWITCH_POLL_MS = 15_000;
 
 /** A runtime the app manages itself (Antigravity): it installs each version beside the others and checks it. */
 export interface ManagedRuntime {
-  /** The older version installed when the pinned one is not, else null. */
-  older(): Promise<string | null>;
-  install(): Promise<void>;
+  /** The version installed when a newer one is to be installed, else null; with the release channel that version came
+   * from when the runtime has more than one. `skip` names the channels this pass already tried. `first`: nothing is
+   * installed yet and this is the first install, which is not shown as an update. */
+  older(skip?: readonly string[]): Promise<string | { version: string; channel: string; first?: true } | null>;
+  /** Installs from `channel` (the one `older` named). Resolves with the version of the runtime it installed when that
+   * is not the pinned one. */
+  install(channel?: string): Promise<string | void>;
   folder: string;
 }
 
@@ -74,6 +79,11 @@ export interface UpdateSteps {
   standaloneVersion(release: StandaloneRelease, baseDir: string): string | null;
   installStandalone(release: StandaloneRelease, options: StandaloneInstallOptions): Promise<unknown>;
   handshake(command: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<string | null>;
+  /** The version of the Cloud image's own copy of an npm package when that copy is the one that runs, with
+   * OMB_IMAGE_ENGINES=1 (image-engines.ts); else null. */
+  imageVersion(pkg: string, baseDir: string): string | null;
+  /** After an npm copy changed: whether the image's copies or the data folder's go first on PATH. */
+  orderPath(baseDir: string): void;
 }
 
 const STEPS: UpdateSteps = {
@@ -85,6 +95,8 @@ const STEPS: UpdateSteps = {
   standaloneVersion: standaloneCurrentVersion,
   installStandalone: installStandaloneEngine,
   handshake: acpHandshake,
+  imageVersion: (pkg, baseDir) => runningImageVersion(pkg, baseDir),
+  orderPath: (baseDir) => { orderImageEngines(baseDir); },
 };
 
 export interface EngineUpdaterOptions {
@@ -109,6 +121,8 @@ interface EngineState {
   failures?: number;
   retryAt?: number;
   updatedTo?: string;
+  /** Every version a pass moved this engine's channels to, `updatedTo` last. */
+  updatedVersions?: string[];
   updatedAt?: number;
 }
 
@@ -119,14 +133,17 @@ interface UpdaterState {
 
 type Outcome =
   | { kind: "absent" | "current" | "busy" | "waiting" }
-  | { kind: "updated"; from: string; to: string }
-  | { kind: "failed"; from: string; to: string; reason: string };
+  | { kind: "updated"; from: string; to: string; moves?: Move[]; busyAfter?: true }
+  | { kind: "failed"; from: string; to: string; reason: string; moves?: Move[]; busyAfter?: true };
+
+type Move = { from: string; to: string; first?: true };
 
 export interface EngineUpdater {
   /** One pass over every engine now; resolves when it has finished. */
   check(): Promise<void>;
-  /** `autoUpdated` for an engine updated in the last week, for its row in Settings. */
-  shown(driverKind: string): { autoUpdated?: { version: string; at: number } };
+  /** `autoUpdated` for an engine updated in the last week, for its row in Settings: the version it runs, when a pass moved
+   * more than one of its channels. */
+  shown(driverKind: string, running?: string | null): { autoUpdated?: { version: string; at: number } };
   /** The earliest time a pass is due. */
   dueAt(): number;
   start(): DueTimer;
@@ -254,6 +271,10 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
   async function updateNpm(plan: EnginePlan, pkg: string): Promise<Outcome> {
     const current = steps.npmVersion(pkg, baseDir);
     if (current === null) return { kind: "absent" };
+    // The image's copy runs instead of one here no newer than it: nothing to download, unless the driver needs a newer
+    // one than the image carries, or a saved CLI path runs this copy.
+    const image = steps.imageVersion(pkg, baseDir);
+    if (image !== null && !isNewerVersion(current, image) && !imageCopyTooOld(plan.pin, image) && !configuredInto(pkg)) return { kind: "current" };
     if (engineBusy(plan)) return { kind: "busy" };
     let target = plan.pin.target;
     if (target === LATEST) {
@@ -271,19 +292,47 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       if (aborted.busy || error instanceof EngineInUse) return { kind: "waiting" };
       return { kind: "failed", from: current, to: target, reason: error instanceof Error ? error.message : String(error) };
     }
+    steps.orderPath(baseDir);
     return { kind: "updated", from: current, to: target };
   }
 
-  async function updateManaged(plan: EnginePlan, managed: ManagedRuntime): Promise<Outcome> {
-    const older = await managed.older();
-    if (older === null) return { kind: "absent" };
-    if (engineBusy(plan)) return { kind: "busy" };
+  async function installManaged(plan: EnginePlan, managed: ManagedRuntime, older: string, channel: string | undefined): Promise<Outcome> {
+    let installed: string | void;
     try {
-      await managed.install();
+      installed = await managed.install(channel);
     } catch (error) {
       return { kind: "failed", from: older, to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
     }
-    return { kind: "updated", from: older, to: plan.pin.target };
+    const to = installed ?? plan.pin.target;
+    return to === older ? { kind: "failed", from: older, to, reason: "the install left the same version in place" } : { kind: "updated", from: older, to };
+  }
+
+  /** Each channel is tried once a pass; one channel's failure is the pass's outcome (so it is retried), and never keeps
+   * another channel from updating. */
+  async function updateManaged(plan: EnginePlan, managed: ManagedRuntime): Promise<Outcome> {
+    const tried: string[] = [];
+    const moves: Move[] = [];
+    let failed: Extract<Outcome, { kind: "failed" }> | undefined;
+    let busyAfter = false;
+    for (;;) {
+      const found = await managed.older(tried);
+      if (found === null) break;
+      if (engineBusy(plan)) {
+        if (!moves.length && !failed) return { kind: "busy" };
+        busyAfter = true;
+        break;
+      }
+      const { version: older, channel, first } = typeof found === "string" ? { version: found, channel: undefined, first: undefined } : found;
+      const outcome = await installManaged(plan, managed, older, channel);
+      if (outcome.kind === "updated") moves.push({ from: outcome.from, to: outcome.to, ...(first ? { first } : {}) });
+      else if (outcome.kind === "failed") failed ??= outcome;
+      if (channel === undefined || tried.includes(channel)) break;
+      tried.push(channel);
+    }
+    const busy = busyAfter ? { busyAfter: true as const } : {};
+    if (failed) return { ...failed, ...(moves.length ? { moves } : {}), ...busy };
+    const last = moves.at(-1);
+    return last ? { kind: "updated", ...last, moves, ...busy } : { kind: "absent" };
   }
 
   const updateOne = (plan: EnginePlan): Promise<Outcome> => {
@@ -311,17 +360,22 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
       } catch (error) {
         outcome = { kind: "failed", from: "?", to: plan.pin.target, reason: error instanceof Error ? error.message : String(error) };
       }
-      if (outcome.kind === "busy" || outcome.kind === "waiting") waiting = true;
+      if (outcome.kind === "busy" || outcome.kind === "waiting" || ("busyAfter" in outcome && outcome.busyAfter)) waiting = true;
+      const moves = outcome.kind === "updated" ? outcome.moves ?? [{ from: outcome.from, to: outcome.to }] : outcome.kind === "failed" ? outcome.moves ?? [] : [];
+      for (const move of moves) log(move.first ? `Engine update: ${plan.name} ${move.to} installed` : `Engine update: ${plan.name} ${move.from} → ${move.to}`);
+      const shownMoves = moves.filter((move) => !move.first);
+      const moved = shownMoves.length ? { updatedTo: shownMoves.at(-1)!.to, updatedVersions: shownMoves.map((move) => move.to), updatedAt: now() } : {};
+      if (moves.length) changed = true;
       if (outcome.kind === "updated") {
-        state.engines[plan.driverKind] = { updatedTo: outcome.to, updatedAt: now() };
-        log(`Engine update: ${plan.name} ${outcome.from} → ${outcome.to}`);
-        changed = true;
+        state.engines[plan.driverKind] = moved;
       } else if (outcome.kind === "failed") {
         const failures = (engine.failures ?? 0) + 1;
-        state.engines[plan.driverKind] = { ...engine, failures, retryAt: now() + retryDelay(plan, outcome.from, failures) };
+        // A channel the pass did not reach for a turn is due in minutes, not on the failed channel's backoff.
+        const retryAt = now() + (outcome.busyAfter ? ENGINE_UPDATE_BUSY_RETRY_MS : retryDelay(plan, outcome.from, failures));
+        state.engines[plan.driverKind] = { ...engine, ...moved, failures, retryAt };
         log(`Engine update: ${plan.name} stays on ${outcome.from}; ${outcome.to} could not be installed (${outcome.reason.split("\n")[0]}). Trying again later.`);
       } else if (engine.failures) {
-        state.engines[plan.driverKind] = { updatedTo: engine.updatedTo, updatedAt: engine.updatedAt };
+        state.engines[plan.driverKind] = { updatedTo: engine.updatedTo, updatedVersions: engine.updatedVersions, updatedAt: engine.updatedAt };
       }
     }
     passed = true;
@@ -347,11 +401,12 @@ export function createEngineUpdater(options: EngineUpdaterOptions): EngineUpdate
   return {
     check,
     dueAt,
-    shown(driverKind) {
+    shown(driverKind, running) {
       const engine = state.engines[driverKind];
-      return engine?.updatedTo && engine.updatedAt !== undefined && now() - engine.updatedAt < SHOW_UPDATED_MS
-        ? { autoUpdated: { version: engine.updatedTo, at: engine.updatedAt } }
-        : {};
+      if (!engine?.updatedTo || engine.updatedAt === undefined || now() - engine.updatedAt >= SHOW_UPDATED_MS) return {};
+      const versions = engine.updatedVersions ?? [engine.updatedTo];
+      const version = running ? versions.find((one) => one === running) : engine.updatedTo;
+      return version ? { autoUpdated: { version, at: engine.updatedAt } } : {};
     },
     start() {
       return startDueTimer({

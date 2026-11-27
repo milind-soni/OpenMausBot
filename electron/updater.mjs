@@ -28,6 +28,7 @@ let updaterCoordinator = null;
 let pageAllowed = () => false;
 let quiet = null;
 let launch = null;
+const stateListeners = new Set();
 /** Where these updaters install without asking anything: Squirrel.Mac, and the per-user NSIS installer run silently. */
 const QUIET_PLATFORMS = new Set(["darwin", "win32"]);
 
@@ -113,6 +114,9 @@ function setState(patch) {
   const { messageCode: _stale, messageKey: _key, messageParams: _params, ...kept } = state;
   state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
   if (quiet && patch.status === "error") installFailed(quietRecord());
+  for (const listener of stateListeners) {
+    try { listener(view()); } catch {}
+  }
   try {
     const contents = win?.webContents;
     if (contents && pageAllowed({ sender: contents, senderFrame: contents.mainFrame })) contents.send("update:state", view());
@@ -173,6 +177,20 @@ export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => nu
     launch = { ...launch, updated: null };
     setState({});
   }));
+}
+
+/** This app's own update for Update all on Settings → Devices: its state as the window sees it, a check, the install
+ * (a restart, or the hand-off to a terminal) and each new state. A build without the updater has no state. */
+export function appUpdater() {
+  return {
+    state: () => (updaterCoordinator ? view() : null),
+    check: () => updaterCoordinator?.check(true) ?? Promise.resolve(),
+    install: () => updaterCoordinator?.install(),
+    onState: (listener) => {
+      stateListeners.add(listener);
+      return () => stateListeners.delete(listener);
+    },
+  };
 }
 
 /** How an update reaches this computer with nobody at it: installed at a quiet moment ("by-itself"), on the person's

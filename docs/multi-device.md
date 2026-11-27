@@ -15,7 +15,7 @@ to the other by itself. Unless both computers open the same home (below), each h
 empty Inbox, and a bot created on one computer does not appear in the other's list. Engine sign-ins (Claude, Codex and
 the rest) are separate too, because they belong to the machine the bots run on.
 
-Bots work together only within one home: a bot on one computer cannot reach a teammate on another.
+Each bot lives in one place, and bots work together within one home. The one exception is a computer and its own My Cloud: with **Settings → Plan & billing → This computer and My Cloud together** on, a bot in one can hand work to a bot in the other while both are reachable, and this computer's sidebar lists both places' bots. It is on by default: the desktop app turns it on the first time it shows a short notice about it on this computer's page, with a switch right there to turn it off. Someone who chose either way keeps their choice. When My Cloud is home, it joins the workspace of this computer that is running (This Mac or This PC), never the copy the move left behind. The default never lets your Clouds' bots run commands on this computer: that stays its own switch, in the notice and in the OpenMausBot icon's menu, and it asks before it turns on. Only turning the setting on by hand in Settings turns it on too, as that setting says; Show bots together in the rail's menu switches the list alone. With My Cloud as home and the setting on, the app starts This Mac's workspace in the background a little after launch (only if it has bots), so the list and hand-offs work without opening it first.
 
 ## One set of bots on every device
 
@@ -23,18 +23,20 @@ Pick one home, then open it from your other devices. There are three ways:
 
 | Home | Good for | How |
 | --- | --- | --- |
-| **My Cloud** (Starter, Pro or Max plan) | Bots that keep running when your computers are off | Sign in at **Settings → MausBot Cloud**. Once My Cloud is ready, the desktop app moves this computer's bots there by itself, once, and opens My Cloud from then on. On your other computers, sign in to the same account and choose **Open My Cloud**. See [cloud-pro.md](cloud-pro.md). |
+| **My Cloud** (Starter, Pro or Max plan) | Bots that keep running when your computers are off | Sign in at **Settings → MausBot Cloud**. Once My Cloud is ready, a computer with one bot moves it there by itself and opens My Cloud from then on; with more bots the app asks which go (**Move everything**, or some of them, which leaves the rest working here), and a bot's own menu has **Move to My Cloud**. Before a bot moves, the app says what stays on this computer for it (its folder, a local model, commands, teammates) and what it may use here from My Cloud. On your other computers, sign in to the same account and choose **Open My Cloud**. See [cloud-pro.md](cloud-pro.md). |
 | **Your own server** | A VPS or always-on machine you run yourself | Pair each device with it, then right-click the server's circle at the window's left edge and choose **Make <server> my home** to move this computer's bots there. See [self-hosting.md](self-hosting.md). |
-| **One of your computers** | Two desktops on the same Tailscale network, no Cloud | On the computer with the bots, turn on **Settings → Phone & devices → Your other computers** and pair; on the other, choose **＋ → Connect to a server**. The bots stay on the first computer, which must be on. See [desktop-companion.md](desktop-companion.md). |
+| **One of your computers** | Two desktops on the same Tailscale network, no Cloud | On the computer with the bots, turn on **Settings → Devices → Private network → Your other computers** and choose **Add a computer**; on the other, choose **＋ → Connect to another computer**. The bots stay on the first computer, which must be on. See [desktop-companion.md](desktop-companion.md). |
 
 A phone is paired separately. For My Cloud, use **Settings → MausBot Cloud → Use My Cloud on your phone**; for this
-computer, **Settings → Phone & devices → Pair a phone** (a six-digit code). The phone opens the home it paired
+computer, **Settings → Devices → Phones and tablets → Add a phone** (a six-digit code). The phone opens the home it paired
 with. See [ios-companion.md](ios-companion.md).
 
 After a move to My Cloud or your own server, the computer you moved from stops running its copy, so no routine runs
 twice. The computer still lends the new home its folders, screen and Chrome while the desktop app runs and is signed in.
 On your own server this happens by itself only when you are its one owner; on a server with other members or admins,
 lending also needs `features.sharedComputers` set to `true` (see [feature-flags.md](feature-flags.md)).
+With two or more computers lent to My Cloud, its bots take the computer you are typing on as "my computer": the one
+whose desktop app sent the message. The lending icon's menu on each computer says so while My Cloud can use it.
 
 ## Moving bots by hand
 

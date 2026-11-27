@@ -453,6 +453,13 @@ describe("server-side scope check (audit M1)", () => {
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id })).toBeNull();
     expect(sharedComputerScopeRefusal(lent, { action: "write_file", folder_id: writable.id })).toBeNull();
   });
+  it("on the person's own Cloud, a folder that isn't lent says where it is lent from, and never asks a card that can't lend one", () => {
+    const refusal = sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: randomUUID() }, "ask_for_computer");
+    expect(refusal).toMatch(/^That folder isn't lent to this Cloud: use a folder_id list_shared_computers gives\./u);
+    expect(refusal).toContain("share it from the OpenMausBot desktop app, under Files");
+    expect(refusal).not.toContain("ask_for_computer");
+    expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id }, "ask_for_computer")).toBeNull();
+  });
   it("edits, appends and deletes only in a folder lent with editing, and only on a desktop that takes them", () => {
     const current = registration({ folders: [readOnly, writable], fileEdits: true });
     for (const action of ["edit_file", "append_file", "delete_file"] as const) {
@@ -628,5 +635,45 @@ describe("MCP servers a lent computer runs for this server", () => {
     const closed = expect(blocked).rejects.toThrow(/Workspace stopped/);
     broker.close();
     await closed;
+  });
+});
+
+describe("the computer the person types on", () => {
+  it("is the online computer lent by the session that sent the line, put first; no other session or person sees it", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-typing-on-"));
+    const broker = new SharedComputers(() => true, new LentComputers(join(dir, "lent.json")));
+    const pc = { ...registration(), name: "WIN-1", platform: "win32" as const };
+    const laptop = { ...registration(), name: "UBUNTU-1", platform: "linux" as const };
+    broker.register(pc, { session: "pc", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(1_000);
+    broker.register(laptop, { session: "laptop", person: alice.person }, other);
+    const typing = (session?: string) => broker.known(alice.person, session).map(computer => [computer.name, computer.typing === true]);
+    expect(typing()).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    expect(typing("pc")).toEqual([["WIN-1", true], ["UBUNTU-1", false]]);
+    expect(typing("laptop")).toEqual([["UBUNTU-1", true], ["WIN-1", false]]);
+    expect(typing("phone")).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    expect(broker.known(bob.person, "pc")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(40_001);
+    expect(typing("pc")).toEqual([["UBUNTU-1", false], ["WIN-1", false]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("is listed live when another computer with the same name holds the one record kept for that name", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const dir = mkdtempSync(join(tmpdir(), "omb-typing-same-name-"));
+    const broker = new SharedComputers(() => true, new LentComputers(join(dir, "lent.json")));
+    const first = { ...registration(), name: "PC", platform: "win32" as const };
+    const second = { ...registration(), name: "PC", platform: "win32" as const };
+    broker.register(first, { session: "first", person: alice.person }, secret);
+    await vi.advanceTimersByTimeAsync(1_000);
+    broker.register(second, { session: "second", person: alice.person }, other);
+    expect(broker.known(alice.person).map(computer => computer.id)).toEqual([second.id]);
+    expect(broker.known(alice.person, "first").map(computer => [computer.id, computer.typing === true, computer.online]))
+      .toEqual([[first.id, true, true], [second.id, false, true]]);
+    expect(broker.known(alice.person, "second").map(computer => [computer.id, computer.typing === true])).toEqual([[second.id, true]]);
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

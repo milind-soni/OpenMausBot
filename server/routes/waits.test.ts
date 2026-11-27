@@ -203,6 +203,19 @@ describe("the waits route", () => {
     expect(waitSourceRefusal({ ...handed, owned: false, op: "create" })).toBe(WAIT_MESSAGES.notYours);
   });
 
+  it("off a Cloud, lets the person's own request make its wait in a conversation outside work reached, and nothing else", () => {
+    const person = { owned: true, room: false, depth: 0, handedOff: false, routineRun: false, outsideDriven: true, personStarted: true, guest: false, cloudHome: false };
+    const handed = { ...person, depth: 1, assignmentId: "node-1", op: "create" as const };
+    expect(waitSourceRefusal(person)).toBeNull();
+    expect(waitSourceRefusal(handed)).toBeNull();
+    expect(waitSourceRefusal({ ...handed, op: "cancel" })).toBe(WAIT_MESSAGES.handedStop);
+    for (const other of [{ personStarted: false }, { routineRun: true }, { cloudHome: true }, { cloudHome: undefined }]) {
+      expect(waitSourceRefusal({ ...person, ...other }), JSON.stringify(other)).toBe(WAIT_MESSAGES.notPerson);
+      expect(waitSourceRefusal({ ...handed, ...other }), JSON.stringify(other)).toBe(WAIT_MESSAGES.notPerson);
+    }
+    expect(waitSourceRefusal({ ...handed, assignmentId: undefined })).toBe(WAIT_MESSAGES.notPerson);
+  });
+
   it("lets a proved wait continuation create the next wait in its own direct chat", () => {
     const continuation = { owned: true, room: false, depth: 0, handedOff: false, routineRun: true, outsideDriven: true, personStarted: false, guest: false, waitContinuation: true, op: "create" as const };
     expect(waitSourceRefusal(continuation)).toBeNull();

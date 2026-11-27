@@ -15,8 +15,8 @@ import { parseSurface } from "../surface.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
 import { titleConversationExcerpt, type ThreadTitleSource } from "../thread-title.ts";
 import type { MessagePage } from "./channels.ts";
-import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
-import { forkMessageId } from "./fork-request.ts";
+import { bulkDeleteThreadIds, outsideClosedScope, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { madeThread, sawThread } from "../thread-presence.ts";
 import { refusalBody, userError } from "../user-errors.ts";
@@ -169,14 +169,13 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot || !store.taskByThread(bot.id, m[2])) return json(res, 404, { error: "no such conversation" });
-      const body = await readBody(req);
-      const messageId = forkMessageId(body);
-      if (messageId === null) return json(res, 400, { error: "messageId must be a string" });
+      const fork = parseForkRequest(await readBody(req), true);
+      if (!fork) return json(res, 400, { error: "Provide a string messageId or set latest to true" });
       const notYours = cloudThreadRefusal(auth, m[2]);
       if (notYours) return json(res, 403, { error: notYours });
-      if (threadBusy(bot.id, m[2])) return json(res, 409, { error: "this conversation is running — wait for it to finish" });
-      const task = store.forkTask(bot.id, m[2], messageId);
-      if (!task) return json(res, 404, { error: "no such completed message in this conversation" });
+      if (threadBusy(bot.id, m[2])) return json(res, 409, FORK_BUSY);
+      const task = store.forkTask(bot.id, m[2], fork.messageId, fork.branchLeafId);
+      if (!task) return json(res, 404, fork.messageId === undefined ? FORK_NO_TEXT : { error: "no such completed message in this conversation" });
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) } satisfies TaskResponse);
     }
@@ -231,8 +230,9 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const refused: BulkDeleteRefusal[] = [];
       for (const threadId of parsed.threadIds) {
         const refusal = deleteRefusal(auth, bot.id, threadId);
-        if (!refusal) allowed.push(threadId);
-        else refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        if (refusal) refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        else if (parsed.scope === "closed" && outsideClosedScope(store.taskByThread(bot.id, threadId))) refused.push({ threadId, reason: "not-closed" });
+        else allowed.push(threadId);
       }
       const result = deleteTasks(bot.id, allowed);
       if (!result) return json(res, 404, { error: "no such bot" });
@@ -253,8 +253,8 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
-      deps.threadRead?.(auth, m[2]);
-      readThreadNotifications(m[2], broadcast, notificationListed(auth));
+      // "seen=0": the page showed it by itself at launch; what waits there for the person stays unseen until they open it.
+      if (url.searchParams.get("seen") !== "0") { deps.threadRead?.(auth, m[2]); readThreadNotifications(m[2], broadcast, notificationListed(auth)); }
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).

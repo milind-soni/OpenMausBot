@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -192,4 +192,44 @@ test("a first move waits for the person's choice, asked on whichever page is ope
     await alone.main.kick();
     assert.equal(alone.kept()?.phase, "copy", "with one bot there is nothing to choose");
   } finally { asked.main.close(); alone.main.close(); rmSync(folder, { recursive: true, force: true }); }
+});
+
+test("the move step's commands: main's own dialog is asked only when the person asked for them and they aren't lent yet, before the move starts; a failure goes on the move's line", async () => {
+  const CLOUD = "https://omb-t-1.fly.dev";
+  const root = mkdtempSync(join(tmpdir(), "omb-move-commands-"));
+  let n = 0;
+  const launch = ({ terminal = false, allow = async () => {} } = {}) => {
+    const handlers = new Map(), asked = [];
+    const folder = join(root, String(n++));
+    mkdirSync(folder);
+    let kept = null;
+    const main = installOneHome({
+      ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => ({ origin: CLOUD, grant: async () => ({ origin: CLOUD, code: "x" }) }),
+      cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => join(folder, "cloud-send.json"),
+      window: () => ({ isDestroyed: () => false, webContents: { on: () => {}, send: () => {}, get mainFrame() { return { url: "http://127.0.0.1:4100/" }; } } }),
+      localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404),
+      localRequest: async (route) => (route === "/api/bots?messages=0" ? json({ bots: [{ id: "b0", name: "Bot 0" }, { id: "b1", name: "Bot 1" }] }) : json({ frozen: false })),
+      account: () => ({ state: () => ({ status: "connected", account: { id: "acct-1", email: "person@example.test" }, machine: { status: "ready", origin: CLOUD, moves: true } }), pairHome: async () => { throw new Error("not in this test"); } }),
+      journalFile: () => join(folder, "one-home.json"), tempRoot: () => folder, journal: { read: () => kept, write: (value) => { kept = value; } }, keep: { read: () => null, write: () => {} }, chooses: true,
+      moveLending: () => ({ state: { enabled: true, folders: [], terminal }, paused: false }),
+      allowCommands: async () => { asked.push({ moveStarted: existsSync(join(folder, "bot-moves.json")) }); await allow(); },
+    });
+    return { main, asked, move: (options) => handlers.get("cloud-send:move-bots")({ page: "local" }, ["b0"], options),
+      line: () => handlers.get("cloud-send:notice")({ page: "local" })?.botMove ?? null };
+  };
+  const off = launch(), unsaid = launch(), on = launch(), lent = launch({ terminal: true });
+  const failing = launch({ allow: async () => { throw new Error("Sign in to the Cloud before lending it the terminal."); } });
+  try {
+    await off.move({ folder: true, commands: false });
+    await unsaid.move(undefined);
+    assert.deepEqual([...off.asked, ...unsaid.asked], [], "never asked without the person's switch");
+    await on.move({ commands: true });
+    assert.deepEqual(on.asked, [{ moveStarted: false }], "asked once, before this move starts");
+    assert.equal(on.line()?.commandsError, undefined);
+    await lent.move({ commands: true });
+    assert.deepEqual(lent.asked, [], "not asked again when the Clouds may run commands already");
+    await failing.move({ commands: true });
+    assert.equal(failing.asked.length, 1);
+    assert.equal(failing.line()?.commandsError, "Sign in to the Cloud before lending it the terminal.", "the move goes on, and its line says why");
+  } finally { for (const one of [off, unsaid, on, lent, failing]) one.main.close(); rmSync(root, { recursive: true, force: true }); }
 });

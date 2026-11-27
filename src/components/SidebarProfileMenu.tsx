@@ -19,6 +19,7 @@ import {
   MessageSquare,
   Sparkles,
   FolderTree,
+  Hamburger,
   RefreshCw,
   Rocket,
   Settings as SettingsIcon,
@@ -60,7 +61,7 @@ import { pageIsThisComputer } from "@/lib/companion-bridge";
 import { cloudPlanLabel } from "@/lib/cloud-plan";
 import { shortcutLabel } from "./ShortcutHint";
 import { useAnnouncements } from "./announcements/use-announcements";
-import { useOtherServerName } from "@/lib/other-server";
+import { useOtherServerName } from "@/lib/other-server"; import { useFeature } from "@/lib/use-feature";
 import { isOwnerOrAdmin, profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
   cloudPhoneDestination,
@@ -254,7 +255,7 @@ export function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
         if (phase === "available" && check?.releaseUrl) return void openExternalLink(check.releaseUrl);
         if (phase === "reload") return window.location.reload();
         setPhase("checking");
-        void api<ServerUpdateCheck>("/api/updates/check", { timeoutMs: 20_000 })
+        void api<ServerUpdateCheck>("/api/updates/check?fresh=1", { timeoutMs: 20_000 })
           .then((next) => {
             setCheck(next);
             setPhase(serverCheckPhase(next));
@@ -286,7 +287,7 @@ export function selectPhoneDestination(destination: PhoneDestination, { bridge, 
   void bridge.connectHomeForPhone().catch(() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }));
 }
 
-/** The menu row's line under Phone & devices: where a phone goes and how it is doing there, in a few words. */
+/** The menu row's line under Devices: where a phone goes and how it is doing there, in a few words. */
 export function phoneDevicesSubtitle(state: PhonePlaceState, place: string): string {
   switch (state.kind) {
     case "paired": return t("sidebar.menu.phoneDevices.paired", { count: state.count, place });
@@ -302,7 +303,7 @@ export function phoneDevicesItem(state: PhonePlaceState, place: string, onSelect
   const dot = state.kind === "paired" && state.connected ? "bg-success" : state.kind === "attention" ? "bg-warning" : null;
   return {
     key: "phone-devices",
-    label: t("settings.section.phoneDevices"),
+    label: t("settings.page.devices"),
     subtitle: phoneDevicesSubtitle(state, place),
     icon: <Smartphone size={16} />,
     trailing: dot ? <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", dot)} /> : undefined,
@@ -310,7 +311,7 @@ export function phoneDevicesItem(state: PhonePlaceState, place: string, onSelect
   };
 }
 
-export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, onTeamMap, onFiles, onPublishedApps, onTeamFiles, archived }: {
+export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, onTeamMap, onFiles, onPublishedApps, onSkillBurgers, onTeamFiles, archived }: {
   activeView: string;
   automationsNeedYou: boolean;
   onAutomations: () => void;
@@ -318,6 +319,7 @@ export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, o
   /** set once My Cloud's files are ready to open */
   onFiles?: () => void;
   onPublishedApps?: () => void;
+  onSkillBurgers?: () => void;
   /** set only on a Team Cloud: its shared folder */
   onTeamFiles?: () => void;
   archived?: ArchivedBots;
@@ -327,6 +329,7 @@ export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, o
     { key: "team-map", label: t("sidebar.nav.teamMap"), icon: <UsersRound size={16} />, active: activeView === "team-map", onSelect: onTeamMap },
     ...(onFiles ? [{ key: "files", label: t("sidebar.nav.files"), icon: <FolderOpen size={16} />, active: activeView === "files", onSelect: onFiles }] : []),
     ...(onPublishedApps ? [{ key: "published-apps", label: t("sidebar.nav.publishedApps"), icon: <Rocket size={16} />, active: activeView === "published-apps", onSelect: onPublishedApps }] : []),
+    ...(onSkillBurgers ? [{ key: "skill-burgers", label: t("skillBurger.list.title"), icon: <Hamburger size={16} />, active: activeView === "skill-burgers", onSelect: onSkillBurgers }] : []),
     ...(onTeamFiles ? [{ key: "team-files", label: t("sidebar.nav.teamFiles"), icon: <FolderTree size={16} />, active: activeView === "team-files", onSelect: onTeamFiles }] : []),
     ...(archived?.count ? [{ key: "archived", label: t("sidebar.archived.title"), icon: <Archive size={16} />, value: String(archived.count), onSelect: archived.open }] : []),
   ];
@@ -434,7 +437,7 @@ export interface AccountHeader {
   onOpen: () => void;
 }
 
-/** One menu for Simple, Advanced and phone width: your account, Phone & devices and Settings, Simple's own places to go,
+/** One menu for Simple, Advanced and phone width: your account, Devices and Settings, Simple's own places to go,
  * then Plan & billing and Help, with any other accounts and Sign out last. A ready update is raised to the top. */
 export function profileMenuItems({
   phone,
@@ -539,7 +542,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const { state, dispatch } = useStore();
   const simple = account !== undefined;
   const [menuOpen, setMenuOpen] = useState(false);
-  const advancedMode = useAdvancedMode();
+  const advancedMode = useAdvancedMode(), skillBurger = useFeature("skillBurger");
   const automationsNeedYou = useAutomationsNeedYou();
   const planSnapshot = useCloudPlanSnapshot(usageBridge(state.config?.cloudHome === true) ?? (window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudPlan));
   const cloudUsage = cloudUsageSummary(planSnapshot);
@@ -609,6 +612,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         onTeamMap: () => dispatch({ type: "showTeamMap" }),
         onFiles: filesReady ? () => dispatch({ type: "showFiles" }) : undefined,
         onPublishedApps: () => dispatch({ type: "showPublishedApps" }),
+        onSkillBurgers: skillBurger ? () => dispatch({ type: "showSkillBurgers" }) : undefined,
         onTeamFiles: state.config?.team ? () => dispatch({ type: "showTeamFiles" }) : undefined,
         archived: account?.archived,
       }),

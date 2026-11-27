@@ -86,6 +86,7 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
   const runs = new Map<string, RoutineRun>();
   const busy = new Set<string>();
   const notified: Array<{ kind: string; threadId: string; detail: string }> = [];
+  const notifiedRuns: string[] = [];
   const wrote: string[] = [];
   const routines = {
     listRuns: () => [...runs.values()].map((run) => ({ ...run })).reverse(),
@@ -105,7 +106,7 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
   const create = () => createAutomationReports({
     store, routines: () => manager, busy: (_botId, threadId) => busy.has(threadId),
     wrote: (_bot: BotRecord, threadId) => wrote.push(threadId),
-    notify: (kind, _bot, threadId, detail) => notified.push({ kind, threadId, detail }),
+    notify: (kind, _bot, threadId, detail, run) => { notified.push({ kind, threadId, detail }); notifiedRuns.push(run.id); },
     ...(options.threadLanguage ? { threadLanguage: options.threadLanguage } : {}),
     ...(options.notes ? { notes: { has: (runId: string) => options.notes!.has(runId), take: (runId: string) => { const note = options.notes!.get(runId) ?? null; options.notes!.delete(runId); return note; } } } : {}),
   });
@@ -129,7 +130,7 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
   /** Everything written into the chat since the bot said hello. */
   const added = () => store.messagesFor(main).filter((message) => !greeting.has(message.id));
   return {
-    store, bot, main, runs, busy, notified, wrote, reports, finished, lines, added, create,
+    store, bot, main, runs, busy, notified, notifiedRuns, wrote, reports, finished, lines, added, create,
     offline: () => { manager = null; },
     online: () => { manager = routines; },
   };
@@ -153,7 +154,21 @@ describe("automation reports", () => {
     expect(f.runs.get(run.id)!.report).toEqual({ state: "posted", threadId: f.main, messageId: f.lines()[0]!.id });
     expect(f.wrote).toEqual([f.main]);
     expect(f.notified).toEqual([{ kind: "done", threadId: f.main, detail: "Inbox brief: Acme replied about the order." }]);
+    expect(f.notifiedRuns, "the notice knows which run it reports on").toEqual([run.id]);
     expect(f.store.messagesFor(f.main).some((message) => message.kind === "routine.run")).toBe(false);
+  });
+
+  it("ends the person's own unread mark on the chat with a report, and keeps it through a run with nothing new", () => {
+    const f = fixture();
+    const held = () => f.store.taskByThread(f.bot.id, f.main)?.heldUnread;
+    f.store.patchTask(f.bot.id, f.main, { unread: true, heldUnread: f.store.activePath(f.main).at(-1)!.id });
+    const quiet = f.finished("NOTHING NEW");
+    f.reports.runSettled(quiet, `turn-${quiet.id}`);
+    expect(held(), "nothing was written").toBeDefined();
+    const run = f.finished("Acme replied about the order.");
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.store.taskByThread(f.bot.id, f.main)).toMatchObject({ unread: true });
+    expect(held(), "a report the person has not read yet is news").toBeUndefined();
   });
 
   it("writes nothing, marks nothing and notifies nobody for a run with nothing new", () => {

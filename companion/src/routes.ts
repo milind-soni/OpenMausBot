@@ -80,13 +80,19 @@ export function isBrowserControlAccess(method: string, path: string): boolean {
 /** Every request the iOS app makes, and nothing else. Paths arrive undecoded
  * and are anchored at both ends, so an encoded traversal fails to match. */
 const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
-  // Configured-or-not booleans, never keys; the write side is refused below.
+  // Configured-or-not booleans, never keys.
   { method: "GET", path: /^\/api\/config$/ },
+  // The harness takes only provider keys from a paired device; every other setting stays on the host.
+  { method: "PUT", path: /^\/api\/config$/ },
+  { method: "POST", path: /^\/api\/keys\/test$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
   // The harness refuses it while any Claude turn runs. Instance ids may carry
   // dots, so a dots-only segment is refused outright.
   { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/claude-update$/ },
+  // Engine sign-in. The harness refuses browser-based methods from a paired device. Dots-only ids are refused as above.
+  { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/auth\/(?:start|complete|cancel|sign-out)$/ },
+  { method: "GET", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/auth\/status$/ },
   { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned: the proxy answers it locally.
   { method: "GET", path: /^\/api\/companion\/endpoints$/ },
@@ -101,6 +107,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
+  // Display order only; the harness accepts just the departments the device can see.
+  { method: "PUT", path: /^\/api\/sidebar-sections\/order$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/respond$/ },
@@ -210,6 +218,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/live\/call\/end$/ },
   { method: "GET", path: /^\/api\/live\/call$/ },
   { method: "PATCH", path: /^\/api\/live\/settings$/ },
+  // A Gemini call the phone runs itself reports to the harness here; the harness checks the call's own session token.
+  { method: "POST", path: /^\/api\/live\/relay$/ },
 
   // The phone's own apps as bot tools: it registers, long-polls for jobs, leases and answers them.
   { method: "PUT", path: /^\/api\/phones\/self$/ },
@@ -275,7 +285,7 @@ const EXPLAINED: ReadonlyArray<{ path: RegExp; error: string }> = [
     // Losing the phone must not mean losing the ability to lock it out.
     error: "Remote access settings are managed on the host computer",
   },
-  { path: /^\/api\/config$/, error: "API keys can only be changed on your computer" },
+  { path: /^\/api\/config$/, error: "this setting is changed on your computer" },
   { path: /^\/api\/local-computer(\/|$)/, error: "the Local VM is set up on your computer" },
   {
     // Creating one exposes an endpoint to the internet.

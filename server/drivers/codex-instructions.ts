@@ -5,13 +5,38 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import type { CodexApprovalParams } from "./codex-approval-config.ts";
+
+export const CODEX_LINUX_SANDBOX_NOTE =
+  "Shell commands here run in Codex's Linux sandbox: root-owned files appear owned by nobody (uid 65534) and the network may be blocked, so ssh and git over SSH can fail with \"Bad owner or permissions on /etc/ssh/...\". That is usually the sandbox, not a host fault: run them through an approved escalation outside the sandbox before calling it one.";
+
+/** Explains Linux user-namespace uid mapping when Codex turns run inside a sandbox. */
+export function codexSandboxNote(
+  params: Pick<CodexApprovalParams, "thread" | "turn">,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "linux") return "";
+  const sandboxPolicy = (params.turn.sandboxPolicy as { type?: unknown } | undefined)?.type;
+  if (typeof sandboxPolicy === "string") {
+    return sandboxPolicy === "dangerFullAccess" ? "" : CODEX_LINUX_SANDBOX_NOTE;
+  }
+  if (typeof params.thread.permissions === "string") return "";
+  const threadSandbox = params.thread.sandbox;
+  if (typeof threadSandbox !== "string" || threadSandbox === "danger-full-access") return "";
+  return CODEX_LINUX_SANDBOX_NOTE;
+}
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
 
 export interface CodexInstructionReceipt {
   instructions: string;
   volatile?: string;
+  /** Characters of OpenMausBot developer blocks this native thread's history carries. */
+  injected?: number;
 }
+
+// Providers merge developer content into one system prompt with a hard character cap (GLM rejects above 100,000); 85,000 leaves room for Codex's own developer blocks.
+export const CODEX_INJECTED_CHAR_LIMIT = 85_000;
 
 const isFingerprint = (value: string) => /^[0-9a-f]{64}$/.test(value);
 
@@ -22,11 +47,12 @@ function parseReceipt(raw: string | undefined): CodexInstructionReceipt | null {
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as { instructions?: unknown; volatile?: unknown };
+      const record = parsed as { instructions?: unknown; volatile?: unknown; injected?: unknown };
       if (typeof record.instructions === "string" && isFingerprint(record.instructions)) {
         return {
           instructions: record.instructions,
           ...(typeof record.volatile === "string" && isFingerprint(record.volatile) ? { volatile: record.volatile } : {}),
+          ...(typeof record.injected === "number" && Number.isSafeInteger(record.injected) && record.injected >= 0 ? { injected: record.injected } : {}),
         };
       }
     }
@@ -35,7 +61,7 @@ function parseReceipt(raw: string | undefined): CodexInstructionReceipt | null {
 }
 
 /** Preserve native configured rules when overriding Codex's developer slot. */
-export function codexDeveloperInstructions(config: unknown, botInstructions: string): string {
+export function codexDeveloperInstructions(config: unknown, botInstructions: string, sandboxNote = ""): string {
   if (!config || typeof config !== "object" || Array.isArray(config)) {
     throw new Error("Codex returned no effective configuration; cannot safely update bot instructions.");
   }
@@ -44,8 +70,9 @@ export function codexDeveloperInstructions(config: unknown, botInstructions: str
     throw new Error("Codex returned invalid developer instructions; cannot safely update bot instructions.");
   }
   // Native rules go last, keeping their precedence over the bot's.
-  return configured
-    ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${configured}`
+  const trailing = [sandboxNote, configured].filter((part): part is string => Boolean(part)).join("\n\n");
+  return trailing
+    ? `${botInstructions || "No OpenMausBot bot-specific instructions remain."}\n\n${trailing}`
     : botInstructions;
 }
 
@@ -57,7 +84,8 @@ export async function syncCodexInstructions(
   resumed: boolean,
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   mentionTurn = false,
-): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; commitVolatile: (() => void) | null }> {
+  canReset = true,
+): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; commitVolatile: (() => void) | null; resetSession: boolean }> {
   const directory = join(DATA_DIR, "codex-instructions");
   const path = join(directory, `${digest(JSON.stringify([key, nativeThreadId]))}.sha256`);
   const fingerprint = digest(instructions);
@@ -69,6 +97,16 @@ export async function syncCodexInstructions(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     previous = null;
   }
+  const injected = previous?.injected ?? 0;
+  const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
+  const replacement = "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
+    + (instructions || "No OpenMausBot bot-specific instructions remain.");
+  if (canReset && resumed && previous?.instructions !== fingerprint && injected + replacement.length > CODEX_INJECTED_CHAR_LIMIT) {
+    // Superseded blocks stay in the thread until codex compacts, so another injection would only push the
+    // provider's system prompt past its cap; the driver's fresh-session recovery is the only cleanup. Only a changed
+    // block is injected, so a thread whose first block alone is that long is not reset on every turn.
+    return { deliverVolatile: false, hadVolatile, commitVolatile: null, resetSession: true };
+  }
   if (resumed && previous?.instructions !== fingerprint) {
     // Codex 0.153.4 keeps the old initial developer message until compaction, so an update is appended
     // only on change. inject_items flushes history before acknowledging; only then is the receipt written.
@@ -78,11 +116,7 @@ export async function syncCodexInstructions(
         items: [{
           type: "message",
           role: "developer",
-          content: [{
-            type: "input_text",
-            text: "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
-              + (instructions || "No OpenMausBot bot-specific instructions remain."),
-          }],
+          content: [{ type: "input_text", text: replacement }],
         }],
       });
     } catch (error) {
@@ -93,17 +127,20 @@ export async function syncCodexInstructions(
     }
   }
   const deliverVolatile = !resumed || previous?.volatile !== volatileFingerprint || mentionTurn;
-  const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
+  // A fresh thread carries its block through thread/start instead of inject_items, so it counts toward the same total.
+  const acknowledged = !resumed || previous?.instructions !== fingerprint
+    ? { instructions: fingerprint, injected: !resumed ? instructions.length : injected + replacement.length }
+    : { instructions: fingerprint, injected };
   if (!resumed || previous?.instructions !== fingerprint) {
     // The volatile digest stays pending until the provider accepts the turn, so a rejected one redelivers.
     mkdirSync(directory, { recursive: true });
-    writeFileAtomic(path, JSON.stringify({ instructions: fingerprint }), { mode: 0o600 });
+    writeFileAtomic(path, JSON.stringify(acknowledged), { mode: 0o600 });
   }
   const commitVolatile = previous?.instructions === fingerprint && previous?.volatile === volatileFingerprint
     ? null
     : () => {
         mkdirSync(directory, { recursive: true });
-        writeFileAtomic(path, JSON.stringify({ instructions: fingerprint, volatile: volatileFingerprint }), { mode: 0o600 });
+        writeFileAtomic(path, JSON.stringify({ ...acknowledged, volatile: volatileFingerprint }), { mode: 0o600 });
       };
-  return { deliverVolatile, hadVolatile, commitVolatile };
+  return { deliverVolatile, hadVolatile, commitVolatile, resetSession: false };
 }

@@ -138,6 +138,20 @@ posixOnly("bulk delete tasks e2e", () => {
     await waitUntil(async () => (await getBot(bot.id))?.busy === false, 15_000, "turn never finished");
   });
 
+  it("a closed-only delete keeps a thread that is not closed when the request arrives", async () => {
+    const bot = await newBot("Bulk Closed");
+    const open = await newTask(bot.id);
+
+    const res = await api("POST", `/api/bots/${bot.id}/tasks/delete`, { threadIds: [open], scope: "closed" });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.deleted).toEqual([]);
+    expect(res.body.refused).toEqual([{ threadId: open, reason: "not-closed" }]);
+    expect(await taskIds(bot.id)).toContain(open);
+    expect((await api("POST", `/api/bots/${bot.id}/tasks/delete`, { threadIds: [open], scope: "open" })).status).toBe(400);
+    expect(await taskIds(bot.id)).toContain(open);
+  });
+
   it("rejects malformed bodies and unknown bots", async () => {
     const bot = await newBot("Bulk D");
     const url = `/api/bots/${bot.id}/tasks/delete`;
@@ -201,6 +215,19 @@ posixOnly("bulk delete tasks e2e", () => {
     expect((await roomTaskIds(room.id)).sort()).toEqual([room.threadId, third].sort());
     writeFileSync(finishGate, "go");
     await waitUntil(async () => (await api("GET", "/api/bots")).body.groups.find((g: any) => g.id === room.id)?.working === false, 15_000, "room turn never finished");
+  });
+
+  it("a closed-only channel delete keeps a thread that is not closed", async () => {
+    const bot = await newBot("Bulk Closed Room");
+    const room = await newRoom("Bulk room closed", bot);
+    const second = (await api("POST", `/api/groups/${room.id}/tasks`, {})).body.task.threadId;
+
+    const res = await api("POST", `/api/groups/${room.id}/tasks/delete`, { threadIds: [second], scope: "closed" });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.deleted).toEqual([]);
+    expect(res.body.refused).toEqual([{ threadId: second, reason: "not-closed" }]);
+    expect((await roomTaskIds(room.id)).sort()).toEqual([room.threadId, second].sort());
   });
 
   it("rejects malformed channel bodies, unknown channels and bot-to-bot channels", async () => {

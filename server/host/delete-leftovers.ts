@@ -1,7 +1,8 @@
 // Deleting a conversation or a bot removes what it kept on disk outside its transcript: the files uploaded to the
-// conversation, its box uploads folder, the session files the engines wrote for it, and for a bot its checkpoints and
+// conversation, its box uploads folder, its own notes, the session files the engines wrote for it, and for a bot its checkpoints and
 // the memory layers kept beside its own folder. A conversation's own folder (task-workspaces/<bot>/<thread>) holds
-// files the bot made for the person, and stays when the conversation or the bot is deleted.
+// files the bot made for the person, and stays when the conversation or the bot is deleted: on a Cloud home only its
+// package installs, and the conversation's full tool results, go (conversation-folder-cleanup.ts).
 //
 // Security: a file goes only when it is provably the deleted conversation's or bot's. An upload another conversation,
 // a picture or a routine still names stays; an engine session a remaining conversation still resumes stays. Nothing is
@@ -10,6 +11,7 @@
 import { lstatSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
+import type { AttachmentReferences } from "../attachment-references.ts";
 import { baseBotId, isLayerId } from "../audience.ts";
 
 /** A file in attachments/, by its URL or by its path (as JSON escapes it) a sent document's tag carries. */
@@ -35,29 +37,34 @@ export interface EngineSessionFolders {
 }
 
 type Cursors = Record<string, unknown> | undefined;
+type Folder = string | null | undefined;
 type Change = { type: string; threadId?: string; botId?: string };
 
 export interface DeleteLeftoversDeps {
   dataDir: string;
   store: {
-    readonly bots: ReadonlyArray<{ id: string; threadId?: string; resumeCursors?: Cursors; tasks?: ReadonlyArray<{ threadId: string; resumeCursors?: Cursors }> }>;
+    readonly bots: ReadonlyArray<{ id: string; threadId?: string; resumeCursors?: Cursors; tasks?: ReadonlyArray<{ threadId: string; resumeCursors?: Cursors; cwd?: Folder }> }>;
+    readonly groups?: ReadonlyArray<{ threadId?: string; pinnedCwd?: Folder; tasks?: ReadonlyArray<{ threadId: string; pinnedCwd?: Folder }> }>;
     messagesFor(threadId: string): readonly unknown[];
     onChange(listener: (change: Change) => void): unknown;
     /** Set here: the store calls it before it tries to delete these conversations. */
     threadsGoing: (threadIds: readonly string[]) => void;
   };
-  /** Conversations whose messages still name this text (message-db.ts threadsReferencing). */
-  threadsReferencing(fragment: string): readonly string[];
+  /** Which uploads no remaining message names: one pass over the transcripts for them all (attachment-references.ts). */
+  references: Pick<AttachmentReferences, "removeUnreferenced">;
   /** Stored names something other than a transcript uses (pictures, routines' files, files on their way into a turn);
    * null while that cannot be read, and then no upload is removed. */
   keptAttachments(): ReadonlySet<string> | null;
-  deleteAttachment(name: string): void;
+  /** Removes these stored uploads, by name (attachments.ts deleteAttachments). */
+  deleteAttachments(names: readonly string[]): void;
   engineFolders(): EngineSessionFolders;
   layers: MemoryLayerRecords;
   /** Resolves once no git is running on the bot's checkpoints: Windows cannot remove a folder a process still has open. */
   checkpointsQuiet?(botId: string): Promise<void>;
   /** Runs `flush` once the delete under way has finished, so one pass covers every conversation it removed. */
   defer?(flush: () => void): void;
+  /** What clears the deleted conversations' and bots' rebuildable trees and tool results, off the delete's own call. */
+  folders?: { conversationsGone(threadIds: Iterable<string>, workedIn?: Iterable<string>): void; botGone(botId: string): void };
   warn?(line: string): void;
 }
 
@@ -203,7 +210,10 @@ export function instanceEnvironment(base: Record<string, string | undefined>, in
 interface Noted {
   attachments: Set<string>;
   sessions: Set<string>;
+  /** The folders it worked in: a fork works in its source's folder, which may be left with no conversation. */
+  folders: Set<string>;
 }
+const nothingNoted = (): Noted => ({ attachments: new Set(), sessions: new Set(), folders: new Set() });
 
 export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
   const dataDir = resolve(deps.dataDir);
@@ -225,11 +235,16 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
 
   function note(threadId: string): void {
     if (!ID.test(threadId)) return;
-    const found: Noted = { attachments: new Set(), sessions: new Set() };
+    const found = nothingNoted();
     for (const match of JSON.stringify(deps.store.messagesFor(threadId)).matchAll(ATTACHMENT)) found.attachments.add(match[1]!);
     for (const bot of deps.store.bots) {
       if (bot.threadId === threadId) for (const cursor of cursorsOf(bot.resumeCursors)) found.sessions.add(cursor);
       for (const task of bot.tasks ?? []) if (task.threadId === threadId) for (const cursor of cursorsOf(task.resumeCursors)) found.sessions.add(cursor);
+      for (const task of bot.tasks ?? []) if (task.threadId === threadId && task.cwd) found.folders.add(task.cwd);
+    }
+    for (const group of deps.store.groups ?? []) {
+      if (group.threadId === threadId && group.pinnedCwd) found.folders.add(group.pinnedCwd);
+      for (const task of group.tasks ?? []) if (task.threadId === threadId && task.pinnedCwd) found.folders.add(task.pinnedCwd);
     }
     for (const session of loggedSessions(dataDir, threadId)) found.sessions.add(session);
     noted.delete(threadId);
@@ -245,19 +260,42 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     }).join("\n");
   }
 
-  function removeAttachments(names: ReadonlySet<string>): void {
-    if (!names.size) return;
+  /** Of these names, the stored uploads nothing but a transcript may use: not a picture, a member's picture or a kept file.
+   * Null, with a warning, while what still uses uploads cannot be read. */
+  function removable(names: Iterable<string>): string[] | null {
     const kept = deps.keptAttachments();
-    if (!kept) return warn("delete leftovers: uploads stayed behind: what still uses them cannot be read right now");
+    if (!kept) { warn("delete leftovers: uploads stayed behind: what still uses them cannot be read right now"); return null; }
     const pictures = memberPictures();
+    const found: string[] = [];
     for (const name of names) {
       const path = join(attachments, name);
       if (name.includes("..") || basename(name) !== name || kept.has(name) || pictures.includes(name) || !plainlyUnder(dataDir, path)) continue;
-      attempt(`the upload ${name}`, () => {
-        if (!lstatSync(path, { throwIfNoEntry: false })?.isFile() || deps.threadsReferencing(name).length) return;
-        deps.deleteAttachment(name);
-      });
+      attempt(`the upload ${name}`, () => { if (lstatSync(path, { throwIfNoEntry: false })?.isFile()) found.push(name); });
     }
+    return found;
+  }
+
+  /** Asked again just before they go, since the pass gives the event loop back: a name something started using meanwhile stays. */
+  function removeNow(names: readonly string[]): number {
+    const going = removable(names) ?? [];
+    if (!going.length) return 0;
+    try {
+      deps.deleteAttachments(going);
+    } catch (error) {
+      for (const name of going) warn(`delete leftovers: the upload ${name} stayed behind: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    }
+    return going.length;
+  }
+
+  /** Resolves once every upload no remaining message names has gone; never rejects. */
+  function removeAttachments(names: ReadonlySet<string>): Promise<void> {
+    if (!names.size) return Promise.resolve();
+    const candidates = removable(names);
+    if (!candidates?.length) return Promise.resolve();
+    return deps.references.removeUnreferenced(candidates, removeNow).then(() => {}, (error: unknown) => {
+      for (const name of candidates) warn(`delete leftovers: the upload ${name} stayed behind: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   function removeSessions(sessions: ReadonlySet<string>): void {
@@ -281,6 +319,12 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     for (const bot of entries(root)) removeUnder(dataDir, join(root, bot, threadId));
   }
 
+  /** memory/threads/<thread>.md in the workspace of whichever bot kept the conversation. */
+  function removeThreadNotes(threadId: string): void {
+    const root = join(dataDir, "workspaces");
+    for (const bot of entries(root)) removeUnder(dataDir, join(root, bot, "memory", "threads", `${threadId}.md`));
+  }
+
   function removeBot(botId: string): void {
     if (!ID.test(botId) || isLayerId(botId)) return;
     const removeCheckpoints = () => attempt(`checkpoints of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "checkpoints", botId)));
@@ -294,22 +338,31 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     }
   }
 
-  function flush(): void {
+  /** The uploads go after the rest, off this call: the promise resolves once they have. */
+  function flush(): Promise<void> {
     scheduled = false;
     const threads = new Map(gone);
     const bots = [...goneBots];
     gone.clear();
     goneBots.clear();
-    attempt("uploads", () => removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))));
+    let uploads = Promise.resolve();
+    attempt("uploads", () => { uploads = removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))); });
     attempt("engine sessions", () => removeSessions(new Set([...threads.values()].flatMap((found) => [...found.sessions]))));
     for (const threadId of threads.keys()) attempt(`box uploads of ${threadId}`, () => removeBoxUploads(threadId));
+    for (const threadId of threads.keys()) attempt(`notes of ${threadId}`, () => removeThreadNotes(threadId));
     for (const botId of bots) removeBot(botId);
+    if (deps.folders) {
+      const folders = deps.folders;
+      attempt("conversation folders", () => folders.conversationsGone(threads.keys(), [...threads.values()].flatMap((found) => [...found.folders])));
+      for (const botId of bots) if (!isLayerId(botId)) attempt(`conversation folders of ${botId}`, () => folders.botGone(botId));
+    }
+    return uploads;
   }
 
   function schedule(): void {
     if (scheduled) return;
     scheduled = true;
-    defer(() => attempt("leftovers", flush));
+    defer(() => attempt("leftovers", () => void flush()));
   }
 
   deps.store.threadsGoing = (threadIds) => {
@@ -317,7 +370,7 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
   };
   deps.store.onChange((change) => {
     if (change.type === "thread.deleted" && change.threadId && ID.test(change.threadId)) {
-      gone.set(change.threadId, noted.get(change.threadId) ?? { attachments: new Set(), sessions: new Set() });
+      gone.set(change.threadId, noted.get(change.threadId) ?? nothingNoted());
       noted.delete(change.threadId);
       schedule();
     } else if (change.type === "bot.deleted" && change.botId) {

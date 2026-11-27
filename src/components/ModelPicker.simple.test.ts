@@ -135,6 +135,8 @@ function open(forBot: Bot, options: { contained?: boolean; thread?: boolean } = 
 }
 
 type Rendered = ReturnType<typeof render>;
+/** The class of the button a trigger element draws (Simple's trigger is its own component). */
+const buttonClass = (trigger: ReactElement) => /^<button[^>]*\sclass="([^"]*)"/.exec(renderToStaticMarkup(trigger))?.[1] ?? "";
 const pane = (rendered: Rendered) =>
   rendered.nodes.find((node) => node.type === SimpleModelMenu) as ReactElement<ComponentProps<typeof SimpleModelMenu>> | undefined;
 const list = (rendered: Rendered): SimpleMenu => pane(rendered)!.props.menu;
@@ -363,6 +365,32 @@ describe("the model picker in Simple mode", () => {
     expect(atDefault).toContain('data-simple-effort-auto="true" class="px-2 pb-1 text-[12px] leading-4 text-ink-tertiary">Recommended. Effort is picked per message.</p>');
   });
 
+  it("offers ultra and its tooltip hint only on models whose effortLevels include ultra", () => {
+    const codexEngine: InstanceInfo = {
+      ...fixture.instances[0]!,
+      instanceId: "codex",
+      driverKind: "codex",
+      displayName: "Codex",
+      capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+      models: {
+        default: "gpt-5.4",
+        options: [
+          { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+    };
+    fixture.instances = [codexEngine];
+    const withUltra = open(bot("ultra", "codex", "gpt-5.4"));
+    expect(thinking(withUltra).levels).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    const ultraBand = region(menu(withUltra.html), "data-simple-effort-band");
+    expect(ultraBand).toMatch(/aria-pressed="true"[^>]*>Ultra<\/button>/);
+    expect(ultraBand).toContain(">Maximum thinking with automatic task delegation. Slowest, for the toughest jobs.</p>");
+    fixture.values = [];
+    const withoutUltra = open(bot("high", "codex", "gpt-5.3"));
+    expect(thinking(withoutUltra).levels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
   it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
     const chip = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     const markup = renderToStaticMarkup(chip);
@@ -370,11 +398,11 @@ describe("the model picker in Simple mode", () => {
     expect(markup.replace(/title="[^"]*"/, "")).not.toContain("High");
     expect(String(chip.props.title)).toContain("High thinking");
     expect(String(chip.props.title)).not.toContain("effort");
-    expect(String(chip.props.className)).toContain("h-9");
-    expect(String(chip.props.className)).toContain("rounded-full");
-    expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
+    expect(buttonClass(chip)).toContain("h-9");
+    expect(buttonClass(chip)).toContain("rounded-full");
+    expect(buttonClass(chip)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
-    expect(markup).toContain('<span class="min-w-0 truncate max-w-[160px]">Opus 5.5</span>');
+    expect(markup).toContain('<span data-model-pill-words="" class="min-w-0 truncate max-w-[160px]">Opus 5.5</span>');
     expect(markup).toContain("opacity-60");
     fixture.advanced = true;
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
@@ -383,7 +411,7 @@ describe("the model picker in Simple mode", () => {
   });
 
   it("puts the header chip on an opaque surface, so scrolled transcript text cannot read through it", () => {
-    const classes = () => String(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!.props.className);
+    const classes = () => buttonClass(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!);
     expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
     expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
     fixture.advanced = true;
@@ -403,11 +431,11 @@ describe("the model picker in Simple mode", () => {
 
   it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
     const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
-    expect(String(contained.props.className)).toContain("min-w-0 max-w-[72%]");
-    expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
+    expect(buttonClass(contained)).toContain("min-w-0 max-w-[72%]");
+    expect(buttonClass(contained)).not.toMatch(/\bshrink-0\b/);
     const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
-    expect(String(loose.props.className)).toContain("shrink-0");
-    expect(String(loose.props.className)).not.toContain("max-w-[72%]");
+    expect(buttonClass(loose)).toContain("shrink-0");
+    expect(buttonClass(loose)).not.toContain("max-w-[72%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {

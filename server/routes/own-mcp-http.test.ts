@@ -1,13 +1,19 @@
-import { createServer, type Server } from "node:http";
+import { mkdtempSync, rmSync } from "node:fs";
+import { createServer, request, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { Agent, fetch as undiciFetch } from "undici";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { openHarnessGate } from "../bot-box/harness-gate.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createOwnMcpHttpRoutes, ownMcpHttpRoutes } from "./own-mcp-http.ts";
 import type { RouteHandler } from "./table.ts";
-import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "./own-mcp-http-path.ts";
+import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH, TOOL_SHARE_HEADER } from "./own-mcp-http-path.ts";
+import { definitionListBytes, toolListShareProfile, type ListedTool } from "../tool-list-budget.ts";
+import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV, TOOL_LIMIT_HEADER } from "../tool-count-limit.ts";
 
 /** This server's own internal endpoints, as the stdio proxies reach them: the turn's capability is checked there. */
@@ -117,6 +123,18 @@ describe("OpenMausBot's own MCP servers over HTTP", () => {
     const whole = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2" });
     expect(await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2", [TOOL_LIMIT_ENV]: "3" })).toEqual(whole.slice(0, 3));
   });
+
+  it("fits each server's list into its share of the session's tool budget, every tool kept", async () => {
+    const agents = async (settings: Record<string, string>) =>
+      ((await (await post("agents", { jsonrpc: "2.0", id: 8, method: "tools/list" }, agentsHeaders(settings))).json()) as { result: { tools: ListedTool[] } }).result.tools;
+    const whole = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2" });
+    const shared = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2", [TOOL_SCHEMA_PROFILE_ENV]: toolListShareProfile(definitionListBytes(whole) - 5_000) });
+    expect(shared.map((tool) => tool.name)).toEqual(whole.map((tool) => tool.name));
+    expect(definitionListBytes(shared)).toBeLessThanOrEqual(definitionListBytes(whole) - 5_000);
+    const browser = await (await post("browser", { jsonrpc: "2.0", id: 9, method: "tools/list" },
+      { authorization: "Bearer turn-capability", [TOOL_SHARE_HEADER]: toolListShareProfile(1) })).json();
+    expect(browser).toEqual({ jsonrpc: "2.0", id: 9, result: { tools: [{ name: "agent_browser_open", inputSchema: { type: "object" } }] } });
+  });
 });
 
 describe("a long tool call, and the stdio proxy's limits", () => {
@@ -180,5 +198,34 @@ describe("a long tool call, and the stdio proxy's limits", () => {
       const two = await read(await post("browser", [large(1), large(2)])) as Array<{ id: number; result: { isError?: boolean; content: Array<{ text: string }> } }>;
       expect(two.filter((reply) => reply.result.isError === true).map((reply) => reply.result.content[0]!.text)).toEqual(["The browser answer exceeded the size limit."]);
     });
+  });
+});
+
+// The box's harness gate listens on a unix socket, which Windows refuses at a file path; the box runs only on Linux.
+describe.skipIf(process.platform === "win32")("an engine in the bot box", () => {
+  it("reaches these servers through the box's harness gate, as its stdio proxies reach the routes behind them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-own-mcp-gate-"));
+    const gate = await openHarnessGate({ socketPath: join(dir, "harness.sock"), port: Number(new URL(base).port) });
+    const call = (path: string, body: unknown) => new Promise<{ status: number; text: string }>((resolve, reject) => {
+      const req = request({ socketPath: gate.socketPath, path, method: "POST", headers: { "content-type": "application/json",
+        accept: "application/json, text/event-stream", authorization: "Bearer turn-capability" } }, (res) => {
+        let text = "";
+        res.on("data", (chunk) => { text += chunk; });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
+      });
+      req.on("error", reject);
+      req.end(JSON.stringify(body));
+    });
+    try {
+      const listed = await call(`${OWN_MCP_HTTP_PATH}browser`, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+      expect(JSON.parse(listed.text)).toMatchObject({ id: 1, result: { tools: [{ name: "agent_browser_open" }] } });
+      const called = await call(`${OWN_MCP_HTTP_PATH}browser`, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "agent_browser_open", arguments: {} } });
+      expect(JSON.parse(called.text.split("\n").find((line) => line.startsWith("data: "))!.slice(6))).toEqual(
+        { jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "ran agent_browser_open" }] } });
+      expect((await call("/api/bots", {})).status).toBe(403);
+    } finally {
+      await gate.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

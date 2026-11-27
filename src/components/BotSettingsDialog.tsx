@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 
-import { type Bot, type BotSettingsSection } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "./DesktopCapabilities";
 import { BOT_SECTIONS, appSearchPhase, searchEmptyText, sectionLabel, sectionMatches } from "./bot-settings/sections";
@@ -26,15 +26,11 @@ import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotPanel } from "./bot-panel/PanelShell";
 import { LibraryTab } from "./bot-panel/LibraryTab";
-import type { SimplePageId } from "./bot-panel/page-registry";
-import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
+import { BOT_PANEL_ID, sidePanelCls, useSidePanelLeave } from "./bot-panel/side-panel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
-
-/** Where the Library's memory, skills and folder rows lead in Advanced settings. */
-const LIBRARY_LINKS: Partial<Record<SimplePageId, BotSettingsSection>> = { memory: "memory", skills: "skills", folder: "access" };
 
 /** The avatar moves with every turn of the bot, so only this section follows its motion. */
 function MovingIdentitySection(props: Omit<ComponentProps<typeof IdentitySection>, "mascotMotion">) {
@@ -50,6 +46,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
+  useSidePanelLeave(dialogRef);
   const { dragProps } = useCaptionChrome();
   const [query, setQuery] = useState("");
   const collapsed = !state.botSettingsExpandAccordion;
@@ -140,7 +137,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       case "memory":
         return <MemorySection bot={bot} active={!collapsed && section === "memory"} onToggle={(enabled) => derived.patch({ memoryEnabled: enabled })} />;
       case "library":
-        return <LibraryTab bot={bot} onOpen={(page) => dispatch({ type: "toggleSettings", open: true, section: LIBRARY_LINKS[page] ?? "overview" })} />;
+        return <LibraryTab bot={bot} />;
       case "routines":
         return <RoutinesSection bot={bot} routines={derived.botRoutines} runs={state.routineRuns} />;
       case "access":

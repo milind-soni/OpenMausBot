@@ -148,6 +148,14 @@ const BLOCKED: Case[] = [
   ["if true; then rm -rf /; fi", "delete-root"],
   ["echo $(rm -rf /)", "delete-root"],
   ["echo `rm -rf ~`", "delete-home"],
+  // a substitution inside `${…}` or an array runs
+  ["echo ${X:-$(rm -rf /)}", "delete-root"],
+  ['echo "${X:-"$(rm -rf /)"}"', "delete-root"],
+  [': "${DIR:=`rm -rf ~`}"', "delete-home"],
+  ["files=( $(mkfs.ext4 /dev/sda1) )", "format-disk"],
+  // a newline inside a substitution does not start the outer heredoc's body
+  [": <<EOF ${X:-$(printf ok\n)}; ( rm -rf ~\nEOF\n); echo }", "delete-home"],
+  [": <<EOF $(printf ok\n); ( rm -rf ~\nEOF\n)", "delete-home"],
   ["rm -rf \\\n  /", "delete-root"],
   // formatting or overwriting a disk
   ["mkfs.ext4 /dev/sda1", "format-disk"],
@@ -220,6 +228,11 @@ const BLOCKED: Case[] = [
   ["powershell.exe -NoProfile -Command Remove-Item -Recurse C:\\Users", "delete-system-directory", "win32"],
   ["rm -r -fo C:\\", "delete-root", "win32"],
   ["rm -Recurse -Force C:\\Windows", "delete-system-directory", "win32"],
+  ["Remove-Item C:\\ \u2013Recurse \u2013Force", "delete-root", "win32"],
+  ["Remove-Item \u2014Recurse C:\\Windows", "delete-system-directory", "win32"],
+  ["ri \u2015r $HOME", "delete-home", "win32"],
+  ["rm \u2013r \u2013fo C:\\Users", "delete-system-directory", "win32"],
+  ["pwsh -c 'Remove-Item \u2013Recurse -Force /'", "delete-root"],
   // Windows: Git Bash and WSL spellings of a drive
   ["rm -rf /c", "delete-root", "win32"],
   ["rm -rf /c/Users", "delete-system-directory", "win32"],
@@ -447,6 +460,8 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   ["rm -rf $BUILD_DIR/"],
   ['rm -rf "${TMPDIR:-/tmp}/work"'],
   ['rm -rf "$(mktemp -d)"'],
+  ['DIR="${DIR:-$(mktemp -d)}"'],
+  ["files=( $(ls) )"],
   ["rm -rf /$NAME"],
   ["rm -rf ~/../shared-scratch"],
   ["rm -rf ~other"],
@@ -480,6 +495,7 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   ["del /s /q C:\\Temp\\*"],
   ["del C:\\Windows\\Temp\\a.log"],
   ["Remove-Item -Recurse -Force .\\node_modules"],
+  ["Remove-Item \u2013Recurse \u2013Force .\\node_modules"],
   ["Remove-Item -Recurse $env:TEMP\\work"],
   ['Remove-Item -Recurse "$env:USERPROFILE\\Downloads\\old"'],
   ["Remove-Item -Recurse '$HOME'"],
@@ -615,7 +631,8 @@ const NOT_CLEAR: Array<[command: string, on: Platform | "posix" | "all", outcome
   ["x=$((2 << 3)); echo $x", "all", "unreadable"],
   ["(( x << 1 ))\nrm -rf /", "all", "unreadable"],
   ["echo $[1<<2]\nrm -rf /", "all", "unreadable"],
-  ["echo $((1 << 2))\nrm -rf /", "all", "unreadable"],
+  // inside `$(( … ))` the heredoc stays in the substitution, so the next line is still read
+  ["echo $((1 << 2))\nrm -rf /", "all", "delete-root"],
   // `env -S` expands `$NAME`, reads backslashes and drops `#` comments by
   // rules of its own, and a value the shell computed is not known
   ["env -S 'rm -rf ${TARGET}'", "all", "unreadable"],

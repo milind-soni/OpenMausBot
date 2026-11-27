@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
-import { codexLoginCheck } from "./codex-login.ts";
+import { codexLoginCheck, keptCodexLogin } from "./codex-login.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
@@ -24,5 +24,18 @@ describe("Codex login check", () => {
     login.forget();
     await expect(asked).resolves.toBe("present");
     await expect(login.check(env("logged-out"))).resolves.toBe("missing");
+  });
+});
+
+describe("Codex sign-in through a check that could not finish", () => {
+  it("keeps the last answer; an answer that finished always counts", () => {
+    const signedIn = keptCodexLogin();
+    expect(signedIn({ status: "unknown", busy: true })).toBe(false);
+    expect(signedIn({ status: "signed-in" })).toBe(true);
+    expect(signedIn({ status: "unknown", busy: true })).toBe(true);
+    expect(signedIn({ status: "unknown" })).toBe(false);
+    expect(signedIn({ status: "unknown", busy: true })).toBe(false);
+    expect(signedIn({ status: "signed-in" })).toBe(true);
+    expect(signedIn({ status: "signed-out" })).toBe(false);
   });
 });

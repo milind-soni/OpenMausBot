@@ -22,7 +22,10 @@ import { isUnanswered } from "./cdp/errors.ts";
 import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
-import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
+import { executeTool, personUrl, readsDuringHold, toolFailure, type ToolContext } from "./dispatch.ts";
+import type { DesktopTarget } from "./desktop/views.ts";
+import { PERSON_HOLDS_TAB } from "./pane/endpoint.ts";
+import { fillDisplay, resizeDisplay } from "./desktop/window.ts";
 import { installedExtensions } from "./extensions.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import type { HoldLimits } from "./hold.ts";
@@ -42,6 +45,14 @@ export const BROWSER_STUCK = `The browser engine is stuck. Press Restart in the 
 const RESTART_COST = "a restart closes every tab and loses page state such as form input";
 const PROBE_MS = 5_000;
 const CAPACITY_WAIT_MS = 30_000;
+/** How long a started Chrome's first tab may take to run: as long as Chrome itself gets to answer on its DevTools pipe
+ * (chrome/launch.ts). On a busy or CPU-capped computer the first tab can take longer than 15 s, and refusing it then only
+ * made the bot start Chrome again from nothing. */
+const FIRST_TAB_MS = 60_000;
+/** What a bot's call keeps back from its budget while the browser starts: the call answers "still starting" by then, so
+ * it never ends as a lost call, and the start carries on for its next call. */
+const STARTING_MARGIN_MS = 15_000;
+export const BROWSER_STARTING = "The browser is still starting (this computer is busy), so this call did not run. Call again in a moment: the next call uses the same browser once it is up.";
 const SERVER_TAB_LIMIT = 32;
 const PROFILE_TAB_LIMIT = 8;
 
@@ -71,6 +82,8 @@ interface Running {
   readonly browser: CdpBrowser;
   readonly offs: Array<() => void>;
   closing: boolean;
+  /** The person resized the browser's display away from its usual size. */
+  resized?: boolean;
 }
 
 type Reopened = { kind: "idle" | "restart" | "crash"; pages: string[] } | null;
@@ -241,11 +254,28 @@ export class BrowserService {
       if (profile.tabs.remove(page.targetId)) profile.hub.tabsChanged();
     }));
     if (browser.downloads) run.offs.push(browser.downloads.onChange((download) => profile.hub.downloaded(download)));
+    if (opened.onPersonInput) run.offs.push(opened.onPersonInput(() => { profile.lastUsed = Date.now(); }));
+    // A display the person resized goes back to its usual size when they hand the browser back, as the page does.
+    const display = opened.display;
+    if (display) run.offs.push(profile.control.onChange(() => {
+      if (profile.control.owner !== null || !run.resized || run.closing) return;
+      run.resized = false;
+      void resizeDisplay(display.socket, display.size).then(() => fillDisplay(browser, display.size)).catch(() => undefined);
+    }));
     try {
       this.#stillWanted(profile, epoch);
-      await browser.waitForPage(() => true, 15_000);
+      // A Chrome that dies before any tab runs says so at once, not when the wait ends.
+      const firstTab = browser.waitForPage(() => true, FIRST_TAB_MS);
+      const died = opened.exited.then(() => { throw new Error("Chrome closed before its first tab opened."); });
+      firstTab.catch(() => undefined);
+      died.catch(() => undefined);
+      await Promise.race([firstTab, died]);
       for (const page of browser.pages()) await page.ready.then(() => adopt(page, "restored"), () => undefined);
       if (fresh) await this.#onlyBlankTab(profile, browser);
+      // Chrome gives a new window's keyboard to its address bar, and the bot's DevTools Protocol work never moves it: on a
+      // display a person's keys went there, and Google Chrome opened its suggestions over the page. The page takes it.
+      const front = browser.activePage ?? browser.pages()[0];
+      if (display && front) await front.session.send("Page.bringToFront").catch(() => undefined);
       this.#stillWanted(profile, epoch);
     } catch (error) {
       run.closing = true;
@@ -284,6 +314,9 @@ export class BrowserService {
     }
     profile.reopened = { kind: "crash", pages: [] };
     profile.control.settle();
+    // A hold of a browser that is gone ends with it: the bot is not left paused for nobody, and the person's views show
+    // the browser free when it starts again.
+    if (profile.control.owner !== null) void profile.hub.handBack();
     this.#options.log?.(`browser ${profile.key}: Chrome exited unexpectedly; the next call starts it again`);
     profile.hub.stopped("crashed");
   }
@@ -472,12 +505,18 @@ export class BrowserService {
     if (!parsed.ok) return errorResult(parsed.error);
     let run: Running;
     try {
-      run = await this.running(profile);
+      const started = await this.#startedBy(profile, deadline);
+      if (started === null) return errorResult(BROWSER_STARTING);
+      run = started;
     } catch (error) {
       return errorResult(`The browser could not start: ${error instanceof Error ? error.message : String(error)}`);
     }
     beforeDispatch?.();
-    if (control.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+    if (control.owner !== null && !readsDuringHold(parsed.call)) throw new Error(BROWSER_CONTROL_REFUSAL);
+    // A pane tab the person holds takes the same reads; the pane's endpoint refuses any other command to it as well.
+    const asked = (parsed.call.input as { tab?: string }).tab;
+    const paneTab = asked === "new" ? null : asked ? profile.tabs.get(asked) : profile.active();
+    if (paneTab && run.opened.personControl?.held(paneTab.page.targetId) && !readsDuringHold(parsed.call)) return errorResult(PERSON_HOLDS_TAB);
     control.call = parsed.call.name;
     try {
       const result = await executeTool(this.#context(profile, run, deadline), parsed.call);
@@ -497,6 +536,21 @@ export class BrowserService {
     }
   }
 
+  /** The running browser, or null when it is still starting as the call's budget nears its end. The start is shared and
+   * carries on; nothing is latched, so the next call takes the same browser. */
+  async #startedBy(profile: ProfileState, deadline: number): Promise<Running | null> {
+    const starting = this.running(profile);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), Math.max(0, deadline - Date.now() - STARTING_MARGIN_MS)); timer.unref?.(); });
+    try {
+      const outcome = await Promise.race([starting, late]);
+      if (outcome === null) starting.catch(() => undefined);
+      return outcome;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   #context(profile: ProfileState, run: Running, deadline: number): ToolContext {
     return {
       control: profile.control,
@@ -513,6 +567,7 @@ export class BrowserService {
       secretOnPage: (tab) => this.#holds.refuses(profile.session, async () => tab.page.url(), tab.page.targetId),
       saveScreenshot: (data, pageUrl) => this.#saveScreenshot(profile, data, pageUrl),
       downloads: () => run.browser.downloads?.list() ?? [],
+      personHolds: () => run.opened.personControl?.holding() ?? false,
     };
   }
 
@@ -591,7 +646,10 @@ export class BrowserService {
     if (!profile || !tab) throw new Error("the browser has no open page to picture");
     if (profile.control.agents > 0 || this.#lanes.held(profile.key)) throw new Error("The browser is busy with an agent action.");
     if (profile.control.owner !== null) throw new Error("a person holds the browser");
+    // A page under a dialog answers no screencast pause or capture, and the bot's next call would wait behind this one.
+    if (tab.page.dialogs.pending) throw new Error("a dialog is open on the page");
     return profile.control.agent(tab, async () => {
+      if (tab.page.dialogs.pending) throw new Error("a dialog is open on the page");
       if (await tab.page.secrets.present(tab.page.frames)) throw new Error("a filled secret is on the page");
       const shot = await profile.hub.paused(tab, () => tab.page.screenshot({ format: "jpeg", quality: 80 }));
       return { png: shot.data.toString("base64"), format: "jpeg" as const };
@@ -643,6 +701,20 @@ export class BrowserService {
     return profile.hub.attach(options, push);
   }
 
+  /** The display a person sees this browser's window on: "pictures" when it runs headless, "stopped" while it does not
+   * run. A desktop view never starts a browser: the person's v2 view does, and an idle one stays closed. */
+  async desktop(target: BrowserTarget): Promise<DesktopTarget | "pictures" | "stopped"> {
+    const profile = this.#profiles.get(target.key);
+    const run = profile?.run && !profile.run.closing ? profile.run : await profile?.starting?.catch(() => null);
+    if (!profile || !run || run.closing) return "stopped";
+    const display = run.opened.display;
+    if (!display) return "pictures";
+    return { socket: display.socket, control: profile.control, used: () => profile.hub.personUsed(), resized: (width, height) => {
+      run.resized = width !== display.size.width || height !== display.size.height;
+      void fillDisplay(run.browser, { width, height });
+    } };
+  }
+
   heldBy(session: string): string | null {
     return this.#bySession(session)?.control.owner ?? null;
   }
@@ -661,6 +733,19 @@ export class BrowserService {
   /** A person's files for the page's open picker, which their view was offered as `chooserId`. */
   answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
     return this.#bySession(session)?.hub.answerFileChooser(owner, chooserId, paths) ?? Promise.resolve(false);
+  }
+
+  /**
+   * The person takes `tab` of this session's desktop pane from the bot, or hands it back. It is named, since the bot's
+   * active tab can be one opened behind the person's. The tab held, or null where there is no such pane tab.
+   */
+  holdTab(session: string, tab: string, held: boolean): string | null {
+    const profile = this.#bySession(session);
+    const control = profile?.run?.opened.personControl;
+    const chosen = profile?.tabs.get(tab);
+    if (!control || !chosen) return null;
+    control.hold(chosen.page.targetId, held);
+    return chosen.id;
   }
 
   /** A file this session's browser finished downloading. */
@@ -709,6 +794,7 @@ export class BrowserService {
       running: async () => { await this.running(profile); },
       used: () => { profile.lastUsed = Date.now(); },
       pageLimit: () => (profile.run && !profile.run.closing ? profile.run.opened.pageLimit ?? null : null),
+      desktop: () => Boolean(profile.run?.opened.display),
       take: async (owner: string): Promise<TakeResult> => {
         await this.running(profile);
         const taken = await profile.control.take(owner);

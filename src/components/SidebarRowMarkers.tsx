@@ -1,3 +1,4 @@
+import { Star } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
@@ -54,4 +55,14 @@ export function RowDot({ waiting = false }: { waiting?: boolean }) {
 export function RowStatusText({ working = false, failed = false, unread }: { working?: boolean; failed?: boolean; unread: boolean }) {
   const text = [working ? t("chat.activity.working") : "", failed ? t("sidebar.preview.failed") : "", unread ? t("task.unread") : ""].filter(Boolean).join(", ");
   return text ? <span className="sr-only">{text}</span> : null;
+}
+
+/** The bot's main thread ("Set as main thread"): one mark for every list of its threads. It never shrinks, so a long
+ * title is cut short before it. */
+export function MainThreadMark({ className }: { className?: string }) {
+  const label = t("sidebar.bot.simple.mainThread");
+  return <span role="img" data-main-thread-mark="" aria-label={label} title={label}
+    className={cn("flex shrink-0 items-center gap-1 text-[12px] font-medium leading-4 text-ink-secondary", className)}>
+    <Star size={14} aria-hidden="true" className="fill-current" />{t("sidebar.threads.main")}
+  </span>;
 }

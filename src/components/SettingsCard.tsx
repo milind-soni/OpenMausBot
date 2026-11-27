@@ -20,7 +20,7 @@ const CARDS: Record<SettingsCardId, { here: () => boolean; control: () => ReactN
 export function SettingsCard({ message }: { message: Message }) {
   const card = message.settingsCard && Object.hasOwn(CARDS, message.settingsCard.id) ? CARDS[message.settingsCard.id] : null;
   if (!card) return <p dir="auto" className="max-w-[600px] text-[15px] leading-relaxed text-ink">{message.text}</p>;
-  if (!card.here()) return <p data-settings-card={message.settingsCard!.id} data-settings-card-elsewhere="" className="max-w-[600px] text-[15px] leading-relaxed text-ink">{t("chat.settingsCard.elsewhere")}</p>;
+  if (!card.here()) return <p data-settings-card={message.settingsCard!.id} data-settings-card-elsewhere="" className="max-w-[600px] text-[15px] leading-relaxed text-ink">{t("chat.settingsCard.elsewhereDevices")}</p>;
   return (
     <SettingsLook.Provider value={true}>
       <div data-settings-card={message.settingsCard!.id} data-settings-look="simple" className="flex w-full max-w-[600px] flex-col gap-2"><Suspense fallback={null}>{card.control()}</Suspense></div>

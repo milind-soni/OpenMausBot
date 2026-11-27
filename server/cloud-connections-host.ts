@@ -5,7 +5,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 
 import { answerConnection, connectionFingerprints, launchersOnPath, listConnections, releaseConnection, signInDigest } from "./cloud-connections.ts";
-import { createConnectionPrompt, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
+import { createConnectionPrompt, type ConnectionPromptAppFor, type ConnectionPromptBot } from "./cloud-connections-prompt.ts";
 import { createStayedNotices, type StayedNoticesDeps } from "./cloud-connections-stayed.ts";
 import { movedFrom } from "./cloud-send-arrived.ts";
 import * as composio from "./composio.ts";
@@ -101,7 +101,7 @@ export function createCloudConnectionsHost(deps: CloudConnectionsHostDeps) {
       return answerConnection(what.id, sources());
     },
 
-    prompt: (bot: ConnectionPromptBot, lent?: ReadonlyMap<string, string>): string => prompt?.(bot, lent) ?? "",
+    prompt: (bot: ConnectionPromptBot, lent?: ReadonlyMap<string, string>, appFor?: ConnectionPromptAppFor): string => prompt?.(bot, lent, appFor) ?? "",
     /** What stayed on the person's computer: said when the move ends, and in the first conversation with each bot. */
     moved: (language?: string): void => stayed?.moved(language),
     personTurn: (bot: Parameters<NonNullable<typeof stayed>["personTurn"]>[0], threadId: string): void => stayed?.personTurn(bot, threadId),

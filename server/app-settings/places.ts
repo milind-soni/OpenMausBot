@@ -7,11 +7,15 @@ const byId = new Map(PLACES.map((place) => [place.id, place]));
 
 function described(place: SettingsPlace): string {
   const notes = [
-    ...(place.advanced ? [place.simplePath ? `in Simple mode it is at ${place.simplePath}` : "shown in Advanced mode only; app_settings set appearance.advanced true turns it on"] : []),
+    ...(place.advanced ? [place.simplePath ? `in Simple mode it is at ${place.simplePath}` : "shown in Advanced mode; the switch is at the bottom of Settings"] : []),
     ...(place.only ? [`only in ${place.only}`] : []),
+    ...(place.note ? [place.note] : []),
   ];
   return notes.length ? `${place.path} (${notes.join("; ")})` : place.path;
 }
+
+/** Whether only Advanced mode shows the place, with nowhere for it in Simple. */
+export const advancedOnlyPlace = (id: SettingsPlaceId): boolean => Boolean(byId.get(id)!.advanced && !byId.get(id)!.simplePath);
 
 /** The place's path, with when only Advanced mode or one kind of place shows it. */
 export const placePath = (id: SettingsPlaceId): string => described(byId.get(id)!);

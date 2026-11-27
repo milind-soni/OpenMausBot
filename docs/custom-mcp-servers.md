@@ -221,6 +221,17 @@ the server's address. Sign-in with a registered app always uses that port; if
 another program holds it, sign-in stops and says so. Changing the client ID
 or the scopes signs the server out; a new secret for the same app does not.
 
+When you sign in from a browser on another computer, a return to
+`127.0.0.1` lands on the wrong machine and only the paste-back step is left.
+If the provider lets the app register an https address instead, set
+**Redirect URI** in the app's entry in `config.json` to this server's public
+https address at `/mcp-oauth/callback` (for example
+`https://maus.example/mcp-oauth/callback`) — the same address the editor
+shows once it is set. The sign-in then returns straight to that page and
+says **Signed in**, with nothing to paste; a browser on this computer uses
+the same address. Only that exact address is accepted, over https, with no
+query, credentials or fragment.
+
 ### Example: give your bots web search
 
 A good first URL server is You.com's search server, because the free profile
@@ -447,19 +458,19 @@ the servers above, its integrations (computer, browser, agents, phone), and
 its own project's `<cwd>/.mcp.json`. By default it does **not** inherit this
 machine's Claude Code setup — the MCP servers and claude.ai connectors in your
 user or local Claude config, your skills and agents, your hooks, and your
-personal `~/.claude/CLAUDE.md`. Those were being mounted into every turn of
-every bot (one measured desktop added 407 tools, ~10k tokens per model call)
-and were reachable by the bot. Codex bots, by contrast, have always read the
-MCP servers in `~/.codex/config.toml`, which is why the two engines looked
-different.
+personal `~/.claude/CLAUDE.md` and `~/.claude/rules`. Those were being mounted
+into every turn of every bot (one measured desktop added 407 tools, ~10k tokens
+per model call) and were reachable by the bot. Codex bots, by contrast, have
+always read the MCP servers in `~/.codex/config.toml`, which is why the two
+engines looked different.
 
 If you want Claude bots to see your own Claude Code MCP servers too, switch on
 **Also use my Claude Code MCP servers** at the top of Plugins → MCP servers.
 With it on, every Claude bot also loads the servers and connectors from your
 Claude Code config on every message; skills, hooks and the personal
-`CLAUDE.md` still stay out. More tools means more tokens per message, so keep
-it off unless you need those servers — the recommended way to give a bot a
-server is still this page or the bot project's `.mcp.json`.
+`CLAUDE.md` and rules still stay out. More tools means more tokens per
+message, so keep it off unless you need those servers — the recommended way
+to give a bot a server is still this page or the bot project's `.mcp.json`.
 
 **Also use my Claude Code skills**, just below it, gives Claude bots the skills
 in your own `~/.claude/skills` and nothing else from your setup. OpenMausBot

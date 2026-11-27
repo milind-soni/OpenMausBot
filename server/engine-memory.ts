@@ -10,7 +10,7 @@ import { newEventId, newId, TurnAuthenticationRefusedError, TurnNotStartedError,
 import { readCgroupMemory } from "./process-limits.ts";
 import { namesOwnCause, shortageCode, type ShortageCode } from "./process-shortage.ts";
 import {
-  BROWSER_TASKS, ENGINE_TASKS, gateHost, linuxTreeUse, processBudget, SESSION_TASKS, turnsSetting, turnsUnder, type GateHost, type ProcessBudget, type TreeUse,
+  BROWSER_TASKS, ENGINE_TASKS, engineTasks, gateHost, linuxTreeUse, processBudget, SESSION_TASKS, turnsSetting, turnsUnder, type GateHost, type ProcessBudget, type TreeUse,
   type TurnsSetting,
 } from "./process-room.ts";
 
@@ -19,10 +19,14 @@ const PAGE_BYTES = 4096;
 /** What one engine and its MCP servers take until one has been measured here: `opencode acp` 1.19.3 measured 361 MB on a
  * Cloud home before its first prompt and 623 MB with six stdio MCP servers, and about 466 MB while working. */
 export const ENGINE_DEFAULT_BYTES = 700 * MB;
-const ENGINE_MIN_BYTES = 300 * MB, ENGINE_MAX_BYTES = 1500 * MB;
+const ENGINE_MIN_BYTES = 300 * MB;
+/** The most admission plans for one engine, however large the ones measured here. */
+export const ENGINE_MAX_BYTES = 1500 * MB;
 /** One more session in a running shared process: OpenCode 1.19.3 grew about 110 MB a session with three stdio MCP
  * servers after a prompt; more MCP servers cost more. */
 export const SESSION_BYTES = 200 * MB;
+/** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
+export const memoryFloor = (totalBytes: number): number => Math.max(320 * MB, totalBytes * 0.1);
 /** One bot's browser (agent-browser's daemon and its Chrome) on a page or two: 270 to 390 MB per bot on an 8 GB Cloud home,
  * 2026-10-21. It runs outside the engine's process group, so an engine's measured size never includes it. */
 export const BROWSER_BYTES = 400 * MB;
@@ -149,15 +153,21 @@ export const memoryStallText = (cause: string, count: number) => `${cause}. This
 /** The last day's memory pressure on a Cloud home: tasks that had to wait for memory and how long they waited in all (a wait
  * still going included), turns stopped for memory, processes the kernel stopped, and minutes the machine stalled on it. */
 export interface RoomReport { waits: number; waitMs: number; stopped: number; killed: number; stallMinutes: number }
+/** The same counts since this process started (no wait time): the Admin keeps each hour's increase (its Cloud history), which
+ * the rolling day can't give. A restart starts them again; the Admin tells by the report's `bootedAt`. */
+export type BootPressure = Omit<RoomReport, "waitMs">;
 type PressureKind = "waits" | "waitMs" | "stopped" | "killed" | "stalled";
 
-/** Counts by minute over the last day. */
+/** Counts by minute over the last day, and since start. */
 export class PressureLedger {
   private readonly minutes = new Map<number, Record<PressureKind, number>>();
+  private readonly sinceStart: BootPressure = { waits: 0, stopped: 0, killed: 0, stallMinutes: 0 };
 
   note(at: number, kind: PressureKind, amount = 1): void {
     const minute = Math.floor(at / MINUTE_MS);
     const slot = this.minutes.get(minute) ?? { waits: 0, waitMs: 0, stopped: 0, killed: 0, stalled: 0 };
+    if (kind === "stalled") { if (!slot.stalled) this.sinceStart.stallMinutes += 1; }
+    else if (kind !== "waitMs") this.sinceStart[kind] += amount;
     slot[kind] = kind === "stalled" ? 1 : slot[kind] + amount;
     this.minutes.set(minute, slot);
     for (const key of this.minutes.keys()) if (key <= minute - DAY_MINUTES) this.minutes.delete(key);
@@ -174,6 +184,9 @@ export class PressureLedger {
     for (const start of waiting) report.waitMs += Math.max(0, at - start);
     return report;
   }
+
+  /** Counts since start: never fall, so the Admin can take each read's increase. */
+  boot(): BootPressure { return { ...this.sinceStart }; }
 }
 
 /** The bots' browsers, which start during a turn rather than with its engine. */
@@ -240,7 +253,7 @@ export class EngineMemory {
   private readonly engines = new Map<number, Engine>();
   private readonly active = new Set<string>();
   /** Threads admitted in the last RESERVE_MS: when, and what they were let in for. */
-  private readonly reserved = new Map<string, { at: number; start: "process" | "session"; browser: boolean; browserSince?: number }>();
+  private readonly reserved = new Map<string, { at: number; start: "process" | "session"; tasks: number; browser: boolean; browserSince?: number }>();
   private readonly queue: Waiter[] = [];
   /** Threads whose engine was stopped for memory: how many tasks ran then, and whether their browser was running. */
   private readonly stops = new Map<string, { count: number; browser: boolean; only?: true }>();
@@ -412,9 +425,10 @@ export class EngineMemory {
   expectFrame(threadId: string): void { if (this.enabled) this.expecting.add(threadId); }
 
   /** A spawn the system refused. Every one is a sign of a shortage; an engine's own (`engine`) inside a thread's running
-   * turn also fails that turn as one the server had no room for. */
-  spawnRefused(code: string | undefined, engine = false): void {
-    const threadId = this.context.getStore(), shortage = shortageCode({ code });
+   * turn also fails that turn as one the server had no room for. `threadId` is that turn's, read from the spawn's own
+   * context unless given. */
+  spawnRefused(code: string | undefined, engine = false, threadId = this.context.getStore()): void {
+    const shortage = shortageCode({ code });
     if (!this.enabled || shortage === null) return;
     this.lastRefusal = { at: this.now(), code: shortage };
     if (engine && threadId !== undefined && this.active.has(threadId) && !this.starved.has(threadId)) this.starved.set(threadId, { code: shortage, why: "refused" });
@@ -518,9 +532,9 @@ export class EngineMemory {
   /** Resolves once a new engine process, or a session in the running one `joining` names by pid, fits for this thread, or
    * for `turn` once the plan's limit has a place for its turn; `notify` tells the person when it has to wait. False when
    * aborted. A thread joining a process counts on it at once, so that process is never stopped as idle to make room for its
-   * own new session. */
+   * own new session. `tasks`: what a new process of this engine holds against the pids limit. */
   async admit(threadId: string, abort: AbortSignal, notify: (text: string) => void, start: "process" | "session" | "turn" = "process",
-    joining?: number): Promise<boolean> {
+    joining?: number, tasks = ENGINE_TASKS): Promise<boolean> {
     if (!this.enabled) return true;
     if (joining !== undefined) this.engines.get(joining)?.threads.add(threadId);
     const waiter: Waiter = { wake: () => {}, threadId, since: this.now() };
@@ -533,9 +547,9 @@ export class EngineMemory {
         if (this.order()[0] === waiter && this.capped(threadId) === undefined) {
           // Counted at once: another waiter woken with this one must see its place taken.
           if (start === "turn") { this.active.add(threadId); return true; }
-          const room = this.room(start, threadId);
+          const room = this.room(start, threadId, tasks);
           if (room === "admit") {
-            this.reserved.set(threadId, { at: this.now(), start, browser: this.browserStarts(threadId) });
+            this.reserved.set(threadId, { at: this.now(), start, tasks, browser: this.browserStarts(threadId) });
             this.arm();
             return true;
           }
@@ -597,6 +611,8 @@ export class EngineMemory {
 
   /** The last day's memory pressure, for the Admin's health check (cloud-health.ts): times only, never what ran. */
   dayPressure(): RoomReport { return this.ledger.read(this.now(), this.waitingSince.values()); }
+  /** The last day's pressure and the counts since start (`boot`), as the health report carries them. */
+  roomReport(): RoomReport & { boot: BootPressure } { return { ...this.dayPressure(), boot: this.ledger.boot() }; }
 
   /** Every couple of seconds while an engine or a bot's browser runs: notes short memory against the running turns, and
    * makes room before the machine runs out: an idle engine first (and, thrashing, the unused browsers with it), then the
@@ -684,6 +700,29 @@ export class EngineMemory {
     return memory !== null && this.free(memory) < this.floor(memory);
   }
 
+  /** Memory available, not counting swap, is under relief's floor (`times` the floor, where given): a browser over its hard
+   * line then closes whatever holds it (browser/memory-ceiling.ts). False where memory can't be read. */
+  memoryShort(times = 1): boolean {
+    const memory = this.read();
+    return memory !== null && memory.availableBytes < this.floor(memory) * times;
+  }
+
+  /** The browser this thread's turn holds was closed for memory, whatever held it (browser/memory-ceiling.ts): the engine
+   * running that turn is stopped as relief stops one, and the turn ends with the line that the browser was closed. False
+   * when no engine here runs that turn. */
+  stopForBrowser(threadId: string): boolean {
+    const engine = [...this.engines.values()].find((candidate) => this.working(candidate).includes(threadId));
+    if (!engine) return false;
+    if (engine.stopping) return true;
+    const stopped = this.working(engine);
+    // A driver that carries other conversations stops them too; only this one's line says its browser was the cause.
+    this.noteStops(stopped, () => this.busy(), false, threadId);
+    this.noteRoomStopped(engine);
+    this.lastRelief = this.now();
+    void this.stop(engine, "relief").then(() => this.closeBrowsers(stopped));
+    return true;
+  }
+
   /** Stops the engine idle longest, if any: what a browser that has no room to open asks before it is refused. */
   async reclaimIdle(): Promise<boolean> {
     const idle = this.enabled ? this.idle() : null;
@@ -695,8 +734,7 @@ export class EngineMemory {
   /** Runs on every tick (every couple of seconds while engines run): the idle policy closes what it kept too long. */
   useIdleSweep(sweep: () => void): void { this.idleSweep = sweep; }
 
-  /** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
-  private floor(memory: HostMemory): number { return Math.max(320 * MB, memory.totalBytes * 0.1); }
+  private floor(memory: HostMemory): number { return memoryFloor(memory.totalBytes); }
 
   private free(memory: HostMemory): number { return memory.availableBytes + memory.swapFreeBytes / 2; }
 
@@ -709,9 +747,9 @@ export class EngineMemory {
       .sort((a, b) => a.startedAt - b.startedAt)[0] ?? null;
   }
 
-  private room(start: "process" | "session", threadId: string): "admit" | "wait" | Engine {
+  private room(start: "process" | "session", threadId: string, tasks: number): "admit" | "wait" | Engine {
     const memory = this.read();
-    if (!memory) return this.crowded(start, threadId, 0, false) ? this.idle() ?? (this.othersBusy(threadId) === 0 ? "admit" : "wait") : "admit";
+    if (!memory) return this.crowded(start, threadId, 0, false, tasks) ? this.idle() ?? (this.othersBusy(threadId) === 0 ? "admit" : "wait") : "admit";
     const groups = this.groups(), at = this.now();
     const live = [...this.engines.entries()].filter(([, engine]) => !engine.stopping);
     const measured = live.filter(([, engine]) => at - engine.startedAt >= SETTLED_MS).map(([pid]) => groups.get(pid)).filter((bytes) => bytes !== undefined);
@@ -723,7 +761,7 @@ export class EngineMemory {
       // An engine's processes are all there within seconds of its start, long before its memory settles.
       const up = admitted.start === "process" && live.some(([, engine]) => engine.threads.has(threadId) && at - engine.startedAt >= TASKS_SETTLED_MS);
       if (at - admitted.at < TASKS_RESERVE_MS && !up) {
-        heldTasks += admitted.start === "session" ? SESSION_TASKS : ENGINE_TASKS;
+        heldTasks += admitted.start === "session" ? SESSION_TASKS : admitted.tasks;
         heldBrowser ||= admitted.browser && this.browserStarts(threadId);
       }
       // A browser grows as it starts and loads its first pages: its share is held until it has run SETTLED_MS.
@@ -742,7 +780,7 @@ export class EngineMemory {
     }
     const newBrowser = this.browserStarts(threadId) && !heldBrowsers.has(this.browsers?.which?.(threadId) ?? threadId);
     const need = (start === "session" ? SESSION_BYTES : process) + (newBrowser ? BROWSER_BYTES : 0);
-    if (this.free(memory) - this.floor(memory) - held >= need && !this.crowded(start, threadId, heldTasks, heldBrowser)) return "admit";
+    if (this.free(memory) - this.floor(memory) - held >= need && !this.crowded(start, threadId, heldTasks, heldBrowser, tasks)) return "admit";
     return this.idle() ?? (this.othersBusy(threadId) === 0 ? "admit" : "wait");
   }
 
@@ -750,10 +788,10 @@ export class EngineMemory {
    * call, not with its engine, and itself waits for room before it opens (browser-room.ts): room for one more
    * is kept while any start pending may open one, rather than one for every such start, which would let one turn in at a
    * time. Browsers already running count in the limit's own count. */
-  private crowded(start: "process" | "session", threadId: string, heldTasks: number, heldBrowser: boolean): boolean {
+  private crowded(start: "process" | "session", threadId: string, heldTasks: number, heldBrowser: boolean, tasks: number): boolean {
     if (!this.processes) return false;
     const browser = heldBrowser || this.browserStarts(threadId) ? BROWSER_TASKS : 0;
-    return this.processes.short((start === "session" ? SESSION_TASKS : ENGINE_TASKS) + browser, heldTasks);
+    return this.processes.short((start === "session" ? SESSION_TASKS : tasks) + browser, heldTasks);
   }
 
   private browserStarts(threadId: string): boolean { return this.browsers?.starts(threadId) === true; }
@@ -799,10 +837,10 @@ export class EngineMemory {
   }
 
   /** These threads' turns were stopped for memory, with how many tasks ran then: each says whether its browser was closed. */
-  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false): void {
+  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false, browserClosed?: string): void {
     for (const threadId of threadIds) {
       if (!this.stops.has(threadId)) this.ledger.note(this.now(), "stopped");
-      this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
+      this.stops.set(threadId, { count: count(threadId), browser: threadId === browserClosed || this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
     }
   }
 
@@ -847,6 +885,7 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
   const adapter = instance.adapter;
   const listeners = new Set<RuntimeEventListener>();
   const waiting = new Map<string, AbortController>();
+  const tasks = engineTasks(instance.driverKind);
   const explained = new Set<string>();
   const event = (threadId: string, fields: Record<string, unknown>) =>
     ({ eventId: newEventId(), provider: instance.driverKind, threadId, createdAt: new Date().toISOString(), ...fields }) as RuntimeEvent;
@@ -887,7 +926,7 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
         try {
           const admitted = await memory.admit(threadId, controller.signal, (message) => {
             for (const listener of listeners) listener(event(threadId, { type: "runtime.notice", message }));
-          }, start, joining);
+          }, start, joining, tasks);
           if (!admitted) throw new TurnNotStartedError(newId(), "stopped while waiting for memory");
         } finally {
           if (waiting.get(threadId) === controller) waiting.delete(threadId);

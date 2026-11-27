@@ -974,9 +974,16 @@ count: the browser tab's title and the app's icon.
 `shared/inbox.ts`), newest first, each line in one tab: **Needs you** while it waits on them (an ask, by the rule above;
 their count is the badge), **For your info** for news until they answer it or mark it done, and **Done** once it is
 settled or marked done. `POST /api/inbox/<line>/done` marks news done (an open ask refuses, 409: only its answer settles
-it) and `POST /api/inbox/<line>/read` marks one line read; each answers with the list as it is now. The app shows the
-list in the right panel, opened from the card, the badge or the person's own row under People: dense rows with each
-line's quick answers, a reading view with the reply, and a sheet at phone width. Answering from a row answers the copy's
+it), `POST /api/inbox/<line>/read` marks one line read and `/unread` makes it new again; each answers with the list as it
+is now. Each line says first why it is there (`shared/inbox-reason.ts`): "Asked you", "Needs your OK", "Mentioned you",
+"Replied to you", "Messaged you", "Needs a look", "Finished" or "Shared with you". Most follow from the line itself; a
+mention, a reply to the person, a share and a board item's question carry `InboxItem.reason`, because only the server
+can tell them apart. The app lists the lines in two groups: **For you** (what waits on the person or names them, the
+only lines the Inbox's number counts) and **Activity** (finished work and shares, which make the Inbox row bold and are
+never counted). The app shows the list in the right panel, opened from the card, the badge or the person's own row under
+People: rows with each line's quick answers, a reading view with the reply, and a sheet at phone width. An opened line is
+read after two seconds on screen with the window focused, or at once when the person answers it, with "Marked as read ·
+Undo"; it keeps its place in the list, read or settled, until the person picks another. Answering from a row answers the copy's
 card or replies to the line, through the same routes as in the chat. In the inbox conversation one card sits under the
 newest line that needed the person (`InboxView.anchor`) and updates in place. The inbox's task carries
 `inboxChangedAt`, which moves whenever the list changes; a client showing the list reads it again then.

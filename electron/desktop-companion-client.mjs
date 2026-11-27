@@ -30,6 +30,8 @@ const MIME = {
   ".ico": "image/x-icon",
   ".json": "application/json",
   ".woff2": "font/woff2",
+  ".webp": "image/webp",
+  ".mp4": "video/mp4",
 };
 
 const cleanLabel = (value, fallback) => {

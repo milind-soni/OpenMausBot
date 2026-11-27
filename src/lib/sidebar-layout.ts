@@ -4,13 +4,15 @@ import { t } from "./i18n";
 import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar, someoneElsesDefaultBot } from "./default-bot";
+import { botShowsUnread } from "./bot-unread";
+import { reorderNamesStable } from "../../shared/bot-order";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
+export const UNREAD_SECTION_ID = "builtin:unread";
 export const CHANNELS_SECTION_ID = "builtin:channels";
 export const BOT_CHATS_SECTION_ID = "builtin:bot-chats";
 export const BOTS_SECTION_ID = "builtin:bots";
 export const ATTENTION_SECTION_ID = "builtin:attention";
-export const PINNED_THREADS_SECTION_ID = "builtin:pinned-threads";
 export const TOOLS_SECTION_ID = "builtin:tools";
 
 const USER_SECTION_PREFIX = "section:";
@@ -59,6 +61,7 @@ export function userSectionName(id: SidebarSectionId): string | null {
 
 export function sidebarSectionLabel(id: SidebarSectionId): string {
   if (id === PINNED_SECTION_ID) return "Pinned";
+  if (id === UNREAD_SECTION_ID) return "Unread";
   if (id === CHANNELS_SECTION_ID) return "Group chats";
   if (id === BOT_CHATS_SECTION_ID) return "Bot threads";
   if (id === BOTS_SECTION_ID) return "Bots";
@@ -149,6 +152,81 @@ export function activeBotsFirst<T>(parts: { pinnedBots: T[]; sectionedBots: T[];
     return [...bots.filter((_, index) => flags[index]), ...bots.filter((_, index) => !flags[index])];
   };
   return { pinnedBots: first(parts.pinnedBots), sectionedBots: first(parts.sectionedBots), unsectionedBots: first(parts.unsectionedBots) };
+}
+
+/** The departments to list: the given ones, then any other that a bot or a room shown here is filed under. */
+export function sectionsInUse(names: readonly string[], filed: ReadonlyArray<{ section?: string | null }>): string[] {
+  const result = [...names];
+  for (const { section } of filed) if (section && !result.includes(section)) result.push(section);
+  return result;
+}
+
+type UnreadListBot = {
+  id: string;
+  unread?: boolean;
+  tasks?: ReadonlyArray<{ unread?: boolean; routineRunId?: string; archivedAt?: number; updatedAt?: number; createdAt?: number }> | null;
+  messages?: ReadonlyArray<{ at: number }>;
+  /** A row of the other place in the one list (place-rows.ts): when its conversations last moved there. */
+  lastAt?: number;
+};
+
+/** The bot kept in Unread after it was opened from there, with the time it was listed by and the conversation open then. */
+export type UnreadHold = { id: string; since: number; chat?: string };
+
+function unreadSince(bot: UnreadListBot): number {
+  const threads = (bot.tasks ?? []).filter((task) => task.unread && !task.routineRunId && task.archivedAt === undefined);
+  if (threads.length === 0) return bot.messages?.at(-1)?.at ?? bot.lastAt ?? 0;
+  return Math.max(...threads.map((task) => task.updatedAt ?? task.createdAt ?? 0));
+}
+
+/** Each bot showing unread, with the time Unread lists it by. */
+export function unreadSinceByBot(bots: readonly UnreadListBot[]): Map<string, number> {
+  return new Map(bots.filter(botShowsUnread).map((bot) => [bot.id, unreadSince(bot)]));
+}
+
+/** A bot that showed unread when its conversation `chat` was opened, or while it is open, stays in Unread where it was
+ * until another conversation or view is open, so one opened by mistake can be marked unread again without looking for its
+ * row. Another conversation of the same bot, or a blank new one, ends it too. */
+export function nextUnreadHold(held: UnreadHold | null, openId: string | null, unreadBefore: ReadonlyMap<string, number>, chat?: string): UnreadHold | null {
+  if (openId === null) return null;
+  const same = held?.id === openId && held.chat === chat;
+  const since = unreadBefore.get(openId);
+  if (since !== undefined) return same && held.since === since ? held : { id: openId, since, chat };
+  return same ? held : null;
+}
+
+/** Bots showing unread leave their department or the main list for one list of their own, newest first, and go back
+ * once read; `held` stays listed where it was. Pinned bots and the main Chief keep their place above it. Only how the
+ * list is shown changes. */
+export function unreadBotsApart<T extends UnreadListBot>(parts: { sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, enabled = true, held: UnreadHold | null = null) {
+  if (!enabled) return { ...parts, unreadBots: [] as T[] };
+  const listed = (bot: T) => botShowsUnread(bot) || bot.id === held?.id;
+  const inPlace = (bots: T[]) => bots.filter((bot) => !listed(bot));
+  const unreadBots = [...parts.unsectionedBots, ...parts.sectionChiefs, ...parts.sectionedBots].filter(listed)
+    .map((bot) => ({ bot, since: held && !botShowsUnread(bot) ? held.since : unreadSince(bot) })).sort((a, b) => b.since - a.since).map(({ bot }) => bot);
+  return { unreadBots, sectionChiefs: inPlace(parts.sectionChiefs), sectionedBots: inPlace(parts.sectionedBots), unsectionedBots: inPlace(parts.unsectionedBots) };
+}
+
+/** The rows of the bot list as shown, busy bots first and unread ones in a list of their own, with `filed`, every
+ * shown bot that belongs to a department. `inPlace` is the saved order of the rows left where they belong: what a drag
+ * or Alt+Up/Down arranges, so neither stores the shown order nor counts a row that Unread is listing. `unreadCount`
+ * leaves out a row Unread only holds. */
+export function sidebarBotRows<T extends UnreadListBot>(saved: { pinnedBots: T[]; sectionChiefs: T[]; sectionedBots: T[]; unsectionedBots: T[] }, busy: (bot: T) => boolean, unreadApart = true, held: UnreadHold | null = null) {
+  const ordered = { ...saved, ...activeBotsFirst(saved, busy) };
+  const shown = unreadBotsApart(ordered, unreadApart, held);
+  return {
+    pinnedBots: ordered.pinnedBots,
+    filed: [...ordered.sectionedBots, ...ordered.sectionChiefs],
+    ...shown,
+    unreadCount: shown.unreadBots.filter(botShowsUnread).length,
+    inPlace: unreadBotsApart(saved, unreadApart, held),
+  };
+}
+
+/** Unread sits under the pinned bots when they lead the list and above everything else otherwise. */
+export function withUnreadSection(ids: SidebarSectionId[], shown: boolean): SidebarSectionId[] {
+  if (!shown) return ids;
+  return ids[0] === PINNED_SECTION_ID ? [PINNED_SECTION_ID, UNREAD_SECTION_ID, ...ids.slice(1)] : [UNREAD_SECTION_ID, ...ids];
 }
 
 export function partitionSidebarGroups<T extends SidebarGroup>(groups: T[]) {
@@ -264,6 +342,17 @@ export function mergeSectionOrder(
     included.add(id);
   }
   return result;
+}
+
+/** The departments in the workspace's order, the same on every device: the places they hold in `ids` are filled in
+ * `departments` order. Built-in sections, and a department the workspace does not list, keep their places. */
+export function withDepartmentOrder(ids: SidebarSectionId[], departments: readonly string[]): SidebarSectionId[] {
+  return reorderNamesStable(ids, departments.map(userSectionId));
+}
+
+/** The departments in `ids`, by name, in that order. */
+export function departmentsIn(ids: readonly SidebarSectionId[]): string[] {
+  return ids.flatMap((id) => userSectionName(id) ?? []);
 }
 
 export function sameSectionOrder(a: SidebarSectionId[], b: SidebarSectionId[]): boolean {

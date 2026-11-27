@@ -274,6 +274,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
 | **GitHub Sponsors** | One-time and monthly project support |
+| **Open Bot Avatar** ([github.com/DominikScholz/open-bot-avatar](https://github.com/DominikScholz/open-bot-avatar)) | The avatar engine and many of the bot avatars, by Dominik Scholz |
 
 ## How it works
 
@@ -345,7 +346,7 @@ See [Run OpenMausBot from scripts and CI](docs/headless-cli.md).
 | **macOS** (Intel) | [OpenMausBot-intel.dmg](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-intel.dmg) | Same app, built for Intel Macs. Signed & notarized. |
 | **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. By default the app installs to `%LOCALAPPDATA%\Programs\OpenMausBot`, and every update goes back to the folder the installer recorded, so keep it where the installer put it: a copy moved by hand (for example from C: to D:) is left behind, and the next update lands in the recorded folder again. |
 | **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
-| **Fedora** (x64) | [OpenMausBot-x86_64.rpm](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) | Install with `sudo dnf install ./OpenMausBot-x86_64.rpm`. Community-supported; Ubuntu is the tested Linux. |
+| **Fedora** (x64) | [OpenMausBot-x86_64.rpm](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) | Install with `cd ~/Downloads && sudo dnf install ./OpenMausBot-*.rpm` (works for both the stable-named and the versioned download). Community-supported; Ubuntu is the tested Linux. |
 
 See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
 Any desktop build can also open the bots of another Windows, macOS, or Ubuntu computer over Tailscale; see [open one computer's bots from another computer](docs/desktop-companion.md).
@@ -550,6 +551,11 @@ in [LICENSING.md](LICENSING.md).
 Packaged Cua Driver components retain their upstream MIT, SIL OFL 1.1, MPL-2.0, and other dependency terms;
 the corresponding notices, license texts, source locations, and SBOM are in
 [`third_party/cua-driver/`](third_party/cua-driver/) and ship beside the native runtime.
+
+The bot avatar engine and avatar designs come from
+[Open Bot Avatar](https://github.com/DominikScholz/open-bot-avatar), Copyright (c) 2026 Dominik Scholz,
+used under the MIT License; its license and our changes are in
+[`packages/phone-protocol/src/open-bot-avatar/`](packages/phone-protocol/src/open-bot-avatar/).
 
 OpenMausBot is an independent, open-source project inspired by Grok Bot. It is
 not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark

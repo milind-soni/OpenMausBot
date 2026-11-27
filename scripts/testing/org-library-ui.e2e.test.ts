@@ -131,11 +131,16 @@ describe("the organization library in the real renderer", () => {
       .find(([, entry]) => entry.role === "button" && /Open .+ profile/.test(entry.name));
     expect(profile).toBeDefined();
     await ui("click", "--ref", `@${profile![0]}`);
-    // The bot's panel: where it came from on Bot settings, the organization's skills on Library → Skills.
-    await click("Bot settings");
+    // The bot's panel: where it came from on Bot settings, the organization's skills on Details → Skills.
+    // The gear is visible to the browser while the panel is still sliding in.
+    await expect.poll(async () => {
+      const settings = await ui("eval", "--js", "Boolean(document.querySelector('[data-panel-gear][aria-current=page]'))");
+      if (settings.result === true) return true;
+      await click("Bot settings");
+      return false;
+    }, { timeout: 10_000 }).toBe(true);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("From Sales desk 1.3.0 · Acme Partners");
     await click("Details");
-    await click("Library");
     await ui("eval", "--js", "document.querySelector('[data-panel-page=\"skills\"]').click(); true");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Skills your organization shares");
     await evidence("org-library-bot-skills.png");

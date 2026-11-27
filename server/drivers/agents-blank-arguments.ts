@@ -12,7 +12,7 @@ const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
   session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
   show_html: ["html", "jsx", "path"],
   // A blank text, or a blank old_text where the action needs one, is a mistake the schema names, not "not given".
-  memory_update: ["until"],
+  memory_update: ["until", "scope"],
 };
 
 const blankText = (value: unknown) => typeof value === "string" && !value.trim();

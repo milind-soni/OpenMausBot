@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  calendarsFromData, createConnectedReads, emailsFromData, eventsFromData, messageFromData, profileFromData, SourceError, threadFromData, toolData,
+  calendarsFromData, createConnectedReads, emailsFromData, eventsFromData, messageFromData, outlookMessageFromData, outlookMessagesFromData, profileFromData, SourceError, threadFromData, toolData,
 } from "./connected-reads.ts";
 
 const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`./testing/fixtures/${name}.json`, import.meta.url), "utf8"));
@@ -248,5 +248,37 @@ describe("a check's reads", () => {
     expect(await session.address()).toBe("new@x.test");
     expect(asked).toBe(2);
     expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_newest"]);
+  });
+
+  it("reads Outlook inbox messages and single messages with preview, conversation id, and shortened-page fallback", async () => {
+    const messages = [
+      { id: "o1", conversationId: "conv-1", receivedDateTime: "2026-10-22T08:00:00Z", from: { emailAddress: { name: "Ada", address: "ada@x.test" } }, subject: "First", bodyPreview: "Can you review?", webLink: "https://outlook.office365.com/owa/?ItemID=o1" },
+      { id: "o2", conversationId: "conv-2", receivedDateTime: "2026-10-22T09:00:00Z", from: { emailAddress: { address: "bob@x.test" } }, subject: "Second", bodyPreview: "Latest update" },
+    ];
+    expect(outlookMessagesFromData({ value: messages }).map((m) => [m.id, m.threadId, m.from, m.preview, m.app])).toEqual([
+      ["o2", "conv-2", "bob@x.test", "Latest update", "outlook"],
+      ["o1", "conv-1", "Ada <ada@x.test>", "Can you review?", "outlook"],
+    ]);
+    expect(outlookMessageFromData(messages[0])).toMatchObject({ id: "o1", threadId: "conv-1", from: "Ada <ada@x.test>", preview: "Can you review?", app: "outlook", link: "https://outlook.office365.com/owa/?ItemID=o1" });
+    expect(outlookMessageFromData(messages[1]).link).toBeUndefined();
+
+    const { deps, frames } = relay({
+      OUTLOOK_LIST_MESSAGES: (args) => {
+        if (Number(args.top) > 10) return { successful: true, data_preview: { value: ["...too many"] } };
+        return { successful: true, data: { value: messages } };
+      },
+      OUTLOOK_GET_MESSAGE: (args) => (args.message_id === "gone"
+        ? { successful: false, error: "Requested entity was not found." }
+        : { successful: true, data: messages[0] }),
+    });
+    const session = createConnectedReads(deps).session();
+    const list = await session.outlookEmails(Date.parse("2026-10-22T00:00:00Z"), 20);
+    expect(list.map((m) => m.id)).toEqual(["o2", "o1"]);
+    expect(frames.filter((one) => one.slug === "OUTLOOK_LIST_MESSAGES").map((one) => Number(one.args!.top))).toEqual([20, 10]);
+    expect(await session.outlookMessage("o1")).toMatchObject({ id: "o1", app: "outlook" });
+    expect(await session.outlookMessage("gone")).toBeNull();
+    const outlookReads = frames.filter((one) => one.slug?.startsWith("OUTLOOK_"));
+    expect(outlookReads.length).toBeGreaterThan(0);
+    expect(outlookReads.every((one) => (one.args!.select as string[]).includes("webLink"))).toBe(true);
   });
 });

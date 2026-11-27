@@ -85,6 +85,21 @@ describe("saveLater", () => {
     expect(writes).toEqual([]);
   });
 
+  it("preserves a newer write queued while the current flush is in progress", () => {
+    const writes: string[] = [];
+    saveLater("a", () => {
+      writes.push("a");
+      saveLater("b", () => writes.push("b-current"));
+    });
+    saveLater("b", () => writes.push("b-stale"));
+    flushLaterSaves();
+    expect(writes).toEqual(["a"]);
+    expect(waitingSaves()).toBe(1);
+    flushLaterSaves();
+    expect(writes).toEqual(["a", "b-current"]);
+    expect(waitingSaves()).toBe(0);
+  });
+
   it("keeps a failed write waiting and tries it again", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     let fail = true;

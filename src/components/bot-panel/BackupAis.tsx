@@ -16,6 +16,7 @@ import { modelMenuKey, modelMenuPointerMove } from "../model-menu-keys";
 import { SIMPLE_POPOVER_WIDTH } from "../ModelPicker";
 import { InstanceProviderMark } from "../ProviderIcons";
 import { SimpleModelMenu } from "../SimpleModelMenu";
+import { BackupReasoning } from "../BackupReasoning";
 import { buttonCls, Card, ColRow, RowIcon, RowText, TrashButton } from "./rows";
 import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
@@ -193,9 +194,9 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
             botModel={{ label: "", title: "" }}
             idPrefix={menuId}
             onQuery={setQuery}
-            onPick={(instance, model) => {
+            onPick={(instance, model, variant) => {
               if (instance.policy) return;
-              onPick({ instanceId: instance.instanceId, model });
+              onPick({ instanceId: instance.instanceId, model, ...(variant === undefined ? {} : { variant }) });
               close(true);
             }}
             onPickCurrent={() => close(true)}
@@ -261,6 +262,8 @@ export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Ba
                     {!instance && <span className="shrink-0 text-[12px] text-warning">{t("model.simple.unavailable")}</span>}
                     <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
                   </BackupChooser>
+                  <BackupReasoning instance={instance} selection={entry}
+                    onChange={(next) => onChange(chain.map((candidate, at) => at === index ? next : candidate))} />
                   <TrashButton
                     data-panel-action="backup-remove"
                     label={t("botPanel.backups.remove", { model: name })}

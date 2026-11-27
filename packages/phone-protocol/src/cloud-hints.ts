@@ -7,8 +7,8 @@ export const TEAM_LEFT_REFUSAL = "unauthorized: you are no longer in this team";
 
 /** On a Team Cloud, the welcome's own record (shown, done, hidden) is each person's: one admin finishing it ends it for
  * nobody else. Its steps (an AI connected, files) stay the team's, since they are facts about the team's Cloud. So is
- * whether they saw the Teams What's new (src/lib/notices.ts TEAMS_NOTICE). */
-export const TEAM_PERSONAL_HINTS: ReadonlySet<string> = new Set(["cloud-welcome-shown", CLOUD_WELCOME_DONE, "cloud-setup-hidden", "teams-2026-11b"]);
+ * whether they saw the Teams What's new and What's new (src/lib/notices.ts TEAMS_NOTICE, WHATS_NEW_NOTICE). */
+export const TEAM_PERSONAL_HINTS: ReadonlySet<string> = new Set(["cloud-welcome-shown", CLOUD_WELCOME_DONE, "cloud-setup-hidden", "teams-2026-11b", "whats-new-2026-11b", "whats-new-2026-11c"]);
 
 /** When the person last opened Announcements, in epoch milliseconds: `announcements-read-<ms>`. A record keeps one, the
  * newest; on a Team Cloud it is each person's. */

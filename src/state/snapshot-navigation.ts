@@ -1,4 +1,14 @@
-import type { Bot, Group, Message } from "./store";
+import { branchLeafFrom } from "../../shared/conversation-branch";
+import type { AppState, Bot, Group, Message } from "./store";
+
+export function switchBotBranch(state: AppState, botId: string, threadId: string, messageId: string): AppState {
+  const panel = state.forkPanel;
+  if (panel?.kind === "bot" && panel.ownerId === botId && panel.threadId === threadId) {
+    return { ...state, forkPanel: { ...panel, activeLeafId: branchLeafFrom(panel.messages, messageId) } };
+  }
+  return { ...state, bots: state.bots.map((bot) => bot.id === botId && bot.threadId === threadId
+    ? { ...bot, activeLeafId: branchLeafFrom(bot.messages, messageId) } : bot) };
+}
 
 // One branch per transcript array and leaf: every sidebar row, the composer and the chat ask for it on each store
 // change, and an unchanged transcript keeps the same array (so memos keyed on it hold).
@@ -46,17 +56,34 @@ function keepNewTasks<T extends { threadId: string }>(previous: T[] | undefined,
   return created.length ? [...(incoming ?? []), ...created] : incoming;
 }
 
+function viewingHandoff(previous: Bot, incoming: Bot): boolean {
+  const task = previous.tasks?.find(candidate => candidate.threadId === previous.threadId);
+  return Boolean(task?.openedBy?.botId) && (incoming.tasks ?? []).some(candidate => candidate.threadId === previous.threadId);
+}
+
+/** The snapshot is the server's copy of the hand-off from its first row on, so a send it confirmed or a row it no longer
+ * has does not linger; only the rows loaded before that first row stay. Without an overlap the snapshot wins. */
+function reconcileTranscript(previous: Message[], incoming: Message[]): { messages: Message[]; earlier: boolean } {
+  const start = incoming[0] ? previous.findIndex(message => message.id === incoming[0]!.id) : -1;
+  return start > 0 ? { messages: [...previous.slice(0, start), ...incoming], earlier: true } : { messages: incoming, earlier: false };
+}
+
 export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, preserve: boolean, taskIdsAtStart?: ReadonlySet<string>): Bot {
-  if (!preserve || !previous) return incoming;
+  // A reconnect snapshot does not preserve navigation, and the server often still names the older thread.
+  // A hand-off another bot opened stays on screen while that thread remains.
+  const keepHandoff = previous !== undefined && !preserve && viewingHandoff(previous, incoming);
+  if ((!preserve && !keepHandoff) || !previous) return incoming;
+  const sameOpenHandoff = keepHandoff && incoming.threadId === previous.threadId;
+  const reconciled = sameOpenHandoff ? reconcileTranscript(previous.messages, incoming.messages) : null;
   return {
     ...incoming,
     threadId: previous.threadId,
     tasks: keepNewTasks(previous.tasks, incoming.tasks, taskIdsAtStart),
     switchingTo: previous.switchingTo,
     awaitingThreadSnapshot: previous.awaitingThreadSnapshot,
-    messages: previous.messages,
-    hasMore: previous.hasMore,
-    activeLeafId: previous.activeLeafId,
+    messages: reconciled ? reconciled.messages : previous.messages,
+    hasMore: reconciled ? (reconciled.earlier ? previous.hasMore : incoming.hasMore) : previous.hasMore,
+    activeLeafId: sameOpenHandoff ? (incoming.activeLeafId === undefined ? previous.activeLeafId : incoming.activeLeafId) : previous.activeLeafId,
     pinnedMessageId: previous.pinnedMessageId,
   };
 }

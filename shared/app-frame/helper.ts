@@ -7,7 +7,16 @@
 //     setContext(text): Promise<void>,  // ui/update-model-context
 //     theme: "light" | "dark",
 //     room: boolean,                    // shown in a room: send and setContext resolve and do nothing
+//     data: { query(sql, params?): Promise<{ columns, rows, truncated }> },          // mausbot/data/query
+//     state: { get(key): Promise<value | undefined>, set(key, value?): Promise<void>, keys(): Promise<string[]> },
+//     connectors: {
+//       call(connectorOrServer, tool, args?): Promise<result>,         // mausbot/connectors/call: the tool's answer
+//       list(): Promise<Array<{ connector | server, label, connected, tools }>>,  // mausbot/connectors/list
+//     },
 //   }
+//
+// data, state and connectors answer only for a page shown with show_html `uses` naming them; otherwise they reject with the
+// reason. A connector call that changes something runs only after the person clicked in the page.
 //
 // Outside a room it also reports the person's text selection (mausbot/notifications/selection), so the host can
 // offer to cite it in the chat's composer. Everywhere it reports whether the page, as rendered, opens with a heading
@@ -28,6 +37,9 @@ export const APP_THEME_STYLE = [
   "--font-sans:system-ui,-apple-system,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif;",
   "--font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}",
 ].join("");
+
+/** What a published page's data and state calls reject with: no bot answers there. */
+export const PUBLISHED_PAGE_NO_BOT = "This page is published: it cannot read the bot's data, keep state or call connected apps. Embed the data in the page instead.";
 
 /** The page's text selection, read by the desktop host beside the bridge: { text, left, bottom }, or { text: "" } once gone. */
 export const APP_SELECTION_METHOD = "mausbot/notifications/selection";
@@ -304,6 +316,34 @@ const helperSource = (room: boolean) => `(function () {
     return ready.then(function () {
       return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] });
     }).then(function () {});
+  };
+  var call = function (method, params) {
+    return ready.then(function () { return request(method, params); });
+  };
+  api.data = {
+    query: function (sql, params) {
+      return call("mausbot/data/query", params === undefined ? { sql: String(sql) } : { sql: String(sql), params: params });
+    }
+  };
+  api.state = {
+    get: function (key) {
+      return call("mausbot/state/get", { key: String(key) }).then(function (result) { return result ? result.value : undefined; });
+    },
+    set: function (key, value) {
+      return call("mausbot/state/set", value === undefined ? { key: String(key) } : { key: String(key), value: value }).then(function () {});
+    },
+    keys: function () {
+      return call("mausbot/state/keys", {}).then(function (result) { return result && Array.isArray(result.keys) ? result.keys : []; });
+    }
+  };
+  api.connectors = {
+    call: function (name, tool, args) {
+      return call("mausbot/connectors/call", { name: String(name), tool: String(tool), arguments: args === undefined ? {} : args })
+        .then(function (answer) { return answer ? answer.result : undefined; });
+    },
+    list: function () {
+      return call("mausbot/connectors/list", {}).then(function (answer) { return answer && Array.isArray(answer.connectors) ? answer.connectors : []; });
+    }
   };
   Object.defineProperty(window, "mausbot", { value: api, enumerable: true });
 })();`;

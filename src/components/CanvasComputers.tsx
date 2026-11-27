@@ -8,6 +8,7 @@ import { Select } from "./Select";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { randomUuid } from "@/lib/random-uuid";
+import { serverFetch } from "@/lib/relay-server";
 
 const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
@@ -75,7 +76,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   useEffect(() => () => {
     const held = heldHereRef.current;
     if (!held) return;
-    void fetch(`/api/team-computers/${encodeURIComponent(held)}/control`, {
+    void serverFetch(`/api/team-computers/${encodeURIComponent(held)}/control`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "release", controlLeaseId: controlLeaseId.current }),

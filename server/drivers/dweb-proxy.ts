@@ -1,7 +1,7 @@
 // dweb's HTTP API (the local OpenMaus network daemon) as MCP tools over stdio JSON-RPC 2.0: dweb_status,
 // dweb_repo_status, dweb_opencode_models, dweb_opencode_run (waits up to 5 min). Env:
 //   DWEB_URL  base URL of the local dweb daemon (http://127.0.0.1:49737)
-import readline from "node:readline";
+import { readStdioLines } from "../stdio-lines.ts";
 
 const DWEB = (process.env.DWEB_URL ?? "http://127.0.0.1:49737").replace(/\/+$/, "");
 const DWEB_DISPLAY = (() => {
@@ -170,8 +170,7 @@ async function handle(msg: Json) {
   }
 }
 
-const rl = readline.createInterface({ input: process.stdin, terminal: false });
-rl.on("line", (line) => {
+readStdioLines(process.stdin, (line) => {
   const t = line.trim();
   if (!t) return;
   let msg: Json;
@@ -183,5 +182,4 @@ rl.on("line", (line) => {
   void handle(msg).catch((e) => {
     if (msg.id !== undefined) rpcErr(msg.id, -32603, (e as Error).message);
   });
-});
-rl.on("close", () => process.exit(0));
+}, () => process.exit(0));

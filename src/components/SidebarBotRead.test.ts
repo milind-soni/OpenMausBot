@@ -120,6 +120,19 @@ describe("bot menu bulk reads", () => {
     flushSync(() => button("Mark as unread").click());
     expect(state.bots[0]!.unread).toBe(true);
   });
+
+  it("offers Mark as unread in Simple mode when the only unread threads are archived or routine runs", () => {
+    mode.advanced = false;
+    state.bots[0]!.unread = false;
+    state.bots[0]!.tasks = [
+      { threadId: "selected", title: "Selected", createdAt: 1, unread: false },
+      { threadId: "hidden", title: "Archived unread", createdAt: 2, unread: true, archivedAt: 10 },
+      { threadId: "routine", title: "Routine run", createdAt: 3, unread: true, routineRunId: "run-1" },
+    ];
+    draw();
+    expect(button("Mark as read")).toBeUndefined();
+    expect(button("Mark as unread")).toBeDefined();
+  });
 });
 
 describe("Advanced mode's bot menu", () => {
@@ -155,13 +168,13 @@ describe("Simple mode's bot menu", () => {
   const point = (target: Element, y: number) => target.dispatchEvent(new MouseEvent("pointerover", { bubbles: true, clientX: 60, clientY: y }));
   beforeEach(() => { mode.advanced = false; });
 
-  it("leads with Pin, Move and Mark as read, then the thread items, then Rename, then Copy conversation ID and More, and ends with Archive and Delete", () => {
+  it("leads with Pin, Move and Mark as read, then the thread items, then Rename, then Publish, Copy conversation ID and More, and ends with Archive and Delete", () => {
     draw();
     expect([...sheet().querySelectorAll("button")].map((node) => node.textContent)).toEqual([
-      "Pin", "Move to department", "Mark as read", "New thread", "View threads", "Rename", "Copy conversation ID", "More", "Archive", "Delete",
+      "Pin", "Move to department", "Mark as read", "New thread", "View threads", "Rename", "Publish", "Copy conversation ID", "More", "Archive", "Delete",
     ]);
     expect([...sheet().children].map((node) => node.getAttribute("role") === "separator" ? "|" : node.textContent)).toEqual([
-      "Pin", "Move to department", "Mark as read", "|", "New thread", "View threads", "|", "Rename", "|", "Copy conversation ID", "More", "|", "Archive", "Delete",
+      "Pin", "Move to department", "Mark as read", "|", "New thread", "View threads", "|", "Rename", "|", "Publish", "Copy conversation ID", "More", "|", "Archive", "Delete",
     ]);
     flushSync(() => button("Rename").click());
     expect(onRename).toHaveBeenCalledWith(bot.id);

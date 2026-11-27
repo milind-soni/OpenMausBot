@@ -5,6 +5,8 @@ import {
   aiWorks,
   beatsFor,
   cloudSignInDue,
+  noEnginesDue,
+  workedEarlier,
   companyModelCount,
   completionPatch,
   EMPTY_ONBOARDING,
@@ -317,5 +319,41 @@ describe("welcomeFinishedThisLaunch", () => {
     vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
     expect(() => markWelcomeFinished()).not.toThrow();
     expect(welcomeFinishedThisLaunch()).toBe(true);
+  });
+});
+
+describe("the no-AI setup page", () => {
+  let n = 0;
+  const row = (snapshot: { state: string; busy?: true; unverified?: true; authenticated?: boolean }, instanceId = `e${++n}`) => ({ instanceId, snapshot });
+  it("shows only when engines are known and none is there", () => {
+    const worked = new Set<string>();
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" })] }, worked)).toBe(true);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }), row({ state: "available" })] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: false, instances: [row({ state: "unavailable" })] }, worked)).toBe(false);
+  });
+
+  it("never for status checks that could not finish on a busy machine", () => {
+    const worked = new Set<string>();
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable", busy: true }), row({ state: "unavailable" })] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available", unverified: true })] }, worked)).toBe(false);
+  });
+
+  it("never for an engine that worked earlier since the page loaded, until a check finds it missing", () => {
+    const worked = new Set<string>();
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available" }, "opencode")] }, worked)).toBe(false);
+    expect(workedEarlier(row({ state: "unavailable", busy: true }, "opencode"), worked)).toBe(true);
+    expect(workedEarlier(row({ state: "unavailable" }, "codex"), worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "codex")] }, worked)).toBe(true);
+    // A check that answered "not there" is a real loss: the setup page may show again.
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "available" }, "kimi")] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable", busy: true }, "kimi")] }, worked)).toBe(false);
+    expect(noEnginesDue({ connected: true, instances: [row({ state: "unavailable" }, "kimi")] }, worked)).toBe(true);
+    // Only found installed is not "worked".
+    expect(workedEarlier(row({ state: "available", unverified: true }, "pi"), worked)).toBe(false);
+    // Another place, after the connection dropped: its own engines decide.
+    expect(workedEarlier(row({ state: "available" }, "grok"), worked)).toBe(true);
+    expect(noEnginesDue({ connected: false, instances: [row({ state: "unavailable", busy: true }, "grok")] }, worked)).toBe(false);
+    expect(workedEarlier(row({ state: "unavailable", busy: true }, "grok"), worked)).toBe(false);
   });
 });

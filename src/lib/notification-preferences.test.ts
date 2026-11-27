@@ -205,3 +205,22 @@ describe("notification tray pin (email 1a1a4fb0)", () => {
     expect(preference.notificationTrayPinned()).toBe(false);
   });
 });
+
+describe("scheduled report notifications preference", () => {
+  it("follows the finished switch until set, then keeps its own choice", async () => {
+    let preference = await import("./notification-preferences");
+    expect(preference.reportNotificationsEnabled()).toBe(true);
+    preference.setFinishedNotifications(false);
+    expect(preference.reportNotificationsEnabled()).toBe(false);
+    preference.setReportNotifications(true);
+    expect(local.getItem(preference.REPORT_NOTIFICATIONS_KEY)).toBe("1");
+    expect(preference.useReportNotifications()).toBe(true);
+    vi.resetModules();
+    preference = await import("./notification-preferences");
+    expect(preference.finishedNotificationsEnabled()).toBe(false);
+    expect(preference.reportNotificationsEnabled()).toBe(true);
+    preference.setReportNotifications(false);
+    preference.setFinishedNotifications(true);
+    expect(preference.reportNotificationsEnabled()).toBe(false);
+  });
+});

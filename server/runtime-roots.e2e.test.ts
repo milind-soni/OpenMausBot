@@ -283,6 +283,47 @@ it("T2 parks the root on a credential card and runs it again with the provided l
   expect(f.roots()[0].executions).toBe(2);
 }), hostTimeout(60_000));
 
+it("T2b parks the root when multiple credentials are asked in one turn and resumes the bot on each saved card", () => scenario(async (f) => {
+  f.script(f.clive.id,
+    { key: "C2", match: [SECRET_PROVIDED, "OpenAI API key"], reply: "T2b-DONE: all credentials received." },
+    { key: "C1", match: [SECRET_PROVIDED, "xAI API key"], reply: "T2b-C1-DONE: first credential received, waiting for the rest." },
+    { key: "C0", match: ["T2b-JOB"], steps: [
+      { tool: "request_credential", arguments: { credential_id: "xaiApiKey", reason: "For Grok" } },
+      { tool: "request_credential", arguments: { credential_id: "openaiImageApiKey", reason: "For Images" } },
+    ], reply: "T2b-ASKED: waiting for credentials." });
+  const job = f.clive.activeTaskId;
+  await f.say(f.clive.id, job, "T2b-JOB: need multiple credentials.");
+  await f.final(job, "T2b-ASKED");
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
+  const cards = (await f.messages(job)).filter((message: any) => message.kind === "secret");
+  expect(cards).toHaveLength(2);
+  const [first, second] = cards;
+  const parked = f.roots()[0];
+  expect(parked.cards).toEqual([first.id, second.id]);
+
+  expect((await f.api("PUT", "/api/config", { xai: { key: "xai-fixture-key" }, imageGen: { key: "openai-fixture-key" } })).status).toBe(200);
+
+  const save1 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${first.id}/provided`, { threadId: job });
+  expect(save1.status).toBe(200);
+  expect(save1.body).toMatchObject({ provided: true, resumed: true });
+  await f.final(job, "T2b-C1-DONE");
+
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("needs_input");
+  expect(f.roots()[0].cards).toEqual([second.id]);
+
+  const save2 = await f.api("POST", `/api/bots/${f.clive.id}/secret-cards/${second.id}/provided`, { threadId: job });
+  expect(save2.status).toBe(200);
+  expect(save2.body).toMatchObject({ provided: true, resumed: true });
+
+  await f.final(job, "T2b-DONE");
+  await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
+  expect(f.roots()[0].executions).toBe(3);
+
+  const finalCards = (await f.messages(job)).filter((message: any) => message.kind === "secret");
+  expect(finalCards.map((m: any) => m.secret?.resumed)).toEqual([true, true]);
+}), hostTimeout(60_000));
+
+
 it("T3 parks the root on connector cards and runs it again once when both connect", async () => {
   const composio = await composioStub();
   try {

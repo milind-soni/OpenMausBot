@@ -6,6 +6,9 @@ export const LATEST_RELEASE_URL = "https://api.github.com/repos/milind-soni/Open
 /** Written by .github/workflows/promote-stable.yml: the released version our own Clouds have run for 48 hours. */
 export const STABLE_CHANNEL_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json";
 const CACHE_MS = 60 * 60_000;
+/** A press of Check for updates looks again unless the last lookup is younger than this. Any session may press it, and
+ * GitHub allows a server 60 lookups an hour without a token: presses keep to 12 of them. */
+const FRESH_MS = 5 * 60_000;
 /** How long the last answer stands in when the channel cannot be read: an outage of GitHub is no reason to say nothing. */
 const STALE_MS = 24 * 60 * 60_000;
 
@@ -119,6 +122,8 @@ export function createUpdateChecker(options: {
   let cached: { at: number; result: UpdateCheck } | undefined;
   /** The last answer that was read, kept past the hour for a channel that cannot be read for a while. */
   let lastGood: { at: number; result: UpdateCheck } | undefined;
+  /** The last lookup, when it failed: a press of Check for updates within FRESH_MS gets this error, not a new lookup. */
+  let failed: { at: number; error: unknown } | undefined;
   let inflight: Promise<UpdateCheck> | undefined;
   const base = (): UpdateCheck => ({
     current: options.current,
@@ -149,9 +154,11 @@ export function createUpdateChecker(options: {
     return { version: release.tag_name.replace(/^v/, ""), ...(typeof release.html_url === "string" ? { releaseUrl: release.html_url } : {}) };
   }
 
-  return async function check(): Promise<UpdateCheck> {
+  /** `fresh`: someone pressed Check for updates, so an answer from up to an hour ago is not good enough. */
+  return async function check({ fresh = false }: { fresh?: boolean } = {}): Promise<UpdateCheck> {
     if (options.install === "desktop" || options.install === "managed") return base();
-    if (cached && now() - cached.at < CACHE_MS) return cached.result;
+    if (cached && now() - cached.at < (fresh ? FRESH_MS : CACHE_MS)) return cached.result;
+    if (fresh && failed && now() - failed.at < FRESH_MS) throw failed.error;
     inflight ??= (async () => {
       try {
         const promoted = channel === "stable" ? await stable() : null;
@@ -165,16 +172,23 @@ export function createUpdateChecker(options: {
           ...updateCommand(options.install, { version: found.version, stable: promoted !== null }),
         };
         cached = lastGood = { at: now(), result };
+        failed = undefined;
         return result;
       } catch (error) {
-        // Never a fall back to the newest release, which the stable channel has not taken yet: the last answer it gave,
-        // when there is one from the last day, else the error.
-        if (lastGood && now() - lastGood.at < STALE_MS) return lastGood.result;
+        failed = { at: now(), error };
         throw error;
       } finally {
         inflight = undefined;
       }
     })();
-    return inflight;
+    try {
+      return await inflight;
+    } catch (error) {
+      // Never a fall back to the newest release, which the stable channel has not taken yet: the last answer it gave,
+      // when there is one from the last day, else the error. A press of Check for updates gets the error: an old
+      // answer there reads as "up to date".
+      if (!fresh && lastGood && now() - lastGood.at < STALE_MS) return lastGood.result;
+      throw error;
+    }
   };
 }

@@ -82,9 +82,9 @@ describe("quota switch", () => {
     return { id, event: { threadId, turnId: `turn-${id}`, ok: false, stopReason: "quota" } };
   };
   /** The fold's report of that turn, broken on `why`: the module decides what carries on. */
-  const ranOut = (turn: ReturnType<typeof begin>, why = QUOTA, internal = false, on = thread()) => {
+  const ranOut = (turn: ReturnType<typeof begin>, why = QUOTA, internal = false, on = thread(), settled?: Promise<unknown>) => {
     cause = why;
-    return quota.turnFailed(on, turn.event, internal);
+    return quota.turnFailed(on, turn.event, internal, settled);
   };
   /** The quota card an earlier version left open for that turn: the other engines here, then Not now. */
   const fails = async (turn: ReturnType<typeof begin>, _why = QUOTA, _internal = false, on = thread()) => {
@@ -221,6 +221,121 @@ describe("quota switch", () => {
       expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
     });
 
+    it("moves the request only once the turn's conversation has settled, since a working conversation's model cannot change", async () => {
+      gate.mockImplementation((_thread, selection) => deps.busy(bot.id, bot.threadId) ? { ok: false, error: "the bot is working — stop it before changing models" } : { ok: true, selection });
+      store.setTaskActivity(bot.id, bot.threadId, "working");
+      const turn = begin(bot.threadId, { messageId: said("find three papers on reef recovery") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      cause = QUOTA;
+      let settle = () => {};
+      const failing = quota.turnFailed(thread(), turn.event, false, new Promise<void>((resolve) => { settle = resolve; }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(gate, "nothing is tried while the conversation still works").not.toHaveBeenCalled();
+      store.setTaskActivity(bot.id, bot.threadId, "idle");
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+      expect(passed).toEqual([]);
+    });
+
+    it("moves nothing when the person stops the request, or sends another, before its conversation has settled", async () => {
+      for (const change of ["stopped", "replaced"] as const) {
+        const turn = begin(bot.threadId, { messageId: said(`find papers (${change})`) });
+        coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+        let settle = () => {};
+        const failing = quota.turnFailed(thread(), turn.event, false, new Promise<void>((resolve) => { settle = resolve; }));
+        await new Promise((resolve) => setImmediate(resolve));
+        if (change === "stopped") requests.get(bot.threadId)!.stopped = true;
+        else begin(bot.threadId, { messageId: said("something else") });
+        settle();
+        expect(await failing).toBeNull();
+        expect(thread().modelSelection, change).toEqual(defaultSelection());
+        expect(resend, change).not.toHaveBeenCalled();
+      }
+    });
+
+    it("moves nothing when the request is stopped, its backup taken off the bot's list, or the model switched by hand while the backup is probed", async () => {
+      for (const change of ["stopped", "unlisted", "switched", "variant"] as const) {
+        let answer = () => {};
+        engines[1] = engine("codex", "codex", "Codex", { snapshot: () => new Promise((resolve) => { answer = () => resolve({ state: "available", authenticated: true }); }) });
+        backups = [CODEX];
+        const turn = begin(bot.threadId, { messageId: said(`find papers (${change})`) });
+        coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+        passed = [];
+        const failing = quota.turnFailed(thread(), turn.event, false, Promise.resolve());
+        await new Promise((resolve) => setImmediate(resolve));
+        if (change === "stopped") requests.get(bot.threadId)!.stopped = true;
+        else if (change === "unlisted") backups = [];
+        else store.switchTaskModel(bot.id, bot.threadId, change === "switched" ? CURSOR : { ...defaultSelection(), variant: "high" }, false, false);
+        answer();
+        expect(await failing).toBeNull();
+        expect(thread().modelSelection, change).toEqual(change === "switched" ? CURSOR : change === "variant" ? { ...defaultSelection(), variant: "high" } : defaultSelection());
+        expect(resend, change).not.toHaveBeenCalled();
+        expect(passed, change).toEqual([{ selection: CODEX, why: change === "unlisted" ? "not-configured" : "conversation-changed" }]);
+        if (change === "switched" || change === "variant") store.switchTaskModel(bot.id, bot.threadId, defaultSelection(), false, false);
+      }
+    });
+
+    it("carries the backup model's configured reasoning effort or variant on automatic failover", async () => {
+      const backupWithEffort: ModelSelection = { instanceId: "codex", model: "codex-default", effort: "medium" };
+      backups = [backupWithEffort];
+      const turn = begin(bot.threadId, { messageId: said("use backup reasoning") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      expect(await ranOut(turn)).toBeNull();
+      expect(thread().modelSelection).toEqual(backupWithEffort);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("moves a request whose turn had already run something to the backup without sending it again", async () => {
+      for (const ran of ["tool", "reply"] as const) {
+        const turn = begin(bot.threadId, { messageId: said(`file the ticket (${ran})`) });
+        if (ran === "tool") store.appendMessage(bot.threadId, { role: "bot", kind: "activity", turnId: turn.event.turnId, tool: { name: "create_ticket", itemId: "call-1", ok: true } });
+        else store.appendMessage(bot.threadId, { role: "bot", kind: "text", turnId: turn.event.turnId, text: "Filed it as T-42." });
+        coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+        expect(await ranOut(turn)).toBeNull();
+        expect(thread().modelSelection, ran).toEqual(CODEX);
+        expect(resend, ran).not.toHaveBeenCalled();
+        expect(notices().at(-1), ran).toEqual({ name: "notice: switched to Codex. Part of your request had already run, so it was not sent again. Send what is still to do.", nameCode: "chat.notice.backupAlreadyRan", nameParams: { name: "Codex" }, ok: false });
+        store.switchTaskModel(bot.id, bot.threadId, defaultSelection(), false, false);
+      }
+    });
+
+    it("sends a request again when the only row before the refusal is a summary of the conversation's earlier context", async () => {
+      const messageId = said("plan the launch");
+      const turn = begin(bot.threadId, { messageId });
+      store.appendMessage(bot.threadId, { role: "bot", kind: "compaction", compaction: { summary: "Earlier: the launch is on Friday.", firstKeptId: messageId, foldedThroughId: messageId, tokensBefore: 90_000, by: "harness" } });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      expect(await ranOut(turn)).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends a request again when the screen captured as its refused turn settled is the only row after it", async () => {
+      const turn = begin(bot.threadId, { messageId: said("plan the launch") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      let settle = () => {};
+      const failing = ranOut(turn, QUOTA, false, thread(), new Promise<void>((resolve) => { settle = resolve; }));
+      store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: "iVBORw0KGgo=", mime: "image/png" });
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
+    it("sends a request again when a routine's report landed in the conversation while its refused turn settled", async () => {
+      const turn = begin(bot.threadId, { messageId: said("plan the launch") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      let settle = () => {};
+      const failing = ranOut(turn, QUOTA, false, thread(), new Promise<void>((resolve) => { settle = resolve; }));
+      store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Your morning digest is ready.",
+        automation: { routineId: "r1", runId: "run-1", name: "Morning digest", trigger: "schedule", executionThreadId: "routine-thread", scheduledFor: 1_800_000_000_000 } });
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
     it("never takes a failed tool call for the AI's usage limit, whatever the tool is called", async () => {
       const turn = begin(bot.threadId, { messageId: said("export the quota report") });
       coordinator.endTurn(turn.id, { ok: false, text: "tool failed" });
@@ -353,13 +468,15 @@ describe("quota switch", () => {
 
     it("moves a request the job runtime still holds but sends nothing again: the runtime resumes it", async () => {
       const turn = begin(bot.threadId, { messageId: said("ask the team for the numbers") });
+      store.appendMessage(bot.threadId, { role: "bot", kind: "activity", turnId: turn.event.turnId, tool: { name: "ask_teammate", itemId: "call-1", ok: true } });
       const mate = store.createBot();
       coordinator.enqueue({ botId: bot.id, threadId: bot.threadId }, turn.id, undefined, { botId: mate.id, threadId: mate.threadId }, "Pull the quarter's numbers");
       coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
       await ranOut(turn);
       expect(thread().modelSelection).toEqual(CODEX);
       expect(resend).not.toHaveBeenCalled();
-      expect(notices()).toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", nameCode: "chat.notice.backupRequestUnderWay", nameParams: { name: "Codex" }, ok: true }]);
+      expect(notices().filter((tool) => tool.name.startsWith("notice:")), "what it already ran is the runtime's to resume, not the person's to send again")
+        .toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", nameCode: "chat.notice.backupRequestUnderWay", nameParams: { name: "Codex" }, ok: true }]);
     });
 
     describe("an AI that is signed out", () => {
@@ -391,7 +508,7 @@ describe("quota switch", () => {
           { name: `notice: ${NOTICE}`, ok: true, setup: true },
           { name: "notice: continuing on Codex while Claude is signed out", nameCode: "chat.notice.backupContinuingSignedOut", nameParams: { name: "Codex", engine: "Claude" }, ok: true },
         ]);
-        expect(scopes).toEqual(["signed-out"]);
+        expect(new Set(scopes), "the backups are weighed for a sign-out, at the refusal and again before the move").toEqual(new Set(["signed-out"]));
         expect(thread().modelSelection).toEqual(CODEX);
         expect(resend).toHaveBeenCalledTimes(1);
         expect(resend.mock.calls[0]![2]).toMatchObject({ id: messageId });
@@ -401,9 +518,13 @@ describe("quota switch", () => {
 
       it("with no backup chosen moves nothing, and a second refusal adds no notice", async () => {
         backups = [];
+        const shown: Array<{ threadId: string; instanceId: string; id: string }> = [];
+        quota = createQuotaSwitch({ ...deps, signedOutNotice: (threadId, instanceId, row) => shown.push({ threadId, instanceId, id: row.id }) });
         await signedOut({ messageId: said("hi") });
         await signedOut({ messageId: said("hi again") });
         expect(notices()).toEqual([{ name: `notice: ${NOTICE}`, ok: true, setup: true }]);
+        const notice = store.messagesFor(bot.threadId).find((message) => message.tool?.name === `notice: ${NOTICE}`)!;
+        expect(shown, "the notice is handed on, to say the AI is signed in again later").toEqual([{ threadId: bot.threadId, instanceId: defaultSelection().instanceId, id: notice.id }]);
         expect(thread().modelSelection).toEqual(defaultSelection());
         expect(resend).not.toHaveBeenCalled();
       });

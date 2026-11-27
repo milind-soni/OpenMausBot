@@ -21,7 +21,7 @@ export const limitQuietMs = (): number => {
 export const usageLimitWait = (status: number | null | undefined, waitMs: number | null | undefined): boolean =>
   status === 429 && (waitMs ?? 0) > limitQuietMs();
 
-export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "tool_schema" | "tool_count" | "model_no_route" | "refused";
+export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "tool_schema" | "tool_count" | "image_content" | "model_no_route" | "refused";
 
 /** A provider refusing for want of credit or payment, in its own words (402 is read from the status). */
 const OUT_OF_CREDITS = /\bpayment required\b|\binsufficient (?:account )?(?:funds|balance|credits?)\b|\b(?:credit|account) balance is too low\b|\bout of credits?\b|\bno credits? (?:left|remaining)\b|\bused all (?:available |of (?:your|its) )?credits\b/i;
@@ -33,6 +33,11 @@ const OUT_OF_CREDITS = /\bpayment required\b|\binsufficient (?:account )?(?:fund
 const TOOL_SCHEMA = /moonshot flavou?red json schema|schema exceeds maximum allowed size|invalid schema for function\b|\btools\.\d+\.custom\.input_schema\b|function_declarations\[\d+\]\.parameters|\btoolSpec\.inputSchema\b/i;
 const SCHEMA_TOOL_NAME = /\b(?:function|tool) ['"`]([\w.:-]{1,128})['"`]/i;
 const SCHEMA_TOO_LARGE = /exceeds maximum allowed size|\btoo (?:large|long|big)\b/i;
+
+/** Z.ai GLM's refusal (api.z.ai and open.bigmodel.cn, chat-completions form) when a request carries a content part a
+ * text-only model cannot read: an image that reached the conversation — attached in chat or returned by a tool — is
+ * resent with every turn, so each one fails with these words. */
+const IMAGE_CONTENT = /\bmessages\.content\.type is invalid, allowed values: \[['"]text['"]\]/i;
 /** The model OpenCode 2.2.5 names in a no-route refusal ("Unsupported package for <id>: <package>", "Model unavailable:
  * <id>", "Cannot initialize <id>: …"); an id may hold a colon ("ollama-cloud/deepseek-v4.1-flash:1017"). */
 const NO_ROUTE_MODEL = /\b(?:Unsupported package for|Variant unavailable for|Cannot initialize|Model unavailable:) (\S+?)[:.]?(?=\s|$)/i;
@@ -94,6 +99,7 @@ export function engineFailureKind(text: string, status = httpStatusOf(text)): En
   if (status === 429) return "rate_limit";
   if (TOOL_SCHEMA.test(text)) return "tool_schema";
   if (toolCountLimitFromError(text) !== undefined) return "tool_count";
+  if (IMAGE_CONTENT.test(text)) return "image_content";
   if (MODEL_NO_ROUTE.test(text)) return "model_no_route";
   if (status !== null) return status >= 500 ? "server" : "refused";
   return null;
@@ -146,6 +152,7 @@ export function engineFailure(
       return limit == null ? noticeFailure("chat.notice.toolCountUnknown", { provider })
         : noticeFailure("chat.notice.toolCount", { provider, limit: String(limit) });
     }
+    case "image_content": return noticeFailure("chat.notice.imageContent", { provider });
     case "model_no_route": {
       const model = NO_ROUTE_MODEL.exec(text)?.[1];
       return model ? noticeFailure("chat.notice.modelNoRoute", { provider, model }) : noticeFailure("chat.notice.modelNoRouteUnnamed", { provider });
@@ -204,14 +211,15 @@ export function errorReplyFailure(provider: string, text: string, now = Date.now
   return { ...failure, stopReason: "quota", limit: "engine", ...(resetsAt ? { limitResetsAt: resetsAt } : {}) };
 }
 
-/** Only an out-of-credits failure or a refused tool schema or tool count in plain words; any other text stays as it is. */
+/** Only an out-of-credits failure or a refused tool schema, tool count or image content in plain words; any other text stays as it is. */
 export function plainFailureMessage(provider: string, text: string): string {
   return plainFailure(provider, text).message;
 }
 
 export function plainFailure(provider: string, text: string): { message: string; text?: ServerText } {
   const kind = engineFailureKind(text);
-  return kind === "credits" || kind === "tool_schema" || kind === "tool_count" ? engineFailure(provider, text, { kind })! : { message: text };
+  return kind === "credits" || kind === "tool_schema" || kind === "tool_count" || kind === "image_content"
+    ? engineFailure(provider, text, { kind })! : { message: text };
 }
 
 /** ACP protocol v1's StopReason values that explain why a turn ended early. */

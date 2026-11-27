@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { DECIDER_LOG_DIR, type DeciderLogRow } from "./decider/log.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 
@@ -39,6 +40,17 @@ let openrouterScript: RouteScript = {};
 
 const routeRequests = () => jevRequests.filter((request) => request.body?.questions?.answer?.type === "choice");
 const keyChecks = () => jevRequests.filter((request) => request.body?.questions?.answer?.type === "noul");
+
+async function expectDeciderLog(...expected: Partial<DeciderLogRow>[]): Promise<string> {
+  const dir = join(data, DECIDER_LOG_DIR);
+  let log = "";
+  await expect.poll(() => {
+    if (!existsSync(dir)) return [];
+    log = readdirSync(dir).map((name) => readFileSync(join(dir, name), "utf8")).join("");
+    return log.split("\n").slice(0, -1).map((line) => JSON.parse(line));
+  }, { timeout: 5_000 }).toEqual(expect.arrayContaining(expected.map((row) => expect.objectContaining(row))));
+  return log;
+}
 
 const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any; text: string }> => {
   const response = await fetch(`${base}${path}`, {
@@ -185,10 +197,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
       })).body.bot;
     }
     const created = await api("POST", "/api/groups", { name: "Launch", memberIds: [bots.Maya!.id, bots.Theo!.id, bots.Ravi!.id] });
-    expect(created.body.group.defaultResponder).toEqual({ kind: "auto" });
-    const setup = await api("PATCH", `/api/groups/${created.body.group.id}/setup`, { action: "complete", cwd: null, bulletin: "", defaultResponder: { kind: "auto" } });
-    expect(setup.status).toBe(200);
-    expect(setup.body.group.defaultResponder).toEqual({ kind: "auto" });
+    expect(created.body.group).toMatchObject({ defaultResponder: { kind: "auto", fallbackBotId: bots.Maya!.id }, setupCompletedAt: expect.any(Number) });
     room = created.body.group;
   });
 
@@ -281,11 +290,10 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
     const dump = readFileSync(engineDump, "utf8");
     expect(JSON.parse(dump).env).not.toHaveProperty("OMB_JEV_API_KEY");
     expect(dump).not.toContain(KEY);
-    const dir = join(data, "decider-log");
-    const log = readdirSync(dir).map((name) => readFileSync(join(dir, name), "utf8")).join("");
-    const rows = log.trim().split("\n").map((line) => JSON.parse(line));
-    expect(rows.some((row) => row.seam === "roomRouting" && row.ok && row.choice === bots.Theo!.id)).toBe(true);
-    expect(rows.some((row) => row.seam === "roomRouting" && !row.ok && row.reason === "overloaded")).toBe(true);
+    const log = await expectDeciderLog(
+      { seam: "roomRouting", ok: true, choice: bots.Theo!.id },
+      { seam: "roomRouting", ok: false, reason: "overloaded" },
+    );
     expect(log).not.toContain(KEY);
     expect(log).not.toContain("Safari");
     expect(output).not.toContain(KEY);
@@ -403,10 +411,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
         .toEqual([bots.Maya!.id, bots.Theo!.id, bots.Ravi!.id, "__everyone__"]);
       expect(jevRequests.every((jevRequest) => jevRequest.auth !== `Bearer ${OR_KEY}`)).toBe(true);
 
-      const dir = join(data, "decider-log");
-      const log = readdirSync(dir).map((name) => readFileSync(join(dir, name), "utf8")).join("");
-      const rows = log.trim().split("\n").map((line) => JSON.parse(line));
-      expect(rows.some((row) => row.provider === "openrouter" && row.model === MODEL && row.seam === "roomRouting" && row.ok && row.choice === bots.Theo!.id)).toBe(true);
+      const log = await expectDeciderLog({ provider: "openrouter", model: MODEL, seam: "roomRouting", ok: true, choice: bots.Theo!.id });
       expect(log).not.toContain(OR_KEY);
       expect(log).not.toContain("pricing page");
       expect(output).not.toContain(OR_KEY);
@@ -417,9 +422,7 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
       const { replies } = await round(room.id, "Who owns the invoice emails?");
       expect(replies.map((reply) => reply.from!.name)).toEqual(["Ravi"]);
       expect(replies[0]!.routedBy).toBeUndefined();
-      const dir = join(data, "decider-log");
-      const rows = readdirSync(dir).map((name) => readFileSync(join(dir, name), "utf8")).join("").trim().split("\n").map((line) => JSON.parse(line));
-      expect(rows.some((row) => row.provider === "openrouter" && !row.ok && row.reason === "http_error" && row.status === 402)).toBe(true);
+      await expectDeciderLog({ provider: "openrouter", ok: false, reason: "http_error", status: 402 });
     });
 
     it("a decisions model is tested through the Decisions API, and saved with its API", async () => {

@@ -2,7 +2,7 @@
 // packaged app ships no node_modules. Entry points keep their exact relative
 // paths under dist-server, where the server locates each proxy by path.
 import { build } from "esbuild";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { serverLocalePlugin } from "./server-locale-plugin.mjs";
@@ -37,8 +37,12 @@ const ENTRY_POINTS = [
   "openmausbot.ts",
   "pair-cli.ts",
   "workspace-backup.worker.ts",
+  // the stall watch's thread (perf/stall-watch.ts)
+  "stall-watch.worker.ts",
   // the OMB Cloud Pro home image's entry point
   "cloud-home-start.ts",
+  // a Cloud server's backup runs it in the home before it packs the volume (cloud-backup-stage.ts)
+  "cloud-backup-db-snapshot.ts",
   // the container image's entry point
   "server-launcher.ts",
   // Imported directly by the packaged smoke probes. An explicit root sibling,
@@ -154,6 +158,9 @@ copyFileSync(join(root, "scripts", "desktop-server-entry.mjs"), join(root, "dist
 const catalogSnapshot = join(root, "dist-server", "model-catalog", "models-dev.snapshot.json");
 mkdirSync(dirname(catalogSnapshot), { recursive: true });
 copyFileSync(join(server, "model-catalog", "models-dev.snapshot.json"), catalogSnapshot);
+
+// The starter apps' pages (server/local-apps/starters.ts), read from local-apps/starters/ beside the bundle.
+cpSync(join(server, "local-apps", "starters"), join(root, "dist-server", "local-apps", "starters"), { recursive: true });
 
 // Pi loads this through its own jiti and supplies TypeBox. Inline our local
 // policy module so the extension also works without the source checkout;

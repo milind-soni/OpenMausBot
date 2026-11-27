@@ -3,9 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import "../server-line-packs.ts";
 import { engineFailureMessage } from "../drivers/engine-errors.ts";
+import { memoryStopText } from "../engine-memory.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
+import { FROZE_BROWSING } from "../memory-freeze-restart.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
-import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
+import { createChiefNotices, failedRequester, MEMORY_RETRY_MS, retriedMessage, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   const bots = [
@@ -193,6 +195,18 @@ describe("a run stopped to free memory", () => {
     expect(f.told).toHaveLength(1);
   });
 
+  it("starts a turn whose browser was closed for memory again once, never twice for one request, so a heavy page cannot loop", () => {
+    const f = roomFixture();
+    const closedBrowser = `${memoryStopText(true)} (claude exited null before result)`;
+    f.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Read the long report." });
+    for (let stop = 0; stop < 3; stop++) {
+      f.notices.reportIncident({ kind: "failed", bot: f.chief as never, threadId: "chief-main", detail: closedBrowser });
+      f.settle();
+    }
+    expect(f.continued).toHaveLength(1);
+    expect(f.told).toHaveLength(2);
+  });
+
   it("starts nothing when someone wrote in the thread since, or it runs or waits again", () => {
     const wrote = roomFixture();
     wrote.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Book the train." });
@@ -209,6 +223,15 @@ describe("a run stopped to free memory", () => {
     busy.notices.reportIncident({ kind: "failed", bot: busy.chief as never, threadId: "chief-main", detail: STOPPED });
     busy.settle();
     expect(busy.continued).toEqual([]);
+  });
+
+  it("never starts again a routine run that the restart after a memory freeze ended", () => {
+    const f = roomFixture();
+    f.store.appendMessage("chief-main", { role: "user", kind: "text", text: "Check the prices page." });
+    f.notices.reportIncident({ kind: "routine-failed", bot: f.chief as never, threadId: "chief-main", detail: `Prices: ${FROZE_BROWSING}`, failure: FROZE_BROWSING });
+    f.settle();
+    expect(f.waiting).toEqual([]);
+    expect(f.continued).toEqual([]);
   });
 
   it("on a self-hosted server, starts a teammate's run again by itself too, saying it was this server, and asks no Chief", () => {
@@ -329,5 +352,68 @@ describe("a run the server had no room to start", () => {
     expect(crash.turnsOf("ada")).toHaveLength(1);
     expect(crash.turnsOf("ada")[0]!.text.startsWith(AUTO_RETRY_LEAD)).toBe(true);
     expect(crash.continued).toEqual([]);
+  });
+});
+
+describe("a Chief's retry of a thread that failed the Chief's own request", () => {
+  const sent = { status: 200, body: { receipts: [{ botId: "ada", botName: "Ada", outcome: "queued", threadId: "ada-job" }] } };
+  const node = (over: Record<string, unknown>) => ({ id: "child", parentId: "chief-turn", threadId: "ada-job", botId: "ada", status: "failed", reply: "resume", mode: "work", ...over });
+  const coordinator = (last: Record<string, unknown> | undefined) => ({
+    inThread: () => (last ? [node({ id: "older", status: "completed" }), last] : []) as never,
+    node: (id: string) => (id === "chief-turn" ? { id, botId: "chief", threadId: "chief-main" } : undefined) as never,
+  });
+  const requester = (last: Record<string, unknown> | undefined) => failedRequester(coordinator(last), "ada-job");
+
+  it("knows which bot asked, with reply resume, for the failed work, and nobody for anything else", () => {
+    expect(requester(node({}))).toEqual({ botId: "chief", consult: false });
+    expect(requester(node({ mode: "consult" }))).toEqual({ botId: "chief", consult: true });
+    expect(requester(node({ status: "completed" }))).toBeUndefined();
+    expect(requester(node({ reply: "none" }))).toBeUndefined();
+    expect(requester(node({ parentId: undefined }))).toBeUndefined();
+    expect(requester(undefined)).toBeUndefined();
+  });
+
+  it("asks again from the Chief's own turn, so the result wakes the Chief, and says so", async () => {
+    const coordinateBots = vi.fn(async () => sent);
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, note: "The service was down.", coordinateBots });
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(coordinateBots).toHaveBeenCalledWith(expect.objectContaining({ botIds: ["ada"], thread: "ada-job", reply: "resume", consult: false }));
+    expect(how).toBe("request");
+    expect(retriedMessage("Ada", "Invoices", "request")).toContain("resumes you");
+  });
+
+  it("asks a failed question again as a question, so the teammate still acts on nothing", async () => {
+    const coordinateBots = vi.fn(async () => sent);
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: true }) });
+    expect(await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false, coordinateBots })).toBe("request");
+    expect(coordinateBots).toHaveBeenCalledWith(expect.objectContaining({ reply: "resume", consult: true }));
+  });
+
+  it("tells the Chief why when that request could not be sent", async () => {
+    const coordinateBots = vi.fn(async () => ({ status: 403, body: { error: "not reachable" } }));
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, coordinateBots })).rejects.toThrow("not reachable");
+    expect(f.startTurn).not.toHaveBeenCalled();
+  });
+
+  it("retries every other thread as before: another bot's request, the person's own work, or OpenMausBot's automatic retry", async () => {
+    for (const [requested, automatic] of [["someone-else", false], [undefined, false], ["chief", true]] as const) {
+      const coordinateBots = vi.fn(async () => sent);
+      const f = fixture({ failedRequester: () => (requested ? { botId: requested, consult: false } : undefined) });
+      const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, coordinateBots, ...(automatic ? { automatic: true as const } : {}) });
+      expect(coordinateBots).not.toHaveBeenCalled();
+      expect(f.turnsOf("ada")).toHaveLength(1);
+      expect(how).toBe("turn");
+    }
+    expect(retriedMessage("Ada", "Invoices", "turn")).toBe("Ada's thread #Invoices is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.");
+  });
+
+  it("from a room, where the server passes no coordinate_bots, retries the Chief's own request in the failed thread as a turn", async () => {
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false });
+    expect(f.turnsOf("ada")).toEqual([{ threadId: "ada-job", text: expect.stringContaining("Continue the request above from where it stopped and finish it.") }]);
+    expect(f.turnsOf("chief")).toEqual([]);
+    expect(how).toBe("turn");
   });
 });

@@ -16,7 +16,8 @@ vi.mock("@/lib/browser-pip", () => ({
   supportsBrowserPictureInPicture: () => false,
   useBrowserPictureInPicture: () => "",
 }));
-vi.mock("./browser/StreamSurface", () => ({ StreamSurface: (props: { label: string }) => createElement("div", { "data-stub-surface": props.label }) }));
+const surface = vi.hoisted(() => ({ props: null as null | { onMessage?: (message: Record<string, unknown>) => void; onConnectedChange?: (connected: boolean) => void } }));
+vi.mock("./browser/StreamSurface", () => ({ StreamSurface: (props: { label: string; onMessage?: (message: Record<string, unknown>) => void; onConnectedChange?: (connected: boolean) => void }) => { surface.props = props; return createElement("div", { "data-stub-surface": props.label }); } }));
 vi.mock("./browser/BrowserProfilesManager", () => ({ BrowserProfilesManager: () => null }));
 vi.mock("./browser/MoreMenu", () => ({ MoreMenu: () => null }));
 vi.mock("./browser/PasskeyNotice", () => ({ PasskeyNotice: () => null }));
@@ -136,5 +137,22 @@ describe("the browser panel's Full screen", () => {
     click(fullscreenButton());
     await settle();
     expect(fullscreenButton()?.getAttribute("aria-label")).toBe("Full screen");
+  });
+});
+
+describe("input that does not reach the page", () => {
+  it("says so in the panel's status line, with Reconnect, until input gets through again", async () => {
+    flushSync(() => surface.props?.onConnectedChange?.(true));
+    flushSync(() => surface.props?.onMessage?.({ type: "inputHalted", halted: true }));
+    const status = () => host.querySelector('[role="alert"]');
+    expect(status()?.textContent).toContain("Your clicks and typing are not reaching the page.");
+    const reconnect = [...status()!.querySelectorAll("button")].find((button) => button.textContent === "Reconnect");
+    expect(reconnect).toBeTruthy();
+    flushSync(() => surface.props?.onMessage?.({ type: "inputHalted", halted: false }));
+    expect(status()).toBeNull();
+    flushSync(() => surface.props?.onMessage?.({ type: "inputHalted", halted: true }));
+    click(reconnect === undefined ? null : [...status()!.querySelectorAll("button")].find((button) => button.textContent === "Reconnect")!);
+    await settle();
+    expect(status()).toBeNull();
   });
 });

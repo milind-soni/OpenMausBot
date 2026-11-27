@@ -4,9 +4,13 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { helperModelAllowed } from "../shared/wire.ts";
+import type { MemoryModelFailure, MemoryModelOutcome, MemoryModelRun, MemoryModelSelection, MemoryModelStatus } from "../shared/memory-model.ts";
+import { ChatCompletionError, ChatHttpError } from "./drivers/openai-chat-refusals.ts";
+import { openRouterModelUnavailable } from "./drivers/openrouter-free.ts";
 import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
 import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
 import { refusesModel } from "./quick-model-fallback.ts";
+import type { LightModel, LightModelEngine } from "./suggested-reply/light-model.ts";
 import { fastModelFor } from "./turn-route.ts";
 import type { UsageRow, UsageTrigger } from "./usage-ledger.ts";
 
@@ -36,9 +40,10 @@ export function helperSelection(cfg: HelperConfig, env: Record<string, string | 
 }
 
 /** "representative": a person's assistant answering a teammate's question for them, which must never get tools. */
-export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply";
+/** "suggested-reply": the composer's next-line suggestion, only ever on the bot's own engine's smallest model. */
+export type SideJob = "compaction" | "memory" | "skill-review" | "setup-suggestions" | "representative" | "status-reply" | "skill-burger" | "suggested-reply";
 
-export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable"> & {
+export type SideJobInstance = Pick<ProviderInstance, "instanceId" | "driverKind" | "enabled" | "generateText" | "generateMemoryText" | "models" | "quickModelsUsable" | "openRouter"> & {
   adapter: { capabilities: Pick<ProviderAdapter["capabilities"], "agentsMcp"> };
 };
 
@@ -48,17 +53,23 @@ export interface SideJobBot {
   /** Where a spend alert a call raises is shown. */
   threadId: string;
   modelSelection: { instanceId: string; model?: string };
+  memoryModel?: MemoryModelSelection;
   helperModel?: boolean;
 }
 
 export interface SideJobText {
   via: "engine" | "helper";
+  memoryModel?: MemoryModelStatus;
   generateText: (prompt: string, options?: SideJobTextOptions) => Promise<string>;
 }
 
 /** `waiting`: the call has to wait for a free slot (other bots' background calls); `started`: it starts now, after waiting
  * or at once. A call that is never queued calls neither. */
-export type SideJobTextOptions = Pick<TextGenerationOptions, "signal" | "timeoutMs"> & { waiting?(): void; started?(): void };
+export type SideJobTextOptions = Pick<TextGenerationOptions, "signal" | "timeoutMs"> & {
+  waiting?(): void;
+  started?(): void;
+  onMemoryModel?(result: MemoryModelRun): void;
+};
 
 export interface SideJobsDeps {
   bot: (botId: string) => SideJobBot | null | undefined;
@@ -74,6 +85,8 @@ export interface SideJobsDeps {
   log?: (line: string) => void;
   /** How many background jobs run at once, across bots. */
   slots?: JobSlots;
+  /** The smallest model of an engine a suggested reply may run on; without it, or when it answers null, there is none. */
+  lightModel?: (engine: LightModelEngine, refused: ReadonlySet<string>) => LightModel | null;
 }
 
 export interface SideJobs {
@@ -85,7 +98,7 @@ type TextCall = (prompt: string, options?: TextGenerationOptions) => Promise<str
 
 /** Jobs someone is waiting on, and the representative, which must never get tools, run only on a one-off text call:
  * generateMemoryText starts a whole agent process. */
-const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions", "representative", "status-reply"]);
+const ONE_OFF_ONLY: ReadonlySet<SideJob> = new Set(["compaction", "setup-suggestions", "representative", "status-reply", "skill-burger"]);
 
 function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined {
   const call = ONE_OFF_ONLY.has(job) ? instance.generateText : instance.generateText ?? instance.generateMemoryText;
@@ -95,7 +108,22 @@ function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined 
 /** A turn or a person is waiting on these, so they start at once. */
 const NEVER_QUEUED: ReadonlySet<SideJob> = new Set(["compaction", "representative", "status-reply"]);
 /** A person sees these soon (a new bot's suggestions card): they wait ahead of memory upkeep and skill review. */
-const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions"]);
+const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions", "skill-burger", "suggested-reply"]);
+
+function memoryModelFailure(error: unknown): MemoryModelFailure {
+  if (error instanceof DOMException && error.name === "TimeoutError") return "timeout";
+  if (error instanceof Error && "code" in error && error.code === "spend_cap") return "budget";
+  if (error instanceof ChatHttpError || error instanceof ChatCompletionError) {
+    switch (error.status) {
+      case 401: return "authentication";
+      case 402: return "credits";
+      case 403: return "forbidden";
+      case 408: return "timeout";
+      case 429: return "rateLimit";
+    }
+  }
+  return "request";
+}
 
 export function createSideJobs(deps: SideJobsDeps): SideJobs {
   // Logged once per change, not once per call.
@@ -137,25 +165,88 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
   /** Every call checks the spend limit: one upkeep pass makes several in a row. */
   const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions): SideJobText["generateText"] =>
     async (prompt, options) => {
-      deps.assertWithinBudget();
+      const { checkModel, ...generation } = fixed();
+      if (!checkModel) deps.assertWithinBudget();
       const threadId = `${job}-${randomUUID()}`;
       return call(prompt, {
         ...options,
-        ...fixed(),
-        onUsage: (usage) => deps.book({
-          botId: bot.id,
-          botName: bot.name,
-          threadId,
-          instanceId: instance.instanceId,
-          driverKind: instance.driverKind,
-          model: usage.model,
-          input: usage.input ?? 0,
-          output: usage.output ?? 0,
-          ...(usage.cachedInput !== undefined ? { cachedInput: usage.cachedInput } : {}),
-          costUsd: usage.costUsd ?? null,
-          trigger,
-        }, usage.input !== undefined && usage.output !== undefined, bot.threadId),
+        ...generation,
+        ...(checkModel ? { checkModel: (model: string) => {
+          checkModel(model);
+          deps.assertWithinBudget();
+        } } : {}),
+        onUsage: (usage) => {
+          deps.book({
+            botId: bot.id,
+            botName: bot.name,
+            threadId,
+            instanceId: instance.instanceId,
+            driverKind: instance.driverKind,
+            model: usage.model,
+            input: usage.input ?? 0,
+            output: usage.output ?? 0,
+            ...(usage.cachedInput !== undefined ? { cachedInput: usage.cachedInput } : {}),
+            costUsd: usage.costUsd ?? null,
+            trigger,
+          }, usage.input !== undefined && usage.output !== undefined, bot.threadId);
+          generation.onUsage?.(usage);
+        },
       });
+    };
+
+  /** Pinned to the light model: its refusal fails the call rather than running on the bot's own model. */
+  const lightText = (bot: SideJobBot, own: SideJobInstance): SideJobText | null => {
+    const refused = deps.smallModels.refused(own.instanceId);
+    const light = deps.lightModel?.(own, refused);
+    if (!light || (deps.modelAllowed && !deps.modelAllowed({ instanceId: own.instanceId, model: light.model }))) return null;
+    const call = (light.call === "text" ? own.generateText : own.generateMemoryText)?.bind(own);
+    if (!call) return null;
+    const pinned: TextGenerationOptions = { model: light.model, fallback: { model: light.model, refused, onRefused: (model) => deps.smallModels.remember(own.instanceId, model) } };
+    return { via: "engine", generateText: rememberRefusal(booked("suggested-reply", bot, own, call, { kind: "bot", botId: bot.id }, () => pinned), own, light.model) };
+  };
+
+  const writeMemory = (bot: SideJobBot, own: SideJobInstance, call: TextCall, selected: MemoryModelSelection): SideJobText["generateText"] =>
+    async (prompt, { onMemoryModel, ...options } = {}) => {
+      const report = (result: MemoryModelOutcome) => onMemoryModel?.({ ...selected, ...result });
+      const allowed = (model: string) => deps.modelAllowed?.({ instanceId: own.instanceId, model }) !== false;
+      const stillSelected = () => {
+        const current = deps.bot(bot.id);
+        return current?.modelSelection.instanceId === own.instanceId && current.memoryModel?.instanceId === own.instanceId &&
+          current.memoryModel.model === selected.model && deps.instance(own.instanceId) === own && !deps.refusal(own);
+      };
+      const trigger: UsageTrigger = { kind: "bot", botId: bot.id };
+      options.signal?.throwIfAborted();
+      if (!stillSelected()) throw new Error("The memory model selection changed.");
+      if (!allowed(selected.model)) {
+        report({ state: "failed", reason: "forbidden" });
+        throw new Error("The memory model is not assigned to this workspace.");
+      }
+      try {
+        const answer = await booked("memory", bot, own, call, trigger, () => ({ model: selected.model }))(prompt, options);
+        if (!options.signal?.aborted) report({ state: "selected" });
+        return answer;
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        if (!openRouterModelUnavailable(error, selected.model)) {
+          report({ state: "failed", reason: memoryModelFailure(error) });
+          throw error;
+        }
+        let used: string | undefined;
+        try {
+          const answer = await booked("memory", bot, own, call, trigger, () => ({
+            checkModel: (model) => {
+              if (!stillSelected() || !model || model === selected.model || !allowed(model)) throw error;
+              used = model;
+            },
+            onUsage: (usage) => { used = usage.model; },
+          }))(prompt, options);
+          if (!options.signal?.aborted && used) report({ state: "fallback", used });
+          return answer;
+        } catch (fallbackError) {
+          if (!options.signal?.aborted) report({ state: "failed", reason: fallbackError === error ? "unavailable" : memoryModelFailure(fallbackError) });
+          throw fallbackError;
+        }
+      }
     };
 
   /** Whatever the lookup throws reads as no helper: a helper never fails a job or the turn waiting on one. */
@@ -196,7 +287,7 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
 
   const slots = deps.slots ?? backgroundTextSlots;
   const queued = (job: SideJob, found: SideJobText | null): SideJobText | null => found && !NEVER_QUEUED.has(job)
-    ? { via: found.via, generateText: (prompt, { waiting, started, ...options } = {}) => slots.run(() => {
+    ? { ...found, generateText: (prompt, { waiting, started, ...options } = {}) => slots.run(() => {
       started?.();
       return found.generateText(prompt, options);
     }, { signal: options.signal, interactive: SEEN_SOON.has(job), onWait: waiting }) }
@@ -206,6 +297,9 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     const bot = deps.bot(botId);
     const own = at.instance ?? (bot ? deps.instance(bot.modelSelection.instanceId) : null);
     if (!bot || !own || deps.refusal(own)) return null;
+    if (job === "suggested-reply") return lightText(bot, own);
+    const selectedMemory = job === "memory" && bot.memoryModel?.instanceId === own.instanceId ? bot.memoryModel : undefined;
+    if (selectedMemory && (!own.openRouter || !own.enabled || !own.generateText)) return null;
     // The review's changes are written with the bot's own skill tools, whoever read the conversation.
     if (job === "skill-review" && own.adapter.capabilities.agentsMcp !== true) return null;
     const call = ownCall(job, own);
@@ -216,6 +310,13 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
         const quick = quickModel(bot, own);
         const write = booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own), ...quick }));
         return { via: "engine", generateText: quick.model ? rememberRefusal(write, own, quick.model) : write };
+      }
+      if (job === "memory" && own.openRouter && own.enabled && own.generateText) {
+        return {
+          via: "engine",
+          memoryModel: selectedMemory ?? { instanceId: own.instanceId },
+          generateText: selectedMemory ? writeMemory(bot, own, call, selectedMemory) : booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({})),
+        };
       }
       return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own) })) };
     }

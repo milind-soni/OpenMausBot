@@ -14,7 +14,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function serve(check: () => Promise<UpdateCheck>, updater?: ServerUpdater, auth: RequestAuth = { kind: "loopback", scopes: ["admin"] }): Promise<string> {
+async function serve(check: (options?: { fresh?: boolean }) => Promise<UpdateCheck>, updater?: ServerUpdater, auth: RequestAuth = { kind: "loopback", scopes: ["admin"] }): Promise<string> {
   const routes = [createUpdateCheckRoutes({ check, ...(updater ? { server: updater, actor: () => ({ kind: "loopback" as const }) } : {}) })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -42,6 +42,17 @@ describe("update check route", () => {
     expect(await response.json()).toEqual(result);
     expect((await fetch(`${base}/api/updates/check`, { method: "POST" })).status).toBe(404);
     expect((await fetch(`${base}/api/updates`)).status).toBe(404);
+  });
+
+  it("asks for a fresh lookup only when the request says fresh=1", async () => {
+    const asked: Array<{ fresh?: boolean } | undefined> = [];
+    const base = await serve(async (options?: { fresh?: boolean }) => {
+      asked.push(options);
+      return { current: "0.1.177", install: "docker", available: false };
+    });
+    await fetch(`${base}/api/updates/check`);
+    await fetch(`${base}/api/updates/check?fresh=1`);
+    expect(asked).toEqual([{ fresh: false }, { fresh: true }]);
   });
 
   it("reports a failed lookup as a 502 with the reason", async () => {

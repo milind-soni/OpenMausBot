@@ -104,7 +104,29 @@ function lex(source: string, windows: boolean): Reading {
     return key.startsWith("env:") ? WINDOWS_VARIABLES[key.slice(4)] ?? DYNAMIC : DYNAMIC;
   };
 
-  /** Returns the text up to the matching `shut`. Inside `"${…}"` double quotes still quote but `'` is literal. */
+  const nested = (shut: string) => {
+    // Bash reads a pending heredoc body after the line, not at a newline inside a substitution on it.
+    const outer = heredocs.splice(0);
+    if (++nesting > MAX_NESTING) {
+      at = source.length;
+      synced = false;
+    } else if (!script(shut)) synced = false;
+    nesting--;
+    if (heredocs.length) synced = false;
+    heredocs.splice(0, heredocs.length, ...outer);
+  };
+  /** Reads a POSIX `$(…)` or backtick substitution at `at` as commands, and leaves `at` on its last character. */
+  const substitution = (): boolean => {
+    const tick = source[at] === "`";
+    if (windows || !(tick || source.startsWith("$(", at))) return false;
+    at += tick ? 1 : 2;
+    nested(tick ? "`" : ")");
+    at--;
+    return true;
+  };
+
+  /** Returns the text up to the matching `shut`. Inside `"${…}"` double quotes still quote but `'` is literal.
+   * A substitution inside (`${X:-$(…)}`, `name=( $(…) )`) runs, so its commands are read. */
   const balanced = (open: string, shut: string, inDoubleQuotes: boolean): string => {
     const from = at;
     for (let depth = 1; at < source.length; at++) {
@@ -112,8 +134,9 @@ function lex(source: string, windows: boolean): Reading {
       if (c === "\\" && !windows) at++;
       else if (c === "'" && !inDoubleQuotes) at = endOf("'", at + 1);
       else if (c === '"') {
-        for (at++; at < source.length && source[at] !== '"'; at++) if (source[at] === "\\" && !windows) at++;
-      } else if (c === open) depth++;
+        for (at++; at < source.length && source[at] !== '"'; at++) if (source[at] === "\\" && !windows) at++; else substitution();
+      } else if (substitution()) continue;
+      else if (c === open) depth++;
       else if (c === shut && --depth === 0) return source.slice(from, at++);
     }
     synced = false;
@@ -186,13 +209,6 @@ function lex(source: string, windows: boolean): Reading {
       if (command.words.length || command.writes.length) commands.push(command);
       at += skip;
       command = { words: [], starts: [], writes: [], from: at, to: at };
-    };
-    const nested = (shut: string) => {
-      if (++nesting > MAX_NESTING) {
-        at = source.length;
-        synced = false;
-      } else if (!script(shut)) synced = false;
-      nesting--;
     };
     const quoted = () => {
       while (at < source.length) {
@@ -555,6 +571,11 @@ function windowsTarget(word: string, percent: boolean, host: Host): FloorVerdict
   return home && drive && home === `${drive}\\${parts.join("\\")}`.toLowerCase() ? DELETE_HOME : null;
 }
 
+/** PowerShell also takes an en dash, em dash or horizontal bar where a parameter's dash goes. */
+function parameterName(arg: string): string {
+  return arg.toLowerCase().replace(/^[\u2013\u2014\u2015]/, "-");
+}
+
 /** `powershell`: PowerShell on macOS or Linux, whose deletes take POSIX paths. */
 type Mode = "posix" | "windows" | "powershell";
 
@@ -636,8 +657,8 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   if (mode === "powershell") {
     // Remove-Item's aliases off Windows, where `rm` and `rmdir` are the real programs the POSIX reading judges.
     if (!["remove-item", "ri", "rd", "del", "erase"].includes(program)) return null;
-    const isSwitch = (arg: string) => /^-./.test(arg);
-    if (!args.some((arg) => isSwitch(arg) && "-recurse".startsWith(arg.toLowerCase()))) return null;
+    const isSwitch = (arg: string) => /^-./.test(parameterName(arg));
+    if (!args.some((arg) => isSwitch(arg) && "-recurse".startsWith(parameterName(arg)))) return null;
     for (const target of args) {
       // PowerShell takes either slash in a path.
       const verdict = isSwitch(target) ? null : posixTarget(target.replace(/\\/g, "/"), host);
@@ -650,10 +671,10 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   const cmdStyle = program === "rd" || program === "rmdir" || program === "del" || program === "erase";
   if (cmdStyle || program === "ri" || program === "remove-item" || program === "rm") {
     // cmd switches are /s /q or /s/q; PowerShell takes -Recurse or any unambiguous start of it.
-    const isSwitch = (arg: string) => /^-./.test(arg) || (cmdStyle && /^\/[A-Za-z?]/.test(arg));
+    const isSwitch = (arg: string) => /^-./.test(parameterName(arg)) || (cmdStyle && /^\/[A-Za-z?]/.test(arg));
     const recursive = args.some((arg) => isSwitch(arg) && (arg[0] === "/"
       ? arg.toLowerCase().split("/").includes("s")
-      : "-recurse".startsWith(arg.toLowerCase())));
+      : "-recurse".startsWith(parameterName(arg))));
     if (!recursive) return null;
     for (const target of args) {
       // After `rm` a lone backslash is a POSIX line continuation; after the others it is the drive root.
@@ -665,12 +686,11 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
   }
   if (program === "format") return args.some((arg) => /^[A-Za-z]:\\?$/.test(arg)) ? FORMAT_DISK : null;
   // Windows Storage module: Format-Volume formats whatever volume it is given, also one piped in; Clear-Disk erases
-  // a disk's data only with -RemoveData, and refuses a disk holding data partitions without it. PowerShell also takes
-  // an en dash, em dash or horizontal bar where a parameter's dash goes.
+  // a disk's data only with -RemoveData, and refuses a disk holding data partitions without it.
   if (program === "format-volume") return FORMAT_DISK;
   if (program === "clear-disk") {
     return args.some((arg) => {
-      const name = arg.split(":")[0].toLowerCase().replace(/^[\u2013\u2014\u2015]/, "-");
+      const name = parameterName(arg.split(":")[0]);
       return name.length >= "-removed".length && "-removedata".startsWith(name);
     }) ? FORMAT_DISK : null;
   }

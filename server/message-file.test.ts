@@ -8,6 +8,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   MESSAGE_FILE_DOWNLOAD_MAX_BYTES,
   MESSAGE_FILE_MAX_BYTES,
+  canOpenOutsideWorkspaceMessageFile,
   messageFileDisposition,
   messageFileDownloadName,
   messageAttachmentName,
@@ -19,6 +20,7 @@ import {
   mimeFor,
   openMessageFile,
   openMessageFolderEntry,
+  openOutsideWorkspaceMessageFile,
 } from "./message-file.ts";
 
 const referencesAttachment = (text: string, requested: string) => messageAttachmentName(text, requested) !== null;
@@ -498,5 +500,74 @@ describe("message-linked files", () => {
     expect(messageFileDownloadName("Quarterly report.pdf", "4e8d.pdf")).toBe("Quarterly report.pdf");
     expect(messageFileDownloadName("setup.exe", "4e8d.pdf")).toBe("setup.pdf");
     expect(messageFileDownloadName("preview.jpg", "4e8d.png")).toBe("preview.png");
+  });
+
+  it("opens one explicit outside-workspace regular file for an owner while refusing folders, app data, secrets, and relative links", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "omb-outside-single-"));
+    const appData = mkdtempSync(join(tmpdir(), "omb-appdata-refuse-"));
+    try {
+      const note = join(outside, "shared-notes.md");
+      writeFileSync(note, "# shared outside note\n");
+      const folder = join(outside, "subdir");
+      mkdirSync(folder, { recursive: true });
+      const appFile = join(appData, "store.json");
+      writeFileSync(appFile, "{}");
+      const secretDir = join(outside, ".openmausbot-secrets");
+      mkdirSync(secretDir, { recursive: true });
+      const secretFile = join(secretDir, "token.txt");
+      writeFileSync(secretFile, "secret");
+
+      expect(await canOpenOutsideWorkspaceMessageFile(note, [appData])).toBe(true);
+      expect(await canOpenOutsideWorkspaceMessageFile(pathToFileURL(note).href, [appData])).toBe(true);
+      expect(await canOpenOutsideWorkspaceMessageFile(folder, [appData])).toBe(false);
+      expect(await canOpenOutsideWorkspaceMessageFile(appFile, [appData])).toBe(false);
+      expect(await canOpenOutsideWorkspaceMessageFile(secretFile, [appData])).toBe(false);
+      expect(await canOpenOutsideWorkspaceMessageFile("relative/shared-notes.md", [appData])).toBe(false);
+
+      const opened = await openOutsideWorkspaceMessageFile(note, [appData]);
+      try {
+        expect(opened.bytes).toBe(22);
+        expect(opened.name).toBe("shared-notes.md");
+      } finally {
+        await opened.handle.close();
+      }
+
+      await expect(openOutsideWorkspaceMessageFile(appFile, [appData])).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+      // A hidden folder is refused before the file is opened, with the same quiet outside-workspace answer.
+      await expect(openOutsideWorkspaceMessageFile(secretFile, [appData])).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+      await expect(openOutsideWorkspaceMessageFile(folder, [appData])).rejects.toMatchObject({ status: 400, code: "directory" });
+      await expect(openOutsideWorkspaceMessageFile("relative/shared-notes.md", [appData])).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(appData, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses hidden paths, key-like names and a link that resolves into a hidden folder, with the quiet outside answer", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-outside-guard-"));
+    try {
+      const ssh = join(root, "home", ".ssh");
+      mkdirSync(ssh, { recursive: true });
+      const key = join(ssh, "id_ed25519");
+      writeFileSync(key, "fixture key");
+      const shared = join(root, "shared");
+      mkdirSync(shared, { recursive: true });
+      const link = join(shared, "notes.md");
+      symlinkSync(key, link);
+      const env = join(shared, "app.env");
+      writeFileSync(env, "TOKEN=fixture");
+      const pem = join(shared, "server.pem");
+      writeFileSync(pem, "fixture");
+      const fine = join(shared, "plan.md");
+      writeFileSync(fine, "# plan\n");
+
+      expect(await canOpenOutsideWorkspaceMessageFile(fine, [])).toBe(true);
+      for (const refused of [key, link, env, pem]) {
+        expect(await canOpenOutsideWorkspaceMessageFile(refused, []), refused).toBe(false);
+        await expect(openOutsideWorkspaceMessageFile(refused, []), refused).rejects.toMatchObject({ status: 403, code: "outside_workspace" });
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

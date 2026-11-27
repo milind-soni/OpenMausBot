@@ -45,7 +45,7 @@ function circle(entry, { activeId, mine, state, offers, waiting }) {
   const paint = railPaint(placeLook(entry, { clouds: connected?.clouds ?? null, homeOrigin: mine }), color);
   return { id: entry.id, name: entry.name, color, kind, opens: true, ...(paint ? { paint } : {}), ...(entry.id === activeId ? { active: true } : {}),
     ...(progress !== null ? { progress } : {}), ...(problem || waiting(entry.id) ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}),
-    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}), ...(kind === "server" ? { removable: true, forget: true } : {}),
+    ...(kind === "cloud" && cloudState(listed) === "ended" ? { ended: true } : {}), ...(listed?.removable && kind === "cloud" ? { removable: true, cloudId: listed.id } : {}), ...(kind === "server" ? { removable: true, forget: true, renames: true } : {}),
     ...(kind === "server" && offers(entry) ? { makeHome: true } : {}) };
 }
 
@@ -68,10 +68,12 @@ const unlisted = (entry, { clouds, home, mine }) => Array.isArray(clouds) && (en
  * device, each with its places as they were kept: grouped by account after these (withAccounts). `profiles`: the workspaces
  * of this computer's own it may open (local-profiles.mjs; `active`: the one on screen, `settling`: it opens once that bot
  * finishes): first once My Cloud is home, as This computer was, else right after This computer. `computerSettling`: This
- * computer opens once that bot finishes.
- * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any, offers?: (entry: any) => boolean, waiting?: (id: string) => boolean, accounts?: any[], profiles?: Array<{ id: string, name?: string | null, color?: string | null, swatch?: string | null, active?: boolean, settling?: string }>, computerSettling?: string | null }} input
+ * computer opens once that bot finishes. `together`: "This computer and My Cloud together" where it is offered (null
+ * elsewhere): whether it is on, and the workspace of this computer's own that joins while My Cloud is home (`profile`);
+ * This computer's circle (or that workspace's) and My Cloud's then offer Show bots together in their menu.
+ * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any, offers?: (entry: any) => boolean, waiting?: (id: string) => boolean, accounts?: any[], profiles?: Array<{ id: string, name?: string | null, color?: string | null, swatch?: string | null, active?: boolean, settling?: string }>, computerSettling?: string | null, together?: { on: boolean, profile?: string | null } | null }} input
  */
-export function railPlaces({ saved, home = null, mine = null, state = null, offers = () => false, waiting = () => false, accounts = [], profiles = [], computerSettling = null }) {
+export function railPlaces({ saved, home = null, mine = null, state = null, offers = () => false, waiting = () => false, accounts = [], profiles = [], computerSettling = null, together = null }) {
   const connected = state?.status === "connected" ? state : null;
   const clouds = Array.isArray(connected?.clouds) ? connected.clouds : [];
   const order = entry => { const at = clouds.findIndex(cloud => cloud.origin === entry.origin); return at === -1 ? clouds.length : at; };
@@ -79,7 +81,7 @@ export function railPlaces({ saved, home = null, mine = null, state = null, offe
   const remote = saved.environments.filter(entry => entry.kind !== "local" && entry.origin && !(connected && unlisted(entry, { clouds: connected.clouds, home, mine })))
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => rank(a.entry) - rank(b.entry) || order(a.entry) - order(b.entry) || a.index - b.index)
-    .map(({ entry }) => circle(entry, { activeId: saved.activeId, mine, state: connected, offers, waiting }));
+    .map(({ entry }) => ({ ...circle(entry, { activeId: saved.activeId, mine, state: connected, offers, waiting }), ...(together && mine && entry.origin === mine ? { together: together.on } : {}) }));
   const making = otherOwnClouds(clouds).filter(cloud => !cloud.origin && ["checkout", "setting_up"].includes(cloud.status))
     .map(cloud => ({ id: `${PENDING}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "cloud", opens: true, progress: cloudSetupProgress(cloud) ?? 0,
       ...(cloud.status === "checkout" ? { waiting: true } : {}), cloudId: cloud.id }));
@@ -91,11 +93,12 @@ export function railPlaces({ saved, home = null, mine = null, state = null, offe
   const computer = environments.savedPlace(saved, environments.LOCAL_ID), color = computer.color ?? null;
   const own = profiles.map(profile => ({ id: `${PROFILE_PLACE}${profile.id}`, name: profile.name || computer.name, color: profile.color ?? null, kind: "computer", profile: profile.id,
     ...(profile.name ? { named: true } : {}), opens: true, paint: { swatch: profile.swatch ?? null }, ...(profile.active ? { active: true } : {}),
+    ...(together && home && together.profile === profile.id ? { together: together.on } : {}),
     ...(typeof profile.settling === "string" ? { settling: profile.settling } : {}) }));
   const profileShown = own.some(place => place.active);
   const all = home ? [...own, ...places] : [{ id: computer.id, name: computer.name, color, kind: "computer", opens: true, paint: railPaint(placeLook(computer), color),
     ...(saved.activeId === environments.LOCAL_ID && !profileShown ? { active: true } : {}), ...(waiting(computer.id) ? { attention: true } : {}),
-    ...(typeof computerSettling === "string" ? { settling: computerSettling } : {}) }, ...own, ...places];
+    ...(typeof computerSettling === "string" ? { settling: computerSettling } : {}), ...(together ? { together: together.on } : {}) }, ...own, ...places];
   if (accounts.length) return withAccounts(all, { saved, accounts, email: state?.account?.email ?? null });
   return all.length < (clouds.some(ownCloud) ? 1 : RAIL_MIN_PLACES) ? [] : all;
 }
@@ -155,11 +158,12 @@ const CHOICES = Object.freeze(["cloud", "link", "address"]);
  * `places()` is railPlaces' list now; `open(id)` main's own switch; `add` the ＋ sheet's fixed actions; `account()` the
  * MausBot Cloud sign-in; `targets()` the pages told when something changed; `makeHome(id)` starts the move to a server
  * of the person's own (own-home-main.mjs `start`). `switchAccount(id)`: that account becomes the one in use (cloud-accounts.mjs).
+ * `rename(id, name)`: a server saved by hand takes that name on this computer: true when saved, false for a name that is blank; a throw is a failed save.
  * `openProfile(id)`: the window shows that workspace of this computer's own (local-profiles.mjs `open`). `local`: those
  * workspaces' ＋, names, colours and removal (local-profiles.mjs), and the end of a switch still waiting when another place opens.
  * `ask(id, run)`: a circle's click, listed at once, `run` told when a newer one came (place-switch.mjs); `switching()`: the place it opens, or null.
  */
-export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null, forget = null, switchAccount = null, openProfile = null, local = null, ask = (_id, run) => run(() => false), switching = () => null, t = nativeText.englishText.t }) {
+export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, beside = () => false, places, open, add, account, clipboard, openCloud, targets, makeHome = null, forget = null, rename = null, switchAccount = null, openProfile = null, local = null, ask = (_id, run) => run(() => false), switching = () => null, t = nativeText.englishText.t }) {
   let sheetOpen = false, sent = "";
   const allowed = (channel, handler) => guard((event, ...args) => {
     if (!trusted(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -206,14 +210,21 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     const client = account();
     return { outcome: client?.hideCloud ? (await client.hideCloud(place.cloudId)).outcome : "unsupported" };
   });
-  // Make … my home, from a circle's menu or Settings → Phone & devices on this computer's own page (`trusted`): only a server
+  // Rename, from a circle's menu: only a server saved by hand that main listed with it; its new name is this app's own.
+  listed("workspaces:rename", (_event, id, name) => {
+    const place = places().find(entry => entry.id === plain(id) && entry.renames);
+    if (!place) throw new Error(t("native.places.noLongerHere"));
+    if (!rename) return { outcome: "unsupported" };
+    try { return { outcome: rename(place.id, plain(name)) ? "saved" : "name" }; } catch { return { outcome: "failed" }; }
+  });
+  // Make … my home, from a circle's menu or Settings → Devices on this computer's own page (`trusted`): only a server
   // main listed with it, by main's own word for it.
   handle("workspaces:make-home", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.makeHome);
     if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
     return makeHome(place.id);
   });
-  // The servers main offers Make … my home for now, by id: Settings → Phone & devices shows the button only for those.
+  // The servers main offers Make … my home for now, by id: Settings → Devices shows the button only for those.
   handle("workspaces:home-offers", () => (makeHome ? places().filter(entry => entry.makeHome).map(entry => entry.id) : []));
   // A workspace of this computer's own: a new one from ＋ (on the rail's page, or this computer's own from the Server menu),
   // and a name, a colour or its removal from its circle's menu, only for one main listed.

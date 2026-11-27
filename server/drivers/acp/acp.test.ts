@@ -26,6 +26,7 @@ import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { antigravityUpdateFilter } from "../antigravity.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { forgetTextOnlyTools } from "../../mcp-text-only.ts";
 import { TurnWatchdog } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import { wideSchema } from "../../testing/oversized-tool-schema.ts";
@@ -298,10 +299,12 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_MODE;
     delete process.env.FAKE_ACP_AUTH_METHOD;
     delete process.env.FAKE_ACP_DUMP;
+    forgetTextOnlyTools();
     delete process.env.FAKE_ACP_RPC_DUMP;
     delete process.env.FAKE_ACP_RPC_APPEND_FILE;
     delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
     delete process.env.FAKE_ACP_RPC_FAILURE_METHOD;
+    delete process.env.FAKE_ACP_RPC_FAILURE_ONCE;
     delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT;
     delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE;
     delete process.env.FAKE_ACP_LOAD_ERROR;
@@ -507,6 +510,25 @@ describe("ACP turns (fake CLI)", () => {
 (${productName()} attached these files`) },
       { type: "resource_link", uri: acpMediaUri(clipPath), name: "media link clip.mp4" },
     ]);
+    expect(JSON.stringify(prompt)).not.toContain("private-acp-video-bytes");
+  });
+
+  it("links media another bot handed on, named by its inbox/... path in the turn's own folder", async () => {
+    const dump = join(scratch, "media-link-inbox-prompt.json");
+    const folder = join(scratch, "media-link-thread-folder");
+    const handed = join(folder, "inbox", "bot-a", "task-1", "handed clip.mp4");
+    mkdirSync(dirname(handed), { recursive: true });
+    writeFileSync(handed, Buffer.from("private-acp-video-bytes"));
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create(MediaLinksDriver);
+
+    const named = join("inbox", "bot-a", "task-1", "handed clip.mp4");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-acp-media-link-inbox", cwd: folder, text: `Describe the video.\n- ${named} (video/mp4, 1 KB)` });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+    expect(prompt[1]).toEqual({ type: "resource_link", uri: acpMediaUri(handed), name: "handed clip.mp4" });
     expect(JSON.stringify(prompt)).not.toContain("private-acp-video-bytes");
   });
 
@@ -1299,6 +1321,35 @@ describe("ACP turns (fake CLI)", () => {
     for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
   });
 
+  it.each([
+    { advertised: "http", setting: undefined, form: "url" },
+    { advertised: undefined, setting: undefined, form: "stdio" },
+    { advertised: "http", setting: "0", form: "stdio" },
+  ])("gives Grok OpenMausBot's own servers by URL in its first session when its initialize says it takes them (advertised=$advertised, OMB_OWN_MCP_HTTP=$setting)", async ({ advertised, setting, form }) => {
+    if (advertised) process.env.FAKE_ACP_MCP_TRANSPORTS = advertised;
+    if (setting) vi.stubEnv("OMB_OWN_MCP_HTTP", setting);
+    try {
+      await create(GrokAgentDriver);
+      const dump = join(scratch, "grok-own-http.json");
+      process.env.FAKE_ACP_DUMP = dump;
+      const harness = "http://127.0.0.1:8799";
+      const browser = { command: process.execPath, args: ["/app/dist-server/harness-mcp-proxy.js", "browser"], env: { OMB_HARNESS_URL: harness, OMB_MCP_TOKEN_BROWSER: "synthetic-browser-capability" } };
+      const notes = { command: process.execPath, args: ["/tmp/notes-mcp.js"], env: {} };
+      await instance.adapter.sendTurn({ threadId: "t-grok-own-http", text: "go", integrations: { browser, custom: { notes } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const sent = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
+      expect(sent[1]).toEqual({ name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] });
+      expect(sent[0]).toEqual(form === "url"
+        ? { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] }
+        : { name: "browser", command: process.execPath, args: browser.args, env: [{ name: "OMB_HARNESS_URL", value: harness }, { name: "OMB_MCP_TOKEN_BROWSER", value: "synthetic-browser-capability" }] });
+      const { env } = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+      if (setting !== "0") for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
+    } finally {
+      delete process.env.FAKE_ACP_MCP_TRANSPORTS;
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
     await create();
     const dump = join(scratch, "data.json");
@@ -1620,6 +1671,23 @@ describe("ACP turns (fake CLI)", () => {
     expect(opened).toMatchObject({ tool: name, requestType: "permission" });
     expect(opened).toHaveProperty("command", undefined);
     await instance.adapter.respondToRequest("t-mcp-identity", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  it.each([
+    { toolCallId: "call-1", justification: "Reason ".repeat(60), requestType: "permission" },
+    { toolCallId: "call-1", justification: 42, requestType: "permission" },
+    { toolCallId: "interaction_1", justification: "Question context", requestType: "question" },
+  ])("keeps the $requestType summary limit and appends only a permission's text justification", async ({ toolCallId, justification, requestType }) => {
+    const command = "echo " + "x".repeat(300);
+    process.env.FAKE_ACP_PERMISSION_TOOL_CALL = JSON.stringify({ toolCallId, kind: "execute", rawInput: { command, justification } });
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-acp-justification", text: "go", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    const expected = requestType === "question" ? command : command.slice(0, 200)
+      + (typeof justification === "string" ? `\nReason: ${justification.slice(0, 300)}` : "");
+    expect(opened).toMatchObject({ requestType, summary: expected });
+    await instance.adapter.respondToRequest("t-acp-justification", opened.requestId!, { behavior: "deny" });
     await recorder.until((event) => event.type === "turn.completed");
   });
 
@@ -1961,7 +2029,7 @@ describe("ACP turns (fake CLI)", () => {
     process.env.FAKE_ACP_ALLOW_ALWAYS = "1";
     const answer = join(scratch, "permission-answer.txt");
     process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
-    await create(GrokAgentDriver, "permission");
+    await create(GeminiAgentDriver, "permission");
     await instance.adapter.sendTurn({ threadId: "t-always-native", text: "go", approvalMode: "ask" });
     const opened = await recorder.until((e) => e.type === "request.opened");
     expect(opened).toHaveProperty("allowSession", true);
@@ -2520,7 +2588,7 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-auth-required", text: "go" });
     const done = await recorder.until((e) => e.type === "turn.completed");
 
-    expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+    expect(done, "refused at session/new: the prompt never went out").toMatchObject({ ok: false, stopReason: "auth_required", unsent: true });
     expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({ setup: true });
   });
 
@@ -2777,6 +2845,18 @@ describe("ACP turns (fake CLI)", () => {
     expect(argv.indexOf("--permission-mode")).toBeLessThan(agent);
   });
 
+  it("asks session/new once more after the engine's own transient refusal, and the turn runs", async () => {
+    const failureFile = join(scratch, "session-new-once.json"), rpcFile = join(scratch, "session-new-once-rpc.json");
+    Object.assign(process.env, { FAKE_ACP_RPC_FAILURE_FILE: failureFile, FAKE_ACP_RPC_FAILURE_METHOD: "session/new", FAKE_ACP_RPC_FAILURE_ONCE: "1", FAKE_ACP_RPC_DUMP: rpcFile });
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: { details: "Internal service failure", errorName: "ServiceUnavailableError" } }));
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-session-new-once", text: "hi" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    const methods = JSON.parse(readFileSync(rpcFile, "utf8")) as string[];
+    expect(methods.filter((method) => method.startsWith("session/new"))).toEqual(["session/new", "session/new.error", "session/new"]);
+  });
+
   describe("opt-in startup recovery", () => {
     const failStartup = async (message = "503 Service Unavailable") => {
       const failureFile = join(scratch, "startup-failure.json");
@@ -3009,6 +3089,59 @@ describe("ACP turns (fake CLI)", () => {
         });
       });
 
+      describe("an image a text-only model cannot read", () => {
+        // Z.ai GLM's refusal of a request whose message content holds an image part, reported from a chat where a tool
+        // had read a picture into the conversation.
+        const imageOnly = { code: -32603, message: "Internal error: messages.content.type is invalid, allowed values: ['text']", data: { service: "session", errorName: "provider.invalid-request" } };
+
+        it("fails in plain words that say why every message in this conversation fails", async () => {
+          await refusePrompt(imageOnly);
+          releaseFailure();
+          const ack = await instance.adapter.sendTurn({ threadId: "text-only-image", text: "go" });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+            .toMatchObject({ ok: false, stopReason: "rpc_error" });
+          expect(recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === ack.turnId)).toEqual([expect.objectContaining({
+            message: "Select Model Test refused this turn as an invalid request because this model reads text only and this conversation carries an image — one attached in chat or read by a tool — so every message fails the same way. Switch this bot to a model that can see images, or start a new conversation.",
+            text: { key: "chat.notice.imageContent", params: { provider: "Select Model Test" } },
+          })]);
+        });
+
+        it("rebuilds the conversation on the next message instead of resuming the poisoned session", async () => {
+          const dump = join(scratch, "poisoned.json");
+          process.env.FAKE_ACP_DUMP = dump;
+          process.env.FAKE_ACP_DUMP_PROMPT = "1";
+          const methods = join(scratch, "poisoned-rpc.json");
+          process.env.FAKE_ACP_RPC_DUMP = methods;
+          await refusePrompt(imageOnly);
+          releaseFailure();
+          const failed = await instance.adapter.sendTurn({ threadId: "text-only-rebuild", text: "show me the design" });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === failed.turnId))
+            .toMatchObject({ ok: false, stopReason: "rpc_error" });
+
+          // A fresh fake answers this turn: the poisoned gate applied only to the first process.
+          delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
+          delete process.env.FAKE_ACP_RPC_FAILURE_GATE;
+          const recoveryText = "User: Show me the design.\nAssistant: I read design.png.\nUser: and now?";
+          const ack = await instance.adapter.sendTurn({
+            threadId: "text-only-rebuild", text: "and now?", resumeCursor: "fake-acp-session", recoveryText,
+          });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+            .toMatchObject({ ok: true });
+          // The dump file holds the last process's methods: the fresh fake this turn launched never loads the
+          // poisoned session, and its prompt is the rebuilt conversation plus the text-only note.
+          const sent = JSON.parse(readFileSync(methods, "utf8"));
+          expect(sent).not.toContain("session/load");
+          expect(sent.filter((method: string) => method === "session/new")).toHaveLength(1);
+          expect(recorder.events.find((event) => event.type === "session.started" && event.turnId === ack.turnId))
+            .toMatchObject({ rebuilt: true });
+          const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+          expect(prompt).toEqual([
+            { type: "text", text: recoveryText },
+            { type: "text", text: "(Your model for this conversation reads text only. Reading an image file with a file tool, or keeping a picture a tool returned, makes every later reply fail. Say you cannot see it, or attach the file unchanged.)" },
+          ]);
+        });
+      });
+
       it("fails normally for another prompt error before any activity", async () => {
         await refusePrompt({ code: -32603, message: "Internal error: Invalid API key.", data: { service: "session", errorName: "APIError" } });
         releaseFailure();
@@ -3050,6 +3183,7 @@ describe("ACP turns (fake CLI)", () => {
         setup: true,
       })]);
       expect(completed).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(completed, "refused after the prompt went out").not.toHaveProperty("unsent");
     });
 
     it("names any other ACP engine out of credits the same way", async () => {

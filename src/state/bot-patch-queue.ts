@@ -1,4 +1,5 @@
 import type { Bot, BotAnnouncement } from "./store";
+import { relayLink } from "../lib/relay-server";
 
 export type BotUpdatePatch = Partial<
   Pick<
@@ -14,6 +15,8 @@ export type BotUpdatePatch = Partial<
     | "mascotExpression"
     | "mascotBody"
     | "mascotFaceColor"
+    | "mascotBodyColor"
+    | "mascotMaterial"
     | "avatarUrl"
     | "avatarCrop"
     | "avatarZoom"
@@ -44,6 +47,7 @@ export type BotUpdatePatch = Partial<
     | "browserProfile"
     | "memoryUpkeep"
     | "cacheKeepWarm"
+    | "checkWork"
     | "mcpServers"
     | "modelSelection"
   >
@@ -311,13 +315,19 @@ export function createBotPatchQueue(options: BotPatchQueueOptions): BotPatchQueu
 /** Browsers cancel an ordinary request when the page reloads; a keepalive one still arrives, if its body is under 64 KiB. */
 export const keepaliveFits = (body: string) => new TextEncoder().encode(body).length < 60_000;
 
-/** Saves every edit still waiting at once (`flushAll`) when the page is left; returns the listeners' removal. */
-export function flushWhenLeaving(queue: Pick<BotPatchQueue, "flushAll">, target: Pick<Window, "addEventListener" | "removeEventListener">): () => void {
+/** Saves every edit still waiting at once (`flushAll`) when the page is left; returns the listeners' removal. On a relay
+ * pairing a leaving page's save can't be kept alive (the link ends with the page), so there it also saves when the page
+ * is hidden, which comes first when a phone or tab puts the page away. */
+export function flushWhenLeaving(queue: Pick<BotPatchQueue, "flushAll">, target: Pick<Window, "addEventListener" | "removeEventListener">,
+  page: Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener"> = document): () => void {
   const leaving = () => queue.flushAll();
+  const hidden = () => { if (page.visibilityState === "hidden" && relayLink()) queue.flushAll(); };
   target.addEventListener("pagehide", leaving);
   target.addEventListener("beforeunload", leaving);
+  page.addEventListener("visibilitychange", hidden);
   return () => {
     target.removeEventListener("pagehide", leaving);
     target.removeEventListener("beforeunload", leaving);
+    page.removeEventListener("visibilitychange", hidden);
   };
 }

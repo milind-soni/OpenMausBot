@@ -296,7 +296,7 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi"> = [],
+  extraProviders: Array<"codex" | "cline" | "copilot" | "customAcp" | "opencode" | "kimi" | "grok"> = [],
   /** Programmatic tests only: an owned loopback Boat provider, never a live account. */
   boatFixtureApi?: string,
   /** Programmatic web UI qualification against the fixture's static server. */
@@ -343,8 +343,13 @@ export async function launchVerificationServer(
         driver: "kimiAgent", displayName: "Verification Kimi",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
       } } : {}),
+      ...(extraProviders.includes("grok") ? { grok: {
+        driver: "grokAgent", displayName: "Verification Grok",
+        config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)), fullAuto: true },
+      } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+        environment: Object.fromEntries(Object.entries(parentEnv).filter(([key, value]) => key.startsWith("FAKE_CODEX_") && value)),
       } } : {}),
       ...(extraProviders.includes("cline") ? { cline: {
         driver: "clineAgent", displayName: "Verification Cline",

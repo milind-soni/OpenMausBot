@@ -1,0 +1,324 @@
+[
+  {
+    "name": "a macOS home folder with a project under it",
+    "input": "Read /Users/janedoe/WorkSpace/acme-launch/notes.md first.",
+    "output": "Read ~/WorkSpace/acme-launch/notes.md first.",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a Linux home folder, alone and in a path",
+    "input": "Logs go to /home/bob/logs; cd /home/bob",
+    "output": "Logs go to ~/logs; cd ~",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "the app's workspace folder of a bot",
+    "input": "Files live in /Users/janedoe/.openmausbot/workspaces/3f2b1c9e-1a2b-4c3d-9e8f-0123456789ab/reports/weekly.md",
+    "output": "Files live in <workspace>/reports/weekly.md",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a profile data folder under ~",
+    "input": "在 ~/.openmausbot-profiles/default/workspaces/d1bd6e16-5403-4d90-baf1-2afa2b87a61b/ashare-data 使用 python3",
+    "output": "在 <workspace>/ashare-data 使用 python3",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a conversation's task folder",
+    "input": "Saved to /home/omb/.openmausbot/task-workspaces/bot-1234/7c9e6679-7425-40de-944b-e07fc1f90ae7/out.csv",
+    "output": "Saved to <workspace>/out.csv",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "Windows homes, with backslashes, forward slashes and a two-word name",
+    "input": "C:\\Users\\John Smith\\Documents\\plan.docx, C:/Users/bob/x and c:\\users\\Ann\\Desktop",
+    "output": "~\\Documents\\plan.docx, ~/x and ~\\Desktop",
+    "counts": {
+      "paths": 3,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a Windows path as a quoted YAML string writes it",
+    "input": "folder: \"C:\\\\Users\\\\jane\\\\proj\\\\src\"",
+    "output": "folder: \"~\\\\proj\\\\src\"",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a Windows workspace folder",
+    "input": "C:\\Users\\Jane\\.openmausbot\\workspaces\\bot-123456\\file.md",
+    "output": "<workspace>\\file.md",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "shared homes and web addresses keep their paths",
+    "input": "See /Users/Shared/assets, /home/linuxbrew/.linuxbrew/bin and https://example.com/home/about or https://github.com/Users/x",
+    "output": "See /Users/Shared/assets, /home/linuxbrew/.linuxbrew/bin and https://example.com/home/about or https://github.com/Users/x",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a file link",
+    "input": "Open file:///Users/jane/report.html",
+    "output": "Open file://~/report.html",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "emails go; git remotes, retina file names and example addresses stay",
+    "input": "Mail jane.doe@acme.io or Jane+news@mail.co.uk; clone git@github.com:org/repo.git; icon@2x.png; you@example.com; 1234+bot@users.noreply.github.com",
+    "output": "Mail <email> or <email>; clone git@github.com:org/repo.git; icon@2x.png; you@example.com; 1234+bot@users.noreply.github.com",
+    "counts": {
+      "paths": 0,
+      "emails": 2,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "phone numbers in clear formats",
+    "input": "Call +1 (415) 555-0132, 415-555-0132, (415) 555-0132, 415.555.0132, +44 20 7946 0958, +91 98765 43210, +919876543210 or 020 7946 0958.",
+    "output": "Call <phone>, <phone>, <phone>, <phone>, <phone>, <phone>, <phone> or <phone>.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 5,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "timestamps, dates, ids, versions and addresses are not phone numbers",
+    "input": "anchorAt: 1794748391525\nat: 2026-11-25T10:00:00.000Z\nip 192.168.1.100, v1.2.3, 10.0.0.1:8080\nid 550e8400-e29b-41d4-a716-446655440000\ncron: 0 9 * * 1-5\ncount: 12,345,678\nscore +3.5 and x+1234567890\norder 2026-1125-0001",
+    "output": "anchorAt: 1794748391525\nat: 2026-11-25T10:00:00.000Z\nip 192.168.1.100, v1.2.3, 10.0.0.1:8080\nid 550e8400-e29b-41d4-a716-446655440000\ncron: 0 9 * * 1-5\ncount: 12,345,678\nscore +3.5 and x+1234567890\norder 2026-1125-0001",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "secrets of common shapes",
+    "input": "ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz012345\ntoken ghp_abcdefghijklmnopqrstuvwxyz0123456789\npat github_pat_11ABCDEFG0123456789_abcdefghijklmnop\nslack xoxb-1234567890-abcdefghijkl\naws AKIAIOSFODNN7EXAMPLE\ngoogle AIzaSyA-abcdefghijklmnopqrstuvwxyz12345",
+    "output": "ANTHROPIC_API_KEY=<secret>\ntoken <secret>\npat <secret>\nslack <secret>\naws <secret>\ngoogle <secret>",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 6
+    }
+  },
+  {
+    "name": "a bearer token goes; a placeholder stays",
+    "input": "Authorization: Bearer YOUR_ACCESS_TOKEN_HERE\nAuthorization: Bearer abcd1234efgh5678ijkl9012mnop",
+    "output": "Authorization: Bearer YOUR_ACCESS_TOKEN_HERE\nAuthorization: Bearer <secret>",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 1
+    }
+  },
+  {
+    "name": "a private key block",
+    "input": "Key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAabcdefghijklmnopqrstuv\nabcdefghijklmnopqrstuvwxyz0123456789+/\n-----END RSA PRIVATE KEY-----\nDone.",
+    "output": "Key:\n<secret>\nDone.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 1
+    }
+  },
+  {
+    "name": "words about keys stay",
+    "input": "Ask the person for their API key, then set the token in Settings. Never paste a password here.",
+    "output": "Ask the person for their API key, then set the token in Settings. Never paste a password here.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "code fences and Markdown around a path stay as they were",
+    "input": "## Setup\n\n```bash\ncd /Users/janedoe/projects/site\nnpm run build\n```\n\n- Done by **/Users/janedoe**",
+    "output": "## Setup\n\n```bash\ncd ~/projects/site\nnpm run build\n```\n\n- Done by **~**",
+    "counts": {
+      "paths": 1,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "the person's own names: a full name anywhere, one word only as a handle or a folder",
+    "input": "Written by Jane Doe (@janedoe, /srv/janedoe/x, janedoe@host). janedoe wrote it; janedoes and jane-helper stay.",
+    "names": [
+      "janedoe",
+      "Jane Doe"
+    ],
+    "output": "Written by <name> (@<name>, /srv/<name>/x, <name>@host). janedoe wrote it; janedoes and jane-helper stay.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 2,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "a one-word name that is an ordinary word stays in prose",
+    "input": "It will mark the rose. Ask @will or open ~will/notes.",
+    "names": [
+      "will"
+    ],
+    "output": "It will mark the rose. Ask @<name> or open ~<name>/notes.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 1,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "emails written with a full-width ＠, as %40 or with an internationalised domain",
+    "input": "Mail jane＠acme.io, jane%40acme.io, josé@münchen.de or 太郎@例え.日本; icon@2x.png and you@example.com stay.",
+    "output": "Mail <email>, <email>, <email> or <email>; icon@2x.png and you@example.com stay.",
+    "counts": {
+      "paths": 0,
+      "emails": 3,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "phone numbers without a + in spaced groups; timestamps, dates and ids stay",
+    "input": "Call 415 555 0132, (415) 555 0132 or 98765 43210. Not 1794748391525, 2026 11 25, 100 200 3000, 12:30 555 1234 or 1234 5678 9012 3456.",
+    "output": "Call <phone>, <phone> or <phone>. Not 1794748391525, 2026 11 25, 100 200 3000, 12:30 555 1234 or 1234 5678 9012 3456.",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 2,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "WSL, UNC and mounted-disk homes",
+    "input": "/mnt/c/Users/jane/Desktop, \\\\wsl$\\Ubuntu\\home\\jane\\x, \\\\fileserver\\Users\\jane\\docs, \\\\nas\\c$\\Users\\Bob Smith\\x, /Volumes/Macintosh HD/Users/jane/x; \\\\server\\Users\\Public stays.",
+    "output": "~/Desktop, ~\\x, ~\\docs, ~\\x, ~/x; \\\\server\\Users\\Public stays.",
+    "counts": {
+      "paths": 5,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "percent-encoded homes",
+    "input": "file:///Users/Jane%20Doe/x.md, ?path=%2FUsers%2Fjanedoe%2Fnotes, C%3A%5CUsers%5Cjane%5Cx; %2FUsers%2FShared stays.",
+    "output": "file://~/x.md, ?path=~%2Fnotes, ~%5Cx; %2FUsers%2FShared stays.",
+    "counts": {
+      "paths": 3,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "bidirectional overrides and control characters go; tabs, line breaks and right-to-left text stay",
+    "input": "safe ‮txt.exe‬ and a bell\u0007 here\tthen\nשלום עולם",
+    "output": "safe txt.exe and a bell here\tthen\nשלום עולם",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  },
+  {
+    "name": "the publisher's markers are not scrubbed again",
+    "input": "~/x <workspace>/y <email> <phone> <name> <secret> «redacted 40 chars»",
+    "names": [
+      "janedoe"
+    ],
+    "output": "~/x <workspace>/y <email> <phone> <name> <secret> «redacted 40 chars»",
+    "counts": {
+      "paths": 0,
+      "emails": 0,
+      "phones": 0,
+      "names": 0,
+      "secrets": 0
+    }
+  }
+]

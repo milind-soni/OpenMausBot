@@ -23,6 +23,7 @@ import {
   PiDriver,
   PiRpcChunks,
   piLineReader,
+  piThinkingLevel,
   preferPiInjectRows,
   splitPiModel,
   updatePiModelCatalog,
@@ -68,6 +69,16 @@ describe("parsePiCatalog", () => {
     expect(
       parsePiCatalog('{"type":"response","command":"get_available_models","success":true,"data":{"models":[]}}\n'),
     ).toEqual({ default: "", options: [] });
+  });
+
+  it("keeps a listed model's context window and drops a non-positive one", () => {
+    const line =
+      '{"type":"response","command":"get_available_models","success":true,"data":{"models":[' +
+      '{"provider":"ollama-cloud","id":"glm-5.2","name":"glm-5.2","contextWindow":131072},' +
+      '{"provider":"openai","id":"gpt-4o","name":"GPT-4o","contextWindow":0}]}}\n';
+    const catalog = parsePiCatalog(line);
+    expect(catalog.options[0]).toMatchObject({ id: "ollama-cloud/glm-5.2", contextWindow: 131072 });
+    expect(catalog.options[1]).not.toHaveProperty("contextWindow");
   });
 
   it("ignores non-response lines (pi emits TUI bookkeeping on stdout too)", () => {
@@ -823,6 +834,17 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(instance.adapter.hasSession("t-exit")).toBe(false);
   });
 
+  it("fails the turn when omp reports the prompt failed before the agent started", async () => {
+    await create("omp-start-fail");
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-omp-start-fail", text: "hi" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(done).toMatchObject({ ok: false, stopReason: "failed" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      message: "System prompt changed repeatedly during before_agent_start; original input was not delivered.",
+    });
+    expect(instance.adapter.hasSession("t-omp-start-fail")).toBe(false);
+  });
+
   it("surfaces a pi turn error instead of reporting an empty success", async () => {
     await create("turn-error");
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-turn-error", text: "hi" });
@@ -838,6 +860,7 @@ describe("PiDriver turns (fake CLI)", () => {
     await create();
     expect(instance.adapter.capabilities.images).toBe(true);
     expect(instance.adapter.capabilities.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    expect(piThinkingLevel("ultra")).toBe("max");
   });
 
   it("pins reasoning effort via set_thinking_level after the model", async () => {
@@ -957,6 +980,19 @@ describe("PiDriver turns (fake CLI)", () => {
 
     const servers = mcpRow!.mcpConfig!.mcpServers!;
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
+  });
+
+  it("reports each assistant call's prompt size, not the run's summed usage", async () => {
+    await create("priced", { FAKE_PI_CONTEXT_WINDOW: "200000" });
+    await instance.adapter.sendTurn({ threadId: "t-context", text: "run it", model: "ollama-cloud/glm-5.2" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const updates = recorder.events.filter((event) => event.type === "thread.token-usage.updated");
+    expect(updates).toEqual([
+      expect.objectContaining({ input: 105, output: 1, cachedInput: 100, contextTokens: 125, contextWindow: 200_000 }),
+      expect.objectContaining({ input: 132, output: 2, cachedInput: 120, contextTokens: 132, contextWindow: 200_000 }),
+    ]);
+    expect(recorder.events.at(-1)).toMatchObject({ usage: { input: 257, output: 3, cachedInput: 220 } });
   });
 
   it("reports pi's priced cost and cached tokens summed over the whole run", async () => {

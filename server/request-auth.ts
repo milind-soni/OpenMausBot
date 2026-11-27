@@ -18,6 +18,8 @@ export type RequestAuth =
     kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
     /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
     companionDevice?: string;
+    /** Set only when the desktop's capability came from no browser page: the app's own main process (move-back.ts). */
+    desktopMain?: true;
   }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
@@ -155,7 +157,7 @@ function localBrowserTrust(env: NodeJS.ProcessEnv, fromSource: boolean, trust: L
   return { trusted: true, warning: `${LOCAL_BROWSER_TRUST}=1: browsers on this machine act as the owner (development only)` };
 }
 
-export const BROWSER_SIGN_IN = "unauthorized: this browser is not signed in. Open the sign-in link that openmausbot serve or openmausbot pair prints on this computer, or pair it with a code from Settings → Phone & devices";
+export const BROWSER_SIGN_IN = "unauthorized: this browser is not signed in. Open the sign-in link that openmausbot serve or openmausbot pair prints on this computer, or pair it with a code from Settings → Devices";
 
 export function isAllowedOrigin(origin: string | undefined | null): boolean {
   if (!origin) return true; // non-browser clients (CLIs, curl, tests) send none
@@ -190,6 +192,12 @@ export const PROXY_HEADERS = [
 export function isProxied(req: IncomingMessage): boolean {
   if (ipcPeer(req) || networkPeer(req)) return true;
   return PROXY_HEADERS.some((name) => req.headers[name] !== undefined);
+}
+
+/** A paired phone's request. The companion marks everything it forwards and the mark only narrows, so this also
+ * covers the standalone companion, which has no desktop token and so never sets `companionDevice`. */
+export function fromPairedDevice(req: IncomingMessage, auth: RequestAuth): boolean {
+  return (auth.kind === "loopback" && auth.companionDevice !== undefined) || req.headers?.["x-openmausbot-companion"] === "1";
 }
 
 const LOOPBACK_PEER = /^(?:127\.|::1$|::ffff:127\.)/;
@@ -340,6 +348,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/team-map$/ },
   // a link into the organisation's Admin: identifiers only, and Admin authorizes its own visitor
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/slack-management$/ },
+  // what a bot made in the conversations this viewer can read, the same rows those conversations' messages show (routes/bot-library.ts)
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/library$/ },
   { methods: ["GET"], path: /^\/api\/search$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
@@ -350,9 +360,12 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/evidence(?:\.tar|\/[A-Za-z0-9-]{8,64}\/step-\d{6,12}\.jpg)?$/ },
   { methods: ["GET", "POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/job$/ },
+  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/job\/[\w-]+\/stop$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
   // Only says whether a line is a stop, so the Team map knows where an @everyone line goes (routes/stop-line.ts).
   { methods: ["POST"], path: /^\/api\/stop-line$/ },
+  // One suggested next line for a conversation the caller reads and may write in (routes/suggested-reply.ts).
+  { methods: ["POST"], path: /^\/api\/suggested-reply$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
@@ -413,6 +426,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["DELETE"], path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/queue\/[\w-]+\/steer$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/tasks$/ },
+  { methods: ["GET"], path: /^\/api\/groups\/[\w-]+\/threads\/summary$/ },
   { methods: ["POST"], path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+\/forks$/ },
   { methods: ["POST", "PATCH", "DELETE"], path: /^\/api\/groups\/[\w-]+\/tasks\/[\w-]+$/ },
   { methods: ["PATCH"], path: /^\/api\/groups\/[\w-]+$/ }, // display fields only: see clientGroupPatchViolation
@@ -470,10 +484,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/presence\/here$/ },
   // what a bot asks of this person: their own questions and approvals only
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
-  // a person's own inbox: its lines, how many wait, and one of them read or done; the handler serves the session's own alone
+  // a person's own inbox: its lines, how many wait, and one of them read, unread again or done; the handler serves the session's own alone
   { methods: ["GET"], path: /^\/api\/inbox(?:\/count)?$/ },
   { methods: ["POST"], path: /^\/api\/inbox\/read-all$/ },
-  { methods: ["POST"], path: /^\/api\/inbox\/[\w-]+\/(?:read|done)$/ },
+  { methods: ["POST"], path: /^\/api\/inbox\/[\w-]+\/(?:read|unread|done)$/ },
   // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
   { methods: ["GET"], path: /^\/api\/team\/people$/ },
   // the workspace's banner picture: everyone signed in here sees it; changing it (PUT, DELETE) is an admin's
@@ -493,15 +507,33 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // what the viewer's own bots put online, from conversations they can read; the handler deletes only what is theirs
   { methods: ["GET"], path: /^\/api\/published-apps(?:\/framing)?$/ },
   { methods: ["POST"], path: /^\/api\/published-apps\/delete$/ },
+  // the apps a person saved from bots' pages: the handler shows and changes only their own, from conversations they read
+  { methods: ["GET", "POST"], path: /^\/api\/local-apps$/ },
+  { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/local-apps\/la_[A-Za-z0-9_-]{16}$/ },
+  { methods: ["GET"], path: /^\/api\/local-apps\/la_[A-Za-z0-9_-]{16}\/app$/ },
   // a Team Cloud's shared folder: every member reads and adds; the handler lets a member delete or rename only what they
   // uploaded (routes/team-files.ts); off a Team Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/team-files(?:\/file)?$/ },
   { methods: ["PUT"], path: /^\/api\/team-files\/file$/ },
   { methods: ["POST"], path: /^\/api\/team-files\/(?:folder|rename|delete)$/ },
+  // a Team Cloud's board: the handler shows and changes an item only for someone who sees its room thread and may write in
+  // the room (routes/board.ts); off a Team Cloud, or with the board off, they answer 404
+  { methods: ["GET"], path: /^\/api\/board$/ },
+  { methods: ["POST"], path: /^\/api\/board\/items$/ },
+  { methods: ["PATCH", "DELETE"], path: /^\/api\/board\/items\/[\w-]+$/ },
   // Slack for Clouds: the Admin calls these with the member's own session, and the handler answers each as that member
   // alone, on a personal Cloud its owner alone (routes/team-slack.ts); off a Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/slack\/team\/bots$/ },
+  // Skill Burgers: the routes check who may change which (a bot's own: its editors; every chat: an admin).
+  { methods: ["GET", "POST"], path: /^\/api\/skill-burgers$/ },
+  { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/skill-burgers\/[^/]+$/ },
+  { methods: ["POST"], path: /^\/api\/skill-burgers\/[^/]+\/paths$/ },
+  { methods: ["POST"], path: /^\/api\/skill-burger-summary$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
+  // GitHub sign-in: a Team Cloud member's own only; anywhere else the handler takes the owner or an admin alone and never
+  // answers with a token (routes/github-sign-in.ts)
+  { methods: ["GET"], path: /^\/api\/github\/sign-in$/ },
+  { methods: ["POST"], path: /^\/api\/github\/sign-in\/(?:start|cancel|token|sign-out)$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
@@ -515,12 +547,12 @@ export function requiredScope(method: string, path: string, features: { sharedCo
 
 /** A client may change how a bot looks, never what it may do. */
 const CLIENT_BOT_PATCH_FIELDS = new Set([
-  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody", "mascotFaceColor",
+  "unread", "pinned", "pinnedMessageId", "color", "mascotExpression", "mascotBody", "mascotFaceColor", "mascotBodyColor", "mascotMaterial",
   "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY", "sidebarHidden", "welcomed",
 ]);
 /** How a bot looks to everyone who sees it. */
 const SHARED_LOOK_FIELDS = new Set([
-  "color", "mascotExpression", "mascotBody", "mascotFaceColor", "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY",
+  "color", "mascotExpression", "mascotBody", "mascotFaceColor", "mascotBodyColor", "mascotMaterial", "avatarUrl", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY",
 ]);
 /** `ownMausBot`: the session's own MausBot on a Team Cloud, which its member may also rename. `teamMember`: a Team Cloud
  * member's session, which changes no other bot's look. */
@@ -624,7 +656,7 @@ function mutatingPublicRoute(method: string, path: string): boolean {
   // Hands out what a Grok Bot wrote about the person, from their Downloads folder.
   if (upper === "GET" && path === "/api/setup-import/grok") return true;
   // Drives a bot's browser: a WebSocket upgrade is a GET, but what it carries is input.
-  if (/^\/api\/bots\/[\w-]+\/browser\/stream$/.test(path)) return true;
+  if (/^\/api\/bots\/[\w-]+\/browser\/(?:stream|desktop)$/.test(path)) return true;
   // Shows the bots' USB phone: a WebSocket upgrade is a GET that a local process could send without an Origin.
   if (/^\/api\/usb-phones\/[^/]+\/stream$/.test(path)) return true;
   if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;
@@ -722,7 +754,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       }
       return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
     }
-    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+    return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, ...(desktopOwner && !fromBrowser(req) ? { desktopMain: true as const } : {}) }, status: 401, error: "" };
   }
 
   if (proxied) {

@@ -1,6 +1,6 @@
 import type { ModelCatalog, ModelSelection } from "./contracts.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
-import type { EffortLevel } from "../shared/wire.ts";
+import { offeredEffortLevels, type EffortLevel } from "../shared/wire.ts";
 
 export type TurnTier = "simple" | "complex";
 
@@ -12,10 +12,9 @@ export interface TurnSignals {
   priorTurnUsedTools: boolean;
 }
 
-// English only: a message in another language falls back on the other signals.
 const ACTION = /\b(build|fix|debug|implement|refactor|write|create|generate|deploy|install|run|test|search|find|look up|browse|open|edit|change|update|delete|remove|rename|move|migrate|analy[sz]e|review|compare|research|summari[sz]e|translate|draft|send|email|schedule|book|download|upload|scrape|clone|commit|push|merge|plan|design|calculate|convert)\b/i;
 const CODE = /```|`[^`\n]+`|\b(function|const|let|class|import|def|SELECT|FROM)\b|[{};]\s*$|\w+\.(ts|tsx|js|py|go|rs|json|md|sh|yml|yaml|sql|css|html)\b|https?:\/\/|(^|\s)[~.]?\/[\w.-]+\//m;
-const CONTINUE = /^(yes|yep|yeah|ok(ay)?|sure|go( ahead| on)?|do it|continue|proceed|please do|sounds good|retry|try again)\b/i;
+const CONTINUE = /^(yes|yep|yeah|ok(ay)?|sure|go( ahead| on)?|do it|continue|proceed|please do|sounds good|retry|try again|продолж(?:и|ай|айте|ите|ить|им)|давай(?:те)?|дальше)(?=$|[^\p{L}\p{N}_])/iu;
 const ACK = /^(thanks|thank you|thx|ty|cool|nice|great|perfect|awesome|got it|lol|haha)\b[\s!.]*$/i;
 const SIMPLE_CHARS = 280;
 const SIMPLE_LINES = 4;
@@ -36,13 +35,26 @@ export function classifyTurn(signals: TurnSignals): TurnTier {
 
 const FAST = /(^|[-_/. ])(haiku|flash|mini|nano|lite|small|fast|instant|spark|turbo|air)(?=$|[-_/. \d])/i;
 
+const vendor = (id: string) => {
+  const m = /^(gpt|claude|gemini|glm|deepseek|grok|qwen|mistral|llama|composer|kimi)/i.exec(id);
+  return m ? m[1]!.toLowerCase() : null;
+};
+
 /** Same upstream provider only; among several, the first listed wins since engines list their newest first. */
 export function fastModelFor(catalog: ModelCatalog | undefined, current: string, refused: ReadonlySet<string> = new Set()): string | undefined {
   if (!catalog) return undefined;
+  const currentOption = catalog.options.find((option) => option.id === current);
+  if (!currentOption || currentOption.custom) return undefined;
   if (FAST.test(current)) return current;
-  const provider = catalog.options.find((option) => option.id === current)?.provider;
-  const pick = catalog.options.find((option) => !option.custom && !refused.has(option.id) &&
-    FAST.test(option.id) && (option.provider ?? undefined) === (provider ?? undefined));
+  const provider = currentOption.provider;
+  const currentVendor = vendor(current);
+  const pick = catalog.options.find((option) => {
+    if (option.custom || refused.has(option.id) || !FAST.test(option.id)) return false;
+    if (provider || option.provider) return option.provider === provider;
+    const optionVendor = vendor(option.id);
+    if (currentVendor || optionVendor) return optionVendor === currentVendor;
+    return true;
+  });
   return pick?.id;
 }
 
@@ -113,7 +125,9 @@ export function routeDirectTurn(
     variant: bot.modelSelection.variant,
     catalog: instance.quickModelsUsable?.() === false ? undefined : instance.models,
     refused,
-    effortLevels: instance.adapter.capabilities.effortLevels,
+    effortLevels: instance.models
+      ? offeredEffortLevels({ models: instance.models, adapter: instance.adapter }, bot.modelSelection.model)
+      : instance.adapter.capabilities.effortLevels,
     contextTokens: task.usage?.context?.tokens,
   });
 }

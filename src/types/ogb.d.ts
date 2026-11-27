@@ -25,6 +25,11 @@ const __APP_VERSION__: string;
   type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
   type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
+  /** Lending this computer to one server, as the switch shows it (electron/server-lending.mjs view). `why`: what keeps it
+   * from being lent there. `screen`: why its apps and screen don't work yet while it is on (screen-status.mjs). */
+  type DesktopLendView =
+    | { name: string; lendable: true; on: boolean; connected: boolean; paused: boolean; screen?: "starting" | "permissions" | "blocked" | "off" | "not-running" | "unsupported" }
+    | { name: string; lendable: false; why: "team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | "settings" };
 
   type DesktopCapabilities = {
     host: {
@@ -46,7 +51,7 @@ const __APP_VERSION__: string;
     };
     dictation: {
       available: boolean;
-      engine: "apple-speech" | "fish-audio" | "none";
+      engine: "apple-speech" | "windows-speech" | "fish-audio" | "none";
       onDevice: boolean;
       reasonCode?: string;
     };
@@ -62,8 +67,21 @@ const __APP_VERSION__: string;
       driverSource?: "bundled" | "environment" | "user-local" | "path" | "system-package";
       session?: "x11" | "wayland" | "headless" | "unknown";
       compositor?: "gnome-mutter" | "hyprland";
+      /** Set with the Wayland seat-safety block: false on a desktop that isn't Ubuntu, which may have no Xorg session. */
+      ubuntuDesktop?: boolean;
     };
   };
+
+  interface BrowserCookieSource {
+    id: string;
+    name: string;
+    engine: "chromium" | "firefox" | "safari";
+    profiles: Array<{ id: string; name: string }>;
+  }
+
+  type BrowserCookieImportResult =
+    | { ok: true; site: string; imported: number; sessionOnly: number; skipped: Partial<Record<string, number>> }
+    | { ok: false; reason: string };
 
   interface DesktopWorkspaceBounds {
     x: number;
@@ -206,10 +224,15 @@ const __APP_VERSION__: string;
         /** Remove from list: a Cloud the window's rail lists as `removable`, by its circle's id, once the person said yes on
          * the rail's own page (refused on any other page). Absent on an older app. */
         remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
+        /** Rename: a server the window's rail lists with `renames`, by its circle's id, under a name kept on this computer
+         * only. Absent on an older app. */
+        rename?: (id: string, name: string) => Promise<{ outcome: "saved" | "name" | "failed" | "unsupported" }>;
         /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
         makeHome?: (id: string) => Promise<{ started: true }>;
         /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
         homeOffers?: () => Promise<string[]>;
+        /** Show bots together (This computer and My Cloud together), from a circle's menu on the rail's own page: whether it is on now. */
+        together?: (on: boolean) => Promise<boolean>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
         /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
@@ -298,6 +321,19 @@ const __APP_VERSION__: string;
         /** Every Cloud and server of the person's own stops using this computer until resume(), as the icon's menu does. */
         pause?(): Promise<void>;
         resume?(): Promise<void>;
+      };
+      /** The one switch for lending this computer to a server of the person's own (electron/server-lending.mjs). On this
+       * app's own page `id` names the saved server; on a server's own page it is that server, whatever `id` says. */
+      lendComputer?: {
+        state(id: string | null): Promise<DesktopLendView>;
+        set(id: string | null, on: boolean): Promise<DesktopLendView>;
+        /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
+        allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** Opens This computer's Settings with that server's folders and terminal, once it is lent; false when it isn't. */
+        choose?(id: string | null): Promise<boolean>;
+        /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
+         * turns out to be the person's own. */
+        wish?(address: string, on: boolean): Promise<boolean>;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
@@ -408,11 +444,17 @@ const __APP_VERSION__: string;
       /** Receives a chat link (openmausbot://thread/… or openmausbot://bot/…)
        * opened from outside the app. */
       onChatLink?(cb: (link: string) => void): () => void;
+      /** A saved app in a window of its own, on the server this window shows; true once it is open. `openChat` brings
+       * the main window to a chat link (openmausbot://thread/…) from an app's own window. */
+      localApps?: {
+        openWindow(id: string): Promise<boolean>;
+        openChat(link: string): Promise<boolean>;
+      };
       /** The desktop shell's app-menu Preferences… item was activated; open
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | import("../state/store").SettingsPageId) => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | "phone" | import("../state/store").SettingsPageId) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
@@ -441,6 +483,21 @@ const __APP_VERSION__: string;
         setInteractive(contextId: string | null): Promise<boolean>;
         close(contextId?: string): Promise<boolean>;
         onState(cb: (state: DesktopWorkspaceState) => void): () => void;
+      };
+      /** A bot's browser as a native view over its Browser panel (browserEngine.surface "pane"). The main process asks
+       * the server which browser the bot's panel shows; the page never names one. */
+      browserPane?: {
+        show(input: { botId: string; threadId: string | null; profile: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
+        /** The person takes the tab the panel shows from the bot (`held`), or hands it back; the bot may only read a
+         * held tab. Every hold ends when the window closes. */
+        hold(input: { botId: string; threadId: string | null; held: boolean }): Promise<{ held: boolean }>;
+      };
+      /** A site's sign-in from the person's own browsers into a bot's browser, which the person starts. Counts and a
+       * reason code come back, never a cookie. `offer` says whether a site can be imported for a bot (Google never). */
+      browserCookies?: {
+        sources(): Promise<BrowserCookieSource[]>;
+        offer(input: { botId: string; threadId: string | null; site: string }): Promise<{ offered: boolean; reason?: string }>;
+        import(input: { botId: string; threadId: string | null; site: string; source: string; profile: string }): Promise<BrowserCookieImportResult>;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
@@ -487,6 +544,36 @@ const __APP_VERSION__: string;
         /** The person saw the line that the app updated itself: it is not shown again. */
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
+      };
+      /** Update all on Settings → Devices, this computer's own page only (electron/update-all.mjs). `survey(fresh)`: each
+       * saved server's own answer, `fresh` skipping its hour-long cache. `start` takes saved-server ids; main finds their
+       * addresses and targets itself. Absent in older desktop builds and on any other page. */
+      updateAll?: {
+        survey(fresh?: boolean): Promise<import("../../electron/update-all-run.mjs").UpdateAllSurvey>;
+        start(ids: string[], withApp: boolean): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
+        retry(id: string): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
+        onState(cb: (view: import("../../electron/update-all-run.mjs").UpdateAllView) => void): () => void;
+      };
+      /** Saved apps as launchers on this computer (electron/app-install/), this computer's own page only: a bundle in
+       * ~/Applications/MausBot Apps (macOS), a Start menu shortcut (Windows), a desktop entry (Linux), each opening
+       * openmausbot://app/<id>?window=1 (the app in its own window). Installing again replaces the launcher; a new name
+       * replaces the old one. Absent in older desktop builds and on any other page. */
+      appInstall?: {
+        install(input: { id: string; name: string; iconPng?: Uint8Array; desktopShortcut?: boolean }): Promise<
+          | { ok: true; app: { id: string; name: string; path: string | null; desktop?: boolean } }
+          | { ok: false; reason: "unavailable" | "invalid-id" | "taken" | "failed" }>;
+        uninstall(id: string): Promise<{ ok: true; removed: boolean; left?: string[] } | { ok: false; reason: "invalid-id" }>;
+        /** An installed app's icon on the Desktop too (a copy of its launcher); it never makes a missing Desktop folder.
+         * Absent in older desktop builds. */
+        addToDesktop?(id: string): Promise<
+          | { ok: true; app: { id: string; name: string; path: string | null; desktop: boolean } }
+          | { ok: false; reason: "unavailable" | "invalid-id" | "not-installed" | "no-desktop" | "taken" | "failed" }>;
+        /** Removes only that Desktop item; the launcher stays. Absent in older desktop builds. */
+        removeFromDesktop?(id: string): Promise<{ ok: true; removed: boolean; left?: string[] } | { ok: false; reason: "invalid-id" }>;
+        /** `desktop`: its icon is on the Desktop too (absent in older desktop builds). */
+        list(): Promise<{ available: boolean; apps: Array<{ id: string; name: string; path: string | null; desktop?: boolean }> }>;
+        /** `ids`: every saved app's id; launchers of any other app are removed. Absent in older desktop builds. */
+        cleanup?(ids: string[]): Promise<string[]>;
       };
       /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
        * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */

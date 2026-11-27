@@ -7,6 +7,9 @@ export interface TaskOpenedBy {
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
   kind?: "pair" | "work";
+  /** coordinate_bots opened it with thread "new" for one hand-off: it closes, and leaves the sidebar, once its result is
+   * back (server/host/finished-work.ts). start_thread never sets it, and a post_to_thread into the thread takes it off. */
+  oneShot?: true;
   /** The burst this thread is one part of: it is listed under that burst's card. */
   burstId?: string;
   /** The opener's own conversation this "work" thread was opened from.

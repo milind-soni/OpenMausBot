@@ -5,6 +5,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { chmodSync, chownSync, closeSync, existsSync, lstatSync, openSync, readFileSync, realpathSync, statSync, type Stats } from "node:fs";
 import { isIP } from "node:net";
+import { Readable } from "node:stream";
 import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -13,6 +14,9 @@ import {
 } from "./cloud-home.ts";
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
+import { BROWSER_CGROUP_ENV, prepareBrowserCgroup, spawnInCgroup } from "./browser/memory-cgroup.ts";
+import { CLOCK_FD_ENV } from "./cloud-clock.ts";
+import { startClockKeeper } from "./cloud-clock-keeper.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartLine, restartPolicy } from "./restart.ts";
@@ -33,17 +37,42 @@ export function passwdIds(passwd: string, name: string): { uid: number; gid: num
  * gives the server belongs here too (docker-image.test.ts checks): without OMB_DUCKDB_DIR the server found neither the
  * 1Password SDK nor DuckDB, which the image keeps in /app/duckdb, and said 1Password was "not available in this build". */
 const SERVER_ENV_NAMES = new Set([
+  // Antigravity accounts with no runtime of their own run Google's native CLI (server/drivers/antigravity-cli-install.ts):
+  // the Admin or a test home sets it, and without the name here a Cloud home could never turn it on.
+  "OMB_ANTIGRAVITY_NATIVE_CLI",
   "PATH", "SHELL", "HOSTNAME", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "NO_COLOR", "NODE_ENV", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
   "AGENT_BROWSER_EXECUTABLE_PATH", "OMB_STATIC_DIR", "OMB_DATA_DIR", "OMB_DUCKDB_DIR",
   "OMB_CLOUD_ROLE", "OMB_CLOUD_MACHINE_ID", "OMB_CLOUD_ADMIN_URL", "OMB_CLOUD_IMAGE", "OMB_PUBLIC_URL", "OMB_WEBHOOK_PUBLIC_URL",
   "OMB_CLOUD_TEAM_ID", "OMB_CLOUD_TEAM_NAME", "OMB_CLOUD_BOAT_URL", "OMB_CLOUD_VOICE_URL", "OMB_CLOUD_DECIDER_URL", "OMB_CLOUD_AI_URL", "OMB_CLOUD_X_URL", "OMB_CLOUD_HOSTING_URL", "OMB_TTS_DEFAULT_VOICE",
   "OMB_COMPOSIO_BROKER_URL", "OMB_COMPOSIO_BROKER",
+  // Ended engine sessions' prune (server/host/engine-session-sweep.ts), off unless the Admin sets it.
+  "OMB_ENGINE_SESSION_SWEEP",
   // The addresses a home answered at before it moved to another provider, which still forward to it.
   "OMB_CLOUD_LEGACY_ORIGINS",
   // The bot box switch (server/bot-box/detect.ts): the Admin may turn a home's box off for support.
   "OMB_BOT_BOX",
+  // Tool caches into one folder in each bot box's HOME (server/bot-box/tool-caches.ts): off unless the Admin turns it on.
+  "OMB_CACHE_ROOT",
+  // Their cap (server/cache-sweep/limits.ts): the sweeper's switch, off unless the Admin turns it on, and the caps' overrides.
+  "OMB_CACHE_SWEEP", "OMB_CACHE_CAP_TOOLS", "OMB_CACHE_CAP_APP",
+  // The image's own engine CLIs before older copies in the data folder (server/image-engines.ts), for one test Cloud first.
+  "OMB_IMAGE_ENGINES",
+  // The conversation logs' cap and age limit (server/host/thread-log-sweep.ts), off unless the Admin sets it.
+  "OMB_THREAD_LOG_SWEEP", "OMB_THREAD_LOG_CAP", "OMB_THREAD_LOG_CUT",
+  // The canonical event log's bounds and drain concurrency: memory traded for completeness.
+  "OMB_EVENT_LOG_BATCH_LINES", "OMB_EVENT_LOG_QUEUE_BYTES", "OMB_EVENT_LOG_QUEUE_EVENTS", "OMB_EVENT_LOG_DRAIN_THREADS",
   // An ended Cloud started only for its owner's export: the server runs frozen (server/move-freeze.ts).
   "OMB_CLOUD_EXPORT_ONLY",
+  // The idle task workspaces' dependency sweep (server/host/start-upkeep.ts), off unless set: the Admin may turn it on.
+  "OMB_TASK_WORKSPACE_RETENTION",
+  // The delete-time cleanup's switch (server/host/conversation-folder-cleanup.ts): off unless the Admin sets it on.
+  "OMB_CONVERSATION_FOLDER_CLEANUP",
+  // The orphan sweep's switch (server/host/orphan-sweep.ts): off, report or remove, set per home by the Admin.
+  "OMB_ORPHAN_SWEEP", "OMB_ORPHAN_SWEEP_MAX_SHARE",
+  // The idle reclaim's switch (server/host/idle-reclaim.ts): off, report or remove, set per home by the Admin.
+  "OMB_IDLE_RECLAIM",
+  // The full tool results' day-old sweep (server/host/tool-results-sweep.ts), off unless the Admin sets it.
+  "OMB_TOOL_RESULTS_SWEEP",
 ]);
 export function serverEnvironmentAllowed(name: string): boolean {
   return SERVER_ENV_NAMES.has(name) || name.startsWith("LC_");
@@ -371,11 +400,16 @@ export function codeTrustProblem(files: readonly string[], home: string, stat: (
   return null;
 }
 
-/** Secrets go over an inherited pipe, never the environment; it is written and closed at once. */
+/** The server's "check the clock" pipe (server/cloud-clock.ts), when the supervisor keeps the clock. */
+const CLOCK_FD = 4;
+
+/** Secrets go over an inherited pipe, never the environment; it is written and closed at once. `clockPipe`: one more pipe,
+ * the child's descriptor 4, that the child writes "check" lines to (server/cloud-clock-keeper.ts reads them). */
 export function spawnWithSecrets(command: string, args: string[], env: NodeJS.ProcessEnv, secrets: Record<string, string>,
-  ids?: { uid: number; gid: number } | null, capture = false): ChildProcess {
-  const child = spawn(command, args, { env,
-    stdio: capture ? ["inherit", "pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit", "pipe"],
+  ids?: { uid: number; gid: number } | null, capture = false, clockPipe = false): ChildProcess {
+  const stdio: ("inherit" | "pipe")[] = capture ? ["inherit", "pipe", "pipe", "pipe"] : ["inherit", "inherit", "inherit", "pipe"];
+  if (clockPipe) stdio.push("pipe");
+  const child = spawn(command, args, { env: clockPipe ? { ...env, [CLOCK_FD_ENV]: String(CLOCK_FD) } : env, stdio,
     ...(ids ? { uid: ids.uid, gid: ids.gid } : {}) });
   const pipe = child.stdio[SECRETS_FD] as NodeJS.WritableStream | null;
   pipe?.on("error", () => {});
@@ -435,6 +469,13 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   }
   // Names only, never values: what the server does not get from here.
   if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
+  // The bots' Chrome under a memory limit the kernel enforces (browser/memory-cgroup.ts); the server is started in its own
+  // leaf beside it. Root only: nothing changes where it can't be set up.
+  const browserLimit = ids && process.platform === "linux" ? prepareBrowserCgroup(env, boxMemory().bytes, ids) : null;
+  if (browserLimit) console.log(`cloud home: ${browserLimit.line}`);
+  const browserGroup = browserLimit?.group ?? null;
+  if (browserGroup) server[BROWSER_CGROUP_ENV] = browserGroup.browsers;
+  const inServerGroup = <T>(start: () => T): T => browserGroup ? spawnInCgroup(browserGroup.server, browserGroup.base, start) : start();
   const children: ChildProcess[] = [];
   let stopping = false, restartTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = (failed: boolean) => {
@@ -454,10 +495,17 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
       if (!again?.(code, signal)) stop(true);
     });
   };
+  // The clock (server/cloud-clock-keeper.ts): root keeps it right after a resume the provider left it behind on. Root only.
+  const keeper = ids && process.platform === "linux" ? startClockKeeper(config.adminOrigin) : null;
   const policy = restartPolicy();
   const runServer = () => {
     if (stopping) return;
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code, signal) => {
+    watch(inServerGroup(() => spawnWithOomScore(OOM_SCORE.server, () => {
+      const child = spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids, false, Boolean(keeper));
+      const pipe = child.stdio[CLOCK_FD];
+      if (keeper && pipe instanceof Readable) keeper.listen(pipe);
+      return child;
+    })), (code, signal) => {
       if (!policy.again(code, stopping, signal)) return false;
       console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
       if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());

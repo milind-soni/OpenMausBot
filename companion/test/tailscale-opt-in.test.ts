@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer, type AddressInfo, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,21 +15,30 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const freePort = (): Promise<number> =>
-  new Promise((resolve) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address() as { port: number };
-      server.close(() => resolve(port));
-    });
-  });
+/** Distinct free ports: every listener stays open until all are bound, so the OS never hands the same one back twice. */
+async function freePorts(count: number): Promise<number[]> {
+  const servers: Server[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      const server = createServer();
+      servers.push(server);
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => resolve());
+      });
+    }
+    return servers.map((server) => (server.address() as AddressInfo).port);
+  } finally {
+    await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
+  }
+}
 
 /** Starts a real sidecar until it says it is up, and returns every program it tried to run meanwhile. */
 async function startSidecar(env: Record<string, string>): Promise<{ programs: string[][]; out: string }> {
   const home = mkdtempSync(join(tmpdir(), "omb-companion-tailscale-"));
   dirs.push(home);
   const record = join(home, "exec.jsonl");
-  const [companionPort, controlPort] = [await freePort(), await freePort()];
+  const [companionPort, controlPort] = await freePorts(2);
   const child = spawn(process.execPath, ["--import", RECORDER, ENTRY], {
     env: {
       PATH: process.env.PATH ?? "",

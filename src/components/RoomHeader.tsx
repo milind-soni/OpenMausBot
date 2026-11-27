@@ -130,24 +130,26 @@ export function RoomHeader({
   group,
   members,
   simple,
-  setupPending,
   remoteClient,
   findOpen,
   onToggleFind,
   onToggleFolder,
   onOpenMembers,
   membersTriggerRef,
+  feed = false,
 }: {
   group: Group;
   members: Bot[];
   simple: boolean;
-  setupPending: boolean;
   remoteClient: boolean;
   findOpen: boolean;
   onToggleFind: () => void;
   onToggleFolder: () => void;
   onOpenMembers: () => void;
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
+  /** Above the room's feed of threads: what belongs to one thread (who has it open, its pin, find, its export and the
+   * thread picker) is in that thread's own view beside it. */
+  feed?: boolean;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const { state, dispatch } = useStore();
@@ -166,7 +168,7 @@ export function RoomHeader({
   if (simple) {
     const more = members.length - SIMPLE_FACES;
     return (
-      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-11 md:pl-5">
+      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-14 md:pl-5">
         <div data-roomhead-row className="flex items-center justify-between gap-3">
           <div data-roomhead-identity className="flex min-w-0 flex-col items-start" style={headerNoDragStyle}>
             <button
@@ -185,8 +187,8 @@ export function RoomHeader({
             {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
-            <ThreadPresenceFaces threadId={group.threadId} />
-            {pinned}
+            {!feed && <ThreadPresenceFaces threadId={group.threadId} />}
+            {!feed && pinned}
             <button
               ref={membersTriggerRef}
               type="button"
@@ -217,7 +219,7 @@ export function RoomHeader({
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
           "@container/roomhead px-5 py-3",
-          "pl-11 md:pl-5",
+          "pl-14 md:pl-5",
         )}
       >
         <div data-roomhead-row className="flex items-center justify-between @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:gap-y-1">
@@ -225,7 +227,7 @@ export function RoomHeader({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-              {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
+              {!group.dm && !feed && <GroupTaskPicker group={group} />}
             </div>
             {group.description && <p className="truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
@@ -234,9 +236,9 @@ export function RoomHeader({
           data-roomhead-controls
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
-          <ThreadPresenceFaces threadId={group.threadId} />
-          {pinned}
-          <button
+          {!feed && <ThreadPresenceFaces threadId={group.threadId} />}
+          {!feed && pinned}
+          {!feed && <button
             type="button"
             onClick={onToggleFind}
             aria-label={t("chat.find")}
@@ -248,17 +250,17 @@ export function RoomHeader({
             title={t("chat.findShortcut")}
           >
             <Search size={16} />
-          </button>
-          <ExportTranscriptMenu
+          </button>}
+          {!feed && <ExportTranscriptMenu
             title={group.name}
             messages={group.messages}
             isGroup
-          />
-          {!setupPending && <ConversationTurnLimit group={group} />}
+          />}
+          {!feed && <ConversationTurnLimit group={group} />}
           <RoomHeaderCallButton group={group} members={members} />
           <GroupUsageChip usage={group.usage} />
-          {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={onToggleFolder} />}
-          {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
+          {!remoteClient && !group.dm && <RoomWorkingFolderChip group={group} onToggle={onToggleFolder} />}
+          {!remoteClient && !group.dm && <DefaultResponderSelect group={group} members={members} />}
           {group.dm || remoteClient ? (
             faces
           ) : (

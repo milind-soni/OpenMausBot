@@ -225,8 +225,8 @@ describe("the Advanced composer in a bot chat", () => {
     expect(fixture.call).toMatchObject({ placement: "composer", modeMenu: false });
   });
 
-  it("keeps the model in the footer while setup holds the field, with the tools put away", () => {
-    render({ bot, locked: true });
+  it("keeps the model in the footer while the conversation loads, with the tools put away", () => {
+    render({ bot: { ...bot, awaitingThreadSnapshot: true } });
     expect(plus()).toBeNull();
     expect(container.querySelector("[data-test-model]")).not.toBeNull();
   });

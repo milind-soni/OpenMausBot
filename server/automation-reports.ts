@@ -109,7 +109,8 @@ export interface AutomationReportDeps {
   busy(botId: string, threadId: string): boolean;
   /** After a line this conversation's session did not write: it reaches the next turn. The chat is marked unread here. */
   wrote(bot: BotRecord, threadId: string): void;
-  notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
+  /** `run`: the routine run this notice reports on. */
+  notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string, run: RoutineRun): void;
   /** A run that delivers to the brief completed: its answer is the brief's to read. */
   brief?(run: RoutineRun, turnId?: string): void;
   /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
@@ -257,7 +258,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
     if (line.kind === "failure" || reply.question !== undefined || routineRunNeedsReview(run)) store.patchTask(target.bot.id, target.threadId, { unread: true });
-    if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
+    if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`, run);
     return true;
   };
 
@@ -335,7 +336,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       else {
         const noted = withNote(reply, deps.notes?.take(run.id, deps.threadLanguage?.(run.threadId)) ?? null);
         if (noted.quiet) deps.routines()?.noteReport(run.id, { state: "quiet" });
-        else if (bot) deps.notify("done", bot, run.threadId, noted.text);
+        else if (bot) deps.notify("done", bot, run.threadId, noted.text, run);
       }
     },
     /** A run failed in a way the person is told about: one line says so where its reports go. */

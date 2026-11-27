@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, watch, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,10 +70,11 @@ describe("openPhoneSession", () => {
           const look = () => {
             const received = phone.controlBytes();
             if (received.length < bytes * 2) return;
-            changes.close();
+            clearInterval(polling);
             resolve(received);
           };
-          const changes = watch(dir, look);
+          // macOS fs.watch (FSEvents) can drop a change made just after the watcher is created, so this polls instead.
+          const polling = setInterval(look, 10);
           look();
         }),
       serverPid: () => Number(read("server.pid")),

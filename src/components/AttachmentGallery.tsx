@@ -24,6 +24,7 @@ import { useEditSources } from "@/lib/use-edit-sources";
 
 export interface GalleryFile extends TranscriptFileAttachment {
   linked?: boolean;
+  shownPath?: string;
 }
 
 type MarkdownNode = {
@@ -53,16 +54,20 @@ export function collectMessageFiles(text: string, existingPaths: readonly string
     }
     if (node.children) pending.push(...[...node.children].reverse());
   }
+  return linkedFiles(links.map((node) => node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined)), existingPaths);
+}
+
+/** The local files among link targets, as their chips show them, once each; never one of `existingPaths`. */
+export function linkedFiles(hrefs: ReadonlyArray<string | undefined>, existingPaths: readonly string[] = []): GalleryFile[] {
   const seen = new Set(existingPaths.map(fileIdentity));
-  return links.flatMap((node) => {
-    const href = node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined);
+  return hrefs.flatMap((href) => {
     const path = localFilePath(href);
     if (!path || !href) return [];
     const identity = fileIdentity(href);
     if (seen.has(identity)) return [];
     seen.add(identity);
     // Security: send the authored spelling; the server owns the one decode at its authorization boundary.
-    return [{ path: href, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
+    return [{ path: href, shownPath: identity, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
   });
 }
 
@@ -474,7 +479,8 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
       if (seen.has(key)) continue;
       seen.add(key);
       const trusted = Boolean(message && (file.private || file.linked));
-      result.push({ key, source: originalOf(originals, file.path), kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
+      const source = originalOf(originals, file.path) ?? (message && file.linked ? key : undefined);
+      result.push({ key, source, kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
     }
     return result;
   }, [images, files, originals, message]);

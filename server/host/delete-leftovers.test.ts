@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createAttachmentReferences } from "../attachment-references.ts";
+import { rowsOfConversations } from "../testing/message-rows-fixture.ts";
 import { createDeleteLeftovers, engineSessionFolders, instanceEnvironment, plainlyUnder, removeMemoryLayer, removeUnder, type DeleteLeftoversDeps } from "./delete-leftovers.ts";
 
 const SESSION = "11111111-1111-4111-8111-111111111111";
@@ -22,7 +24,7 @@ function put(path: string, text = "x"): string {
   return path;
 }
 
-type Task = { threadId: string; resumeCursors?: Record<string, unknown> };
+type Task = { threadId: string; resumeCursors?: Record<string, unknown>; cwd?: string };
 type Bot = { id: string; threadId?: string; resumeCursors?: Record<string, unknown>; tasks?: Task[] };
 
 function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
@@ -42,9 +44,9 @@ function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
   const leftovers = createDeleteLeftovers({
     dataDir,
     store,
-    threadsReferencing: (fragment) => [...messages].filter(([, list]) => JSON.stringify(list).includes(fragment)).map(([threadId]) => threadId),
+    references: createAttachmentReferences({ rows: rowsOfConversations(messages) }),
     keptAttachments: () => kept,
-    deleteAttachment: (name) => rmSync(join(dataDir, "attachments", name)),
+    deleteAttachments: (names) => { for (const name of names) rmSync(join(dataDir, "attachments", name)); },
     engineFolders: () => engineSessionFolders(dataDir, [{ HOME: home }]),
     layers: { journalFile: (layer) => join(dataDir, "memory-journal", `${layer}.ndjson`), forget: (layer) => { forgotten.push(layer); } },
     defer: () => {},
@@ -63,7 +65,7 @@ function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
       for (const bot of bots) bot.tasks = bot.tasks?.filter((task) => task.threadId !== threadId);
       listener({ type: "thread.deleted", threadId });
     }
-    leftovers.flush();
+    return leftovers.flush();
   };
   const deleteBot = (botId: string) => {
     const bot = bots.find((one) => one.id === botId)!;
@@ -75,7 +77,7 @@ function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
       listener({ type: "thread.deleted", threadId });
     }
     listener({ type: "bot.deleted", botId });
-    leftovers.flush();
+    return leftovers.flush();
   };
   const stored = (name: string) => existsSync(join(dataDir, "attachments", name));
   const logSession = (threadId: string, sessionId: string) =>
@@ -84,73 +86,84 @@ function fixture(over: Partial<DeleteLeftoversDeps> = {}) {
 }
 
 describe("a deleted conversation's uploads", () => {
-  it("go with it", () => {
+  it("go with it", async () => {
     const { bots, say, deleteThreads, stored } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }, { threadId: "t2" }] });
     say("t1", upload(1));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect(stored(upload(1))).toBe(false);
   });
 
-  it("stay while another conversation, a picture, a member's picture or a routine still names them", () => {
+  it("stay while another conversation, a picture, a member's picture or a routine still names them", async () => {
     const { dataDir, bots, kept, say, deleteThreads, stored } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }, { threadId: "t2" }] });
     say("t2", upload(1));
     say("t1", upload(1), upload(2), upload(3), upload(4));
     kept.add(upload(2));
     put(join(dataDir, "people", MEMBER, "profile.json"), JSON.stringify({ name: "Bob", avatarUrl: `/api/attachments/${upload(4)}` }));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect([stored(upload(1)), stored(upload(2)), stored(upload(3)), stored(upload(4))]).toEqual([true, true, false, true]);
   });
 
-  it("go once every conversation that named them is deleted together", () => {
+  it("go once every conversation that named them is deleted together", async () => {
     const { bots, say, deleteThreads, stored } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }, { threadId: "t2" }, { threadId: "t3" }] });
     say("t1", upload(1));
     say("t2", upload(1));
-    deleteThreads("t1", "t2");
+    await deleteThreads("t1", "t2");
     expect(stored(upload(1))).toBe(false);
   });
 
-  it("stay when the delete did not happen", () => {
+  it("stay when the delete did not happen", async () => {
     const { bots, say, store, leftovers, stored } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] });
     say("t1", upload(1));
     store.threadsGoing(["t1"]);
-    leftovers.flush();
+    await leftovers.flush();
     expect(stored(upload(1))).toBe(true);
   });
 
-  it("stay, with a warning, while what still uses uploads cannot be read", () => {
+  it("stay, with a warning, while what still uses uploads cannot be read", async () => {
     const { bots, say, deleteThreads, stored, warnings } = fixture({ keptAttachments: () => null });
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] });
     say("t1", upload(1));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect(stored(upload(1))).toBe(true);
     expect(warnings.join("\n")).toContain("uploads stayed behind");
   });
 
-  it("never reach a file outside attachments/ a message names", () => {
+  it("never reach a file outside attachments/ a message names", async () => {
     const { dataDir, bots, messages, deleteThreads } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] });
     const config = put(join(dataDir, "config.json"));
     messages.set("t1", [{ text: "attachments/../config.json and attachments/..\\config.json" }]);
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect(existsSync(config)).toBe(true);
   });
 
-  it("take the conversation's box uploads folder too", () => {
+  it("take the conversation's box uploads folder too", async () => {
     const { dataDir, bots, deleteThreads } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }, { threadId: "t2" }] });
     const mine = put(join(dataDir, "box-uploads", "scout", "t1", upload(1)));
     const others = put(join(dataDir, "box-uploads", "scout", "t2", upload(2)));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect([existsSync(dirname(mine)), existsSync(others)]).toEqual([false, true]);
+  });
+
+  it("take the conversation's own notes, and leave the bot's memory and its other conversations' notes", async () => {
+    const { dataDir, bots, deleteThreads } = fixture();
+    bots.push({ id: "counsel", tasks: [{ threadId: "t1" }, { threadId: "t2" }] });
+    const memory = join(dataDir, "workspaces", "counsel");
+    const mine = put(join(memory, "memory", "threads", "t1.md"));
+    const others = put(join(memory, "memory", "threads", "t2.md"));
+    const index = put(join(memory, "MEMORY.md"));
+    await deleteThreads("t1");
+    expect([existsSync(mine), existsSync(others), existsSync(index)]).toEqual([false, true, true]);
   });
 });
 
 describe("a deleted conversation's engine sessions", () => {
-  it("go from Claude's and Codex's folders, by the session it resumes and the ones its log says it started", () => {
+  it("go from Claude's and Codex's folders, by the session it resumes and the ones its log says it started", async () => {
     const { home, bots, deleteThreads, logSession } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1", resumeCursors: { claude: SESSION } }, { threadId: "t2", resumeCursors: { claude: SHARED } }] });
     logSession("t1", LOGGED);
@@ -173,23 +186,23 @@ describe("a deleted conversation's engine sessions", () => {
       put(join(home, ".codex", "sessions", "2026", "11", "10", `rollout-2026-11-10T11-00-00-${SHARED}.jsonl`)),
       put(join(home, ".codex", "auth.json")),
     ];
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect(mine.filter(existsSync)).toEqual([]);
     expect(others.filter((path) => !existsSync(path))).toEqual([]);
   });
 
-  it("stay while a remaining conversation resumes the same session", () => {
+  it("stay while a remaining conversation resumes the same session", async () => {
     const { home, bots, deleteThreads, logSession } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1", resumeCursors: { claude: SHARED } }, { threadId: "fork", resumeCursors: { claude: SHARED } }] });
     logSession("t1", SHARED);
     const session = put(join(home, ".claude", "projects", "-work", `${SHARED}.jsonl`));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect(existsSync(session)).toBe(true);
-    deleteThreads("fork");
+    await deleteThreads("fork");
     expect(existsSync(session)).toBe(false);
   });
 
-  it("go from every audience's engine home on a Team Cloud", () => {
+  it("go from every audience's engine home on a Team Cloud", async () => {
     const sessions = (dataDir: string) => engineSessionFolders(dataDir, ["team", "member-0123456789abcdef"].map((key) => ({ HOME: join(dataDir, "engine-homes", key) })));
     let dataDirOf = "";
     const { dataDir, bots, deleteThreads } = fixture({ engineFolders: () => sessions(dataDirOf) });
@@ -197,20 +210,20 @@ describe("a deleted conversation's engine sessions", () => {
     bots.push({ id: "scout", tasks: [{ threadId: "t1", resumeCursors: { claude: SESSION, codex: LOGGED } }, { threadId: "t2" }] });
     const team = put(join(dataDir, "engine-homes", "team", ".claude", "projects", "-work", `${SESSION}.jsonl`));
     const member = put(join(dataDir, "engine-homes", "member-0123456789abcdef", ".codex", "sessions", "2026", "11", "10", `rollout-x-${LOGGED}.jsonl`));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect([existsSync(team), existsSync(member)]).toEqual([false, false]);
   });
 
-  it("removes a Pi session, which is named by its file, only inside Pi's own folder", () => {
+  it("removes a Pi session, which is named by its file, only inside Pi's own folder", async () => {
     const { home, outside, bots, deleteThreads } = fixture();
     const mine = put(join(home, ".pi", "agent", "sessions", "--work--", "2026-11-10_a.jsonl"));
     const elsewhere = put(join(outside, "notes.jsonl"));
     bots.push({ id: "scout", tasks: [{ threadId: "t1", resumeCursors: { pi: mine } }, { threadId: "t2", resumeCursors: { pi: elsewhere } }, { threadId: "t3" }] });
-    deleteThreads("t1", "t2");
+    await deleteThreads("t1", "t2");
     expect([existsSync(mine), existsSync(elsewhere)]).toEqual([false, true]);
   });
 
-  it("never follows a link out of an engine's folder", () => {
+  it("never follows a link out of an engine's folder", async () => {
     const { home, outside, bots, deleteThreads } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1", resumeCursors: { claude: SESSION } }, { threadId: "t2" }] });
     const elsewhere = put(join(outside, "projects", "-work", `${SESSION}.jsonl`));
@@ -221,12 +234,12 @@ describe("a deleted conversation's engine sessions", () => {
     symlinkSync(join(outside, "history", SESSION), join(home, ".claude", "file-history", SESSION));
     mkdirSync(join(home, ".codex"), { recursive: true });
     symlinkSync(join(outside, "projects"), join(home, ".codex", "sessions"));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect([existsSync(elsewhere), existsSync(history)]).toEqual([true, true]);
     expect(existsSync(join(home, ".claude", "file-history", SESSION))).toBe(false);
   });
 
-  it("never follows a link out of the data folder to an engine home", () => {
+  it("never follows a link out of the data folder to an engine home", async () => {
     const sessions = (dataDir: string) => engineSessionFolders(dataDir, [{ HOME: join(dataDir, "engine-homes", "team") }]);
     let dataDirOf = "";
     const { dataDir, outside, bots, deleteThreads } = fixture({ engineFolders: () => sessions(dataDirOf) });
@@ -235,13 +248,13 @@ describe("a deleted conversation's engine sessions", () => {
     const elsewhere = put(join(outside, "claude", "projects", "-work", `${SESSION}.jsonl`));
     mkdirSync(join(dataDir, "engine-homes", "team"), { recursive: true });
     symlinkSync(join(outside, "claude"), join(dataDir, "engine-homes", "team", ".claude"));
-    deleteThreads("t1");
+    await deleteThreads("t1");
     expect(existsSync(elsewhere)).toBe(true);
   });
 });
 
 describe("a deleted bot", () => {
-  it("takes its checkpoints, its box uploads and the memory layers kept beside its own folder, and keeps the files its conversations made", () => {
+  it("takes its checkpoints, its box uploads and the memory layers kept beside its own folder, and keeps the files its conversations made", async () => {
     const { dataDir, bots, deleteBot, forgotten } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] }, { id: "scout-two", tasks: [{ threadId: "t9" }] });
     const layers = [`scout--member-${MEMBER}`, "scout--room-r1"];
@@ -257,7 +270,7 @@ describe("a deleted bot", () => {
       put(join(dataDir, "workspaces", "scout-two", "memory", "notes.md")),
       put(join(dataDir, "memory-journal", "scout-two.ndjson")),
     ];
-    deleteBot("scout");
+    await deleteBot("scout");
     expect(mine.filter(existsSync)).toEqual([]);
     expect(others.filter((path) => !existsSync(path))).toEqual([]);
     expect(forgotten.sort()).toEqual([...layers].sort());
@@ -270,7 +283,7 @@ describe("a deleted bot", () => {
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] });
     const checkpoint = put(join(dataDir, "checkpoints", "scout", "0123456789abcdef", ".git", "HEAD"));
     const uploaded = put(join(dataDir, "box-uploads", "scout", "t1", upload(1)));
-    deleteBot("scout");
+    await deleteBot("scout");
     await Promise.resolve();
     expect(asked).toEqual(["scout"]);
     expect([existsSync(checkpoint), existsSync(uploaded)]).toEqual([true, false]);
@@ -278,7 +291,7 @@ describe("a deleted bot", () => {
     await vi.waitFor(() => expect(existsSync(checkpoint)).toBe(false));
   });
 
-  it("never follows a link out of the data folder", () => {
+  it("never follows a link out of the data folder", async () => {
     const { dataDir, outside, bots, deleteBot } = fixture();
     bots.push({ id: "scout", tasks: [{ threadId: "t1" }] });
     const checkpoint = put(join(outside, "checkpoints", "scout", "repo", "HEAD"));
@@ -286,20 +299,36 @@ describe("a deleted bot", () => {
     symlinkSync(join(outside, "checkpoints"), join(dataDir, "checkpoints"));
     mkdirSync(join(dataDir, "workspaces"), { recursive: true });
     symlinkSync(join(outside, "layer"), join(dataDir, "workspaces", `scout--member-${MEMBER}`));
-    deleteBot("scout");
+    await deleteBot("scout");
     expect([existsSync(checkpoint), existsSync(layer)]).toEqual([true, true]);
     expect(existsSync(join(dataDir, "workspaces", `scout--member-${MEMBER}`))).toBe(false);
   });
 });
 
+describe("the conversation folders' cleanup", () => {
+  it("is handed the deleted conversations, the folders they worked in and the deleted bots, and a failure there stays inside it", async () => {
+    const calls: unknown[] = [];
+    const { bots, deleteThreads, deleteBot, warnings, say } = fixture({ folders: {
+      conversationsGone: (ids, workedIn) => { calls.push(["threads", [...ids], [...(workedIn ?? [])]]); throw new Error("busy disk"); },
+      botGone: (botId) => { calls.push(["bot", botId]); },
+    } });
+    bots.push({ id: "scout", tasks: [{ threadId: "t1", cwd: "/data/task-workspaces/scout/t0" }, { threadId: "t2" }] });
+    say("t1", upload(1));
+    await deleteThreads("t1");
+    await deleteBot("scout");
+    expect(calls).toEqual([["threads", ["t1"], ["/data/task-workspaces/scout/t0"]], ["threads", ["t2"], []], ["bot", "scout"]]);
+    expect(warnings.filter((line) => line.includes("busy disk"))).toHaveLength(2);
+  });
+});
+
 describe("a cleanup that fails", () => {
-  it("is logged, never thrown into the delete, and the rest still goes", () => {
-    const { dataDir, home, bots, say, deleteThreads, warnings } = fixture({ deleteAttachment: () => { throw new Error("disk is read-only"); } });
+  it("is logged, never thrown into the delete, and the rest still goes", async () => {
+    const { dataDir, home, bots, say, deleteThreads, warnings } = fixture({ deleteAttachments: () => { throw new Error("disk is read-only"); } });
     bots.push({ id: "scout", tasks: [{ threadId: "t1", resumeCursors: { claude: SESSION } }, { threadId: "t2" }] });
     say("t1", upload(1));
     const session = put(join(home, ".claude", "projects", "-work", `${SESSION}.jsonl`));
     const box = put(join(dataDir, "box-uploads", "scout", "t1", upload(1)));
-    expect(() => deleteThreads("t1")).not.toThrow();
+    await expect(deleteThreads("t1")).resolves.toBeUndefined();
     expect(warnings).toEqual([`delete leftovers: the upload ${upload(1)} stayed behind: disk is read-only`]);
     expect([existsSync(session), existsSync(box)]).toEqual([false, false]);
   });

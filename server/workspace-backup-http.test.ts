@@ -1,6 +1,6 @@
 // Archive work is mocked so revocation can be held at a deterministic boundary.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,6 +110,118 @@ function post(path: string, body: unknown, token = admin.token) {
   return fetch(`${url}${path}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 }
 
+function get(path: string, token = admin.token) {
+  return fetch(`${url}${path}`, { headers: { authorization: `Bearer ${token}` } });
+}
+
+it("finds the original export after a lost response and allows only its own session to download it", async () => {
+  const path = `/api/workspace-backup/export-jobs/${randomUUID()}`;
+  let release!: () => void;
+  let started!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const starting = new Promise<void>((resolve) => { started = resolve; });
+  const artifact = fakeArchive();
+  archive.create.mockImplementationOnce(async () => {
+    started();
+    await held;
+    return artifact;
+  });
+  const body = JSON.stringify({ password: PASSWORD });
+  const connection = request(`${url}${path}`, { method: "POST", headers: {
+    authorization: `Bearer ${admin.token}`, "content-type": "application/json", "content-length": Buffer.byteLength(body),
+  } });
+  const closed = new Promise<void>((resolve) => connection.once("close", resolve));
+  connection.on("error", () => {});
+  connection.end(body);
+  const other = sessions.issue({ label: "Another admin session", scopes: ["admin", "client"] });
+  try {
+    await starting;
+    connection.destroy();
+    await closed;
+    const retry = await post(path, { password: PASSWORD });
+    expect(retry.status).toBe(202);
+    expect(await retry.json()).toEqual({ state: "running" });
+    expect(await (await get(path)).json()).toEqual({ state: "running" });
+    expect((await get(path, other.token)).status).toBe(404);
+    expect((await post(`/api/workspace-backup/export-jobs/${randomUUID()}`, { password: PASSWORD })).status).toBe(409);
+    expect((await post("/api/workspace-backup/export", { password: PASSWORD })).status).toBe(409);
+    expect(maintenance.active).toBe(true);
+  } finally { release(); }
+  const ready = { state: "ready", id: artifact.id, filename: "OpenMausBot-2026-09-11.ombbackup" };
+  await expect.poll(async () => (await get(path)).json()).toMatchObject(ready);
+  expect(await (await post(path, { password: PASSWORD })).json()).toMatchObject(ready);
+  expect(archive.create).toHaveBeenCalledOnce();
+  const download = `/api/workspace-backup/download/${artifact.id}`;
+  expect(await (await get(download)).text()).toBe("fixture encrypted bytes");
+  expect((await get(download, other.token)).status).toBe(404);
+});
+
+it("cleans up a completed asynchronous export if the initiating session was revoked", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const artifact = fakeArchive();
+  archive.create.mockImplementationOnce(async () => { await held; return artifact; });
+  const path = `/api/workspace-backup/export-jobs/${randomUUID()}`;
+  try {
+    expect((await post(path, { password: PASSWORD })).status).toBe(202);
+    expect((await post("/api/auth/logout", {})).status).toBe(200);
+  } finally { release(); }
+  await vi.waitFor(() => expect(archive.remove).toHaveBeenCalledWith(dataDir, artifact.id));
+  expect(existsSync(artifact.path)).toBe(false);
+  expect((await get(path)).status).toBe(401);
+  expect((await get(`/api/workspace-backup/download/${artifact.id}`)).status).toBe(401);
+});
+
+it("reports a failed job when polled and accepts a new explicit export", async () => {
+  const path = `/api/workspace-backup/export-jobs/${randomUUID()}`;
+  archive.create.mockRejectedValueOnce(new Error("Fixture archive failed"));
+  expect((await post(path, { password: PASSWORD })).status).toBe(202);
+  await expect.poll(async () => (await get(path)).json()).toEqual({ state: "failed", error: "Fixture archive failed" });
+  expect(await (await post(path, { password: PASSWORD })).json()).toEqual({ state: "failed", error: "Fixture archive failed" });
+  expect(archive.create).toHaveBeenCalledOnce();
+  const retry = `/api/workspace-backup/export-jobs/${randomUUID()}`;
+  expect((await post(retry, { password: PASSWORD })).status).toBe(202);
+  await expect.poll(async () => (await get(retry)).json()).toMatchObject({ state: "ready", expiresInMs: expect.any(Number) });
+  expect(archive.create).toHaveBeenCalledTimes(2);
+});
+
+it("retains each successful async archive for one hour from completion", async () => {
+  const first = `/api/workspace-backup/export-jobs/${randomUUID()}`;
+  const artifact = fakeArchive();
+  archive.create.mockResolvedValueOnce(artifact);
+  expect((await post(first, { password: PASSWORD })).status).toBe(202);
+  await expect.poll(async () => (await get(first)).json()).toMatchObject({ state: "ready" });
+  const { expiresInMs } = await (await get(first)).json() as { expiresInMs: number };
+  expect(expiresInMs).toBeGreaterThan(59 * 60_000);
+  expect((await post("/api/workspace-backup/export", { password: PASSWORD })).status).toBe(200);
+  const download = `/api/workspace-backup/download/${artifact.id}`;
+  expect((await get(download)).status).toBe(200);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + expiresInMs);
+  try {
+    expect((await get(first)).status).toBe(404);
+    expect((await get(download)).status).toBe(404);
+    expect(existsSync(artifact.path)).toBe(false);
+  } finally { clock.mockRestore(); }
+});
+
+it("schedules cleanup for an interrupted export that left a snapshot but no archive", async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const id = randomUUID();
+  const directory = join(dataDir, ".backups", id);
+  mkdirSync(join(directory, "snapshot"), { recursive: true });
+  const createdAt = new Date(Date.now() - 60 * 60_000 + 5_000);
+  utimesSync(directory, createdAt, createdAt);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await listen();
+    expect(existsSync(directory)).toBe(true);
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(archive.remove).toHaveBeenCalledWith(dataDir, id);
+    expect(existsSync(directory)).toBe(false);
+  } finally { vi.useRealTimers(); }
+});
+
 it("carries a fixed backup refusal and its redacted string path to the client", async () => {
   const params = { path: "workspaces/ws/project/loop" };
   archive.create.mockRejectedValueOnce(userErrorThrown("serverError.backup.recursiveLink", params));
@@ -209,4 +321,6 @@ it("leaves the restart to the person where no launcher restarts the server", asy
   expect(restored.status).toBe(200);
   expect(await restored.json()).not.toHaveProperty("restarting");
   expect(await status()).toMatchObject({ pendingRestore: true });
+  expect((await post(`/api/workspace-backup/export-jobs/${randomUUID()}`, { password: PASSWORD })).status).toBe(409);
+  expect(archive.create).not.toHaveBeenCalled();
 });

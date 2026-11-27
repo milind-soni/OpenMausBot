@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Bot, Group, Message } from "@/state/store";
-import { botPreview, groupPreview, lastPreviewable, serverCardText } from "./sidebar-preview";
+import { botPreview, groupPreview, lastPreviewable, serverCardText, waitingHandoffPreview } from "./sidebar-preview";
 import { setLocale } from "@/lib/i18n";
+import { WAIT_MESSAGES, waitSourceRefusal } from "../../server/routes/waits";
 
 let at = 0;
 const message = (fields: Partial<Message>): Message => ({ id: `m${++at}`, at, role: "bot", kind: "text", ...fields }) as Message;
@@ -9,6 +10,15 @@ const screen = () => message({ kind: "screen", png: "frame", mime: "image/jpeg" 
 const bot = { id: "ada", name: "Ada", messages: [], busy: false } as unknown as Bot;
 
 describe("sidebar previews", () => {
+  it("says what a waiting bot waits for when it handed the person a step, and the plain wait otherwise", () => {
+    const waiting = { ...bot, activity: "waiting-on-you" } as Bot;
+    const step = (instruction: string, fields: object = {}) => message({ kind: "signin", signIn: { url: "", site: "", place: "browser", instruction, ...fields } } as Partial<Message>);
+    expect(botPreview(waiting, [step("Sign in to GitHub."), step("Approve the payment.")], [], false)).toBe("Waiting for you: Approve the payment.");
+    expect(botPreview(waiting, [step("Sign in to GitHub."), step("Approve the payment.", { done: true })], [], false)).toBe("Waiting for you: Sign in to GitHub.");
+    expect(waitingHandoffPreview([step("Sign in to GitHub.", { expired: true })])).toBeNull();
+    expect(botPreview(waiting, [message({ text: "Which one?" })], [], false)).toBe("Waiting for you…");
+  });
+
   it("shows a bot's reply, not the screen frame its computer turn ended with", () => {
     const visible = [message({ role: "user", text: "Paint a sunset" }), message({ text: "I painted a sunset in JS Paint." }), screen()];
     expect(botPreview(bot, visible, [], false)).toBe("I painted a sunset in JS Paint.");
@@ -28,6 +38,38 @@ describe("sidebar previews", () => {
     expect(botPreview(bot, visible, [], true)).toBe("Bash");
     expect(botPreview(bot, [message({ role: "user", text: "Tidy my inbox" }), step("Bash")], [], false)).not.toBe("Tidy my inbox");
     expect(botPreview(bot, [message({ text: "Earlier reply" }), message({ role: "user", text: "Tidy my inbox" }), step("Bash")], [], false)).not.toBe("Earlier reply");
+  });
+
+  const card = (label: string, followUp: string) => message({ kind: "options", card: { title: "", options: [], waitRequest: { waitId: label, label, followUp } } } as unknown as Partial<Message>);
+
+  it("quotes a wait's note in Simple mode after a step that went fine, but not a person's line written the same way", () => {
+    const report = card("report", "Summarize.");
+    const note = message({ role: "user", text: "[Wait finished: report] Summarize.", automated: true, waitId: "report" } as Partial<Message>);
+    expect(botPreview(bot, [report, note], [], false)).toBe("Following up on the wait: report");
+    expect(botPreview(bot, [report, note, step("Read")], [], false)).toBe("Following up on the wait: report");
+    expect(botPreview(bot, [report, message({ text: "Earlier reply" }), note, step("Read")], [], false)).toBe("Following up on the wait: report");
+    const typed = message({ role: "user", text: "[Wait finished: report] Summarize." });
+    expect(botPreview(bot, [report, message({ text: "Earlier reply" }), typed, step("Read")], [], false)).not.toBe("Earlier reply");
+    expect(botPreview(bot, [report, message({ text: "Earlier reply" }), typed, step("Read")], [], false)).not.toBe("Following up on the wait: report");
+  });
+
+  it("names no wait in the preview when the note's own card is not loaded, a step after it included", () => {
+    const text = "[Wait finished: build] prod] Check logs";
+    for (const [waitId, other] of [["build", card("build] prod", "Check logs")], ["build] prod", card("build", "prod] Check logs")]] as const) {
+      const note = message({ role: "user", text, automated: true, waitId } as Partial<Message>);
+      expect(botPreview(bot, [other, note], [], false)).toBe("Following up on a wait");
+      expect(botPreview(bot, [other, note, step("Read")], [], false)).toBe("Following up on a wait");
+    }
+    const bracketed = message({ role: "user", text: "[Wait finished: release [QA] aprovada] Publish.", automated: true } as Partial<Message>);
+    expect(botPreview(bot, [bracketed, step("Read")], [], false)).toBe("Following up on a wait");
+  });
+
+  it("credits a line the person typed in a group chat to them", () => {
+    const typed = message({ role: "user", text: "Summarize the report." });
+    const group = (messages: Message[]) => ({ id: "g", name: "Team", memberIds: ["ada"], messages }) as unknown as Group;
+    expect(groupPreview(group([typed]), [bot], [], false)).toBe("You: Summarize the report.");
+    // A group chat refuses waits (server/routes/waits.ts), so no wait's note reaches one and its preview credits no one here.
+    expect(waitSourceRefusal({ owned: true, room: true, depth: 0, handedOff: false, routineRun: false, outsideDriven: false, personStarted: true, guest: false, op: "create" })).toBe(WAIT_MESSAGES.room);
   });
 
   it("keeps a failed step's error line and a recovery or notice line as they are", () => {

@@ -1,4 +1,4 @@
-export interface SharedFolder { id: string; name: string; path: string; write: boolean; /** The person's whole home folder. */ home?: boolean }
+export interface SharedFolder { id: string; name: string; path: string; write: boolean; /** The person's whole home folder. */ home?: boolean; /** The whole Windows system drive (C:\\). */ system?: boolean }
 export interface SharingState {
   enabled: boolean;
   folders: SharedFolder[];
@@ -92,7 +92,7 @@ export function automaticGrant(input: { kept?: SharedFolder[]; home?: SharedFold
 export function lendsAsWanted(record: unknown, wanted: AutomaticGrant): boolean;
 export function isHomeFolder(target: string): Promise<boolean>;
 export function existingFolders<T>(folders: unknown[], validate: (folders: unknown[]) => Promise<T[]>): Promise<T[]>;
-export function validateSharedFolders(folders: unknown, options?: { homeEdits?: boolean }): Promise<SharedFolder[]>;
+export function validateSharedFolders(folders: unknown, options?: { homeEdits?: boolean; platform?: NodeJS.Platform }): Promise<SharedFolder[]>;
 /** The sign-in a server answers with (/api/auth/session) is this desktop's admin pairing on a server of the person's own. */
 export function ownServerSession(auth: unknown): boolean;
 export function validSharedOperation(operation: unknown, computerId: string): boolean;
@@ -156,15 +156,17 @@ export function createComputerSharing(options: {
   identity(env: Workspace): Promise<Identity>;
   observe(env: Workspace): Promise<Identity | null>;
   decline(env: Workspace, identity: Identity): void;
-  save(env: Workspace, input: Pick<SharingState, "folders" | "terminal" | "computer">, identity: Identity): Promise<SharingState>;
+  save(env: Workspace, input: Pick<SharingState, "folders" | "terminal" | "computer">, identity: Identity, options?: { homeEdits?: boolean }): Promise<SharingState>;
   revoke(env: Workspace): SharingState;
   /** `env` is a server of the person's own, checked now: its identity, else null. */
   ownServer(env: Workspace): Promise<Identity | null>;
+  /** Why `env` is not a server of the person's own, or null when it is. */
+  ownRefusal(env: Workspace): Promise<"team" | "cloud" | "not-owner" | "shared" | "old" | "unreachable" | null>;
   /** A server of the person's own whose pairing here was never asked about: its identity, for the popup; null once asked;
    * false when it is not a server of the person's own. */
   ownOffer(env: Workspace): Promise<Identity | null | false>;
   /** The person allowed a server of their own to use this computer. */
-  lendOwn(env: Workspace, input: Partial<Pick<SharingState, "folders" | "terminal" | "computer">>): Promise<SharingState>;
+  lendOwn(env: Workspace, input: Partial<Pick<SharingState, "folders" | "terminal" | "computer">>, options?: { homeEdits?: boolean }): Promise<SharingState>;
   /** Not now: nothing is lent, and this pairing is not asked again. */
   declineOwn(env: Workspace, identity: Identity): void;
   forget(env: Workspace): void;
@@ -188,6 +190,8 @@ export function createComputerSharing(options: {
   resume(): Promise<void> | undefined;
   /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
   lendTerminal(on: boolean): Promise<void> | undefined;
+  /** Every Cloud of the signed-in account's own may run commands here now (what lendTerminal last set, for that account). */
+  terminalOn(): boolean;
   screenChanged(): Promise<void>;
   cloudChanged(): void;
   start(options?: { maintainer?: boolean }): void;

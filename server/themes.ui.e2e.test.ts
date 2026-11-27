@@ -1,5 +1,6 @@
 // A person's theme in a real browser against a real server (temporary home): it paints the window live, Settings lists
-// it, the reset keys and ?safe-look both get back to the default look. Runs where a Chromium and playwright-core are named:
+// it, the reset keys and ?safe-look both get back to the default look; a picture and an animation on the chat's backdrop
+// paint under the messages. Runs where a Chromium and playwright-core are named:
 //   OMB_UI_CHROMIUM=<chrome or headless shell> OMB_UI_PLAYWRIGHT_CORE=<playwright-core dir> OMB_UI_DIST=<vite build dir>
 //   [OMB_UI_SHOTS=<folder for screenshots>] vitest run server/themes.ui.e2e.test.ts
 import { createRequire } from "node:module";
@@ -20,7 +21,7 @@ beforeAll(async () => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true }, [], undefined, dist);
   const { chromium } = createRequire(join(playwrightPath!, "package.json"))("playwright-core");
-  browser = await chromium.launch({ executablePath: chromiumPath, headless: true, args: ["--use-mock-keychain"] });
+  browser = await chromium.launch({ executablePath: chromiumPath, headless: true, args: ["--use-mock-keychain", "--password-store=basic"] });
   if (shots) mkdirSync(shots, { recursive: true });
 }, 90_000);
 
@@ -75,5 +76,75 @@ it.skipIf(!ready)("paints a theme live, lists it in Settings, and the reset keys
   expect(await safe.evaluate("document.documentElement.dataset.theme ?? null")).toBeNull();
   await safe.close();
 
-  expect(remote).toEqual([]);
+  expect(remote, remote.join("\n")).toEqual([]);
+}, 120_000);
+
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+it.skipIf(!ready)("paints a theme's picture and animation on the chat's backdrop: behind the messages, never over them", async () => {
+  const url = fixture.info.url;
+  const api = async (method: string, path: string, body?: unknown) => {
+    const res = await fetch(`${url}${path}`, { method, headers: { "content-type": "application/json", origin: url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: res.status, body: await res.json().catch(() => ({})) as any };
+  };
+  await api("PUT", "/api/config", { onboarding: { completedAt: new Date().toISOString(), version: WELCOME_VERSION } });
+  if (!(await api("GET", "/api/bots")).body.bots.some((one: { name: string }) => one.name === "Scout")) await runControlOmb(["new-bot", "--name", "Scout", "--url", url]);
+  expect((await api("PUT", "/api/themes/active", { id: null })).status).toBe(200);
+  const css = [
+    '[data-look="chat-backdrop"] { background: linear-gradient(rgb(255 0 0 / 0.5), rgb(255 0 0 / 0.5)), url("/api/theme-assets/sky/sky.png") center / cover no-repeat; }',
+    '[data-look="chat-backdrop"]::before { content: ""; position: absolute; inset: -50%; background: conic-gradient(red, blue, red); opacity: 0.2; animation: bg-turn 60s linear infinite; }',
+    "@keyframes bg-turn { to { transform: rotate(1turn); } }",
+  ].join("\n");
+  const imported = await api("POST", "/api/themes/import", { mausbotTheme: 1, id: "sky", theme: { name: "Sky", css }, assets: { "sky.png": `data:image/png;base64,${PNG}` } });
+  expect(imported.status).toBeLessThan(300);
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 }, reducedMotion: "no-preference" });
+  const pictures: number[] = [];
+  page.on("response", (response: any) => { if (response.url().endsWith("/api/theme-assets/sky/sky.png")) pictures.push(response.status()); });
+  await page.goto(url);
+  const greeting = page.locator('[data-look="chat"] [data-look="bot-bubble"]').getByText("Hi, I'm Scout", { exact: false }).first();
+  await greeting.waitFor();
+  const skipTour = page.getByRole("button", { name: "Skip tour" });
+  if (await skipTour.isVisible().catch(() => false)) await skipTour.click();
+  for (let n = 0; n < 5 && await page.locator("[data-mausbot-welcome]").isVisible().catch(() => false); n++) {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(500);
+  }
+  const notNow = page.getByRole("button", { name: "Not now" });
+  if (await notNow.isVisible().catch(() => false)) await notNow.click();
+  await page.waitForTimeout(500);
+
+  // Pixels, not the DOM: elementsFromPoint skips the click-through backdrop, so only a picture shows what it covers.
+  const chat = (await page.locator('[data-look="chat"]').first().boundingBox())!;
+  const text = (await greeting.boundingBox())!;
+  const inBubble = { x: Math.round(text.x + 2), y: Math.round(text.y + 2), width: Math.round(Math.min(120, text.width - 4)), height: Math.round(text.height - 4) };
+  const blank = { x: Math.round(chat.x + chat.width - 90), y: Math.round(chat.y + chat.height * 0.62), width: 60, height: 40 };
+  const pixels = async () => ({ bubble: await page.screenshot({ clip: inBubble }), blank: await page.screenshot({ clip: blank }) });
+  const plain = await pixels();
+
+  expect((await api("PUT", "/api/themes/active", { id: imported.body.id })).status).toBe(200);
+  const probe = () => page.evaluate(`(() => {
+    const chat = document.querySelector('[data-look="chat"]'), back = document.querySelector('[data-look="chat-backdrop"]');
+    const box = chat.getBoundingClientRect(), b = back.getBoundingClientRect();
+    return { first: chat.firstElementChild === back, box: [b.top - box.top, b.height - box.height, b.width - box.width].map(Math.round), image: getComputedStyle(back).backgroundImage,
+      animations: back.getAnimations({ subtree: true }).length, clickThrough: document.elementFromPoint(box.right - 60, box.top + box.height * 0.62) !== back };
+  })()`);
+  await expect.poll(probe, { timeout: 15_000 }).toMatchObject({ first: true, box: [0, 0, 0], image: expect.stringContaining("/api/theme-assets/sky/sky.png"), animations: 1, clickThrough: true });
+  await expect.poll(() => pictures.includes(200), { timeout: 10_000 }).toBe(true);
+  await page.waitForTimeout(500);
+  const themed = await pixels();
+  expect(themed.blank.equals(plain.blank), "the backdrop shows where no message is").toBe(false);
+  expect(themed.bubble.equals(plain.bubble), "a message bubble paints over the backdrop, unchanged").toBe(true);
+  if (shots) await page.screenshot({ path: join(shots, "theme-backdrop.png") });
+
+  // Reduced motion stops what a theme animates there, whatever its CSS says.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(probe, { timeout: 5_000 }).toMatchObject({ animations: 0 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+
+  // Taken off, the backdrop is empty again and the chat looks as it did.
+  expect((await api("PUT", "/api/themes/active", { id: null })).status).toBe(200);
+  await expect.poll(probe, { timeout: 10_000 }).toMatchObject({ image: "none", animations: 0 });
+  await page.waitForTimeout(500);
+  expect((await pixels()).blank.equals(plain.blank)).toBe(true);
+  await page.close();
 }, 120_000);

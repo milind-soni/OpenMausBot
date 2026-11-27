@@ -20,10 +20,10 @@ export interface SettingsCard {
 export const SETTINGS_CARDS: Record<SettingsCardId, SettingsCard> = {
   "other-computers": {
     label: "Your other computers",
-    where: "Settings → Phone & devices",
+    where: "Settings → Devices → Private network",
     when: "when the person asks how to connect or open this computer from another computer",
-    text: "Your other computers: this is turned on in MausBot on the computer itself, in Settings → Phone & devices.",
-    guide: "Tell the user in two or three plain sentences: if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Phone & devices (both computers need Tailscale, signed in to the same Tailscale account). Then choose Pair a computer and Copy link, and on the other computer open Connect to a server in MausBot and paste the link.",
+    text: "Your other computers: this is turned on in MausBot on the computer itself, in Settings → Devices, with the switch on the Private network row.",
+    guide: "Tell the user in two or three plain sentences: if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Devices, and turn on the switch on the Private network row (both computers need Tailscale, signed in to the same Tailscale account). Then choose Add a computer and Copy link, and on the other computer open Connect to another computer in MausBot and paste the link.",
   },
   "ai-sign-in": {
     label: "AI sign-in",

@@ -124,8 +124,12 @@ export interface CloudSendPageBridge {
   botMoveState?(): Promise<BotMoveState>;
   /** The bots of this computer's a person can choose to move, asked on either page. */
   botChoices?(): Promise<{ bots: Array<{ id: string; name: string }> }>;
-  /** Moves these bots to My Cloud; the others stay here and go on working. */
-  moveBots?(ids: string[]): Promise<BotMoveState>;
+  /** Moves these bots to My Cloud; the others stay here and go on working. `options`: what the move step chose to lend,
+   * the working folders (on unless false) and commands (main asks its own dialog first). */
+  moveBots?(ids: string[], options?: { folder?: boolean; commands?: boolean }): Promise<BotMoveState>;
+  /** On this computer's page: what moving these bots changes for them, before the person presses Move; null when it
+   * can't be read. */
+  moveChanges?(ids: string[]): Promise<{ facts: import("../shared/move-changes.ts").MoveFacts; lending: Omit<import("../shared/move-changes.ts").MoveLending, "together"> } | null>;
   /** Moves everything to My Cloud: this computer's one-time move. */
   moveEverything?(): Promise<BotMoveState>;
   botMoveRetry?(): Promise<BotMoveView | null>;
@@ -138,7 +142,9 @@ export interface CloudSendPageBridge {
 }
 
 /** Some of this computer's bots moving to My Cloud (bot-move-main.mjs). `bot`: the first of them, `bots`: how many go. */
-export interface BotMoveView { bot: { id: string; name: string }; team: { id: string; name: string }; phase: "moving" | "failed" | "done"; bots?: number }
+export interface BotMoveView { bot: { id: string; name: string }; team: { id: string; name: string }; phase: "moving" | "failed" | "done"; bots?: number;
+  /** Letting the Clouds run commands here, asked for with this move, failed: why, in main's words. */
+  commandsError?: string }
 export interface BotMoveState { available: boolean; moving: string[] }
 
 /** The switch "Keep this computer's bots on this computer" (one-home-main.mjs). `shown`: this person has a Cloud of their

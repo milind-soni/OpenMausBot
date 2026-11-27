@@ -689,6 +689,45 @@ describe("bots' browsers", () => {
     b.exit("SIGKILL");
     expect(h.memory.stopText("b")).toBe(memoryStopText(false));
   });
+
+  it("stops the only busy engine when the browser its turn holds is closed for memory, and its turn says the browser was closed", async () => {
+    const h = host();
+    // The ceiling kills Chrome right after: the browser no longer counts as running when the stop is noted.
+    const { closed } = browsers(h, []);
+    h.memory.turnStarted("a"); h.spawn("a");
+    expect(h.memory.stopForBrowser("a")).toBe(true);
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1000"]);
+    expect(closed).toEqual(["a"]);
+    expect(h.memory.stopText("a")).toBe(memoryStopText(true));
+    // The automatic retry knows this line, and starts it again once per request (host/chief-notices.ts).
+    expect(memoryStopped(`${memoryStopText(true)} (claude exited null before result)`)).toBe(true);
+    // No engine of ours runs this turn: nothing to stop.
+    expect(h.memory.stopForBrowser("elsewhere")).toBe(false);
+  });
+
+  it("on an engine that carries two conversations, says the browser was closed only to the one whose browser it was", async () => {
+    const h = host();
+    browsers(h, []);
+    h.memory.turnStarted("a"); const shared = h.spawn("a");
+    h.memory.turnStarted("b"); h.memory.attach(shared as unknown as ChildProcess, "b");
+    expect(h.memory.stopForBrowser("a")).toBe(true);
+    await settle();
+    expect(h.memory.stopText("a")).toBe(memoryStopText(true));
+    expect(h.memory.stopText("b")).toBe(memoryStopText(false));
+  });
+
+  it("calls memory short only under relief's floor, not counting swap", () => {
+    const h = host();
+    h.state.swapFree = 4 * GB;
+    h.state.available = 420 * MB;
+    expect(h.memory.memoryShort()).toBe(false);
+    h.state.available = 400 * MB;
+    expect(h.memory.memoryShort()).toBe(true);
+    // Twice the floor: when the browser ceiling looks again sooner.
+    h.state.available = 800 * MB;
+    expect([h.memory.memoryShort(), h.memory.memoryShort(2)]).toEqual([false, true]);
+  });
 });
 
 function fakeInstance(driverKind = "opencodeGo") {
@@ -1075,6 +1114,16 @@ describe("the day's memory pressure, for the Admin", () => {
     ledger.note(start, "killed", 3); ledger.note(start, "stopped");
     expect(ledger.read(start + 60_000, [start])).toEqual({ waits: 2, waitMs: 150_000, stopped: 1, killed: 3, stallMinutes: 1 });
     expect(ledger.read(start + 24 * 60 * 60_000 + 60_000)).toEqual({ waits: 0, waitMs: 0, stopped: 0, killed: 0, stallMinutes: 0 });
+  });
+
+  it("counts since start beside the rolling day: a stalled minute once, and never falling as the day forgets", () => {
+    const ledger = new PressureLedger(), start = 1_800_000_000_000;
+    ledger.note(start, "waits"); ledger.note(start, "waitMs", 90_000); ledger.note(start, "killed", 3); ledger.note(start, "stopped");
+    ledger.note(start, "stalled"); ledger.note(start + 20_000, "stalled"); ledger.note(start + 60_000, "stalled");
+    expect(ledger.boot()).toEqual({ waits: 1, stopped: 1, killed: 3, stallMinutes: 2 });
+    ledger.note(start + 25 * 60 * 60_000, "waits");
+    expect(ledger.read(start + 25 * 60 * 60_000)).toMatchObject({ waits: 1, stallMinutes: 0 });
+    expect(ledger.boot()).toEqual({ waits: 2, stopped: 1, killed: 3, stallMinutes: 2 });
   });
 });
 

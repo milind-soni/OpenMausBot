@@ -535,7 +535,9 @@ export class McpOAuthManager {
    * public; a server that issues a secret anyway (Supabase) gets it back on every token request. */
   private async register(meta: McpAuthMetadata, redirectUri: string): Promise<ClientAuth> {
     if (!meta.registrationEndpoint) {
-      throw new McpOAuthError("no-registration", "This server only signs in apps registered with it in advance. Edit the server and add that app's client ID under Sign-in app.");
+      throw new McpOAuthError("no-registration", meta.clientIdMetadataDocument
+        ? "This server signs in apps by a published app ID (a client ID metadata document), which OpenMausBot doesn't support yet."
+        : "This server only signs in apps registered with it in advance. Edit the server and add that app's client ID under Sign-in app.");
     }
     const response = await fetch(meta.registrationEndpoint, {
       method: "POST",
@@ -572,6 +574,18 @@ export class McpOAuthManager {
     const meta = await discoverMcpAuth(url, wwwAuthenticate ?? await this.challenge(url));
     if (!meta) throw new McpOAuthError("not-oauth", "This server does not offer an OAuth sign-in. Add its token as a header instead.");
     const registered = this.clients(name, url);
+
+    /** An app with a configured return address always returns there: it is the one address the provider has registered,
+     * and the only one a browser on another computer can reach. The public route completes it, so no listener runs. */
+    if (registered?.redirectUri) {
+      const client: ClientAuth = {
+        id: registered.clientId,
+        ...(registered.clientSecret ? { secret: registered.clientSecret } : {}),
+        method: tokenAuthMethod(meta, registered.clientSecret),
+      };
+      const scopes = registered.scopes?.length ? registered.scopes : meta.scopes;
+      return { ...this.open(name, url, starting, meta, registered.redirectUri, client, null, scopes).status };
+    }
 
     if (!registered && starting.browser.remote && starting.browser.origin) {
       const redirectUri = `${starting.browser.origin}${CALLBACK_PATH}`;

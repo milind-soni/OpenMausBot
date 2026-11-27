@@ -18,14 +18,14 @@ export interface AgentsConversation {
   botDriven?: boolean;
   /** `x`: a research credential is held (a treg key or a plan's); `research`: research works for it too; `appHosting`:
    * the plan's included app hosting reaches this server. */
-  host: { skillAuthoring: boolean; sharedComputers: boolean; cloudHome: boolean; team: boolean; voiceNotes: boolean; x: boolean; research: boolean; imageGeneration: boolean; meetings?: boolean; appHosting?: boolean; localVm: boolean };
+  host: { skillAuthoring: boolean; skillBurger?: boolean; sharedComputers: boolean; cloudHome: boolean; team: boolean; voiceNotes: boolean; x: boolean; research: boolean; imageGeneration: boolean; meetings?: boolean; appHosting?: boolean; localVm: boolean; board?: boolean };
 }
 
 /** What one turn may do. Its bearer carries this to the harness, which checks it on every call. */
 export interface AgentsTurn {
   generation: string;
   depth: number;
-  /** In a room only the first answer to a person's message may list or write skills. */
+  /** In a room only the first answer to a person's message, and each bot that answer @mentions, may list or write skills. */
   skillAuthoring: boolean;
   roomHandoffId?: string;
   deliversSavedFiles?: boolean;
@@ -42,9 +42,10 @@ export function agentsServerEnv(conversation: AgentsConversation, turn: AgentsTu
     OMB_THREAD_ID: conversation.threadId,
     OMB_COMMS_TOKEN: bearer(turn),
     OMB_SKILL_AUTHORING_ENABLED: flag(host.skillAuthoring),
+    OMB_SKILL_BURGER: flag(host.skillBurger !== false),
     OMB_MEMORY_ENABLED: flag(bot.memoryEnabled !== false),
     OMB_SHARED_COMPUTERS_ENABLED: flag(host.sharedComputers),
-    OMB_CLOUD_HOME: flag(host.cloudHome), OMB_TEAM_PEOPLE: flag(host.team), OMB_ROOM: flag(conversation.room),
+    OMB_CLOUD_HOME: flag(host.cloudHome), OMB_TEAM_PEOPLE: flag(host.team), OMB_TEAM_BOARD: flag(host.board === true), OMB_ROOM: flag(conversation.room),
     OMB_VOICE_NOTES: flag(host.voiceNotes),
     OMB_X_RESEARCH: flag(host.x && bot.xResearch !== false),
     OMB_RESEARCH: flag(host.x && host.research && bot.xResearch !== false),
@@ -94,7 +95,41 @@ export function computerPickRefusal(kind: TurnKind | undefined): string {
   return `Picking a computer works only on a person's own message. ${THIS_TURN[kind]}, so carry on with the computer already in use.`;
 }
 
-/** skills_list or skill_manage on a room turn that is not the first answer to a person's message. */
+/** skills_list or skill_manage on a room turn that is neither the first answer to a person's message nor a bot it @mentioned. */
 export function roomSkillsRefusal(handoff: boolean): string {
-  return `In a room, only the first bot answering a person's message can list or write skills. ${handoff ? THIS_TURN.handoff : "This turn is a follow-up"}, so carry on without changing skills.`;
+  return `In a room, only the first bot answering a person's message, and a bot it @mentions in that answer, can list or write skills. ${handoff ? THIS_TURN.handoff : "This turn is a follow-up"}, so carry on without changing skills.`;
+}
+
+/** Who may still list and write skills on one person's message in a room: the first bot answering it (hop 0), once, and each
+ * bot that answer @mentions, once each, on its first turn however the chain reaches it. A bot only a later answer mentions never may. */
+export interface RoomSkillsClaim {
+  claimed: boolean;
+  mentioned?: Set<string>;
+}
+
+export function roomTurnMayWriteSkills(claim: RoomSkillsClaim, hop: number, botId: string): boolean {
+  return hop === 0 ? !claim.claimed : claim.mentioned?.has(botId) === true;
+}
+
+/** What one room turn may do with skills: `writes` its own (it may, and its engine can), `hands` a share to each bot it
+ * @mentions (the first answer to a person's message, even when its own engine can't write skills), and `claims` its turn: it takes the claim once
+ * set up, and gives it back if it never ran, whenever it writes or hands, so no later first answer can hand shares again. */
+export function roomSkillsTurn(claim: RoomSkillsClaim, hop: number, botId: string, { allowed, canWrite, personStarted }: { allowed: boolean; canWrite: boolean; personStarted: boolean }): { writes: boolean; hands: boolean; claims: boolean } {
+  const may = allowed && roomTurnMayWriteSkills(claim, hop, botId);
+  const writes = may && canWrite, hands = may && hop === 0 && personStarted;
+  return { writes, hands, claims: writes || hands };
+}
+
+/** The first answer, holding the claim, @mentions `botIds`: each may change its own skills once on this message. Returns what
+ * withdraws the shares still unused, for when that answer's mentions are done, so no later answer's mention can use them. */
+export function handRoomSkills(claim: RoomSkillsClaim, botIds: readonly string[]): () => void {
+  for (const botId of botIds) (claim.mentioned ??= new Set()).add(botId);
+  return () => { for (const botId of botIds) claim.mentioned?.delete(botId); };
+}
+
+/** A turn that may write skills takes its share once its setup succeeded (`taken`), or gives it back when it never ran. */
+export function takeRoomSkills(claim: RoomSkillsClaim, hop: number, botId: string, taken: boolean): void {
+  if (hop === 0) claim.claimed = taken;
+  else if (taken) claim.mentioned?.delete(botId);
+  else handRoomSkills(claim, [botId]);
 }

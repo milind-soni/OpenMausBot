@@ -6,7 +6,7 @@ import type { Action } from "@/state/store";
 import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { cloudColor } from "@/lib/cloud-look";
 import { t } from "@/lib/i18n";
-import { railShown, usePlaces } from "@/lib/places";
+import { railShown, usePlaces, windowPlaceName } from "@/lib/places";
 import { CloudTile } from "./cloud-buy/parts";
 import { SIMPLE_RAIL_BUTTON } from "./SidebarSimpleTop";
 
@@ -92,8 +92,8 @@ export function DesktopWorkspaceSwitcher(props: SwitcherProps) {
 }
 
 function Switcher({ compact = false, inline = false, pill = false, rail = false, cloudHome = false, owner = null, howTo = false, place, onMenuClosed }: SwitcherProps) {
-  const cloudName = place || t("cloudSetup.myCloud");
   const { bridge, current, open, error, onLine, waking, openMenu } = useWorkspacePlace({ cloudHome, howTo, onMenuClosed });
+  const cloudName = current?.home ? windowPlaceName(current, place) : place || t("cloudSetup.myCloud");
   const withPower = (name: string) => (onLine ? `${name} · ${onLine}` : name);
   // This window's home is My Cloud: it opens nothing else, so there is nothing to switch.
   if (!bridge || current?.home === true) {
@@ -104,7 +104,7 @@ function Switcher({ compact = false, inline = false, pill = false, rail = false,
       <Cloud size={18} aria-hidden="true" />
     </div>;
     if (inline) return <div data-cloud-home-indicator data-workspace-switcher="inline" title={label}
-      className={pill ? "flex h-8 min-w-0 items-center gap-1 rounded-full bg-raised/50 px-3 text-[13px] font-medium text-ink" : "flex min-w-0 items-center gap-1.5 px-1.5 text-[13px] font-medium text-ink"}>
+      className={pill ? "flex h-8 min-w-0 items-center gap-1 rounded-full px-3 text-[13px] font-medium text-ink-secondary" : "flex min-w-0 items-center gap-1.5 px-2 text-[13px] font-medium text-ink-secondary"}>
       <Cloud size={pill ? 15 : 14} aria-hidden="true" className={pill ? "hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block" : "shrink-0 text-ink-secondary"} />
       <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate"}>{cloudName}</span>
       {(onLine || whose) && <span className="sr-only">{onLine ? ` · ${onLine}` : ""}{whose ? ` · ${whose}` : ""}</span>}
@@ -135,12 +135,12 @@ function Switcher({ compact = false, inline = false, pill = false, rail = false,
     <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
       data-tour="server-switcher" title={title} onClick={openMenu}
       className={pill
-        ? "flex h-8 min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-full bg-raised/50 pl-2.5 pr-1.5 text-left text-[13px] font-medium text-ink hover:bg-raised aria-expanded:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-        : "flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md px-1.5 text-left text-[13px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"}
+        ? "flex h-8 min-w-0 max-w-full items-center gap-1 overflow-hidden rounded-full pl-2.5 pr-1.5 text-left text-[13px] font-medium text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] aria-expanded:bg-ink/[0.06] aria-expanded:text-ink motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        : "flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-full px-2 text-left text-[13px] font-medium text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] aria-expanded:bg-ink/[0.06] aria-expanded:text-ink motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
       {cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} /> : <Icon size={pill ? 15 : 14} aria-hidden="true" data-switcher-icon className={pill ? "hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block" : "shrink-0 text-ink-secondary"} />}
       <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate @max-[96px]/sidebar-top:hidden"}>{name}</span>
-      <ChevronDown size={pill ? 12 : 11} aria-hidden="true" className={pill ? "shrink-0 text-ink-tertiary" : "shrink-0 text-ink-secondary"} />
+      <ChevronDown size={pill ? 12 : 11} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
     </button>
     {error && <p role="alert" className="absolute right-2 top-full z-40 mt-1 w-56 max-w-[calc(100%-1rem)] rounded-md bg-menu px-2 py-1 text-[11px] text-danger shadow-lg">{error}</p>}
     {waking && !error && <p role="status" data-cloud-waking className="absolute right-2 top-full z-40 mt-1 w-56 max-w-[calc(100%-1rem)] rounded-md bg-menu px-2 py-1 text-[11px] text-ink-secondary shadow-lg">{waking}</p>}
@@ -149,7 +149,7 @@ function Switcher({ compact = false, inline = false, pill = false, rail = false,
     <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
       data-tour="server-switcher" title={title}
       onClick={openMenu}
-      className={cn("flex w-full items-center gap-2 rounded-lg py-2 text-left text-[13px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus", compact ? "justify-center px-1" : "px-2")}
+      className={cn("flex w-full items-center gap-2 rounded-xl py-2 text-left text-[13px] font-medium text-ink hover:bg-ink/[0.06] active:bg-ink/[0.08] aria-expanded:bg-ink/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus", compact ? "justify-center px-1" : "px-2")}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
       {cloudColor(current?.color) ? <CloudTile color={current?.color} size={20} /> : <Icon size={16} className="shrink-0 text-ink-secondary" />}
       {!compact && <><span className="min-w-0 flex-1 truncate">{name}{cloudHome && onLine && <PowerLine text={onLine} />}</span><ChevronDown size={13} className="shrink-0 text-ink-secondary" /></>}

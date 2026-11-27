@@ -8,6 +8,7 @@ import { parseTotpKey, totpCode, type TotpKey } from "./totp.ts";
 // Obvious fakes only.
 const PASSWORD = "fake-S3cret!pass";
 const KEY = parseTotpKey("JBSWY3DPEHPK3PXP")!;
+const SECOND_KEY = parseTotpKey("GEZDGNBVGY3TQOJQ")!;
 const NOW = 1_700_000_010_000; // 10 s into a 30 s step
 const DASHBOARD = { url: "https://example.com/dashboard?session=abc", html: "<title>Dashboard</title><h1>Welcome back</h1>" };
 
@@ -323,6 +324,39 @@ describe("one-time codes and fields", () => {
     expect(Array.from({ length: 6 }, (_, index) => page.field(`input[name=d${index}]`).value).join("")).toBe(totpCode(KEY, NOW));
   });
 
+  it.each([
+    ["Verify Security Code", "alice@example.com", KEY],
+    ["Verify Security Code", "bob@example.com", SECOND_KEY],
+    ["Enter ZIP code", "alice@example.com", KEY],
+  ])("uses the selected account's code on the verification screen (%s, %s)", async (prompt, username, key) => {
+    const boxes = Array.from({ length: 6 }, (_, index) =>
+      `<div><input name="d${index}" type="number" maxlength="1"></div>`
+    ).join("");
+    const shouldFill = prompt === "Verify Security Code";
+    const { page, fill } = setup(
+      "https://example.com/login",
+      LOGIN_FORM,
+      [
+        { host: "example.com", username: "alice@example.com", totp: KEY },
+        { host: "example.com", username: "bob@example.com", totp: SECOND_KEY },
+      ],
+    );
+    page.answer = () => page.sent.length === 1
+      ? { navigate: {
+        url: "https://example.com/verify",
+        html: `<h2>${prompt}</h2><form><div>${boxes}</div><button type="submit">Verify</button></form>`,
+      } }
+      : { navigate: DASHBOARD };
+
+    const outcome = await fill(username);
+    const code = totpCode(key, NOW);
+    expect(outcome.filled).toEqual(shouldFill ? ["username", "password", "code"] : ["username", "password"]);
+    expect(page.typed.slice(2).join("")).toBe(shouldFill ? code : "");
+    expect(page.sent.slice(1)).toEqual(shouldFill
+      ? [Object.fromEntries([...code].map((digit, index) => [`d${index}`, digit]))] : []);
+    expectNoSecret(outcome, page, [code, PASSWORD, key.secret]);
+  });
+
   it("points at the person's inbox, then the person, when a code is asked for and no 2FA key is saved", async () => {
     const { page, fill } = setup("https://example.com/2fa", `<input name="verification_code">`, [{ host: "example.com", username: "alice" }]);
     const outcome = await fill();
@@ -341,6 +375,40 @@ describe("one-time codes and fields", () => {
     expect(page.field("input[name=new]").value).toBe("");
   });
 
+  it("takes a sign-in page's only password box even when it is marked new-password, as TikTok's is", async () => {
+    const { page, fill } = setup("https://www.tiktok.com/login/phone-or-email/email", `<form><input type="text" placeholder="Email or username" autocomplete="webauthn" name="username"><input type="password" placeholder="Password" autocomplete="new-password"></form>`,
+      [{ host: "tiktok.com", username: "alice@example.com" }]);
+    page.answer = () => ({ navigate: DASHBOARD });
+    const outcome = await fill();
+    expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+    expect(page.typed).toEqual(["alice@example.com", PASSWORD]);
+    expect(page.pressed).toEqual(["Enter"]);
+  });
+
+  it("takes the only new-password box on a sign-in page whose path ends in a file name (login.html), as ccopyright's does", async () => {
+    const boxes = `<div><input type="text" placeholder="请输入用户名/手机号/邮箱" autocomplete="new-password"><input type="password" placeholder="请输入密码" autocomplete="new-password"></div>`;
+    for (const url of ["https://register.example.cn/login.html", "https://example.com/account/signin.php", "https://example.com/Sign-In.aspx", "https://example.com/login.servlet", "https://example.com/login.do"]) {
+      const { page, fill } = setup(url, boxes, [{ host: url.includes(".cn") ? "example.cn" : "example.com", username: "alice@example.com" }], { submit: false });
+      const outcome = await fill();
+      expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+      expect(page.field("input[type=text]").value).toBe("alice@example.com");
+      expect(page.field("input[type=password]").value).toBe(PASSWORD);
+      page.close();
+    }
+  });
+
+  it("keeps new-password boxes empty on a sign-in page with two of them, or on a sign-up page under a sign-in path", async () => {
+    const twoBoxes = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"><input name="again" type="password" autocomplete="new-password"></form>`;
+    const oneBox = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"></form>`;
+    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login.html", twoBoxes], ["https://example.com/login/password.reset", oneBox], ["https://example.com/login.register", oneBox], ["https://example.com/login.signup", oneBox], ["https://example.com/login/signup.html", oneBox], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox], ["https://example.com/login/%72egistration", oneBox], ["https://example.com/login/%E0%A4%A", oneBox]]) {
+      const { page, fill } = setup(url, html, [{ host: "example.com", username: "alice@example.com" }], { submit: false });
+      const outcome = await fill();
+      expect(outcome).toMatchObject({ ok: true, filled: ["username"] });
+      expect(page.field("input[name=new]").value).toBe("");
+      page.close();
+    }
+  });
+
   it("asks which login when a site has several, and fills the one named", async () => {
     const saved = [{ host: "example.com", username: "alice", password: "fake-alice-pw" }, { host: "example.com", username: "bob", password: "fake-bob-pw" }];
     const { page, fill } = setup("https://example.com/login", LOGIN_FORM, saved, { submit: false });
@@ -350,6 +418,36 @@ describe("one-time codes and fields", () => {
     expect(await fill("Bob")).toMatchObject({ ok: true });
     expect(page.field("#password").value).toBe("fake-bob-pw");
     expect((await fill("carol")).text).toContain('has the username "carol"');
+  });
+
+  it("counts logins with no username instead of listing blanks, and says they can't be picked by name", async () => {
+    const saved = [{ host: "example.com", username: "" }, { host: "example.com", username: "alice" }, { host: "example.com", username: "" }];
+    const { page, fill } = setup("https://example.com/login", LOGIN_FORM, saved, { submit: false });
+    const note = "A login with no username can't be chosen by name: ask the person to add its username where it is saved (Settings → Vault, or the password manager it comes from), or call request_sign_in so the person signs in.";
+    expect((await fill()).text).toBe(`There are 3 saved logins for example.com: alice, 2 with no username saved. ${note} Call fill_login again with the username to use.`);
+    expect((await fill("carol")).text).toBe(`No saved login for example.com has the username "carol". The usernames saved there: alice, 2 with no username saved. ${note}`);
+    expect(page.typed).toEqual([]);
+  });
+
+  it("counts whitespace-only usernames as blank", async () => {
+    const saved = [{ host: "example.com", username: "  " }, { host: "example.com", username: "alice" }];
+    const { fill } = setup("https://example.com/login", LOGIN_FORM, saved, { submit: false });
+    expect((await fill()).text).toMatch(/^There are 2 saved logins for example\.com: alice, 1 with no username saved\. /);
+  });
+
+  it("asks for no username when every saved login has none", async () => {
+    const saved = [{ host: "example.com", username: "" }, { host: "example.com", username: "" }];
+    const { page, fill } = setup("https://example.com/login", LOGIN_FORM, saved, { submit: false });
+    const text = (await fill()).text;
+    expect(text).toMatch(/^There are 2 saved logins for example\.com: 2 with no username saved\. /);
+    expect(text).not.toContain("Call fill_login again with the username");
+    expect(page.typed).toEqual([]);
+  });
+
+  it("offers a retry without a username when the only saved login has none", async () => {
+    const { fill } = setup("https://example.com/login", LOGIN_FORM, [{ host: "example.com", username: "" }], { submit: false });
+    expect((await fill("carol")).text).toMatch(/1 with no username saved\. .* Or call fill_login again without a username to use that one login\.$/);
+    expect(await fill()).toMatchObject({ ok: true });
   });
 
   it("says when the page has no login fields", async () => {

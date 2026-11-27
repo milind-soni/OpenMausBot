@@ -1,7 +1,7 @@
 // BYO Linux VPS: Docker's SSH transport reaches the user's daemon; one Cua MCP container per bot.
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createConnection, createServer, type AddressInfo } from "node:net";
+import { loopbackAnswers, unusedLoopbackPort } from "./vps-loopback.ts";
 import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 import {
   BASE_IMAGE,
@@ -20,8 +20,8 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } from "./container-isolation.ts";
-import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
-import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
+import { applyResourcesBeforeStart, DEFAULT_DESKTOP_RESOURCES, PIDS_LIMIT, raisePidsLimit, resourceArgs, type DesktopResources } from "./container-limits.ts";
+import { DATA_DIR, isValidSshAlias, vpsResources, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
 import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, VpsHostUnreachableError, type VpsCommandRunner } from "./vps-command.ts";
 export { defaultRunner, VpsHostUnreachableError, type VpsCommandOptions, type VpsCommandRunner } from "./vps-command.ts";
@@ -65,7 +65,7 @@ const lifecycleLocks = new Map<string, Promise<void>>();
 /** The app config reloads in place: across awaits it could inspect one host and mutate another. */
 function snapshotVpsConfig(cfg: AppConfig): AppConfig {
   const sshAlias = vpsSshAlias(cfg);
-  return sshAlias ? { vps: { sshAlias } } : {};
+  return sshAlias ? { vps: { ...cfg.vps, sshAlias } } : {};
 }
 
 export function vpsLifecycleBusy(): boolean {
@@ -73,7 +73,7 @@ export function vpsLifecycleBusy(): boolean {
 }
 const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
 const STATUS_CACHE_TTL_MS = 10_000;
-const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>();
+const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>(); /** The last inspection of a bot's VPS computer, however old, and when it ran: never a new one. */ export function lastVpsStatus(cfg: AppConfig, botId: string): { status: VpsComputerStatus; at: number } | null { const key = vpsLockKey(snapshotVpsConfig(cfg), botId), hit = key ? statusCache.get(key) : undefined; return hit ? { status: hit.status, at: hit.expiresAt - STATUS_CACHE_TTL_MS } : null; }
 const pendingStatuses = new Map<string, Promise<VpsComputerStatus>>();
 const pendingProvisions = new Map<string, Promise<VpsComputerStatus>>();
 const SCREENSHOT_BUDGET_MS = 45_000;
@@ -84,7 +84,7 @@ const pendingScreenshots = new Map<string, Promise<VpsScreenshot>>();
 const viewerConnections = new Map<string, { privateIp: string; password: string }>();
 const REMOTE_VIEWER_GRACE_MS = 30_000;
 const NATIVE_VIEWER_LIFETIME_MS = 8 * 60 * 60_000;
-type DesktopTunnel = { child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout>; viewers: number; localViewer: boolean };
+type DesktopTunnel = { onViewerClosed?: () => void; child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout>; viewers: number; localViewer: boolean };
 type TunnelStart = { cancelled: boolean; child?: ReturnType<typeof spawn> };
 const desktopTunnels = new Map<string, DesktopTunnel>();
 const pendingDesktopTunnels = new Map<string, { promise: Promise<DesktopTunnel>; start: TunnelStart }>();
@@ -190,38 +190,6 @@ export function vpsSshTunnelArgs(alias: string, localPort: number, privateIp: st
   ];
 }
 
-function unusedLoopbackPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      // SAFETY: bound to an IPv4 TCP address above, so Node returns AddressInfo, not a socket path.
-      const port = (probe.address() as AddressInfo).port;
-      probe.close((error) => {
-        if (error) reject(error);
-        else if (port >= 1024) resolve(port);
-        else reject(new Error("could not reserve a VPS viewer port"));
-      });
-    });
-  });
-}
-
-function loopbackAnswers(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
-    let settled = false;
-    const finish = (answer: boolean) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(answer);
-    };
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-    socket.setTimeout(250, () => finish(false));
-  });
-}
-
 function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
   if (!expected) {
     const pending = pendingDesktopTunnels.get(botId);
@@ -240,6 +208,12 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
   return true;
 }
 
+function endViewerTunnel(botId: string, tunnel: DesktopTunnel): boolean {
+  if (!stopDesktopTunnel(botId, tunnel)) return false;
+  tunnel.onViewerClosed?.();
+  return true;
+}
+
 export function closeVpsDesktopTunnel(botId: string) {
   const tunnel = desktopTunnels.get(botId);
   if (tunnel?.viewers) {
@@ -247,7 +221,11 @@ export function closeVpsDesktopTunnel(botId: string) {
     clearTimeout(tunnel.expiry);
     return { closed: false };
   }
-  return { closed: stopDesktopTunnel(botId) };
+  return { closed: tunnel ? endViewerTunnel(botId, tunnel) : stopDesktopTunnel(botId) };
+}
+
+export function stopVpsDesktopTunnel(botId: string): boolean {
+  return stopDesktopTunnel(botId);
 }
 
 export function closeAllVpsDesktopTunnels(): void {
@@ -272,7 +250,7 @@ export function vpsDesktopConnection(botId: string) {
         tunnel.viewers--;
         if (!tunnel.viewers && !tunnel.localViewer && desktopTunnels.get(botId) === tunnel) {
           tunnel.expiry = setTimeout(() => {
-            stopDesktopTunnel(botId, tunnel);
+            endViewerTunnel(botId, tunnel);
           }, REMOTE_VIEWER_GRACE_MS);
           tunnel.expiry.unref();
         }
@@ -383,6 +361,7 @@ async function computeVpsComputerStatus(
   cfg: AppConfig,
   botId: string,
   runner: VpsCommandRunner,
+  requireEnvironmentLabel = false,
 ): Promise<VpsComputerStatus> {
   const alias = vpsSshAlias(cfg);
   const status = emptyStatus(botId, alias);
@@ -459,7 +438,7 @@ async function computeVpsComputerStatus(
     status.managed =
       labels?.[VPS_MANAGED_LABEL] === "1" &&
       labels?.[VPS_CONTAINER_LABEL] === status.container_name &&
-      (environmentLabel === undefined || environmentLabel === vpsEnvironmentId());
+      ((!requireEnvironmentLabel && environmentLabel === undefined) || environmentLabel === vpsEnvironmentId());
     if (status.managed && status.container_id) raisePidsLimit(status.container_id, detail?.HostConfig?.PidsLimit, run);
     status.network = hasNoPublishedPorts(detail?.HostConfig, detail?.NetworkSettings?.Networks) ? "private" : "unsafe";
     status.mounts = hasNoHostMounts(detail ?? {}) ? "none" : "unsafe";
@@ -539,6 +518,18 @@ async function computeVpsComputerStatus(
   status.problem = statusProblem(status);
   status.ready = status.problem === null;
   return status;
+}
+
+export async function vpsComputerRunning(cfg: AppConfig, botId: string, runner: VpsCommandRunner = defaultRunner): Promise<boolean> {
+  const alias = vpsSshAlias(snapshotVpsConfig(cfg));
+  if (!alias) return false;
+  const name = vpsContainerName(botId);
+  try {
+    const detail = (JSON.parse((await runner(vpsDockerArgs(alias, ["inspect", name]), { timeoutMs: 10_000 })).stdout) as Array<{ Config?: { Labels?: Record<string, string> }; State?: { Running?: boolean } }>)[0];
+    const labels = detail?.Config?.Labels;
+    const environmentLabel = labels?.[VPS_ENVIRONMENT_LABEL];
+    return Boolean(detail?.State?.Running && labels?.[VPS_MANAGED_LABEL] === "1" && labels?.[VPS_CONTAINER_LABEL] === name && (environmentLabel === undefined || environmentLabel === vpsEnvironmentId()));
+  } catch { return false; }
 }
 
 export async function vpsComputerStatus(
@@ -722,6 +713,7 @@ export function vpsContainerRunArgs(
   containerName: string,
   imageRef = VPS_IMAGE,
   viewerSecret = randomBytes(18).toString("base64url"),
+  resources: DesktopResources = DEFAULT_DESKTOP_RESOURCES,
 ): string[] {
   if (!CONTAINER_NAME.test(containerName) || (imageRef !== VPS_IMAGE && !IMAGE_ID.test(imageRef))) {
     throw new Error("invalid managed VPS container or image reference");
@@ -748,12 +740,7 @@ export function vpsContainerRunArgs(
     `${BASE_IMAGE_LABEL}=${BASE_IMAGE_DIGEST}`,
     "--label",
     `${IMAGE_LAYER_LABEL}=${IMAGE_LAYER_VERSION}`,
-    "--memory",
-    "4g",
-    "--memory-swap",
-    "4g",
-    "--cpus",
-    "2",
+    ...resourceArgs(resources, { swap: true }),
     "--pids-limit", String(PIDS_LIMIT),
     "--network",
     "bridge",
@@ -961,6 +948,7 @@ export async function vpsComputerAction(
   cfg: AppConfig,
   botId: string,
   runner: VpsCommandRunner = defaultRunner,
+  shouldStop?: () => boolean,
 ): Promise<VpsComputerStatus> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
@@ -971,8 +959,9 @@ export async function vpsComputerAction(
   const operation = async () => {
     invalidateVpsStatus(key);
     try {
-      const before = await computeVpsComputerStatus(cfg, botId, runner);
+      const before = await computeVpsComputerStatus(cfg, botId, runner, Boolean(shouldStop));
       if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? "Docker over SSH is not reachable"), { status: 409 });
+      if (action === "stop" && shouldStop && (before.container !== "running" || !before.managed || !shouldStop())) return before;
       if (action === "provision" && before.ready) return before;
       if (action !== "provision" || before.container !== "running") stopDesktopTunnel(botId);
       const run = (args: string[], timeoutMs = 2 * 60_000) => runner(vpsDockerArgs(alias, args), { timeoutMs });
@@ -986,15 +975,19 @@ export async function vpsComputerAction(
             imageRef = (await computeVpsComputerStatus(cfg, botId, runner)).image_id;
           }
           if (!imageRef) throw Object.assign(new Error("The prepared VPS image could not be identified"), { status: 409 });
-          await run(vpsContainerRunArgs(before.container_name, imageRef));
+          await run(vpsContainerRunArgs(before.container_name, imageRef, undefined, vpsResources(cfg)));
         } else {
           assertUsableContainer(before);
-          if (before.container === "stopped") await run(["start", containerRef]);
+          if (before.container === "stopped") {
+            await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
+            await run(["start", containerRef]);
+          }
         }
       } else if (action === "start") {
         if (before.container === "missing") throw Object.assign(new Error("No VPS container exists for this bot"), { status: 409 });
         if (before.container === "running") throw Object.assign(new Error("The VPS container is already running"), { status: 409 });
         assertUsableContainer(before);
+        await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
         await run(["start", containerRef]);
       } else if (action === "remove") {
         // Skips the usability check (remove escapes a broken container); the ownership labels are the only gate.
@@ -1059,6 +1052,7 @@ export async function vpsComputerJoin(
   botId: string,
   runner: VpsCommandRunner = defaultRunner,
   remoteViewer = false,
+  onViewerClosed?: () => void,
 ): Promise<{ joinUrl: string; state: "running" }> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
@@ -1066,7 +1060,7 @@ export async function vpsComputerJoin(
 
   let tunnel = desktopTunnels.get(botId);
   if (tunnel && (tunnel.child.exitCode !== null || tunnel.child.killed)) {
-    stopDesktopTunnel(botId, tunnel);
+    endViewerTunnel(botId, tunnel);
     tunnel = undefined;
   }
   if (!tunnel) {
@@ -1079,11 +1073,12 @@ export async function vpsComputerJoin(
     try { tunnel = await pending.promise; }
     finally { if (pendingDesktopTunnels.get(botId) === pending) pendingDesktopTunnels.delete(botId); }
   }
+  if (onViewerClosed) tunnel.onViewerClosed = onViewerClosed;
   if (!remoteViewer) tunnel.localViewer = true;
   if (!tunnel.viewers || tunnel.localViewer) {
     clearTimeout(tunnel.expiry);
     const current = tunnel;
-    tunnel.expiry = setTimeout(() => stopDesktopTunnel(botId, current), tunnel.localViewer ? NATIVE_VIEWER_LIFETIME_MS : REMOTE_VIEWER_GRACE_MS);
+    tunnel.expiry = setTimeout(() => endViewerTunnel(botId, current), tunnel.localViewer ? NATIVE_VIEWER_LIFETIME_MS : REMOTE_VIEWER_GRACE_MS);
     tunnel.expiry.unref();
   }
   return { joinUrl: tunnel.joinUrl, state: "running" };
@@ -1129,6 +1124,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
     if (active?.child === child) {
       clearTimeout(active.expiry);
       desktopTunnels.delete(botId);
+      active.onViewerClosed?.();
     }
     if (!failure) failure = stderr.trim() || `SSH viewer tunnel exited ${code ?? "without a status"}`;
   });
@@ -1149,7 +1145,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
   const joinUrl = `http://127.0.0.1:${localPort}/vnc.html#autoconnect=true&resize=scale&password=${encodeURIComponent(connection.password)}`;
   const tunnel: DesktopTunnel = {
     child, joinUrl, viewers: 0, localViewer: false,
-    expiry: setTimeout(() => stopDesktopTunnel(botId, tunnel), REMOTE_VIEWER_GRACE_MS),
+    expiry: setTimeout(() => endViewerTunnel(botId, tunnel), REMOTE_VIEWER_GRACE_MS),
   };
   tunnel.expiry.unref();
   desktopTunnels.set(botId, tunnel);

@@ -13,6 +13,7 @@ import { storeThreads, type StoreBotThreads } from "../engine-homes/migrate.ts";
 import type { ConversationShares } from "./conversation-shares.ts";
 import { createTeamBoxScope, type TeamBoxBots, type TeamBoxScopeDeps } from "./team-box-scope.ts";
 import type { BoxAudienceScope } from "../bot-box/box.ts";
+import { provideGitAudience } from "../github/git-access.ts";
 
 export interface CloudTeamHostDeps {
   team: CloudTeam | null;
@@ -58,6 +59,8 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   };
   if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
   if (team) deps.box?.scopeAudiences(createTeamBoxScope({ audienceOf, bots: () => deps.store.bots ?? [], ...(deps.teamFiles ? { teamFiles: deps.teamFiles } : {}) }));
+  // A bot's git uses the GitHub sign-in of the member whose own conversation it is, and nobody's elsewhere.
+  if (team) provideGitAudience((threadId) => ownPerson(audienceOf(threadId)));
   /** The layer a turn in this conversation writes into: the bot's own folder off a team or for the team's conversations,
    * a sibling folder for a room's or a member's. The folder exists before the turn starts, so the box can bind it. */
   const layer = (botId: string, threadId: string): string => {

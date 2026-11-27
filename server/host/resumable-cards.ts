@@ -39,7 +39,7 @@ export function resumableCards(store: Pick<Store, "activePath">, threadId: strin
     }
     const signIn = message.signIn;
     if (signIn && !signIn.resumed && !signIn.superseded && !signIn.answeredInChat && !signIn.stopped) {
-      open.push({ id: message.id, waits: `sign in to ${signIn.site}` });
+      open.push({ id: message.id, waits: signIn.instruction || `sign in to ${signIn.site}` });
     }
   }
   return open;

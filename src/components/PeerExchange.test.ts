@@ -1,8 +1,10 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readdirSync, readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { PeerCompactRow, PeerExchangeView, PeerOpenedActions } from "./PeerExchange";
+import { PEER_HOW, PeerCompactRow, PeerExchangeView, PeerOpenedActions } from "./PeerExchange";
 
 const peer = { botId: "L", name: "Liaison", delivery: "coordinate_bots" as const, body: "Long request" };
 
@@ -45,5 +47,19 @@ describe("PeerExchangeView", () => {
     expect(html.indexOf("First request")).toBeLessThan(html.indexOf("Done with the first"));
     expect(html).toContain('data-from="peer"');
     expect(html).toContain('data-from="bot"');
+  });
+});
+
+describe("PEER_HOW", () => {
+  it("labels how a bot reached this one in words, never by a tool's name, in every language", () => {
+    const tools = Object.keys(PEER_HOW);
+    for (const file of readdirSync("src/locales").filter((name) => name.endsWith(".json") && name !== "source-hashes.json")) {
+      const catalog = JSON.parse(readFileSync(`src/locales/${file}`, "utf8")) as Record<string, string>;
+      for (const key of Object.values(PEER_HOW)) {
+        const label = catalog[key];
+        if (label === undefined) continue;
+        expect(tools.filter((tool) => label.includes(tool)), `${file} ${key}`).toEqual([]);
+      }
+    }
   });
 });

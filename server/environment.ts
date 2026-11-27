@@ -142,6 +142,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const, computerAsks: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       ...(input.ownHome === true && input.cloudHome !== true ? { move: 1 as const } : {}),
+      ...((input.cloudHome === true && input.cloudTeam !== true) || input.desktopManaged ? { moveBack: 1 as const } : {}),
       ...(input.cloudHome === true && input.cloudTeam === true ? { cloudTeam: true as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       ...(input.desktopManaged ? {} : { install: serverInstall() }),

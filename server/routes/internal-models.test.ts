@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ModelSelection } from "../../shared/wire.ts";
+import type { EngineHint } from "../host/engine-hints.ts";
 import { MENU_FOUND, MENU_SHORT, modelMenu as menuOf, type MenuEngine } from "./internal-models.ts";
 
 const engine = (instanceId: string, ids: readonly string[], extra: Partial<MenuEngine> = {}): MenuEngine => ({
@@ -11,7 +12,8 @@ const engine = (instanceId: string, ids: readonly string[], extra: Partial<MenuE
 });
 const current: ModelSelection = { instanceId: "claude", model: "claude-sonnet-5" };
 const opens = () => null;
-const modelMenu = (input: Omit<Parameters<typeof menuOf>[0], "down"> & { down?: (engine: MenuEngine) => boolean }) => menuOf({ down: () => false, ...input });
+const modelMenu = (input: Omit<Parameters<typeof menuOf>[0], "down"> & { down?: (engine: MenuEngine) => EngineHint | null }) => menuOf({ down: () => null, ...input });
+const notInstalled: EngineHint = { why: "not installed", connect: "install it in Settings → AI → Providers" };
 
 describe("modelMenu", () => {
   it("keeps a 2,000-model catalog to a short list, its current model first, and counts the rest", () => {
@@ -38,6 +40,29 @@ describe("modelMenu", () => {
       instanceId: "claude", name: "Claude", models: ["claude-sonnet-5", "claude-opus-5", { id: "default", label: "Default (recommended)" }], efforts: ["low", "high", "max"],
       blocked: [{ id: "claude-haiku-5", why: "turned off by this account's organization" }],
     }] });
+  });
+
+  it("scopes engine efforts in the menu to listed models' per-model effortLevels", () => {
+    const noUltra = engine("codex", [], {
+      models: { default: "gpt-5.3", options: [{ id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] }] },
+      adapter: { capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] } },
+    });
+    expect(modelMenu({ engines: [noUltra], current, pinned: [], refusal: opens }).engines[0]).toMatchObject({
+      efforts: ["low", "medium", "high", "xhigh", "max"],
+    });
+    const withUltra = engine("codex", [], {
+      models: {
+        default: "gpt-5.4",
+        options: [
+          { id: "gpt-5.4", label: "GPT-5.4", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-5.3", label: "GPT-5.3", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+      adapter: { capabilities: { effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] } },
+    });
+    expect(modelMenu({ engines: [withUltra], current, pinned: [], refusal: opens }).engines[0]).toMatchObject({
+      efforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    });
   });
 
   it("names a model the installed CLI is too old for, with the version it needs, instead of dropping it (Fable 5.2 'gone' after an update)", () => {
@@ -70,9 +95,10 @@ describe("modelMenu", () => {
   it("marks an engine unusable with start_thread's own reason after a few refusals, without checking the rest of a big catalog", () => {
     const grok = engine("grok", Array.from({ length: 500 }, (_, i) => `grok-${i}`));
     const refusal = vi.fn((selection: ModelSelection) => selection.instanceId === "grok" ? "Grok · grok-0 can't run now: it is signed out." : null);
-    const menu = modelMenu({ engines: [grok, engine("claude", ["claude-sonnet-5"])], current, pinned: [], refusal });
+    const signedOut = (row: MenuEngine) => row.instanceId === "grok" ? { why: "not signed in", connect: "sign in with your Grok account in Settings → AI → Providers" } : null;
+    const menu = modelMenu({ engines: [grok, engine("claude", ["claude-sonnet-5"])], current, pinned: [], refusal, signedOut });
     expect(menu.engines).toEqual([
-      { instanceId: "grok", name: "Grok", unusable: "Grok · grok-0 can't run now: it is signed out." },
+      { instanceId: "grok", name: "Grok", unusable: "Grok · grok-0 can't run now: it is signed out.", connect: "sign in with your Grok account in Settings → AI → Providers" },
       { instanceId: "claude", name: "Claude", models: ["claude-sonnet-5"] },
     ]);
     expect(refusal.mock.calls.filter(([selection]) => selection.instanceId === "grok")).toHaveLength(3);
@@ -89,12 +115,27 @@ describe("modelMenu", () => {
 
   it("names engines that can't run anything in one list instead of a row each, and search finds them by name", () => {
     const engines = [engine("claude", ["claude-sonnet-5"]), engine("cursor", ["auto"]), engine("mistral", ["mistral-large"])];
-    const down = (row: MenuEngine) => row.instanceId !== "claude";
+    const down = (row: MenuEngine) => row.instanceId !== "claude" ? notInstalled : null;
     const refusal = vi.fn((_selection: ModelSelection) => null);
     expect(modelMenu({ engines, current, pinned: [], refusal, down })).toEqual({ current,
-      engines: [{ instanceId: "claude", name: "Claude", models: ["claude-sonnet-5"] }], unavailable: ["Cursor", "Mistral"] });
+      engines: [{ instanceId: "claude", name: "Claude", models: ["claude-sonnet-5"] }], unavailable: [{ engines: ["Cursor", "Mistral"], ...notInstalled }] });
     expect(refusal.mock.calls.every(([selection]) => selection.instanceId === "claude")).toBe(true);
-    expect(modelMenu({ engines, current, pinned: [], refusal: opens, down, search: "mistral" })).toEqual({ current, engines: [], unavailable: ["Mistral"] });
+    expect(modelMenu({ engines, current, pinned: [], refusal: opens, down, search: "mistral" })).toEqual({ current, engines: [], unavailable: [{ engines: ["Mistral"], ...notInstalled }] });
+  });
+
+  it("names an engine with no models yet and one whose settings can't be read, each with why and how to connect", () => {
+    const signIn: EngineHint = { why: "not signed in", connect: "sign in with your Google account in Settings → AI → Providers" };
+    const engines = [engine("claude", ["claude-sonnet-5"]), engine("antigravity", []), engine("kimi", [])];
+    const down = (row: MenuEngine) => row.instanceId === "antigravity" ? signIn : row.instanceId === "kimi" ? notInstalled : null;
+    const broken = [{ name: "Mine", hint: { why: "its saved settings can't be read", connect: "fix or remove it in Settings → AI → Providers" } }];
+    expect(modelMenu({ engines, current, pinned: [], refusal: opens, down, broken }).unavailable).toEqual([
+      { engines: ["Antigravity"], ...signIn }, { engines: ["Kimi"], ...notInstalled }, { engines: ["Mine"], ...broken[0]!.hint },
+    ]);
+    expect(modelMenu({ engines, current, pinned: [], refusal: opens, down, broken, search: "kimi" }).unavailable).toEqual([{ engines: ["Kimi"], ...notInstalled }]);
+    // An engine that can run but has nothing to list stays out, as before; signed out, it is named with why.
+    expect(modelMenu({ engines: [engine("kimi", [])], current, pinned: [], refusal: opens })).toEqual({ current, engines: [] });
+    const signIn2 = { why: "not signed in", connect: "run `kimi login` in a terminal" };
+    expect(modelMenu({ engines: [engine("kimi", [])], current, pinned: [], refusal: opens, signedOut: () => signIn2 }).unavailable).toEqual([{ engines: ["Kimi"], ...signIn2 }]);
   });
 
   it("leaves out a single model start_thread would refuse and keeps the engine", () => {

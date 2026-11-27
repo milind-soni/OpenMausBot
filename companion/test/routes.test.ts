@@ -50,6 +50,7 @@ describe("what the app may do", () => {
     ["DELETE", "/api/bots/bot_123"],
     ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
+    ["PUT", "/api/sidebar-sections/order"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
     ["POST", "/api/bots/bot_123/respond"],
@@ -119,6 +120,7 @@ describe("what the app may do", () => {
     ["POST", "/api/live/call/end"],
     ["GET", "/api/live/call"],
     ["PATCH", "/api/live/settings"],
+    ["POST", "/api/live/relay"],
     ["GET", "/api/routines"],
     ["POST", "/api/routines"],
     ["PATCH", "/api/routines/routine_1"],
@@ -157,7 +159,6 @@ describe("what it may not", () => {
 
   it("refuses host configuration, and says where it happens", () => {
     for (const [method, path] of [
-      ["PUT", "/api/config"],
       ["PATCH", "/api/config"],
       ["GET", "/api/devices"],
       ["GET", "/api/companion"],
@@ -342,7 +343,7 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/sidebar-sections")).toBe(false);
     expect(allowed("PATCH", "/api/sidebar-sections")).toBe(false);
     expect(allowed("POST", "/api/sidebar-sections/extra")).toBe(false);
-    expect(allowed("PUT", "/api/config")).toBe(false);
+    expect(allowed("PATCH", "/api/config")).toBe(false);
     expect(allowed("GET", "/api/attachments/../config.json")).toBe(false);
     expect(allowed("GET", "/api/files")).toBe(false);
     expect(allowed("POST", "/api/files/anything")).toBe(false);
@@ -374,14 +375,41 @@ describe("what it may not", () => {
     }
   });
 
-  it("allows only the four Live call routes, never the key", () => {
+  it("lets a phone set provider keys and sign engines in, and nothing wider", () => {
+    for (const [method, path] of [
+      ["PUT", "/api/config"],
+      ["POST", "/api/keys/test"],
+      ["POST", "/api/instances/codex/auth/start"],
+      ["POST", "/api/instances/claude.work/auth/complete"],
+      ["POST", "/api/instances/codex/auth/cancel"],
+      ["POST", "/api/instances/codex/auth/sign-out"],
+      ["GET", "/api/instances/codex/auth/status"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(true);
+    }
+    for (const [method, path] of [
+      ["POST", "/api/instances/../auth/start"],
+      ["GET", "/api/instances/codex/auth/start"],
+      ["POST", "/api/instances/codex/auth/status"],
+      ["POST", "/api/instances/codex/install"],
+      ["PUT", "/api/config/extra"],
+      ["PATCH", "/api/config"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+    expect(ask("PATCH", "/api/config")?.error).toBe("this setting is changed on your computer");
+  });
+
+  it("allows only the five Live call routes, never the key", () => {
     expect(ask("POST", "/api/live/summary")?.status).toBe(404);
-    expect(ask("PUT", "/api/config")?.status).toBe(403);
+    expect(ask("PATCH", "/api/config")?.status).toBe(403);
     expect(allowed("PUT", "/api/live/settings")).toBe(false);
     expect(allowed("GET", "/api/live/settings")).toBe(false);
     expect(allowed("GET", "/api/live/session")).toBe(false);
     expect(allowed("POST", "/api/live/call")).toBe(false);
     expect(allowed("POST", "/api/live/call/end/extra")).toBe(false);
+    expect(allowed("GET", "/api/live/relay")).toBe(false);
+    expect(allowed("POST", "/api/live/relay/x")).toBe(false);
   });
 
   it("allows an app's document, rpc and context and nothing else of apps", () => {

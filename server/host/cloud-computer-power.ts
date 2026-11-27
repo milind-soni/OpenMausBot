@@ -68,6 +68,8 @@ export interface CloudComputerReadyHooks {
 export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
   const { cfg, broadcast } = deps;
   const timers = new Map<string, ComputerIdleTimer>();
+  /** When each computer was last used, so its sleep says how long it really sat idle. */
+  const lastUsed = new Map<string, number>();
   const turnOwners = new Map<string, { generation: string; owner: string }>();
   /** A start can outlive the turn that asked for it; stopping a computer mid-create would make provisionBoat delete it. */
   const starting = new Map<string, number>();
@@ -113,12 +115,16 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
       release();
     }
     forget(owner);
-    deps.log(`cloud computer ${owner}: asleep after ${Math.round(CLOUD_COMPUTER_IDLE_MS / 1_000)}s idle`);
+    const idleFor = Math.round((Date.now() - (lastUsed.get(owner) ?? Date.now())) / 1_000);
+    lastUsed.delete(owner);
+    deps.log(`${owner === "browser" ? "the Cloud's browser sandbox" : `cloud computer ${owner}`}: asleep after ${idleFor}s idle`);
   }
 
-  /** Starts, or restarts, this owner's idle window. */
-  function used(owner: string): void {
+  /** Starts, or restarts, this owner's idle window; `windowMs` asks for a shorter or longer one (the browser's), which
+   * never cuts a longer window another use asked for. */
+  function used(owner: string, windowMs?: number): void {
     if (closed || !boat.boatConfigured(cfg)) return;
+    lastUsed.set(owner, Date.now());
     let timer = timers.get(owner);
     if (!timer) {
       timer = new ComputerIdleTimer(CLOUD_COMPUTER_IDLE_MS, () => busy(owner), () => sleepIfIdle(owner), (error, retryInMs) => {
@@ -127,7 +133,7 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
       });
       timers.set(owner, timer);
     }
-    timer.touch();
+    timer.touch(windowMs);
   }
 
   /** Before the wake, so a start that fails or outlives its turn still leaves the computer timed. */

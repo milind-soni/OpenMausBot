@@ -72,7 +72,7 @@ export function sameWifiOnlyLink(url: string | null): boolean {
   }
 }
 
-/** The link another computer pastes into Connect to a server, and the address it names: the server's own link, else one made from the shared address. */
+/** The link another computer pastes into Connect to another computer, and the address it names: the server's own link, else one made from the shared address. */
 export function computerLink(offer: Pick<PairingOffer, "url" | "code">, address: string | null): { link: string; address: string } | null {
   const link = offer.url ?? (address ? `${address}/pair#code=${offer.code}` : null);
   if (!link) return null;
@@ -222,7 +222,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
               ) : null}
               {/* One 14/20 ink instruction, then 12/16 secondary notes. */}
               <div className="flex flex-col gap-1" data-pair-instructions="">
-                {forComputer ? <p className="text-[14px] leading-5 text-ink">{t("devices.computers.typeCode", { app: productName() })}</p> : offer.url ? <>
+                {forComputer ? <p className="text-[14px] leading-5 text-ink">{t("devices.computers.typeCodeOther", { app: productName() })}</p> : offer.url ? <>
                   <p className="text-[14px] leading-5 text-ink">{t("phone.code.installAndScan", { app: productName() })}</p>
                   <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
                 </> : <p className="text-[14px] leading-5 text-ink">{t("phone.code.typeThis", { app: productName() })}</p>}

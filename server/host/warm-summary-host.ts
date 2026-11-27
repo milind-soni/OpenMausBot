@@ -10,7 +10,7 @@
 //
 // The person sees it the way they see compaction today: one activity line for Claude Code's summary, the summary note for
 // OpenMausBot's fold.
-import type { IdleCompactResult } from "../contracts.ts";
+import type { EngineCompactResult, IdleCompactResult } from "../contracts.ts";
 import { isContextMessage, type HandedState } from "../delta-context.ts";
 import { sinceFreshStart } from "../fresh-start.ts";
 import { backgroundTextSlots, type JobSlots } from "../job-slots.ts";
@@ -40,11 +40,30 @@ export const PRESENCE_HOLD_MS = 10 * 60_000;
 
 type CompactFn = (threadId: string, options: { instructions: string; session?: string; signal?: AbortSignal }) => Promise<IdleCompactResult>;
 
+/** What an engine's compaction asked for by the person is checked against, before it and once it is done. */
+export interface EngineCompactCheck {
+  /** The model selection the conversation's next turn runs on. */
+  model: string;
+  /** The person set `context.compactAt`: an engine that compacts in place leaves compacting to the fold. */
+  compactAtSet: boolean;
+  /** Whether the next turn would carry on `session` rather than rebuild from the transcript. */
+  resumes(session: string): boolean;
+  /** The engine instance and model the next turn would run on now. */
+  selectionNow(): { instanceId: string; model: string | null } | undefined;
+  /** The turn that holds the conversation for this compaction still does. */
+  current(): boolean;
+}
+
+/** `skipped`: the engine did nothing or failed, and the caller folds. `done`: the session is compacted. `stale`: the engine
+ * compacted, but the conversation moved on while it did, so nothing is written and nothing folds. */
+export type EngineCompactOutcome = "skipped" | "done" | "stale";
+
 export interface WarmSummaryHostDeps {
   /** How many background engine jobs run at once, across bots (job-slots.ts). */
   slots?: JobSlots;
-  store: Pick<Store, "taskByThread" | "botByThread" | "groupByThread" | "activePath" | "appendMessage" | "setResumeCursor" | "setHandedMessages">;
-  instance(instanceId: string): { adapter: { cacheKeepWarm?: { compact?: CompactFn; hold(threadId: string, until: number | null): boolean } } } | null | undefined;
+  store: Pick<Store, "taskByThread" | "botByThread" | "groupByThread" | "activePath" | "appendMessage" | "setResumeCursor" | "setHandedMessages" | "patchTask">;
+  instance(instanceId: string): { adapter: { cacheKeepWarm?: { compact?: CompactFn; hold(threadId: string, until: number | null): boolean };
+    compactSession?(threadId: string, options: { botId?: string; session: string; model?: string | null; selectionNow?: EngineCompactCheck["selectionNow"]; signal?: AbortSignal }): Promise<EngineCompactResult> } } | null | undefined;
   /** Off with `context.autoCompact: false` or OMB_WARM_SUMMARY=0. */
   enabled(): boolean;
   /** Where the engine summarizes by itself, in tokens (Claude Code's --autocompact); undefined when OpenMausBot set none. */
@@ -61,6 +80,8 @@ export interface WarmSummaryHostDeps {
   fold(target: WarmSummaryTarget, signal: AbortSignal): Promise<boolean>;
   /** The summary call's usage, booked like a keep-warm ping. */
   book(target: WarmSummaryTarget, result: Extract<IdleCompactResult, { ok: true }>): void;
+  /** An engine's in-place compaction's usage; with none reported, a row whose tokens are marked unreported. */
+  bookEngineCompact(target: WarmSummaryTarget, result: Extract<EngineCompactResult, { ok: true }>): void;
   /** Until when keep-warm already holds this conversation's process. */
   keepWarmUntil(threadId: string): number | undefined;
   /** The language the conversation's person reads its lines in (server/server-lines.ts); undefined reads as English. */
@@ -126,6 +147,26 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     return { ok: true };
   };
 
+  const compactInPlace = async (target: WarmSummaryTarget, session: string, check: EngineCompactCheck, signal: AbortSignal): Promise<EngineCompactOutcome> => {
+    const { threadId, botId, instanceId } = target;
+    const result = await deps.instance(instanceId)!.adapter.compactSession!(threadId, { botId, session, model: check.model, selectionNow: check.selectionNow, signal });
+    if (!result.ok) {
+      deps.log?.(`compact now ${threadId}: not by the engine (${result.reason})`);
+      return "skipped";
+    }
+    deps.bookEngineCompact(target, { ...result, model: result.model ?? check.model });
+    const now = check.selectionNow();
+    if (store.taskByThread(botId, threadId)?.resumeCursors[instanceId] !== session || !check.current() || signal.aborted || now?.instanceId !== instanceId || now.model !== check.model || !check.resumes(session)) {
+      deps.log?.(`compact now ${threadId}: the engine compacted, but the conversation moved on meanwhile`);
+      return "stale";
+    }
+    const task = store.taskByThread(botId, threadId);
+    store.patchTask(botId, threadId, { lastContextModel: undefined, ...(task?.usage ? { usage: { ...task.usage, context: undefined } } : {}) });
+    store.appendMessage(threadId, { role: "bot", kind: "compaction", engineCompaction: true });
+    deps.log?.(`compact now ${threadId}: compacted in place by the engine`);
+    return "done";
+  };
+
   const warm = createWarmSummary({
     now,
     timeScale: Number(process.env.OMB_WARM_SUMMARY_TIME_SCALE) || 1,
@@ -174,12 +215,25 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
   return {
     ...warm,
     /** The person asked for a summary now: the engine's own compaction of the conversation's session, where the engine has
-     * one to run outside a turn. False leaves the conversation as it was. */
-    async compactNow(target: WarmSummaryTarget, signal: AbortSignal): Promise<boolean> {
+     * one to run outside a turn, and only on a session the conversation's next turn would carry on. `skipped` leaves the
+     * conversation as it was. */
+    async compactNow(target: WarmSummaryTarget, signal: AbortSignal, check: EngineCompactCheck): Promise<EngineCompactOutcome> {
       warm.forget(target.threadId);
+      const session = store.taskByThread(target.botId, target.threadId)?.resumeCursors[target.instanceId];
+      if (typeof session === "string" && !check.resumes(session)) {
+        deps.log?.(`compact now ${target.threadId}: not by the engine (the next turn would not carry on its session)`);
+        return "skipped";
+      }
+      if (typeof session === "string" && deps.instance(target.instanceId)?.adapter.compactSession) {
+        if (check.compactAtSet) {
+          deps.log?.(`compact now ${target.threadId}: not by the engine (context.compactAt is set, so the fold compacts)`);
+          return "skipped";
+        }
+        return compactInPlace(target, session, check, signal);
+      }
       const outcome = await native(target, { signal, awaited: () => true }, true);
       if (!outcome.ok) deps.log?.(`compact now ${target.threadId}: not by the engine (${outcome.reason})`);
-      return outcome.ok;
+      return outcome.ok ? "done" : "skipped";
     },
     /** The person has the conversation in front of them (opened it, or is active in the app with it open). */
     sawThread(threadId: string): void {

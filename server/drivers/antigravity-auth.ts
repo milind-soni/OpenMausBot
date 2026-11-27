@@ -1,4 +1,5 @@
-// One Google sign-in at a time for an Antigravity account, run by the runtime's own `authenticate`.
+// One Google sign-in at a time for an Antigravity account on the pinned runtime, run by its own `authenticate`. The native
+// CLI signs in through `acp --login` (antigravity-native-login.ts).
 //
 // Adapted from pingdotgg/t3code@b9bc03869e, MIT License, Copyright (c) 2026
 // T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
@@ -10,7 +11,6 @@
 import { randomUUID } from "node:crypto";
 
 import { botBox } from "../bot-box/box.ts";
-import type { BoxRelay } from "../bot-box/relay.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
 import {
   AntigravityAcpClient,
@@ -45,15 +45,18 @@ function failureLine(error: unknown): { phase: "failed" | "expired"; message: st
 
 interface AuthFlow {
   id: string;
-  client: AntigravityAcpClient;
-  relay: BoxRelay | null;
   /** Rejects with one of the fixed lines. */
   completed: Promise<void>;
   pending: { redirectUri: string; state: string };
   expiresAt: number;
-  /** The runtime's listener takes one response: a second would be read as another sign-in's. Cleared when a
-   * delivery fails, which the listener having closed after the browser's own redirect also looks like. */
+  /** The runtime takes one response: a second would be read as another sign-in's. Cleared when a delivery fails, which
+   * the listener having closed after the browser's own redirect also looks like. */
   callbackSent: boolean;
+  /** What the person pasted, checked against this sign-in; throws a line for the person when it does not answer it. */
+  accept(pasted: string): string;
+  /** Hands an accepted answer to the runtime. */
+  send(accepted: string): Promise<void>;
+  close(): void;
 }
 
 export class AntigravityAuthController {
@@ -92,53 +95,47 @@ export class AntigravityAuthController {
       await client.initialize();
       const expiresAt = Date.now() + AUTH_TIMEOUT_MS;
       const authenticated = client.request("authenticate", { methodId: "oauth-personal" }, AUTH_TIMEOUT_MS, async () => new SignInExpired());
-      let startupTimer: ReturnType<typeof setTimeout> | undefined;
-      const startupTimeout = new Promise<never>((_resolve, reject) => {
-        startupTimer = setTimeout(() => reject(new Error("Google sign-in did not start in time.")), STARTUP_TIMEOUT_MS);
-        startupTimer.unref?.();
-      });
-      const outcome = await Promise.race([
+      const outcome = await raceStartup([
         urlPromise.then((request) => ({ kind: "url" as const, request })),
         authenticated.then(() => ({ kind: "done" as const })),
-        startupTimeout,
-      ]).finally(() => {
-        if (startupTimer) clearTimeout(startupTimer);
-      });
+      ]);
       if (outcome.kind === "done") {
         closeAll();
         this.onSignedIn();
         return { phase: "succeeded", flowId: null, authorizationUrl: null, expiresAt: null };
       }
+      const pending = { redirectUri: outcome.request.redirectUri, state: outcome.request.state };
       const flow: AuthFlow = {
         id: randomUUID(),
-        client,
-        relay,
-        completed: authenticated.then(
-          () => {
-            if (this.end(flow, "succeeded")) this.onSignedIn();
-          },
-          (error) => {
-            const { phase, message } = failureLine(error);
-            this.end(flow, phase, message);
-            throw new Error(message);
-          },
-        ).finally(closeAll),
-        pending: { redirectUri: outcome.request.redirectUri, state: outcome.request.state },
+        completed: this.settle(() => flow, authenticated).finally(closeAll),
+        pending,
         expiresAt,
         callbackSent: false,
+        accept: (pasted) => validateAntigravityCallbackUrl(pending, pasted).href,
+        send: (accepted) => forwardAntigravityCallback(new URL(accepted), relay ?? undefined),
+        close: closeAll,
       };
       flow.completed.catch(() => {});
       this.flow = flow;
-      return {
-        phase: "waiting",
-        flowId: flow.id,
-        authorizationUrl: outcome.request.authorizationUrl,
-        expiresAt: new Date(flow.expiresAt).toISOString(),
-      };
+      return { phase: "waiting", flowId: flow.id, authorizationUrl: outcome.request.authorizationUrl, expiresAt: new Date(flow.expiresAt).toISOString() };
     } catch (error) {
       closeAll();
       throw error;
     }
+  }
+
+  /** The flow's end: signed in, or one of the fixed lines. */
+  private settle(flow: () => AuthFlow, signedIn: Promise<unknown>): Promise<void> {
+    return signedIn.then(
+      () => {
+        if (this.end(flow(), "succeeded")) this.onSignedIn();
+      },
+      (error) => {
+        const { phase, message } = failureLine(error);
+        this.end(flow(), phase, message);
+        throw new Error(message);
+      },
+    );
   }
 
   /** False when another outcome already ended this sign-in. */
@@ -163,16 +160,16 @@ export class AntigravityAuthController {
     return { phase: "expired", flowId, authorizationUrl: null, expiresAt: null, message: EXPIRED };
   }
 
-  async complete(flowId: string, callbackUrl: string): Promise<void> {
+  async complete(flowId: string, pasted: string): Promise<void> {
     const flow = this.flow;
     if (!flow || flow.id !== flowId || Date.now() >= flow.expiresAt) {
       throw new Error("This Google sign-in is no longer active. Start again.");
     }
     if (flow.callbackSent) throw new Error(ALREADY_SENT);
-    const callback = validateAntigravityCallbackUrl(flow.pending, callbackUrl);
+    const accepted = flow.accept(pasted);
     flow.callbackSent = true;
     try {
-      await forwardAntigravityCallback(callback, flow.relay ?? undefined);
+      await flow.send(accepted);
     } catch {
       flow.callbackSent = false;
       throw new Error(NOT_DELIVERED);
@@ -183,7 +180,17 @@ export class AntigravityAuthController {
   cancel(): void {
     const flow = this.flow;
     if (!flow || !this.end(flow, "cancelled", CANCELLED)) return;
-    flow.client.close();
-    flow.relay?.close();
+    flow.close();
   }
+}
+
+async function raceStartup<A, B>(outcomes: [Promise<A>, Promise<B>]): Promise<A | B> {
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  const startupTimeout = new Promise<never>((_resolve, reject) => {
+    startupTimer = setTimeout(() => reject(new Error("Google sign-in did not start in time.")), STARTUP_TIMEOUT_MS);
+    startupTimer.unref?.();
+  });
+  return Promise.race([...outcomes, startupTimeout]).finally(() => {
+    if (startupTimer) clearTimeout(startupTimer);
+  });
 }

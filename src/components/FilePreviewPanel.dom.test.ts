@@ -15,6 +15,7 @@ const { closeFilePreview } = await import("@/lib/file-preview");
 const { openAppPreview, closeAppPreview } = await import("@/lib/app-preview");
 const { AttachedFileChip } = await import("./AttachmentPreview");
 const { FilePreviewPanel } = await import("./FilePreviewPanel");
+const { ChatMarkdown } = await import("./ChatMarkdown");
 // The preview loads this lazily; loaded once here, the tests wait only on the file.
 await import("./MarkdownFilePreview");
 
@@ -35,6 +36,7 @@ afterEach(async () => {
   await act(async () => { closeFilePreview(); closeAppPreview(); root.unmount(); });
   host.remove();
   vi.unstubAllGlobals();
+  Reflect.deleteProperty(window, "ogb");
 });
 
 /** A conversation with one Markdown file in a reply, and the shell's pane beside it; `inPanel` draws the chip in a
@@ -97,6 +99,86 @@ describe("a file opened from the chat on a wide window", () => {
     expect(pane()).toBeNull();
   });
 
+  it("comes back when the person returns to that conversation, without taking the focus", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    const box = host.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']")!;
+    box.focus();
+    await render({ threadId: "t1" });
+    expect(pane()?.getAttribute("data-file-preview")).toBe(PLAN.path);
+    await vi.waitFor(() => expect(pane()?.textContent).toContain("Bring a red flashlight."));
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("stays closed in a conversation where the person closed it", async () => {
+    await render();
+    await openFile();
+    await act(async () => pane()!.querySelector<HTMLButtonElement>("button[aria-label='Close preview']")!.click());
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+  });
+
+  it("stays away on a return while another panel holds that side, and comes back on a later one", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    fixture.state = { ...fixture.state, computerOpen: true };
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    fixture.state = { ...fixture.state, computerOpen: false };
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()?.getAttribute("data-file-preview")).toBe(PLAN.path);
+  });
+
+  it("stays closed on a return after the person opened and closed another file there while the first waited", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    fixture.state = { ...fixture.state, computerOpen: true };
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    fixture.state = { ...fixture.state, computerOpen: false };
+    await render({ threadId: "t1" });
+    await openFile();
+    await act(async () => pane()!.querySelector<HTMLButtonElement>("button[aria-label='Close preview']")!.click());
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+  });
+
+  it("stays closed in a conversation where it was never open", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    await render({ threadId: "t3" });
+    expect(pane()).toBeNull();
+  });
+
+  it("shows a linked file outside the chat in its folder by its real path, asking for it by the link as written", async () => {
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } }));
+    const revealInFolder = vi.fn(async () => "shown");
+    vi.stubGlobal("fetch", fetch);
+    Object.assign(window, { ogb: { revealInFolder } });
+    await act(async () => root.render(createElement(Fragment, null,
+      createElement("main", { "data-look": "chat" }, createElement(ChatMarkdown, { text: "Report: [Q3 report.md](/workspace/finance/Q3%20report.md)", message })),
+      createElement(FilePreviewPanel, { threadId: "t1" }),
+    )));
+    await act(async () => host.querySelector<HTMLButtonElement>("main button[title='Preview: Q3 report.md']")!.click());
+    const show = await vi.waitFor(() => {
+      const button = [...(pane()?.querySelectorAll("button") ?? [])].find((candidate) => candidate.textContent === "Show in folder");
+      expect(button).toBeDefined();
+      return button!;
+    });
+    await act(async () => show.click());
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]!.body))).toEqual({ path: "/workspace/finance/Q3%20report.md" });
+    expect(revealInFolder).toHaveBeenCalledWith("/workspace/finance/Q3 report.md");
+  });
+
   it("gives way to another panel on that side", async () => {
     await render();
     await openFile();
@@ -122,5 +204,46 @@ describe("a file that keeps the dialog", () => {
     expect(pane()).toBeNull();
     expect(dialog()?.textContent).toContain("Bring a red flashlight.");
     expect(fixture.dispatched).toEqual([]);
+  });
+});
+
+describe("a text file a bot links in a reply", () => {
+  const NOTES = "Shopping list\n- apples\n# bread";
+  async function renderReply(text: string) {
+    await act(async () => root.render(createElement(Fragment, null,
+      createElement("main", { "data-look": "chat" }, createElement(ChatMarkdown, { text, message })),
+      createElement(FilePreviewPanel, { threadId: "t1" }),
+    )));
+  }
+
+  it("opens beside the conversation from its name, as the file's own text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(NOTES)));
+    await renderReply("I wrote the notes: [notes.txt](notes.txt)");
+    await act(async () => host.querySelector<HTMLButtonElement>("main button[title='Preview: notes.txt']")!.click());
+    await vi.waitFor(() => expect(pane()?.querySelector("pre")?.textContent).toBe(NOTES));
+    expect(pane()?.getAttribute("data-file-preview")).toBe("notes.txt");
+    expect(pane()?.querySelector("button[aria-label='Source']")).toBeNull();
+    expect(host.querySelector("main button[aria-label='Save a copy of notes.txt']")).not.toBeNull();
+  });
+
+  it("still shows one outside the chat's folder in its folder on the desktop app", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } })));
+    const revealInFolder = vi.fn(async () => "shown");
+    Object.assign(window, { ogb: { revealInFolder } });
+    await renderReply("Log: [run.log](/var/log/run.log)");
+    const show = await vi.waitFor(() => {
+      const button = host.querySelector<HTMLButtonElement>("main button[title='Show in folder']");
+      expect(button).not.toBeNull();
+      return button!;
+    });
+    await act(async () => show.click());
+    expect(revealInFolder).toHaveBeenCalledWith("/var/log/run.log");
+    expect(pane()).toBeNull();
+  });
+
+  it("is still saved from its name when attached instead", async () => {
+    await act(async () => root.render(createElement("main", { "data-look": "chat" }, createElement(AttachedFileChip, { file: { path: "/workspace/notes.txt", name: "notes.txt", private: true }, message }))));
+    expect(host.querySelector("main button[aria-label='Save a copy of notes.txt']")).not.toBeNull();
+    expect(host.querySelector("main button[aria-label='Preview: notes.txt']")).toBeNull();
   });
 });

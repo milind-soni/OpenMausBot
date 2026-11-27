@@ -350,24 +350,24 @@ describe("bots that are working or waiting on the person", () => {
     fixture.state = { ...fixture.state, bots: fixture.state.bots.map((item) => (item.id === id ? { ...item, ...extra } : item)) };
   };
 
-  it("move to the top of their own list, in the person's order, and go back when done", () => {
+  it("keep their place in their own list while they work or wait, and after", () => {
     busy("cleo", { busy: true });
     busy("bea", { activity: "waiting-on-you" });
     busy("echo", { busy: true });
-    expect(listed()).toEqual(["bea", "cleo", "atlas", "echo", "dodo"]);
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
     busy("cleo", { busy: false });
     busy("bea", { activity: "idle" });
     busy("echo", { busy: false });
     expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
   });
 
-  it("count a working thread, but not a wait on a teammate", () => {
+  it("keep their place for a working thread too", () => {
     busy("cleo", { tasks: [{ threadId: "c1", title: "Run", createdAt: 1, busy: true } as Task] });
     busy("bea", { waitingForTeammates: true });
-    expect(listed()).toEqual(["cleo", "atlas", "bea", "dodo", "echo"]);
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
   });
 
-  it("never store the shown order: Alt+Up/Down and drops use the person's own order", () => {
+  it("Alt+Up/Down and drops use the person's own order, a working bot in its place", () => {
     busy("cleo", { busy: true });
     row("atlas").botDrag!.step("atlas", 1);
     expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["bea", "atlas", "cleo"] }]);
@@ -432,6 +432,15 @@ describe("a department's menu in Simple", () => {
     openMenu("Work").onDelete();
     const dialog = render().find((node) => node.type === ConfirmDialog && node.props.open === true)!;
     expect(dialog.props.body).toBe("Its bots and group chats stay, with their conversations, outside any department. The department and its shared instructions are deleted. This cannot be undone.");
+  });
+
+  it("offers Move up and Move down only on the phone layout", () => {
+    const desk = openMenu("Work");
+    expect([desk.onMoveUp, desk.onMoveDown]).toEqual([undefined, undefined]);
+    fixture.phone = true;
+    const phone = openMenu("Work");
+    expect(phone.onMoveUp).toBeTypeOf("function");
+    expect(phone.onMoveDown).toBeTypeOf("function");
   });
 
   it("keeps Advanced's rename dialog", () => {

@@ -75,7 +75,7 @@ thread exactly as in any other.
 | --- | --- |
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
 | **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
-| **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
+| **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. DeepSeek Harness keeps the sandbox and uses the session model to review requests to go outside it. Providers without an equivalent fall back to asking. |
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Sends through connected apps (email, messages, posts, payments) follow the bot's Sending on your behalf setting: Ask every time requires consent, and Send without asking, or no setting at all, sends with no daily limit. Apps outside the bot's connected-app scope are still refused. Work handed on with `coordinate_bots` runs at the level of the receiving bot's thread: a new thread or work thread it opens takes the sending conversation's own level (above), and a Chief of Staff's level flows down (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
@@ -105,7 +105,7 @@ that reaches depends on who runs the tools:
   Groq, Greenference, ModelGo, Meta): OMB's tool gate reads the level before each tool call, so the
   change applies from the next call, up or down.
 - **Engines with their own modes** (Codex, Claude, Cursor, Antigravity, Grok
-  Build, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
+  Build, DeepSeek Harness, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
   its mode when the turn started and keeps it to the end of the turn. A
   permission request it still sends is answered at the new level, so raising
   to Full access applies to the next request. Lowering from Full access, and
@@ -118,7 +118,7 @@ that reaches depends on who runs the tools:
 A request already on screen stays for you to answer, and an action already
 running finishes. A team change sets the level on working bots too.
 
-A department's sidebar menu has **Set for all bots in this department…**, for the owner
+A department's sidebar menu has **Settings for all bots…**, for the owner
 or an admin. It sets one approval level (Ask, Auto-accept edits, Approve for
 me or Full access), or one model and effort, on every bot in that department. It
 lists what each bot will get before anything changes, then saves the bots one
@@ -325,6 +325,30 @@ level under another name, not a separate permission setting, applies at once
 like Full access, and covers every model in that Antigravity instance,
 including Gemini.
 
+The native Antigravity CLI (1.5.0 and later) rejects `yolo` and `auto_edit`,
+so it stays in its `default` mode at every level and asks before each action.
+On Auto the app answers those requests itself, never-list commands excepted.
+On Auto-accept edits it answers a request only when it is a plain file edit
+inside the turn's folder: one that names a command, gives no location, or
+reaches outside that folder is asked as usual. A turn fails rather than start
+when the CLI offers no mode or does not confirm `default`.
+
+A new install takes the native CLI; a computer that already has the pinned
+runtime keeps it. An Antigravity account on the pinned runtime moves to the
+native CLI through **Switch to Google Antigravity CLI** on its card (its CLI path
+becomes `antigravity` and the CLI is installed); Settings offers no way back. A
+saved `agy_acp_server` path still runs the pinned runtime alone. An account with no CLI
+path, or `agy`, runs the pinned runtime when it is installed, and the native CLI
+otherwise. The native CLI signs in through its own
+`acp --login`: the link opens Google, and the code or address the page ends on
+is pasted back into the sign-in card. The app starts the native CLI as if over
+SSH, so each account keeps its own Google sign-in in its own folder, as on the
+pinned runtime, and the OS keyring and the Antigravity CLI in a terminal are
+never touched. Signing out or removing an account ends that account's sign-in
+alone. A server started with `OMB_ANTIGRAVITY_NATIVE_CLI=1` runs the native CLI
+for every account with no CLI path, or `agy`, even where the pinned runtime is
+installed; an account whose CLI path names a runtime keeps it.
+
 A new Antigravity bot starts on Auto, the default. Old Antigravity
 `auto` / `autoApprove` settings still behave as Ask and are displayed as Ask;
 they never become unrestricted access on upgrade. Switching back to Ask
@@ -370,13 +394,16 @@ multi-question card renders its structured form on current apps instead.
 | Claude | Native `default` | Native `acceptEdits` | Native `auto` | Native `bypassPermissions` |
 | Cursor | Native default | not offered | Native `--auto-review` | Native `--force` |
 | Antigravity | Native `default` | Native `auto_edit` | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
+| Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers file edits inside the turn's folder itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
+| DeepSeek Harness | Runs in the `workspace-write` sandbox and asks you about escalations | not offered | On dsh 0.2.2-rc.2 or later, OMB loads one plugin it writes locally, without loading or downloading any dsh plugins. The sandbox confines workspace writes to this conversation's task directory and this bot's memory directory. Each escalation costs one review request to the session model. Approval allows that call once. If review declines or fails, OMB asks you. Older or unrecognized versions keep dsh's usual sandbox and ask you about escalations. | Keeps the sandbox. OMB answers remaining permission requests. |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Gemini CLI | Native `default` | Native `--approval-mode auto_edit` | Ask (no reviewer) | `--yolo`, plus automatic approval of remaining ACP permission requests |
 | Cline | `--auto-approve false`, you review | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Droid | Session mode `normal` (reads only) | not offered | Ask (no reviewer) | Session mode `auto-high`, plus automatic approval of remaining ACP permission requests |
-| Kimi, Hermes, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
+| Hermes | Its `default` session mode | Its `accept_edits` session mode, where Hermes advertises it | Ask (no reviewer) | Its `default` session mode; approve individual ACP permission requests, never task questions |
+| Kimi, custom ACP agents | The agent's own default | not offered | Ask (no reviewer) | Approve individual ACP permission requests, never task questions |
 | Pi | Pi's own tools run; computer control and custom MCP tools ask | not offered | Ask (no reviewer) | Custom MCP tools run without asking; computer-control confirms are approved |
 | API engines (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras, Groq, Greenference, ModelGo, Meta) | OMB's tool gate asks | not offered | Ask (no reviewer) | OMB's tool gate approves each call |
 
@@ -385,6 +412,14 @@ to a different provider while on Custom requires leaving Custom first;
 choose Ask. Switching models within Antigravity keeps the selected level.
 Native modes require a CLI version that supports them; OpenMausBot does not
 silently substitute unrestricted access when a mode is rejected.
+
+On Linux, Codex's sandboxed modes (`Ask`, `Auto`, and `Custom` when configured
+with `workspace-write` or `read-only`) run shell commands in a user namespace
+where root-owned files (such as `/etc/ssh/ssh_config.d/*`) appear owned by
+`nobody` (uid 65534) and network access may be restricted. OpenSSH can reject
+those config files with `Bad owner or permissions on /etc/ssh/...`; use an
+approved escalation or `Full access` (`danger-full-access`) for `ssh` and
+`git`-over-SSH commands.
 
 ### Read-only integration tools
 

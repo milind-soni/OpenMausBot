@@ -12,7 +12,7 @@ import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
 
-(enabled ? it : it.skip)("coordinates from the real composer and opens the exact child task from its existing inline receipt", async () => {
+(enabled ? it : it.skip)("coordinates from the real composer and opens the exact child task as an exchange from its existing inline receipt", async () => {
   const temporary = mkdtempSync(join(tmpdir(), "omb-direct-ui-plan-"));
   const planPath = join(temporary, "plan.json");
   writeFileSync(planPath, "{}");
@@ -65,7 +65,7 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     writeFileSync(gateFile, "complete fixture work");
     await ui("wait-settle", "--timeout", "60");
     await expect.poll(snapshot, { timeout: 15_000 }).toContain("Engineer checked the fixture CSV export");
-    expect(await snapshot()).toContain("Sent to Engineer");
+    expect(await snapshot()).toContain('button "Open exchange with Engineer"');
     const state = await api("/api/bots");
     const parent = state.bots.find((bot: any) => bot.id === info.botId);
     const receipt = parent.messages.find((message: any) => message.tool?.name === "Sent to Engineer");
@@ -73,13 +73,16 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     expect(receipt.threadRef.threadId).not.toBe(lead.threadId);
     const screenshot = info.logPath + ".direct-coordination.png";
     await ui("screenshot", "--out", screenshot);
-    await click("Sent to Engineer");
+    await click("Open exchange with Engineer");
     await expect.poll(snapshot, { timeout: 15_000 }).toContain("CSV export checked in my separate task");
-    // The request in the teammate's thread names the bot that sent it.
-    expect(await snapshot()).toMatch(/Pepper[\s\S]{0,80}sent a request/);
-    const selected = (await api("/api/bots")).bots.find((bot: any) => bot.id === lead.id);
-    expect(selected.threadId).toBe(receipt.threadRef.threadId);
-    const evidence = { source: parent.messages, receipt, selectedThread: selected.threadId, final: await snapshot(), screenshot };
+    expect(await snapshot()).toContain('group "Bot exchange between Pepper and Engineer"');
+    expect(await snapshot()).not.toContain('textbox "Message');
+    const shown = (await ui("eval", "--js", "document.querySelector('[data-handoff-exchange]')?.getAttribute('data-handoff-exchange')")).result;
+    expect(shown).toBe(receipt.threadRef.threadId);
+    expect((await api("/api/bots")).bots.find((bot: any) => bot.id === info.botId).threadId).toBe(parent.threadId);
+    await click("Back to Pepper");
+    await expect.poll(snapshot, { timeout: 15_000 }).toContain('textbox "Message Pepper"');
+    const evidence = { source: parent.messages, receipt, exchangeThread: shown, final: await snapshot(), screenshot };
     writeFileSync(info.logPath + ".direct-coordination.json", JSON.stringify(evidence, null, 2));
     console.log("Direct coordination UI evidence:", info.logPath + ".direct-coordination.json");
   } finally {

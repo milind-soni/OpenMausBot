@@ -178,6 +178,16 @@ describe("a turn's Email tools", () => {
     expect(tools.filter((tool) => !tool.annotations.readOnlyHint).map((tool) => tool.name)).toEqual(["EMAIL_SEND_MESSAGE"]);
   });
 
+  it("in read-only mode (work from the person's other place) lists and runs only its reads, and says why for a send", async () => {
+    const { host } = await fixture(ALL_READS);
+    const { tools } = await host.handle({ method: "tools/list" }, { botId: "b1", threadId: "t1" }, () => {}, "Only reads here.") as unknown as { tools: Array<{ name: string }> };
+    expect(tools.map((tool) => tool.name)).toEqual(EMAIL_READ_TOOL_NAMES);
+    const sent = await host.handle({ method: "tools/call", params: { name: "EMAIL_SEND_MESSAGE", arguments: { to: ["x@shop.example"], subject: "s", text: "b" } } }, { botId: "b1", threadId: "t1" }, () => {}, "Only reads here.");
+    expect(JSON.stringify(sent)).toContain("Only reads here.");
+    const read = await host.handle({ method: "tools/call", params: { name: "EMAIL_LIST_MAILBOXES", arguments: {} } }, { botId: "b1", threadId: "t1" }, () => {}, "Only reads here.");
+    expect(JSON.stringify(read)).toContain("INBOX");
+  });
+
   it("a turn no longer active is refused before anything runs", async () => {
     const { host, marked } = await fixture(ALL_READS);
     await expect(host.handle({ method: "tools/call", params: { name: "EMAIL_LIST_MESSAGES", arguments: {} } }, { botId: "b1", threadId: "t1" }, () => { throw new Error("ended"); })).rejects.toThrow("ended");

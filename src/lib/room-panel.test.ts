@@ -37,14 +37,13 @@ afterEach(() => {
 describe("which rooms get the calm header", () => {
   const room = { dm: false };
   it("is a normal room on this desktop in Simple mode", () => {
-    expect(simpleRoomHeader({ advanced: false, remoteClient: false, group: room, setupPending: false })).toBe(true);
+    expect(simpleRoomHeader({ advanced: false, remoteClient: false, group: room })).toBe(true);
   });
 
-  it("keeps today's header in Advanced mode, on a remote client, in a DM and while the room is being set up", () => {
-    expect(simpleRoomHeader({ advanced: true, remoteClient: false, group: room, setupPending: false })).toBe(false);
-    expect(simpleRoomHeader({ advanced: false, remoteClient: true, group: room, setupPending: false })).toBe(false);
-    expect(simpleRoomHeader({ advanced: false, remoteClient: false, group: { dm: true }, setupPending: false })).toBe(false);
-    expect(simpleRoomHeader({ advanced: false, remoteClient: false, group: room, setupPending: true })).toBe(false);
+  it("keeps today's header in Advanced mode, on a remote client and in a DM", () => {
+    expect(simpleRoomHeader({ advanced: true, remoteClient: false, group: room })).toBe(false);
+    expect(simpleRoomHeader({ advanced: false, remoteClient: true, group: room })).toBe(false);
+    expect(simpleRoomHeader({ advanced: false, remoteClient: false, group: { dm: true } })).toBe(false);
   });
 });
 

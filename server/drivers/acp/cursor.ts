@@ -363,7 +363,9 @@ export async function fetchCursorModels(
   env: Record<string, string | undefined>,
   run: typeof execCli = execCli,
 ): Promise<ModelCatalog> {
-  const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, clientCapabilitiesMeta: CURSOR_CLIENT_META })
+  // cursor-agent's cold start can take longer than the shared 8s request budget before session/new answers:
+  // give it its own, so a slow but working session does not collapse to the static list for six hours.
+  const fromSession = await discoverAcpModels(env, cli, ["acp"], { variants: false, requestTimeoutMs: 20_000, clientCapabilitiesMeta: CURSOR_CLIENT_META })
     .then((catalog) => cursorCatalogFromSession(catalog.options), () => null);
   if (fromSession) return fromSession;
   // Live CLI prints plain text (`slug - Label`); `--format json` is not supported yet.
@@ -394,6 +396,14 @@ export function classifyCursorError(error: unknown): ProviderErrorCode | undefin
     return "inactive_subscription";
   }
   return undefined;
+}
+
+/** cursor-agent 2026.10.22's session/prompt catches any failed model call, sends `\n\nError: ${String(error)}` as one
+ * message chunk and answers end_turn. Its own errors are named RetriableError and NonRetriableError. */
+const CURSOR_REPLY_FAILURE = /^\n\nError: (?:(?:Non)?RetriableError: )?([^\n]+)$/;
+
+export function cursorReplyFailure(chunk: string): string | null {
+  return CURSOR_REPLY_FAILURE.exec(chunk.trimEnd())?.[1]?.trim() || null;
 }
 
 /** Cursor's AskQuestion blocks on `cursor/ask_question` (cursor.com/docs/cli/acp; cursor-agent 2026.10.01, no sessionId).
@@ -513,7 +523,10 @@ const support = (run: typeof execCli): AcpSupport => ({
       : methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null,
   authFailure: "continue",
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
+  // cursor_login re-run clears the CLI's stored login and opens a browser, so the handshake asks the CLI first.
+  skipAuthenticateWhenAuthenticated: true,
   classifyError: classifyCursorError,
+  replyFailure: cursorReplyFailure,
 
   clientCapabilitiesMeta: CURSOR_CLIENT_META,
 

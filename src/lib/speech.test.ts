@@ -3,12 +3,14 @@ import { DEEPSEEK_RECORDING_MAX_MS } from "../../shared/deepseek-voice";
 import type { ConfigStatus } from "@/state/store";
 import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
 import { createEndpointer, fishSpeech } from "./fish-speech";
-import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, missingListenKey, recordsClips, scribeChosen, speechBridge } from "./speech";
+import { t } from "./i18n";
+import { CALL_ENDPOINT_MS, callSpeechEndNote, fishListeningReady, listensHere, missingListenKey, recordsClips, scribeChosen, speechBridge } from "./speech";
 
 const withDictation = (dictation: DesktopCapabilities["dictation"]): DesktopCapabilities =>
   ({ ...initialDesktopCapabilities(), dictation });
 const FISH = { available: true, engine: "fish-audio", onDevice: false } as const;
 const APPLE = { available: true, engine: "apple-speech", onDevice: true } as const;
+const WINDOWS = { available: true, engine: "windows-speech", onDevice: true } as const;
 const savedFish = { savedKeys: { fishAudioKey: { configured: true } } } as unknown as ConfigStatus;
 
 afterEach(() => {
@@ -33,6 +35,31 @@ describe("speechBridge", () => {
   it("is nothing in a browser", () => {
     vi.stubGlobal("window", {});
     expect(speechBridge(null)).toBeUndefined();
+  });
+});
+
+describe("Windows dictation", () => {
+  it("listens on the computer through the desktop app's helper when no key is saved", () => {
+    const ogb = { speechStart: vi.fn() };
+    vi.stubGlobal("window", { ogb });
+    cacheDesktopCapabilities(withDictation(WINDOWS));
+    expect(missingListenKey(withDictation(WINDOWS), null)).toBeNull();
+    expect(listensHere(withDictation(WINDOWS), null)).toBe(true);
+    expect(speechBridge(null)).toBe(ogb);
+    expect(recordsClips(speechBridge(null))).toBe(false);
+  });
+
+  it("keeps hearing through a saved Fish Audio key, as before", () => {
+    vi.stubGlobal("window", { ogb: { speechStart: vi.fn() } });
+    cacheDesktopCapabilities(withDictation(WINDOWS));
+    expect(listensHere(withDictation(WINDOWS), savedFish)).toBe(true);
+    expect(speechBridge(savedFish)).toBe(fishSpeech);
+  });
+
+  it("still asks for the DeepSeek key while DeepSeek is the voice", () => {
+    const deepseekVoice = { tts: { provider: "deepseek" } } as unknown as ConfigStatus;
+    expect(missingListenKey(withDictation(WINDOWS), deepseekVoice)).toBe("deepseek");
+    expect(listensHere(withDictation(WINDOWS), deepseekVoice)).toBe(false);
   });
 });
 
@@ -145,5 +172,22 @@ describe("CALL_ENDPOINT_MS", () => {
   it("still ends the turn once the person has stopped speaking", () => {
     expect(CALL_ENDPOINT_MS).toBeLessThanOrEqual(2_500);
     expect(run(CALL_ENDPOINT_MS, CALL_ENDPOINT_MS + FRAME)).toBe("done");
+  });
+});
+
+describe("call speech-end note", () => {
+  it("tells a call without a recognizer for the language to add a listening key, not to use Windows voice typing", () => {
+    const note = t(callSpeechEndNote("speech-language-missing"));
+    expect(note).toContain("Fish Audio");
+    expect(note).not.toContain("Windows key + H");
+    expect(note).not.toBe(t("composer.dictation.failed"));
+  });
+
+  it("keeps the other helper reasons' notes", () => {
+    expect(callSpeechEndNote("helper-build-failed")).toBe("call.turns.helperBuildFailed");
+    expect(callSpeechEndNote("dictation-disabled")).toBe("composer.dictation.disabled");
+    expect(callSpeechEndNote("speech-not-authorized")).toBe("call.turns.speechNotAuthorized");
+    expect(callSpeechEndNote("helper-start-failed")).toBe("composer.dictation.failed");
+    expect(callSpeechEndNote(undefined)).toBe("composer.dictation.failed");
   });
 });
