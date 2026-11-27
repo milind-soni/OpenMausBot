@@ -178,6 +178,17 @@ describe("plan usage parsers", () => {
     expect(parsed.extra).toEqual([expect.objectContaining({ label: "Fable", usedPercent: 94 })]);
   });
 
+  it("still shows a model's weekly limit from the limits list when only its 5-hour window comes as a key", () => {
+    const parsed = parseClaudeUsage({
+      five_hour_fable: { utilization: 30 },
+      limits: [{ kind: "weekly_scoped", percent: 95, scope: { model: { display_name: "Fable" } } }],
+    });
+    expect(parsed.models).toEqual([
+      { name: "Fable", windows: [expect.objectContaining({ label: "Weekly", usedPercent: 95 })] },
+    ]);
+    expect(parsed.extra).toEqual([expect.objectContaining({ label: "Fable", usedPercent: 30 })]);
+  });
+
   it("classifies Codex windows by duration and does not stuff a 30-day window into weekly", () => {
     const parsed = parseCodexUsage({
       plan_type: "plus",

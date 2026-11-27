@@ -171,6 +171,7 @@ export function parseClaudeUsage(body: unknown): PlanWindows {
   const extra: PlanExtra[] = [];
   const models: PlanModelUsage[] = [];
   if (root) {
+    const weeklyExtra: string[] = [];
     for (const [key, value] of Object.entries(root)) {
       if (key === "five_hour" || key === "seven_day" || key === "spend" || key === "extra_usage") continue;
       if (!/^[a-z][a-z0-9_]{0,40}$/i.test(key)) continue;
@@ -178,9 +179,13 @@ export function parseClaudeUsage(body: unknown): PlanWindows {
       if (!window) continue;
       const model = claudeModelWindow(key);
       if (model) addModelWindow(models, model.name, extraLine(model.window, window));
-      else extra.push(extraLine(claudeExtraLabel(key), window));
+      else {
+        const label = claudeExtraLabel(key);
+        extra.push(extraLine(label, window));
+        if (key.startsWith("seven_day_")) weeklyExtra.push(label);
+      }
     }
-    const keyed = [...models.filter((model) => model.windows.some((line) => line.label === "Weekly")).map((model) => model.name), ...extra.map((line) => line.label)];
+    const keyed = [...models.filter((model) => model.windows.some((line) => line.label === "Weekly")).map((model) => model.name), ...weeklyExtra];
     for (const limit of claudeScopedWeekly(root.limits, keyed)) addModelWindow(models, limit.name, extraLine("Weekly", openWindow(limit.usedPercent, isoOrNull(limit.resetsAt))));
   }
   sortModelWindows(models);
