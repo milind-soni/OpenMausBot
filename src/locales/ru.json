@@ -127,6 +127,7 @@
   "server.problem.routineFailed": "У бота {bot} возникла проблема: запланированная процедура {where} завершилась ошибкой",
   "server.problem.routineFailedWhy": "У бота {bot} возникла проблема: запланированная процедура {where} завершилась ошибкой: «{detail}»",
   "server.incidents.where.thread": "в ветке #{title}",
+  "server.chief.retryQueued": "Повтор в ветке #{title} ({name}) поставлен в очередь",
   "server.incidents.where.main": "в основном разговоре",
   "server.connect.signIn": "Войдите, пожалуйста, на {site}.",
   "server.connect.signInWhy": "Войдите, пожалуйста, на {site}: {reason}",

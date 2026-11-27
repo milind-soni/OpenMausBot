@@ -85,6 +85,7 @@
   "server.problem.routineFailed": "{bot} को एक समस्या आई: {where} उसका शेड्यूल किया गया रूटीन विफल रहा",
   "server.problem.routineFailedWhy": "{bot} को एक समस्या आई: {where} उसका शेड्यूल किया गया रूटीन विफल रहा: “{detail}”",
   "server.incidents.where.thread": "थ्रेड #{title} में",
+  "server.chief.retryQueued": "{name} के थ्रेड #{title} का दोबारा प्रयास कतार में रखा गया",
   "server.incidents.where.main": "मुख्य बातचीत में",
   "server.connect.signIn": "आपको {site} में साइन इन करना होगा।",
   "server.connect.signInWhy": "आपको {site} में साइन इन करना होगा: {reason}",

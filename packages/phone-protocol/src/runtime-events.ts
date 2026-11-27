@@ -180,6 +180,8 @@ export type RuntimeEvent = RuntimeEventBase &
          * was already gone and the action never ran */
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
         approvalScope?: "local-computer";
+        /** Optional reason attached to the approval card while waiting, preserved on timeout. */
+        heldReason?: string;
       }
     | {
         type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number;

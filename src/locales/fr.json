@@ -85,6 +85,7 @@
   "server.problem.routineFailed": "{bot} a rencontré un problème : sa routine planifiée {where} a échoué",
   "server.problem.routineFailedWhy": "{bot} a rencontré un problème : sa routine planifiée {where} a échoué : « {detail} »",
   "server.incidents.where.thread": "dans son fil #{title}",
+  "server.chief.retryQueued": "Nouvelle tentative du fil #{title} de {name} mise en file d'attente",
   "server.incidents.where.main": "dans sa conversation principale",
   "server.connect.signIn": "J'ai besoin que vous vous connectiez à {site}.",
   "server.connect.signInWhy": "J'ai besoin que vous vous connectiez à {site} : {reason}",

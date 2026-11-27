@@ -236,6 +236,7 @@
   "server.problem.routineFailed": "{bot} hit a problem: its scheduled routine {where} failed",
   "server.problem.routineFailedWhy": "{bot} hit a problem: its scheduled routine {where} failed: \"{detail}\"",
   "server.incidents.where.thread": "in its thread #{title}",
+  "server.chief.retryQueued": "Queued a retry of {name}'s thread #{title}",
   "server.incidents.where.main": "in its main conversation",
   "server.incidents.folded": "{chief} is asked about only so many problems an hour, so {count} more this hour were not sent to it. From: {list}",
   "server.connect.signIn": "I need you to sign in to {site}.",
