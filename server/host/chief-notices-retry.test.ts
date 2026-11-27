@@ -80,7 +80,7 @@ describe("a Chief's retry of a teammate's busy thread", () => {
   }
 
   it("queues the retry while its bot is mid-turn elsewhere, and the queue starts it when the bot frees up", async () => {
-    const f = fixture({ threadBusy: (botId) => botId === "ada", groupTurnActive: (botId) => botId === "ada" });
+    const f = fixture({ groupTurnActive: (botId) => botId === "ada" });
     const queued = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, note: "The service was down." });
     expect(queued).toEqual({ queued: true });
     expect(f.startTurn).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe("a Chief's retry of a teammate's busy thread", () => {
   });
 
   it("queues with the capacity reason at its bot's turn limit, answering queued rather than failed", async () => {
-    const f = fixture({ threadQueued: () => true, botAtThreadCapacity: () => true });
+    const f = fixture({ botAtThreadCapacity: () => true });
     const queued = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false });
     expect(queued).toEqual({ queued: true });
     const snapshot = queuedSteerSnapshot(() => true);
@@ -103,11 +103,23 @@ describe("a Chief's retry of a teammate's busy thread", () => {
     cancelSteeredMessage("ada", snapshot["ada-job"]![0]!.queueId, "ada-job");
   });
 
-  it("still refuses while the thread only shuts down, or when its bot has room and no room turn", async () => {
-    const settling = fixture({ threadBusy: () => true, threadSettling: () => true, groupTurnActive: () => true });
-    await expect(settling.notices.retryThread({ chief: settling.chief as never, bot: settling.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(RETRY_BLOCKED.settling);
-    const withRoom = fixture({ threadBusy: () => true });
-    await expect(withRoom.notices.retryThread({ chief: withRoom.chief as never, bot: withRoom.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(RETRY_BLOCKED.running);
+  it("still refuses a thread that runs, shuts down or already waits, even while its bot is at its turn limit", async () => {
+    for (const [over, refusal] of [
+      [{ threadBusy: () => true }, RETRY_BLOCKED.running],
+      [{ threadBusy: () => true, threadSettling: () => true }, RETRY_BLOCKED.settling],
+      [{ threadQueued: () => true }, RETRY_BLOCKED.queued],
+    ] as const) {
+      const f = fixture({ ...over, botAtThreadCapacity: () => true, groupTurnActive: () => true });
+      await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(refusal);
+      expect(f.startTurn).not.toHaveBeenCalled();
+    }
+    expect(_queuedCount("ada-job")).toBe(0);
+  });
+
+  it("starts OpenMausBot's own retry at once, never from the queue", async () => {
+    const f = fixture({ botAtThreadCapacity: () => true });
+    await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, automatic: true });
+    expect(f.startTurn).toHaveBeenCalledTimes(1);
     expect(_queuedCount("ada-job")).toBe(0);
   });
 

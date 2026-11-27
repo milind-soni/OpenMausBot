@@ -120,24 +120,22 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   }
 
   /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and OpenMausBot's automatic retry both
-   * start it here, after the same refusal checks. Throws the refusal, or why the start failed. A busy refusal queues the
-   * retry instead when the bot is mid-turn elsewhere or at its turn limit: the steer queue starts it when the bot frees up. */
+   * start it here, after the same refusal checks. Throws the refusal, or why the start failed. A Chief's retry of an idle
+   * thread whose bot is busy elsewhere (at its turn limit, or in a room's turn) waits in that thread's queue instead, and
+   * the queue starts it when the bot frees up. A thread that still runs, shuts down or already waits is refused as before. */
   async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true }): Promise<{ queued: true } | undefined> {
     const refused = retryRefusal(input.bot.id, input.threadId);
+    if (refused) throw new Error(refused);
     const chief = peerName(input.chief.name);
     const lead = input.automatic
       ? `${AUTO_RETRY_LEAD}, once, before telling ${chief}, your Chief of Staff, that this thread's last run failed.`
       : `${RETRY_LEAD}${chief}, your Chief of Staff, after this thread's last run stopped.${input.note ? ` Note from ${chief}: ${quoteInNote(input.note, 300)}` : ""}`;
     const text = `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`;
     const peerAsk = { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) };
-    if (refused) {
-      const atCapacity = deps.botAtThreadCapacity(input.bot.id);
-      const groupTurn = deps.groupTurnActive(input.bot.id);
-      if ((refused === RETRY_BLOCKED.running || refused === RETRY_BLOCKED.queued) && (atCapacity || groupTurn)) {
-        queueSteeredMessage(input.bot.id, input.threadId, text, { reason: atCapacity ? "capacity" : "group-turn", unattended: input.unattended, peerAsk });
-        return { queued: true };
-      }
-      throw new Error(refused);
+    const atCapacity = !input.automatic && deps.botAtThreadCapacity(input.bot.id);
+    if (atCapacity || (!input.automatic && deps.groupTurnActive(input.bot.id))) {
+      queueSteeredMessage(input.bot.id, input.threadId, text, { reason: atCapacity ? "capacity" : "group-turn", unattended: input.unattended, peerAsk });
+      return { queued: true };
     }
     await deps.startTurn(input.bot.id, text, { threadId: input.threadId, unattended: input.unattended, peerAsk });
   }
