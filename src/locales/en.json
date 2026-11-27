@@ -6370,7 +6370,7 @@
   "engineSetup.device.waiting": "Waiting for you to finish signing in…",
   "engineSetup.device.expires": "Code expires at {time}",
   "engineSetup.device.security": "Only enter a code you requested here. This signs Codex in for your bots and uses your account's limits. Your password stays with OpenAI, and the sign-in stays where your bots run.",
-  "engineSetup.device.enableNote": "If OpenAI says device code sign-in isn't allowed, turn it on in ChatGPT → Settings → Security (your ChatGPT admin may need to), then try again.",
+  "engineSetup.device.enableNote": "If OpenAI says device code sign-in isn't allowed, turn it on in ChatGPT Settings → Security (your ChatGPT admin may need to), then try again.",
   "engineSetup.device.connected": "ChatGPT connected. Your models are being refreshed.",
   "engineSetup.device.connectedAccount": "ChatGPT connected",
   "engineSetup.device.cancel": "Cancel sign-in",

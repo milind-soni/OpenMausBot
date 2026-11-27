@@ -28,7 +28,7 @@ describe("Codex device sign-in UI", () => {
 
   it("says how to turn on device code sign-in as step 1, before the code", () => {
     const html = render(waiting);
-    const step = html.indexOf("1. If OpenAI says device code sign-in isn&#x27;t allowed, turn it on in ChatGPT → Settings → Security");
+    const step = html.indexOf("1. If OpenAI says device code sign-in isn&#x27;t allowed, turn it on in ChatGPT Settings → Security");
     expect(step).toBeGreaterThan(-1);
     expect(html).toContain("your ChatGPT admin may need to");
     expect(html.indexOf("2. Enter this one-time code on OpenAI&#x27;s sign-in page")).toBeGreaterThan(step);

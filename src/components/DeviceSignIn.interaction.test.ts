@@ -58,7 +58,7 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 it("shows where to turn on device code sign-in before a code is asked for", () => {
-  expect(render().some((node) => node.type === "p" && text(node).includes("turn it on in ChatGPT → Settings → Security"))).toBe(true);
+  expect(render().some((node) => node.type === "p" && text(node).includes("turn it on in ChatGPT Settings → Security"))).toBe(true);
 });
 
 it("says the sign-in was interrupted when the server no longer has it, and Try again starts a fresh one", async () => {
@@ -82,7 +82,7 @@ it("says the sign-in was interrupted when the poll hears the server's interrupte
 });
 
 it("shows OpenAI's refusal as the server words it, with Try again and the setting to turn on", async () => {
-  const refused = "OpenAI did not allow device code sign-in. Turn it on in ChatGPT → Settings → Security (your ChatGPT admin may need to), then try again.";
+  const refused = "OpenAI did not allow device code sign-in. Turn it on in ChatGPT Settings → Security (your ChatGPT admin may need to), then try again.";
   fixture.api.mockResolvedValueOnce({ auth: waiting });
   await startAndPoll(() => Promise.resolve({ auth: { phase: "failed", flowId: "flow-one", authorizationUrl: null, expiresAt: null, message: refused } }));
   expect(fixture.values[AUTH]).toMatchObject({ phase: "failed", message: refused });
