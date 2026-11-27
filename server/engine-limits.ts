@@ -104,7 +104,8 @@ export function engineLimitsFor(input: {
       seen.set(name, count);
       return { account: count > 1 ? `${name} ${count}` : name, engine: instance.driverKind };
     })();
-    if (!REPORTING_DRIVERS.has(instance.driverKind) || snapshot.billing === "metered" || (instance.driverKind === ANTIGRAVITY && !ANTIGRAVITY_USAGE_LIMITS)) {
+    const usageMeterOff = (input.configs[instance.instanceId]?.config as { usageMeter?: unknown } | undefined)?.usageMeter === false;
+    if (!REPORTING_DRIVERS.has(instance.driverKind) || snapshot.billing === "metered" || (instance.driverKind === ANTIGRAVITY && (!ANTIGRAVITY_USAGE_LIMITS || usageMeterOff))) {
       return snapshot.authenticated === false ? [] : [{ ...base, status: "unsupported", checkedAt: null, windows: [], why: UNSUPPORTED_WHY }];
     }
     if (!report) return [{ ...base, status: "unknown", checkedAt: null, windows: [], why: NOT_CHECKED_WHY }];

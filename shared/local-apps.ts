@@ -38,6 +38,8 @@ export interface LocalApp {
   manifest: LocalAppManifest;
   /** The conversation it came from is still there, so "Go to chat" has somewhere to go. */
   chat: boolean;
+  /** A sample app that came with MausBot: no bot made it and it has no chat (`botId`, `threadId` are empty). */
+  sample?: true;
 }
 
 export interface LocalAppsList {

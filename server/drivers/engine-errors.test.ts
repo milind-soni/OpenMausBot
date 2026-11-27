@@ -105,6 +105,28 @@ describe("a provider refusing a tool's schema", () => {
   });
 });
 
+describe("a text-only model sent an image", () => {
+  /** Z.ai GLM's session/prompt refusal as acpRpcError words it, reported from a chat with an image read into the conversation. */
+  const GLM = "Internal error: messages.content.type is invalid, allowed values: ['text'] (session/prompt, service: session, provider.invalid-request)";
+
+  it("says in plain words that the model reads text only, keeping the words that class it an invalid request", () => {
+    const plain = engineFailureMessage("OpenCode", GLM);
+    expect(plain).toBe("OpenCode refused this turn as an invalid request because this model reads text only and this conversation carries an image — one attached in chat or read by a tool — so every message fails the same way. "
+      + "Switch this bot to a model that can see images, or start a new conversation.");
+    expect(engineFailureKind(GLM)).toBe("image_content");
+    expect(engineFailure("OpenCode", GLM)!.text).toEqual({ key: "chat.notice.imageContent", params: { provider: "OpenCode" } });
+    expect([reason(GLM), reason(plain!)]).toEqual(["unknown", "invalid_request"]);
+    expect(classifyError({ text: plain! }).transient).toBe(false);
+  });
+
+  it("reads the words behind an HTTP status too, so the chat runtime keeps them plain", () => {
+    expect(engineFailureKind("Z.ai HTTP 400: messages.content.type is invalid, allowed values: ['text']")).toBe("image_content");
+    expect(plainFailureMessage("Z.ai", "Z.ai HTTP 400: messages.content.type is invalid, allowed values: ['text']"))
+      .toBe(engineFailureMessage("Z.ai", "Z.ai HTTP 400: messages.content.type is invalid, allowed values: ['text']"));
+    expect(engineFailureKind("Mistral HTTP 400: content is too long")).toBe("refused");
+  });
+});
+
 describe("errorReplyFailure", () => {
   const NOW = Date.parse("2026-10-27T06:12:46Z");
   const anthropic = (status: number, type: string, message: string) =>

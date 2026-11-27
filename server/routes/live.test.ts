@@ -85,6 +85,13 @@ describe("live routes", () => {
     expect((await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0\r\n", client: "web" })).status).toBe(201);
     expect(d.calls.start).toHaveBeenCalledWith(expect.objectContaining({ client: "web" }));
   });
+  it("passes on the relayed sessions a phone app runs itself, and nothing else", async () => {
+    const d = deps();
+    expect((await request(d, "POST", "/api/live/session", { botId: "bot1", relays: ["gemini"], client: "android" })).status).toBe(201);
+    expect(d.calls.start).toHaveBeenCalledWith(expect.objectContaining({ client: "android", relays: ["gemini"] }));
+    expect(d.calls.start).not.toHaveBeenCalledWith(expect.objectContaining({ sdp: expect.anything() }));
+    expect((await request(deps(), "POST", "/api/live/session", { botId: "bot1", relays: ["fish"], client: "android" })).status).toBe(400);
+  });
   it("keeps the SDP byte for byte", async () => {
     const d = deps();
     await request(d, "POST", "/api/live/session", { botId: "bot1", sdp: "v=0\r\na=x \r\n", client: "desktop" });

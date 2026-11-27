@@ -32,6 +32,9 @@ export interface AcpDiscoveryOptions {
   default?: string;
   /** Sent as `clientCapabilities._meta` in initialize, as a turn session sends it, so both see the same model list. */
   clientCapabilitiesMeta?: Record<string, unknown>;
+  /** Some CLIs refuse session/new until authenticate ran with a method they advertised. */
+  authMethod?(methods: Array<{ id?: string }>, env: Record<string, string | undefined>): string | null;
+  authMeta?(env: Record<string, string | undefined>): Record<string, unknown> | undefined;
   /** The picker label for an advertised model, given session/new's result verbatim. */
   label?(model: { id: string; label: string }, sessionNew: unknown): string;
   /** Close stdin and give the agent this many milliseconds to exit on its own, so it can release what it holds,
@@ -224,6 +227,13 @@ export async function discoverAcpModels(
         ...(discovery.clientCapabilitiesMeta ? { _meta: discovery.clientCapabilitiesMeta } : {}),
       },
     });
+    const advertised = record(initialized);
+    const methods: Array<{ id?: string }> = Array.isArray(advertised?.authMethods) ? advertised.authMethods as Array<{ id?: string }> : [];
+    const methodId = discovery.authMethod?.(methods, env);
+    if (methodId) {
+      const meta = discovery.authMeta?.(env);
+      await request("authenticate", { methodId, ...(meta ? { _meta: meta } : {}) });
+    }
     const initial = await request("session/new", { cwd, mcpServers: [] });
     const rawSessionId = record(initial)?.sessionId;
     if (typeof rawSessionId !== "string" || !rawSessionId) throw new Error("ACP model discovery did not return a session.");

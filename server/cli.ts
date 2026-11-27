@@ -45,7 +45,7 @@ import { cliCommand, cliPrefix } from "./cli-invocation.ts"; import { defaultDat
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
 import { isLoopbackHost } from "../electron/server-address.mjs";
-import { parseDuration } from "./headless/args.ts";
+import { describeMs, parseDuration, serveReadyTimeoutMs } from "./headless/args.ts";
 import { signInFromEnv, type AppConfig } from "./config.ts";
 import {
   cleanupTunnelOrigin,
@@ -753,7 +753,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     if (startupCancelled) throw new SetupCancelled();
     if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
-    child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"] });
+    child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"], windowsHide: true });
     if (ownerToken) {
       child.stdin?.on("error", () => {});
       child.stdin?.end(`${ownerToken}\n`);
@@ -805,10 +805,9 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   process.on("SIGTERM", onSignal);
 
   try {
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && exited === null && !stopping) {
+    const readyTimeoutMs = serveReadyTimeoutMs(env);
+    for (const deadline = Date.now() + readyTimeoutMs; Date.now() < deadline && exited === null && !stopping; await new Promise((r) => setTimeout(r, 250))) {
       if (await serverUp(options.port, child.pid)) break;
-      await new Promise((r) => setTimeout(r, 250));
     }
     if (exited !== null) {
       if (exited !== 0) log(`OpenMausBot could not start.${logPath ? ` Details: ${logPath}` : " See the output above."}`);
@@ -816,7 +815,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     if (stopping) return await childExit;
     if (!(await serverUp(options.port, child.pid))) {
-      console.error(`OpenMausBot did not become ready within a minute.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
+      console.error(`OpenMausBot did not become ready within ${describeMs(readyTimeoutMs)}.${logPath ? ` Details: ${logPath}` : " See its output above."}`);
       await stop();
       return 1;
     }

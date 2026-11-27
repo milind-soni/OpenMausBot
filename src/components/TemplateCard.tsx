@@ -1,5 +1,5 @@
-// A shareable template of a bot or a department: its card (in the chat and in the department's Share), what it brings
-// (the Details sheet, also Import's preview), and the card's actions.
+// A shareable template of a bot or a department: its card (in the chat, in a department's Share and after a bot's Publish),
+// what it brings (the Details sheet, also Import's preview), and the card's actions.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Check, ChevronDown, Copy, FolderDown, Github, Library, Loader2, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
@@ -11,7 +11,7 @@ import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { addToTeamTemplates, askBot, countsLine, creditShown, deleteTemplate, githubConnection, publishTemplate, publishToRepo, saveTemplateFolder, scrubbedLine, templateDetails } from "@/lib/template-share";
+import { addToTeamTemplates, askBot, countsLine, creditShown, deleteTemplate, downloadTemplate, githubConnection, publishTemplate, publishToRepo, saveTemplateFolder, scrubbedLine, templateDetails } from "@/lib/template-share";
 import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
@@ -85,8 +85,8 @@ export function TemplateCardBody({ card }: { card: TemplateCard }) {
   );
 }
 
-/** The profile's name when the profile is this person's own (not a shared workspace's owner's). */
-function useOwnProfileName(): string {
+/** The profile's name when the profile is this person's own (not a shared workspace's owner's); null until known. */
+function useOwnProfileName(): string | null {
   const profile = useStoreSelector((state) => state.config?.profile);
   const [session, setSession] = useState<SessionState | null>(null);
   useEffect(() => {
@@ -94,19 +94,20 @@ function useOwnProfileName(): string {
     void readSessionState().then((next) => { if (live) setSession(next); });
     return () => { live = false; };
   }, []);
-  return profileForSession(profile, session)?.name?.trim() ?? "";
+  return session ? profileForSession(profile, session)?.name?.trim() ?? "" : null;
 }
 
 /** What the card's buttons do. The card shown is the latest the server answered, until the message brings a newer one. */
 export function useTemplateActions(initial: TemplateCard) {
   const [card, setCard] = useState(initial);
-  const [busy, setBusy] = useState<"publish" | "save" | "delete" | "team" | null>(null);
+  const [busy, setBusy] = useState<"publish" | "save" | "download" | "delete" | "team" | null>(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState<string | null>(null);
   const [teamNote, setTeamNote] = useState<string | null>(null);
   const profileName = useOwnProfileName();
   const [typed, setAuthor] = useState<string | null>(null);
-  const author = typed ?? card.author ?? profileName;
+  const author = typed ?? card.author ?? profileName ?? "";
   useEffect(() => setCard(initial), [initial]);
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
     if (busy) return;
@@ -121,7 +122,9 @@ export function useTemplateActions(initial: TemplateCard) {
     }
   };
   return {
-    card, busy, error, saved, teamNote, author, setAuthor,
+    card, busy, error, saved, downloaded, teamNote, author, setAuthor,
+    /** Whether `author` is settled: the profile's name, which Published by starts with, is read once. */
+    authorKnown: typed !== null || card.author !== undefined || profileName !== null,
     /** Adds it to the Team Cloud's own templates, replacing one of the same name there. */
     addToTeam: (team: string) => run("team", async () => {
       setTeamNote(null);
@@ -137,6 +140,7 @@ export function useTemplateActions(initial: TemplateCard) {
       }
     }),
     save: () => run("save", async () => setSaved(await saveTemplateFolder(card))),
+    download: () => run("download", async () => setDownloaded(await downloadTemplate(card))),
     remove: () => run("delete", async () => {
       await deleteTemplate(card.id);
       setCard((current) => ({ ...current, status: "gone" }));
@@ -214,30 +218,30 @@ function PublishedByField({ actions }: { actions: TemplateActions }) {
 
 /** One line under the buttons: why Publish isn't offered, the publish error, the last action's error, or where the folder went. */
 export function TemplateNotes({ actions }: { actions: TemplateActions }) {
-  const { card, error, saved, teamNote } = actions;
+  const { card, error, saved, downloaded, teamNote } = actions;
   return <>
     {card.fallback && <p className="mt-1.5 text-[12px] text-ink-secondary">{t(card.fallback === "sign_in" ? "template.signInToPublish" : "template.publishUnavailable")}</p>}
     {card.secret && card.status !== "gone" && card.status !== "published" && !card.fallback && <p role="alert" data-template-secret className="mt-1.5 text-[12px] text-danger">{t("template.secretFound")}</p>}
     {card.status === "failed" && card.error && !card.secret && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{card.error}</p>}
     {error && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{error}</p>}
     {saved && <p role="status" dir="auto" className="mt-1.5 truncate text-[12px] text-ink-secondary" title={saved}>{t("template.savedTo", { path: saved })}</p>}
+    {downloaded && <p role="status" dir="auto" className="mt-1.5 truncate text-[12px] text-ink-secondary" title={downloaded}>{t("template.downloaded", { file: downloaded })}</p>}
     {teamNote && <p role="status" dir="auto" className="mt-1.5 text-[12px] text-ink-secondary">{teamNote}</p>}
   </>;
 }
 
 /** On a Team Cloud, its name when the person is its owner or an admin, who add templates to its library; else null. */
 export function useTeamTemplatesOwner(): string | null {
-  const { state } = useStore();
+  const team = useStoreSelector((state) => state.config?.team?.name);
   const admin = useOwnerOrAdmin();
-  const team = state.config?.team?.name;
   return team && admin === true ? team : null;
 }
 
 /** Publishing to one's own repository goes through Share's routes, which a Team Cloud keeps for its owner and admins. */
 export function useRepoPublishOffered(): boolean {
-  const { state } = useStore();
+  const onTeam = useStoreSelector((state) => Boolean(state.config?.team));
   const admin = useOwnerOrAdmin();
-  return !state.config?.team || admin === true;
+  return !onTeam || admin === true;
 }
 
 /** The template card a bot posts in its chat. `botId` and `threadId` are this chat's, for Update; a group chat leaves them out. */

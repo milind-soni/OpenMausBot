@@ -41,11 +41,14 @@ export function claudeLoginPrompt(output: string): { authorizationUrl: string } 
   return null;
 }
 
-/** What Anthropic's page shows after sign-in: a code, sometimes with `#state`. */
+/** What Anthropic's page shows after sign-in: a code, sometimes with `#state`. Never the short digits-only login code
+ * Claude emails, which belongs on Claude's own page. */
 export function claudeLoginCode(value: string): string | null {
   const code = value.trim();
-  return /^[A-Za-z0-9_\-#.:]{8,1024}$/.test(code) ? code : null;
+  return /^[A-Za-z0-9_\-#.:]{8,1024}$/.test(code) && !/^\d{1,8}$/.test(code) ? code : null;
 }
+
+const NOT_THE_CODE = "That is not the code from Claude's page. If it is the login code Claude emails you, enter it on Claude's page, click Authorize, then paste the longer code Claude shows.";
 
 type Flow = {
   status: ProviderAuthenticationStatus;
@@ -148,7 +151,7 @@ export class ClaudeLoginController {
     if (flow.status.phase !== "waiting" || !flow.ready) throw new Error(NOT_AVAILABLE);
     if (flow.codeSent) throw new Error("A code was already sent for this sign-in. Wait for the result, or cancel and start again.");
     const code = claudeLoginCode(pasted);
-    if (!code) throw withSignInReason(new Error("Paste the whole code shown on Anthropic's page after signing in."), "wrong_code");
+    if (!code) throw withSignInReason(new Error(NOT_THE_CODE), "wrong_code");
     const child = flow.child;
     const stdin = child?.stdin;
     if (!child || !stdin || child.exitCode !== null || child.signalCode !== null) throw new Error(NOT_AVAILABLE);

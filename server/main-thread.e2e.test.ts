@@ -293,9 +293,11 @@ it("moves an archived or deleted main thread to the only open one, a thread the 
   try {
     const { bot } = await cli("new-bot", "--name", "Keeper");
     writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
-      [bot.id]: { turns: [
-        { steps: [{ tool: "start_thread", arguments: { title: "Side job", message: "Check the side job." } }], reply: "Opened a side job." },
-        { reply: "Side job checked." },
+      // Picked by each turn's own words: the side job's turn may start before the turn that opened it has finished. The
+      // side job's words also name the thread it came from, so its entry comes first.
+      [bot.id]: { script: [
+        { key: "check", match: ["Check the side job."], reply: "Side job checked." },
+        { key: "open", match: ["Open a side job."], steps: [{ tool: "start_thread", arguments: { title: "Side job", message: "Check the side job." } }], reply: "Opened a side job." },
       ] },
     }));
     const first = bot.activeTaskId as string;

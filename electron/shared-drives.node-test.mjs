@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isShareableDriveRoot, linuxDrive, parseMountInfo, shareableDrive } from "./shared-drives.mjs";
+import { isShareableDriveRoot, isSystemDrive, linuxDrive, parseMountInfo, shareableDrive } from "./shared-drives.mjs";
 
 const MOUNTINFO = [
   "25 1 259:2 / / rw,relatime shared:1 - ext4 /dev/nvme0n1p2 rw",
@@ -66,6 +66,39 @@ test("the home folder is lent only when asked for by the picker; its parents and
     await assert.rejects(validateSharedFolders([{ id, path: path.parse(home).root, write: false, home: true }]), { code: "HOME_OR_ROOT" });
     const [docs] = await validateSharedFolders([{ id, path: path.join(home, "Documents"), write: false, home: true }]);
     assert.equal(docs.home, undefined);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("the Windows system drive is lent whole only when the picker asks for it, read only until edits are confirmed", async () => {
+  const { mkdtempSync, mkdirSync, realpathSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const path = await import("node:path");
+  const { validateSharedFolders } = await import("./computer-sharing.mjs");
+  const base = realpathSync.native(mkdtempSync(path.join(tmpdir(), "omb-system-drive-")));
+  const home = path.join(base, "me");
+  mkdirSync(home, { recursive: true });
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  const id = "8b0c8d3e-1f2a-4b5c-8d6e-7f8091a2b3c4";
+  // The drive the home folder is on: C:\ on Windows; "/" here, standing in for it with platform "win32".
+  const drive = path.parse(home).root;
+  try {
+    process.env.HOME = home; process.env.USERPROFILE = home;
+    assert.equal(await isSystemDrive(drive, "win32"), true);
+    assert.equal(await isSystemDrive(drive, "darwin"), false, "Windows only");
+    assert.equal(await isSystemDrive(base, "win32"), false, "a folder, not the drive");
+    const asked = { id, path: drive, write: true, system: true };
+    const [lent] = await validateSharedFolders([asked], { platform: "win32" });
+    assert.deepEqual({ system: lent.system, write: lent.write, home: lent.home }, { system: true, write: false, home: undefined });
+    const [edits] = await validateSharedFolders([asked], { platform: "win32", homeEdits: true });
+    assert.equal(edits.write, true, "edits once the person confirmed them");
+    await assert.rejects(validateSharedFolders([{ ...asked, system: undefined }], { platform: "win32" }), { code: "HOME_OR_ROOT" }, "not without the request");
+    await assert.rejects(validateSharedFolders([asked], { platform: "linux" }), { code: "HOME_OR_ROOT" }, "elsewhere / stays refused");
+    await assert.rejects(validateSharedFolders([{ ...asked, path: base }], { platform: "win32" }), { code: "HOME_OR_ROOT" }, "folders above home stay refused");
+    const [homeEdits] = await validateSharedFolders([{ id, path: home, write: true, home: true }], { homeEdits: true });
+    assert.equal(homeEdits.write, true, "the home folder keeps confirmed edits too");
   } finally {
     for (const [name, value] of Object.entries(saved)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
     rmSync(base, { recursive: true, force: true });

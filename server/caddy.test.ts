@@ -1,12 +1,17 @@
-import { spawnSync } from "node:child_process";
+import { ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CADDY_ASSETS, CADDY_VERSION, caddyfileFor, ensureCaddy, normalizeDomainOption, pinnedCaddyPath, portPermissionRefused, resolveCaddyBinary, startCaddy } from "./caddy.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 const posix = process.platform !== "win32";
 
@@ -44,6 +49,23 @@ describe("the managed Caddy", () => {
     expect(resolveCaddyBinary({ dataDir: dir, env: { PATH: join(dir, "bin") }, platform: "linux", arch: "x64", exists })).toBe(pinned);
     expect(resolveCaddyBinary({ dataDir: join(dir, "elsewhere"), env: { PATH: join(dir, "bin") }, platform: "linux", arch: "x64", exists })).toBe(onPath);
     expect(resolveCaddyBinary({ dataDir: join(dir, "elsewhere"), env: { PATH: "" }, platform: "linux", arch: "x64", exists })).toBeNull();
+  });
+
+  it("hides a preinstalled Windows Caddy while preserving missing-binary rejection", async () => {
+    const binary = join(dir, "caddy.exe");
+    writeFileSync(binary, "");
+    const fetchImpl = vi.fn<typeof fetch>();
+    expect(await ensureCaddy({ dataDir: dir, env: { PATH: dir }, platform: "win32", fetchImpl })).toBe(binary);
+    await expect(ensureCaddy({ dataDir: dir, env: { PATH: "" }, platform: "win32", fetchImpl })).rejects.toThrow("--domain is not available on Windows yet");
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const child = new ChildProcess();
+    vi.mocked(spawn).mockClear().mockImplementationOnce(() => {
+      queueMicrotask(() => child.emit("error", new Error("fixture exit")));
+      return child;
+    });
+    await expect(startCaddy({ binary, dataDir: dir, domain: "maus.example.com", appPort: 18799, webhookPort: 18800, env: { PATH: dir } })).rejects.toThrow("exit 1");
+    expect(spawn).toHaveBeenCalledWith(binary, ["run", "--config", join(dir, "caddy", "Caddyfile"), "--adapter", "caddyfile"], expect.objectContaining({ windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }));
   });
 
   it("takes a bare public hostname for --domain", () => {

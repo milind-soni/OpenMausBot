@@ -69,6 +69,7 @@ import { CloudSetup } from "@/components/CloudSetup";
 import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
 import { TeamWelcome } from "@/components/TeamWelcome";
 import { ConversationShareDialogs } from "@/components/conversation-share/ConversationShareDialogs";
+import { PublishTemplateHost } from "@/components/publish-template";
 import { invitedToTeam, teamWelcomeDue, useTeamWelcomeRecord } from "@/lib/team-welcome";
 import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
 import { EmptyChatShell } from "@/components/onboarding/EmptyChatShell";
@@ -400,6 +401,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
       <ConversationShareDialogs />
+      <PublishTemplateHost />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1 overflow-x-clip">
       {!calendarFocus && <button

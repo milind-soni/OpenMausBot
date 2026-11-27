@@ -277,6 +277,7 @@ export type TeamExportSkipReason =
   | "skill_conflict"
   | "bot_skill_limit"
   | "team_skill_limit"
+  | "skill_off"
   | "preset_empty"
   | "preset_skill_conflict";
 

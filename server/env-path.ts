@@ -392,7 +392,7 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
       const command = join(dir, desktop[1]);
       const archive = join(dir, desktop[2]);
       const script = join(archive, desktop[3]);
-      if (isFile(command) && isFile(archive)) {
+      if (isFile(command) && (isFile(archive) || isFile(script))) {
         return { command, args: ["--expose-internals", script], env: { ELECTRON_RUN_AS_NODE: "1" } };
       }
     }

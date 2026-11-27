@@ -9,6 +9,7 @@ import { GroupView } from "./GroupView";
 import { ThreadPanelHeading } from "./room-feed/ThreadPanelHeading";
 import { useRoomFeedHere } from "./room-feed/use-room-feed";
 import { useThreadTurnStart } from "./room-feed/thread-turn-start";
+import { useRoomWorkStatuses } from "./room-feed/use-room-work";
 import { FEED_MIN_WIDTH } from "./room-feed/feed-fit";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize";
 
@@ -35,6 +36,7 @@ export function ForkPanel({ full = false }: { full?: boolean }) {
   }, [panel?.focusComposer, panel?.loadId, panel?.loading]);
   const panelGroup = panel?.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const turnStartedAt = useThreadTurnStart(panelGroup, panelGroup?.tasks?.find((candidate) => candidate.threadId === panel?.threadId));
+  const work = useRoomWorkStatuses(panelGroup?.dm ? null : panelGroup?.id, state.bots).get(panel?.threadId ?? "") ?? null;
   if (!panel) return null;
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
@@ -78,7 +80,7 @@ export function ForkPanel({ full = false }: { full?: boolean }) {
         <header className="flex shrink-0 items-center gap-2 py-2.5 ps-4 pe-3">
           {inPlace && group && <button type="button" aria-label={t("room.thread.backToFeed", { name: group.name })} title={t("room.thread.backToFeed", { name: group.name })}
             data-thread-back="" className="ui-icon-button shrink-0" onClick={close}><ArrowLeft size={16} aria-hidden="true" /></button>}
-          {!fork && group && groupTask ? <ThreadPanelHeading group={group} task={groupTask} messages={panel.messages} working={Boolean(openedGroup?.working || openedGroup?.busyBotId)} /> : <div className="min-w-0 flex-1">
+          {!fork && group && groupTask ? <ThreadPanelHeading group={group} task={groupTask} messages={panel.messages} working={Boolean(openedGroup?.working || openedGroup?.busyBotId)} work={work} /> : <div className="min-w-0 flex-1">
             <h2 dir="auto" title={task?.title} className="truncate text-[15px] font-semibold leading-5 text-ink">{fork ? task?.title ?? label : label}</h2>
             <p dir="auto" className="truncate text-[12px] leading-4 text-ink-secondary">{group?.name ?? bot?.name}</p>
           </div>}

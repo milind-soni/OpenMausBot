@@ -50,6 +50,8 @@ export type LiveCallStarted =
   | { call: LiveCallState; sdp?: undefined; fish?: undefined; gemini: LiveGeminiTransport; elevenlabs?: undefined }
   | { call: LiveCallState; sdp?: undefined; fish?: undefined; gemini?: undefined; elevenlabs: LiveElevenLabsTransport };
 export const LIVE_FISH_NEEDS_APP = "Live calls through Fish Audio work in the desktop app or a web browser, not in the phone app yet.";
+/** The relayed sessions a phone app can run itself, as it names them when it starts a call. */
+export type LiveRelayClient = "gemini";
 export const LIVE_GEMINI_NEEDS_APP = "Live calls through Gemini work in the desktop app or a web browser, not in the phone app yet.";
 export const LIVE_ELEVENLABS_NEEDS_APP = "Live calls through ElevenLabs work in the desktop app or a web browser, not in the phone app yet.";
 
@@ -184,7 +186,7 @@ export class LiveCallController {
     return this.call && this.call.state.status !== "ended" ? { ...this.call.state } : null;
   }
 
-  async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp?: string }): Promise<LiveCallStarted> {
+  async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp?: string; relays?: readonly LiveRelayClient[] }): Promise<LiveCallStarted> {
     const settings = this.deps.settings();
     // First: someone refused here is not told about a running call, or sent to set Azure or a relayed service up.
     // The chosen relayed service comes before a key's endpoint, so its refusal and its mismatch check apply.
@@ -203,7 +205,8 @@ export class LiveCallController {
       }
     }
     const relayed = limited === "azure" || limited === "custom" ? null : limited;
-    if (relayed && (input.client === "ios" || input.client === "android")) throw new LiveSessionError(relayed === "fish" ? LIVE_FISH_NEEDS_APP : relayed === "gemini" ? LIVE_GEMINI_NEEDS_APP : LIVE_ELEVENLABS_NEEDS_APP, 400);
+    // A phone app runs a relayed session only when it says it can (`relays`); older phones are sent to the desktop app.
+    if (relayed && (input.client === "ios" || input.client === "android") && !(relayed === "gemini" && input.relays?.includes("gemini"))) throw new LiveSessionError(relayed === "fish" ? LIVE_FISH_NEEDS_APP : relayed === "gemini" ? LIVE_GEMINI_NEEDS_APP : LIVE_ELEVENLABS_NEEDS_APP, 400);
     if (!relayed && !input.sdp) throw new LiveSessionError("The call request was not valid.", 400);
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();

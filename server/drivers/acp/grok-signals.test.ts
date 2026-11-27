@@ -20,6 +20,8 @@ import { grokReportedFailure } from "./grok-signals.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const TOKIO = "grok: failed to start tokio runtime: blocking pool pre-warm stalled after 14 of 16 threads";
+// A provider the Grok CLI serves (an OpenAI-compatible router) throttling for a moment.
+const ROUTER_THROTTLE = "Rate limited: stream error (rate_limit_error): openai/gpt-5.2: rate limit - Semaphore timeout after 2000ms, waiting before retry";
 
 const scratches: string[] = [];
 const instances: ProviderInstance[] = [];
@@ -128,6 +130,35 @@ describe("Grok's rate-limit stop", () => {
     expect(of(events, "turn.completed")[0]!.stopReason).not.toBe("quota");
     expect(of(events, "runtime.error")[0]).not.toHaveProperty("limit");
     expect(of(events, "runtime.error")[0]!.message).toMatch(/^Grok had a temporary server problem/);
+  });
+
+  it("leaves a router's own transient throttle a rate limit a retry can clear, and holds no quota", async () => {
+    const events = await (await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_STOP: "rate_limit", FAKE_ACP_COMPLETE_REPLY: "never",
+      FAKE_ACP_COMPLETE_RESULT: ROUTER_THROTTLE })).ask();
+    expect(of(events, "turn.completed")).toEqual([expect.objectContaining({ ok: false, stopReason: "rpc_error" })]);
+    const [error] = of(events, "runtime.error");
+    expect(error).not.toHaveProperty("limit");
+    expect(error!.message).toMatch(/^Grok hit a rate limit/);
+  });
+});
+
+describe("Grok's rate-limit words", () => {
+  const said = (text: string): AcpReportedFailure => grokReportedFailure(Object.assign(new Error(text), { code: -32003 })) as AcpReportedFailure;
+
+  it("keeps a provider's own transient throttle a rate limit, not the account's quota", () => {
+    const throttle = said(ROUTER_THROTTLE);
+    expect(throttle.facts.message).toMatch(/^Grok hit a rate limit/);
+    expect(throttle.acpUsageLimit).toBe(false);
+    expect(said("HTTP 429: Too Many Requests").acpUsageLimit).toBe(false);
+  });
+
+  it("still reads its own usage-limit wording, and a bare rate-limit stop, as the account's quota", () => {
+    const limit = said("Rate limited: you have reached your usage limit");
+    expect(limit.facts.message).toMatch(/^This Grok account has reached its usage limit/);
+    expect(limit.acpUsageLimit).toBe(true);
+    const bare = said("Rate limited");
+    expect(bare.facts.message).toMatch(/^This Grok account has reached its usage limit/);
+    expect(bare.acpUsageLimit).toBe(true);
   });
 });
 

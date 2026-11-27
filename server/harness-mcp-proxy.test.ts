@@ -60,6 +60,16 @@ describe("harness MCP capability proxy", () => {
       .resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "1 row" }] } });
   });
 
+  it("replaces an image in a tool's result with a note when the model reads text only", async () => {
+    status = 200;
+    payload = { result: { content: [{ type: "text", text: "snapshot taken" }, { type: "image", data: "jpeg", mimeType: "image/jpeg" }] } };
+    const textOnly = await harnessMcpRequest(frame("tools/call", { name: "agent_browser_snapshot" }), { ...connection(), textOnly: true }) as any;
+    expect(textOnly.result.content[0]).toEqual({ type: "text", text: "snapshot taken" });
+    expect(textOnly.result.content[1]).toEqual({ type: "text", text: expect.stringContaining("[Image from this tool's result not shown: this model reads text only (image/jpeg, ~1 kB).]") });
+    const asSent = await harnessMcpRequest(frame("tools/call", { name: "agent_browser_snapshot" }), connection()) as any;
+    expect(asSent.result.content[1]).toEqual({ type: "image", data: "jpeg", mimeType: "image/jpeg" });
+  });
+
   it("sends Email calls to their own harness route with the Email instructions", async () => {
     status = 200;
     payload = { result: { tools: [{ name: "EMAIL_READ_MESSAGE" }], instructions: "mail" } };

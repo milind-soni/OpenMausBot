@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, FOLLOWERS, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, localDay, markLaunchNotice, MODELGO_OFFER_NOTICE, MUST_ACT,
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, FOLLOWERS, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, localDay, markLaunchNotice, MODELGO_OFFER_NOTICE, MUST_ACT, PREVIOUS_WHATS_NEW_NOTICE,
   nextNotice, noticeSeen, NOTICES, OLD_PRO_DISMISSALS, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TOGETHER_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE, type NoticeFacts,
   type NoticeId } from "./notices";
 
@@ -46,7 +46,7 @@ it("is one queue: What's new first, then the Simple mode popup, the product-upda
   expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === WHATS_NEW_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null, true), none)).toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, false, null), none)).toBeNull();
-  expect(WHATS_NEW_NOTICE).toBe("whats-new-2026-11b");
+  expect(WHATS_NEW_NOTICE).toBe("whats-new-2026-11c");
   expect(nextNotice(facts(true, true, true, true, true, true), none)).toBe(WHATS_NEW_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null), none)).toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, true), id => id === WHATS_NEW_NOTICE)).toBe(PRODUCT_HUNT_NOTICE);
@@ -70,7 +70,7 @@ it("is one queue: What's new first, then the Simple mode popup, the product-upda
 });
 
 it("Boat's credit offer and the Grok Bot move are ones the desktop keeps for its every page, as What's new is", () => {
-  expect(DESKTOP_NOTICES).toEqual([EARLIER_WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE, WHATS_NEW_NOTICE]);
+  expect(DESKTOP_NOTICES).toEqual([EARLIER_WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE, PREVIOUS_WHATS_NEW_NOTICE, WHATS_NEW_NOTICE]);
 });
 
 it("the Teams What's new goes ahead of every notice, holds the queue while it waits, and the rest keep their order after it", () => {

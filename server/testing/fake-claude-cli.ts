@@ -550,7 +550,7 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
   // Every new thread asks its engine for a title (server/thread-title-generate.ts), so that call stays out of the captures
   // below unless a test answers it: by FAKE_CLAUDE_TEXT_FILE or a FAKE_CLAUDE_TEXT_ROUTES marker. Otherwise it fails at
   // once and the thread keeps its first-message title. Answered, it still never overwrites the turn dump.
-  const titleCall = prompt.includes("Reply with only a short title: 3 to 6 words");
+  const titleCall = prompt.includes("Reply with only a short title");
   const routes = process.env.FAKE_CLAUDE_TEXT_ROUTES;
   const routed = () => {
     try { return Object.keys(JSON.parse(readFileSync(routes!, "utf8"))).some((marker) => prompt.includes(marker)); } catch { return false; }
@@ -1144,6 +1144,12 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
   let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
+  if (process.env.FAKE_CLAUDE_PROMPT_STATE) {
+    const path = join(process.env.FAKE_CLAUDE_PROMPT_STATE, `${sessionId}.txt`);
+    launchFiles ??= readLaunchFiles();
+    if (!argv.includes("--resume")) writeFileSync(path, String(launchFiles.systemPrompt ?? ""));
+    replyParts = [readFileSync(path, "utf8")];
+  }
   const defaultToolId = `tu-${process.pid}-${++toolUseCount}`;
   if (process.env.FAKE_CLAUDE_TURN_STATE) {
     let n = 0;
