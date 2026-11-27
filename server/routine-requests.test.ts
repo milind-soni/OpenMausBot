@@ -16,6 +16,7 @@ import {
   type RoutineToolDefinitionInput,
 } from "./routine-requests.ts";
 import { RoutineManager, type RoutineInput } from "./routines.ts";
+import { routineRequestCardDataSchema } from "./routine-request-schemas.ts";
 import type { JsonValue } from "./schema.ts";
 import "./server-line-packs.ts";
 import { setConversationLanguage } from "./server-lines.ts";
@@ -2033,6 +2034,79 @@ describe("a bot's own routine changes", () => {
     const deleted = await submit({ action: "delete", routineId: marked });
     expect(undo(service, deleted.requestId)).toMatchObject({ state: "undone", action: "delete" });
     expect(routines.listRoutines().find((routine) => routine.prompt === "Start with the app.")?.runOnStartup).toBe(true);
+  });
+
+  it.each([
+    ["pause", false], ["pause", true], ["resume", false], ["resume", true],
+  ] as const)("restores the previous enabled state after %s from %s", async (action, enabled) => {
+    const { service, routines, clock } = own();
+    const saved = routines.create({ botId: "bot-a", name: "Status fixture", prompt: "Check the queue.", enabled,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    clock.now += 1_000;
+    const applied = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action, routineId: saved.id } });
+    expect(routines.listRoutines()[0]?.enabled).toBe(action === "resume");
+    expect(undo(service, applied.requestId)).toMatchObject({ state: "undone" });
+    expect(routines.listRoutines()[0]?.enabled).toBe(enabled);
+  });
+
+  it.each(["pause", "resume"] as const)("undoes an unchanged %s without disclosing instructions or losing attachments", async (action) => {
+    const { service, routines, store, clock } = own();
+    const enabled = action === "resume";
+    const prompt = "Use token=fixture-private-value.";
+    const attachments = [{ id: "context", name: "Context", path: "/fixture/context.txt", kind: "file" as const, size: 20 }];
+    const saved = routines.create({ botId: "bot-a", name: "Private status fixture", prompt, enabled, attachments,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    clock.now += 1_000;
+    const applied = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action, routineId: saved.id } });
+    const receipt = store.messagesFor("ask-thread")[0]!.card!;
+    expect(JSON.stringify(receipt)).not.toContain("fixture-private-value");
+    expect(undo(service, applied.requestId)).toMatchObject({ state: "undone" });
+    expect(routines.listRoutines()[0]).toMatchObject({ enabled, prompt, attachments });
+  });
+
+  it.each(["pause", "resume"] as const)("still undoes a legacy %s receipt without a before snapshot", async (action) => {
+    const { service, routines, store, clock } = own();
+    const enabled = action === "pause";
+    const saved = routines.create({ botId: "bot-a", name: "Legacy status fixture", prompt: "Check the queue.", enabled,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    clock.now += 1_000;
+    const applied = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action, routineId: saved.id } });
+    delete store.messagesFor("ask-thread")[0]!.card!.routineRequest!.undo!.before;
+    expect(undo(service, applied.requestId)).toMatchObject({ state: "undone" });
+    expect(routines.listRoutines()[0]?.enabled).toBe(enabled);
+  });
+
+  it.each([
+    ["pause", "name"], ["resume", "name"], ["pause", "prompt"], ["resume", "prompt"],
+  ] as const)("keeps %s Undo valid when redacting a maximum-length %s", async (action, field) => {
+    const { service, routines, store, clock } = own();
+    const name = field === "name" ? `${"x".repeat(65)} token=12345678` : "Status fixture";
+    const prompt = field === "prompt" ? `${"x".repeat(19_985)} token=12345678` : "Check the queue.";
+    const enabled = action === "resume";
+    const saved = routines.create({ botId: "bot-a", name, prompt, enabled,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] } });
+    clock.now += 1_000;
+    const applied = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action, routineId: saved.id } });
+    const receipt = JSON.parse(JSON.stringify(store.messagesFor("ask-thread")[0]!.card!.routineRequest));
+    expect(routineRequestCardDataSchema.safeParse(receipt).success).toBe(true);
+    expect(JSON.stringify(receipt)).not.toContain("12345678");
+    expect(receipt.undo.before.enabled).toBe(enabled);
+    expect(undo(service, applied.requestId)).toMatchObject({ state: "undone" });
+    expect(routines.listRoutines()[0]).toMatchObject({ name, prompt, enabled });
+  });
+
+  it.each(["pause", "resume"] as const)("restores %s state without changing a fractional once timestamp", async (action) => {
+    const { service, routines, store, clock } = own();
+    const enabled = action === "resume";
+    const schedule = { type: "once" as const, at: clock.now + 60_000.5 };
+    const saved = routines.create({ botId: "bot-a", name: "Fractional time", prompt: "Check the queue.", enabled, schedule });
+    clock.now += 1_000;
+    const applied = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: { action, routineId: saved.id } });
+    const receipt = JSON.parse(JSON.stringify(store.messagesFor("ask-thread")[0]!.card!.routineRequest));
+    expect(routineRequestCardDataSchema.safeParse(receipt).success).toBe(true);
+    expect(receipt.undo.before.enabled).toBe(enabled);
+    expect(undo(service, applied.requestId)).toMatchObject({ state: "undone" });
+    expect(routines.listRoutines()[0]).toMatchObject({ enabled, schedule });
   });
 
   it("undoes each kind of change once, and refuses a run or a stale change", async () => {
