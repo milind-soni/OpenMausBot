@@ -1,11 +1,12 @@
 // A relayed MCP server's part of a session's tool budget, for the servers OpenMausBot relays but does not serve:
 // connected apps and the person's own servers. The session gives each relay its share in bytes and a file to record
 // the list it relays; the relay fits what it lists into the share, and the record sizes the share the next session
-// gives it.
+// gives it. A list over its share even at its shortest leaves out tools itself, so no relay takes the session past the
+// CLI's budget and has the CLI drop another server's tools.
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { fitToolListToShare, type ListedTool } from "./tool-list-budget.ts";
+import { fitToolListWithinShare, overShareNote, type ListedTool } from "./tool-list-budget.ts";
 
 export const TOOL_LIST_SHARE_ENV = "OMB_TOOL_LIST_SHARE";
 export const TOOL_LIST_RECORD_ENV = "OMB_TOOL_LIST_RECORD";
@@ -53,8 +54,9 @@ export function toolsForSessionShare(tools: readonly unknown[], env: Record<stri
   if (!tools.every(isTool)) return [...tools];
   if (path) record(path, tools);
   if (share === undefined) return [...tools];
-  const fitted = fitToolListToShare(tools, share);
-  if (!fitted.fits) log?.(`tool list is ${fitted.bytes} bytes at its shortest, ${fitted.bytes - share} over its ${share}-byte share of the session's tool budget`);
+  const fitted = fitToolListWithinShare(tools, share);
+  const note = overShareNote(fitted, share);
+  if (note) log?.(note);
   return fitted.tools;
 }
 

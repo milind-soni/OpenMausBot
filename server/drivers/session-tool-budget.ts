@@ -88,7 +88,7 @@ export function withSessionToolBudget(servers: AcpMcpServer[], budget: number, o
   const lists = [...sized.map((entry) => entry.tools), ...others.map(() => UNKNOWN_LIST_RESERVE)];
   const { shares, bytes, fits } = sessionToolShares(lists, budget);
   if (!fits) {
-    log(`[mcp] this session's MCP tools (${sized.map((entry) => entry.server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; the engine leaves out its largest tools first`);
+    log(`[mcp] this session's MCP tools (${sized.map((entry) => entry.server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; each server leaves out its least important tools to fit its share`);
   }
   if (others.length) log(`[mcp] ${others.map((entry) => entry.server.name).join(", ")}: not relayed by OpenMausBot, so not fitted to the session's tool budget (${UNKNOWN_LIST_RESERVE} bytes set aside each)`);
   for (const entry of sized) {

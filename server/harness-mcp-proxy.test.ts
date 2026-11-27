@@ -53,10 +53,10 @@ describe("harness MCP capability proxy", () => {
     const tool = { name: "data_sql", description: "Run SQL. It reads the bot's tables.", inputSchema: { type: "object", additionalProperties: true, properties: { sql: { type: "string", description: "One statement." } } } };
     payload = { result: { tools: [tool], instructions: "DuckDB" } };
     await expect(harnessMcpRequest(frame("tools/list"), { ...connection("data"), schemaProfile: "moonshot" })).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { tools: [tool], instructions: "DuckDB" } });
-    await expect(harnessMcpRequest(frame("tools/list"), { ...connection("data"), schemaProfile: "listShare:100" })).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: {
+    await expect(harnessMcpRequest(frame("tools/list"), { ...connection("data"), schemaProfile: "listShare:150" })).resolves.toEqual({ jsonrpc: "2.0", id: 1, result: {
       instructions: "DuckDB", tools: [{ name: "data_sql", description: tool.description, inputSchema: { type: "object", properties: { sql: { type: "string" } } } }] } });
     payload = { result: { content: [{ type: "text", text: "1 row" }] } };
-    await expect(harnessMcpRequest(frame("tools/call", { name: "data_sql", arguments: { sql: "select 1" } }), { ...connection("data"), schemaProfile: "listShare:100" }))
+    await expect(harnessMcpRequest(frame("tools/call", { name: "data_sql", arguments: { sql: "select 1" } }), { ...connection("data"), schemaProfile: "listShare:150" }))
       .resolves.toEqual({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "1 row" }] } });
   });
 

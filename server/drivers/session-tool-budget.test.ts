@@ -16,7 +16,7 @@ import { cliDrops } from "../testing/cli-tool-drop.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { workspaceAppsLikeCatalog } from "../testing/workspace-apps-like-catalog.ts";
 import {
-  ANTIGRAVITY_CLI_TOOL_BUDGET, definitionListBytes, toolListFloorBytes, toolsForShareProfile, type ListedTool,
+  ANTIGRAVITY_CLI_TOOL_BUDGET, ANTIGRAVITY_CLI_TOOL_LIMIT, COORDINATION_TOOLS, definitionListBytes, toolListFloorBytes, toolsForShareProfile, type ListedTool,
 } from "../tool-list-budget.ts";
 import { TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsForSessionShare } from "../tool-list-share.ts";
 import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfile } from "../tool-schema-profile.ts";
@@ -107,7 +107,7 @@ describe("the session's tool budget over every server", () => {
     }
   });
 
-  it("a session that cannot fit even at its shortest keeps every tool, says by how much, and leaves the CLI the largest to drop", () => {
+  it("a session that cannot fit even at its shortest leaves out its servers' least important tools itself, never a coordination tool", () => {
     const recordsDir = mkdtempSync(join(tmpdir(), "stb-"));
     const big = [...session, workspace];
     LISTS.workspace = fitToolList(whopLikeCatalog().slice(0, 120), gemini) as ListedTool[];
@@ -115,8 +115,12 @@ describe("the session's tool budget over every server", () => {
       shown(plan(big, recordsDir).planned);
       const { planned, logged } = plan(big, recordsDir);
       const lists = shown(planned);
-      expect(flat(lists)).toHaveLength(Object.values(OWN).flat().length + LISTS.composio!.length + LISTS.workspace.length);
-      expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's MCP tools \(agents, browser, data, composio, workspace\) come to \d+ bytes at their shortest, \d+ over the 55000-byte tool budget; the engine leaves out its largest tools first$/)]);
+      expect(flat(lists).length).toBeLessThan(Object.values(OWN).flat().length + LISTS.composio!.length + LISTS.workspace.length);
+      for (const name of COORDINATION_TOOLS) expect(lists.agents!.map((tool) => tool.name)).toContain(name);
+      const all = Object.values(lists).flat();
+      expect(definitionListBytes(all)).toBeLessThanOrEqual(ANTIGRAVITY_CLI_TOOL_LIMIT);
+      expect(cliDrops(all, ANTIGRAVITY_CLI_TOOL_LIMIT)).toEqual([]);
+      expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's MCP tools \(agents, browser, data, composio, workspace\) come to \d+ bytes at their shortest, \d+ over the 55000-byte tool budget; each server leaves out its least important tools to fit its share$/)]);
     } finally {
       LISTS.workspace = fitToolList(whopLikeCatalog().slice(0, 30), gemini) as ListedTool[];
     }

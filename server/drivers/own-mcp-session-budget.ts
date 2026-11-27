@@ -78,7 +78,7 @@ export function withSessionToolShares(servers: AcpMcpServer[], budget: number, l
   const { shares, bytes, fits } = sessionToolShares(own.map(({ tools }) => tools!), budget);
   if (!fits) {
     const others = servers.filter((server) => !own.some((entry) => entry.server === server)).map((server) => server.name);
-    log(`[mcp] this session's own MCP tools (${own.map(({ server }) => server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; the engine leaves out its largest tools first${others.length ? ` (${others.join(", ")} not counted)` : ""}`);
+    log(`[mcp] this session's own MCP tools (${own.map(({ server }) => server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; each server leaves out its least important tools to fit its share${others.length ? ` (${others.join(", ")} not counted)` : ""}`);
   }
   const shareOf = new Map(own.map(({ server }, index) => [server, shares[index]!]));
   return servers.map((server) => {

@@ -4,7 +4,8 @@ import fullAgents from "./drivers/agents-catalog-goldens/full.tools-list.json" w
 import { compactAdvertisedSchema } from "./advertised-schema.ts";
 import { cliDrops } from "./testing/cli-tool-drop.ts";
 import {
-  cutText, definitionBytes, withCompactSchemas, withDescriptionLevel, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, TOOL_DESCRIPTION_FLOOR, TOOL_DESCRIPTION_MIN, toolListShare, toolListShareProfile,
+  ANTIGRAVITY_CLI_TOOL_BUDGET, ANTIGRAVITY_CLI_TOOL_LIMIT, COORDINATION_TOOLS, cutText, definitionBytes, fitToolListWithinShare, toolKeepRank, toolListLimit,
+  withCompactSchemas, withDescriptionLevel, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, TOOL_DESCRIPTION_FLOOR, TOOL_DESCRIPTION_MIN, toolListShare, toolListShareProfile,
   toolsForShareProfile, toolsListResultForShareProfile, type ListedTool,
 } from "./tool-list-budget.ts";
 
@@ -126,8 +127,8 @@ describe("fitting a list into its share", () => {
     expect(toolsListResultForShareProfile({ error: "x" }, toolListShareProfile(1))).toEqual({ error: "x" });
     const logged: string[] = [];
     const fitted = toolsListResultForShareProfile(result, toolListShareProfile(14_000), (line) => logged.push(line)) as { tools: ListedTool[] };
-    expect(names(fitted.tools)).toEqual(names(agents));
-    expect(logged).toEqual([expect.stringMatching(/^tool list is \d+ bytes at its shortest, \d+ over its 14000-byte share of the session's tool budget$/)]);
+    expect(names(fitted.tools)).toEqual(names(fitToolListWithinShare(agents, 14_000).tools));
+    expect(logged).toEqual([expect.stringMatching(/^tool list is over its 14000-byte share of the session's tool budget even at its shortest: left out \d+ tool\(s\) so the engine does not choose, \w+/)]);
     // The same list under the same share again, as every request of a turn builds it: the fitted list reused, no second line.
     expect(toolsForShareProfile(structuredClone(agents), toolListShareProfile(14_000), (line) => logged.push(line))).toBe(fitted.tools);
     expect(logged).toHaveLength(1);
@@ -205,5 +206,32 @@ describe("fitting a list into its share", () => {
         labels: { type: "array", items: { type: "string" }, maxItems: 16 },
       },
     });
+  });
+});
+
+describe("a list over its share even at its shortest", () => {
+  const share = 14_000;
+
+  it("leaves out tools itself, the least important first, never a coordination tool, until the CLI has nothing to drop", () => {
+    const fitted = fitToolListWithinShare(agents, share);
+    expect(fitted.left.length).toBeGreaterThan(0);
+    expect(fitted.bytes).toBeLessThanOrEqual(toolListLimit(share));
+    expect(cliDrops(fitted.tools, toolListLimit(share))).toEqual([]);
+    for (const name of COORDINATION_TOOLS) expect(names(fitted.tools)).toContain(name);
+    // A protected tool goes only once every other tool has.
+    const keptPlain = fitted.tools.filter((tool) => toolKeepRank(tool.name) === 0);
+    if (fitted.left.some((name) => PROTECTED_TOOLS.includes(name))) expect(keptPlain).toEqual([]);
+    // What is kept is in the order given, and what is left out is named in that order too.
+    expect(names(fitted.tools)).toEqual(names(agents).filter((name) => !fitted.left.includes(name)));
+    expect(fitted.left).toEqual(names(agents).filter((name) => fitted.left.includes(name)));
+  });
+
+  it("leaves nothing out while it is within the CLI's own limit, and keeps the coordination tools at any share", () => {
+    const shortest = fitToolListToShare(agents, 1).bytes;
+    const near = Math.ceil((shortest * ANTIGRAVITY_CLI_TOOL_BUDGET) / ANTIGRAVITY_CLI_TOOL_LIMIT);
+    expect(fitToolListToShare(agents, near).fits).toBe(false);
+    expect(fitToolListWithinShare(agents, near).left).toEqual([]);
+    const tiny = fitToolListWithinShare(agents, 1);
+    expect(names(tiny.tools)).toEqual(names(agents).filter((name) => COORDINATION_TOOLS.includes(name)));
   });
 });

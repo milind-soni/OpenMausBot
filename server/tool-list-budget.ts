@@ -5,8 +5,10 @@
 // bytes, on 1.5.18 up to about 56,780, about 38 more per further tool. There is no limit for one tool: with many tools
 // the cut only looks like one, since every tool over some size goes. A session's servers share out
 // ANTIGRAVITY_CLI_TOOL_BUDGET and each fits its list into its share, least loss first: the schema compacted, then its
-// annotations, shorter parameter descriptions, shorter tool descriptions, and last nested fields. No tool is left out,
-// no name or required field changes, and every call is still checked against the tool's own full schema.
+// annotations, shorter parameter descriptions, shorter tool descriptions, and last nested fields. Only a list that is over
+// its share even then leaves tools out, and it chooses them itself, the least important first, so the CLI never drops one
+// that the bot must keep. No name or required field changes, and every call is still checked against the tool's own full
+// schema.
 import { compactAdvertisedSchema } from "./advertised-schema.ts";
 import { itemsOf, schemaBytes } from "./tool-schema-profile.ts";
 
@@ -15,6 +17,16 @@ export type ListedTool = { name: string; description?: string; inputSchema?: unk
 
 /** Below the CLI's drop point, with room for its per-path overhead and the person's own servers. */
 export const ANTIGRAVITY_CLI_TOOL_BUDGET = 55_000;
+
+/** The most a session's tools came to that the CLI kept whole in every measurement: one tool alone on 1.5.17 (56,608), more
+ * with more tools. A list leaves tools out only past its share's part of this, so a session a little over the budget
+ * loses nothing the CLI would have kept. */
+export const ANTIGRAVITY_CLI_TOOL_LIMIT = 56_600;
+
+/** What a list with `share` of ANTIGRAVITY_CLI_TOOL_BUDGET may come to before it leaves tools out. */
+export function toolListLimit(share: number): number {
+  return Math.floor((share * ANTIGRAVITY_CLI_TOOL_LIMIT) / ANTIGRAVITY_CLI_TOOL_BUDGET);
+}
 
 /** The value of OMB_TOOL_SCHEMA_PROFILE that gives a server its share of a session's budget, in bytes. */
 const SHARE_PREFIX = "listShare:";
@@ -41,6 +53,16 @@ export function definitionListBytes(tools: readonly ListedTool[]): number {
 /** Tools never to be the ones the CLI leaves out, most important first. It drops the largest first, so when a list cannot
  * fit these are made smaller still. */
 export const PROTECTED_TOOLS: readonly string[] = ["coordinate_bots", "start_thread", "show_html", "trigger", "memory_update", "attach_file"];
+
+/** Tools a list never leaves out, however far over its share: a bot that loses them cannot reach its team or read the
+ * rest of a long result. */
+export const COORDINATION_TOOLS: readonly string[] = ["coordinate_bots", "assignment_status", "list_bots", "list_room_targets", "post_to_thread", "tool_result_read"];
+
+/** The order a list over its share leaves tools out in: a lower rank first, Infinity never. */
+export function toolKeepRank(name: string): number {
+  if (COORDINATION_TOOLS.includes(name)) return Infinity;
+  return PROTECTED_TOOLS.includes(name) ? 1 : 0;
+}
 
 /** Tool descriptions are cut to this many characters before any is cut further. */
 export const TOOL_DESCRIPTION_FLOOR = 120;
@@ -195,9 +217,11 @@ function smallest<T extends ListedTool>(tool: T): T {
   return { ...tool, description, inputSchema: withTopLevelFields(tool.inputSchema) };
 }
 
+const FLOOR_LEVEL: DescriptionLevel = { parameters: 0, tools: TOOL_DESCRIPTION_MIN, annotations: true, topLevelOnly: true };
+
 /** What `tools` come to at the deepest cut there is, protected tools kept whole. */
 export function toolListFloorBytes(tools: readonly ListedTool[]): number {
-  return definitionListBytes(withDescriptionLevel(withCompactSchemas(tools), { parameters: 0, tools: TOOL_DESCRIPTION_MIN, annotations: true, topLevelOnly: true }));
+  return definitionListBytes(withDescriptionLevel(withCompactSchemas(tools), FLOOR_LEVEL));
 }
 
 export interface FittedToolList<T> { tools: T[]; bytes: number; from: number; level: DescriptionLevel; fits: boolean }
@@ -219,6 +243,39 @@ export function fitToolListToShare<T extends ListedTool>(tools: readonly T[], sh
   return { tools: fitted, bytes: definitionListBytes(fitted), from, level, fits };
 }
 
+export interface ToolListWithinShare<T> extends FittedToolList<T> {
+  /** The names of the tools left out, in the order given. */
+  left: string[];
+}
+
+/** `tools` fitted into `share` bytes as fitToolListToShare does; when even their shortest is over toolListLimit(share),
+ * without the tools of lowest toolKeepRank, the largest first within a rank, until the rest is within it at its shortest.
+ * The engine then has nothing to leave out itself. `left` is empty while the list is within that limit. */
+export function fitToolListWithinShare<T extends ListedTool>(tools: readonly T[], share: number): ToolListWithinShare<T> {
+  const whole = fitToolListToShare(tools, share);
+  const limit = toolListLimit(share);
+  if (whole.fits || whole.bytes <= limit) return { ...whole, left: [] };
+  const floor = withDescriptionLevel(withCompactSchemas(tools), FLOOR_LEVEL).map((tool, index) => ({ index, bytes: definitionBytes(tool), rank: toolKeepRank(tool.name) }));
+  let total = floor.reduce((sum, entry) => sum + entry.bytes, 0);
+  const left = new Set<number>();
+  for (const entry of floor.filter((candidate) => candidate.rank !== Infinity).sort((a, b) => a.rank - b.rank || b.bytes - a.bytes || a.index - b.index)) {
+    if (total <= limit) break;
+    left.add(entry.index);
+    total -= entry.bytes;
+  }
+  const kept = fitToolListToShare(tools.filter((_, index) => !left.has(index)), share);
+  return { ...kept, from: whole.from, left: tools.filter((_, index) => left.has(index)).map((tool) => tool.name) };
+}
+
+/** The log line for a list over its share, or undefined when it fit. */
+export function overShareNote(fitted: ToolListWithinShare<ListedTool>, share: number): string | undefined {
+  if (fitted.left.length) {
+    return `tool list is over its ${share}-byte share of the session's tool budget even at its shortest: left out ${fitted.left.length} tool(s) so the engine does not choose, ${fitted.left.join(", ")}`
+      + (fitted.bytes > toolListLimit(share) ? `; still ${fitted.bytes - share} bytes over` : "");
+  }
+  return fitted.fits ? undefined : `tool list is ${fitted.bytes} bytes at its shortest, ${fitted.bytes - share} over its ${share}-byte share of the session's tool budget`;
+}
+
 /** A tools/list `tools` array under OMB_TOOL_SCHEMA_PROFILE `profile`: fitted when the profile is a share, else as it came. */
 export function toolsForShareProfile<T extends ListedTool>(tools: readonly T[], profile: unknown, log?: (line: string) => void): readonly T[] {
   const share = toolListShare(profile);
@@ -227,8 +284,9 @@ export function toolsForShareProfile<T extends ListedTool>(tools: readonly T[], 
   const key = `${share}\0${JSON.stringify(tools)}`;
   const known = FITTED.get(key);
   if (known) return known as T[];
-  const fitted = fitToolListToShare(tools, share);
-  if (!fitted.fits) log?.(`tool list is ${fitted.bytes} bytes at its shortest, ${fitted.bytes - share} over its ${share}-byte share of the session's tool budget`);
+  const fitted = fitToolListWithinShare(tools, share);
+  const note = overShareNote(fitted, share);
+  if (note) log?.(note);
   if (FITTED.size >= FITTED_KEPT) FITTED.delete(FITTED.keys().next().value!);
   FITTED.set(key, fitted.tools);
   return fitted.tools;
