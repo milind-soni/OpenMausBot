@@ -161,7 +161,7 @@ describe("finished work reaches the inbox once", () => {
     f.inbox.route(summary, { summary: true });
     const whole = vi.spyOn(f.store, "messagesFor");
     expect(f.inbox.view(OWNER).rows[0]!.origin?.messageId).toBe(posted.id);
-    expect(f.inbox.count(OWNER)).toBe(1);
+    expect(f.inbox.count(OWNER), "finished work waits on nobody").toBe(0);
     expect(whole).not.toHaveBeenCalled();
   });
 });
