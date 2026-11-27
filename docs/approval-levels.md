@@ -118,7 +118,7 @@ that reaches depends on who runs the tools:
 A request already on screen stays for you to answer, and an action already
 running finishes. A team change sets the level on working bots too.
 
-A department's sidebar menu has **Set for all bots in this department…**, for the owner
+A department's sidebar menu has **Settings for all bots…**, for the owner
 or an admin. It sets one approval level (Ask, Auto-accept edits, Approve for
 me or Full access), or one model and effort, on every bot in that department. It
 lists what each bot will get before anything changes, then saves the bots one

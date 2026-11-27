@@ -2232,7 +2232,7 @@
   "team.deleteKeepBotsSimple": "Its bots and group chats stay, with their conversations, outside any department. The department and its shared instructions are deleted. This cannot be undone.",
   "team.delete": "Delete department",
   "team.actions": "Actions for {name} department",
-  "teamSettings.menu": "Set for all bots in this department…",
+  "teamSettings.menu": "Settings for all bots…",
   "teamSettings.title": "Set for all bots in {name}",
   "teamSettings.general": "General",
   "teamSettings.close": "Close department settings",

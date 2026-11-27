@@ -2034,7 +2034,7 @@
   "team.deleteKeepBotsSimple": "Os bots e os chats em grupo continuam com suas conversas, fora de qualquer equipe. A equipe e suas instruções compartilhadas são excluídas. Não é possível desfazer.",
   "team.delete": "Excluir equipe",
   "team.actions": "Ações da equipe {name}",
-  "teamSettings.menu": "Definir para todos os bots desta equipe…",
+  "teamSettings.menu": "Configurações de todos os bots…",
   "teamSettings.title": "Definir para todos os bots de {name}",
   "teamSettings.general": "Geral",
   "teamSettings.close": "Fechar as configurações da equipe",

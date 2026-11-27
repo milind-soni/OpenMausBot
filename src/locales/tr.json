@@ -1162,7 +1162,7 @@
   "team.deleteKeepBotsDescription": "Botlar ve grup sohbetleri, konuşmaları bozulmadan Genel grubuna taşınır. Departman ve paylaşılan talimatları silinir. Bu işlem geri alınamaz.",
   "team.deleteKeepBotsSimple": "Botları ve grup sohbetleri, konuşmalarıyla birlikte kalır ama hiçbir departmanda olmaz. Departman ve paylaşılan talimatları silinir. Bu işlem geri alınamaz.",
   "team.delete": "Departmanı sil",
-  "teamSettings.menu": "Bu departmandaki tüm botlar için ayarla…",
+  "teamSettings.menu": "Tüm botların ayarları…",
   "teamSettings.title": "{name} ekibindeki tüm botlar için ayarla",
   "teamSettings.general": "Genel",
   "teamSettings.close": "Departman ayarlarını kapat",
