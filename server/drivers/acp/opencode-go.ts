@@ -779,7 +779,7 @@ const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
 
 /** A usage limit the error names as the Go subscription's, by its error name or its wording ("OpenCode Go weekly usage
  * limit reached"), whatever model the session had selected. */
-const GO_NAMED_LIMIT = /\bGoUsageLimitError\b|\b(?:OpenCode\s+)?Go\b.{0,60}\b(?:usage|weekly|monthly|5-hour|daily|hourly)\s+limit/iu;
+const GO_NAMED_LIMIT = /\bGoUsageLimitError\b|\bGo\b.{0,60}\b(?:[Uu]sage|[Ww]eekly|[Mm]onthly|5-hour|[Dd]aily|[Hh]ourly)\s+[Ll]imit/u; // "Go" as named: never a lowercase "go to …"
 
 /** How far a usage limit OpenCode reported reaches: one provider's models — the Go subscription's when the refusal or
  * the failing model names Go, else the failing model's provider's — or one provider's shared free allowance (with the

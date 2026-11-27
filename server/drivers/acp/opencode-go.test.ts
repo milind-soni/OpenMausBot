@@ -549,6 +549,9 @@ describe("OpenCode catalog", () => {
     expect(facts.limitModels).toEqual(expect.arrayContaining(["openrouter/openai/gpt-6", "openrouter/anthropic/claude-sonnet-5"]));
     expect(facts.limitModels).not.toContain("opencode/big-pickle");
     expect(facts.limitModels).not.toContain("opencode-go/minimax-m3");
+    // A lowercase "go" in another provider's refusal is not the Go subscription's limit.
+    expect(openCodeLimitFacts("Internal error: go to your dashboard, monthly usage limit reached", "openrouter/openai/gpt-6", catalog).limitModels)
+      .toEqual(expect.arrayContaining(["openrouter/openai/gpt-6", "openrouter/anthropic/claude-sonnet-5"]));
     // A limit met on a model of an unknown provider still holds just that model, never the account.
     expect(openCodeLimitFacts("Internal error: Monthly usage limit reached for this key", "unlisted/one-off", catalog))
       .toEqual({ limit: "model", limitModels: ["unlisted/one-off"] });
