@@ -6,6 +6,7 @@ import type { SessionState } from "../lib/session";
 import { readSharedSessionState } from "../lib/shared-session";
 import { canPairDevices } from "./ServerPairingCard";
 import { Card } from "./SettingsPrimitives";
+import { LICENCE_CHANGED } from "@/lib/licence-state";
 
 export interface SignInLists {
   admins: string[];
@@ -69,6 +70,7 @@ export function SignInAccessCard() {
     try {
       await api("/api/config", { method: "PUT", body: JSON.stringify({ signIn: next }) });
       setLists(next);
+      window.dispatchEvent(new Event(LICENCE_CHANGED));
     } catch (e) {
       setError(t("remote.signInAccess.error", { error: e instanceof Error ? e.message : String(e) }));
     } finally {

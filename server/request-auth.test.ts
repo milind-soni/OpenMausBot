@@ -777,6 +777,20 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     expect(check("GET", "/api/health/engines", { trust: "service", headers: { "x-forwarded-for": "203.0.113.9" } }).auth).toBeNull();
   });
 
+  it("passes the MausBot connector's licence-state read on a service-trust server to its route, which checks the digest, and nothing else", () => {
+    const proof = "ab".repeat(32);
+    const headers = { "x-openmausbot-licence-proof": proof };
+    expect(check("GET", "/api/license", { trust: "service", headers }).auth).toEqual({ kind: "loopback", scopes: ["client"], trust: "service" });
+    expect(check("GET", "/api/license", { trust: "service" }).auth).toBeNull();
+    expect(check("GET", "/api/license", { trust: "service", headers: { "x-openmausbot-licence-proof": "omb1.the.licence" } }).auth).toBeNull();
+    expect(check("POST", "/api/license", { trust: "service", headers }).auth).toBeNull();
+    expect(check("PUT", "/api/config", { trust: "service", headers }).auth).toBeNull();
+    expect(check("GET", "/api/license", { trust: "service", headers: { ...headers, "x-forwarded-for": "203.0.113.9" } }).auth).toBeNull();
+    for (const path of ["/api/config", "/api/license/x", "/api/licensex", "/api/license/", "/api/auth/pairing"]) {
+      expect(check("GET", path, { trust: "service", headers }).auth, path).toBeNull();
+    }
+  });
+
   it("still admits a real session with its own scopes on a service-trust server", () => {
     const admin = sessions.issue({ label: "Laptop", scopes: ["admin", "client"] });
     const member = sessions.issue({ label: "Phone", scopes: ["client"] });

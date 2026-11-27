@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
+import { LICENCE_CHANGED } from "../lib/licence-state";
 import { readMembership, type Membership } from "../lib/membership";
 import type { SessionState } from "../lib/session";
 import { readSharedSessionState } from "../lib/shared-session";
@@ -232,14 +233,18 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
     });
   }, [load]);
 
-  const save = async (next: SignInLists) => {
+  /** True once saved; a refusal (a seat limit, a list the environment pins) shows its sentence instead. */
+  const save = async (next: SignInLists): Promise<boolean> => {
     setBusy(true);
     setError(null);
     try {
       await api("/api/config", { method: "PUT", body: JSON.stringify({ signIn: next }) });
+      window.dispatchEvent(new Event(LICENCE_CHANGED));
       await load();
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -253,7 +258,7 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
       setError(t("remote.signInAccess.invalid"));
       return;
     }
-    await save(withEntry(lists, entry, role));
+    if (!(await save(withEntry(lists, entry, role)))) return;
     setDraft("");
     setLink(inviteLink(base, entry));
   };

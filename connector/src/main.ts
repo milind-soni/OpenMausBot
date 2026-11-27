@@ -19,6 +19,7 @@ import { serveRequest } from "./home-requests.ts";
 import { Home } from "./home.ts";
 import { hostChecks, hostFacts, hostHealth, probeBox, type BoxProbeResult, type HostReader } from "./host.ts";
 import { jobDesk, jobRunner, resultEvent } from "./jobs.ts";
+import { LicenceDelivery } from "./licence.ts";
 import { sendLocalJob, serveLocalJobs } from "./local.ts";
 import { POLICY_FILE } from "./policy.ts";
 import { errorText, log, registerSecret } from "./log.ts";
@@ -146,6 +147,9 @@ async function run(): Promise<void> {
     docker, state, log, diskFree: () => reader.disk().free, updateDir: PATHS.update,
     onStep: ({ id, type, step, detail }) => note({ event: "step", id, type, step, ...(detail ? { detail } : {}) }),
   }) : null;
+  // The licence in MausBot's config goes to the server's data folder, paused or not (customer-run.ts, section 5).
+  const licence = adopted ? new LicenceDelivery({ home: adopted, log, record: (event) => audit.append(event) }) : null;
+  void licence?.offer(kept?.licence);
   const home = adopted ?? new Home({
     docker, state, log, readHealth, seccomp, transfer: httpTransfer,
     diskFree: () => reader.disk().free,
@@ -158,7 +162,9 @@ async function run(): Promise<void> {
   const heartbeat = async (): Promise<Heartbeat> => {
     await home.refreshHealth().catch(() => null);
     const facts = { host: await host.health(false), home: await home.report(), connector: identity() };
-    return adopted ? reducedHeartbeat({ ...facts, paused: state.paused(), seats: adopted.seats }) : { heartbeat: facts };
+    return adopted
+      ? reducedHeartbeat({ ...facts, paused: state.paused(), seats: adopted.seats, environmentId: adopted.environmentId, licence: adopted.licence })
+      : { heartbeat: facts };
   };
   let agent: Agent;
   const runner = jobRunner({
@@ -183,7 +189,10 @@ async function run(): Promise<void> {
       log(`MausBot's signing keys are now ${Object.keys(keys).join(", ")}`);
     },
     config: { saved: () => state.adminConfig(), save: (config) => state.saveAdminConfig(config) },
-    onConfig: (config) => log(`MausBot's schedule and policy (version ${config.version}) are kept on this server`),
+    onConfig: (config) => {
+      log(`MausBot's schedule and policy (version ${config.version}) are kept on this server`);
+      void licence?.offer(config.licence);
+    },
     stream: (stream, accept) => (adopted
       ? serveCustomerRunRequest(stream, accept, {
         paused: () => state.paused(), record: note,
@@ -233,6 +242,7 @@ async function run(): Promise<void> {
 
   setInterval(() => {
     home.supervise().catch((error) => log(`supervising the home failed: ${errorText(error)}`));
+    void licence?.tick();
     const latest = state.agent();
     if (latest && serverMode(latest) !== mode) {
       log("this server was connected again in another mode; the connector restarts to take it up");

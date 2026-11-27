@@ -10,6 +10,7 @@ import { api, type ConfigStatus } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
+import { SeatLimitBanner } from "../LicenceCard";
 import { shortcutLabel } from "../ShortcutHint";
 import { SettingsLook } from "../SettingsPrimitives";
 import { SettingsPageBody } from "./pages/SettingsPageBody";
@@ -201,6 +202,7 @@ export function SettingsWindow() {
                       <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} peek={!ctx.advanced && !page.when(ctx) && !anchor} sub={sub} action={headerAction} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
                         <LicenseExpiryBanner config={config} />
+                        <SeatLimitBanner enabled={place.kind === "server" && ctx.admin && !ctx.client} />
                         {page.owner === "place" && config === null
                           ? unreachable ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
                             : <><SettingsSkeletonCard place={place.name} /><SettingsSkeletonCard place={place.name} /></>

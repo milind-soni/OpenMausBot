@@ -1,5 +1,6 @@
 import { liveSavePatch } from "../live-config.ts";
 import { signInEnvRefusal } from "../sign-in-env.ts";
+import { seatInviteRefusal } from "../license-seats.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -176,6 +177,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       // Saved, it would be overruled by the environment at once: say so instead of answering 200 with nothing changed.
       const signInPinned = signInEnvRefusal(patch.signIn);
       if (signInPinned) return json(res, 409, { error: signInPinned, code: "signin_env" });
+      const seatsFull = seatInviteRefusal(patch.signIn);
+      if (seatsFull) return json(res, 409, { ...userError("serverError.seats.full", { seats: String(seatsFull.seats), used: String(seatsFull.used) }), code: "seats_full" });
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);

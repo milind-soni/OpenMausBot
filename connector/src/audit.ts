@@ -1,7 +1,8 @@
 // The audit log on the server: one JSON line for each job and for each request MausBot's Admin makes to the home, written
-// by the connector to /var/log/mausbot/audit.jsonl on the host, root's, for the server's owner to read. It is only ever
-// appended to. Each line carries the SHA-256 of the line before it, so a line taken out or changed breaks the chain
-// (verifyAudit). It never holds a secret, an environment value or a pairing code.
+// by the connector to /var/log/mausbot/audit.jsonl on the host, root's, for the server's owner to read, and on a
+// customer-run server one before each licence it writes there (customer-run.ts, section 5). It is only ever appended to.
+// Each line carries the SHA-256 of the line before it, so a line taken out or changed breaks the chain (verifyAudit).
+// It never holds a secret, an environment value, a pairing code or a licence.
 import { createHash } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname } from "node:path";
@@ -17,6 +18,11 @@ export type AuditEvent =
   /** The server's admin paused or resumed remote management (`mausbot-connector pause`, `resume`). */
   | { event: "management"; what: "paused" | "resumed"; by: "local" }
   | { event: "refused"; by: "admin"; code: JobErrorCode; why: string; id?: string; type?: string }
+  /** Customer-run: the licence in MausBot's config is about to be written to the server's data folder as license.key
+   * (written before the file, and the file is not written when this line cannot be), its write failed, or it was not a
+   * licence and was ignored. `fingerprint`: the first 12 hex digits of its SHA-256, never the licence. */
+  | { event: "licence"; what: "writing" | "failed"; by: "admin"; fingerprint: string }
+  | { event: "licence"; what: "refused"; by: "admin"; why: string }
   | { event: "job"; by: AuditSource; id: string; type: JobType; args: Record<string, unknown> }
   | { event: "result"; by: AuditSource; id: string; type: JobType; ok: true; detail?: Record<string, unknown> }
   | { event: "result"; by: AuditSource; id: string; type: JobType; ok: false; error: JobError }

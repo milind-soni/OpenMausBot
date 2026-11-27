@@ -4,17 +4,19 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AdoptedHome, UPDATE_FILES, enrolmentRefusal, findInstall, standaloneServerPresent } from "../src/adopted-home.ts";
-import { Agent, type Refusal, type Socket } from "../src/agent.ts";
+import { Agent, savedConfig, type Refusal, type Socket } from "../src/agent.ts";
 import { AuditLog, type AuditEvent, type AuditLine } from "../src/audit.ts";
 import { serveCustomerRunRequest } from "../src/customer-run-requests.ts";
 import {
-  CUSTOMER_RUN_JOBS, CUSTOMER_RUN_LOCAL_JOBS, CUSTOMER_RUN_REQUESTS, HOME_READS, HOME_READS_COMMAND, checkCustomerRunJob, customerRunRefusal, olderVersionRefusal, parseHomeReads, reducedHeartbeat, reducedReply,
+  CUSTOMER_RUN_JOBS, CUSTOMER_RUN_LOCAL_JOBS, CUSTOMER_RUN_REQUESTS, HOME_READS, LICENCE_PROOF_HEADER, checkCustomerRunJob, checkLicence, customerRunRefusal, homeReadsCommand,
+  LICENCE_PASTE_MINUTES, licenceCommand, licenceFingerprint, licenceProof, licenceReport, olderVersionRefusal, parseHomeReads, reducedHeartbeat, reducedReply,
 } from "../src/customer-run.ts";
+import { LicenceDelivery } from "../src/licence.ts";
 import { enroll } from "../src/enroll.ts";
 import { neverOlder } from "../src/images.ts";
 import { jobDesk, jobRunner } from "../src/jobs.ts";
 import { JOB_TYPES, checkJob, type HostFacts, type HostHealth, type Job, type JobReply, type JobType } from "../src/protocol.ts";
-import { StateStore, type AgentRecord } from "../src/state.ts";
+import { StateStore, type AgentRecord, type ConfigRecord } from "../src/state.ts";
 import { FakeAdmin } from "./fake-admin.ts";
 import { FakeDocker } from "./fake-docker.ts";
 
@@ -28,6 +30,14 @@ const UNNAMED = digest("d");
 const EMAIL = "ada.lovelace@customer.example";
 const WRITTEN = "Quarterly numbers for Project Nightingale";
 const SERVER_NAME = "Lovelace Analytical Engines";
+const ENV_ID = "5d0c6f2e-9c1a-4c57-8f0e-2b7a1d3e4f50";
+/** Licences of the right shape: the connector never verifies one, the server does. */
+const licenceOf = (claims: string) => `omb1.${Buffer.from(JSON.stringify({ v: 1, customer: "Lovelace", claims })).toString("base64url")}.${"s".repeat(86)}`;
+const LICENCE = licenceOf("first");
+const RENEWED = licenceOf("renewed");
+const LICENCE_STATE = { valid: true, source: "file", customer: SERVER_NAME, plan: "business-server", seats: 20, features: ["budgets"], expiresAt: "2026-12-31", expiresInDays: 34, graceEndsAt: "2027-01-14", graceDaysLeft: null, notice: EMAIL };
+/** Where the server keeps license.key: OMB_DATA_DIR in the image is /data/.openmausbot, inside the data folder's mount. */
+const LICENCE_PATH = ".openmausbot/license.key";
 const host: HostFacts = { os: "Ubuntu 24.04.3 LTS", kernel: "6.8.0-1021-azure", arch: "x86_64", cpus: 4, memMb: 16_000, diskGb: 120, docker: "28.0.4", apparmor: true, userns: true };
 const health: HostHealth = {
   ...host, diskTotalGb: 200, memAvailableMb: 9000, load1: 0.1, uptimeS: 50, clockSkewS: 0,
@@ -64,16 +74,39 @@ async function server(options: { image?: string; seats?: number | null } = {}) {
   for (const [ref, version] of [[image, "v0.1.151"], [NEXT, "v0.1.152"], [OLDER, "v0.1.150"], [UNNAMED, null], ["caddy:2", null]] as const) docker.publish(ref, version);
   for (const ref of [image, "caddy:2"]) await docker.pull(ref);
   const compose = (service: string) => ({ "com.docker.compose.project": "openmausbot", "com.docker.compose.service": service });
-  const home = { answers: true, seats: options.seats === undefined ? 7 : options.seats, execs: [] as string[][] };
+  const home = {
+    answers: true, seats: options.seats === undefined ? 7 : options.seats, execs: [] as string[][],
+    /** The licence-state answer; null: the server refuses the read. */
+    licence: LICENCE_STATE as Record<string, unknown> | null,
+    /** Proofs the server accepts, as GET /api/license checks them. */
+    proofs: new Set<string>(),
+    /** The data folder cannot be written (a full disk): the licence write fails. */
+    readOnly: false,
+    /** license.key was changed by hand within the paste window. */
+    pastedJustNow: false,
+  };
   docker.onExec = (_container, command) => {
     home.execs.push(command);
-    if (!home.answers) return { code: 0, output: "\n\u001e\n\n\u001e\n\n\u001e\n" };
+    // The licence check and write, as the script does them (connector/test/licence-write.test.ts runs the script itself).
+    if (command[3] === "sh" && (command[4] === "check" || command[4] === "write") && command[5]?.startsWith("omb1.")) {
+      const files = docker.folder(dataDir).files;
+      const licence = command[5];
+      if (files.get(LICENCE_PATH) === `${licence}\n`) return { code: 3, output: "" };
+      if (files.has(LICENCE_PATH) && home.pastedJustNow) return { code: 4, output: "" };
+      if (command[4] === "check") return { code: 5, output: "" };
+      if (home.readOnly) return { code: 1, output: "sh: can't create /data/.openmausbot/.license.key.connector.tmp: Read-only file system\n" };
+      files.set(LICENCE_PATH, `${licence}\n`);
+      return { code: 0, output: "" };
+    }
+    if (!home.answers) return { code: 0, output: "\n\u001e\n\n\u001e\n\n\u001e\n\n\u001e\n" };
+    const proof = command[4] ?? "";
     return {
       code: 0,
       output: [
         JSON.stringify({ app: "openmausbot", pid: 41, owner: EMAIL, box: "on" }),
-        JSON.stringify({ environmentId: "env-1", label: SERVER_NAME, version: "0.1.151", admin: EMAIL }),
+        JSON.stringify({ environmentId: ENV_ID, label: SERVER_NAME, version: "0.1.151", admin: EMAIL }),
         home.seats === null ? JSON.stringify({ error: "Not found" }) : JSON.stringify({ seats: home.seats, people: [EMAIL] }),
+        home.licence && (home.proofs.size === 0 || home.proofs.has(proof)) ? JSON.stringify(home.licence) : JSON.stringify({ error: "Only the owner or an admin sees this server's licence." }),
       ].map((answer) => `${answer}\n\u001e\n`).join(""),
     };
   };
@@ -238,32 +271,49 @@ describe("a customer-run server: what leaves it", () => {
     return out;
   };
 
-  it("reads four fields from the home and drops everything else it answered", async () => {
+  const NOTHING = { answers: false, version: null, seats: null, box: null, environmentId: null, licence: null };
+  const STATE = { valid: true, plan: "business-server", seats: 20, expiresAt: "2026-12-31", graceDaysLeft: null, source: "file" };
+
+  it("reads six fields from the home and drops everything else it answered", async () => {
     const fixture = await server();
-    expect(HOME_READS).toEqual(["/api/health", "/.well-known/openmausbot/environment", "/api/seats"]);
+    expect(HOME_READS).toEqual(["/api/health", "/.well-known/openmausbot/environment", "/api/seats", "/api/license"]);
     const facts = parseHomeReads(fixture.docker.onExec!({} as never, []).output);
-    expect(facts).toEqual({ answers: true, version: "0.1.151", seats: 7, box: "on" });
-    expect(parseHomeReads("not json\n\u001e\n{\"version\":\"<script>\"}\n\u001e\n{\"seats\":\"seven\"}\n\u001e\n")).toEqual({ answers: false, version: null, seats: null, box: null });
-    expect(parseHomeReads("")).toEqual({ answers: false, version: null, seats: null, box: null });
+    expect(facts).toEqual({ answers: true, version: "0.1.151", seats: 7, box: "on", environmentId: ENV_ID, licence: STATE });
+    expect(parseHomeReads("not json\n\u001e\n{\"version\":\"<script>\",\"environmentId\":\"env-1\"}\n\u001e\n{\"seats\":\"seven\"}\n\u001e\n{\"error\":\"no\"}\n\u001e\n")).toEqual(NOTHING);
+    expect(parseHomeReads("")).toEqual(NOTHING);
     // On or off, nothing else: a server without the field, or with anything else in it, says nothing about its box.
     expect(parseHomeReads(`${JSON.stringify({ app: "openmausbot", box: "off" })}\n\u001e\n`).box).toBe("off");
     expect(parseHomeReads(`${JSON.stringify({ app: "openmausbot", box: { checks: "33/33" } })}\n\u001e\n`).box).toBeNull();
   });
 
-  it("sends a heartbeat of versions, states, counts and the seat count, with no address, name or sentence in it", async () => {
+  it("sends a heartbeat of versions, states, counts, the seat count, the server's id and its licence state, with no address, name or sentence in it", async () => {
     const fixture = await server();
     await fixture.install();
     await fixture.adopted.refreshHealth();
-    expect(fixture.home.execs).toEqual([[...HOME_READS_COMMAND]]);
-    const beat = reducedHeartbeat({ host: health, home: await fixture.adopted.report(), connector: identity, paused: false, seats: fixture.adopted.seats });
+    expect(fixture.home.execs).toEqual([homeReadsCommand(null)]);
+    const { adopted } = fixture;
+    const beat = reducedHeartbeat({ host: health, home: await adopted.report(), connector: identity, paused: false, seats: adopted.seats, environmentId: adopted.environmentId, licence: adopted.licence });
     const sent = JSON.stringify(beat);
-    for (const secret of [EMAIL, "@customer", "lovelace", SERVER_NAME, "Lovelace", WRITTEN, "said so", "env-1"]) expect(sent, secret).not.toContain(secret);
+    for (const secret of [EMAIL, "@customer", "lovelace", SERVER_NAME, "Lovelace", WRITTEN, "said so", "budgets", "omb1"]) expect(sent, secret).not.toContain(secret);
     expect(beat.heartbeat).toEqual({
       host: { ...host, diskTotalGb: 200, memAvailableMb: 9000, load1: 0.1, uptimeS: 50, clockSkewS: 0, checks: [{ id: "disk", ok: true, warning: true }, { id: "clock", ok: true }] },
       home: { state: "running", image: RUNNING, health: { ok: true, version: "0.1.151", image: RUNNING, box: { box: "on", checks: null, failed: [] }, at: 1_800_000_000_000 } },
-      connector: identity, mode: "customer-run", paused: false, seats: 7,
+      connector: identity, mode: "customer-run", paused: false, seats: 7, environmentId: ENV_ID, licence: STATE,
     });
-    for (const text of strings(beat)) expect(text, text).toMatch(TOLD);
+    for (const text of strings(beat).filter((text) => text !== ENV_ID && text !== "2026-12-31" && text !== "business-server")) expect(text, text).toMatch(TOLD);
+  });
+
+  it("sends the licence state as six fields of fixed kinds, and null for anything that is not the server's licence answer", () => {
+    expect(licenceReport({ ...LICENCE_STATE, plan: `Business for ${EMAIL}`, seats: 2.5, expiresAt: "next year", graceDaysLeft: -1, source: "/data/license.key", valid: "yes" })).toBeNull();
+    expect(licenceReport({ valid: false, plan: `Business for ${EMAIL}`, seats: 2.5, expiresAt: "next year", graceDaysLeft: 4000, source: "/data/license.key", key: LICENCE })).toEqual({
+      valid: false, plan: null, seats: null, expiresAt: null, graceDaysLeft: null, source: null,
+    });
+    expect(licenceReport({ valid: true, plan: "business-server", seats: 25, expiresAt: "2026-12-01", graceDaysLeft: 9, source: "last-good" })).toEqual({
+      valid: true, plan: "business-server", seats: 25, expiresAt: "2026-12-01", graceDaysLeft: 9, source: "last-good",
+    });
+    for (const refused of [null, [], "valid", { error: "forbidden" }]) expect(licenceReport(refused)).toBeNull();
+    const beat = reducedHeartbeat({ host: health, home: { state: "running", image: RUNNING, health: null }, connector: identity, paused: false, seats: 1, environmentId: "../etc/passwd", licence: { ...STATE, plan: WRITTEN } as never });
+    expect(beat.heartbeat).toMatchObject({ environmentId: null, licence: { plan: null } });
   });
 
   it("replaces anything that is not a version, an image or a machine's own name before it is sent", () => {
@@ -299,6 +349,210 @@ describe("a customer-run server: what leaves it", () => {
       id: "s", ok: true,
       result: { home: { state: "running", image: RUNNING, health: null }, connector: identity, backups: [{ id: "20261028-104512-3fa9", kind: "backup", createdAt: 5, image: RUNNING }], snapshot: null },
     });
+  });
+});
+
+describe("a customer-run server: its licence", () => {
+  async function delivering(options: { paused?: boolean; audit?: string } = {}) {
+    const fixture = await server();
+    await fixture.install();
+    if (options.paused) fixture.state.savePause(true);
+    const audit = new AuditLog(options.audit ?? join(fixture.dir, "audit.jsonl"));
+    let clock = 1_800_000_000_000;
+    const delivery = new LicenceDelivery({
+      home: fixture.adopted, log: (line) => fixture.lines.push(line), record: (event) => audit.append(event), now: () => clock, recheckMs: 60 * 60_000, retryMs: 5 * 60_000,
+    });
+    const writes = () => fixture.home.execs.filter((command) => command[4] === "write").length;
+    const licenceExecs = () => fixture.home.execs.filter((command) => command[4] === "check" || command[4] === "write").length;
+    const onDisk = () => fixture.docker.folder(fixture.dataDir).files.get(LICENCE_PATH);
+    const audits = () => audit.tail(100).map((line) => JSON.parse(line) as AuditLine);
+    const said = () => audits().filter((line) => line.event === "licence").map((line) => (line as { what: string }).what);
+    return { ...fixture, audit, delivery, writes, licenceExecs, onDisk, audits, said, later: (ms: number) => { clock += ms; } };
+  }
+
+  it("saves a licence from MausBot's config once, as license.key in the server's data folder, from inside the server's container", async () => {
+    const fixture = await delivering();
+    await fixture.delivery.offer(LICENCE);
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+    expect(fixture.writes()).toBe(1);
+    // In the home's container, through its own shell: a check, then the write; the licence is an argument after a fixed script.
+    expect(fixture.home.execs.slice(-2)).toEqual([licenceCommand("check", LICENCE), licenceCommand("write", LICENCE)]);
+    const command = fixture.home.execs.at(-1)!;
+    expect(command.slice(0, 2)).toEqual(["sh", "-c"]);
+    expect(command[2]).not.toContain(LICENCE);
+    expect(command[2]).toContain("umask 077; set -C;");
+    expect(command[2]).toMatch(/> "\$tmp" && mv -f "\$tmp" "\$file"/);
+    expect(command[2]).toContain(`-mmin -${LICENCE_PASTE_MINUTES}`);
+    expect(fixture.docker.calls.filter((call) => call.startsWith("exec ")).every((call) => call === "exec openmausbot-omb-1")).toBe(true);
+    expect(fixture.docker.calls.some((call) => /create|start|stop|remove|volume/.test(call))).toBe(false);
+  });
+
+  it("does not write the same licence again, and writes a renewed one", async () => {
+    const fixture = await delivering();
+    await fixture.delivery.offer(LICENCE);
+    await fixture.delivery.offer(LICENCE);
+    await fixture.delivery.tick();
+    expect(fixture.writes()).toBe(1);
+    await fixture.delivery.offer(RENEWED);
+    expect(fixture.onDisk()).toBe(`${RENEWED}\n`);
+    expect(fixture.writes()).toBe(2);
+    expect(fixture.said()).toEqual(["writing", "writing"]);
+  });
+
+  it("ignores and logs a licence that does not have the shape of one, and writes nothing", async () => {
+    const fixture = await delivering();
+    for (const malformed of [`${LICENCE}; rm -rf /`, "omb1.short.sig", `omb2.${LICENCE.slice(5)}`, `${LICENCE}\n`, " ", 42, { licence: LICENCE }]) {
+      expect(checkLicence(malformed), String(malformed)).toBeNull();
+      await fixture.delivery.offer(malformed);
+    }
+    expect(checkLicence(LICENCE)).toBe(LICENCE);
+    expect(fixture.licenceExecs()).toBe(0);
+    expect(fixture.onDisk()).toBeUndefined();
+    expect(fixture.lines.some((line) => line.startsWith("ignored the licence in MausBot's config: it is not a licence"))).toBe(true);
+    expect(fixture.said().length).toBeGreaterThan(0);
+    expect(fixture.said().every((what) => what === "refused")).toBe(true);
+    expect(JSON.stringify(fixture.audits())).not.toContain("rm -rf");
+    expect(() => licenceCommand("write", `${LICENCE}'; reboot; '`)).toThrow();
+  });
+
+  it("leaves the licence on the server when a config carries none: cancelling stops new licences, it removes nothing", async () => {
+    const fixture = await delivering();
+    await fixture.delivery.offer(LICENCE);
+    await fixture.delivery.offer(undefined);
+    await fixture.delivery.offer(null);
+    fixture.later(2 * 60 * 60_000);
+    await fixture.delivery.offer(undefined);
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+    expect(fixture.home.execs.every((command) => !/\brm -f "\$file"|unlink/.test(command[2] ?? ""))).toBe(true);
+  });
+
+  it("writes one audit line before each licence it writes, with a fingerprint and never the licence", async () => {
+    const fixture = await delivering();
+    await fixture.delivery.offer(LICENCE);
+    expect(fixture.audits().filter((line) => line.event === "licence")).toEqual([
+      expect.objectContaining({ event: "licence", what: "writing", by: "admin", fingerprint: licenceFingerprint(LICENCE) }),
+    ]);
+    expect(licenceFingerprint(LICENCE)).toMatch(/^[0-9a-f]{12}$/);
+    const text = readFileSync(fixture.audit.file, "utf8");
+    expect(text).not.toContain(LICENCE.split(".")[1]);
+    expect(text).not.toContain(LICENCE.split(".")[2]);
+  });
+
+  it("writes no licence when the audit log cannot be written, and tries again five minutes later", async () => {
+    const blocked = mkdtempSync(join(tmpdir(), "omb-audit-blocked-"));
+    cleanups.push(() => rmSync(blocked, { recursive: true, force: true }));
+    writeFileSync(join(blocked, "not-a-folder"), "");
+    const fixture = await delivering({ audit: join(blocked, "not-a-folder", "audit.jsonl") });
+    await fixture.delivery.offer(LICENCE);
+    expect(fixture.writes()).toBe(0);
+    expect(fixture.onDisk()).toBeUndefined();
+    expect(fixture.lines.some((line) => line.startsWith("could not save the licence MausBot sent: the audit log cannot be written") && line.endsWith("trying again in 5 minutes"))).toBe(true);
+    const checks = fixture.licenceExecs();
+    fixture.later(60_000);
+    await fixture.delivery.tick();
+    expect(fixture.licenceExecs()).toBe(checks);
+    fixture.later(4 * 60_000);
+    await fixture.delivery.tick();
+    expect(fixture.licenceExecs()).toBe(checks + 1);
+  });
+
+  it("saves it while remote management is paused: a licence is not a job on the server's bots", async () => {
+    const fixture = await delivering({ paused: true });
+    expect(fixture.state.paused()).toBe(true);
+    await fixture.delivery.offer(LICENCE);
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+  });
+
+  it("waits for the home to run, backs off five minutes after a failed write, and puts the licence back after the hourly check finds it replaced", async () => {
+    const fixture = await delivering();
+    await fixture.docker.stopContainer("openmausbot-omb-1");
+    await fixture.delivery.offer(LICENCE);
+    expect(fixture.onDisk()).toBeUndefined();
+    await fixture.docker.startContainer("openmausbot-omb-1");
+    fixture.home.readOnly = true;
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBeUndefined();
+    expect(fixture.lines.filter((line) => line.startsWith("could not save the licence MausBot sent: the home could not save its licence (exit 1"))).toHaveLength(1);
+    expect(fixture.said()).toEqual(["writing", "failed"]);
+    fixture.home.readOnly = false;
+    await fixture.delivery.tick();
+    fixture.later(60_000);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBeUndefined();
+    fixture.later(4 * 60_000);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+    // A restore puts an older license.key back: the next hourly check writes the licence again; the same file, nothing.
+    fixture.docker.folder(fixture.dataDir).files.set(LICENCE_PATH, `${licenceOf("older")}\n`);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${licenceOf("older")}\n`);
+    fixture.later(60 * 60_000);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+    fixture.later(60 * 60_000);
+    await fixture.delivery.tick();
+    expect(fixture.said()).toEqual(["writing", "failed", "writing", "writing"]);
+  });
+
+  it("leaves a licence someone pasted in the last few minutes for the server to read first, then writes MausBot's", async () => {
+    const fixture = await delivering();
+    fixture.docker.folder(fixture.dataDir).files.set(LICENCE_PATH, `${licenceOf("pasted")}\n`);
+    fixture.home.pastedJustNow = true;
+    await fixture.delivery.offer(LICENCE);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${licenceOf("pasted")}\n`);
+    expect(fixture.writes()).toBe(0);
+    expect(fixture.said()).toEqual([]);
+    expect(fixture.lines.filter((line) => line.includes("changed in the last few minutes"))).toHaveLength(1);
+    fixture.home.pastedJustNow = false;
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+  });
+
+  it("reads the licence state with the licence's digest, so a shared server answers the connector and not a bot's shell", async () => {
+    const fixture = await delivering();
+    fixture.home.proofs.add(licenceProof(LICENCE));
+    await fixture.adopted.refreshHealth();
+    expect(fixture.adopted.licence).toBeNull();
+    await fixture.delivery.offer(LICENCE);
+    await fixture.adopted.refreshHealth();
+    expect(fixture.home.execs.at(-1)).toEqual(homeReadsCommand(licenceProof(LICENCE)));
+    expect(fixture.home.execs.at(-1)![2]).toContain(`-H "${LICENCE_PROOF_HEADER}: $1"`);
+    expect(fixture.home.execs.at(-1)!.join(" ")).not.toContain(LICENCE);
+    expect(fixture.adopted.licence).toMatchObject({ valid: true, seats: 20 });
+    expect(licenceProof(LICENCE)).toMatch(/^[0-9a-f]{64}$/);
+    expect(homeReadsCommand("not a digest; rm -rf /").at(-1)).toBe("");
+  });
+
+  it("takes the licence from a config MausBot signed, through the connection, and from the kept config after a restart", async () => {
+    const fixture = await delivering();
+    const admin = new FakeAdmin();
+    await admin.listen();
+    cleanups.push(() => admin.close());
+    const record: AgentRecord = await enroll({ admin: admin.origin, code: admin.mintCode(), host, connector: identity, mode: "customer-run" });
+    let saved: ConfigRecord | null = null;
+    let count = 0;
+    const agent = new Agent({
+      identity: () => record, log: () => {}, random: () => 0, nextCount: () => ++count, mode: "customer-run", outgoing: reducedReply,
+      heartbeat: async () => reducedHeartbeat({ host: health, home: { state: "running", image: RUNNING, health: null }, connector: identity, paused: false, seats: 7 }),
+      handle: async () => null,
+      config: { saved: () => saved, save: (config) => { saved = config; } },
+      onConfig: (config) => void fixture.delivery.offer(config.licence),
+    });
+    cleanups.push(() => agent.stop());
+    agent.start();
+    await until(() => agent.connected);
+    admin.sendConfig(record.boxId, { licence: LICENCE });
+    await until(() => fixture.onDisk() === `${LICENCE}\n`);
+    admin.sendConfig(record.boxId, { licence: "omb1.not a licence" });
+    admin.sendConfig(record.boxId, {});
+    await until(() => (saved?.version ?? 0) >= 3);
+    await until(() => fixture.lines.some((line) => line.startsWith("ignored the licence")));
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
+    expect(fixture.writes()).toBe(1);
+    // After a restart the connector goes by the config it kept: the newest it verified, which carries no licence, so
+    // the licence on the server stays as it is.
+    expect(savedConfig(saved, record)?.licence).toBeUndefined();
   });
 });
 

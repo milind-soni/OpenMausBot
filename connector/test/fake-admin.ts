@@ -171,13 +171,15 @@ export class FakeAdmin {
     return reply;
   }
 
-  sendConfig(boxId: string, patch: Partial<Pick<ConfigPayload, "schedule" | "policy">> & { version?: number } = {}): number {
+  /** `licence`: what the config carries for it (anything, to test what the connector refuses); absent leaves it out. */
+  sendConfig(boxId: string, patch: Partial<Pick<ConfigPayload, "schedule" | "policy">> & { version?: number; licence?: unknown } = {}): number {
     const version = patch.version ?? ++this.configVersion;
     this.configVersion = Math.max(this.configVersion, version);
     const payload: Omit<ConfigPayload, "kid"> = {
       t: "config", box: boxId, iat: Date.now() + this.clockOffsetMs, version, state: this.boxes.get(boxId)!.state,
       schedule: patch.schedule ?? { window: { days: [0], start: "02:00", end: "05:00", timeZone: "Europe/Berlin" }, ring: "standard", holdUntil: null, image: null },
       policy: patch.policy ?? { offlineHours: 72 },
+      ...("licence" in patch ? { licence: patch.licence as string } : {}),
     };
     this.send({ config: seal(payload, this.signingKid, this.keys[this.signingKid]!.privateKey) });
     return version;

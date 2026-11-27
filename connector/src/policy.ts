@@ -6,6 +6,8 @@
 //
 // `jobs`: the only kinds MausBot may run here (absent: all of them). `updates: "hold"`: MausBot's home updates wait.
 // A self-update of the connector is always accepted, so a held or locked-down server never strands an old connector.
+// A licence MausBot's config carries is not a job: this file does not limit it, and neither does a pause (customer-run.ts,
+// section 5, says why).
 import { readFileSync } from "node:fs";
 
 import { JOB_TYPES, type Job, type JobType } from "./protocol.ts";

@@ -6,12 +6,14 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { CUSTOMER_HOME_IMAGE, HOME_READS_COMMAND, VERSION_LABEL, boxReport, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource } from "./customer-run.ts";
+import {
+  CUSTOMER_HOME_IMAGE, LICENCE_EXIT, VERSION_LABEL, boxReport, homeReadsCommand, licenceCommand, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource,
+} from "./customer-run.ts";
 import type { ContainerInfo, Docker, Mount } from "./docker.ts";
 import { JobFailure } from "./failure.ts";
 import { backupId, helperSpec } from "./home.ts";
 import { errorText, type Log } from "./log.ts";
-import type { CopyInfo, HomeHealth, HomeReport, HomeState, JobError, JobReply, JobResults, ServerMode } from "./protocol.ts";
+import type { CopyInfo, HomeHealth, HomeReport, HomeState, JobError, JobReply, JobResults, LicenceReport, ServerMode } from "./protocol.ts";
 import { BACKUPS_KEPT, HOME_STOP_TIMEOUT_S, LABELS, NAMES } from "./settings.ts";
 import type { HomeRecord, Operation, StateStore } from "./state.ts";
 
@@ -34,6 +36,9 @@ const MADE_BY_LABEL = "com.mausbot.by";
 
 const lastLine = (text: string) => text.trim().split("\n").pop()?.slice(0, 300) ?? "";
 const gb = (bytes: number) => Math.round((bytes / 1e9) * 10) / 10;
+
+/** What licenceFile found or did. */
+export type LicenceFileState = "no_home" | "same" | "recent" | "differs" | "written";
 
 export interface Install {
   container: ContainerInfo;
@@ -102,6 +107,10 @@ export class AdoptedHome {
   private readonly pollMs: number;
   private lastHealth: HomeHealth | null = null;
   private lastSeats: number | null = null;
+  private lastEnvironmentId: string | null = null;
+  private lastLicence: LicenceReport | null = null;
+  /** customer-run.ts `licenceProof` of the licence the connector saved, presented on the licence-state read. */
+  licenceProof: string | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private active = 0;
 
@@ -124,6 +133,33 @@ export class AdoptedHome {
   /** How many people can sign in, as the home last said; null when it does not say. */
   get seats(): number | null {
     return this.lastSeats;
+  }
+
+  /** The server's own id, as the home last said; null when it does not say. */
+  get environmentId(): string | null {
+    return this.lastEnvironmentId;
+  }
+
+  /** The server's licence state, as the home last said; null when it does not say. */
+  get licence(): LicenceReport | null {
+    return this.lastLicence;
+  }
+
+  /**
+   * Compares `licence` with license.key in the home's data folder (`check`), or saves it there (`write`), from inside the
+   * home's container as the user it runs as (customer-run.ts, section 5). "no_home": the home is not running, so nothing
+   * was read or written and the caller tries again later. Throws when the file cannot be written. Not exclusive with jobs:
+   * it touches nothing a job does, and a long update must not hold up a licence.
+   */
+  async licenceFile(mode: "check" | "write", licence: string): Promise<LicenceFileState> {
+    const container = await this.container(SERVICE);
+    if (!container?.State.Running) return "no_home";
+    const { code, output } = await this.docker.exec(container.Id, licenceCommand(mode, licence), 30_000);
+    if (code === LICENCE_EXIT.same) return "same";
+    if (code === LICENCE_EXIT.recent) return "recent";
+    if (code === LICENCE_EXIT.differs && mode === "check") return "differs";
+    if (code === LICENCE_EXIT.written && mode === "write") return "written";
+    throw new Error(`the home could not save its licence (exit ${code}${output.trim() ? `: ${lastLine(output)}` : ""})`);
   }
 
   get previousImage(): string | null {
@@ -162,6 +198,8 @@ export class AdoptedHome {
     }
     const facts = await this.read(container);
     this.lastSeats = facts.seats;
+    this.lastEnvironmentId = facts.environmentId;
+    this.lastLicence = facts.licence;
     this.lastHealth = { ok: facts.answers, version: facts.version, image: await this.imageOf(container), box: boxReport(facts.box), at: this.now() };
     return this.lastHealth;
   }
@@ -406,9 +444,9 @@ export class AdoptedHome {
 
   private async read(container: ContainerInfo): Promise<HomeFacts> {
     try {
-      return parseHomeReads((await this.docker.exec(container.Id, [...HOME_READS_COMMAND], 30_000)).output);
+      return parseHomeReads((await this.docker.exec(container.Id, homeReadsCommand(this.licenceProof), 30_000)).output);
     } catch {
-      return { answers: false, version: null, seats: null, box: null };
+      return { answers: false, version: null, seats: null, box: null, environmentId: null, licence: null };
     }
   }
 
