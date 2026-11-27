@@ -82,6 +82,15 @@ describe("draftCardFrom", () => {
     const othersOnly: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", extra_recipients: ["eve@example.com"] } };
     expect(draftCardFrom([othersOnly], done, "b", shownBefore)?.to).toEqual(["ana@example.com", "eve@example.com"]);
   });
+
+  it("shows no card for a draft with other recipients but no first one, so a later update can't drop them", () => {
+    const before = draftCardFrom([createCall], created(), "b")!;
+    const done = answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } });
+    const cleared: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", recipient_email: "" } };
+    expect(draftCardFrom([cleared], done, "b", (id) => (id === "r-123" ? before : undefined))).toBeNull();
+    const othersOnly: ConnectorCall = { slug: "GMAIL_CREATE_EMAIL_DRAFT", arguments: { user_id: "me", extra_recipients: ["ben@example.com"], subject: "Launch", body: "Hi" } };
+    expect(draftCardFrom([othersOnly], created(), "b")).toBeNull();
+  });
 });
 
 describe("showDraftAnswer", () => {

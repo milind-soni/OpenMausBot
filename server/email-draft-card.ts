@@ -66,10 +66,14 @@ export function draftCardFrom(calls: readonly ConnectorCall[], frame: Row | null
   const threadId = text(record(body?.message)?.threadId) ?? text(args.thread_id) ?? before?.threadId;
   const url = httpsUrl(body?.display_url) ?? httpsUrl(record(body?.message)?.display_url) ?? before?.url;
   const account = call.account ?? before?.account;
+  // The card's first address is the draft's recipient_email, the rest its extra_recipients (as draftCall saves them), so a
+  // draft with others but no recipient_email gets no card: a later update naming only one of the two couldn't be placed.
+  const recipient = first ? list(args.recipient_email) : before!.to.slice(0, 1);
+  const others = rest ? list(args.extra_recipients) : before!.to.slice(1);
+  if (!recipient.length && others.length) return null;
   return {
     app: "gmail", draftId, botId,
-    // The card's first address is the draft's recipient_email, the rest its extra_recipients (as draftCall saves them).
-    to: [...(first ? list(args.recipient_email) : before!.to.slice(0, 1)), ...(rest ? list(args.extra_recipients) : before!.to.slice(1))],
+    to: [...recipient, ...others],
     cc: cc ? list(args.cc) : before!.cc,
     bcc: bcc ? list(args.bcc) : before!.bcc,
     subject: !subject ? before!.subject : typeof args.subject === "string" ? args.subject : "",
