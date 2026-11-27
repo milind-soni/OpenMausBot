@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { LOOK_HISTORY_LIMIT } from "../../shared/theme.ts";
-import { isRefusal, createThemeStore } from "./store.ts";
+import { isRefusal, createThemeStore, pictureKind } from "./store.ts";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
 const GIF = Buffer.from("GIF89a\x01\x00\x01\x00", "latin1");
@@ -54,6 +54,21 @@ describe("theme store", () => {
     expect(store.asset("owner", "neon", "stars.png")).toMatchObject({ type: "image/png", bytes: PNG.byteLength });
     expect(store.asset("owner", "neon", "../theme.json")).toBeNull();
     expect(store.asset("someone-else", "neon", "stars.png")).toBeNull();
+  });
+
+  it("refuses an unclosed comment prefix without stalling the svg sniff", () => {
+    const { store } = fixture();
+    store.save("owner", "neon", { name: "Neon" });
+    const stall = Buffer.from(`<!--${"--><!--".repeat(26)}`);
+    const started = Date.now();
+    expect(pictureKind(stall)).toBeNull();
+    expect(Date.now() - started).toBeLessThan(500);
+    const saving = Date.now();
+    expect(isRefusal(store.addAsset("owner", "neon", "mark.svg", stall))).toBe(true);
+    expect(Date.now() - saving).toBeLessThan(500);
+    const wrapped = Buffer.from('<?xml version="1.0"?>\n<!-- icon -->\n<!DOCTYPE svg>\n<svg></svg>');
+    expect(pictureKind(wrapped)).toBe("svg");
+    expect(store.addAsset("owner", "neon", "icon.svg", wrapped)).toEqual({ url: "/api/theme-assets/neon/icon.svg" });
   });
 
   it("exports with files inlined and imports them again under a free id, CSS pointed at the new copy", () => {
