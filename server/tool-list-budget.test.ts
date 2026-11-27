@@ -152,4 +152,58 @@ describe("fitting a list into its share", () => {
       mode: { type: "string", enum: ["a", "b"] },
     } });
   });
+
+  it("rebuilds an oversized array with its item type, and leaves a plain string array as it was", () => {
+    const tool: ListedTool = {
+      name: "sample", description: "A sample tool.",
+      inputSchema: { type: "object", required: ["keys", "labels"], properties: {
+        keys: { type: "array", items: { type: "integer" }, allOf: Array.from({ length: 200 }, () => ({ maxItems: 16 })) },
+        labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+      } },
+    };
+    const fitted = fitToolListToShare([tool], 500);
+    expect(fitted.from).toBeGreaterThan(500);
+    expect(fitted.level.topLevelOnly).toBe(true);
+    expect(fitted.fits).toBe(true);
+    expect(fitted.bytes).toBeLessThanOrEqual(500);
+    expect(fitted.tools[0]!.inputSchema).toEqual({ type: "object", required: ["keys", "labels"], properties: {
+      keys: { type: "array", items: { type: "integer" } },
+      labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+    } });
+  });
+
+  it("keeps a nullable, nested, missing, or recursive array's items when the field is rebuilt", () => {
+    const tool: ListedTool = {
+      name: "sample", description: "A sample tool.",
+      inputSchema: {
+        type: "object", required: ["keys", "nullable"],
+        $defs: { node: { type: "array", items: { $ref: "#/$defs/node" } } },
+        properties: {
+          keys: { type: "array", items: { type: "integer" }, allOf: Array.from({ length: 200 }, () => ({ maxItems: 16 })) },
+          nullable: { type: ["array", "null"], items: { type: "integer", minimum: 0 }, allOf: [{ maxItems: 4 }] },
+          nested: { type: "array", items: { type: "array", items: { type: "boolean", description: "drop me" } }, allOf: [{ maxItems: 4 }] },
+          bare: { type: "array" },
+          tree: { type: "array", allOf: [{ maxItems: 4 }], $ref: "#/$defs/node" },
+          labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+        },
+      },
+    };
+    const fitted = fitToolListToShare([tool], 700);
+    expect(fitted.from).toBeGreaterThan(700);
+    expect(fitted.level.topLevelOnly).toBe(true);
+    expect(fitted.fits).toBe(true);
+    expect(fitted.bytes).toBeLessThanOrEqual(700);
+    expect(fitted.tools[0]!.inputSchema).toEqual({
+      type: "object", required: ["keys", "nullable"],
+      $defs: { node: { type: "array", items: { $ref: "#/$defs/node" } } },
+      properties: {
+        keys: { type: "array", items: { type: "integer" } },
+        nullable: { type: ["array", "null"], items: { type: "integer" } },
+        nested: { type: "array", items: { type: "array", items: { type: "boolean" } } },
+        bare: { type: "array", items: { type: "string" } },
+        tree: { type: "array", items: { type: "array", items: { type: "string" } } },
+        labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+      },
+    });
+  });
 });

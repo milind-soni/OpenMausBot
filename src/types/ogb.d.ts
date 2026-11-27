@@ -329,6 +329,8 @@ const __APP_VERSION__: string;
         set(id: string | null, on: boolean): Promise<DesktopLendView>;
         /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
         allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** Opens This computer's Settings with that server's folders and terminal, once it is lent; false when it isn't. */
+        choose?(id: string | null): Promise<boolean>;
         /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
          * turns out to be the person's own. */
         wish?(address: string, on: boolean): Promise<boolean>;

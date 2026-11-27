@@ -44,3 +44,7 @@ export function recoveryPromptFor(input: RecoveryPromptInput): RecoveryPrompt {
 export function rebuiltSessionNotice(engine: string): string {
   return `${engine} could not reopen this conversation's session, so it went on in a new one started from the chat; results of earlier tool calls did not carry over.`;
 }
+
+export function instructionsOverflowNotice(engine: string): string {
+  return `${engine} moved this conversation to a new session: its accumulated developer instruction blocks were close to the provider's system-prompt limit, so the superseded ones did not carry over.`;
+}

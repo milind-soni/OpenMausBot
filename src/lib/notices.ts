@@ -3,10 +3,13 @@ import { hintSeen, hintSeenPatch, type OnboardingStatus } from "@/lib/onboarding
 /** "MausBot is better with your team": once per person whom What's new has nothing for (a Team Cloud's members), on every
  * surface but a branded build or an organization's desktop. On a Team Cloud its record is each person's (TEAM_PERSONAL_HINTS). */
 export const TEAMS_NOTICE = "teams-2026-11b";
-/** What's new, the new Cloud, Team and the sponsor's slides: each person sees it once, as the launch's notice. A new id shows
- * it once more. Seeing it counts as seeing the Teams popup and the sponsor's card. On a Team Cloud its record is each person's. */
-export const WHATS_NEW_NOTICE = "whats-new-2026-11b";
-/** The earlier What's new, with the new Cloud and Team only. */
+/** What's new (src/lib/whats-new.ts whatsNewCarousel): each person sees it once, as the launch's notice. A new id shows it
+ * once more. Seeing it counts as seeing the earlier ones, the Teams popup and the sponsor's card. On a Team Cloud its record
+ * is each person's. */
+export const WHATS_NEW_NOTICE = "whats-new-2026-11c";
+/** The What's new before it, with the new Cloud, Team and the sponsor's slides. */
+export const PREVIOUS_WHATS_NEW_NOTICE = "whats-new-2026-11b";
+/** The first What's new, with the new Cloud and Team only. */
 export const EARLIER_WHATS_NEW_NOTICE = "whats-new-2026-11";
 export const UPDATES_CONSENT_NOTICE = "updates-consent";
 /** The Simple mode popup, once per browser (simple-mode-prompt.ts keeps whether it was closed). */
@@ -25,7 +28,7 @@ export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
 /** The Move from Grok Bot popup: each person sees it once, first of all, after their welcome. */
 export const GROK_MOVE_NOTICE = "grok-move-2026-11";
-/** The sponsor's card for ModelGo, now What's new's last slide: kept as seen with it, and listed in Announcements. */
+/** The sponsor's card for ModelGo, later a slide of What's new 2026-11b: kept as seen with What's new, and listed in Announcements. */
 export const MODELGO_OFFER_NOTICE = "modelgo-offer-2026-11";
 /** Update MausBot on your phone: once per phone with an older app after this computer's secure link ended. */
 export const PHONE_UPDATE_NOTICE = "phone-app-update";

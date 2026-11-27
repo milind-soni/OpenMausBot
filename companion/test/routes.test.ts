@@ -50,6 +50,7 @@ describe("what the app may do", () => {
     ["DELETE", "/api/bots/bot_123"],
     ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
+    ["PUT", "/api/sidebar-sections/order"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
     ["POST", "/api/bots/bot_123/respond"],
@@ -119,6 +120,7 @@ describe("what the app may do", () => {
     ["POST", "/api/live/call/end"],
     ["GET", "/api/live/call"],
     ["PATCH", "/api/live/settings"],
+    ["POST", "/api/live/relay"],
     ["GET", "/api/routines"],
     ["POST", "/api/routines"],
     ["PATCH", "/api/routines/routine_1"],
@@ -398,7 +400,7 @@ describe("what it may not", () => {
     expect(ask("PATCH", "/api/config")?.error).toBe("this setting is changed on your computer");
   });
 
-  it("allows only the four Live call routes, never the key", () => {
+  it("allows only the five Live call routes, never the key", () => {
     expect(ask("POST", "/api/live/summary")?.status).toBe(404);
     expect(ask("PATCH", "/api/config")?.status).toBe(403);
     expect(allowed("PUT", "/api/live/settings")).toBe(false);
@@ -406,6 +408,8 @@ describe("what it may not", () => {
     expect(allowed("GET", "/api/live/session")).toBe(false);
     expect(allowed("POST", "/api/live/call")).toBe(false);
     expect(allowed("POST", "/api/live/call/end/extra")).toBe(false);
+    expect(allowed("GET", "/api/live/relay")).toBe(false);
+    expect(allowed("POST", "/api/live/relay/x")).toBe(false);
   });
 
   it("allows an app's document, rpc and context and nothing else of apps", () => {

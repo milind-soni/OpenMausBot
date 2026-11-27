@@ -77,7 +77,7 @@ export function LocalAppCard({ app, bot, onOpen, onOpenWindow, onRename, onGoToC
 }) {
   const [renaming, setRenaming] = useState(false);
   const maker = bot?.name ?? app.bot?.name;
-  const facts = [maker ?? t("localApps.card.botGone"), relativeTime(app.updatedAt)].join(" · ");
+  const facts = [maker ?? t(app.sample ? "localApps.card.sample" : "localApps.card.botGone"), relativeTime(app.updatedAt)].join(" · ");
   const items: SidebarMenuItem[] = [
     { key: "rename", label: t("localApps.card.rename"), icon: <Pencil size={16} />, onSelect: () => setRenaming(true) },
     ...(onGoToChat ? [{ key: "chat", label: t("localApps.card.goToChat"), icon: <MessageSquare size={16} />, onSelect: onGoToChat }] : []),

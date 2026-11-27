@@ -7,6 +7,13 @@ export interface RegisteredLayer {
   customer: string;
   features: string[];
   expiresAt: string | null;
+  seats?: number;
+  plan?: string;
+  sub?: string;
+  server?: string;
+  /** Core orders licences by these: the issue date, then `iat` when both carry it. */
+  issued: string;
+  iat?: number;
 }
 
 /** The longest grace core may ask for; a larger number is clamped, never trusted. */
@@ -19,5 +26,13 @@ export function register(options: { licenseKey: string | undefined; graceDays?: 
   // only the expiry comparison moves that many days earlier.
   const graceDays = Math.min(MAX_GRACE_DAYS, Math.max(0, Number.isFinite(options.graceDays) ? options.graceDays! : 0));
   const claims = verifyLicenseKey(options.licenseKey, { now: new Date((options.now ?? Date.now()) - graceDays * DAY_MS) });
-  return { customer: claims.customer, features: claims.features, expiresAt: claims.expires };
+  return {
+    customer: claims.customer, features: claims.features, expiresAt: claims.expires,
+    ...(claims.seats !== undefined ? { seats: claims.seats } : {}),
+    ...(claims.plan !== undefined ? { plan: claims.plan } : {}),
+    ...(claims.sub !== undefined ? { sub: claims.sub } : {}),
+    ...(claims.server !== undefined ? { server: claims.server } : {}),
+    issued: claims.issued,
+    ...(claims.iat !== undefined ? { iat: claims.iat } : {}),
+  };
 }

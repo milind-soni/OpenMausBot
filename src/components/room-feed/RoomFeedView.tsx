@@ -25,13 +25,15 @@ import { FeedComposer } from "./FeedComposer";
 import { useHiddenMark } from "./unread-offscreen";
 import { RoomFeedRow, type FeedRowActions, type FeedRowData } from "./RoomFeedRow";
 import { useRoomThreads, type FeedThread } from "./use-room-threads";
+import { useRoomWorkStatuses } from "./use-room-work";
+import type { WorkStatus } from "@/lib/room-work";
 
 /** How near the foot the feed counts as being read there, so a new thread keeps it at the foot. */
 const FOOT_PX = 48;
 /** Only the person scrolling takes the feed off its foot; a row opening beside it or a window resize never does. */
 const INTENT_MS = 1_000;
 
-function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]): FeedRowData {
+function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[], work: WorkStatus | undefined): FeedRowData {
   const { waiting, unread } = roomThreadAttention(group, task, bots);
   return {
     threadId: task.threadId,
@@ -42,13 +44,15 @@ function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]
     replies: summary.replies,
     lastReplyAt: summary.lastReplyAt,
     repliers: summary.repliers,
-    mark: waiting ? "waiting" : unread ? "unread" : null,
+    // A piece of work waiting on someone else does not wait on the viewer.
+    mark: waiting && !work?.someoneElse ? "waiting" : unread ? "unread" : null,
     working: roomThreadWorking(group, task.threadId),
     workingBotId: roomThreadSpeakerId(group, task.threadId),
     title: task.title,
     pinned: task.pinned === true,
     archived: isArchived(task),
     closedBy: threadRowCloser(task),
+    work,
   };
 }
 
@@ -82,6 +86,8 @@ export function RoomFeedView({ group }: { group: Group }) {
   const deletable = (group.tasks?.length ?? 1) > 1;
   const [showArchived, setShowArchived] = useState(false);
   const { threads, failed, retry } = useRoomThreads(group, showArchived && hasArchived);
+  const work = useRoomWorkStatuses(group.id, bots);
+  const team = useStoreSelector((state) => Boolean(state.config?.team));
   const actions = useMemo<FeedRowActions>(() => {
     const room = roomThreadRowActions(group.id, dispatch);
     const leave = (threadId: string) => { if (store.state().forkPanel?.threadId === threadId) dispatch({ type: "closeForkPanel" }); };
@@ -105,11 +111,11 @@ export function RoomFeedView({ group }: { group: Group }) {
 
   const rows = useMemo(() => {
     if (!threads) return null;
-    const listed = threads.map((thread) => toRow(group, thread, bots));
+    const listed = threads.map((thread) => toRow(group, thread, bots, work.get(thread.task.threadId)));
     if (!pending || (pending.threadId && listed.some((row) => row.threadId === pending.threadId))) return listed;
     return [...listed, { threadId: pending.threadId ?? "", speaker: { person: {} }, text: pending.text, at: pending.at, replies: 0, lastReplyAt: null,
       repliers: [], mark: null, working: false, workingBotId: null } satisfies FeedRowData];
-  }, [threads, pending, group, bots]);
+  }, [threads, pending, group, bots, work]);
   const items = useMemo(() => rows && foldClosedRuns(rows, (row) => folds(row, openThread), unfolded), [rows, openThread, unfolded]);
   const unfold = useCallback((threadIds: readonly string[]) => {
     // The fold stays where the person pressed it, and what it shows opens under it.
@@ -177,7 +183,10 @@ export function RoomFeedView({ group }: { group: Group }) {
                 </p>
               )
             ) : rows.length === 0 ? (
-              <p className="py-6 text-center text-[13px] text-ink-secondary">{t("room.feed.empty")}</p>
+              <div className="py-6 text-center text-[13px] leading-[18px]">
+                <p className="text-ink-secondary">{t("room.feed.empty")}</p>
+                {team && <p data-feed-split-hint="" className="mt-1 text-ink-tertiary">{t("room.feed.splitHint")}</p>}
+              </div>
             ) : (
               <ol aria-label={t("room.feed.aria", { name: group.name })} className="flex flex-col gap-0.5 py-2">
                 {items.map((item) => item.kind === "fold" ? (

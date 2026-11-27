@@ -59,6 +59,7 @@
 //   FAKE_CODEX_TEXT_MODE  `codex exec`: ok (default) | fail | exit | hang | tool | noisy
 //   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
 //   FAKE_CODEX_TEXT_BLOCK  `codex exec`: comma-separated models answered with the 403 OpenAI sends a region it does not serve
+//   FAKE_CODEX_CATALOG_FAILURES  the first N null-cursor model/list requests fail (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_TIERS  "1": model/list rows list a Fast service tier, as codex-cli 0.167.2 does; gpt-page-two
 //     already runs on it by default. Set FAKE_CODEX_ULTRAFAST="1" alongside it to also include Ultrafast.
@@ -659,7 +660,19 @@ process.stdin.on("data", (chunk) => {
         out({ jsonrpc: "2.0", id: msg.id, result: { account, requiresOpenaiAuth: true } });
         break;
       }
-      case "model/list":
+      case "model/list": {
+        if ((msg.params?.cursor ?? null) === null && process.env.FAKE_CODEX_CATALOG_FAILURES && process.env.FAKE_CODEX_STATE) {
+          let listed = 0;
+          try {
+            listed = Number(readFileSync(process.env.FAKE_CODEX_STATE, "utf8")) || 0;
+          } catch {}
+          const quota = Number(process.env.FAKE_CODEX_CATALOG_FAILURES) || 0;
+          writeFileSync(process.env.FAKE_CODEX_STATE, String(listed + 1));
+          if (listed < quota) {
+            out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "model catalog unavailable" } });
+            break;
+          }
+        }
         if (msg.params?.cursor === "page-2") {
           out({
             jsonrpc: "2.0",
@@ -699,6 +712,7 @@ process.stdin.on("data", (chunk) => {
           });
         }
         break;
+      }
       case "config/read":
         logStartup("config/read");
         if (process.env.FAKE_CODEX_CONFIG_HOLD_FILE && existsSync(process.env.FAKE_CODEX_CONFIG_HOLD_FILE) && !msg.released) {

@@ -8,6 +8,7 @@ import { parseTotpKey, totpCode, type TotpKey } from "./totp.ts";
 // Obvious fakes only.
 const PASSWORD = "fake-S3cret!pass";
 const KEY = parseTotpKey("JBSWY3DPEHPK3PXP")!;
+const SECOND_KEY = parseTotpKey("GEZDGNBVGY3TQOJQ")!;
 const NOW = 1_700_000_010_000; // 10 s into a 30 s step
 const DASHBOARD = { url: "https://example.com/dashboard?session=abc", html: "<title>Dashboard</title><h1>Welcome back</h1>" };
 
@@ -323,6 +324,39 @@ describe("one-time codes and fields", () => {
     expect(Array.from({ length: 6 }, (_, index) => page.field(`input[name=d${index}]`).value).join("")).toBe(totpCode(KEY, NOW));
   });
 
+  it.each([
+    ["Verify Security Code", "alice@example.com", KEY],
+    ["Verify Security Code", "bob@example.com", SECOND_KEY],
+    ["Enter ZIP code", "alice@example.com", KEY],
+  ])("uses the selected account's code on the verification screen (%s, %s)", async (prompt, username, key) => {
+    const boxes = Array.from({ length: 6 }, (_, index) =>
+      `<div><input name="d${index}" type="number" maxlength="1"></div>`
+    ).join("");
+    const shouldFill = prompt === "Verify Security Code";
+    const { page, fill } = setup(
+      "https://example.com/login",
+      LOGIN_FORM,
+      [
+        { host: "example.com", username: "alice@example.com", totp: KEY },
+        { host: "example.com", username: "bob@example.com", totp: SECOND_KEY },
+      ],
+    );
+    page.answer = () => page.sent.length === 1
+      ? { navigate: {
+        url: "https://example.com/verify",
+        html: `<h2>${prompt}</h2><form><div>${boxes}</div><button type="submit">Verify</button></form>`,
+      } }
+      : { navigate: DASHBOARD };
+
+    const outcome = await fill(username);
+    const code = totpCode(key, NOW);
+    expect(outcome.filled).toEqual(shouldFill ? ["username", "password", "code"] : ["username", "password"]);
+    expect(page.typed.slice(2).join("")).toBe(shouldFill ? code : "");
+    expect(page.sent.slice(1)).toEqual(shouldFill
+      ? [Object.fromEntries([...code].map((digit, index) => [`d${index}`, digit]))] : []);
+    expectNoSecret(outcome, page, [code, PASSWORD, key.secret]);
+  });
+
   it("points at the person's inbox, then the person, when a code is asked for and no 2FA key is saved", async () => {
     const { page, fill } = setup("https://example.com/2fa", `<input name="verification_code">`, [{ host: "example.com", username: "alice" }]);
     const outcome = await fill();
@@ -351,10 +385,22 @@ describe("one-time codes and fields", () => {
     expect(page.pressed).toEqual(["Enter"]);
   });
 
+  it("takes the only new-password box on a sign-in page whose path ends in a file name (login.html), as ccopyright's does", async () => {
+    const boxes = `<div><input type="text" placeholder="请输入用户名/手机号/邮箱" autocomplete="new-password"><input type="password" placeholder="请输入密码" autocomplete="new-password"></div>`;
+    for (const url of ["https://register.example.cn/login.html", "https://example.com/account/signin.php", "https://example.com/Sign-In.aspx", "https://example.com/login.servlet", "https://example.com/login.do"]) {
+      const { page, fill } = setup(url, boxes, [{ host: url.includes(".cn") ? "example.cn" : "example.com", username: "alice@example.com" }], { submit: false });
+      const outcome = await fill();
+      expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+      expect(page.field("input[type=text]").value).toBe("alice@example.com");
+      expect(page.field("input[type=password]").value).toBe(PASSWORD);
+      page.close();
+    }
+  });
+
   it("keeps new-password boxes empty on a sign-in page with two of them, or on a sign-up page under a sign-in path", async () => {
     const twoBoxes = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"><input name="again" type="password" autocomplete="new-password"></form>`;
     const oneBox = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"></form>`;
-    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox], ["https://example.com/login/%72egistration", oneBox], ["https://example.com/login/%E0%A4%A", oneBox]]) {
+    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login.html", twoBoxes], ["https://example.com/login/password.reset", oneBox], ["https://example.com/login.register", oneBox], ["https://example.com/login.signup", oneBox], ["https://example.com/login/signup.html", oneBox], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox], ["https://example.com/login/%72egistration", oneBox], ["https://example.com/login/%E0%A4%A", oneBox]]) {
       const { page, fill } = setup(url, html, [{ host: "example.com", username: "alice@example.com" }], { submit: false });
       const outcome = await fill();
       expect(outcome).toMatchObject({ ok: true, filled: ["username"] });

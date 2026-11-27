@@ -160,6 +160,7 @@ export async function startCaddy(options: {
   const child: ChildProcess = spawn(options.binary, ["run", "--config", configFile, "--adapter", "caddyfile"], {
     env: { ...(options.env ?? process.env), XDG_DATA_HOME: join(home, "data"), XDG_CONFIG_HOME: join(home, "config") },
     stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
   let output = "";
   const receive = (chunk: Buffer) => {

@@ -81,25 +81,28 @@ afterAll(async () => {
   await fx?.close();
 });
 
-it("lists no board tools while the switch is off, and refuses their calls", async () => {
+it("lists the board tools to every bot of a Team Cloud with no switch, and tells a room's bots to split work only when asked", async () => {
+  const dump = () => JSON.parse(readFileSync(file("dump.json"), "utf8")) as { systemPrompt?: string | null; mcpConfig?: { mcpServers?: { agents?: { env?: Record<string, string> } } } };
+  const idle = () => until(async () => ((await team.as(olive, "GET", "/api/bots")).body.bots as Array<{ busy?: boolean }>).every((one) => !one.busy), "idle");
   rmSync(file("dump.json"), { force: true });
   const sent = await team.as(olive, "POST", `/api/bots/${writer.id}/messages`, { text: "Hello", threadId: writer.threadId });
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
-  await until(() => existsSync(file("dump.json")), "a turn");
-  const env = () => JSON.parse(readFileSync(file("dump.json"), "utf8")).mcpConfig?.mcpServers?.agents?.env as Record<string, string>;
-  expect(env().OMB_TEAM_BOARD).toBe("0");
-  const bearer = await team.capability(writer.id, launch.threadId);
-  const refused = await fetch(`${team.base}/api/internal/board/list`, { method: "POST", headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" }, body: "{}" });
-  expect(refused.status).toBe(404);
-  const on = await team.as(olive, "PATCH", "/api/config", { features: { teamBoard: true } });
-  expect(on.status, JSON.stringify(on.body)).toBe(200);
-  await until(async () => ((await team.as(olive, "GET", "/api/bots")).body.bots as Array<{ busy?: boolean }>).every((one) => !one.busy), "idle");
+  await until(() => existsSync(file("dump.json")), "a chat turn");
+  expect(dump().mcpConfig?.mcpServers?.agents?.env?.OMB_TEAM_BOARD).toBe("1");
+  expect(dump().systemPrompt).toBeTruthy();
+  expect(dump().systemPrompt ?? "", "the split line is for rooms").not.toContain("board_add");
+  expect(dump().systemPrompt ?? "", "and so is the work view").not.toContain("call board_list and show it here with show_html");
+  await idle();
   rmSync(file("dump.json"), { force: true });
-  await team.as(olive, "POST", `/api/bots/${writer.id}/messages`, { text: "Hello again", threadId: writer.threadId });
-  await until(() => existsSync(file("dump.json")), "a second turn");
-  expect(env().OMB_TEAM_BOARD).toBe("1");
-  // Writer's own chat turn must be over before the next case: a busy Writer would hand its first item to another bot.
-  await until(async () => ((await team.as(olive, "GET", "/api/bots")).body.bots as Array<{ busy?: boolean }>).every((one) => !one.busy), "idle again");
+  const room = await team.as(mira, "POST", `/api/groups/${launch.id}/messages`, { text: "Hello room", threadId: launch.threadId });
+  expect(room.status, JSON.stringify(room.body)).toBe(202);
+  await until(() => existsSync(file("dump.json")), "a room turn");
+  expect(dump().mcpConfig?.mcpServers?.agents?.env?.OMB_TEAM_BOARD).toBe("1");
+  expect(dump().systemPrompt ?? "").toContain("When a person here asks you to split up or share out work");
+  expect(dump().systemPrompt ?? "").toContain("When someone asks to see the work or where it stands, call board_list and show it here with show_html");
+  expect(dump().systemPrompt ?? "").toContain("asked again, replace that page by its app_id. Never show it unasked.");
+  // Every bot must be idle before the next case: a busy one would hand its first item to another bot.
+  await idle();
 }, hostTimeout(90_000));
 
 it("hands a person's item to a free bot as unattended work, and a done item readies and dispatches what needs it", async () => {
@@ -113,14 +116,14 @@ it("hands a person's item to a free bot as unattended work, and a done item read
   await settled(alpha.threadId, "done");
   expect(await item(alpha.threadId)).toMatchObject({ result: "Draft at drafts/alpha.md", attempts: 1 });
   const lines = await messages(mira, alpha.threadId);
-  const brief = lines.find((line) => line.role === "user" && line.sender?.name === "Board")!;
+  const brief = lines.find((line) => line.role === "user" && line.sender?.name === "Handoff")!;
   expect(brief.text).toMatch(/^@Writer /);
   expect(brief.text).toContain("Alpha draft");
   expect(brief.text).toContain("Write the launch post for Friday.");
   expect(brief.sender?.id, "the board is no person").toBeUndefined();
   await until(async () => (await messages(mira, alpha.threadId)).some((line) => line.role === "bot" && line.kind === "text" && line.from?.botId === writer.id), "Writer's reply");
   await settled(beta.threadId, "done");
-  const review = (await messages(mira, beta.threadId)).find((line) => line.sender?.name === "Board")!;
+  const review = (await messages(mira, beta.threadId)).find((line) => line.sender?.name === "Handoff")!;
   expect(review.text).toMatch(/^@Reviewer /);
   expect(review.text).toContain("Draft at drafts/alpha.md");
   expect(await item(beta.threadId)).toMatchObject({ result: "Reads well." });
@@ -137,6 +140,7 @@ it("an ask waits on the person who made the item, reaches their inbox, and their
   await settled(gamma.threadId, "needs_person");
   const asked = await item(gamma.threadId);
   expect(asked).toMatchObject({ holder: { botId: writer.id }, question: { text: "Which date should the launch be?", person: personKey({ id: "", email: MIRA.email }) } });
+  expect(asked.question?.name, "whom it waits on, by name").toBeTruthy();
   expect((await messages(mira, gamma.threadId)).some((line) => line.role === "bot" && line.text === "Which date should the launch be?" && line.from?.botId === writer.id)).toBe(true);
   await until(async () => ((await team.as(mira, "GET", "/api/inbox")).body.rows as Array<{ text: string; origin?: { threadId: string } }>)
     .some((row) => row.text === "Which date should the launch be?" && row.origin?.threadId === gamma.threadId), "Mira's inbox line");
@@ -174,7 +178,7 @@ it("a reply queued behind the turn that asked still goes to the same bot, and th
   expect(await item(theta.threadId)).toMatchObject({ result: "Booked Thursday.", attempts: 1 });
   const lines = await messages(mira, theta.threadId);
   expect(lines.filter((line) => line.role === "user" && line.text?.includes("Thursday works")).map((line) => line.text)).toEqual(["@Writer Thursday works"]);
-  expect(lines.filter((line) => line.sender?.name === "Board"), "never handed out again").toHaveLength(1);
+  expect(lines.filter((line) => line.sender?.name === "Handoff"), "never handed out again").toHaveLength(1);
   rmSync(file("release"), { force: true });
 }, hostTimeout(120_000));
 
@@ -196,7 +200,7 @@ it("an answer from the person's inbox, which starts no turn by itself, brings th
   expect(answered.status, JSON.stringify(answered.body)).toBe(202);
   await settled(zeta.threadId, "done");
   expect(await item(zeta.threadId)).toMatchObject({ result: "Booked The Hall.", attempts: 1 });
-  const boardLines = (await messages(mira, zeta.threadId)).filter((row) => row.sender?.name === "Board");
+  const boardLines = (await messages(mira, zeta.threadId)).filter((row) => row.sender?.name === "Handoff");
   expect(boardLines).toHaveLength(2);
   expect(boardLines[1]!.text).toMatch(/^@Writer .*The Hall, please\./s);
 }, hostTimeout(120_000));
@@ -219,6 +223,11 @@ it("board_add from a lead makes a thread and an item each, with needs, and a bad
   await settled(two.threadId, "done");
   const listed = await (await call("list", {})).json() as { text: string };
   expect(listed.text).toContain(`${two.threadId} [done] Delta two`);
+  // A bot working one piece cannot split it into more: that would start turns nobody asked for.
+  const inside = await team.capability(writer.id, one.threadId);
+  const again = await fetch(`${team.base}/api/internal/board/add`, { method: "POST", headers: { authorization: `Bearer ${inside}`, "content-type": "application/json" }, body: JSON.stringify({ items: [{ key: "x", title: "Delta three" }] }) });
+  expect(again.status).toBe(409);
+  expect((await board(olive)).some((entry) => entry.title === "Delta three")).toBe(false);
 }, hostTimeout(120_000));
 
 it("later sets the item aside and brings it back to the same bot at its time, counting no attempt", async () => {
@@ -231,7 +240,7 @@ it("later sets the item aside and brings it back to the same bot at its time, co
   expect(await item(epsilon.threadId)).toMatchObject({ state: "working", holder: { botId: writer.id }, laterCount: 1, later: { note: "See whether CI passed" } });
   await settled(epsilon.threadId, "done");
   expect(await item(epsilon.threadId)).toMatchObject({ result: "CI green.", attempts: 1, laterCount: 1 });
-  const woken = (await messages(mira, epsilon.threadId)).filter((line) => line.sender?.name === "Board");
+  const woken = (await messages(mira, epsilon.threadId)).filter((line) => line.sender?.name === "Handoff");
   expect(woken).toHaveLength(2);
   expect(woken[1]!.text).toMatch(/^@Writer .*See whether CI passed/s);
 }, hostTimeout(120_000));
