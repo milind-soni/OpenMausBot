@@ -20,7 +20,7 @@ import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
 import type { WireTool } from "./wire-tool.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
-import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts"; import type { AppSettingCardField, WindowPrefFrame } from "./app-settings.ts";
+import type { ConnectorCardData } from "./connector-card.ts"; import type { McpChangeRequest } from "./mcp-request.ts"; import type { AppSettingCardField, WindowPrefFrame } from "./app-settings.ts"; import type { EmailDraftField } from "./email-draft.ts";
 import type { SkillRequestCardData } from "./skill-request.ts"; import type { OutsideWriteCardField } from "./outside-write.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
@@ -436,7 +436,7 @@ export type CardAnswerer = (
 export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, CheckBackLineField, HandoffStatusField, BugReportField {
+export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCardFields, WaitLineField, CheckBackLineField, HandoffStatusField, BugReportField, EmailDraftField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
