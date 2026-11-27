@@ -68,6 +68,21 @@ describe("buildApplicationMenu", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
+  it.each([["linux", false], ["linux", true], ["win32", false], ["win32", true]])(
+    "registers Ctrl+, on %s with Open at Login present: %s",
+    (platform, loginItem) => {
+      const onOpenSettings = vi.fn();
+      const template = build(platform, { onOpenSettings,
+        openAtLogin: loginItem ? { checked: false, onToggle: vi.fn() } : null });
+      const items = template.flatMap((menu) => menu.submenu ?? []).filter((item) => item.accelerator === "CmdOrCtrl+,");
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ label: "Settings…", visible: false });
+      items[0].click();
+      expect(onOpenSettings).toHaveBeenCalledTimes(1);
+      expect(template.find((menu) => menu.role === "fileMenu").submenu).toContain(items[0]);
+    },
+  );
+
   it.each(["linux", "win32"])("does not add an app menu on %s", (platform) => {
     const template = build(platform);
     expect(template[0].role).toBe("fileMenu");
