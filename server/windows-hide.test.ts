@@ -1,4 +1,4 @@
-// Guard for issue #4660: a console-subsystem child spawned without windowsHide opens a visible console window on
+// A console-subsystem child spawned without windowsHide opens a visible console window on
 // Windows. Every spawn/exec site in server/ and electron/ must set windowsHide (a no-op elsewhere), spread
 // OWN_GROUP, or be allowlisted here with the reason it may stay as it is.
 import { readFileSync, readdirSync, statSync } from "node:fs";
