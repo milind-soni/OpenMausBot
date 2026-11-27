@@ -26,7 +26,7 @@ export type HoldDirective = {
 };
 
 export function maskQuotedAndCode(value: string): string {
-  const mentionsOnly = (span: string): string => (span.match(/@[\p{L}\p{N}._-]+/gu) ?? []).join(" ") || "quoted";
+  const mentionsOnly = (span: string): string => (span.match(/@[\p{L}\p{N}._+-]+/gu) ?? []).join(" ") || "quoted";
   const kept: string[] = [];
   let fence = "";
   for (const line of value.split("\n")) {
@@ -101,7 +101,7 @@ export function isStopCommand(text: string, ownName?: string): boolean {
     if (!isMentionBoundary(line, at)) return false;
     const name = names.find((candidate) => {
       const tail = line.slice(at + 1 + candidate.length);
-      return line.startsWith(candidate, at + 1) && !isMentionNameContinuation(tail) && !/^[.+-][\p{L}\p{M}\p{N}_]/u.test(tail);
+      return line.startsWith(candidate, at + 1) && !isMentionNameContinuation(tail) && !/^[.+-]+[\p{L}\p{M}\p{N}_]/u.test(tail);
     });
     if (!name) return false;
     parts.push(line.slice(start, at));
