@@ -58,7 +58,7 @@ describe("a typed stop", () => {
     expect(w.rows).toHaveLength(1);
   });
 
-  it.each(["stop @Todo", "stop @Now", "@Adaplease stop", "@Ada.stop stop", "@Ada+Todo stop", "@all+Please stop", "@Ada++Todo stop", '"@Ada+Todo" stop', "@everyone stop @Todo"])(
+  it.each(["stop @Todo", "stop @Now", "@Adaplease stop", "@Ada.stop stop", "@Ada+Todo stop", "@all+Please stop", "@Ada++Todo stop", '"@Ada+Todo" stop', '"/@Ada" stop', '"@Ada\u0301" stop', "@everyone stop @Todo"])(
     "leaves the current turn running when the stop names someone else: %s", async (text) => {
       const w = world({ working: ["t", "other"] });
       expect(await w.send(text, { busy: true })).toBeNull();

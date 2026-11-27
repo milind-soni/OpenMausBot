@@ -149,6 +149,15 @@ describe("isStopCommand", () => {
     "```\n@Ada+Todo\n```\nstop",
     "@everyoneplease stop",
     "/@Ada stop",
+    '"/@Ada" stop',
+    "`/@Ada` stop",
+    "```\n/@Ada\n```\nstop",
+    "> /@Ada\nstop",
+    '"mail@Ada" stop',
+    '"@Ada@Ada" stop',
+    '"@Ada\u0301" stop',
+    "`@Ada\u0301` stop",
+    "```\n@Ada\u0301\n```\nstop",
     "@everyone stop @Todo",
   ])("keeps another name or a non-mention out of a typed stop: %s", (text) => {
     expect(isStopCommand(text, "Ada")).toBe(false);
@@ -166,6 +175,8 @@ describe("isStopCommand", () => {
     ["@Ada++Todo stop", "Ada++Todo"],
     ["@Ada... stop", "Ada"],
     ['"@Ada+Todo" stop', "Ada+Todo"],
+    ['"@Ada\u0301" stop', "Adá"],
+    ['"@Rene\u0301" stop', "René"],
     ["@Chris Assistent stop", "Chris Assistent"],
     ["@Rene\u0301 stop", "René"],
     ["【@小助手】停止", "小助手"],
@@ -176,6 +187,11 @@ describe("isStopCommand", () => {
     ["@all stop", "Ada"],
   ])("keeps a complete allowed name usable: %s", (text, name) => {
     expect(isStopCommand(text, name)).toBe(true);
+  });
+
+  it("retains a path boundary on a quoted punctuated name", () => {
+    expect(isStopCommand('"/@Ada+Todo" stop', "Ada+Todo")).toBe(false);
+    expect(isStopCommand('"@Ada+Todo" stop', "Ada+Todo")).toBe(true);
   });
 
   it("reads any other message as a message, including a quoted or coded stop", () => {

@@ -26,7 +26,9 @@ export type HoldDirective = {
 };
 
 export function maskQuotedAndCode(value: string): string {
-  const mentionsOnly = (span: string): string => (span.match(/@[\p{L}\p{N}._+-]+/gu) ?? []).join(" ") || "quoted";
+  const mentionsOnly = (span: string): string => Array.from(span.matchAll(/@[\p{L}\p{M}\p{N}._+-]+/gu), (match) =>
+    isMentionBoundary(span, match.index) ? match[0] : span[match.index - 1] + match[0],
+  ).join(" ") || "quoted";
   const kept: string[] = [];
   let fence = "";
   for (const line of value.split("\n")) {
