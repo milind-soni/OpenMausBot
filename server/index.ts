@@ -303,7 +303,7 @@ import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPos
 import { messagePages, pageMessage, pageSize, slimMessage } from "./host/message-pages.ts"; import { SUGGESTION_MAX_AGE_MS, suggestedSelection } from "./host/suggested-selection.ts"; import { otherProviderSelection } from "./checker-model.ts"; import { checkWorkFile, createCheckWork } from "./host/check-work.ts";
 import { coordinateResultMessage, createAsksActingPerson, createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts"; import { createMausBotOwnChat } from "./host/mausbot-own-chat.ts"; import { moveMemoryLayer } from "./memory-move.ts";
 import { createQueuedReason } from "./host/queued-reason.ts";
-import { ReplayBuffer } from "./host/sse-replay.ts";
+import { ReplayBuffer, type ReplayFrame } from "./host/sse-replay.ts";
 import {
   mentionedBots,
   roomResponders,
@@ -4663,58 +4663,64 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
+const numberedJson = (payload: Record<string, unknown>, seq: number) => JSON.stringify({ ...payload, seq });
+const sseMessage = (seq: number, json: string) => `id: ${STREAM_ID}:${seq}\ndata: ${json}\n\n`;
+
 /** `adminOnly` frames are withheld from client sessions, live and on replay; a `person`'s frames reach only their streams. */
 function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string; frames?: BotFrameForm } = {}) {
   // Close stale email streams before any further workspace data is delivered.
   sessions.recheckMembership();
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
-  const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
+  const json = numberedJson(payload, seq);
   // Members get config as configured-or-not and every bot without its server alias.
   const clientPayload = options.adminOnly ? null : kind === "config" ? configForAccess(payload as ReturnType<typeof configStatus>, false) : memberFramePayload(payload);
-  const clientFrame = clientPayload === null ? null : clientPayload === payload ? frame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...clientPayload, seq })}\n\n`;
-  replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}), ...(options.frames ? { frames: options.frames } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, seq, options));
-  const ownGroups: OwnGroupFrames = new Map();
+  const clientJson = clientPayload === null ? null : clientPayload === payload ? json : numberedJson(clientPayload, seq);
+  const event = { seq, kind, json, clientJson, payload, person: options.person, frames: options.frames };
+  replayBuffer.push(event); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, options));
+  const ownGroups: OwnGroupFrames | undefined = kind === "group" && sseClients.size > 1 ? new Map() : undefined;
+  const projected = ownGroups && new Map<Record<string, unknown>, string>();
   for (const client of Array.from(sseClients)) {
-    if (!wants(client, kind, options.frames) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, options.person)) continue;
-    // Admin-only frames (clientFrame null) never reach members, and a member never falls back to the admin frame.
-    const out = CLOUD_TEAM && kind === "config" && clientFrame !== null ? teamConfigFrame(client, seq, payload)
-      : memberFrame(client, seq, payload, client.admin ? frame : clientFrame, ownGroups);
-    if (out === null) continue;
-    if (deliverSseFrame(client, kind, out) === "disconnected") client.close();
+    const out = streamJson(client, event, ownGroups, projected);
+    if (out !== null && deliverSseFrame(client, kind, sseMessage(seq, out)) === "disconnected") client.close();
   }
 }
 
-/** A Team Cloud's config frame is each person's own: it carries their profile as "you". */
-function teamConfigFrame(client: SseClient, seq: number, payload: Record<string, unknown>): string {
-  const own = configForAccess(payload as ReturnType<typeof configStatus>, client.admin, client.person);
-  return `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...own, seq })}\n\n`;
+function streamJson(client: SseClient, event: ReplayFrame, ownGroups?: OwnGroupFrames, projected?: Map<Record<string, unknown>, string>): string | null {
+  const { kind, seq, payload } = event;
+  const base = client.admin ? event.json : event.clientJson;
+  if (base === null || !payload || !wants(client, kind, event.frames) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, event.person)) return null;
+  const selected = CLOUD_TEAM && kind === "config" && event.clientJson !== null
+    ? configForAccess(payload as ReturnType<typeof configStatus>, client.admin, client.person)
+    : memberPayload(client, payload, ownGroups);
+  if (!selected) return null;
+  if (selected === payload) return base;
+  const cached = projected?.get(selected);
+  if (cached !== undefined) return cached;
+  const json = numberedJson(selected, seq);
+  projected?.set(selected, json);
+  return json;
 }
 
 const streamFor = (client: Pick<SseClient, "person">, person: string | undefined) => !person || (client.person !== undefined && personKey(client.person) === person);
 /** What a stream for `auth` is shown; a phone with no stream open is judged by the same view (pushReaches). */
 function streamView(auth: RequestAuth, viewer: Viewer = viewerFor(auth)): StreamView { const visibleNow = visibleTo(viewer); return { admin: auth.scopes.includes("admin"), viewer, ask: teamOwners.viewer(auth), seen: viewer.kind === "all" && !visibleNow.filtersThreads ? { bots: new Set(), groups: new Set() } : { bots: new Set(store.bots.filter((bot) => visibleNow.bot(bot.id)).map((bot) => bot.id)), groups: new Set(store.groups.filter((group) => visibleNow.group(group.id)).map((group) => group.id)) }, ...(CLOUD_TEAM && auth.kind === "session" ? { person: auth.session } : {}) }; }
 /** Whether the phone behind `key` would have been sent this frame had its stream been open: broadcast's own rule. */
-function pushReaches(key: string, payload: Record<string, unknown>, seq: number, options: { adminOnly?: boolean; person?: string }): boolean {
+function pushReaches(key: string, payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string }): boolean {
   const session = key.startsWith("session:") ? sessions.record(key.slice("session:".length)) : null;
   const auth: RequestAuth | null = key.startsWith("companion:") ? { kind: "loopback", scopes: ["admin", "client"], companionDevice: key.slice("companion:".length) } : session ? { kind: "session", session, via: "bearer", scopes: session.scopes } : null;
-  const view = auth && streamView(auth); return view !== null && teamOwners.reaches(view.ask, payload) && streamFor(view, options.person) && memberFrame(view, seq, payload, view.admin || !options.adminOnly ? "" : null) !== null; }
+  const view = auth && streamView(auth); return view !== null && (view.admin || !options.adminOnly) && teamOwners.reaches(view.ask, payload) && streamFor(view, options.person) && memberPayload(view, payload) !== null; }
 
-/** `clientFrame` is the frame this client would get unnarrowed: an admin's is the admin frame, narrowed on a Team Cloud.
- * `ownGroups` keeps each person's room for one frame. */
-function memberFrame(client: StreamView, seq: number, payload: Record<string, unknown>, clientFrame: string | null, ownGroups: OwnGroupFrames = new Map()): string | null {
-  const own = client.person && clientFrame !== null ? personRooms.ownGroupFrame(ownGroups, personKey(client.person), payload, (mine) => `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...mine, seq })}\n\n`) : null;
-  if (own) { payload = own.payload; clientFrame = own.frame; }
-  const order = clientFrame === null ? null : botOrders?.streamFrame(client, payload); if (order) { payload = order; clientFrame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...order, seq })}\n\n`; }
+function memberPayload(client: StreamView, payload: Record<string, unknown>, ownGroups?: OwnGroupFrames): Record<string, unknown> | null {
+  if (client.person && payload.kind === "group") payload = personRooms.ownGroupPayload(ownGroups ?? new Map(), personKey(client.person), payload) ?? payload;
+  payload = botOrders?.streamFrame(client, payload) ?? payload;
   const visible = visibleTo(client.viewer);
-  if (clientFrame === null || (client.viewer.kind === "all" && !visible.filtersThreads)) return clientFrame;
+  if (client.viewer.kind === "all" && !visible.filtersThreads) return payload;
   if (visible.everything) {
     noteSeen(payload, client.seen);
-    return clientFrame;
+    return payload;
   }
-  const narrowed = frameForMember(payload, memberFrameContext(visible), client.seen);
-  if (!narrowed) return null;
-  return narrowed === payload ? clientFrame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...narrowed, seq })}\n\n`;
+  return frameForMember(payload, memberFrameContext(visible), client.seen) ?? null;
 }
 onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueuedMessages() }));
 
@@ -14504,15 +14510,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       );
       if (resumed) {
         for (const buffered of replayBuffer) {
-          if (buffered.seq <= since || !wants(client, buffered.kind, buffered.frames) || (buffered.payload && !teamOwners.reaches(client.ask, buffered.payload)) || !streamFor(client, buffered.person)) continue;
-          const frame = CLOUD_TEAM && buffered.kind === "config" && buffered.clientFrame !== null && buffered.payload
-            ? teamConfigFrame(client, buffered.seq, buffered.payload)
-            : buffered.payload
-              ? memberFrame(client, buffered.seq, buffered.payload, client.admin ? buffered.frame : buffered.clientFrame)
-              : client.admin
-                ? buffered.frame
-                : buffered.clientFrame;
-          if (frame) res.write(frame);
+          if (buffered.seq <= since) continue;
+          const json = streamJson(client, buffered);
+          if (json !== null) res.write(sseMessage(buffered.seq, json));
         }
       }
 

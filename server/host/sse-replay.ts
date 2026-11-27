@@ -3,8 +3,8 @@ import type { BotFrameForm } from "./bot-frames.ts";
 export interface ReplayFrame {
   seq: number;
   kind: string;
-  frame: string | null;
-  clientFrame: string | null;
+  json: string | null;
+  clientJson: string | null;
   payload: Record<string, unknown> | null;
   /** Only this person's streams get it (a Team Cloud's room as they read it). */
   person?: string;
@@ -18,9 +18,9 @@ export const REPLAY_MAX_CHARS = 8_000_000;
 
 /** A frame's payload is kept beside its serialization and costs about as much again. */
 function retainedChars(entry: ReplayFrame): number {
-  const frame = entry.frame?.length ?? 0;
-  const clientFrame = entry.clientFrame !== entry.frame ? entry.clientFrame?.length ?? 0 : 0;
-  return frame + clientFrame + (entry.payload ? frame : 0);
+  const chars = entry.json?.length ?? 0;
+  const clientChars = entry.clientJson !== entry.json ? entry.clientJson?.length ?? 0 : 0;
+  return chars + clientChars + (entry.payload ? chars : 0);
 }
 
 /** Kinds that mean something only live: the buffer keeps their sequence slot, so resume-gap detection still works, and
@@ -41,7 +41,7 @@ export class ReplayBuffer {
   }
 
   push(entry: ReplayFrame): void {
-    const kept = LIVE_ONLY.has(entry.kind) ? { ...entry, frame: null, clientFrame: null, payload: null } : entry;
+    const kept = LIVE_ONLY.has(entry.kind) ? { ...entry, json: null, clientJson: null, payload: null } : entry;
     this.frames.push(kept);
     this.chars += retainedChars(kept);
     while (this.frames.length > 1 && (this.frames.length > this.maxFrames || this.chars > this.maxChars)) {
