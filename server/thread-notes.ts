@@ -209,18 +209,22 @@ export function reachThreads(input: {
     const lines = input.messages(thread.threadId).filter((line) => (line.role === "user" || line.role === "bot") && line.kind === "text" && line.text?.trim());
     const end = input.before ? lines.findIndex((line) => line.id === input.before) : lines.length;
     const limit = Math.min(Math.max(1, input.limit ?? THREAD_READ_LIMIT), THREAD_LIST_MAX);
-    let budget = THREAD_READ_BUDGET - notes.text.length;
+    const first = (end === -1 ? 0 : end) - 1;
+    const reserved = Math.min(THREAD_LINE_CHARS, lines[first]?.text?.trim().length ?? 0);
+    const shownNotes = cut(notes.text, THREAD_READ_BUDGET - reserved);
+    let budget = THREAD_READ_BUDGET - shownNotes.text.length;
     const page: Array<{ messageId?: string; by: "person" | "bot"; at?: number; text: string; truncated: boolean }> = [];
-    for (let index = (end === -1 ? 0 : end) - 1; index >= 0 && page.length < limit && budget > 0; index -= 1) {
+    for (let index = first; index >= 0 && page.length < limit && budget > 0; index -= 1) {
       const line = lines[index]!;
       const shown = cut(line.text!.trim(), Math.min(THREAD_LINE_CHARS, budget));
+      if (!shown.text) break;
       budget -= shown.text.length;
       page.push({ ...(line.id ? { messageId: line.id } : {}), by: line.role === "user" ? "person" : "bot", ...(line.at ? { at: line.at } : {}), ...shown });
     }
     const oldest = (end === -1 ? 0 : end) - page.length;
     return {
       thread: { threadId: thread.threadId, ...(thread.title ? { title: thread.title } : {}) },
-      notes: notes.text, notesTruncated: notes.truncated,
+      notes: shownNotes.text, notesTruncated: notes.truncated || shownNotes.truncated,
       messages: page,
       earlier: oldest > 0 ? page.at(-1)?.messageId ?? null : null,
     };

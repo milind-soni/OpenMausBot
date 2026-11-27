@@ -12,6 +12,7 @@ import {
   shortcutDescription,
 } from "./keyboard-shortcuts";
 import { setLocale } from "./i18n";
+import { en } from "@/locales";
 
 afterEach(() => setLocale("en"));
 
@@ -39,6 +40,13 @@ describe("keyboard-shortcuts", () => {
     expect(isSidebarToggle({ ...chord, metaKey: false })).toBe(false);
     expect(isSidebarToggle({ ...chord, shiftKey: true })).toBe(false);
     expect(isSidebarToggle({ ...chord, defaultPrevented: true })).toBe(false);
+  });
+
+  it("lists Start fresh with its chord and a catalogued description", () => {
+    const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "start-fresh")!;
+    expect(item).toMatchObject({ macKeys: ["⌘", "⇧", "K"], winKeys: ["Ctrl", "Shift", "K"] });
+    expect(Object.hasOwn(en, "shortcuts.start-fresh")).toBe(true);
+    expect(shortcutDescription(item)).toBe("Start fresh in this conversation (keeps the messages)");
   });
 
   it("defines unique IDs and non-empty key lists for all shortcuts", () => {

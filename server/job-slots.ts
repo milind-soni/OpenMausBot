@@ -60,7 +60,12 @@ export function createJobSlots(limit: number): JobSlots {
         }, 250);
         poll.unref?.();
       }
-      onWait?.();
+      try {
+        onWait?.();
+      } catch (error) {
+        unwait();
+        reject(error);
+      }
     });
   };
   return {

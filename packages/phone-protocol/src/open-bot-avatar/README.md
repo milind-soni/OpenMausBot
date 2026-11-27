@@ -25,6 +25,8 @@ Vendored sources of [Open Bot Avatar](https://github.com/DominikScholz/open-bot-
   `bareSurface` in the fragment shader under the `finish` uniform; fluffy itself is unchanged.
 - The ribbons of `working` and `done` take our six rainbow comet palettes (`COMET_COLORS`) instead of
   shades of the body colour.
+- `renderAvatarSvg` writes no `<title>`, only `aria-label`, so the browser's tooltip never covers the one on
+  the bot's row.
 
 Comments in `motion.ts` and `effects.ts` that pointed at an upstream pull request and a third-party demo
 now say "a reference animation"; the numbers are unchanged.

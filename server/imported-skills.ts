@@ -28,6 +28,8 @@ export const IMPORTED_SKILLS_DIR = join(DATA_DIR, "imported-skills");
 /** Beside each bot's own skill state, outside every folder a bot works in. */
 const INDEX_PATH = join(DATA_DIR, "skill-state", "imported-skills.json");
 const choicesPath = (botId: string) => join(DATA_DIR, "skill-state", botId, "imported-skills.json");
+/** In its own file so a version that does not know it never rewrites the removal away. */
+const removedPath = (botId: string) => join(DATA_DIR, "skill-state", botId, "imported-skills-removed.json");
 
 const sha256Hex = z.string().regex(/^[a-f0-9]{64}$/);
 const entrySchema = z.object({
@@ -56,6 +58,7 @@ const choicesSchema = z.object({
   listed: z.array(z.string()).optional(),
 });
 type Choices = z.infer<typeof choicesSchema>;
+const removedSchema = z.object({ removed: z.array(z.string()).default([]) });
 
 /** Every imported skill by name; empty when there are none or the index cannot be trusted. */
 export function readImportedSkills(): Record<string, ImportedSkillEntry> {
@@ -79,6 +82,49 @@ function readChoices(botId: string): Choices {
     if (parsed.success) return parsed.data;
   } catch {}
   return { off: [], on: {}, listed: [] };
+}
+
+function writeChoices(botId: string, choices: Choices): void {
+  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
+  writeFileAtomic(choicesPath(botId), `${JSON.stringify(choices, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** The imported skills a person took out of one bot's Skills settings. */
+function readRemoved(botId: string): string[] {
+  try {
+    const parsed = removedSchema.safeParse(JSON.parse(readFileSync(removedPath(botId), "utf8")));
+    if (parsed.success) return parsed.data.removed.filter(isSkillName);
+  } catch {}
+  return [];
+}
+
+function writeRemoved(botId: string, removed: readonly string[]): void {
+  mkdirSync(dirname(removedPath(botId)), { recursive: true, mode: 0o700 });
+  writeFileAtomic(removedPath(botId), `${JSON.stringify({ removed: [...new Set(removed)].sort() }, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Whether the folder a skill was brought in from no longer holds a SKILL.md: the copy here is all that is left. The
+ * source is only asked whether its SKILL.md is a file; it is never read. */
+function sourceFolderGone(entry: ImportedSkillEntry): boolean {
+  if (!entry.origin) return true;
+  // A workspace moved to another computer (a Cloud) never had the folder it was read from: that proves nothing gone.
+  try {
+    if (!statSync(entry.root).isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  try {
+    return !statSync(join(entry.origin, "SKILL.md")).isFile();
+  } catch (error) {
+    // A missing path is gone; a permission or I/O error does not prove it, so it must not allow the shared copy's removal.
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR";
+  }
+}
+
+/** Imported skills this bot removed: a native copy of the same name stays off with them. */
+export function removedImportedSkills(botId: string): string[] {
+  return readRemoved(botId);
 }
 
 /** More than this many and a bot's prompt lists only the ones that fit it. */
@@ -328,7 +374,8 @@ function loadedInPlace(entry: ImportedSkillEntry, native: readonly string[]): bo
  * the ones listedImportedSkills picks. */
 export function importedSkillsFor(botId: string, shadowed: ReadonlySet<string>, native: readonly string[] = []): ImportedSkillView[] {
   const index = readImportedSkills();
-  const names = Object.keys(index).filter((name) => !shadowed.has(name)).sort();
+  const removed = new Set(readRemoved(botId));
+  const names = Object.keys(index).filter((name) => !shadowed.has(name) && !removed.has(name)).sort();
   if (!names.length) return [];
   const choices = readChoices(botId);
   return names.flatMap((name) => {
@@ -341,14 +388,16 @@ export function importedSkillsFor(botId: string, shadowed: ReadonlySet<string>, 
 
 export const IMPORTED_CHANGED_WARNING = "its files changed after it was brought in — bring it in again from Settings → Import & export → Bring things in → From your AI apps";
 
-export type ImportedSkillListing = SkillListing & { origin: "imported"; listed: boolean; file?: string };
+export type ImportedSkillListing = SkillListing & { origin: "imported"; listed: boolean; file?: string; sourceGone: boolean };
 
-/** Bot Settings → Skills: every imported skill not shadowed by one of the bot's own, with its switch for this bot,
- * the ones in its list (`about` is what the bot is for) first. An enabled one names its SKILL.md, so a search finds it. */
+/** Bot Settings → Skills: every imported skill not shadowed by one of the bot's own or removed from it, with its switch
+ * for this bot, the ones in its list (`about` is what the bot is for) first. An enabled one names its SKILL.md, so a
+ * search finds it. */
 export function importedSkillListings(botId: string, shadowed: ReadonlySet<string>, about = ""): ImportedSkillListing[] {
   const index = readImportedSkills();
   const choices = readChoices(botId);
-  const listings = Object.keys(index).filter((name) => !shadowed.has(name)).sort().map((name): ImportedSkillListing => {
+  const removed = new Set(readRemoved(botId));
+  const listings = Object.keys(index).filter((name) => !shadowed.has(name) && !removed.has(name)).sort().map((name): ImportedSkillListing => {
     const entry = index[name]!;
     const intact = importedSkillIntact(name, entry);
     const enabled = intact && enabledFor(name, entry, choices);
@@ -357,6 +406,7 @@ export function importedSkillListings(botId: string, shadowed: ReadonlySet<strin
       description: entry.description,
       enabled,
       listed: false,
+      sourceGone: sourceFolderGone(entry),
       ...(enabled ? { file: join(IMPORTED_SKILLS_DIR, name, "SKILL.md") } : {}),
       editable: false,
       source: entry.label,
@@ -396,8 +446,11 @@ export function setImportedSkillEnabled(botId: string, name: string, enabled: bo
   const next: Choices = enabled
     ? { off, on: entry.warnings.length ? { ...on, [name]: entry.filesSha256 } : on, ...(listed ? { listed: [...listed, name].sort() } : {}) }
     : { off: [...off, name].sort(), on, ...(listed ? { listed } : {}) };
-  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
-  writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  writeChoices(botId, next);
+  if (enabled) {
+    const removed = readRemoved(botId);
+    if (removed.includes(name)) writeRemoved(botId, removed.filter((other) => other !== name));
+  }
   return importedSkillListings(botId, new Set()).find((skill) => skill.name === name)!;
 }
 
@@ -410,9 +463,39 @@ export function importedSkillsSwitchedOff(botId: string): string[] {
 export function switchImportedSkillBackOn(botId: string, name: string): void {
   const choices = readChoices(botId);
   if (!choices.off.includes(name)) return;
-  const next: Choices = { ...choices, off: choices.off.filter((other) => other !== name) };
-  mkdirSync(dirname(choicesPath(botId)), { recursive: true, mode: 0o700 });
-  writeFileAtomic(choicesPath(botId), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  writeChoices(botId, { ...choices, off: choices.off.filter((other) => other !== name) });
+}
+
+/** Takes an imported skill out of one bot's Skills settings and its turn: every other bot, OpenMausBot's copy and the
+ * folder it came from keep it. Bringing the same copy in again leaves it out until it is switched on for this bot. */
+export function removeImportedSkillForBot(botId: string, name: string): { removed: true } | { error: string } {
+  if (!isSkillName(name)) return { error: `invalid skill name "${name}"` };
+  writeRemoved(botId, [...readRemoved(botId), name]);
+  return { removed: true };
+}
+
+/** Deletes OpenMausBot's copy and index entry, only once the folder it was brought in from no longer holds a SKILL.md:
+ * every bot loses the skill, and the files on disk are never touched. */
+export function purgeImportedSkill(name: string): { removed: true } | { error: string } {
+  if (!isSkillName(name)) return { error: `invalid skill name "${name}"` };
+  const index = readImportedSkills();
+  const entry = index[name];
+  if (!entry) return { error: `no skill named "${name}" was brought in from this computer` };
+  if (!sourceFolderGone(entry)) return { error: `"${name}" still has its source folder; remove it from this bot instead` };
+  if (directoryEntryState(IMPORTED_SKILLS_DIR) === "unsafe") {
+    return { error: "the imported skills folder is a symlink or file; refusing to remove through it" };
+  }
+  const target = join(IMPORTED_SKILLS_DIR, name);
+  try {
+    if (directoryEntryState(target) === "directory") rmSync(target, { recursive: true, force: true });
+    else if (entryExistsWithoutFollowing(target)) unlinkSync(target);
+  } catch (error) {
+    return { error: `could not remove the copy of "${name}": ${error instanceof Error ? error.message : String(error)}` };
+  }
+  digests.delete(target);
+  delete index[name];
+  writeIndex(index);
+  return { removed: true };
 }
 
 /** The engine of one turn, as far as which skill folders it loads by itself. */
