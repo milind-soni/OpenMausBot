@@ -9,8 +9,7 @@ import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 import { BOT_TEXT_MESSAGE_INDEXES_SQL } from "./message-db-bot-text-indexes.ts";
-import { ensureMemoryIndex } from "./message-db-memory-index.ts";
-import { createAttachmentNameIndex, STORED_UPLOAD_NAME } from "./message-db-attachment-names.ts";
+import { ensureMemoryIndex } from "./message-db-memory-index.ts"; import { createAttachmentNameIndex, STORED_UPLOAD_NAME } from "./message-db-attachment-names.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts"; import { messageWritten } from "./message-writes.ts";
@@ -153,8 +152,7 @@ function db(): DatabaseSync {
     handle?.close();
   } catch {}
   statements = new Map();
-  handle = open();
-  attachmentNameIndex.reset();
+  handle = open(); attachmentNameIndex.reset();
   handlePath = file;
   handleCheckedAt = Date.now();
   return handle;
@@ -664,9 +662,7 @@ export function deleteThreads(threadIds: readonly string[], beforeCommit?: () =>
     ];
     for (const id of threadIds) for (const statement of statements) statement.run(id);
     beforeCommit?.();
-  });
-  // After the commit: a rolled-back batch's rows stay, and the index must not forget them.
-  attachmentNameIndex.threadsDeleted(threadIds);
+  }); attachmentNameIndex.threadsDeleted(threadIds); // after the commit: a rolled-back batch's rows stay, and stay indexed
 }
 
 /** Option-card rows whose card names one of `tools`, oldest first; the caller judges each card itself. */
@@ -688,15 +684,10 @@ export function liveAppRows(limit = 100): Array<{ threadId: string; messageId: s
   return db().prepare("SELECT thread_id AS threadId, id AS messageId FROM messages WHERE kind = 'app' AND json_extract(json, '$.app.live') = 1 ORDER BY rowid DESC LIMIT ?").all(limit) as Array<{ threadId: string; messageId: string }>;
 }
 
-/** The attachment-name index (message-db-attachment-names.ts), which threadsReferencing answers stored upload names
- * from; exported so tests can see how often it built. */
-export const attachmentNameIndex = createAttachmentNameIndex({ prepare: (sql) => prepared(sql) });
-
+export const attachmentNameIndex = createAttachmentNameIndex({ prepare: (sql) => prepared(sql) }); // threadsReferencing's stored upload names; exported so tests can count builds
 export function threadsReferencing(fragment: string): string[] {
-  if (!fragment) return [];
-  if (STORED_UPLOAD_NAME.test(fragment)) return attachmentNameIndex.threadsFor(fragment);
-  const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
-  return rows.map((row) => row.thread_id);
+  if (!fragment) return []; if (STORED_UPLOAD_NAME.test(fragment)) return attachmentNameIndex.threadsFor(fragment);
+  return (db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>).map((row) => row.thread_id);
 }
 
 export function searchMessages(query: string, limit = 40, threadId?: string): SearchHit[] {

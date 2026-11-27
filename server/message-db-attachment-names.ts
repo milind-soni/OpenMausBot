@@ -1,6 +1,6 @@
 // Which conversations' messages name a stored upload (message-db.ts threadsReferencing). Asking SQLite once per name
 // (instr over every row's JSON) is a full read of messages.db per name, on the main thread: a 740k-row install held its
-// server for 79 s per refused hand-off file (issue #6255). This in-memory index answers the question per name without
+// server for 79 s per refused hand-off file. This in-memory index answers the question per name without
 // reading any row.
 //
 // saveFile/saveImage/saveAudio only ever store `${uuid}${extension}`, so every name these queries ask for is one shape:

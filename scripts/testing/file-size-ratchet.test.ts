@@ -21,7 +21,7 @@ const LINES: Record<string, number> = {
   "electron/main.mjs": 3124,
   "server/store.ts": 2254,
   "src/components/Sidebar.tsx": 1654,
-  "server/drivers/claude.ts": 1960, // the turn loop holds the MCP mounts, session reuse and recovery together
+  "server/drivers/claude.ts": 1954,
   "server/drivers/acp/core.ts": 1538,
   "server/drivers/codex.ts": 1577,
   "server/routines.ts": 1553,
@@ -43,7 +43,6 @@ const LINES: Record<string, number> = {
   "server/cli.ts": 1052,
   "src/components/AttachmentPreview.tsx": 1017,
   "server/meetings/meetbot.ts": 1047,
-  "server/message-db.ts": 1009, // the attachment-name index hooks (issue #6255): one line per message write, delete and reopen path
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
 };
 
