@@ -222,7 +222,7 @@ export class EventBus {
         this.queuedLogWarnings.set(event.threadId, warning);
         // Queued before delivery: listeners may publish synchronously.
         this.push(warning);
-        console.error("bus: canonical event log queue is full");
+        console.error(`bus: canonical event log queue is full; dropped ${this.dropped.events} events so far`);
         this.deliver(warning);
       }
       return;
