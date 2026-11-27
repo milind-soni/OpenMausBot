@@ -1185,8 +1185,8 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
         const merged = { ...current };
         const workspaceServer = onWorkspaceServer(current.url, cfg.openaiCompat.url || process.env.OPENAI_COMPAT_URL);
         for (const [k, v] of Object.entries(defaults).filter(([key]) => key === "url" || workspaceServer)) {
-          // An empty provider means "no upstream pin"; never fill it from the workspace.
-          if (k === "provider" && typeof merged[k] === "string") continue;
+          // An empty provider means "no upstream pin", and a server with its own model list picks from it: never fill either from the workspace.
+          if ((k === "provider" && typeof merged[k] === "string") || (k === "model" && merged.managedModels !== undefined)) continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;
         }
         entry.config = merged;
