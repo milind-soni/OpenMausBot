@@ -97,4 +97,22 @@ describe("a Gemini Live call's token", () => {
     const fetchImpl = vi.fn(async () => { throw new TypeError("fetch failed"); });
     await expect(create(fetchImpl as unknown as typeof fetch)).rejects.toMatchObject({ status: 502, message: "Could not reach Gemini. Check the internet connection." });
   });
+
+  it("sends configured history up to Gemini's higher cap", async () => {
+    const fetchImpl = fakeGemini();
+    const history = Array.from({ length: 150 }, (_, i) => ({ role: "user" as const, text: `gem-${i}` }));
+    await createGeminiLiveSession({
+      key: "k",
+      endpoint: ENDPOINT,
+      voice: "Puck",
+      bot: { name: "Rigel" },
+      history,
+      cloudHome: false,
+      historyLimits: { historyMessages: 150, historyMessageChars: 1_000, historyTotalChars: 40_000 },
+      fetchImpl,
+      now: () => NOW,
+    });
+    const text = JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body)).bidiGenerateContentSetup.systemInstruction.parts[0].text as string;
+    expect(text.match(/^User: /gm)).toHaveLength(150);
+  });
 });

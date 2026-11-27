@@ -353,3 +353,19 @@ describe("Live calls through ElevenLabs", () => {
     expect(JSON.stringify(settings)).not.toContain("eleven-secret");
   });
 });
+
+describe("live history limit settings", () => {
+  it("keeps defaults omitted until configured and clamps over-cap limits to the active provider", () => {
+    expect(liveSettingsFor({ live: { provider: "gemini", historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 } } as AppConfig))
+      .toMatchObject({ provider: "gemini", historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 });
+    expect(liveSettingsFor({ live: { provider: "openai", historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 } } as AppConfig))
+      .toMatchObject({ historyMessages: 128, historyMessageChars: 8_000, historyTotalChars: 24_000 });
+  });
+
+  it("validates history limit patches against the effective provider's limit", () => {
+    expect(() => liveSavePatch({ provider: "openai" }, { historyMessages: 200 })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => liveSavePatch({ provider: "fish" }, { historyMessageChars: 6_000 })).toThrow(expect.objectContaining({ status: 400 }));
+    expect(liveSavePatch({ provider: "openai" }, { provider: "gemini", historyMessages: 200, historyMessageChars: 10_000, historyTotalChars: 50_000 }))
+      .toEqual({ provider: "gemini", historyMessages: 200, historyMessageChars: 10_000, historyTotalChars: 50_000 });
+  });
+});

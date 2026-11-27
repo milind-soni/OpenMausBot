@@ -1,10 +1,13 @@
 import { useCallback, useId, useState } from "react";
 
-import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
-import { t } from "@/lib/i18n";
+import {
+  GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_HISTORY_MIN, LIVE_VOICE_OPTIONS,
+  liveHistoryCaps, resolveLiveHistoryLimits,
+} from "../../shared/live-call";
+import { intlLocale, t } from "@/lib/i18n";
 import { liveDisclosure, liveKeyCopy, liveKeyFormKey } from "@/lib/call-mode";
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
-import type { LiveSettings } from "../../shared/wire";
+import type { LiveHistoryLimits, LiveSettings } from "../../shared/wire";
 import { LiveKeySetup } from "./LiveKeySetup";
 import { LiveProviderSettings } from "./LiveProviderSettings";
 import { BotLiveVoiceSelect } from "./BotLiveVoiceSelect";
@@ -12,6 +15,15 @@ import { KeysLink } from "./keys/KeysLink";
 import { Select } from "./Select";
 
 const IDLE_CHOICES = [1, 2, 3, 5, 10, 15, 30, 60];
+const HISTORY_MESSAGE_CHOICES = [0, 4, 8, 16, 32, 64, 100, 128, 200];
+const HISTORY_MESSAGE_CHAR_CHOICES = [200, 400, 600, 1_000, 2_000, 4_000, 8_000, 12_000];
+const HISTORY_TOTAL_CHAR_CHOICES = [1_000, 3_000, 6_000, 12_000, 20_000, 24_000, 40_000, 60_000];
+
+function limitChoices(choices: number[], current: number, min: number, max: number): number[] {
+  const allowed = choices.filter((value) => value >= min && value <= max);
+  if (current >= min && current <= max && !allowed.includes(current)) allowed.push(current);
+  return allowed.sort((a, b) => a - b);
+}
 
 /** With `bot`, the bot on the call: it can have a voice of its own, and the other voice is the default for every other bot. */
 export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "name" | "liveVoice">; onClose: () => void }) {
@@ -39,7 +51,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
   const known = voiceOptions.some((option) => option.id === voice);
 
-  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
+  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes" | keyof LiveHistoryLimits>>) => {
     setSaving(true);
     setError(null);
     try {
@@ -66,6 +78,35 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
       setSaving(false);
     }
   };
+
+  const historyCaps = liveHistoryCaps(live.provider);
+  const historyLimits = resolveLiveHistoryLimits(live, live.provider);
+  const historyRows: Array<{
+    key: keyof LiveHistoryLimits;
+    label: "call.live.historyMessages" | "call.live.historyMessageChars" | "call.live.historyTotalChars";
+    options: number[];
+    value: number;
+  }> = [
+    {
+      key: "historyMessages",
+      label: "call.live.historyMessages",
+      options: limitChoices(HISTORY_MESSAGE_CHOICES, historyLimits.historyMessages, LIVE_HISTORY_MIN.historyMessages, historyCaps.maxMessages),
+      value: historyLimits.historyMessages,
+    },
+    {
+      key: "historyMessageChars",
+      label: "call.live.historyMessageChars",
+      options: limitChoices(HISTORY_MESSAGE_CHAR_CHOICES, historyLimits.historyMessageChars, LIVE_HISTORY_MIN.historyMessageChars, historyCaps.maxMessageChars),
+      value: historyLimits.historyMessageChars,
+    },
+    {
+      key: "historyTotalChars",
+      label: "call.live.historyTotalChars",
+      options: limitChoices(HISTORY_TOTAL_CHAR_CHOICES, historyLimits.historyTotalChars, LIVE_HISTORY_MIN.historyTotalChars, historyCaps.maxTotalChars),
+      value: historyLimits.historyTotalChars,
+    },
+  ];
+  const historyHintId = useId();
 
   return (
     <div
@@ -124,6 +165,29 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
           ))}
         </Select>
       </label>
+      {historyRows.map((row) => (
+        <label key={row.key} className="flex items-center justify-between gap-2">
+          <span className="text-ink-secondary">{t(row.label)}</span>
+          <Select
+            size="sm"
+            value={row.value}
+            disabled={saving}
+            aria-describedby={historyHintId}
+            onChange={(event) => void save({ [row.key]: Number(event.target.value) })}
+          >
+            {row.options.map((count) => (
+              <option key={count} value={count}>{count.toLocaleString(intlLocale())}</option>
+            ))}
+          </Select>
+        </label>
+      ))}
+      <div id={historyHintId} className="-mt-2 text-[12px] text-ink-tertiary">
+        {t("call.live.historyHint", {
+          messages: historyCaps.maxMessages.toLocaleString(intlLocale()),
+          messageChars: historyCaps.maxMessageChars.toLocaleString(intlLocale()),
+          totalChars: historyCaps.maxTotalChars.toLocaleString(intlLocale()),
+        })}
+      </div>
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
         <span className="text-ink-secondary">{t(copy.key)}</span>
         <span className="flex gap-2">

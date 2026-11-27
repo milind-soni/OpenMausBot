@@ -1,6 +1,7 @@
 // The provider key never leaves the harness: the renderer only ever holds the SDP answer and its media connection.
 import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
-import type { LiveProvider } from "../shared/wire.ts";
+import type { LiveHistoryLimits, LiveProvider } from "../shared/wire.ts";
+import { resolveLiveHistoryLimits } from "../shared/live-call.ts";
 import type { Message } from "./store.ts";
 
 export const LIVE_MODEL = "gpt-live-1";
@@ -138,10 +139,7 @@ export function liveAuthHeaders(provider: LiveProvider, key: string): Record<str
   return provider === "azure" ? { "api-key": key } : { authorization: `Bearer ${key}` };
 }
 
-// The API caps startup history at 128 messages / 8,192 tokens; stay well inside it.
-const HISTORY_MESSAGES = 8;
-const HISTORY_MESSAGE_CHARS = 600;
-const HISTORY_TOTAL_CHARS = 6_000;
+// Provider startup caps live in shared/live-call.ts; defaults stay 8 messages / 600 chars / 6,000 total.
 const CREATE_TIMEOUT_MS = 20_000;
 
 export interface LiveBot {
@@ -229,18 +227,36 @@ export function spokenHangUp(text: string): boolean {
     || ZH_HANG_UP.test(text.trim().replace(ZH_HANG_UP_LEAD, ""));
 }
 
-export function liveInitialInput(history: LiveHistoryMessage[]) {
+/** Picks the newest non-empty messages inside the configured chat-history limits, capped by `provider`. */
+export function selectLiveHistory(
+  history: LiveHistoryMessage[],
+  limits?: Partial<LiveHistoryLimits>,
+  provider: LiveProvider = "openai",
+): LiveHistoryMessage[] {
+  const { historyMessages, historyMessageChars, historyTotalChars } = resolveLiveHistoryLimits(limits, provider);
+  if (historyMessages <= 0 || historyMessageChars <= 0 || historyTotalChars <= 0) return [];
   const picked: LiveHistoryMessage[] = [];
   let total = 0;
   for (const message of [...history].reverse()) {
-    if (picked.length >= HISTORY_MESSAGES) break;
-    const text = message.text.replace(/\s+/g, " ").trim().slice(0, HISTORY_MESSAGE_CHARS);
+    if (picked.length >= historyMessages) break;
+    const text = message.text.replace(/\s+/g, " ").trim().slice(0, historyMessageChars);
     if (!text) continue;
-    if (total + text.length > HISTORY_TOTAL_CHARS) break;
+    if (total + text.length > historyTotalChars) {
+      if (picked.length === 0) picked.unshift({ role: message.role, text: text.slice(0, historyTotalChars) });
+      break;
+    }
     total += text.length;
     picked.unshift({ role: message.role, text });
   }
-  return picked.map((message) => message.role === "user"
+  return picked;
+}
+
+export function liveInitialInput(
+  history: LiveHistoryMessage[],
+  limits?: Partial<LiveHistoryLimits>,
+  provider: LiveProvider = "openai",
+) {
+  return selectLiveHistory(history, limits, provider).map((message) => message.role === "user"
     ? { type: "message" as const, role: "user" as const, content: [{ type: "input_text" as const, text: message.text }] }
     : { type: "message" as const, role: "assistant" as const, content: [{ type: "output_text" as const, text: message.text }] });
 }
@@ -259,6 +275,7 @@ export interface CreateLiveSessionInput {
   cloudHome: boolean;
   voice?: string;
   endpoint?: LiveEndpoint;
+  historyLimits?: Partial<LiveHistoryLimits>;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
@@ -272,7 +289,7 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   if (!input.sdp.trim() || Buffer.byteLength(input.sdp) > MAX_SDP_BYTES) {
     throw new LiveSessionError("The call could not start: the connection offer was invalid.", 400);
   }
-  const initialInput = liveInitialInput(input.history);
+  const initialInput = liveInitialInput(input.history, input.historyLimits, endpoint.provider);
   const body = {
     session: {
       model: endpoint.model,

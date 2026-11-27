@@ -100,6 +100,52 @@ describe("the Fish agent's instructions", () => {
     expect(text.match(/^(User|You): /gm)).toHaveLength(8);
     expect(text).not.toContain("x".repeat(601));
   });
+
+  it("honors configurable history limits and enforces provider caps across prompt-based callers", async () => {
+    const history = Array.from({ length: 140 }, (_, i) => ({
+      role: i % 2 ? "assistant" as const : "user" as const,
+      text: `msg-${i} ${"x".repeat(120)}`,
+    }));
+    const expanded = fishInstructions({ name: "Rigel" }, history, {
+      historyLimits: { historyMessages: 16, historyMessageChars: 100, historyTotalChars: 2_000 },
+    });
+    expect(expanded.match(/^(User|You): /gm)).toHaveLength(16);
+    expect(expanded).not.toContain("x".repeat(101));
+
+    const minClamped = fishInstructions({ name: "Rigel" }, history, {
+      historyLimits: { historyMessages: 2, historyMessageChars: 40, historyTotalChars: 200 },
+    });
+    expect(minClamped.match(/^(User|You): /gm)).toHaveLength(2);
+    expect(minClamped).not.toContain("x".repeat(101));
+
+    const zeroed = fishInstructions({ name: "Rigel" }, history, { historyLimits: { historyMessages: 0 } });
+    expect(zeroed.match(/^(User|You): /gm) ?? []).toHaveLength(0);
+
+    const cappedFish = fishInstructions({ name: "Rigel" }, history, {
+      historyLimits: { historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 },
+      provider: "fish",
+    });
+    expect(cappedFish.match(/^(User|You): /gm)).toHaveLength(100);
+
+    const cappedGemini = fishInstructions({ name: "Rigel" }, history, {
+      historyLimits: { historyMessages: 200, historyMessageChars: 12_000, historyTotalChars: 60_000 },
+      provider: "gemini",
+    });
+    expect(cappedGemini.match(/^(User|You): /gm)).toHaveLength(140);
+
+    const fetchImpl = fakeFetch(201, TOKEN);
+    await createFishLiveSession({
+      key: "fish-key",
+      endpoint: ENDPOINT,
+      bot: { name: "Rigel" },
+      history: history.slice(0, 20),
+      cloudHome: false,
+      historyLimits: { historyMessages: 12, historyMessageChars: 120, historyTotalChars: 3_000 },
+      fetchImpl,
+    });
+    const prompt = JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body)).overrides.system_prompt as string;
+    expect(prompt.match(/^(User|You): /gm)).toHaveLength(12);
+  });
 });
 
 describe("creating a Fish Audio session", () => {

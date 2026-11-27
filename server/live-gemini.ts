@@ -2,7 +2,7 @@
 // (model, instructions, the `delegate` tool) the harness locks here, and it relays what was said as a Fish Audio call does.
 import { randomBytes } from "node:crypto";
 import { geminiLiveVoice } from "../shared/live-call.ts";
-import type { LiveGeminiSession } from "../shared/wire.ts";
+import type { LiveGeminiSession, LiveHistoryLimits } from "../shared/wire.ts";
 import { LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import { FISH_DELEGATE_TOOL, fishInstructions } from "./live-fish.ts";
 
@@ -63,6 +63,7 @@ export interface CreateGeminiSessionInput {
   bot: LiveBot;
   history: LiveHistoryMessage[];
   cloudHome: boolean;
+  historyLimits?: Partial<LiveHistoryLimits>;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }
@@ -73,7 +74,12 @@ export async function createGeminiLiveSession(input: CreateGeminiSessionInput): 
   const key = input.key.trim();
   if (!key) throw new LiveSessionError("Add a Gemini API key in Settings → AI → Other services to use Live calls.", 409);
   const now = (input.now ?? Date.now)();
-  const setup = geminiLiveSetup(input.endpoint.model, fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }), input.voice);
+  const instructions = fishInstructions(input.bot, input.history, {
+    cloudHome: input.cloudHome,
+    historyLimits: input.historyLimits,
+    provider: "gemini",
+  });
+  const setup = geminiLiveSetup(input.endpoint.model, instructions, input.voice);
   const expiresAt = new Date(now + CONNECT_WITHIN_MS).toISOString();
   let response: Response;
   try {

@@ -210,4 +210,34 @@ describe("an ElevenLabs call's session", () => {
     const w = wiring(fakeFish());
     expect(w.calls.elevenlabsRefusal({ kind: "loopback", scopes: ["admin", "client"] })).toBeNull();
   });
+
+  it("forwards configured historyLimits to Gemini, ElevenLabs, Fish Audio and OpenAI sessions", async () => {
+    const history = Array.from({ length: 14 }, (_, i) => ({ role: "user" as const, text: `w-${i}` }));
+    const fishFetch = fakeFish();
+    const geminiFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ name: "auth_tokens/t1" }), { status: 200 }));
+    const elevenFetch = fakeElevenLabs();
+    const openAiFetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ session: { id: "s1" }, transport: { type: "webrtc", sdp: "v=0\r\na=1" } }), { status: 201 }));
+    const wireWith = (fetchImpl: typeof fetch) => liveSessionWiring({
+      bot: () => ({ name: "Rigel" }),
+      history: () => history,
+      cloudHome: false,
+      othersOnLoopback: () => false,
+      saveAgent: vi.fn(),
+      env: {},
+      fetchImpl,
+      historyLimits: () => ({ historyMessages: 12, historyMessageChars: 800, historyTotalChars: 8_000 }),
+    });
+
+    await wireWith(fishFetch as unknown as typeof fetch).calls.createSession({ ...start, endpoint: fishLiveEndpoint("agent_saved", {}) });
+    expect((JSON.parse(String(fishFetch.mock.calls[0]![1]!.body)).overrides.system_prompt as string).match(/^User: /gm)).toHaveLength(12);
+
+    await wireWith(geminiFetch as unknown as typeof fetch).calls.createSession({ ...start, key: "g", endpoint: { provider: "gemini", apiBase: "https://generativelanguage.googleapis.com/v1beta", model: "gemini-3.8-live" } });
+    expect((JSON.parse(String(geminiFetch.mock.calls[0]![1]!.body)).bidiGenerateContentSetup.systemInstruction.parts[0].text as string).match(/^User: /gm)).toHaveLength(12);
+
+    const elSession = await wireWith(elevenFetch as unknown as typeof fetch).calls.createSession({ ...start, key: "e", endpoint: elevenLabsLiveEndpoint("agent_1", {}) });
+    expect((elSession as { elevenlabs: { session: { instructions: string } } }).elevenlabs.session.instructions.match(/^User: /gm)).toHaveLength(12);
+
+    await wireWith(openAiFetch as unknown as typeof fetch).calls.createSession({ ...start, key: "o", sdp: "v=0\r\n", endpoint: { provider: "openai", apiBase: "https://api.openai.com/v1", model: "gpt-realtime" } });
+    expect(JSON.parse(String(openAiFetch.mock.calls[0]![1]!.body)).session.input).toHaveLength(12);
+  });
 });

@@ -2,7 +2,7 @@
 // tool `delegate` on the person's account once, and for each call asks ElevenLabs for a signed URL the client opens; the
 // client relays what was said as on a Fish Audio call.
 import { randomBytes } from "node:crypto";
-import type { LiveElevenLabsSession } from "../shared/wire.ts";
+import type { LiveElevenLabsSession, LiveHistoryLimits } from "../shared/wire.ts";
 import { LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import type { LiveConfig } from "./live-config.ts";
 import { elevenLabsProviderApi } from "./included-services.ts";
@@ -124,6 +124,7 @@ export interface CreateElevenLabsSessionInput {
   bot: LiveBot;
   history: LiveHistoryMessage[];
   cloudHome: boolean;
+  historyLimits?: Partial<LiveHistoryLimits>;
   fetchImpl?: typeof fetch;
   now?: () => number;
 }
@@ -144,7 +145,11 @@ export async function createElevenLabsLiveSession(input: CreateElevenLabsSession
   return {
     session_id: `elevenlabs_${randomBytes(12).toString("hex")}`,
     signed_url: url,
-    instructions: fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }),
+    instructions: fishInstructions(input.bot, input.history, {
+      cloudHome: input.cloudHome,
+      historyLimits: input.historyLimits,
+      provider: "elevenlabs",
+    }),
     ...(voiceId ? { voice_id: voiceId } : {}),
     expires_at: new Date((input.now ?? Date.now)() + CONNECT_WITHIN_MS).toISOString(),
   };

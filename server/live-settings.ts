@@ -1,4 +1,5 @@
-import type { LiveKeySource, LiveSettings } from "../shared/wire.ts";
+import type { LiveHistoryLimits, LiveKeySource, LiveProvider, LiveSettings } from "../shared/wire.ts";
+import { resolveLiveHistoryLimits } from "../shared/live-call.ts";
 import { saveConfig, syncCredentialEnv, type AppConfig } from "./config.ts";
 import { azureLiveEndpoint, customLiveEndpoint, LIVE_NEEDS_AZURE, LIVE_NEEDS_CUSTOM, LIVE_NEEDS_ELEVENLABS, LIVE_NEEDS_FISH, LIVE_NEEDS_GEMINI, LIVE_NEEDS_KEY, openAiLiveEndpoint, type LiveEndpoint } from "./live-call.ts";
 import { liveSavePatch, usableLiveKey, type LiveConfig as LiveConfigSection } from "./live-config.ts";
@@ -71,6 +72,16 @@ export function liveSettingsForClient({ azureEndpoint: _endpoint, azureDeploymen
   return settings;
 }
 
+function liveHistorySettings(live: AppConfig["live"], provider: LiveProvider | undefined): Partial<LiveHistoryLimits> {
+  if (!live) return {};
+  const resolved = resolveLiveHistoryLimits(live, provider);
+  const out: Partial<LiveHistoryLimits> = {};
+  if (typeof live.historyMessages === "number" && Number.isInteger(live.historyMessages)) out.historyMessages = resolved.historyMessages;
+  if (typeof live.historyMessageChars === "number" && Number.isInteger(live.historyMessageChars)) out.historyMessageChars = resolved.historyMessageChars;
+  if (typeof live.historyTotalChars === "number" && Number.isInteger(live.historyTotalChars)) out.historyTotalChars = resolved.historyTotalChars;
+  return out;
+}
+
 export function liveSettingsFor(cfg: AppConfig): LiveSettings {
   const minutes = cfg.live?.idleMinutes;
   const key = liveCallKey(cfg);
@@ -87,5 +98,6 @@ export function liveSettingsFor(cfg: AppConfig): LiveSettings {
     ...(cfg.live?.geminiVoice ? { geminiVoice: cfg.live.geminiVoice } : {}),
     readTypedReplies: cfg.live?.readTypedReplies ?? true,
     idleMinutes: Number.isInteger(minutes) && minutes! >= 1 && minutes! <= 60 ? minutes! : LIVE_IDLE_MINUTES_DEFAULT,
+    ...liveHistorySettings(cfg.live, provider),
   };
 }
