@@ -1,7 +1,7 @@
 // A Chief of Staff turns named skills on or off for several of its teammates in one call. Each change passes the rules a
 // bot's own switch does (skill-switch.ts), and they apply together or not at all: where the Chief's own skill changes
 // apply directly, with one receipt and one Undo; otherwise on one card, approved only while every skill is still the one
-// the card listed.
+// the card listed. Its record stays until Undo, which turns them back only while every skill is still as it was applied.
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -14,7 +14,7 @@ import { chiefLevel } from "../chief-level.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
-import { skillSwitchStillMatches, skillSwitchTarget, type SwitchableSkill } from "../skill-switch.ts";
+import { skillContentSha256, skillSwitchStillMatches, skillSwitchTarget, type SwitchableSkill } from "../skill-switch.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 
 export const TEAMMATE_SKILL_CHANGES_MAX = 40;
@@ -51,6 +51,10 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
       const parsed = recordSchema.safeParse(JSON.parse(readFileSync(recordPath(requestId), "utf8")));
       return parsed.success ? parsed.data : null;
     } catch { return null; }
+  };
+  const writeRecord = (requestId: string, record: TeammateSkillsRecord) => {
+    mkdirSync(dirname(recordPath(requestId)), { recursive: true, mode: 0o700 });
+    writeFileAtomic(recordPath(requestId), `${JSON.stringify(record)}\n`, { mode: 0o600 });
   };
   const dropRecord = (requestId: string) => rmSync(recordPath(requestId), { force: true });
   const botName = (id: string) => store.bot(id)?.name ?? id;
@@ -140,17 +144,19 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
     const persistence = deps.persistence(from.id, threadId, !applies);
     if (!persistence.ok) return { status: persistence.status, body: { error: persistence.error } };
     const requestId = randomUUID();
+    const record: TeammateSkillsRecord = { chiefId: from.id, changes: asked.changes.map(({ botId, name, action, contentSha256 }) => ({ botId, name, action, contentSha256 })) };
+    writeRecord(requestId, record);
     if (applies) {
       const turned = turnAll(steps(asked.changes));
-      if ("error" in turned) return { status: 422, body: { state: "failed", error: turned.error } };
+      if ("error" in turned) {
+        dropRecord(requestId);
+        return { status: 422, body: { state: "failed", error: turned.error } };
+      }
       const done = appendCard({ requestId, from, threadId, changes: asked.changes, applied: true });
       appendDecision(deps.dataDir, { threadId, requestId, botId: from.id, botName: from.name, tool: "stage_skill", summary: done, decision: "auto-approved", source: applies });
       deps.noteSkillChange(from.id, threadId);
       return { status: 201, body: { state: "applied", changes: asked.changes.length, summary: `${done}.` } };
     }
-    const record: TeammateSkillsRecord = { chiefId: from.id, changes: asked.changes.map(({ botId, name, action, contentSha256 }) => ({ botId, name, action, contentSha256 })) };
-    mkdirSync(dirname(recordPath(requestId)), { recursive: true, mode: 0o700 });
-    writeFileAtomic(recordPath(requestId), `${JSON.stringify(record)}\n`, { mode: 0o600 });
     let summary: string;
     try {
       summary = appendCard({ requestId, from, threadId, changes: asked.changes, applied: false });
@@ -195,7 +201,6 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
     store.patchMessage(args.threadId, messageId, { card: { ...card, answered: "allow", held: undefined, title: done } });
     deps.noteSkillChange(args.botId, args.threadId);
     decided("user-approved");
-    dropRecord(request.requestId);
     return { claimed: true, outcome: "allowed-once" };
   }
 
@@ -203,15 +208,18 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
   function undo(botId: string, threadId: string, message: Message, request: SkillRequestCardData):
     | { claimed: true; state: "undone" }
     | { claimed: true; state: "invalid"; error: string; status: number; stale?: true } {
-    const changes = request.teammates ?? [];
+    const record = readRecord(request.requestId);
+    const changes = record?.chiefId === botId ? record.changes : [];
     const moved = changes.some((change) => {
       const target = store.bot(change.botId);
       const current = target ? deps.skill(target, change.name) : undefined;
-      return !current || current.kind === "fixed" || current.enabled !== (change.action === "enable");
+      return !current || current.kind === "fixed" || current.enabled !== (change.action === "enable") || current.text === null
+        || skillContentSha256({ kind: current.kind, text: current.text }) !== change.contentSha256;
     });
     if (!changes.length || moved) return { claimed: true, state: "invalid", error: UNDO_STALE, status: 409, stale: true };
     const undone = turnAll(steps(changes, true));
     if ("error" in undone) return { claimed: true, state: "invalid", error: undone.error, status: 409 };
+    dropRecord(request.requestId);
     if (message.card) store.patchMessage(threadId, message.id, { card: { ...message.card, undone: true } });
     deps.noteSkillChange(botId, threadId);
     return { claimed: true, state: "undone" };

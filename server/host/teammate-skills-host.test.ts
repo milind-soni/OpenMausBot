@@ -163,6 +163,11 @@ describe("a Chief of Staff changing its teammates' skills", () => {
     expect(t.enabled("writer/research")).toBe(true);
     expect(t.enabled("coder/lint")).toBe(false);
     expect(t.card()).toMatchObject({ answered: "allow", title: "Skills changed on your team (2)" });
+    expect(t.records()).toHaveLength(1);
+
+    expect(t.undo()).toEqual({ claimed: true, state: "undone" });
+    expect(t.enabled("writer/research")).toBe(false);
+    expect(t.enabled("coder/lint")).toBe(true);
     expect(t.records()).toHaveLength(0);
   });
 
@@ -210,5 +215,22 @@ describe("a Chief of Staff changing its teammates' skills", () => {
     expect(t.undo()).toMatchObject({ claimed: true, state: "invalid", stale: true });
     expect(t.turns).toEqual([]);
     expect(t.enabled("writer/research")).toBe(true);
+  });
+
+  it("refuses Undo, changing none, once a listed skill's content changed though it is still on", () => {
+    const t = setup();
+    t.host.stage(t.bots.chief!, "t1", both, "self");
+    t.turns.length = 0;
+    t.edit("writer/research", "---\nname: research\n---\nnew words\n");
+    expect(t.undo()).toMatchObject({ claimed: true, state: "invalid", stale: true });
+    expect(t.turns).toEqual([]);
+    expect(t.enabled("writer/research")).toBe(true);
+    expect(t.enabled("coder/lint")).toBe(false);
+  });
+
+  it("keeps no record when applying fails", () => {
+    const t = setup({ failTurn: "coder/lint" });
+    expect(t.host.stage(t.bots.chief!, "t1", both, "self")).toMatchObject({ status: 422 });
+    expect(t.records()).toHaveLength(0);
   });
 });
