@@ -203,11 +203,26 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
     expect(goal.finished).toEqual([{ status: "failed", detail: "Solo could not complete the coordination step — exit 1." }]);
   });
 
-  it("never takes a reply without a valid marker as done", async () => {
-    const goal = goalRun({ solo: true, steps: [settled("All done, trust me.")] });
+  it("retries a reply without a valid marker up to GROUP_GOAL_MAX_CONSECUTIVE_MISSES times before blocking", async () => {
+    const goal = goalRun({ solo: true, steps: [
+      settled("All done, trust me."),
+      settled("Still no envelope."),
+      settled("And still nothing valid."),
+    ] });
     await goal.done;
-    expect(goal.calls).toHaveLength(1);
-    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision." }]);
+    expect(goal.calls).toHaveLength(3);
+    expect(goal.finished).toEqual([{ status: "blocked", detail: expect.stringContaining("3 attempts") }]);
+  });
+
+  it("resets the miss counter after a valid decision follows an invalid one", async () => {
+    const goal = goalRun({ solo: true, steps: [
+      settled("No envelope here."),
+      settled(envelope({ status: "continue", next: "solo-id", instruction: "Recovered", detail: "Back on track" })),
+      settled(envelope({ status: "completed", detail: "Done" })),
+    ] });
+    await goal.done;
+    expect(goal.calls).toHaveLength(3);
+    expect(goal.finished).toEqual([{ status: "completed", detail: "Done" }]);
   });
 
   it("blocks a room of one that repeats the same next step", async () => {

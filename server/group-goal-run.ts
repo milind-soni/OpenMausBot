@@ -7,6 +7,7 @@ import type { GroupDefaultResponder } from "./store.ts";
 export const GROUP_GOAL_MAX_TURNS = 13;
 export const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
+const GROUP_GOAL_MAX_CONSECUTIVE_MISSES = 3;
 export const GROUP_GOAL_CONTROL_OPEN = "<openmaus-goal>";
 export const GROUP_GOAL_CONTROL_CLOSE = "</openmaus-goal>";
 /** A close tag the model sometimes escapes; it ends an envelope exactly like the plain one. */
@@ -310,6 +311,7 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
 
   let coordinatorNote: string | undefined;
   let waitExhaustions = 0;
+  let consecutiveMisses = 0;
   while (!deps.cancelled() && run.turnCount < run.maxTurns) {
     const coordinatorTurn = run.turnCount + 1;
     const note = coordinatorNote;
@@ -354,9 +356,15 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
 
     const decision = parseGroupGoalDecision(coordinatorResult.replyText).decision;
     if (!decision) {
-      deps.finish("blocked", `${coordinator.name} did not provide a valid next-step decision.`);
-      return;
+      consecutiveMisses += 1;
+      if (consecutiveMisses >= GROUP_GOAL_MAX_CONSECUTIVE_MISSES) {
+        deps.finish("blocked", `${coordinator.name} did not provide a valid next-step decision after ${GROUP_GOAL_MAX_CONSECUTIVE_MISSES} attempts.`);
+        return;
+      }
+      coordinatorNote = `Your last reply did not end with exactly one valid control envelope, so the goal could not take your decision. Do not repeat the work or the assignments you already made. Write one short update, then end with the envelope alone on its own last line: ${GROUP_GOAL_CONTROL_OPEN}{"status":"continue", …}${GROUP_GOAL_CONTROL_CLOSE}`;
+      continue;
     }
+    consecutiveMisses = 0;
     if (decision.status !== "continue") {
       deps.finish(decision.status, decision.detail);
       return;
