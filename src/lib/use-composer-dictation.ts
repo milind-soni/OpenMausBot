@@ -69,6 +69,8 @@ export function useComposerDictation({ draftId, text, onText }: {
         setSpeechError(message ?? (reason === "speech-not-authorized" ? withOpenSettings(t("composer.dictation.permission"), "speech")
           : t(reason === "dictation-disabled" ? "composer.dictation.disabled"
             : reason === "speech-language-missing" ? "composer.dictation.languageMissing" : "composer.dictation.failed")));
+      } else if (reason === "interrupted") {
+        setSpeechError(t("composer.dictation.cutOff"));
       }
     });
     void bridge.speechStart().catch(() => {
