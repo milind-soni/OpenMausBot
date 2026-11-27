@@ -80,6 +80,7 @@
 //   FAKE_ACP_OMIT_MODEL_VALUE  when the live model equals this id, the model option has no currentValue
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
+//   FAKE_ACP_EXIT_AFTER_WAKE=1  the process exits once it has answered a hand-off result's wake turn
 //   FAKE_ACP_HANG_ON_MODEL  set_config_option never answers a switch to this model, as a stuck account can; other requests
 //     are still answered
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
@@ -1222,6 +1223,12 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
+      // Antigravity's session/resume takes the session's servers again, as session/new does.
+      if (Array.isArray(msg.params?.mcpServers)) {
+        const offered = offeredAgents(msg.params.mcpServers);
+        agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
+        sessionMcp = acceptedMcp(msg.params.mcpServers);
+      }
       const opts = configOptions();
       const mdls = sessionModels();
       const sm = sessionModesPayload();
@@ -1666,6 +1673,8 @@ function handle(msg: any) {
           },
         });
         complete();
+        // As a CLI the app restarts between turns: the next turn resumes the session in a new process.
+        if (process.env.FAKE_ACP_EXIT_AFTER_WAKE === "1") setTimeout(() => process.exit(0), 50);
         return;
       }
       if (mode === "chief-delegate" && agentsMcp && promptText.includes("CHECK_STATUS")) {
@@ -1839,9 +1848,11 @@ function handle(msg: any) {
         return;
       }
       if (mode === "delegate-peer" && agentsMcp) {
+        // A turn whose text names BRIEF_<word> hands on that task, so two of the person's requests are two briefs.
+        const named = [...promptText.matchAll(/\bBRIEF_\w+/g)].at(-1)?.[0];
         void driveMcp(agentsMcp, [
           { name: "list_bots", args: () => ({}) },
-          handoffCall("delegated task", { reason: "followup", doneWhen: "the export opens in Numbers" }),
+          handoffCall(named ? `delegated task ${named}` : "delegated task", { reason: "followup", doneWhen: "the export opens in Numbers" }),
         ])
           .then((reply) => {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegated: ${reply}` } } } });

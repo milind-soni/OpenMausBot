@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
-import { toolListFloorBytes, type ListedTool } from "../tool-list-budget.ts";
+import { fitToolListWithinShare, toolListFloorBytes, type ListedTool } from "../tool-list-budget.ts";
 import { readRecordedToolList, TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV } from "../tool-list-share.ts";
 import { ownServerToolList, sessionToolShares, withOwnShare, withSessionToolShares } from "./own-mcp-session-budget.ts";
 import type { AcpMcpServer } from "./turn-mcp.ts";
@@ -33,6 +33,30 @@ export interface SessionBudgetOptions {
   /** Where relays record the lists they relay. */
   recordsDir?: string;
   log?: (line: string) => void;
+  /** Told, on every setup, how to read the tools each server's list leaves out to fit its share: none when the session fits.
+   * Read it when needed: a relay's list is known once the relay has answered and recorded it. */
+  leftOut?: (left: () => LeftOutTools[]) => void;
+}
+
+/** The tools one server of a session leaves out of its list to fit its share. */
+export interface LeftOutTools { server: string; tools: string[] }
+
+/** What `lists` leave out under `shares`, by server, as each list's own fit chooses (fitToolListWithinShare). */
+export function leftOutTools(lists: ReadonlyArray<{ server: string; tools: readonly ListedTool[] | number; share: number | undefined; record?: string }>): LeftOutTools[] {
+  return lists.flatMap(({ server, tools: planned, share, record }) => {
+    // A relay set aside a reserve is sized by the list it recorded since, once it has answered.
+    const tools = typeof planned === "number" && record ? readRecordedToolList(record) ?? planned : planned;
+    if (typeof tools === "number" || share === undefined) return [];
+    const { left } = fitToolListWithinShare(tools, share);
+    return left.length ? [{ server, tools: left }] : [];
+  });
+}
+
+/** The line a turn carries while its session's lists leave tools out, so the bot knows what it cannot call and why. */
+export function leftOutToolsNote(left: readonly LeftOutTools[]): string | undefined {
+  if (!left.length) return undefined;
+  return `[Tools left out] To fit this engine's limit on tool definitions, this session does not list: ${left.map(({ server, tools }) => `${server}: ${tools.join(", ")}`).join("; ")}. `
+    + "They cannot be called here. If the task needs one, tell the person which, and that turning off a server this bot does not need brings it back.";
 }
 
 export function toolListRecordPath(recordsDir: string, botId: string, server: string): string {
@@ -66,7 +90,7 @@ type Planned =
 export function withSessionToolBudget(servers: AcpMcpServer[], budget: number, options: SessionBudgetOptions = {}): AcpMcpServer[] {
   const env = options.env ?? process.env;
   const log = options.log ?? ((line: string) => console.warn(line));
-  if (env[SESSION_TOOL_BUDGET_ENV] === "0") return withSessionToolShares(servers, budget, log);
+  if (env[SESSION_TOOL_BUDGET_ENV] === "0") return withSessionToolShares(servers, budget, log, options.leftOut);
   const recordsDir = options.recordsDir ?? join(DATA_DIR, "tool-list-records");
   const botId = servers.map((server) => ("command" in server ? valueOf(server.env, "OMB_BOT_ID") : undefined)).find(Boolean) ?? "";
   const planned: Planned[] = servers.map((server) => {
@@ -82,11 +106,14 @@ export function withSessionToolBudget(servers: AcpMcpServer[], budget: number, o
     const reserve = Math.max(UNKNOWN_LIST_RESERVE, Math.floor((budget - known) / unknown.length));
     for (const entry of unknown) if (entry.kind === "relay") entry.tools = reserve;
   }
-  if (!planned.some((entry) => entry.kind !== "other")) return servers;
+  if (!planned.some((entry) => entry.kind !== "other")) {
+    options.leftOut?.(() => []);
+    return servers;
+  }
   const others = planned.filter((entry) => entry.kind === "other");
   const sized = planned.filter((entry) => entry.kind !== "other");
-  const lists = [...sized.map((entry) => entry.tools), ...others.map(() => UNKNOWN_LIST_RESERVE)];
-  const { shares, bytes, fits } = sessionToolShares(lists, budget);
+  const sizes = [...sized.map((entry) => entry.tools), ...others.map(() => UNKNOWN_LIST_RESERVE)];
+  const { shares, bytes, fits } = sessionToolShares(sizes, budget);
   if (!fits) {
     log(`[mcp] this session's MCP tools (${sized.map((entry) => entry.server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; each server leaves out its least important tools to fit its share`);
   }
@@ -96,6 +123,15 @@ export function withSessionToolBudget(servers: AcpMcpServer[], budget: number, o
     if (refused.length) log(`[mcp] ${entry.server.name}: the engine refuses ${refused.length} tool(s) whose name as mcp_${entry.server.name}_<tool> is over 64 characters or not [a-zA-Z0-9_-]: ${refused.join(", ")}`);
   }
   const shareOf = new Map(sized.map((entry, index) => [entry.server, shares[index]!]));
+  const lists = sized.map((entry) => ({ server: entry.server.name, tools: entry.tools, share: shareOf.get(entry.server), record: entry.kind === "relay" ? entry.record : undefined }));
+  // Once every list is known what they leave out is settled; until then a relay that answers since is counted.
+  let settled: LeftOutTools[] | undefined;
+  options.leftOut?.(() => {
+    if (settled) return settled;
+    const left = leftOutTools(lists);
+    if (lists.every((list) => typeof list.tools !== "number")) settled = left;
+    return left;
+  });
   return planned.map((entry) => {
     const share = shareOf.get(entry.server);
     if (share === undefined || entry.kind === "other") return entry.server;

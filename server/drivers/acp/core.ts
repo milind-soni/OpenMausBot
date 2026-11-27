@@ -74,7 +74,7 @@ import { startupFailureRecoverable } from "./startup-recovery.ts";
 import { engineFailure, engineFailureKind } from "../engine-errors.ts";
 import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
+import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { leftOutToolsNote } from "../session-tool-budget.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
 import { learnedTextOnlyTools, learnTextOnlyTools, TEXT_ONLY_PROMPT_NOTE } from "../../mcp-text-only.ts"; import { isHermesReasoningReplay } from "./hermes-replay.ts";
 
@@ -1121,6 +1121,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (liveSessionId !== null && session.sessionKey === liveSessionKey(sessionKey, heldSystem()) && (cursor === null || cursor === liveSessionId)) {
                 break;
               }
+              const sessionServers = () => acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget,
+                (left) => { session.toolsLeftOut = () => leftOutToolsNote(left()); });
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
@@ -1130,7 +1132,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     link: session.acp, sessionId: cursor, quietMs: support.loadReplayQuietMs?.(turn), replayed: () => session.sessionConfigResult ?? {},
                     send: (receive) => request(
                       support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) },
+                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : sessionServers(), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) },
                       support.sessionSetupTimeoutMs ?? LOAD_SESSION_TIMEOUT, receive),
                     receive: (result) => {
                       if (result) {
@@ -1173,7 +1175,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await sessionNewRetried(() => request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
+              await sessionNewRetried(() => request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : sessionServers(), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = liveSessionKey(sessionKey, heldSystem());
                 receiveModelVariants(result, true);
@@ -1281,11 +1283,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (expectedModeId !== undefined && readSessionModes(session.sessionConfigResult)?.currentModeId !== expectedModeId) throw new Error(`${support.displayName} changed mode before the prompt`);
             state.promptSent = true; clock.promptSent(Date.now());
             if (!support.promptUnreachedModel) acknowledge();
-            const promptIdleMs = promptIdleTimeoutMs();
+            const promptIdleMs = promptIdleTimeoutMs(); const leftOutNote = session.toolsLeftOut?.();
             const quiet = startQuietWatch(threadId, session, current);
             const result = await request(
               "session/prompt",
-              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(textOnlyModel ? [{ type: "text", text: TEXT_ONLY_PROMPT_NOTE }] : [])] },
+              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(leftOutNote ? [{ type: "text", text: leftOutNote }] : []), ...(textOnlyModel ? [{ type: "text", text: TEXT_ONLY_PROMPT_NOTE }] : [])] },
               undefined,
               undefined,
               promptIdleMs,

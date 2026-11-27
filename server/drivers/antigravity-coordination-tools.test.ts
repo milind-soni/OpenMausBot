@@ -77,7 +77,7 @@ async function start(executable: string, dump: string, rpc: string) {
     instanceId: "antigravity-coordination", displayName: "Antigravity", enabled: true, config: { cli: executable, fullAuto: false },
     environment: {
       FAKE_ACP_AUTH_METHOD: "oauth-personal", FAKE_ACP_MODELS: "gemini-4-neon,gemini-4-pro", FAKE_ACP_AGENT_NAME: "Antigravity ACP Server",
-      FAKE_ACP_VERSION: "1.5.18", FAKE_ACP_MODES: "default,plan", FAKE_ACP_DUMP: dump, FAKE_ACP_RPC_APPEND_FILE: rpc,
+      FAKE_ACP_VERSION: "1.5.18", FAKE_ACP_MODES: "default,plan", FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1", FAKE_ACP_RPC_APPEND_FILE: rpc,
     },
   });
   instances.push(instance);
@@ -122,9 +122,25 @@ describe("a native Antigravity CLI thread over the session's tool budget", () =>
       const { turnId } = await instance.adapter.sendTurn({ threadId: "t-shop", text, cwd: directory, integrations, ...extra });
       expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
     };
-    const check = (sent: Sent[]) => {
+    const note = () => (JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")) as Array<{ text?: string }>)
+      .map((block) => block.text ?? "").find((text) => text.startsWith("[Tools left out]"));
+    // `relaysAnswered` false: the turn was set up before any relay had answered and recorded its list, as only this fake
+    // allows (the CLI lists every server's tools on session setup, before the prompt), so it can name only OpenMausBot's own.
+    const check = (sent: Sent[], relaysAnswered = true) => {
       expect(sent.map((server) => server.name).sort()).toEqual(Object.keys(LISTS).sort());
       const lists = shown(sent);
+      // The turn names what the lists left out, server by server, so the bot knows what it cannot call.
+      const left = Object.entries(LISTS).filter(([server]) => relaysAnswered || ["agents", "browser", "data"].includes(server)).flatMap(([server, tools]) => {
+        const kept = new Set(lists[server]!.map((tool) => tool.name));
+        return tools.filter((tool) => !kept.has(tool.name)).map((tool) => `${server}/${tool.name}`);
+      });
+      const named = note() ?? "";
+      for (const tool of left) {
+        const [server, name] = tool.split("/");
+        expect(named).toMatch(new RegExp(`(?:: |; )${server}: (?:[^;]*, )?${name}(?:[,;.]|$)`));
+      }
+      if (relaysAnswered && !left.length) expect(note()).toBeUndefined();
+      for (const name of COORDINATION_TOOLS) expect(named).not.toMatch(new RegExp(`\\b${name}\\b`));
       for (const name of COORDINATION_TOOLS) expect(lists.agents!.map((tool) => tool.name)).toContain(name);
       // Counted as the CLI counts them, each tool by its own name.
       const all = Object.values(lists).flat();
@@ -136,7 +152,7 @@ describe("a native Antigravity CLI thread over the session's tool budget", () =>
     // session/new: nothing recorded yet, so the person's servers are sized by a reserve.
     await turn("hello");
     expect(setups()).toEqual(["session/new"]);
-    check(sentNow());
+    check(sentNow(), false);
     const sessionId = (recorder.events.find((event) => event.type === "session.started") as { sessionId: string }).sessionId;
 
     // A model switch in the same live session: its servers are the ones session/new sent.
