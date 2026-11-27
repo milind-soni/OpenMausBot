@@ -1456,7 +1456,7 @@
   "team.deleteKeepBotsDescription": "Los bots y los chats de grupo se mueven a General con sus conversaciones intactas. Se eliminan el departamento y sus instrucciones compartidas. No se puede deshacer.",
   "team.deleteKeepBotsSimple": "Sus bots y chats de grupo se quedan, con sus conversaciones, fuera de cualquier departamento. Se eliminan el departamento y sus instrucciones compartidas. No se puede deshacer.",
   "team.delete": "Eliminar departamento",
-  "teamSettings.menu": "Configurar para todos los bots de este departamento…",
+  "teamSettings.menu": "Ajustes para todos los bots…",
   "teamSettings.title": "Configurar para todos los bots de {name}",
   "teamSettings.general": "General",
   "teamSettings.close": "Cerrar la configuración del departamento",

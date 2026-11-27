@@ -2224,7 +2224,7 @@
   "team.deleteKeepBotsSimple": "I suoi bot e le chat di gruppo restano, con le loro conversazioni, fuori da qualsiasi reparto. Il reparto e le sue istruzioni condivise vengono eliminati. Non si può annullare.",
   "team.delete": "Elimina reparto",
   "team.actions": "Azioni per il reparto {name}",
-  "teamSettings.menu": "Imposta per tutti i bot di questo reparto…",
+  "teamSettings.menu": "Impostazioni per tutti i bot…",
   "teamSettings.title": "Imposta per tutti i bot di {name}",
   "teamSettings.general": "Generale",
   "teamSettings.close": "Chiudi impostazioni del reparto",
