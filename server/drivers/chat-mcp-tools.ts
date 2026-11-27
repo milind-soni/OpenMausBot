@@ -82,6 +82,8 @@ const WINDOWS_BUILT_IN_STARTUP_MS = 20_000;
 /** A turn can't run without the agents server, so a slow computer (an older Intel Mac) gets this long for it everywhere. */
 const AGENTS_STARTUP_MS = 20_000;
 const STARTUP_TIMED_OUT = "MCP startup timed out";
+/** A configured server still starting when a background turn's bounded wait ends: it keeps starting for a later round. */
+const STILL_STARTING = "still starting; its tools may be missing from this turn's first reply.";
 const REQUEST_TIMED_OUT = "MCP request timed out; execution outcome may be uncertain";
 /** How much of a server's stderr is kept, and how much of its last line is ever shown. */
 const STDERR_TAIL_CHARS = 4_000, STDERR_LINE_CHARS = 300;
@@ -101,8 +103,9 @@ export function agentsStartupMs(env: Record<string, string | undefined> = proces
 
 /** `startupMs` replaces every command server's startup budget (mcpStartupMs, agentsStartupMs), `hostComputerMs` hostComputerStartupMs. `notice` hears, for the person,
  * that this computer's tools did not start, worded once per `conversation`. With `background` and the agents server, setup
- * waits only for the built-ins a turn acts through (agents, a computer, the browser); the rest are listed by `join` once
- * started. `onSettled` hears each server's name once it has listed its tools or failed. */
+ * waits for the built-ins a turn acts through (agents, a computer, the browser) and, within the built-ins' startup budget,
+ * the configured servers too; one still starting past that is listed by `join` once started. `onSettled` hears each
+ * server's name once it has listed its tools or failed. */
 export interface ChatToolMountOptions {
   startupMs?: number;
   hostComputerMs?: number;
@@ -767,6 +770,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   try {
     if (signal.aborted) throw aborted();
     // Concurrent starts, consumed in config order so names and collision suffixes stay stable.
+    const mountedAt = Date.now();
     const mounts = servers.map(async ([name, descriptor], index): Promise<Mounted> => {
       if (signal.aborted || closed) throw aborted();
       const client = new ChatMcpClient(descriptor, computerUse, index >= builtIns);
@@ -802,6 +806,20 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     };
     const waitAll = !options.background || !servers.some(([, descriptor]) => descriptor === agentsServer);
     await Promise.all(settled.filter((_, index) => waitAll || waited(index)));
+    // In the background, the first request waits for the configured servers' first mounts too, within the startup budget
+    // a built-in gets: one that starts in time has its tools listed from the first request, and one still starting past
+    // that keeps starting for a later round (join), said here so its tools' absence is not silent.
+    const late = waitAll ? [] : settled.flatMap((mount, index) => index >= builtIns && !waited(index) ? [{ mount, index }] : []);
+    if (late.length) {
+      const atBound = new Promise<false>((resolve) => { setTimeout(() => resolve(false), Math.max(0, mountedAt + startupMs - Date.now())).unref(); });
+      const made = await Promise.all(late.map(({ mount }) => Promise.race([mount.then(() => true as const), atBound])));
+      for (const [at, { index }] of late.entries()) {
+        if (made[at]) continue;
+        const name = servers[index]![0];
+        skipped.push({ server: name, reason: STILL_STARTING });
+        console.warn(`chat-mcp: configured MCP server "${name}" is still starting; its tools may be missing from this turn's first reply`);
+      }
+    }
     await absorb();
     await layout(toolLimit);
     if (signal.aborted || closed) throw aborted();
