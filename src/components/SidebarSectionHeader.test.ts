@@ -26,6 +26,18 @@ describe("SidebarSectionHeader", () => {
     expect(html).not.toContain("uppercase");
   });
 
+  it("gives a department the same folder and heading type in Advanced, and leaves other headings quiet", () => {
+    const heading = (props: Partial<Parameters<typeof SidebarSectionHeader>[0]> = {}) => renderToStaticMarkup(
+      createElement(SidebarSectionHeader, { name: "Work", collapsed: false, onToggle: () => {}, reorderable: true, dragging: false, ...props }),
+    );
+    const department = heading({ department: true });
+    expect(department.indexOf("lucide-folder-open")).toBeLessThan(department.indexOf(">Work</span>"));
+    expect(department).toContain("text-[17px] leading-[22px] font-semibold tracking-[-0.01em] text-ink");
+    expect(heading({ department: true, collapsed: true })).not.toContain("lucide-folder-open");
+    expect(heading()).not.toContain("lucide-folder");
+    expect(heading()).toContain("text-[13px] leading-[18px] text-ink-secondary");
+  });
+
   it.each([false, true])("keeps delete separate from collapse and the context menu, collapsed=%s", (collapsed) => {
     const onContextMenu = () => {};
     const element = SidebarSectionHeader({
@@ -133,6 +145,30 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(onMenu).toHaveBeenCalledExactlyOnceWith(button);
     expect(renderToStaticMarkup(line({ onMenu, menuOpen: true }))).toContain('aria-haspopup="menu" aria-expanded="true"');
     expect(renderToStaticMarkup(line())).not.toContain("Actions for Work department");
+  });
+
+  it("reads a department as a heading: a 17px semibold name in ink, on a 36px line set off from the rows above", () => {
+    const html = renderToStaticMarkup(line({ department: true }));
+    expect(html).toContain("text-[17px] leading-[22px] font-semibold tracking-[-0.01em] text-ink");
+    expect(html).not.toContain("text-[13px]");
+    expect(String(line({ department: true }).props.className).split(" ")).toEqual(expect.arrayContaining(["mt-3", "h-9", "rounded-xl", "touch:h-10"]));
+    expect(renderToStaticMarkup(line())).not.toContain("font-semibold");
+  });
+
+  it("leads a department with a folder in the avatar column, open while its rows show and closed once collapsed", () => {
+    const open = renderToStaticMarkup(line({ department: true }));
+    expect(open).toMatch(/<span data-section-mark-icon="" class="me-1 flex w-9 shrink-0 justify-center text-ink-secondary"><svg[^>]*lucide-folder-open[^>]*aria-hidden="true"/);
+    expect(open.indexOf("lucide-folder-open")).toBeLessThan(open.indexOf(">Work</span>"));
+    const closed = renderToStaticMarkup(line({ department: true, collapsed: true }));
+    expect(closed).toMatch(/lucide-folder(?!-open)/);
+    expect(closed).not.toContain("lucide-folder-open");
+    expect(renderToStaticMarkup(line())).not.toContain("lucide-folder");
+    expect(renderToStaticMarkup(line({ department: true, naming: { value: "Work", label: "Name", onCommit: () => {}, onCancel: () => {} } }))).toContain("lucide-folder-open");
+  });
+
+  it("toggles a department from its folder as well as its name", () => {
+    const toggle = nodes(line({ department: true }).props.children).find((node) => node.type === "button")!;
+    expect(renderToStaticMarkup(toggle)).toContain("lucide-folder-open");
   });
 
   it("shows no row count, only the chevron on hover or focus", () => {

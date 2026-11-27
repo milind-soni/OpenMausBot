@@ -1416,7 +1416,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                     collapsed={collapsed}
                     attention={attention}
                     onToggle={layoutInteractive ? () => toggleSection(id) : undefined}
-                    {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { ...(unreadCount > 0 && { count: unreadCount }), reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)}
+                    {...layout.header(id)} {...(id === UNREAD_SECTION_ID && { ...(unreadCount > 0 && { count: unreadCount }), reorderable: false })} naming={drops.naming(sectionName)} dropInto={drops.into(sectionName)} department={sectionName !== null}
                     onDelete={!simple && !remoteClient && editable ? () => setDeletingTeam(editable) : undefined} onShare={!simple && !remoteClient && editable && !oneList?.virtual(editable) ? () => setShareTeam(editable) : undefined}
                   />
                 )}

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Share2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, GripVertical, MoreHorizontal, Share2, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
@@ -30,6 +30,7 @@ export function SidebarSectionHeader({
   menuOpen = false,
   naming,
   dropInto = false,
+  department = false,
 }: {
   name: string;
   /** How many rows the section holds, for a section whose size is the point of it. */
@@ -55,9 +56,12 @@ export function SidebarSectionHeader({
   naming?: SectionNaming;
   /** A dragged bot would go into this department. */
   dropInto?: boolean;
+  department?: boolean;
 }) {
   const reorderable = canReorder && !naming;
   const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const Mark = collapsed ? Folder : FolderOpen;
+  const nameType = department ? "text-[17px] leading-[22px] font-semibold tracking-[-0.01em] text-ink" : "text-[13px] leading-[18px] text-ink-secondary";
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
   const onHeaderKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!reorderable || !event.altKey) return;
@@ -82,6 +86,9 @@ export function SidebarSectionHeader({
   const dropMark = dropInto ? "bg-accent/10 outline outline-2 -outline-offset-2 outline-accent/70" : undefined;
 
   if (line) {
+    const mark = department && (
+      <span data-section-mark-icon="" className="me-1 flex w-9 shrink-0 justify-center text-ink-secondary"><Mark size={20} aria-hidden="true" /></span>
+    );
     const tail = onToggle && (
       <Chevron size={12} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
     );
@@ -95,9 +102,13 @@ export function SidebarSectionHeader({
         draggable={reorderable || undefined}
         onDragStart={reorderable ? onDragStart : undefined}
         onDragEnd={reorderable ? onDragEnd : undefined}
-        className={cn("group/section flex h-[30px] items-center gap-1.5 rounded-[6px] px-2 pb-1.5 pt-2 hover:bg-raised/50", reorderable && "cursor-grab", dragging && "opacity-40", naming && "py-0.5", dropMark)}
+        className={cn(
+          "group/section flex items-center gap-1.5 px-2",
+          department ? "mt-3 h-9 rounded-xl hover:bg-ink/[0.06] touch:h-10" : "h-[30px] rounded-[6px] pb-1.5 pt-2 hover:bg-raised/50",
+          reorderable && "cursor-grab", dragging && "opacity-40", naming && !department && "py-0.5", dropMark,
+        )}
       >
-        {naming ? <SectionNameField {...naming} /> : onToggle ? (
+        {naming ? <>{mark}<SectionNameField {...naming} /></> : onToggle ? (
           <button
             type="button"
             onClick={onToggle}
@@ -107,14 +118,16 @@ export function SidebarSectionHeader({
             title={toggleTitle}
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
-            <span className={cn("min-w-0 truncate text-[13px] leading-[18px] text-ink-secondary", !counted && "flex-1")}>{name}</span>
+            {mark}
+            <span className={cn("min-w-0 truncate", nameType, !counted && "flex-1")}>{name}</span>
             {size}
             {collapsed && <SectionAttention attention={attention} label={attentionLabel} alert={alert} />}
             {tail}
           </button>
         ) : (
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className={cn("min-w-0 truncate text-[13px] leading-[18px] text-ink-secondary", !counted && "flex-1")}>{name}</span>
+            {mark}
+            <span className={cn("min-w-0 truncate", nameType, !counted && "flex-1")}>{name}</span>
             {size}
             {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
             {tail}
@@ -138,9 +151,10 @@ export function SidebarSectionHeader({
     );
   }
 
+  const mark = department && <Mark size={20} aria-hidden="true" data-section-mark-icon="" className="shrink-0 text-ink-secondary" />;
   return (
     <div className={cn("flex items-center gap-1 rounded-md px-2 pb-1", dropMark)} data-section={name} data-section-drop={dropInto ? "" : undefined} tabIndex={onContextMenu ? -1 : undefined} onContextMenu={naming ? undefined : onContextMenu}>
-      {naming ? <SectionNameField {...naming} /> : onToggle ? (
+      {naming ? <>{mark}<SectionNameField {...naming} /></> : onToggle ? (
         <button
           type="button"
           onClick={onToggle}
@@ -150,7 +164,8 @@ export function SidebarSectionHeader({
           title={toggleTitle}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
         >
-          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
+          {mark}
+          <span className={cn("truncate", nameType)}>
             {name}
           </span>
           {size}
@@ -159,7 +174,8 @@ export function SidebarSectionHeader({
         </button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5">
-          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
+          {mark}
+          <span className={cn("truncate", nameType)}>
             {name}
           </span>
           {size}
@@ -241,7 +257,7 @@ function SectionNameField({ value, label, onCommit, onCancel }: SectionNaming) {
           settle(false);
         }
       }}
-      className="h-6 min-w-0 flex-1 rounded-md bg-ink/[0.05] px-1.5 text-[13px] leading-[18px] text-ink outline-none ring-1 ring-accent/60"
+      className="-ms-1.5 h-8 min-w-0 flex-1 rounded-md bg-ink/[0.05] px-1.5 text-[17px] font-semibold leading-[22px] tracking-[-0.01em] text-ink outline-none ring-1 ring-accent/60"
     />
   );
 }
