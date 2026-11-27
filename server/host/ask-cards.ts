@@ -35,6 +35,7 @@ export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
     | "groupTaskByThread" | "patchGroup" | "groupByThread">;
   node(id: string): HandoffView | undefined;
+  runningIn(threadId: string): HandoffView[];
   /** The conversation that handed this one its work, while that work is live. */
   delegatorOf(threadId: string): { threadId: string; botId?: string } | undefined;
   notify(notification: Notification | null): void;
@@ -381,6 +382,7 @@ export function createAskCards(deps: AskCardsDeps) {
   /** A bot's own reply in its own chat ended on a NEEDS INPUT line: the line becomes a question card the person taps or
    * answers in words, as their next message there. */
   function ownQuestion(botId: string, threadId: string, turnId: string): void {
+    if (deps.runningIn(threadId).some((node) => node.parentId && !node.groupId && node.botId === botId)) return;
     const reply = store.activePath(threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
     const question = reply ? needsInputQuestion(reply.text ?? "") : undefined;
     if (!reply || question === undefined) return;

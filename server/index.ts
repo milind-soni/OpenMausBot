@@ -3831,7 +3831,7 @@ function followupAtBoot(threadId: string): "dispatched" | "pending" | undefined 
 }
 const followupEndedRoots = new Map<string, string | undefined>(); let pokeBoard = (): void => {}; // the board's dispatcher, once it is made below
 
-const askCards = createAskCards({ store, node: (id) => coordinator.node(id), delegatorOf, notify, answerCard: respondToCard, answerNode: (id, text) => coordinator.answerNode(id, text),
+const askCards = createAskCards({ store, node: (id) => coordinator.node(id), runningIn: (threadId) => coordinator.runningIn(threadId), delegatorOf, notify, answerCard: respondToCard, answerNode: (id, text) => coordinator.answerNode(id, text),
   answeredIn: (threadId, requestId) => automationReports.answeredIn(teamMessages.inbox.answeredIn(threadId, requestId), requestId), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`),
   copiedInto: (inboxThreadId, botId, threadId) => Boolean(CLOUD_TEAM) && teamMessages.inbox.isHomeOf(inboxThreadId, teamOwners.routing.askedPerson(botId, threadId)), keptPrivate: (threadId, parentThreadId) => keptPrivate({ child: teamHost.privateTo(threadId), parent: teamHost.privateTo(parentThreadId) }) });
 const questionRouting = createQuestionRouting({ store, handedInUnproven, active: () => coordinator.active(), node: (id) => coordinator.node(id), parkedFor: (botId) => coordinator.parkedFor(botId), answerNode: (id, text, by) => coordinator.answerNode(id, text, by), live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`), hasLive: (threadId) => { for (const key of askMessageByRequest.keys()) if (key.startsWith(`${threadId}:`)) return true; return false; },
