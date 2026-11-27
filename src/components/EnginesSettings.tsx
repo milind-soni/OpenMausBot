@@ -12,7 +12,8 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AntigravitySwitchCli } from "./AntigravitySwitchCli";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
-import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
+import { AccountsCard, AddAccount, accountGroupOf, accountGroupTitle, accountsReady, type AccountGroup } from "./EngineAccounts";
+import { engineDisplayName } from "@/lib/engine-name";
 import { ClaudeEndpoints, CodexEndpoints } from "./ClaudeEndpoints";
 import { ClaudeBedrockEndpoints } from "./ClaudeBedrock";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
@@ -27,6 +28,7 @@ import { InstanceProviderMark } from "./ProviderIcons";
 import { GEMINI_PRESET, GeminiServer, hasGeminiServer } from "./OpenAiCompatServers";
 import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
 import { AdminOnly } from "./AdminOnly";
+import { modelgoOfferable, sponsorRowRaised } from "@/lib/modelgo-offer";
 import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
 
 export { HiddenEngines };
@@ -196,7 +198,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 }
 
 /** The executable behind an engine: its path, Claude's self-update, and a reset to the default. */
-function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
+function EngineAdvanced({ instance, accountName }: { instance: InstanceInfo; accountName?: string }) {
   const { refreshInstances } = useStoreActions();
   const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
@@ -257,7 +259,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
 
   return (
       <details className="mt-4 border-t border-hairline/40 pt-3">
-        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.library.advanced")}</summary>
+        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{accountName ? `${t("engines.library.advanced")} · ${accountName}` : t("engines.library.advanced")}</summary>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
           {instance.cli ? (
@@ -460,7 +462,7 @@ function ProviderRow({ instance, ready, open, onToggle, compact, children }: {
     <div data-simple-engine={instance.instanceId} className={cn("flex items-center gap-3 px-4", compact && !ready && !status.tone ? "min-h-11 py-1.5" : "min-h-16 py-3")}>
       <SettingsMark><InstanceProviderMark instance={instance} size={18} subtle /></SettingsMark>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[14px] leading-5 text-ink">{instance.displayName}</span>
+        <span className="truncate text-[14px] leading-5 text-ink">{accountGroupOf(instance) === "antigravity" ? accountGroupTitle("antigravity") : instance.displayName}</span>
         {!(compact && !ready && !status.tone) && <span className="truncate text-[13px] leading-[18px] text-ink-secondary"><StatusDot tone={status.tone} />{status.text}</span>}
       </span>
       <button type="button" aria-expanded={open} className="ui-button ml-3 shrink-0" onClick={onToggle}>
@@ -490,7 +492,7 @@ function GeminiProviderRow({ open, onToggle }: { open: boolean; onToggle: () => 
   </>;
 }
 
-function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false, offerGemini = false }: {
+function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false, offerGemini = false, offerModelgo = false }: {
   rows: InstanceInfo[];
   isReady: (instance: InstanceInfo) => boolean;
   renderEngine: (instance: InstanceInfo, bare?: boolean) => ReactNode;
@@ -499,14 +501,19 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   accountsOnly?: boolean;
   /** Offer the Google AI Studio row: no Gemini server is added yet and this workspace can add one. */
   offerGemini?: boolean;
+  /** The sponsor's provider sits in the main list, among its first three rows, where it may be offered (modelgoOfferable). */
+  offerModelgo?: boolean;
 }) {
   const [opened, setOpened] = useState<string | null>(null);
   // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
   const allHidden = useHiddenProviders(), hidden = accountsOnly ? [] : allHidden;
   const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined || hasGeminiServer([instance]));
-  const others = rows.filter((instance) => !featured.includes(instance));
+  const modelgo = offerModelgo && !accountsOnly ? rows.find((instance) => instance.driverKind === "modelgo") : undefined;
+  const others = rows.filter((instance) => !featured.includes(instance) && instance !== modelgo);
   // A hidden Gemini server comes back through its own hidden row; adding another would only make a second one.
   const gemini = offerGemini && !hidden.some((provider) => provider.driverKind === "openai-compat" && provider.displayName === GEMINI_PRESET.name);
+  const main = sponsorRowRaised<InstanceInfo | "google-ai-studio">([...featured, ...(gemini ? ["google-ai-studio" as const] : []),
+    ...(modelgo && !featured.includes(modelgo) ? [modelgo] : [])], modelgo, (entry) => entry !== "google-ai-studio" && entry.driverKind === "cursorAgent");
   const folded = others.length + hidden.length;
   const row = (instance: InstanceInfo, compact: boolean) => {
     const open = opened === instance.instanceId;
@@ -516,8 +523,8 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
   return (
     <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
       <SettingsRows icons>
-        {featured.map((instance) => row(instance, false))}
-        {gemini && <GeminiProviderRow open={opened === "google-ai-studio"} onToggle={() => setOpened(opened === "google-ai-studio" ? null : "google-ai-studio")} />}
+        {main.map((entry) => entry !== "google-ai-studio" ? row(entry, false)
+          : <GeminiProviderRow key={entry} open={opened === entry} onToggle={() => setOpened(opened === entry ? null : entry)} />)}
         {folded > 0 && (
           <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(folded)} open={more.open} onToggle={more.onToggle}
             leading={<span aria-hidden="true" />}>
@@ -528,6 +535,13 @@ function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false
       </SettingsRows>
     </SettingsGroup>
   );
+}
+
+function accountsAdvanced(group: AccountGroup, accounts: InstanceInfo[]): ReactNode {
+  if (group === "antigravity") return accounts.map((account) => (
+    <EngineAdvanced key={account.instanceId} instance={account} accountName={accounts.length > 1 ? engineDisplayName(account) : undefined} />
+  ));
+  return <>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={accounts[0]!} /></>;
 }
 
 /** A provider's accounts share one card, which takes the place of its first account. */
@@ -552,7 +566,9 @@ export function AiSignInSettings() {
   const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
   const renderEngine = (instance: InstanceInfo, bare = false) => {
     const group = groupOf(instance);
-    return group ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare} /> : <EngineRow instance={instance} bare={bare} />;
+    return group
+      ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare} advanced={group === "antigravity" ? accountsAdvanced(group, groups.get(group)!) : undefined} />
+      : <EngineRow instance={instance} bare={bare} />;
   };
   return <AdminOnly><div data-ai-sign-in="">
     <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} accountsOnly more={{ id: "ai-sign-in-more", open: false, onToggle: () => {} }} />
@@ -560,7 +576,7 @@ export function AiSignInSettings() {
 }
 
 export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
-  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
+  const state = useStoreSelector((s) => ({ instances: s.instances, policy: s.config?.managedPolicy }), sameFields);
   // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
   useEffect(() => forgetAppCopySwitches, []);
   const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
@@ -575,12 +591,13 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     const group = groupOf(instance);
     return group
       ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare}
-        advanced={<>{group === "claude" ? <><ClaudeEndpoints /><ClaudeBedrockEndpoints /></> : <CodexEndpoints />}<EngineAdvanced instance={instance} /></>} />
+        advanced={accountsAdvanced(group, groups.get(group)!)} />
       : <EngineRow instance={instance} bare={bare} />;
   };
 
   if (simple && more) return <>
-    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} offerGemini={!hostedWorkspace && !hasGeminiServer(state.instances)} />
+    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} more={more} offerGemini={!hostedWorkspace && !hasGeminiServer(state.instances)}
+      offerModelgo={modelgoOfferable(state.policy)} />
     {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
     {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
   </>;
@@ -594,7 +611,7 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
         </div>
         <RefreshEngines />
       </div>
-      <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} />
+      <EngineSections instances={rows} isReady={isReady} renderEngine={renderEngine} offerModelgo={modelgoOfferable(state.policy)} />
       {orphanEndpoints && <div className="px-4"><ClaudeEndpoints /><ClaudeBedrockEndpoints /></div>}
       {orphanCodexEndpoints && <div className="px-4"><CodexEndpoints /></div>}
       <HiddenEngines />

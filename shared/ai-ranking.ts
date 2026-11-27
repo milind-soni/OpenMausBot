@@ -14,7 +14,7 @@ export type AiTestState = "testing" | "passed" | "failed" | "untestable";
 /** Why a test message failed, as a word from a fixed list: never the provider's text. */
 export const AI_TEST_REASONS = [
   "signed_out", "timeout", "empty", "credits", "usage_limit", "rate_limit", "overloaded", "server", "tool_schema", "tool_count",
-  "model_no_route", "refused", "other",
+  "image_content", "model_no_route", "refused", "other",
 ] as const;
 export type AiTestReason = (typeof AI_TEST_REASONS)[number];
 

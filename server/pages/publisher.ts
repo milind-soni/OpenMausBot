@@ -60,6 +60,8 @@ export function createPagePublisher(deps: {
   paused?(): boolean;
 }) {
   const { client, store } = deps;
+  // A conversation shows the plan's limit card once: asked again there, the bot is told and passes it on in words.
+  const limitShown = new Set<string>();
 
   // One publish at a time per bot and source, so two at once can't both find no page and each create one; an update also
   // queues on its page. An unpublish waits for both, so an update's late answer can't bring back its record. Always the
@@ -156,6 +158,9 @@ export function createPagePublisher(deps: {
       if (result.reason === "limit") {
         const card: PublishedPageCard = { state: "limit", title, message: result.message, ...(result.usage ? { usage: result.usage } : {}), ...(result.upgrade ? { upgrade: true } : {}),
           ...(result.plan ? { plan: result.plan } : {}) };
+        if (limitShown.has(input.threadId)) return { status: 402, text: `${result.message} This conversation already shows it: give the person the file instead, in one sentence, and do not publish again.`, card };
+        limitShown.add(input.threadId);
+        if (limitShown.size > 500) limitShown.delete(limitShown.values().next().value!);
         input.post(cardText(card), card);
         return { status: 402, text: `${result.message} Tell the person this in your reply.`, card };
       }

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { Pin, Plus, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { sameDrawnBot } from "@/lib/drawn-bots";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { nextRename } from "@/lib/rename";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useFeature } from "@/lib/use-feature";
@@ -9,7 +11,7 @@ import type { Bot } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { BotAvatar } from "./Avatar";
 import { reducedMotion } from "./MenuMotion";
-import { botShowsTabs, neighbourOf, openTabId, showsTabs, threadTabs, type ThreadTab } from "./thread-tabs";
+import { botShowsTabs, neighbourOf, openTabId, sameTabs, stripTabs, type ThreadTab } from "./thread-tabs";
 import { useSlidingIndicator, useTabMotion } from "./thread-tab-motion";
 import { UndoToast, useUndoToast } from "./UndoToast";
 
@@ -17,24 +19,23 @@ const TAB = "thread-tab group/tab relative z-[1] flex h-8.5 min-w-24 max-w-42 sh
 const CLOSE = "pointer-events-none ms-1 flex size-5 shrink-0 items-center justify-center rounded-full text-ink-tertiary opacity-0 transition-opacity duration-[120ms] hover:bg-ink/[0.08] hover:text-ink group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 touch:pointer-events-auto touch:opacity-100 motion-reduce:transition-none";
 const FADE = 24;
 
-/** Whether the chat header shows this bot's threads as tabs in place of its pill and New thread, in windows wide enough
- * for them. */
-export function useThreadTabsShown(botId: string): boolean {
-  const on = useFeature("threadTabs");
-  return useBotHasThreads(botId) && on;
+/** Whether the chat header shows the thread tab strip in place of the bot's pill and New thread, in windows wide enough
+ * for it: whenever Thread tabs is on, so a bot with one thread still has the strip's + to make another. */
+export function useThreadTabsShown(): boolean {
+  return useFeature("threadTabs");
 }
 
-/** Whether this bot has two threads or more to switch between, its blank New thread chat counted. */
+/** Whether this bot has two threads or more to switch between, its blank New thread chat counted: Simple's pill
+ * switcher shows for these, whether or not Thread tabs is on. */
 export function useBotHasThreads(botId: string): boolean {
   return useStoreSelector((state) => botShowsTabs(state.bots.find((bot) => bot.id === botId), state.newChat));
 }
 
-/** A bot's threads as tabs in the chat header, once Thread tabs is on and the bot has two threads or more. */
+/** A bot's threads as tabs in the chat header, with a + for a new one, once Thread tabs is on. */
 export function HeaderThreadTabs({ bot }: { bot: Bot }) {
   const on = useFeature("threadTabs");
-  const tabs = useMemo(() => threadTabs(bot), [bot.id, bot.threadId, bot.switchingTo, bot.mainThreadId, bot.tasks, bot.busy]);
-  if (!on || !showsTabs(tabs)) return null;
-  return <Strip bot={bot} tabs={tabs} />;
+  if (!on) return null;
+  return <Strip bot={bot} tabs={stripTabs(bot)} active={openTabId(bot)} />;
 }
 
 /** The mask that fades a sideways-scrolling row's edges where more of it is hidden, none when it all fits. */
@@ -48,13 +49,18 @@ export function edgeFade(element: HTMLElement, fade = FADE): string | undefined 
   return `linear-gradient(to right, ${left}, ${right})`;
 }
 
-function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
+type StripProps = { bot: Bot; tabs: ThreadTab[]; active: string };
+
+const sameStrip = (a: StripProps, b: StripProps) => a.active === b.active && sameTabs(a.tabs, b.tabs)
+  && a.bot.id === b.bot.id && a.bot.yourAccess === b.bot.yourAccess && sameDrawnBot(a.bot, b.bot);
+
+const Strip = memo(function Strip({ bot, tabs, active }: StripProps) {
+  useActiveLocale();
   const dispatch = useStoreDispatch();
   const panelOpen = useStoreSelector((state) => state.settingsOpen);
   const panelBeside = useStoreSelector((state) => state.settingsOpen || state.computerOpen || state.inspectorOpen);
   const scroller = useRef<HTMLDivElement>(null);
   const { shown, entering } = useTabMotion(tabs, scroller);
-  const active = openTabId(bot);
   const indicator = useSlidingIndicator(scroller, active);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -202,4 +208,4 @@ function Strip({ bot, tabs }: { bot: Bot; tabs: ThreadTab[] }) {
       <UndoToast toast={toast} onDone={() => setToast(null)} />
     </div>
   );
-}
+}, sameStrip);

@@ -45,6 +45,7 @@ export declare const MOVE_PHASES: readonly MovePhase[];
 export declare const MOVE_REASONS: readonly MoveReason[];
 export declare const MOVE_BUSY: readonly ("bot" | "room" | "sign-in" | "other")[];
 export declare const MOVE_STATUS_HEARTBEAT_MS: number;
+export declare const MOVE_STATUS_IDLE_HEARTBEAT_MS: number;
 export declare const MOVE_STATUS_SETTLE_MS: number;
 export declare const MOVE_STATUS_GAP_MS: number;
 export declare const MOVE_STATUS_OFF_MS: number;
@@ -66,5 +67,7 @@ export function createMoveStatusReport(deps: {
   signIn(): string | null;
   now?(): number;
   log?(line: string): void;
+  /** Spreads each heartbeat and failure's wait by ±20% (Math.random). */
+  random?(): number;
   timers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
 }): { changed(): void; flush(): Promise<void>; close(): void };

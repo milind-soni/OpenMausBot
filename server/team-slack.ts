@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { cloudSignedTimestamp } from "./cloud-clock.ts";
 
 /** On the Admin; must match openmaus-cloud's TEAM_SLACK_REPORT_PATH. */
 export const TEAM_SLACK_REPORT_PATH = "/api/cloud/machines/slack";
@@ -157,7 +158,7 @@ export function createTeamSlackReporter(options: { machineId: string; adminOrigi
   return async (report: TeamSlackReport): Promise<TeamSlackReportOutcome> => {
     const fetcher = options.fetchImpl ?? globalThis.fetch;
     const body = JSON.stringify({ v: 1, ...report });
-    const timestamp = String(Math.floor(now() / 1000)), nonce = randomBytes(18).toString("base64url");
+    const timestamp = cloudSignedTimestamp(now()), nonce = randomBytes(18).toString("base64url");
     let response: Response;
     try {
       response = await fetcher(`${options.adminOrigin}${TEAM_SLACK_REPORT_PATH}`, { method: "POST", redirect: "error", cache: "no-store", body, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: {

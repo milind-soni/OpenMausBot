@@ -23,6 +23,15 @@ export interface TemplateCard {
   counts: { bots: number; skills: number; routines: number; apps: number };
   /** How many key- or password-shaped values were replaced before the folder was written. */
   redacted: number;
+  /** What was taken out of its text before it left this computer: home and data folders, email addresses, phone numbers
+   * and the publisher's own names. Left out when nothing was. */
+  scrubbed?: { paths: number; emails: number; phones: number; names: number };
+  /** It holds something key- or token-shaped: Publish is refused until the template is made again without it. */
+  secret?: boolean;
+  /** The name last typed into "Published by" ("" when it was cleared); left out until someone publishes it. */
+  author?: string;
+  /** The name it was published under; left out for none ("Community"). */
+  publishedBy?: string;
   /** Parts left out, in plain words ("Skill pricing changed while it was being shared"). */
   skipped: string[];
   status: TemplateStatus;

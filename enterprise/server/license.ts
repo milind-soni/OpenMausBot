@@ -7,13 +7,25 @@
 import { createPrivateKey, createPublicKey, sign, verify, type JsonWebKeyInput } from "node:crypto";
 import { z } from "zod";
 
-/** Ed25519 public keys (JWK `x`), oldest first. Rotate by appending; never edit or remove
- * an entry while a key signed with it is still in the field. The matching private keys are
- * generated with scripts/issue-license.mjs and stay outside the repo. */
+/** Ed25519 public keys (JWK `x`), oldest first. A key verifies when any entry signed it.
+ *
+ * Adding a signing key:
+ *   1. Whoever holds the new private key runs `node enterprise/scripts/issue-license.mjs keygen --out <path>`.
+ *      It writes the private half to <path> (mode 0600) and prints only the public half.
+ *   2. Append that public half as a new last line below, with a comment saying who signs with it.
+ *   3. Ship a release. Servers older than that release do not trust the new key yet, so keep issuing
+ *      with the old key until the servers that need the new one are updated.
+ *
+ * Never edit or remove an entry while a key signed with it is still in the field. Private keys stay
+ * outside the repo. */
 export const LICENSE_PUBLIC_KEYS: readonly string[] = [
+  // Hand-issued enterprise keys.
   "6CHdwwJzxKJFimRkC79eQ5FR__bX2WaU2BBGNGPQTQU",
 ];
 
+/** The claims a licence may carry. An issuer (the cloud Admin's included) must validate with exactly this schema before
+ * signing, e.g. through `validateClaims`: a new server refuses the WHOLE licence when an optional claim is malformed (a
+ * `seats` of 0 or 2.5, an empty `plan`), it does not just drop that claim. */
 export const claimsSchema = z.object({
   v: z.literal(1),
   /** Who the license was issued to; shown in the UI and the startup log. */
@@ -24,9 +36,29 @@ export const claimsSchema = z.object({
   issued: z.iso.date("issued must be a YYYY-MM-DD date"),
   /** ISO date (YYYY-MM-DD) the key stops working, or null for perpetual. */
   expires: z.iso.date("expires must be a YYYY-MM-DD date").nullable(),
+  // Optional, added later in the same `v: 1` format. A server without them ignores them (unknown claims are dropped,
+  // never refused), and a key without them still verifies here, so old servers and old keys keep working.
+  /** How many people may sign in before new invites stop (soft: nobody is locked out). */
+  seats: z.number().int().positive().optional(),
+  /** The plan the key was sold under, e.g. "business-server". */
+  plan: z.string().min(1).optional(),
+  /** The subscription the key renews with. */
+  sub: z.string().min(1).optional(),
+  /** The server the key was issued for. Carried; not checked yet (server/enterprise.ts, licenseServerRefusal). */
+  server: z.string().min(1).optional(),
+  /** When the key was issued, in epoch milliseconds: orders two keys issued the same day, so a seat change made today
+   * cannot be undone by putting back this morning's key. */
+  iat: z.number().int().nonnegative().optional(),
 });
 
 export type LicenseClaims = z.infer<typeof claimsSchema>;
+
+/** The claims as a server will read them, or an error naming the first problem: what an issuer checks before it signs. */
+export function validateClaims(claims: unknown): LicenseClaims {
+  const result = claimsSchema.safeParse(claims);
+  if (!result.success) throw new Error(`licence claims are malformed (${result.error.issues[0]?.path.join(".") || "claims"}: ${result.error.issues[0]?.message ?? "invalid"})`);
+  return result.data;
+}
 
 const PREFIX = "omb1";
 

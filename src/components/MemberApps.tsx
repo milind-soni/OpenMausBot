@@ -6,6 +6,8 @@ import { api, useStore } from "@/state/store";
 import { AppsSection } from "./AppsSection";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { ServiceIcon } from "./ServiceIcon";
+import { GithubAppCard } from "./github/GithubAppCard";
+import { useGithubShown } from "@/lib/github-sign-in";
 
 /** One app an admin made each person's own, as GET /api/team/my-connections lists it. */
 export interface OwnApp { slug: string; name: string; connected: boolean; reconnect?: boolean }
@@ -22,6 +24,7 @@ export function MemberApps() {
   const [signIn, setSignIn] = useState<{ slug: string; url: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
+  const githubHidden = !useGithubShown();
   const said = (cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause));
   const reads = useRef(0);
   const load = useCallback(() => {
@@ -92,8 +95,9 @@ export function MemberApps() {
         <div className="@container min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
           {error && <div role="alert" className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
           {apps === null ? <div className="flex items-center justify-center py-16 text-ink-secondary"><Loader2 size={14} className="animate-spin" /></div>
-            : apps.length === 0 ? <p data-member-apps-none className="py-10 text-center text-[13px] text-ink-secondary">{t("memberApps.none", { team })}</p>
+            : apps.length === 0 && githubHidden ? <p data-member-apps-none className="py-10 text-center text-[13px] text-ink-secondary">{t("memberApps.none", { team })}</p>
             : <AppsSection id="member-apps-yours" title={t("memberApps.yours")}>
+                <GithubAppCard />
                 {apps.map((app) => (
                   <div key={app.slug} data-app-tile={app.slug} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
                     <div className="flex items-center gap-3">

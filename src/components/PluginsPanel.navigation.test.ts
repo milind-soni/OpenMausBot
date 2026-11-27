@@ -50,6 +50,8 @@ vi.mock("./McpServersPanel", async () => {
 });
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
+vi.mock("./github/GithubAppCard", () => ({ GITHUB_CARD_SEARCH: "github git", GITHUB_CARD_CATEGORIES: ["Developer tools"], GithubAppCard: () => null }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => true }));
 vi.mock("./XCard", () => ({
   X_CARD_SEARCH: "x twitter treg tweets posts",
   XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
@@ -541,6 +543,22 @@ describe("Apps pop-up", () => {
     expect(html).not.toContain('data-app-tile="gmail"');
     expect(html).not.toContain("MCP inventory");
     expect(html).toContain("1 connected");
+  });
+
+  it("puts the GitHub sign-in row just before the GitHub app's tile in its section, and in the native cards otherwise", () => {
+    const categorized = (slug: string, category: string) => ({ ...card(slug), categories: [category] });
+    fixture.overrides.set(CARDS, [categorized("linear", "Developer tools"), categorized("github", "Developer tools"), categorized("gmail", "Communication")]);
+    const sectioned = render();
+    const githubRows = (html: string) => [...html.matchAll(/<div (?:class="([^"]*)" )?data-native-card="github"(?: class="([^"]*)")?/g)].map((match) => match[1] ?? match[2]);
+    expect(githubRows(sectioned.html)).toEqual(["contents", "hidden"]);
+    const section = sectioned.html.slice(sectioned.html.indexOf("Developer tools"));
+    expect(section.indexOf('data-native-card="github"')).toBeLessThan(section.indexOf('data-app-tile="github"'));
+    expect(section.indexOf('data-app-tile="linear"')).toBeLessThan(section.indexOf('data-native-card="github"'));
+    fixture.overrides.set(SEARCH, "git");
+    const searched = render();
+    expect(githubRows(searched.html)).toEqual(["contents"]);
+    fixture.overrides.set(SEARCH, "gmail");
+    expect(githubRows(render().html)).toEqual(["hidden"]);
   });
 
   it("groups the catalog into connected apps, category previews and every app, with a View all per section", () => {

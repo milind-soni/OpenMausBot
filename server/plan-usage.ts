@@ -70,7 +70,7 @@ export interface PlanAccount {
   driver: PlanDriver;
   environment: Record<string, string | undefined>;
   configDir?: string;
-  /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude instance whose config sets `usageMeter: false` keeps its login unread (a refused turn still fails over). */
+  /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude or Antigravity instance whose config sets `usageMeter: false` keeps its login unread (a refused turn still fails over). */
   noUsage?: true;
   /** An Antigravity account's CLI path: whether it runs the native CLI is read when its limits are. */
   antigravityCli?: string;
@@ -160,7 +160,7 @@ export function planAccountsFromInstances(instances: InstanceConfigMap, env: Nod
       environment: { ...entry.environment, ...(ownCodexHome ? { CODEX_HOME: chatgptAccountHome(id) } : {}) },
       ...(configDir ? { configDir } : {}),
       // Reading ~/.codex/auth.json for a browser-signed ChatGPT plan would report (and hold it on) another account's limit.
-      ...((config?.authMode === "chatgpt-plan" && !ownCodexHome) || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : driver === "antigravity" && typeof config?.cli === "string" ? { antigravityCli: config.cli } : {}),
+      ...((config?.authMode === "chatgpt-plan" && !ownCodexHome) || ((driver === "claude" || driver === "antigravity") && config?.usageMeter === false) ? { noUsage: true as const } : driver === "antigravity" && typeof config?.cli === "string" ? { antigravityCli: config.cli } : {}),
     });
   }
   return accounts;

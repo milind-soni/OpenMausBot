@@ -19,6 +19,15 @@ export interface BoardItemQuestion {
   askedAt: number;
   /** The person key of whoever was asked; absent when anyone who sees the room may answer. */
   person?: string;
+  /** That person's name when they were asked, for showing whom the item waits on. */
+  name?: string;
+}
+
+/** Its bot set the item aside to look again at `at` (board_update later): the item stays `working` and keeps its holder,
+ * and the server starts that bot again then with `note`. */
+export interface BoardItemLater {
+  at: number;
+  note: string;
 }
 
 export interface BoardItemCreator {
@@ -44,6 +53,10 @@ export interface BoardItem {
   /** Times a bot took it since it was made or last reopened. */
   attempts: number;
   question?: BoardItemQuestion;
+  /** Set while its bot waits to look again. */
+  later?: BoardItemLater;
+  /** Times its bot set it aside to look again since it was made or last reopened. */
+  laterCount?: number;
   /** What came of it, set when it is settled. */
   result?: string;
   createdBy: BoardItemCreator;
@@ -65,6 +78,11 @@ export const BOARD_LIMITS = {
   openPerRoom: 200,
   /** Items one bot call may add. */
   itemsPerCall: 15,
+  /** board_update later: minutes ahead, and times per item. */
+  laterMinutesMax: 1_440,
+  latersMax: 20,
+  /** Dispatches before a turn that ends without settling the item fails it. */
+  triesMax: 3,
 } as const;
 
 /** A label key: lowercase letters, digits, `_` and `-`. */
@@ -99,6 +117,8 @@ export interface BoardItemPatchBody {
 /** GET /api/board (`?groupId=` for one room): the items the caller can see, oldest first. */
 export interface BoardListResponse {
   items: BoardItem[];
+  /** The caller's person key, as an item's `question.person` names whoever was asked. */
+  you?: string;
 }
 
 export interface BoardItemResponse {

@@ -25,6 +25,8 @@ export interface Opened {
   onRemoved: (notice: string | null, device: Device) => void;
   /** More of an open device's details, from what only the page reads (a phone's own controls). */
   extra?: (device: Device) => DeviceExtra | undefined;
+  /** Its Update all state, under the row, while and after a run. */
+  progress?: (device: Device) => ReactNode;
 }
 
 const SLOT = "flex size-8 shrink-0 items-center justify-center text-ink-secondary";
@@ -61,6 +63,7 @@ function DeviceRow({ device, mark, opened, onAction, now }: {
         )}
         <ChevronRight size={14} aria-hidden="true" className={cn("-me-1 shrink-0 text-ink-tertiary transition-transform duration-150 motion-reduce:transition-none rtl:-scale-x-100", open && "rotate-90")} />
       </div>
+      {opened.progress?.(device)}
       <div id={detailsId} hidden={!open} data-device-details={open ? device.id : undefined} className="ps-[60px] pe-4 pb-4 motion-safe:animate-fade-in">
         {open && <DeviceDetails device={device} onAction={onAction} now={now} pairing={opened.pairing} extra={opened.extra?.(device)}
           onPairing={(on, connected) => opened.onPairing(device, on, connected)} onRemoved={(text) => opened.onRemoved(text, device)} />}

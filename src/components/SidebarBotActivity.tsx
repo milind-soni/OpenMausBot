@@ -1,8 +1,9 @@
-import { BellDot, CircleAlert, Clock3, Loader2, Pin, type LucideIcon } from "lucide-react";
+import { BellDot, CircleAlert, Clock3, Loader2, Pin, Users, type LucideIcon } from "lucide-react";
 import type { Dispatch } from "react";
 import type { Action, AppState, Bot, Group, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { openFeedThread, roomFeedShows } from "@/lib/room-feed";
 import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
@@ -10,6 +11,8 @@ import { localizedTaskTitle } from "@/lib/task-title";
 import { endedOnFailure } from "@/lib/mascot";
 import { MainThreadMark, rowSelectedSurface } from "./SidebarRowMarkers";
 import { handoffStatusText } from "./HandoffStatusChip";
+import { BotAvatar, type BotAvatarProps } from "./Avatar";
+import { threadRowCloser } from "@/lib/room-thread-close";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -67,7 +70,7 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
     const waiting = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
       ...task, busy: roomThreadWorking(group, task.threadId), unread: task.unread ?? (task.threadId === group.threadId && Boolean(group.unread)),
-      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
+      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined, closedBy: threadRowCloser(task),
     };
   });
   return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))
@@ -104,6 +107,17 @@ export function attentionJumpAction(entry: AttentionThread):
   return entry.task.threadId === entry.groupThreadId
     ? { type: "select", id: entry.groupId }
     : { type: "switchGroupTask", groupId: entry.groupId, threadId: entry.task.threadId };
+}
+
+/** Opens an activity row's thread; a room that shows its feed comes on screen with the thread beside the feed, its
+ * current thread too. */
+export function attentionJump(dispatch: Dispatch<Action>, entry: AttentionThread, state: Pick<AppState, "config" | "groups">): void {
+  if (entry.kind === "group" && roomFeedShows(state.config, state.groups.find((group) => group.id === entry.groupId))) {
+    dispatch({ type: "select", id: entry.groupId });
+    dispatch(openFeedThread(entry.groupId, entry.task.threadId));
+    return;
+  }
+  dispatch(attentionJumpAction(entry));
 }
 
 export function attentionUnpinAction(entry: AttentionThread):
@@ -176,7 +190,7 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
         const activity = new Map(sidebarGroupActivityTasks(group, bots, queued).map((task) => [task.threadId, task]));
         return (group.tasks ?? [])
           .filter((task) => task.pinned === true)
-          .map((task) => ({ ...task, ...activity.get(task.threadId), queued: Boolean(queued[task.threadId]?.length), groupId: group.id, groupName: group.name, groupThreadId: group.threadId }));
+          .map((task) => ({ ...task, ...activity.get(task.threadId), closedBy: threadRowCloser(task), queued: Boolean(queued[task.threadId]?.length), groupId: group.id, groupName: group.name, groupThreadId: group.threadId }));
       }),
   ];
   return orderedThreadList(flat).map(({ botId, botName, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
@@ -185,8 +199,35 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
       : { kind: "bot", botId: botId!, botName: botName!, task });
 }
 
-export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot = false, current }: {
+/** What a bot's picture is drawn from, and nothing else, so a list of faces re-renders when a picture changes, not on
+ * every message. */
+export type BotFace = BotAvatarProps["bot"] & { id: string };
+
+export function botFaces(bots: readonly Bot[]): BotFace[] {
+  return bots.map(({ id, name, color, avatarUrl, avatarCrop, avatarZoom, avatarFocusX, avatarFocusY, mascotBody, mascotFaceColor, mascotBodyColor, mascotMaterial }) =>
+    ({ id, name, color, avatarUrl, avatarCrop, avatarZoom, avatarFocusX, avatarFocusY, mascotBody, mascotFaceColor, mascotBodyColor, mascotMaterial }));
+}
+
+/** Whose conversation a row is, at a glance: the bot's own picture, or the room mark for a room, with the row's status
+ * icon on its corner. */
+export function AttentionFace({ entry, faces, Icon, iconClass }: { entry: AttentionThread; faces: readonly BotFace[]; Icon: LucideIcon; iconClass?: string }) {
+  const bot = entry.kind === "bot" ? faces.find((face) => face.id === entry.botId) : undefined;
+  return (
+    <span data-attention-face={entry.kind} className="relative flex size-5 shrink-0">
+      {entry.kind === "bot"
+        ? <BotAvatar bot={bot ?? { name: entry.botName, color: "blue" }} state="happy" size={20} motion="none" motionKey={0} animated={false} />
+        : <span className="flex size-5 items-center justify-center rounded-full bg-raised"><Users size={12} aria-hidden="true" className="text-ink-secondary" /></span>}
+      <span className="absolute -bottom-1 -right-1 flex size-3.5 items-center justify-center rounded-full bg-panel">
+        <Icon size={10} aria-hidden="true" className={cn("shrink-0", iconClass)} />
+      </span>
+    </span>
+  );
+}
+
+export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot = false, current, faces }: {
   entries: AttentionThread[]; onJump: (entry: AttentionThread) => void; inset?: boolean;
+  /** Lead each row with its bot's picture; without them the status icon leads the row. */
+  faces?: readonly BotFace[];
   /** Mark an unread conversation with a dot and a heavier title, the way the Inbox's own rows are marked. */
   unreadDot?: boolean;
   /** The conversation the chat window has open, marked like a selected sidebar row. */
@@ -203,7 +244,9 @@ export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot 
         aria-current={open ? "page" : undefined} data-open-thread={open || undefined}
         onClick={() => onJump(entry)}
         className={cn("flex w-full items-center gap-2.5 text-left text-[13px] text-ink hover:bg-menu-hover", inset ? "rounded-md px-2 py-1.5" : "px-3.5 py-2", open && openThreadRow)}>
-        <Icon size={inset ? 16 : 15} aria-hidden="true" className={cn("shrink-0", colorClass)} />
+        {faces
+          ? <AttentionFace entry={entry} faces={faces} Icon={Icon} iconClass={colorClass} />
+          : <Icon size={inset ? 16 : 15} aria-hidden="true" className={cn("shrink-0", colorClass)} />}
         <span className="min-w-0 flex-1">
           <span className={cn("block truncate", unread && "font-medium text-ink")}>{entry.task.title}</span>
           <span className="block truncate text-[12px] leading-4 text-ink-secondary">{name} · {status}</span>

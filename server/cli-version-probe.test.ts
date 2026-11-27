@@ -81,7 +81,7 @@ it.each(["ENOENT", "EACCES", "EPERM"])("forgets a known version after %s instead
   expect(read(null, "2.1.311")).toEqual({ version: "2.1.311" });
   const unavailable = read(Object.assign(new Error("fixture launch failure"), { code }), "");
   expect(unavailable).toEqual({ reason: expect.stringContaining(code === "ENOENT" ? "CLI not found" : "file permissions") });
-  expect(read(Object.assign(new Error("fixture timeout"), { killed: true }), "")).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
+  expect(read(Object.assign(new Error("fixture timeout"), { killed: true }), "")).toEqual({ reason: expect.stringContaining("took longer than 30 seconds"), busy: true });
 });
 
 it("reports an unrecognized failure without claiming the CLI is missing or exposing its output", () => {

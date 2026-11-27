@@ -14,7 +14,7 @@ import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
-import { antigravityLimitFacts, antigravityQuotaFamily, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
+import { antigravityHarnessLimit, antigravityLimitFacts, antigravityQuotaFamily, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const USER_INPUT = 14;
@@ -210,6 +210,16 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(antigravityQuotaFamily("gemini-4-neon")).toBe("gemini");
     expect(antigravityLimitFacts("gemini-4-neon", known)).toEqual({ limit: "model", limitModels: ["gemini-4-neon", "gemini-3.8-flash", "gemini-3.8-pro"] });
     expect(antigravityLimitFacts(undefined, known)).toEqual({ limit: "model" });
+  });
+
+  it("reads a harness failure line on stderr that reports an exhausted quota as a usage limit, and no other one", () => {
+    const harness = (error: string) => `E1124 14:52:01.000001 4242 local_connection.py:551] harness stderr: Agent run failed: ${error}`;
+    expect(antigravityHarnessLimit(NAME, harness(QUOTA_ERROR.split("\n")[1]!), 0))
+      .toMatchObject({ acpUsageLimit: true, message: expect.stringContaining("has reached its usage limit"), facts: { limitResetsAt: 3_600_000 } });
+    expect(antigravityHarnessLimit(NAME, harness("RESOURCE_EXHAUSTED (code 429): Quota exceeded. reason:QUOTA_EXHAUSTED quotaResetDelay:38m0s]"), 0))
+      .toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: 38 * 60_000 } });
+    expect(antigravityHarnessLimit(NAME, harness("failed to handle call hook response: no pending hook for ID hook_request_2"), 0)).toBeUndefined();
+    expect(antigravityHarnessLimit(NAME, harness(UNAVAILABLE_ERROR.split("\n")[1]!), 0)).toBeUndefined();
   });
 
   it("gives no failure for a session id that is no file name, a missing profile, or a log replaced during the prompt", async () => {

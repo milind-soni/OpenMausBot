@@ -218,6 +218,12 @@ describe("Tailscale pairing onboarding", () => {
     expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "not-installed" })).toMatchObject({ kind: "not-installed", title: "Tailscale isn't installed on this computer." });
     expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "signed-out" })).toMatchObject({ kind: "signed-out", title: "Open Tailscale and sign in, then try again." });
     expect(deriveTailscalePairingStatus({ enabled: true, routes: tailscale({ on: true, since: 1, name: null }) }).kind).toBe("magicdns");
+    expect(deriveTailscalePairingStatus({ enabled: false, tailscaleProblem: "magicdns" })).toMatchObject({ kind: "magicdns", title: "Tailscale found, but MagicDNS is still needed" });
+    expect(deriveTailscalePairingStatus({ enabled: true, tailscaleProblem: "custom-name" })).toMatchObject({
+      kind: "magicdns",
+      title: "Tailscale is connected, but phone pairing and sharing with your other computers need a Tailscale name ending in .ts.net.",
+      detail: "Your tailnet gives its own names (Headscale, say). Pair the device over Same Wi-Fi instead.",
+    });
     expect(deriveTailscalePairingStatus({ enabled: false, routes: tailscale({ on: true, since: 1, name: "mac.tail1234.ts.net" }) })).toMatchObject({
       kind: "waiting",
       title: "Ready on mac.tail1234.ts.net",

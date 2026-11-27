@@ -1,7 +1,8 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
-import { useComposerDictation } from "@/lib/use-composer-dictation";
+import { useComposerDictation } from "@/lib/use-composer-dictation"; import { isPlaceId } from "@/lib/place-chat";
 import { ComposerForkError, useComposerFork } from "./ComposerFork";
+import { isNewChatThread } from "@/state/new-chat";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { Mic, Square } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
@@ -37,7 +38,7 @@ import {
 } from "@/lib/drafts";
 import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
 import { SlashCommandMenu } from "./SlashCommandMenu"; import { ComposerFailedSends } from "./ComposerFailedSends";
-import { MentionTextarea } from "./MentionTextarea";
+import { MentionTextarea } from "./MentionTextarea"; import { useSuggestedReply } from "./use-suggested-reply"; import { SUGGESTION_HINT_ID, SuggestedReplyGhost } from "./SuggestedReplyGhost";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
@@ -68,7 +69,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
+import { composerForkOwner, composerPlaceholder, sendLabels, SIMPLE_COMPOSER, SIMPLE_CONTROL, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { GroupCallButton } from "./GroupCallView";
@@ -102,6 +103,7 @@ import {
 } from "@/lib/composer-commands";
 import { useSlashSkills } from "@/lib/use-slash-skills";
 import { randomUuid } from "@/lib/random-uuid";
+import { useComposerThreadCommand } from "./use-composer-thread-command";
 
 const supportsAgents = (instances: InstanceInfo[], candidate?: Bot) =>
   Boolean(candidate && instances.find((instance) => instance.instanceId === candidate.modelSelection.instanceId)?.capabilities?.agentsMcp);
@@ -119,7 +121,7 @@ export function Composer({
   onClearReply,
   onConsumeReply,
   onRestoreReply,
-  locked: setupLocked = false, onSendGroup,
+  onSendGroup,
 }: {
   bot?: Bot;
   group?: Group;
@@ -129,12 +131,11 @@ export function Composer({
   onClearReply?: () => void;
   onConsumeReply?: () => void;
   onRestoreReply?: (message: Message, threadId: string) => void;
-  locked?: boolean;
   /** Takes a room's send instead of the store: the room feed starts a new thread with it. */
   onSendGroup?: (action: Extract<Action, { type: "sendGroup" }>) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
-  const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
+  const locked = Boolean(bot?.awaitingThreadSnapshot);
   const state = useStoreSelector((s) => ({ instances: s.instances, config: s.config, queued: s.pendingQueued[group?.threadId ?? bot?.threadId ?? ""] }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef(), bots = useStoreSelector((s) => s.bots, sameDrawnBots);
   const { threads, currentBotId } = useThreadRefs();
   const advanced = useAdvancedMode();
@@ -178,7 +179,7 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
-  const forkOwnerId = singleRow || group?.dm || !threadId ? undefined : group?.id ?? bot?.id;
+  const forkOwnerId = composerForkOwner({ phone: singleRow, group, botId: bot?.id, threadId: threadId && !isNewChatThread(threadId) ? threadId : undefined, startsThread: Boolean(onSendGroup) });
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -303,13 +304,19 @@ export function Composer({
   };
   const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
+  // A room's threads are managed from the room, and a blank New thread has no conversation to act on yet.
+  const threadCommandAvailable = !group && Boolean(composerTask);
+  const { command: threadCommand, run: runThreadCommand, dialog: threadCommandDialog } = useComposerThreadCommand({
+    text: threadCommandAvailable ? text : "", botId: threadCommandAvailable ? bot?.id : undefined, threadId, mainThreadId: profile?.mainThreadId, threads: profile?.tasks,
+    title: composerTask?.title, busy, dispatch, returnFocusRef: inputRef, onCleared: () => { editText(""); setAttachments([]); picks.clear(); setCaret(0); setDismissedSlashAt(null); onConsumeReply?.(); setChannelMode("chat"); },
+  });
   const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
   const slash = composerSlashTrigger(text, caret);
   const locale = activeLocale();
-  const slashSkills = useSlashSkills(group ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
-  const canLearn = skillAuthoringEnabled(state.config) &&
+  const slashSkills = useSlashSkills(group || isPlaceId(bot?.id) ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const canLearn = skillAuthoringEnabled(state.config) && !isPlaceId(bot?.id) &&
     (group ? (members ?? []).some((member) => supportsAgents(state.instances, member)) : supportsAgents(state.instances, bot));
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
@@ -336,21 +343,23 @@ export function Composer({
       description: t("composer.command.setupDesc"),
     }, { kind: "command", id: "burst", label: "/burst", description: t("composer.command.burstDesc") });
     if (builtIns && forkOwnerId) available.push({ kind: "command", id: "fork", label: "/fork", description: t("composer.command.forkDesc") });
+    if (builtIns && !group && bot && composerTask) available.push({ kind: "command", id: "archive", label: "/archive", description: t("composer.command.archiveDesc") },
+      { kind: "command", id: "delete", label: "/delete", description: t("composer.command.deleteDesc") });
     available.push(...skillSlashCommands(slashSkills).filter((command) => !(builtIns && forkOwnerId && command.id === "fork")));
     return available.filter((command) => slashCommandMatches(command, slash.query));
-  }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
+  }, [slash, dismissedSlashAt, group, bot, composerTask, canLearn, state.instances, locale, slashSkills, forkOwnerId]);
   const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
   const candidates = useMemo(() => {
-    if (!mention || mention.start === dismissedAt) return [];
+    if (!mention || mention.start === dismissedAt || isPlaceId(bot?.id)) return []; // a My Cloud bot's chat names none of this computer's
     const pool: MentionChoice[] = group
       ? [
           ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : bots
-          .filter((member) => member.id !== bot?.id && !member.hidden && !hiddenFromSidebar(member, viewer))
+          .filter((member) => member.id !== bot?.id && !member.hidden && !isPlaceId(member.id) && !hiddenFromSidebar(member, viewer))
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
     return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
   }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
@@ -492,14 +501,14 @@ export function Composer({
     return () => window.clearTimeout(timeout);
   }, [busy, pendingCount, steering]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null), placed = isPlaceId(bot?.id), filesThere = () => setAttachmentNotice(t("together.inPlace.files")); // a My Cloud bot open in place takes no files here
   const modeBot = group ? undefined : bot;
   const pinPlace = (surface: Place | null) => modeBot && dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } });
   const place = modeBot && !remoteClient && advanced ? { bot: modeBot, task: composerTask, disabled: Boolean(modeBot.busy), onPin: pinPlace } : undefined;
   const { choice: approvalChoice, dialogs: approvalDialogs } = useThreadApproval(modeBot);
-  const uploadImage = useCallback((file: File) => uploadDraftImage(draftId, file), [draftId]);
+  const uploadImage = useCallback((file: File) => (placed ? Promise.resolve(null) : uploadDraftImage(draftId, file)), [draftId, placed]);
   const pickFiles = async (picked: FileList | readonly File[] | null) => {
-    if (!picked?.length) return;
+    if (!picked?.length) return; if (placed) return filesThere();
     const escapesBefore = escapeBlurs.current;
     changeDraftAttachmentPending(draftId, true);
     try {
@@ -519,6 +528,7 @@ export function Composer({
   };
 
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
+  const suggestion = useSuggestedReply({ botId: group ? undefined : bot?.id, threadId, messages: !group && bot ? visibleMessages(bot) : [], working: busy || Boolean(bot?.waitingForTeammates), held: locked || blocking || pendingCount > 0 || Boolean(replyTo) || recording, draft: text, attached: attachments.length > 0, inputRef, fill: (value) => { editText(value); setCaret(value.length); } });
   const onCall = useOnCall();
   const media = useLiveMedia();
   const callTarget = group?.id ?? bot?.id;
@@ -566,6 +576,7 @@ export function Composer({
   };
   const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
     if (locked || attachmentPending) return;
+    if (threadCommand) { setDismissedSlashAt(slash?.start ?? 0); runThreadCommand(); return; }
     if (fork.command) {
       setDismissedSlashAt(slash?.start ?? 0);
       fork.submit();
@@ -626,7 +637,7 @@ export function Composer({
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const pastedFiles = clipboardFilesToAttach(e.clipboardData);
+    const pastedFiles = clipboardFilesToAttach(e.clipboardData); if (placed && (pastedFiles.length || clipboardHasImages(e.clipboardData))) { e.preventDefault(); filesThere(); return; }
     if (pastedFiles.length > 0) {
       e.preventDefault();
       void pickFiles(pastedFiles);
@@ -741,7 +752,7 @@ export function Composer({
         <PointedChips threadId={threadId} />{!group && bot && <SetupRequestChip bot={bot} threadId={threadId} />}
         <ComposerAttachments
           items={attachments}
-          onAdd={addAttachments}
+          onAdd={placed ? filesThere : addAttachments}
           onRemove={removeAttachment}
           onChangeCitation={(citation: CitationAttachment) => editAttachments((current) => current.map((attachment) => attachment.id === citation.id ? citation : attachment))}
           onDisplayInChatBox={displayPasteInChatBox}
@@ -811,7 +822,7 @@ export function Composer({
             </div>
           )}
           <MentionTextarea
-          wrapperClassName={stacked ? "basis-full" : undefined}
+          wrapperClassName={stacked ? "basis-full" : undefined} ghost={suggestion.text ? <SuggestedReplyGhost text={suggestion.text} onUse={suggestion.accept} /> : undefined}
           inputRef={inputRef}
           peers={[...(group ? members ?? [] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
@@ -830,9 +841,11 @@ export function Composer({
           onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {
             // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
-            if (imeComposing(e.nativeEvent)) return;
+            if (imeComposing(e.nativeEvent) || suggestion.onKeyDown(e)) return;
             const submitsFork = fork.command && commandCandidates[highlight]?.id === "fork" && sendsMessage(e.nativeEvent, sendKey);
-            if (commandPickerOpen && !submitsFork) {
+            // A complete /archive or /delete is its own action: Enter runs it instead of only completing the word.
+            const submitsThreadCommand = Boolean(threadCommand) && commandCandidates[highlight]?.id === threadCommand && sendsMessage(e.nativeEvent, sendKey);
+            if (commandPickerOpen && !submitsFork && !submitsThreadCommand) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -907,9 +920,9 @@ export function Composer({
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.
           disabled={blocking || locked}
-          aria-busy={bot?.awaitingThreadSnapshot || undefined}
-          placeholder={composerPlaceholder({
-            simple: !advanced, locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
+          aria-busy={bot?.awaitingThreadSnapshot || undefined} aria-describedby={suggestion.text ? SUGGESTION_HINT_ID : undefined}
+          placeholder={suggestion.text ?? composerPlaceholder({
+            simple: !advanced, approval: blocking, attaching: attachmentPending, listening: recording,
             replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
             setupHint: group ? null : setupRequestPlaceholder(bot, threadId), startsThread: Boolean(onSendGroup),
@@ -924,7 +937,7 @@ export function Composer({
           {stacked && (
             <ComposerAdvancedTools profile={profile} bot={modeBot} task={composerTask} locked={locked} remoteClient={remoteClient}
               onAttach={() => fileInput.current?.click()} goal={goal} teach={canLearn ? teachTask : undefined} approval={approvalChoice}
-              callBotId={callShown && bot && !group ? bot.id : undefined}
+              callBotId={callShown && bot && !group && !placed ? bot.id : undefined}
               onPin={pinPlace} />
           )}
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", stacked && "ms-auto")}>
@@ -962,7 +975,7 @@ export function Composer({
             <Mic size={16} className="[&_rect]:fill-current" />
           </button>
         )}
-        {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
+        {callShown && bot && !group && !placed && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} modeMenu={!stacked} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (
           <ComposerSendButton compact={simpleDock} waits={!fork.command && busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
@@ -978,6 +991,7 @@ export function Composer({
       <div className="pointer-events-auto">
       {approvalDialogs}
       </div>
+      {threadCommandDialog}
     </div>
   );
 }

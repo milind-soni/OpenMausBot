@@ -401,6 +401,8 @@ export interface PushSender {
   authenticate(read: ((ownerId: string) => D1PreparedStatement) | null): Promise<{ ownerId: string; row: DeviceRow | null }>;
   /** More windows than the owner's own two (a Cloud home's fleet-wide limit). */
   fleet: PushLimit[];
+  /** The owner's own sends an hour, when not PUSH_SEND_LIMIT (a Cloud home's smaller share of the fleet). */
+  sendLimit?: number;
 }
 
 /**
@@ -459,7 +461,7 @@ export async function sendAs<T extends { token: string }>(
   const planned = await plan(body, row, config, now);
   if (planned instanceof Response) return planned;
   const limits = [
-    { owner: ownerId, action: "push_send", limit: PUSH_SEND_LIMIT },
+    { owner: ownerId, action: "push_send", limit: sender.sendLimit ?? PUSH_SEND_LIMIT },
     { owner: ownerId, action: `push_send:${tokenHash.slice(0, 32)}`, limit: PUSH_DEVICE_SEND_LIMIT },
     ...sender.fleet,
   ];

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import type { InboxItem, InboxRow, InboxView } from "../../shared/inbox.ts";
+import { countsForYou } from "../../shared/inbox-reason.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { overtakenQuestions, personWait, type PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
@@ -66,7 +67,7 @@ export function placeInboxViewer(auth: RequestAuth, cloud: { personal: boolean; 
 
 export interface PlaceInboxDeps {
   dataDir: string;
-  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "activePath" | "onChange">;
+  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "newestMessageId" | "activePath" | "onChange">;
   openCards(): OpenCardRow[];
   /** A running turn waits on this card's answer. */
   live(threadId: string, requestId: string): boolean;
@@ -194,7 +195,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
 
   /** The message a line points at: its own message, or the newest one in the conversation it came from, so a client
    * can put the person at it. */
-  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.messagesFor(line.threadId).at(-1)?.id;
+  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.newestMessageId(line.threadId);
 
   const lineRow = (line: Line): InboxRow => {
     const focus = focusOf(line);
@@ -278,18 +279,19 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     view,
     message,
     route,
-    /** What waits on this viewer: every open ask, and news they have not read. */
+    /** What waits on this viewer in For you: open asks and unread news, never Activity (finished or shared). */
     count(auth: RequestAuth): number {
-      return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
+      return view(auth).rows.filter(countsForYou).length;
     },
-    markRead(auth: RequestAuth, lineId: string): boolean {
+    /** The viewer read a line or an open ask, or marked it unread again. */
+    markRead(auth: RequestAuth, lineId: string, read = true): boolean {
       const line = lines.find((one) => one.id === lineId && lineFor(auth, one));
       if (line) {
-        if (!line.seen) { line.seen = true; save(); }
+        if (Boolean(line.seen) !== read) { line.seen = read; save(); }
         return true;
       }
       if (!askRows(auth).some((row) => row.id === lineId)) return false;
-      if (!seenAsks.has(lineId)) { seenAsks.add(lineId); save(); }
+      if (seenAsks.has(lineId) !== read) { if (read) seenAsks.add(lineId); else seenAsks.delete(lineId); save(); }
       return true;
     },
     /** Every line and open ask this viewer lists is read; an ask is only marked read, never answered. */

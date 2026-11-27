@@ -1,8 +1,10 @@
 import { formatQuestionAnswers, questionChoices } from "../../../shared/ask-question";
 import type { InboxRow, InboxTab, InboxView } from "../../../shared/inbox";
+import { countsForYou, inboxGroup, inboxReason, type InboxGroup, type InboxReason } from "../../../shared/inbox-reason";
 import type { NeedsYouItem } from "../../../shared/today";
 import { liveCardKind } from "../../../shared/live-approval";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { dismissResponse, type CardResponse } from "@/lib/card-answer";
 import { accessRequestWords, cardAnswerFor } from "../bot-access/access-card";
 
@@ -12,8 +14,9 @@ export const CARD_ROWS = 3;
 export const rowsIn = (view: InboxView | null, tab: InboxTab): InboxRow[] => (view?.rows ?? []).filter((row) => row.tab === tab);
 
 /** The inbox as one list, newest first: what waits on the person and their news; a settled line is read from where it
- * came, not listed again. */
-export const listedRows = (view: InboxView | null): InboxRow[] => (view?.rows ?? []).filter((row) => row.tab !== "done").sort((a, b) => b.at - a.at);
+ * came, not listed again, except the one the person has open, which keeps its place. */
+export const listedRows = (view: InboxView | null, held?: string | null): InboxRow[] =>
+  (view?.rows ?? []).filter((row) => row.tab !== "done" || row.id === held).sort((a, b) => b.at - a.at);
 
 export function tabCounts(view: InboxView | null): Record<InboxTab, number> {
   const counts: Record<InboxTab, number> = { "needs-you": 0, info: 0, done: 0 };
@@ -23,6 +26,28 @@ export function tabCounts(view: InboxView | null): Record<InboxTab, number> {
 
 /** What the Inbox row counts: every line waiting on the person, and news they have not read. */
 export const waitingCount = (view: InboxView | null): number => (view?.rows ?? []).filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
+
+/** What the inbox's number counts: the For you lines that wait on the person or are new. Activity is never counted. */
+export const forYouCount = (view: InboxView | null): number => (view?.rows ?? []).filter(countsForYou).length;
+
+/** Activity the person has not read yet: it makes the Inbox row bold, with no number. */
+export const activityUnread = (view: InboxView | null): boolean =>
+  (view?.rows ?? []).some((row) => row.tab === "info" && row.unread && inboxGroup(row) === "activity");
+
+/** The listed lines in their two groups, each newest first as given. */
+export function groupRows(rows: readonly InboxRow[]): Record<InboxGroup, InboxRow[]> {
+  const groups: Record<InboxGroup, InboxRow[]> = { "for-you": [], activity: [] };
+  for (const row of rows) groups[inboxGroup(row)].push(row);
+  return groups;
+}
+
+const REASON_WORDS: Record<InboxReason, LocaleKey> = {
+  asked: "inbox.reason.asked", approval: "inbox.reason.approval", mentioned: "inbox.reason.mentioned", replied: "inbox.reason.replied",
+  messaged: "inbox.reason.messaged", notice: "inbox.reason.notice", finished: "inbox.reason.finished", shared: "inbox.reason.shared",
+};
+
+/** Why a line is here, in the person's words: what its row says first. */
+export const reasonOf = (row: InboxRow): string => t(REASON_WORDS[inboxReason(row)]);
 
 /** What a team's person is told needs them beyond the inbox's lines: something to fix, or a question in their own chat. */
 export const inboxFixes = (items: readonly NeedsYouItem[] | undefined, view: InboxView | null): NeedsYouItem[] =>
@@ -38,8 +63,8 @@ export function senderLabel(row: Pick<InboxRow, "from" | "workingFor" | "askedBy
   return row.workingFor ? t("inbox.workingFor", { name, other: row.workingFor.name }) : name;
 }
 
-/** The conversation a line came from, when its subject doesn't already say it. */
-export const placeOf = (row: Pick<InboxRow, "kind" | "origin">): string | null => (row.kind !== "message" && row.origin?.title ? t("inbox.in", { title: row.origin.title }) : null);
+/** Where a line came from: its room or conversation. */
+export const placeOf = (row: Pick<InboxRow, "origin">): string | null => (row.origin?.title ? t("inbox.in", { title: row.origin.title }) : null);
 
 /** What an ask asks: an approval, a question, or something to review where it was asked; null for anything else or an
  * ask already settled. */

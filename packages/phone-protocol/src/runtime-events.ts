@@ -62,6 +62,9 @@ export type RuntimeEvent = RuntimeEventBase &
         type: "turn.completed";
         ok: boolean;
         stopReason?: string | null;
+        /** With stopReason "auth_required": the driver proves the prompt never reached the model, so sending it
+         * again repeats nothing. */
+        unsent?: true;
         cost?: number | null;
         denials?: string[];
         /** THIS turn's token total, as the provider reports it at the end: the
@@ -177,6 +180,8 @@ export type RuntimeEvent = RuntimeEventBase &
          * was already gone and the action never ran */
         source: "user" | "auto" | "timeout" | "system" | "unavailable" | "peer";
         approvalScope?: "local-computer";
+        /** Optional reason attached to the approval card while waiting, preserved on timeout. */
+        heldReason?: string;
       }
     | {
         type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number;

@@ -49,8 +49,29 @@ describe("the person's choices", () => {
     expect(chosen.args.feed).toEqual({ default: "https://b.example/feed.json" });
     expect(chosen.args.url).toBeUndefined();
     expect(chosen.steps[0]).toMatchObject({ run: 'curl -s "$OMB_ARG_FEED" -o feed.json' });
+    expect(chosen.steps[1]).toMatchObject({ prompt: "Write it for {feed}." });
     expect(workflowSchema.safeParse(chosen).success).toBe(true);
     expect(applyChoices(workflow, { inputs: { url: { name: "page" } } })).toEqual({ error: "There is already an input named page." });
     expect(applyChoices(workflow, { inputs: { url: { name: "9x" } } })).toMatchObject({ error: expect.stringContaining("can't be an input's name") });
+  });
+});
+
+describe("dependencies inside app record IDs", () => {
+  const workflow = wf([
+    { id: "s1", kind: "app", app: "airtable", tool: "AIRTABLE_LIST_RECORDS", label: "Find records", args: {} },
+    { id: "s2", kind: "app", app: "airtable", tool: "AIRTABLE_UPDATE_MULTIPLE_RECORDS", label: "Update records", args: { records: [{ id: { $step: "s1", path: "records.0.id" }, fields: { Reviewed: true } }] } },
+    { id: "s3", kind: "file", label: "Write receipt", path: "receipt.txt", content: { $step: "s2" } },
+    { id: "s4", kind: "file", label: "Keep notes", path: "notes.txt", content: "Notes" },
+  ], {});
+
+  it("connects the card's dependent steps through a reference under id", () => {
+    const view = draftView(workflow, [], []);
+    expect(view.steps[1]!.needs).toEqual(["s1"]);
+    expect(dependents(view.steps, "s1")).toEqual(["s2", "s3"]);
+  });
+
+  it("refuses an update without its lookup, and allows leaving the entire dependent chain out", () => {
+    expect(applyChoices(workflow, { skip: ["s1"] })).toEqual({ error: '"Update records" uses what "Find records" returns; leave both out or keep both.' });
+    expect(applyChoices(workflow, { skip: ["s1", "s2", "s3"] })).toMatchObject({ steps: [{ id: "s4" }] });
   });
 });

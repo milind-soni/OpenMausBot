@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs } from "../config.ts";
 import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
+import * as procs from "../procs.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { ClaudeDriver } from "./claude.ts";
@@ -136,6 +138,87 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(pids()).toHaveLength(2);
   });
 
+  it.each(["not-a-version", "2.1.232"])("rebuilds the actual session after an unused prestart on %s", async (version) => {
+    await instance.dispose();
+    await create({ FAKE_CLAUDE_VERSION: version, FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });
+    const threadId = "t-prompt-rebuild";
+    const spawn = vi.spyOn(procs, "spawnCli");
+    const { first, child } = await (async () => {
+      try {
+        const first = await instance.adapter.sendTurn(turn(threadId, { system: "first", systemStable: "first" }));
+        const child = spawn.mock.results[0];
+        if (child?.type !== "return") throw new Error("initial Claude process missing");
+        return { first, child: child.value };
+      } finally {
+        spawn.mockRestore();
+      }
+    })();
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const initial = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId);
+    if (!initial || initial.type !== "session.started") throw new Error("initial session missing");
+    await Promise.all([once(child, "close", { signal: AbortSignal.timeout(15_000) }), instance.adapter.stopAll()]);
+    const changed = { system: "second", systemStable: "second", resumeCursor: initial.sessionId };
+    expect(await started(threadId, 2, changed)).toBe(true);
+    const second = await instance.adapter.sendTurn(turn(threadId, { ...changed, recoveryText: "earlier conversation" }));
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.turnId === second.turnId && e.itemType === "assistant_text")).toMatchObject([{ text: "second" }]);
+    expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId)).toMatchObject({ rebuilt: true });
+  });
+
+  it("keeps the old session's prompt record when its replacement exits before init", async () => {
+    await instance.dispose();
+    await create({ FAKE_CLAUDE_VERSION: "2.1.232", FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });
+    const threadId = "t-replacement-exits";
+    const realSpawn = procs.spawnCli;
+    const closes: Promise<unknown>[] = [];
+    const spawn = vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
+      const child = realSpawn(...args);
+      closes.push(once(child, "close", { signal: AbortSignal.timeout(15_000) }));
+      return child;
+    });
+    try {
+      const first = await instance.adapter.sendTurn(turn(threadId, { system: "first", systemStable: "first" }));
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      const initial = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId);
+      if (!initial || initial.type !== "session.started") throw new Error("initial session missing");
+      if (!closes[0]) throw new Error("initial Claude process missing");
+      await Promise.all([closes[0], instance.adapter.stopAll()]);
+
+      vi.stubEnv("FAKE_CLAUDE_MODE", "exit-early");
+      const changed = { system: "second", systemStable: "second", resumeCursor: initial.sessionId, recoveryText: "earlier conversation" };
+      const failed = await instance.adapter.sendTurn(turn(threadId, changed));
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false });
+      if (!closes[1]) throw new Error("replacement Claude process missing");
+      await closes[1];
+      expect(recorder.events.some((e) => e.type === "session.started" && e.turnId === failed.turnId)).toBe(false);
+
+      vi.stubEnv("FAKE_CLAUDE_MODE", "happy");
+      const retry = await instance.adapter.sendTurn(turn(threadId, changed));
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === retry.turnId)).toMatchObject({ ok: true });
+      expect(recorder.events.filter((e) => e.type === "item.completed" && e.turnId === retry.turnId && e.itemType === "assistant_text")).toMatchObject([{ text: "second" }]);
+      expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === retry.turnId)).toMatchObject({ rebuilt: true });
+    } finally {
+      vi.unstubAllEnvs();
+      spawn.mockRestore();
+    }
+  });
+
+  it("records the session taken by a first turn without a cursor", async () => {
+    await instance.dispose();
+    await create({ FAKE_CLAUDE_VERSION: "2.1.232", FAKE_CLAUDE_PROMPT_STATE: scratch, FAKE_CLAUDE_TOOL_CALLS: "[]" });
+    const threadId = "t-prompt-adopt";
+    const original = { system: "first", systemStable: "first" };
+    expect(await started(threadId, 1, original)).toBe(true);
+    const first = await instance.adapter.sendTurn(turn(threadId, original));
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const initial = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId);
+    if (!initial || initial.type !== "session.started") throw new Error("adopted session missing");
+    const second = await instance.adapter.sendTurn(turn(threadId, { system: "second", systemStable: "second", resumeCursor: initial.sessionId, recoveryText: "earlier conversation" }));
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(recorder.events.filter((e) => e.type === "item.completed" && e.turnId === second.turnId && e.itemType === "assistant_text")).toMatchObject([{ text: "second" }]);
+    expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId)).toMatchObject({ rebuilt: true });
+  });
+
   it("lists the harness-served tools again before the turn's message is written", async () => {
     const data = { integrations: { data: { command: process.execPath, args: ["-e", ""], env: {} } } };
     expect(await started("t-data", 1, data)).toBe(true);
@@ -255,6 +338,86 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(pids()).toHaveLength(2);
     expect(pids().some(alive)).toBe(false);
     expect(recorder.events).toEqual([]);
+  });
+
+  it("resuming a session, is taken only by a turn that resumes that same session", async () => {
+    expect(await started("t-resumed", 1, { resumeCursor: "session-old" })).toBe(true);
+    expect(lines(launches)[0].argv).toEqual(expect.arrayContaining(["--resume", "session-old"]));
+    await instance.adapter.sendTurn(turn("t-resumed", { resumeCursor: "session-old" }));
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-resumed");
+    expect(pids()).toHaveLength(1);
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+
+    for (const [threadId, cursor] of [["t-new-session", undefined], ["t-other-session", "session-other"]] as const) {
+      const before = pids().length;
+      expect(await started(threadId, before + 1, { resumeCursor: "session-old" })).toBe(true);
+      const [spare] = pids().slice(-1);
+      await instance.adapter.sendTurn(turn(threadId, cursor ? { resumeCursor: cursor } : {}));
+      await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId);
+      expect(pids()).toHaveLength(before + 2);
+      await until(() => !alive(spare!), "the unused process to exit");
+      expect(lines(launches).at(-1).argv).not.toContain("session-old");
+    }
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+  });
+
+  it("waits as long as it was started to wait", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(await instance.adapter.prestart!.start(turn("t-longer", { text: "" }), 180_000)).toBe(true);
+    vi.advanceTimersByTime(PRESTART_IDLE_MS);
+    expect(instance.adapter.prestart!.held("t-longer")).toBe(true);
+    vi.advanceTimersByTime(180_000 - PRESTART_IDLE_MS);
+    vi.useRealTimers();
+    await until(() => !instance.adapter.prestart!.held("t-longer"), "the driver to close it");
+    await until(() => pids().every((pid) => !alive(pid)), "the process to exit");
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("closes at the end of its wait even while the person keeps the conversation in front of them (a presence hold)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(await instance.adapter.prestart!.start(turn("t-held", { text: "" }))).toBe(true);
+    expect(instance.adapter.cacheKeepWarm!.hold("t-held", Date.now() + 600_000)).toBe(false);
+    vi.advanceTimersByTime(PRESTART_IDLE_MS);
+    vi.useRealTimers();
+    await until(() => !instance.adapter.prestart!.held("t-held"), "the driver to close it");
+    await until(() => pids().every((pid) => !alive(pid)), "the process to exit");
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("is never taken once it waited past its time by the wall clock (the machine slept)", async () => {
+    expect(await started("t-slept", 1)).toBe(true);
+    const [spare] = pids();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + PRESTART_IDLE_MS + 60 * 60_000);
+    try {
+      await instance.adapter.sendTurn(turn("t-slept"));
+    } finally { clock.mockRestore(); }
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(pids()).toHaveLength(2);
+    await until(() => !alive(spare!), "the stale process to exit");
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("is no session to keep warm, ping or summarize: nothing is sent to the engine for it", async () => {
+    expect(await started("t-quiet", 1, { resumeCursor: "session-quiet" })).toBe(true);
+    const ping = await instance.adapter.cacheKeepWarm!.ping("t-quiet");
+    expect(ping).toMatchObject({ ok: false });
+    expect(instance.adapter.cacheKeepWarm!.hold("t-quiet", Date.now() + 600_000)).toBe(false);
+    expect(lines(prompts)).toEqual([]);
+    expect(pids()).toHaveLength(1);
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("says a conversation's engine is up while one waits or a turn kept one, and not once it is gone", async () => {
+    expect(instance.adapter.prestart!.running("t-up")).toBe(false);
+    expect(await started("t-up", 1)).toBe(true);
+    expect(instance.adapter.prestart!.running("t-up")).toBe(true);
+    await instance.adapter.sendTurn(turn("t-up"));
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(instance.adapter.prestart!.held("t-up")).toBe(false);
+    expect(instance.adapter.prestart!.running("t-up")).toBe(true);
+    await instance.adapter.stopAll();
+    expect(instance.adapter.prestart!.running("t-up")).toBe(false);
   });
 
   it("says nothing when it cannot start", async () => {

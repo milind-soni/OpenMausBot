@@ -7,6 +7,7 @@ import { useCopyFeedback } from "@/lib/copy-text";
 import { engineSignedIn } from "@/lib/product-events";
 import type { LocaleKey } from "@/locales";
 import { deviceSignInHasCode, deviceSignInLink, isDeviceSignInCode, type DeviceSignInProvider } from "../../shared/device-sign-in";
+import { signInOutcome, type SignInOutcome } from "../../shared/sign-in-outcome";
 import { CodexMark } from "./ProviderIcons";
 
 export interface DeviceSignInStatus {
@@ -16,6 +17,21 @@ export interface DeviceSignInStatus {
   userCode?: string;
   expiresAt: string | null;
   message?: string;
+  /** Why it ended, as a fixed code (shared/sign-in-outcome.ts); older servers send none. */
+  reason?: SignInOutcome;
+}
+
+export function signInReason(source: unknown): SignInOutcome | null {
+  if (source instanceof ApiError) return signInOutcome(source.body?.reason);
+  return source && typeof source === "object" ? signInOutcome((source as { reason?: unknown }).reason) : null;
+}
+
+/** The server no longer has this sign-in, as after the Cloud restarted: its `interrupted` reason, or from a server that
+ * sends no reason, a 404/410. */
+export function signInInterrupted(source: unknown): boolean {
+  const reason = signInReason(source);
+  if (reason) return reason === "interrupted";
+  return source instanceof ApiError && [404, 410].includes(source.status);
 }
 
 export function deviceSignInProvider(driverKind: string): DeviceSignInProvider {
@@ -83,6 +99,12 @@ function endedFlow(phase: "expired" | "failed", browserPkce = false): DeviceSign
   return { phase, flowId: null, authorizationUrl: null, expiresAt: null, ...(phase === "failed" ? { message: t(browserPkce ? "engineSetup.chatgpt.flowEnded" : "engineSetup.device.flowEnded") } : {}) };
 }
 
+export function unavailableFlow(cause: unknown, browserPkce = false): DeviceSignInStatus {
+  return signInInterrupted(cause)
+    ? { phase: "failed", flowId: null, authorizationUrl: null, expiresAt: null, reason: "interrupted", message: t("engineSetup.device.interrupted") }
+    : endedFlow("failed", browserPkce);
+}
+
 /** Security: never turn arbitrary process output into a sign-in link; the server validates this address too. */
 export function codexDeviceLink(value: string | null): string | null {
   return deviceSignInLink("codex", value);
@@ -108,7 +130,8 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
   if (auth.phase !== "waiting") {
     const label = auth.phase === "succeeded" ? t(copy.connected)
       : auth.phase === "cancelled" ? t(browserPkce ? "engineSetup.chatgpt.cancelled" : "engineSetup.device.cancelled")
-      : auth.phase === "expired" ? t(browserPkce ? "engineSetup.chatgpt.expired" : "engineSetup.device.expired")
+      : auth.phase === "expired" || signInReason(auth) === "expired" ? t(browserPkce ? "engineSetup.chatgpt.expired" : "engineSetup.device.expired")
+      : signInInterrupted(auth) ? t("engineSetup.device.interrupted")
       : auth.message || t(browserPkce ? "engineSetup.chatgpt.failed" : copy.failed);
     return <p role="status" className={auth.phase === "succeeded" ? "text-[12px] text-success" : "text-[12px] text-ink-secondary"}>{label}</p>;
   }
@@ -118,9 +141,12 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
     return <p role="alert" className="text-[12px] text-danger">{t(browserPkce ? "engineSetup.chatgpt.invalidChallenge" : copy.invalidChallenge)}</p>;
   }
 
+  // ChatGPT accounts can have device code sign-in off; say where to turn it on before the code is used.
+  const enableStep = provider === "codex" && codeShown;
   return (
     <div className="space-y-2 rounded-lg border border-hairline/50 bg-app p-3">
-      {codeShown && <><p className="text-[12px] text-ink-secondary">{t(copy.enterCode)}</p>
+      {enableStep && <p data-device-enable-step className="text-[12px] leading-relaxed text-ink">1. {t("engineSetup.device.enableNote")}</p>}
+      {codeShown && <><p className="text-[12px] text-ink-secondary">{enableStep && "2. "}{t(copy.enterCode)}</p>
       <div className="flex items-center justify-between gap-2 rounded-lg bg-inset px-3 py-2">
         <code className="select-all font-mono text-lg font-semibold tracking-widest text-ink">{auth.userCode}</code>
         <button
@@ -195,7 +221,7 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
         .catch((cause: unknown) => {
           if (controller.signal.aborted) return;
           if (deviceFlowUnavailable(cause)) {
-            setAuth(endedFlow("failed", browserPkce));
+            setAuth(unavailableFlow(cause, browserPkce));
             setError(null);
             return;
           }
@@ -236,7 +262,7 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
       setAuth({ phase: "cancelled", flowId: null, authorizationUrl: null, expiresAt: null });
       onDone?.(false);
     } catch (cause) {
-      if (deviceFlowUnavailable(cause)) setAuth(endedFlow("failed", browserPkce));
+      if (deviceFlowUnavailable(cause)) setAuth(unavailableFlow(cause, browserPkce));
       else setError(cause instanceof Error ? cause.message : failed);
     } finally { setBusy(false); }
   };
@@ -265,7 +291,9 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
         </button>
       )}
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
-      {!browserPkce && provider === "codex" && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("engineSetup.device.enableHint")}</p>}
+      {!browserPkce && provider === "codex" && auth?.phase !== "waiting" && auth?.phase !== "succeeded" && (
+        <p data-device-enable-note className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.device.enableNote")}</p>
+      )}
     </div>
   );
 }

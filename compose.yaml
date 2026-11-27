@@ -30,6 +30,8 @@ services:
       # "1": phones pair by QR through MausBot Relay (docs/phone-relay-server.md). Sign the
       # container in once first: docker compose exec omb openmausbot login --relay
       OMB_PHONE_RELAY: ${OMB_PHONE_RELAY:-}
+      # The licence; a license.key in the data folder (/data/.openmausbot) is read too, and the newer one wins.
+      OMB_LICENSE_KEY: ${OMB_LICENSE_KEY:-}
     healthcheck:
       test:
         - CMD

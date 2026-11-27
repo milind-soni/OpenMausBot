@@ -35,7 +35,7 @@ export function bannerMime(bytes: Buffer): BannerMime | null {
 
 /** PNG: the chunks a still picture needs, and nothing that carries text, time or a colour profile. */
 const PNG_KEEP = new Set(["IHDR", "PLTE", "tRNS", "gAMA", "cHRM", "sRGB", "sBIT", "bKGD", "IDAT", "IEND"]);
-function cleanPng(bytes: Buffer): CheckedBanner {
+function cleanPng(bytes: Buffer, keepProfile = false): CheckedBanner {
   const kept: Buffer[] = [PNG_SIGNATURE];
   let at = 8, width = 0, height = 0, ended = false, first = true;
   while (at < bytes.length) {
@@ -48,7 +48,7 @@ function cleanPng(bytes: Buffer): CheckedBanner {
       width = bytes.readUInt32BE(at + 8); height = bytes.readUInt32BE(at + 12);
     }
     if (type === "acTL" || type === "fcTL" || type === "fdAT") throw new Animated();
-    if (PNG_KEEP.has(type)) kept.push(bytes.subarray(at, end));
+    if (PNG_KEEP.has(type) || (keepProfile && type === "iCCP")) kept.push(bytes.subarray(at, end));
     // A critical chunk this reader doesn't know: not a picture it can vouch for.
     else if (type[0] === type[0]!.toUpperCase()) throw new Damaged();
     first = false; at = end;
@@ -62,7 +62,8 @@ function cleanPng(bytes: Buffer): CheckedBanner {
  * and APP14 (Adobe's colour transform) say how to read the pixels, so they stay. */
 const SOF = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 const dropJpegSegment = (marker: number) => marker === 0xfe || (marker >= 0xe1 && marker <= 0xef && marker !== 0xee);
-function cleanJpeg(bytes: Buffer): CheckedBanner {
+const ICC_PROFILE = Buffer.from("ICC_PROFILE\0", "latin1");
+function cleanJpeg(bytes: Buffer, keepProfile = false): CheckedBanner {
   const kept: Buffer[] = [bytes.subarray(0, 2)];
   let at = 2, width = 0, height = 0, ended = false, frames = 0;
   while (at < bytes.length) {
@@ -79,7 +80,8 @@ function cleanJpeg(bytes: Buffer): CheckedBanner {
       if (length < 7) throw new Damaged();
       height = bytes.readUInt16BE(at + 3); width = bytes.readUInt16BE(at + 5); frames++;
     }
-    if (!dropJpegSegment(marker)) kept.push(Buffer.concat([Buffer.from([0xff, marker]), bytes.subarray(at, end)]));
+    const profile = keepProfile && marker === 0xe2 && bytes.subarray(at + 2, at + 2 + ICC_PROFILE.length).equals(ICC_PROFILE);
+    if (profile || !dropJpegSegment(marker)) kept.push(Buffer.concat([Buffer.from([0xff, marker]), bytes.subarray(at, end)]));
     at = end;
     if (marker !== 0xda) continue;
     // The scan's coded data runs to the next marker that is neither a stuffed 0xFF00 nor a restart.
@@ -96,7 +98,7 @@ function cleanJpeg(bytes: Buffer): CheckedBanner {
 
 /** WebP: the picture's own chunks (VP8, VP8L, its alpha) under a VP8X header told there is no profile, EXIF or XMP. */
 const WEBP_ICC = 0x20, WEBP_EXIF = 0x08, WEBP_XMP = 0x04, WEBP_ANIMATION = 0x02;
-function cleanWebp(bytes: Buffer): CheckedBanner {
+function cleanWebp(bytes: Buffer, keepProfile = false): CheckedBanner {
   const riff = bytes.readUInt32LE(4);
   if (riff + 8 > bytes.length || riff < 4) throw new Damaged();
   const kept: Buffer[] = [];
@@ -111,7 +113,7 @@ function cleanWebp(bytes: Buffer): CheckedBanner {
       if (data[0]! & WEBP_ANIMATION) throw new Animated();
       width = data.readUIntLE(4, 3) + 1; height = data.readUIntLE(7, 3) + 1;
       const header = Buffer.from(bytes.subarray(at, Math.min(end, bytes.length)));
-      header[8] = data[0]! & ~(WEBP_ICC | WEBP_EXIF | WEBP_XMP);
+      header[8] = data[0]! & ~((keepProfile ? 0 : WEBP_ICC) | WEBP_EXIF | WEBP_XMP);
       kept.push(header);
     } else if (fourcc === "VP8 ") {
       if (size < 10 || data[3] !== 0x9d || data[4] !== 0x01 || data[5] !== 0x2a) throw new Damaged();
@@ -121,7 +123,7 @@ function cleanWebp(bytes: Buffer): CheckedBanner {
       if (size < 5 || data[0] !== 0x2f) throw new Damaged();
       if (!width) { const bits = data.readUInt32LE(1); width = (bits & 0x3fff) + 1; height = ((bits >>> 14) & 0x3fff) + 1; }
       image = true; kept.push(bytes.subarray(at, Math.min(end, bytes.length)));
-    } else if (fourcc === "ALPH") {
+    } else if (fourcc === "ALPH" || (keepProfile && fourcc === "ICCP")) {
       kept.push(bytes.subarray(at, Math.min(end, bytes.length)));
     }
     at = end;
@@ -130,6 +132,19 @@ function cleanWebp(bytes: Buffer): CheckedBanner {
   const body = Buffer.concat(kept), header = Buffer.alloc(12);
   header.write("RIFF", 0, "latin1"); header.writeUInt32LE(body.length + 4, 4); header.write("WEBP", 8, "latin1");
   return { bytes: Buffer.concat([header, body]), mime: "image/webp", width, height };
+}
+
+/** A still PNG, JPEG or WebP without its metadata (EXIF and GPS, XMP, IPTC, text, comments, anything after the picture
+ * ends) and with its colour profile kept, so a wide-gamut picture shows the same colours. Its pixels' bytes stay as they
+ * were (nothing is decoded or encoded again); null for anything else, an animation, or a file it can't read. */
+export function withoutPictureMetadata(bytes: Buffer): Buffer | null {
+  const mime = bannerMime(bytes);
+  if (!mime) return null;
+  try {
+    return (mime === "image/png" ? cleanPng(bytes, true) : mime === "image/jpeg" ? cleanJpeg(bytes, true) : cleanWebp(bytes, true)).bytes;
+  } catch {
+    return null;
+  }
 }
 
 /** The upload as it may be kept, or why not, in words the person can act on. */

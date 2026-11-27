@@ -137,10 +137,10 @@ instead, slowest first, each to the shard with the least time so far. The
 times are `scripts/testing/vitest-shard-weights.json`: for each platform
 (`linux`, `win32`, `darwin`), each file's median seconds on that platform's
 runners, for every file over five seconds and every e2e file. A file not in it
-counts one second, or the median e2e time if it is an e2e file. Shard 1 of
-each platform also runs the `node --test` suites after vitest, about two
-minutes on the macOS and Windows runners, so the sequencer starts that shard
-at those seconds (`NODE_TESTS_SECONDS`) and gives it that much less vitest.
+counts one second, or the median e2e time if it is an e2e file. In a full run,
+shard 1 also runs the `node --test` suites after vitest. The sequencer reserves
+their measured time (`NODE_TESTS_SECONDS`), about 90 seconds on Linux and two
+minutes on macOS and Windows, and gives that shard less vitest work.
 Every file still runs exactly once, and each shard job logs a
 `duration-sequencer:` line with its share.
 

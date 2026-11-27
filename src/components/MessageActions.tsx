@@ -21,6 +21,8 @@ export type MessageMenuItem = {
   disabled?: boolean;
   /** Offered only while the chat's turn is not running. */
   idleOnly?: boolean;
+  /** Greyed out while the chat's turn is running. */
+  disabledWhileBusy?: boolean;
 };
 
 /** Whether the chat's turn is running, apart from the row values every message reads: a turn starting or ending
@@ -66,8 +68,8 @@ export function MessageActions({
   const [pointAt, setPointAt] = useState<{ x: number; y: number; clientX: number; clientY: number } | null>(null);
   const offered = pointAt ? [...contextItems, ...items] : items;
   // use() may run conditionally: a closed menu has no reason to follow the turn.
-  const busy = menuOpen && offered.some((item) => item.idleOnly) ? use(ChatBusyContext) : false;
-  const menu = busy ? offered.filter((item) => !item.idleOnly) : offered;
+  const busy = menuOpen && offered.some((item) => item.idleOnly || item.disabledWhileBusy) ? use(ChatBusyContext) : false;
+  const menu = busy ? offered.filter((item) => !item.idleOnly).map((item) => (item.disabledWhileBusy ? { ...item, disabled: true } : item)) : offered;
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [tapped, setTapped] = useState(false);

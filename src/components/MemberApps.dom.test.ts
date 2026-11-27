@@ -4,8 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 
-const f = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), open: vi.fn(async () => true) }));
+const f = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), open: vi.fn(async () => true), github: false }));
 vi.mock("@/state/store", () => ({ api: f.api, useStore: () => ({ state: { config: { team: { id: "team-acme", name: "Acme" } } }, dispatch: f.dispatch }) }));
+vi.mock("./github/GithubAppCard", () => ({ GithubAppCard: () => createElement("div", { "data-github-card": true }) }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubShown: () => f.github }));
 vi.mock("@/lib/connector-oauth", () => ({ reserveConnectionPage: () => ({ open: f.open, cancel: vi.fn() }) }));
 const { MemberApps } = await import("./MemberApps");
 
@@ -19,7 +21,7 @@ const calls = () => f.api.mock.calls.map(([path, init]) => `${(init as RequestIn
 beforeEach(() => {
   setLocale("en");
   apps = [{ slug: "gmail", name: "Gmail", connected: false }, { slug: "googlecalendar", name: "Google Calendar", connected: true }];
-  f.api.mockReset(); f.dispatch.mockReset(); f.open.mockClear();
+  f.api.mockReset(); f.dispatch.mockReset(); f.open.mockClear(); f.github = false;
   f.api.mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === "/api/team/my-connections") return { apps };
     if (init?.method === "POST") return { url: "https://connect.example.test/link" };
@@ -64,4 +66,12 @@ it("says so when nothing is theirs to connect, and says the server's own words w
   f.api.mockRejectedValueOnce(new Error("Your own apps can't be connected on Acme yet."));
   await act(async () => { window.dispatchEvent(new Event("focus")); });
   expect(host.querySelector('[role="alert"]')?.textContent).toBe("Your own apps can't be connected on Acme yet.");
+});
+
+it("puts the member's own GitHub sign-in first among their apps, even when no app is theirs", async () => {
+  f.github = true;
+  apps = [];
+  await show();
+  expect(host.querySelector("[data-github-card]")).not.toBeNull();
+  expect(host.querySelector("[data-member-apps-none]")).toBeNull();
 });

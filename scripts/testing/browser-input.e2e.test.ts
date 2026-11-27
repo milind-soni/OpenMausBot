@@ -310,27 +310,34 @@ describe("input to a page on the default browser engine", () => {
     const step = (tool: string, args: Record<string, unknown>, expectError = false) => ({ server: "browser", tool: `agent_browser_${tool}`, arguments: args, ...(expectError ? { expectError: true } : {}) });
     // The scripted bot takes the plan's turn at the index of the turns it already took.
     const earlier = Array.from({ length: evidence().filter((turn: any) => turn.botId === bot.id).length }, () => ({ steps: [], reply: "Done." }));
-    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [...earlier, { timeoutMs: 180_000, steps: [
+    const turn = (steps: unknown[]) => ({ timeoutMs: 180_000, steps, reply: "Done." });
+    const look = turn([
       step("open", { url: `${base}/?bot=${Date.now()}` }),
       step("click", { selector: "#off" }, true),
       step("click", { selector: "#name" }),
       step("fill", { selector: "#plain", text: "zzz" }, true),
       step("type", { selector: "#plain", text: "yyy" }, true),
       step("snapshot", {}),
-      step("click", { selector: "#swap" }),
-      // The snapshot's ref for the Name field now names a field the page replaced.
-      step("fill", { selector: "@e2", text: "eve" }, true),
-    ], reply: "Done." }] } }));
-    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Use the page.", "--url", url]);
+    ]);
+    const send = (turns: unknown[]) => {
+      writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [...earlier, ...turns] } }));
+      return runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Use the page.", "--url", url]);
+    };
     const answers = () => evidence().slice(before).flatMap((turn: any) => turn.evidence).filter((entry: any) => entry.step?.server === "browser");
+    const text = (at: number) => answers()[at].response.result.content.map((part: any) => part.text).join(" ");
+    await send([look]);
+    await expect.poll(() => answers().length, { timeout: 180_000, interval: 200 }).toBe(6);
+    // Engines number refs their own way (0.39 counts on across a session), so the next turn uses the ref this snapshot gave.
+    const nameRef = /textbox "Name" \[ref=(e\d+)\]/.exec(text(5))?.[1];
+    expect(nameRef, text(5)).toBeDefined();
+    // After the swap that ref names a field the page replaced.
+    await send([look, turn([step("click", { selector: "#swap" }), step("fill", { selector: `@${nameRef}`, text: "eve" }, true)])]);
     await expect.poll(() => answers().length, { timeout: 180_000, interval: 200 }).toBe(8);
     const errors = answers().map((entry: any) => `${entry.step.tool.replace("agent_browser_", "")}:${entry.response.result.isError === true}`);
     expect(errors).toEqual(["open:false", "click:true", "click:false", "fill:true", "type:true", "snapshot:false", "click:false", "fill:true"]);
-    const text = (at: number) => answers()[at].response.result.content.map((part: any) => part.text).join(" ");
     // Our own check's words on the pinned engine; agent-browser 0.39.2 and later refuse it themselves.
     expect(text(1)).toMatch(/disabled/);
     expect(text(3)).toContain("does not hold the text");
-    expect(text(5)).toMatch(/textbox "Name" \[ref=e2\]/);
     // Later engines refuse a ref the page replaced themselves.
     expect(text(7)).toMatch(/Take a new snapshot|Unknown ref/);
     expect(seen).not.toContain("off-click");

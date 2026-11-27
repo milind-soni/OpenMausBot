@@ -1,5 +1,5 @@
-// A shareable template of a bot or a department: its card (in the chat and in the department's Share), what it brings
-// (the Details sheet, also Import's preview), and the card's actions.
+// A shareable template of a bot or a department: its card (in the chat, in a department's Share and after a bot's Publish),
+// what it brings (the Details sheet, also Import's preview), and the card's actions.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowUpRight, Check, ChevronDown, Copy, FolderDown, Github, Library, Loader2, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
@@ -11,10 +11,12 @@ import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { addToTeamTemplates, askBot, countsLine, deleteTemplate, githubConnection, publishTemplate, publishToRepo, saveTemplateFolder, templateDetails } from "@/lib/template-share";
+import { addToTeamTemplates, askBot, countsLine, creditShown, deleteTemplate, downloadTemplate, githubConnection, publishTemplate, publishToRepo, saveTemplateFolder, scrubbedLine, templateDetails } from "@/lib/template-share";
+import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore, type Message } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_PRIMARY_BUTTON } from "./AskCard";
 import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
@@ -42,21 +44,24 @@ function Face({ avatar, size }: { avatar: TemplateAvatar; size: number }) {
     ...(avatar.picture ? { avatarCrop: "circle" as const } : {}), mascotBody: avatar.mascotBody ? botBodyId(avatar.mascotBody) : null }} />;
 }
 
-/** Up to four faces, overlapping, then "+N". */
-export function TemplateFaces({ avatars, size = 32 }: { avatars: readonly TemplateAvatar[]; size?: number }) {
+/** Up to four faces, overlapping, then "+N". `on` is what they sit on, so the gap between two faces is its colour. */
+export function TemplateFaces({ avatars, size = 32, on = "panel" }: { avatars: readonly TemplateAvatar[]; size?: number; on?: "panel" | "card" }) {
   const shown = avatars.slice(0, FACES);
+  const ring = on === "card" ? "ring-card" : "ring-panel";
   return (
     <span className="flex shrink-0 items-center -space-x-2">
-      {shown.map((avatar) => <span key={avatar.key} className="rounded-full ring-2 ring-panel"><Face avatar={avatar} size={size} /></span>)}
-      {avatars.length > FACES && <span className="flex items-center justify-center rounded-full bg-raised text-[11px] text-ink-secondary ring-2 ring-panel tabular-nums"
+      {shown.map((avatar) => <span key={avatar.key} className={cn("rounded-full ring-2", ring)}><Face avatar={avatar} size={size} /></span>)}
+      {avatars.length > FACES && <span className={cn("flex items-center justify-center rounded-full bg-raised text-[11px] text-ink-secondary ring-2 tabular-nums", ring)}
         style={{ width: size, height: size }}>+{avatars.length - FACES}</span>}
     </span>
   );
 }
 
-/** Faces, name, status, one line, counts and the promise that nothing private travels. */
+/** Faces, name, status, one line, counts, who published it and the promise that nothing private travels. */
 export function TemplateCardBody({ card }: { card: TemplateCard }) {
   const counts = countsLine(card);
+  const scrubbed = scrubbedLine(card);
+  const publishedBy = card.status === "published" ? creditShown(card.publishedBy) : null;
   return (
     <div data-template-status={card.status} className="flex min-w-0 items-start gap-3">
       <TemplateFaces avatars={card.avatars} />
@@ -70,7 +75,9 @@ export function TemplateCardBody({ card }: { card: TemplateCard }) {
         </div>
         {card.tagline && <p dir="auto" className="mt-0.5 truncate text-[13px] text-ink-secondary" title={card.tagline}>{card.tagline}</p>}
         {counts && <p className="mt-0.5 text-[12px] text-ink-tertiary">{counts}</p>}
+        {publishedBy && <p dir="auto" data-template-published-by className="mt-0.5 truncate text-[12px] text-ink-tertiary">{t("template.publishedBy", { name: publishedBy })}</p>}
         <p className="mt-0.5 text-[12px] text-ink-tertiary">{t("template.neverShared")}</p>
+        {scrubbed && <p data-template-scrubbed className="mt-0.5 text-[12px] text-ink-tertiary">{scrubbed}</p>}
         {card.redacted > 0 && <p className="mt-0.5 text-[12px] text-ink-tertiary">{card.redacted === 1 ? t("template.redactedOne") : t("template.redactedMany", { count: card.redacted })}</p>}
         {card.skipped.length > 0 && <p dir="auto" className="mt-0.5 text-[12px] text-ink-tertiary">{t("template.skipped", { list: card.skipped.join(", ") })}</p>}
       </div>
@@ -78,13 +85,29 @@ export function TemplateCardBody({ card }: { card: TemplateCard }) {
   );
 }
 
+/** The profile's name when the profile is this person's own (not a shared workspace's owner's); null until known. */
+function useOwnProfileName(): string | null {
+  const profile = useStoreSelector((state) => state.config?.profile);
+  const [session, setSession] = useState<SessionState | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readSessionState().then((next) => { if (live) setSession(next); });
+    return () => { live = false; };
+  }, []);
+  return session ? profileForSession(profile, session)?.name?.trim() ?? "" : null;
+}
+
 /** What the card's buttons do. The card shown is the latest the server answered, until the message brings a newer one. */
 export function useTemplateActions(initial: TemplateCard) {
   const [card, setCard] = useState(initial);
-  const [busy, setBusy] = useState<"publish" | "save" | "delete" | "team" | null>(null);
+  const [busy, setBusy] = useState<"publish" | "save" | "download" | "delete" | "team" | null>(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
+  const [downloaded, setDownloaded] = useState<string | null>(null);
   const [teamNote, setTeamNote] = useState<string | null>(null);
+  const profileName = useOwnProfileName();
+  const [typed, setAuthor] = useState<string | null>(null);
+  const author = typed ?? card.author ?? profileName ?? "";
   useEffect(() => setCard(initial), [initial]);
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
     if (busy) return;
@@ -99,7 +122,9 @@ export function useTemplateActions(initial: TemplateCard) {
     }
   };
   return {
-    card, busy, error, saved, teamNote,
+    card, busy, error, saved, downloaded, teamNote, author, setAuthor,
+    /** Whether `author` is settled: the profile's name, which Published by starts with, is read once. */
+    authorKnown: typed !== null || card.author !== undefined || profileName !== null,
     /** Adds it to the Team Cloud's own templates, replacing one of the same name there. */
     addToTeam: (team: string) => run("team", async () => {
       setTeamNote(null);
@@ -109,12 +134,13 @@ export function useTemplateActions(initial: TemplateCard) {
     publish: () => run("publish", async () => {
       setCard((current) => ({ ...current, status: "publishing", error: undefined }));
       try {
-        setCard(await publishTemplate(card.id));
+        setCard(await publishTemplate(card.id, author.trim()));
       } catch (cause) {
         setCard((current) => ({ ...current, status: "failed", error: cause instanceof Error ? cause.message : undefined }));
       }
     }),
     save: () => run("save", async () => setSaved(await saveTemplateFolder(card))),
+    download: () => run("download", async () => setDownloaded(await downloadTemplate(card))),
     remove: () => run("delete", async () => {
       await deleteTemplate(card.id);
       setCard((current) => ({ ...current, status: "gone" }));
@@ -146,12 +172,14 @@ export function TemplateButtons({ actions, primary, view, extra }: {
 }) {
   const { card, busy } = actions;
   if (card.status === "gone") return null;
+  const publishable = !card.fallback && !(card.status === "published" && card.link);
   const saveButton = (
     <button type="button" data-template-save onClick={() => void actions.save()} disabled={busy !== null} className={cn(card.fallback ? ASK_PRIMARY_BUTTON : cn(ASK_CHIP, ASK_CHIP_IDLE))}>
       {busy === "save" ? <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <FolderDown size={14} aria-hidden="true" />}{t("template.saveFolder")}
     </button>
   );
-  return (
+  return (<>
+    {publishable && <PublishedByField actions={actions} />}
     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
       {card.fallback ? <>
         {saveButton}
@@ -164,41 +192,56 @@ export function TemplateButtons({ actions, primary, view, extra }: {
           <ArrowUpRight size={14} aria-hidden="true" />{view.label}
         </button>}
       </> : (
-        <button type="button" data-template-publish onClick={() => void actions.publish()} disabled={busy !== null || card.status === "publishing"} className={ASK_PRIMARY_BUTTON}>
+        <button type="button" data-template-publish onClick={() => void actions.publish()} disabled={busy !== null || card.status === "publishing" || card.secret === true} className={ASK_PRIMARY_BUTTON}>
           {card.status === "publishing" ? <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Upload size={14} aria-hidden="true" />}
           {card.status === "failed" ? t("common.tryAgain") : primary}
         </button>
       )}
       {extra}
     </div>
+  </>);
+}
+
+/** The one field Publish has: the name the template is credited to, empty for "Community". */
+function PublishedByField({ actions }: { actions: TemplateActions }) {
+  const id = useId();
+  const locked = actions.busy !== null || actions.card.status === "publishing";
+  return (
+    <div className="mt-2.5 flex min-w-0 items-center gap-2">
+      <label htmlFor={id} className="shrink-0 text-[12px] text-ink-secondary">{t("template.publishedByLabel")}</label>
+      <input id={id} data-template-author dir="auto" value={actions.author} maxLength={100} disabled={locked} spellCheck={false} autoComplete="name"
+        onChange={(event) => actions.setAuthor(event.target.value)} placeholder={t("template.publishedByEmpty")}
+        className="h-7 min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-2 text-[12px] text-ink focus:border-focus focus:outline-none disabled:opacity-60" />
+    </div>
   );
 }
 
 /** One line under the buttons: why Publish isn't offered, the publish error, the last action's error, or where the folder went. */
 export function TemplateNotes({ actions }: { actions: TemplateActions }) {
-  const { card, error, saved, teamNote } = actions;
+  const { card, error, saved, downloaded, teamNote } = actions;
   return <>
     {card.fallback && <p className="mt-1.5 text-[12px] text-ink-secondary">{t(card.fallback === "sign_in" ? "template.signInToPublish" : "template.publishUnavailable")}</p>}
-    {card.status === "failed" && card.error && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{card.error}</p>}
+    {card.secret && card.status !== "gone" && card.status !== "published" && !card.fallback && <p role="alert" data-template-secret className="mt-1.5 text-[12px] text-danger">{t("template.secretFound")}</p>}
+    {card.status === "failed" && card.error && !card.secret && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{card.error}</p>}
     {error && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{error}</p>}
     {saved && <p role="status" dir="auto" className="mt-1.5 truncate text-[12px] text-ink-secondary" title={saved}>{t("template.savedTo", { path: saved })}</p>}
+    {downloaded && <p role="status" dir="auto" className="mt-1.5 truncate text-[12px] text-ink-secondary" title={downloaded}>{t("template.downloaded", { file: downloaded })}</p>}
     {teamNote && <p role="status" dir="auto" className="mt-1.5 text-[12px] text-ink-secondary">{teamNote}</p>}
   </>;
 }
 
 /** On a Team Cloud, its name when the person is its owner or an admin, who add templates to its library; else null. */
 export function useTeamTemplatesOwner(): string | null {
-  const { state } = useStore();
+  const team = useStoreSelector((state) => state.config?.team?.name);
   const admin = useOwnerOrAdmin();
-  const team = state.config?.team?.name;
   return team && admin === true ? team : null;
 }
 
 /** Publishing to one's own repository goes through Share's routes, which a Team Cloud keeps for its owner and admins. */
 export function useRepoPublishOffered(): boolean {
-  const { state } = useStore();
+  const onTeam = useStoreSelector((state) => Boolean(state.config?.team));
   const admin = useOwnerOrAdmin();
-  return !state.config?.team || admin === true;
+  return !onTeam || admin === true;
 }
 
 /** The template card a bot posts in its chat. `botId` and `threadId` are this chat's, for Update; a group chat leaves them out. */

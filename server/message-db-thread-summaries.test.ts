@@ -82,11 +82,46 @@ describe("room thread summaries", () => {
     expect(summary.repliers).toEqual(["b6", "b5", "b4", "b3", "b2"].map((botId) => ({ botId })));
   });
 
+  it("lists a thread whose only lines a webhook or a bot's post put there, and counts a later post as a reply", () => {
+    const hook = add("f", { role: "bot", kind: "text", text: "Deploy finished", from: { botId: "kiwi", name: "Kiwi", color: "blue" }, webhookPost: true });
+    const post = add("f", { role: "bot", kind: "text", text: "Posted the notes", from: { botId: "pip", name: "Pip", color: "blue" }, peerPost: {} });
+    const [summary] = roomThreadSummaries(["f"]);
+    expect(summary).toEqual({ threadId: "f", first: { text: "Deploy finished", speaker: { botId: "kiwi" }, at: hook.at }, replies: 1, lastReplyAt: post.at, repliers: [{ botId: "pip" }] });
+  });
+
   it("counts a person's own follow-up as a reply but not their first line", () => {
     add("e", person("one"));
     add("e", person("two"));
     const [summary] = roomThreadSummaries(["e"]);
     expect(summary.replies).toBe(1);
     expect(summary.repliers).toEqual([{ person: {} }]);
+  });
+
+  it("counts only the branch a thread shows: an edited line and a retried answer leave no extra replies", () => {
+    const first = add("g", person("Plan the launch", { parentId: null }));
+    const asked = add("g", person("Which day?", { parentId: first.id }));
+    const old = add("g", answer("kiwi", "Friday", { parentId: asked.id }));
+    // Editing "Which day?" sends the new words beside it, and the bot answers again on the new branch.
+    const edited = add("g", person("Which day, and who?", { parentId: first.id }));
+    const fresh = add("g", answer("pip", "Friday, with Ana", { parentId: edited.id }));
+    // A lone thread beside it keeps its plain count in the same read.
+    add("h", person("Plain", { parentId: null }));
+    const plainReply = add("h", answer("kiwi", "Yes", { parentId: "m-none" }));
+
+    const [g, h] = roomThreadSummaries(["g", "h"]);
+    expect(g).toMatchObject({ first: { text: "Plan the launch" }, replies: 2, lastReplyAt: fresh.at, repliers: [{ botId: "pip" }, { person: {} }] });
+    expect(h).toMatchObject({ replies: 1, lastReplyAt: plainReply.at });
+
+    mdb.setActiveLeaf("g", old.id);
+    const [back] = roomThreadSummaries(["g"]);
+    expect(back, "switching back shows the older branch's lines").toMatchObject({ replies: 2, lastReplyAt: old.at, repliers: [{ botId: "kiwi" }, { person: {} }] });
+  });
+
+  it("reads an edited first line as the thread's first line", () => {
+    add("i", person("Draft", { parentId: null }));
+    const edited = add("i", person("Final words", { parentId: null }));
+    add("i", answer("kiwi", "Got it", { parentId: edited.id }));
+    const [summary] = roomThreadSummaries(["i"]);
+    expect(summary).toMatchObject({ first: { text: "Final words", at: edited.at }, replies: 1, repliers: [{ botId: "kiwi" }] });
   });
 });

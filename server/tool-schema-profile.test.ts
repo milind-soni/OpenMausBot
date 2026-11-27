@@ -6,7 +6,7 @@ import { DATA_TOOLS } from "./data/tools.ts";
 import bridgedAgents from "./drivers/agents-catalog-goldens/bridged.tools-list.json" with { type: "json" };
 import fullAgents from "./drivers/agents-catalog-goldens/full.tools-list.json" with { type: "json" };
 import { createPageSchema, wideSchema } from "./testing/oversized-tool-schema.ts";
-import { fitToolSchema, schemaBytes, toolSchemaProfile, toolSchemaProfileFor, type ToolSchemaProfile } from "./tool-schema-profile.ts";
+import { fitToolListForBudget, fitToolSchema, itemsOf, schemaBytes, toolSchemaProfile, toolSchemaProfileFor, type ToolSchemaProfile } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 const MOONSHOT = toolSchemaProfile("moonshot")!;
@@ -151,7 +151,7 @@ describe("which turns carry a schema profile", () => {
   });
 
   it("is no other engine or endpoint, so their tool lists are unchanged", () => {
-    for (const engine of ["claudeAgent", "codex", "geminiAgent", "grokAgent", "opencodeGo", "qwenAgent", "cursorAgent", "hermesAgent"]) {
+    for (const engine of ["claudeAgent", "codex", "grokAgent", "opencodeGo", "qwenAgent", "cursorAgent", "hermesAgent"]) {
       expect(toolSchemaProfileFor({ engine, model: "kimi-k2.6" })).toBeUndefined();
     }
     expect(toolSchemaProfileFor({ url: "https://api.groq.com/openai/v1", model: "moonshotai/kimi-k2-instruct-0905" })).toBeUndefined();
@@ -159,6 +159,133 @@ describe("which turns carry a schema profile", () => {
     expect(toolSchemaProfileFor({ url: "https://moonshot.ai.example.com/v1" })).toBeUndefined();
     expect(toolSchemaProfileFor({ url: "not a url" })).toBeUndefined();
     expect(toolSchemaProfile("__proto__")).toBeUndefined();
+  });
+});
+
+describe("fitting a tool list to Gemini's list budget", () => {
+  const GEMINI = toolSchemaProfile("gemini")!;
+  const bytes = (list: unknown) => Buffer.byteLength(JSON.stringify(list));
+  const names = (list: Array<{ name: string }>) => list.map((tool) => tool.name);
+
+  it("the Antigravity and Gemini CLI engines carry the profile", () => {
+    expect(toolSchemaProfileFor({ engine: "antigravityAgent" })).toBe(GEMINI);
+    expect(toolSchemaProfileFor({ engine: "geminiAgent" })).toBe(GEMINI);
+    expect(toolSchemaProfileFor({ engine: "claudeAgent" })).toBeUndefined();
+  });
+
+  it("a list under the budget goes out untouched", () => {
+    const tools = [{ name: "small", inputSchema: { type: "object", properties: { id: { type: "string" } } } }];
+    expect(fitToolListForBudget(tools, GEMINI)).toEqual(tools);
+    expect(fitToolListForBudget(tools, undefined)).toEqual(tools);
+    expect(fitToolListForBudget(tools, { ...GEMINI, maxListBytes: undefined })).toEqual(tools);
+  });
+
+  it("the full agents list fits with every tool's name kept", () => {
+    const tools = fullAgents.tools as Array<{ name: string; description: string; inputSchema: Json }>;
+    expect(bytes(tools)).toBeGreaterThan(GEMINI.maxListBytes!);
+    const fitted = fitToolListForBudget(tools, GEMINI);
+    expect(bytes(fitted)).toBeLessThanOrEqual(GEMINI.maxListBytes!);
+    expect(names(fitted)).toEqual(names(tools));
+  });
+
+  it("each tool keeps its required fields and the trimming loses the deep words first", () => {
+    const required = ["id"];
+    const tools = [
+      { name: "wide", required: [], inputSchema: wideSchema(200) as Json },
+      { name: "page", required, inputSchema: createPageSchema() as Json },
+    ];
+    const fitted = fitToolListForBudget(tools, { ...GEMINI, maxListBytes: bytes(tools) / 2 });
+    expect(bytes(fitted)).toBeLessThanOrEqual(bytes(tools) / 2);
+    const page = fitted.find((tool) => tool.name === "page")!;
+    expect(page.required).toEqual(required);
+    expect(Object.keys((page.inputSchema as Json).properties ?? {})).toEqual(Object.keys((tools[1].inputSchema as Json).properties ?? {}));
+    expect(bytes(fitted)).toBeLessThan(bytes(tools));
+  });
+});
+
+describe("fitting one tool schema to Gemini's per-tool limit", () => {
+  const GEMINI = toolSchemaProfile("gemini")!;
+  const keys = () => ({ type: "array", items: { type: "integer" }, allOf: Array.from({ length: 200 }, () => ({ maxItems: 16 })) });
+
+  it("keeps an integer array's items when a nested field is collapsed", () => {
+    const schema = { type: "object", properties: { group: { type: "object", properties: { keys: keys() } } } };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("loosened");
+    if (fit.outcome !== "loosened") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect((fit.schema.properties as Json).group).toEqual({ type: "object", properties: { keys: { type: "array", items: { type: "integer" } } } });
+  });
+
+  it("keeps an integer array's items and its required name when only the top-level fields remain", () => {
+    const schema = { type: "object", required: ["keys"], properties: { keys: keys() } };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("minimal");
+    if (fit.outcome !== "minimal") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect(fit.schema).toEqual({
+      type: "object", properties: { keys: { type: "array", items: { type: "integer" } } }, required: ["keys"], additionalProperties: true,
+    });
+  });
+
+  it("keeps a known item type, and a string where an array has no single item schema", () => {
+    const schema = {
+      type: "object",
+      $defs: { node: { type: "array", items: { $ref: "#/$defs/node" } } },
+      properties: { group: { type: "object", properties: {
+        keys: keys(),
+        nullable: { type: ["array", "null"], items: { type: "integer", minimum: 0 } },
+        nested: { type: "array", items: { type: "array", items: { type: "boolean", description: "drop me" } } },
+        bare: { type: "array" },
+        rows: { type: "array", items: { type: "object", description: "row", properties: { a: { type: "string" } } } },
+        tuple: { type: "array", prefixItems: [{ type: "string" }, { type: "integer" }] },
+        flag: { type: "array", items: true },
+        tree: { $ref: "#/$defs/node" },
+      } } },
+    };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("loosened");
+    if (fit.outcome !== "loosened") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect(fit.schema).toEqual({ type: "object", properties: { group: { type: "object", properties: {
+      keys: { type: "array", items: { type: "integer" } },
+      nullable: { type: ["array", "null"], items: { type: "integer" } },
+      nested: { type: "array", items: { type: "array", items: { type: "boolean" } } },
+      bare: { type: "array", items: { type: "string" } },
+      rows: { type: "array", items: { type: "object" } },
+      tuple: { type: "array", items: { type: "string" } },
+      flag: { type: "array", items: { type: "string" } },
+      tree: { type: "array", items: { type: "array", items: { type: "string" } } },
+    } } } });
+  });
+
+  it("falls back to a string item when shared anyOf refs fan out past the visit budget", () => {
+    const $defs: Json = { D7: { type: "integer" } };
+    for (let level = 6; level >= 0; level -= 1) {
+      $defs[`D${level}`] = { anyOf: Array.from({ length: 20 }, () => ({ $ref: `#/$defs/D${level + 1}` })) };
+    }
+    const schema: Json = { $defs, properties: { values: { type: "array", items: { $ref: "#/$defs/D0" } } } };
+    const values = (schema.properties as Json).values as Json;
+    const started = performance.now();
+    expect(itemsOf(values, schema)).toEqual({ type: "string" });
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
+  it("names items when a top-level value has no schema to copy", () => {
+    const schema = { type: "object", properties: { keys: keys(), note: null } };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("minimal");
+    if (fit.outcome !== "minimal") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect(fit.schema).toEqual({
+      type: "object", additionalProperties: true, properties: {
+        keys: { type: "array", items: { type: "integer" } },
+        note: { type: ["string", "number", "integer", "boolean", "object", "array", "null"], items: { type: "string" } },
+      },
+    });
   });
 });
 

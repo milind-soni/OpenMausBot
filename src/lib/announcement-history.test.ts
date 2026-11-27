@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/state/store", () => ({ api: vi.fn() }));
 import { api } from "@/state/store";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, TEAMS_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, TEAMS_NOTICE } from "@/lib/notices";
 import { announcementHistory, announcementsReadAt, announcementsUnread, BUILT_IN_ANNOUNCEMENTS, firstListedVersion, markAnnouncementsRead, READ_BASELINE, readMark,
   rememberNoticeSeen, withDownloadedUpdate, type HistoryFacts, type PersonRecord } from "./announcement-history";
 import type { ReleaseEntry } from "../../shared/release-notes";
@@ -27,7 +27,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("the built-in announcements", () => {
   it("are one registry, each with its notice id, a date and its words, newest first, Teams at the top", () => {
-    expect(ids(desktopHere)).toEqual([TEAMS_NOTICE, MODELGO_OFFER_NOTICE, GROK_MOVE_NOTICE, WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO]);
+    expect(ids(desktopHere)).toEqual([TEAMS_NOTICE, MODELGO_OFFER_NOTICE, GROK_MOVE_NOTICE, EARLIER_WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO]);
     for (const entry of BUILT_IN_ANNOUNCEMENTS) expect(Number.isFinite(Date.parse(entry.date)), entry.id).toBe(true);
     expect(BUILT_IN_ANNOUNCEMENTS.find(entry => entry.id === TEAMS_NOTICE)?.open).toEqual({ modal: "teams" });
   });
@@ -57,7 +57,7 @@ describe("the built-in announcements", () => {
   it("a card from the file sits by its starts, else by when the file changed, among them", () => {
     const cards = [card("later", { starts: "2026-11-20T00:00:00Z" }), card("undated"), card("old", { starts: "2026-10-20T00:00:00Z" })];
     expect(ids(desktopHere, cards, Date.parse("2026-11-12T00:00:00Z")))
-      .toEqual(["later", TEAMS_NOTICE, "undated", MODELGO_OFFER_NOTICE, GROK_MOVE_NOTICE, WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, "old", PRODUCT_HUNT_NOTICE, CLOUD_INTRO]);
+      .toEqual(["later", TEAMS_NOTICE, "undated", MODELGO_OFFER_NOTICE, GROK_MOVE_NOTICE, EARLIER_WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, "old", PRODUCT_HUNT_NOTICE, CLOUD_INTRO]);
   });
 });
 

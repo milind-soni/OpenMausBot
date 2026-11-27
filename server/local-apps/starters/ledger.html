@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledger · household & studio accounts</title>
+<style>
+:root{--paper:#f5efe4;--paper2:#efe7d8;--ink:#2b2118;--ink2:#5d4f41;--ink3:#8a7b68;--rule:#d9ccb8;--rule2:#e6dccb;--terra:#c4572e;--over:#b23a1f;
+  --serif:ui-serif,"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--text:ui-serif,"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;--gx:clamp(36px,2.9vw,56px)}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--paper);color:var(--ink);overflow:hidden}
+body{font:16px/1.45 var(--text);font-variant-numeric:lining-nums tabular-nums;-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(rgba(120,90,50,.045) 1px,transparent 1px);background-size:3px 3px}
+.page{position:absolute;inset:0;padding:0 var(--gx) 28px;display:grid;grid-template-rows:auto auto 1fr;gap:0}
+/* masthead */
+.mast{display:grid;grid-template-columns:auto 1fr auto;align-items:end;gap:32px;padding:26px 0 14px;border-bottom:2px solid var(--ink)}
+.mast h1{margin:0;font:400 clamp(44px,3.4vw,62px)/.9 var(--serif);font-variation-settings:"opsz" 144;letter-spacing:-.025em}
+.mast h1 i{font-weight:300;color:var(--terra)}
+.mast .dek{font:italic 17px/1.35 var(--text);color:var(--ink2);padding-bottom:5px;max-width:560px}
+.mast .meta{display:flex;align-items:center;gap:22px;padding-bottom:6px;font:13px var(--text);color:var(--ink3)}
+.sc{font:600 11px/1 var(--text);letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+.years{display:flex;gap:2px;border:1px solid var(--rule);border-radius:2px;padding:2px}
+.years b,.years span{font:500 13px var(--text);padding:4px 10px;cursor:pointer}.years b{background:var(--ink);color:var(--paper);font-weight:500}
+.sample{border:1px solid var(--ink3);color:var(--ink2);padding:5px 8px 4px;border-radius:2px}
+.subbar{display:flex;gap:28px;padding:8px 0;border-bottom:1px solid var(--rule);font:13px var(--text);color:var(--ink3)}
+.subbar b{color:var(--ink);font-weight:500}
+/* grid */
+.body{display:grid;grid-template-columns:1.6fr .85fr;grid-template-rows:minmax(0,40fr) minmax(0,60fr);gap:0 0;min-height:0}
+.cell{position:relative;min-height:0;padding:18px 0 0}
+.cell+.cell{}
+.hd{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:8px}
+.hd h2{margin:0;font:400 clamp(22px,1.55vw,28px)/1.1 var(--serif);font-variation-settings:"opsz" 72;letter-spacing:-.01em}
+.hd h2 em{font-style:italic;color:var(--ink2)}
+.hd .note{font:italic 14px var(--text);color:var(--ink3)}
+.river{grid-column:1;grid-row:1;border-right:1px solid var(--rule);padding-right:32px}
+.figs{grid-column:2;grid-row:1;padding-left:32px}
+.lower{grid-column:1/3;grid-row:2;display:grid;grid-template-columns:1.25fr .8fr 1fr;border-top:1px solid var(--rule);margin-top:14px;min-height:0}
+.lower>section{min-height:0;padding:18px 32px 0;border-left:1px solid var(--rule);display:flex;flex-direction:column}
+.lower>section:first-child{padding-left:0;border-left:0}.lower>section:last-child{padding-right:0}
+svg text{font-family:var(--text)}
+/* figures */
+.big{font:300 clamp(64px,5.3vw,100px)/.92 var(--serif);font-variation-settings:"opsz" 144;letter-spacing:-.035em;margin:2px 0 6px}
+.big small{font-size:.42em;letter-spacing:-.01em;color:var(--ink2);margin-right:4px;vertical-align:.55em}
+.lede{font:italic 19px/1.4 var(--text);color:var(--ink2);margin:0 0 14px;max-width:440px}.lede b{font-style:normal;color:var(--ink);font-weight:600}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.trio div{padding:10px 14px 10px 0}.trio div+div{padding-left:14px;border-left:1px solid var(--rule)}
+.trio .v{font:400 clamp(22px,1.6vw,30px)/1.15 var(--serif);letter-spacing:-.01em;margin-top:6px}
+.trio .d{font:13px var(--text);color:var(--ink3)}
+.spark{margin-top:12px}
+/* treemap */
+.tm-crumbs{display:flex;gap:8px;align-items:baseline;font:14px var(--text);color:var(--ink3)}.tm-crumbs a{color:var(--ink2);cursor:pointer;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:3px}
+.tm-crumbs b{color:var(--ink);font-weight:500}
+.tm{position:relative;flex:1;min-height:0;margin:6px 0 24px;overflow:hidden}
+.tile{position:absolute;left:0;top:0;overflow:hidden;cursor:pointer;color:#fff8ef;padding:10px 12px;transform-origin:0 0;will-change:transform,opacity;border:1px solid var(--paper)}
+.tile .n{font:400 18px/1.1 var(--serif);letter-spacing:-.005em;white-space:nowrap}.tile .a{font:500 14px/1.3 var(--text);opacity:.9;margin-top:4px}.tile .p{font:italic 13px var(--text);opacity:.75}
+.tile.sm .n{font-size:14px}.tile.sm .a{font-size:12px}.tile.xs .n,.tile.xs .a,.tile.xs .p{display:none}
+.tile:hover{filter:brightness(1.06)}
+/* compare */
+.cmp{flex:1;min-height:0}
+/* envelopes */
+.env{display:grid;grid-template-columns:118px 1fr 150px;align-items:center;gap:6px 14px;padding:7px 0}
+.env .nm{font:400 17px var(--serif)}.env .st{font:13.5px var(--text);text-align:right;color:var(--ink2)}.env .st.over{color:var(--over);font-weight:600}
+.env .track{position:relative;height:26px;border:1px solid var(--rule);background:var(--paper2);border-radius:2px;cursor:ew-resize;touch-action:none}
+.env .fill{position:absolute;left:0;top:0;bottom:0;border-radius:1px}
+.env .cap{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ink);margin-left:-1px}
+.env .cap::after{content:"";position:absolute;left:-5px;top:-6px;width:12px;height:12px;border-radius:50%;background:var(--paper);border:2px solid var(--ink)}
+.env .cap span{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font:12px var(--text);color:var(--ink3);white-space:nowrap}
+#rec{flex:1 1 0;min-height:0;overflow:hidden}
+.rec{display:grid;grid-template-columns:10px 1fr auto auto;gap:4px 12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--rule2);font:15px var(--text)}
+.rec i{width:8px;height:8px;border-radius:50%}.rec .m{font-family:var(--serif);font-size:16px}.rec .am{text-align:right}
+.rec .ticks{display:flex;gap:2px}.rec .ticks u{display:block;width:5px;height:11px;background:var(--rule);text-decoration:none}.rec .ticks u.on{background:var(--ink2)}
+.rec .nx{grid-column:2/5;font:italic 12.5px var(--text);color:var(--ink3);margin-top:-3px}
+.foot{position:absolute;left:var(--gx);right:var(--gx);bottom:8px;display:flex;justify-content:space-between;font:italic 12px var(--text);color:var(--ink3)}
+@media (max-width:1600px){.hd h2{font-size:20px;white-space:nowrap}.big{font-size:58px!important}.lede{font-size:15px!important;margin-bottom:8px}.trio .sc{letter-spacing:.05em;font-size:10px;white-space:nowrap}.trio .v{font-size:21px}.trio .d{display:none}
+  .env{grid-template-columns:92px 1fr 132px;gap:4px 10px}.env .nm{font-size:15px}.env .st{font-size:12px}.mast .dek{font-size:15px}.hd .note{font-size:12px}#riverNote span{margin-left:8px!important;font-size:12px!important}}
+@media (max-height:950px){.env{padding:4px 0}.rec{padding:5px 0}.big{font-size:64px}.lede{font-size:16px;margin-bottom:8px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="mast">
+    <h1>Ledger<i>.</i></h1>
+    <p class="dek">The household and the print studio, kept in one book. Three years of every card payment, invoice and sale, read in plain words.</p>
+    <div class="meta"><span class="sample sc">Sample data</span><div class="years"><span>2024</span><span>2025</span><b>2026</b><span>All</span></div></div>
+  </header>
+  <div class="subbar" id="subbar"></div>
+  <div class="body">
+    <section class="cell river"><div class="hd"><h2>The river <em>— in above, out below</em></h2><span class="note" id="riverNote"></span></div><svg id="river"></svg></section>
+    <section class="cell figs" id="figs"></section>
+    <div class="lower">
+      <section><div class="hd"><h2>Where it went <em>in 2026</em></h2><div class="tm-crumbs" id="crumbs"></div></div><div class="tm" id="tm"></div></section>
+      <section><div class="hd"><h2 id="cmpTitle">November, <em>a year apart</em></h2></div><svg class="cmp" id="cmp"></svg></section>
+      <section><div class="hd"><h2>Envelopes <em>for November</em></h2><span class="note">drag a pin to re-budget</span></div><div id="env"></div>
+        <div class="hd" style="margin-top:16px"><h2>Recurring <em>found in the book</em></h2><span class="note" id="recNote"></span></div><div id="rec"></div></section>
+    </div>
+  </div>
+</div>
+<div class="foot"><span id="footL"></span><span>Sample data, generated in this page from one seed · no account is connected</span></div>
+<script>
+"use strict";
+// ——————————————————— data: three years of a household plus a small online print studio ———————————————————
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd = mulberry32(2024), R = (a, b) => a + (b - a) * rnd(), pick = (a) => a[Math.floor(rnd() * a.length)];
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const D0 = Date.UTC(2023, 11, 1), DAYS = 1096, MONTHS = 36;
+const CAT = {
+  Home: { c: "#8c3b2a" }, Studio: { c: "#7a4e6d" }, Groceries: { c: "#c8743a" }, Dining: { c: "#d9a441" }, Transport: { c: "#6f8f72" },
+  Travel: { c: "#4f7a8a" }, Health: { c: "#97a47a" }, Subscriptions: { c: "#b98b73" }, Gifts: { c: "#a69c8d" },
+};
+const INC = { Salary: "#2f4a3a", "Shop sales": "#5f8a6c", Interest: "#a9bfa5" };
+const tx = []; // [day, amount (negative = out), category, sub, merchant]
+const add = (d, amt, cat, sub, m) => tx.push([d, Math.round(amt * 100) / 100, cat, sub, m]);
+const dateOf = (d) => new Date(D0 + d * 864e5);
+for (let d = 0; d < DAYS; d++) {
+  const dt = dateOf(d), dow = dt.getUTCDay(), dom = dt.getUTCDate(), mon = dt.getUTCMonth(), yr = dt.getUTCFullYear(), m = (yr - 2023) * 12 + mon - 11;
+  const wk = dow > 0 && dow < 6, xmas = mon === 11 || (mon === 10 && dom > 15), summer = mon >= 5 && mon <= 7;
+  // Studio: online print sales, many small orders a day, a Christmas rush and a slow summer.
+  const orders = Math.round((5.5 + m * .11) * (xmas ? 2.4 : summer ? .75 : 1) * (dow === 0 ? 1.25 : 1) * R(.7, 1.3));
+  for (let o = 0; o < orders; o++) add(d, R(9, 24) * (rnd() < .18 ? R(2, 4) : 1), "Income", "Shop sales", pick(["Print order", "Print order", "Print order", "Gift card", "Framed print"]));
+  if (dow === 2) add(d, -orders * 7 * R(6.6, 7.6), "Studio", "Printing", pick(["Paperhaus Print", "Paperhaus Print", "Linden Giclée"]));
+  if (wk) add(d, -orders * 1.4 * R(2.6, 3.4), "Studio", "Postage", "Parcelway");
+  if (dom === 3) add(d, -(5.5 + m * .11) * 30 * 22 * .029, "Studio", "Card fees", "Tillpoint");
+  if (dom === 5) { add(d, -24, "Studio", "Software", "Inkwell Pro"); add(d, -16, "Studio", "Software", "Framewise"); add(d, -9, "Studio", "Software", "Hostgrove"); }
+  if (dom === 1) add(d, -(m < 13 ? 180 : 210), "Studio", "Co-working", "The Loft Desk");
+  if (rnd() < .012) add(d, -R(40, 260), "Studio", "Equipment", pick(["Northlight Supply", "Bench & Bevel"]));
+  if (yr === 2025 && mon === 2 && dom === 14) add(d, -1450, "Studio", "Equipment", "Northlight Supply");
+  // Salary, with a raise in April 2025, and interest.
+  if (dom === 25) add(d, yr > 2025 || (yr === 2025 && mon >= 3) ? 3920 : 3480, "Income", "Salary", "Northfold Agency");
+  if (dom === 28) add(d, 18 + m * 1.9, "Income", "Interest", "Saltmarsh Savings");
+  // Home.
+  if (dom === 1) add(d, -(yr >= 2026 ? 1720 : 1650), "Home", "Rent", "Larchmont Lettings");
+  if (dom === 8) add(d, -(68 + 120 * (Math.cos((mon + .5) / 12 * 6.283) * .5 + .5)) * R(.92, 1.08), "Home", "Energy", "Brightwater Energy");
+  if (dom === 12 && mon % 3 === 0) add(d, -R(96, 118), "Home", "Water", "Cleartide Water");
+  if (dom === 15) add(d, -38, "Home", "Broadband", "Fernline");
+  if (dom === 2 && (mon < 1 || mon > 2)) add(d, -148, "Home", "Council tax", "Borough of Ashby");
+  if (rnd() < .02) add(d, -R(15, 140), "Home", "Repairs", pick(["Holloway & Sons", "Fixit Depot"]));
+  if (yr === 2025 && mon === 8 && (dom === 4 || dom === 26)) add(d, -4200, "Home", "Repairs", "Holloway & Sons");
+  // Groceries, dining, coffee.
+  if (rnd() < (dow === 6 ? .9 : .28)) add(d, -R(28, 118), "Groceries", "Supermarket", pick(["Pantry & Co", "Pantry & Co", "Greenleaf Market"]));
+  if (rnd() < .55) add(d, -R(2.5, 14), "Groceries", "Top-ups", pick(["Corner Larder", "Hollis Bakery", "Corner Larder"]));
+  if (wk && rnd() < .78) add(d, -R(2.8, 4.4), "Dining", "Coffee", pick(["Café Mira", "Café Mira", "Small Batch"]));
+  if (rnd() < (dow >= 5 || dow === 0 ? .55 : .2) * (xmas ? 1.5 : 1)) add(d, -R(16, 92), "Dining", "Restaurants", pick(["Ember Room", "Noodle Lane", "Sundry Kitchen", "The Gannet"]));
+  // Transport.
+  if (dom === 1) add(d, -86, "Transport", "Rail pass", "Metroline");
+  if (rnd() < .1) add(d, -R(44, 72), "Transport", "Fuel", "Northway Fuel");
+  if (rnd() < .06) add(d, -R(4, 18), "Transport", "Parking", "ParkSmart");
+  // Health and subscriptions.
+  if (dom === 6) add(d, -42, "Health", "Gym", "Forge Gym");
+  if (rnd() < .025) add(d, -R(6, 38), "Health", "Pharmacy", "Bellwort Pharmacy");
+  if (dom === 9) add(d, -10.99, "Subscriptions", "Streaming", "Reelhouse");
+  if (dom === 17) add(d, -11.99, "Subscriptions", "Music", "Tonebox");
+  if (dom === 20) add(d, -8, "Subscriptions", "News", "Daily Courant");
+  if (mon === 2 && dom === 10) add(d, -79, "Subscriptions", "Storage", "Cloudbox");
+  // Travel: trips with flights, stays and spending.
+  for (const [y, mo, d1, len, big] of [[2024, 3, 6, 5, 0], [2024, 7, 9, 10, 1], [2025, 1, 14, 4, 0], [2025, 6, 18, 14, 1], [2026, 4, 2, 6, 0], [2026, 7, 12, 9, 1]]) {
+    if (yr === y && mon === mo - (dom < d1 - 40 ? 0 : 0) && dom === d1) { add(d - 40, -R(180, 340) * (big ? 2 : 1), "Travel", "Flights", "Skylark Air"); add(d, -R(90, 140) * len, "Travel", "Stays", pick(["Harbour Inn", "Casa Lume"])); }
+    if (yr === y && mon === mo && dom >= d1 && dom < d1 + len) add(d, -R(25, 110), "Travel", "Spending", pick(["Local cafés", "Markets", "Museums"]));
+  }
+  // Gifts, heavy in December.
+  if (rnd() < (mon === 11 ? .28 : .03)) add(d, -R(15, 120), "Gifts", "Presents", pick(["Thimble & Twine", "Booknook", "Lark Gifts"]));
+}
+tx.sort((a, b) => a[0] - b[0]);
+const monthOf = (d) => { const dt = dateOf(d); return (dt.getUTCFullYear() - 2023) * 12 + dt.getUTCMonth() - 11; };
+const MNAME = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const mLabel = (m) => `${MNAME[(m + 11) % 12]} ${2023 + Math.floor((m + 11) / 12)}`;
+// Month × category totals.
+const inc = Object.fromEntries(Object.keys(INC).map((k) => [k, new Float64Array(MONTHS)]));
+const out = Object.fromEntries(Object.keys(CAT).map((k) => [k, new Float64Array(MONTHS)]));
+for (const [d, a, c, s] of tx) { const m = monthOf(d); if (c === "Income") inc[s][m] += a; else out[c][m] += -a; }
+const sum = (o, m) => Object.values(o).reduce((s, arr) => s + arr[m], 0);
+const fmt0 = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 0 }), money = (v) => `£${fmt0.format(Math.round(v))}`;
+const kfmt = (v) => Math.abs(v) >= 1000 ? `£${(v / 1000).toFixed(Math.abs(v) >= 1e5 ? 0 : 1)}k` : money(v);
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+const ease = (t) => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+function tween(ms, fn){ return new Promise((ok) => { if (REDUCED) { fn(1); return ok(); } const t0 = performance.now(); const step = (now) => { const u = Math.min(1, (now - t0) / ms); fn(ease(u), u); if (u < 1) requestAnimationFrame(step); else ok(); }; requestAnimationFrame(step); }); }
+const NOW_M = 35, CMP_M = 23;
+const cmpOut = Object.fromEntries(Object.keys(CAT).map((c) => [c, 0])); for (const t of tx) if (t[2] !== "Income" && monthOf(t[0]) === CMP_M && dateOf(t[0]).getUTCDate() <= 26) cmpOut[t[2]] -= t[1];
+
+// ——————————————————— masthead strip, key figures ———————————————————
+let totIn = 0, totOut = 0; for (let m = 0; m < MONTHS; m++) { totIn += sum(inc, m); totOut += sum(out, m); }
+$("subbar").innerHTML = `<span><b>${fmt0.format(tx.length)}</b> entries</span><span><b>36</b> months, Dec 2023 – Nov 2026</span><span><b>2</b> accounts · household, studio</span><span><b>${Object.keys(CAT).length}</b> categories, <b>${new Set(tx.map((t) => t[4])).size}</b> payees</span><span style="margin-left:auto">Book closed 26 Nov 2026</span>`;
+$("footL").textContent = `${fmt0.format(tx.length)} entries · every total on this page is summed from them`;
+function figs(){
+  const net = totIn - totOut, rate = net / totIn, nIn = sum(inc, NOW_M), nOut = sum(out, NOW_M), pOut = Object.values(cmpOut).reduce((a, b) => a + b, 0);
+  $("figs").innerHTML = `<div class="hd"><h2>Three years, <em>in one line</em></h2></div>
+    <div class="sc">Kept, after everything</div><div class="big"><small>£</small>${fmt0.format(Math.round(net))}</div>
+    <p class="lede">Of every pound that came in, <b>${Math.round(rate * 100)}p</b> stayed. The studio paid for the roof in September 2025, and still left the year ahead.</p>
+    <div class="trio"><div><div class="sc">In, November</div><div class="v">${money(nIn)}</div><div class="d">to the 26th</div></div>
+      <div><div class="sc">Out, November</div><div class="v">${money(nOut)}</div><div class="d">${nOut > pOut ? "+" : "−"}${Math.abs(Math.round((nOut / pOut - 1) * 100))}% on 1–26 Nov 2025</div></div>
+      <div><div class="sc">Studio margin</div><div class="v">${Math.round((1 - out.Studio[NOW_M] / inc["Shop sales"][NOW_M]) * 100)}%</div><div class="d">sales less studio costs</div></div></div>
+`;
+}
+
+// ——————————————————— the river ———————————————————
+let riverGeom = null;
+function smoothPath(xs, ys){ let d = `M${xs[0]},${ys[0]}`; for (let i = 0; i < xs.length - 1; i++) { const x0 = xs[Math.max(0, i - 1)], y0 = ys[Math.max(0, i - 1)], x1 = xs[i], y1 = ys[i], x2 = xs[i + 1], y2 = ys[i + 1], x3 = xs[Math.min(xs.length - 1, i + 2)], y3 = ys[Math.min(xs.length - 1, i + 2)];
+  d += `C${x1 + (x2 - x0) / 6},${y1 + (y2 - y0) / 6} ${x2 - (x3 - x1) / 6},${y2 - (y3 - y1) / 6} ${x2},${y2}`; } return d; }
+function river(){
+  const sv = $("river"); sv.innerHTML = ""; const w = sv.parentNode.clientWidth - 32, h = sv.parentNode.clientHeight - 62; sv.setAttribute("width", w); sv.setAttribute("height", h);
+  const L = 58, Rr = w - 8, X = (m) => L + m / (MONTHS - 1) * (Rr - L);
+  let mxI = 0, mxO = 0; for (let m = 0; m < MONTHS; m++) { mxI = Math.max(mxI, sum(inc, m)); mxO = Math.max(mxO, sum(out, m)); }
+  const top = 40, bottom = h - 26, y0 = top + (bottom - top) * mxI / (mxI + mxO), k = (bottom - top) / (mxI + mxO), xs = [...Array(MONTHS).keys()].map(X);
+  riverGeom = { X, y0, k, top, bottom, w, h };
+  // gridlines
+  for (let v = -20000; v <= 30000; v += 10000) { const y = y0 - v * k; if (y < top - 4 || y > bottom + 4) continue; el("line", { x1: L, x2: Rr, y1: y, y2: y, stroke: v ? "#e6dccb" : "#2b2118", "stroke-width": v ? 1 : 1.2 }, sv);
+    const t = el("text", { x: L - 10, y: y + 4, "text-anchor": "end", "font-size": 12.5, fill: "#8a7b68" }, sv); t.textContent = v ? `${v > 0 ? "" : "−"}£${Math.abs(v / 1000)}k` : "£0"; }
+  const stack = (layers, sign) => { const base = new Float64Array(MONTHS); for (const [name, arr, col] of layers) { const ysA = [...base].map((b) => y0 - sign * b * k), ysB = [...base].map((b, m) => y0 - sign * (b + arr[m]) * k);
+      const d = smoothPath(xs, ysB) + "L" + smoothPath([...xs].reverse(), [...ysA].reverse()).slice(1) + "Z"; el("path", { d, fill: col, opacity: .92, "data-layer": name }, sv); for (let m = 0; m < MONTHS; m++) base[m] += arr[m]; } };
+  stack(Object.entries(INC).map(([n, c]) => [n, inc[n], c]), 1);
+  stack(Object.keys(CAT).map((n) => [n, out[n], CAT[n].c]), -1);
+  for (let m = 1; m < MONTHS; m++) if ((m + 11) % 12 === 0) { el("line", { x1: X(m), x2: X(m), y1: top, y2: bottom, stroke: "rgba(43,33,24,.25)", "stroke-dasharray": "2 3" }, sv); const t = el("text", { x: X(m) + 6, y: bottom + 18, "font-size": 13, fill: "#5d4f41", "font-weight": 600 }, sv); t.textContent = 2023 + Math.floor((m + 11) / 12); }
+  for (let m = 0; m < MONTHS; m += 3) if ((m + 11) % 12 !== 0 && (X(3) - X(0) > 80 || (m + 11) % 12 !== 2)) { const t = el("text", { x: X(m), y: bottom + 18, "font-size": 12, fill: "#8a7b68", "text-anchor": "middle" }, sv); t.textContent = MNAME[(m + 11) % 12]; }
+  // annotations
+  const note = (m, val, text, dy, dx = 5, anchor = "start") => { const x = X(m), y = y0 - val * k; el("line", { x1: x, x2: x, y1: y, y2: y + dy, stroke: "#2b2118", "stroke-width": .8 }, sv); el("circle", { cx: x, cy: y, r: 2.6, fill: "#2b2118" }, sv);
+    const t = el("text", { x: x + dx, y: y + dy + (dy < 0 ? -4 : 13), "text-anchor": anchor, "font-size": 13.5, "font-style": "italic", fill: "#2b2118" }, sv); t.textContent = text; };
+  note(12, sum(inc, 12), "Christmas rush in the shop", -14);
+  note(16, sum(inc, 16), "The raise, April", -22);
+  note(21, -sum(out, 21), "A new roof, £8,400", -10, -10, "end");
+  note(31, -sum(out, 31), "Two weeks by the sea", 22, -6, "end");
+  // cursor
+  const cur = el("g", { id: "rcur", opacity: 0 }, sv); el("line", { x1: 0, x2: 0, y1: top - 6, y2: bottom, stroke: "#c4572e", "stroke-width": 1.4 }, cur);
+  el("rect", { x: -70, y: top - 36, width: 140, height: 22, rx: 2, fill: "#2b2118" }, cur); el("text", { id: "rcurt", x: 0, y: top - 21, "text-anchor": "middle", "font-size": 12.5, fill: "#f5efe4" }, cur);
+  const ca = el("g", { id: "rcurA", opacity: 0 }, sv); el("line", { x1: 0, x2: 0, y1: top - 6, y2: bottom, stroke: "#8a7b68", "stroke-width": 1, "stroke-dasharray": "3 3" }, ca);
+  sv.onpointermove = (e) => { const r = sv.getBoundingClientRect(); const m = Math.round((e.clientX - r.left - L) / (Rr - L) * (MONTHS - 1)); if (m >= 0 && m < MONTHS) cursor(m); };
+}
+function riverLegend(){ $("riverNote").innerHTML = [...Object.entries(INC), ["Home", CAT.Home.c], ["Studio", CAT.Studio.c], ["Groceries", CAT.Groceries.c], ["Travel", CAT.Travel.c], ["the rest", "#b5a691"]].map(([n, c]) => `<span style="white-space:nowrap;margin-left:14px;font-style:normal;font-size:13px;color:#5d4f41"><i style="display:inline-block;width:10px;height:10px;background:${c};margin-right:6px;vertical-align:-1px"></i>${n}</span>`).join(""); }
+function cursor(mf, which = "rcur"){ if (!riverGeom) return; const m = Math.max(0, Math.min(MONTHS - 1, mf)); const g = $(which); g.setAttribute("opacity", 1); g.setAttribute("transform", `translate(${riverGeom.X(m)},0)`);
+  if (which === "rcur") { const mi = Math.round(m); $("rcurt").textContent = `${mLabel(mi)} · net ${kfmt(sum(inc, mi) - sum(out, mi))}`; } }
+
+// ——————————————————— treemap with drill-down ———————————————————
+function squarify(items, x, y, w, h){ // items: [{v}], returns rects in place
+  const total = items.reduce((s, i) => s + i.v, 0), out = []; let rest = items.slice().sort((a, b) => b.v - a.v), scale = w * h / total;
+  while (rest.length) { const short = Math.min(w, h); let row = [], best = Infinity;
+    for (const it of rest) { const r = [...row, it], s = r.reduce((a, b) => a + b.v * scale, 0), worst = Math.max(...r.map((q) => Math.max(short * short * q.v * scale / (s * s), s * s / (short * short * q.v * scale)))); if (worst > best) break; best = worst; row = r; }
+    const s = row.reduce((a, b) => a + b.v * scale, 0), thick = s / short; let off = 0;
+    for (const it of row) { const len = it.v * scale / thick; if (w >= h) out.push({ ...it, x, y: y + off, w: thick, h: len }); else out.push({ ...it, x: x + off, y, w: len, h: thick }); off += len; }
+    if (w >= h) { x += thick; w -= thick; } else { y += thick; h -= thick; } rest = rest.slice(row.length); }
+  return out; }
+const yearTx = tx.filter((t) => t[2] !== "Income" && monthOf(t[0]) >= 25);
+function nodeAt(path){ // children of a path [] / [cat] / [cat, sub]
+  const map = new Map();
+  for (const t of yearTx) { if (path[0] && t[2] !== path[0]) continue; if (path[1] && t[3] !== path[1]) continue; const key = path.length === 0 ? t[2] : path.length === 1 ? t[3] : t[4]; map.set(key, (map.get(key) || 0) - t[1]); }
+  return [...map].map(([name, v]) => ({ name, v })); }
+const TM = { path: [], tiles: [] };
+const tmTotal = () => yearTx.reduce((s, t) => s - t[1], 0);
+function shade(hex, f){ const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; const m = (c) => Math.round(f > 0 ? c + (255 - c) * f : c * (1 + f)); return `rgb(${m(r)},${m(g)},${m(b)})`; }
+function layoutTM(path){ const box = $("tm"), W = box.clientWidth, H = box.clientHeight; const items = nodeAt(path), tot = items.reduce((s, i) => s + i.v, 0);
+  return squarify(items, 0, 0, W, H).map((r, i) => ({ ...r, share: r.v / tot, color: path.length ? shade(CAT[path[0]].c, -.18 + (i % 5) * .1) : CAT[r.name].c })); }
+function tileEl(r){ const d = document.createElement("div"); d.className = "tile"; d.style.width = `${r.w}px`; d.style.height = `${r.h}px`; d.style.background = r.color; const a = r.w * r.h;
+  if (a < 5200 || r.w < 70 || r.h < 40) d.classList.add("xs"); else if (a < 22000 || r.w < 130) d.classList.add("sm");
+  d.innerHTML = `<div class="n">${r.name}</div><div class="a">${money(r.v)}</div><div class="p">${(r.share * 100).toFixed(r.share < .1 ? 1 : 0)}%</div>`;
+  d.style.transform = `translate(${r.x}px,${r.y}px)`; d.title = `${r.name}: ${money(r.v)}`; d.onclick = () => { if (TM.path.length < 2) drillInto(r.name); }; return d; }
+function renderTM(path){ const box = $("tm"); box.innerHTML = ""; TM.path = path; TM.tiles = layoutTM(path).map((r) => { const d = tileEl(r); box.appendChild(d); return { r, d }; }); crumbs(); }
+function crumbs(){ const p = TM.path; const parts = [`<a data-l="0">All spending</a>`]; p.forEach((n, i) => parts.push(i === p.length - 1 ? `<b>${n}</b>` : `<a data-l="${i + 1}">${n}</a>`));
+  const total = p.length ? nodeAt(p).reduce((s, i) => s + i.v, 0) : tmTotal();
+  $("crumbs").innerHTML = parts.join(" <span>›</span> ") + ` <span style="margin-left:10px;font-style:italic">${money(total)}</span>`;
+  $("crumbs").querySelectorAll("a").forEach((a) => a.onclick = () => { renderTM(TM.path.slice(0, +a.dataset.l)); }); }
+async function drillInto(name, ms = 1300){
+  const from = TM.tiles.find((t) => t.r.name === name); if (!from) return; const box = $("tm"), W = box.clientWidth, H = box.clientHeight;
+  const next = layoutTM([...TM.path, name]); const sx = from.r.w / W, sy = from.r.h / H;
+  const kids = next.map((r) => { const d = tileEl(r); d.style.opacity = 0; box.appendChild(d); return { r, d }; });
+  const olds = TM.tiles;
+  await tween(ms, (u) => {
+    // The parent tile grows to fill the box; its children ride inside it; siblings are pushed out and fade.
+    const px = from.r.x * (1 - u), py = from.r.y * (1 - u), pw = from.r.w + (W - from.r.w) * u, ph = from.r.h + (H - from.r.h) * u, kx = pw / from.r.w, ky = ph / from.r.h;
+    for (const t of olds) { const cx = (t.r.x - from.r.x) * kx + px, cy = (t.r.y - from.r.y) * ky + py; t.d.style.transform = `translate(${cx}px,${cy}px) scale(${kx},${ky})`; t.d.style.opacity = t === from ? 1 - Math.min(1, u * 1.6) : 1 - u; }
+    for (const k of kids) { const x = px + k.r.x * pw / W, y = py + k.r.y * ph / H; k.d.style.transform = `translate(${x}px,${y}px) scale(${pw / W},${ph / H})`; k.d.style.opacity = Math.min(1, u * 1.8); }
+  });
+  for (const t of olds) t.d.remove(); for (const k of kids) k.d.style.transform = `translate(${k.r.x}px,${k.r.y}px)`;
+  TM.path = [...TM.path, name]; TM.tiles = kids; crumbs();
+}
+
+// ——————————————————— month comparison ———————————————————
+function compare(p = 1){
+  const sv = $("cmp"); sv.innerHTML = ""; const w = sv.parentNode.clientWidth - 64, h = sv.parentNode.clientHeight - 70; sv.setAttribute("width", w); sv.setAttribute("height", h);
+  const rows = Object.keys(CAT).map((c) => ({ c, a: cmpOut[c], b: out[c][NOW_M] })).sort((x, y) => y.b - x.b);
+  const mx = Math.max(...rows.map((r) => Math.max(r.a, r.b))), L = 104, Rr = w - 58, X = (v) => L + Math.sqrt(v / mx) * (Rr - L), rh = Math.min(42, (h - 40) / rows.length);
+  for (const v of [100, 1000, 4000]) { const x = X(v); el("line", { x1: x, x2: x, y1: 10, y2: 14 + rh * rows.length, stroke: "#e6dccb" }, sv); const t = el("text", { x, y: 26 + rh * rows.length, "text-anchor": "middle", "font-size": 12, fill: "#8a7b68" }, sv); t.textContent = kfmt(v); }
+  rows.forEach((r, i) => { const y = 24 + i * rh, b = r.a + (r.b - r.a) * p;
+    const t = el("text", { x: 0, y: y + 5, "font-size": 15, fill: "#2b2118", "font-family": "ui-serif, Georgia, serif" }, sv); t.textContent = r.c;
+    el("line", { x1: X(r.a), x2: X(b), y1: y, y2: y, stroke: CAT[r.c].c, "stroke-width": 5, opacity: .5, "stroke-linecap": "round" }, sv);
+    el("circle", { cx: X(r.a), cy: y, r: 5, fill: "#f5efe4", stroke: "#8a7b68", "stroke-width": 1.5 }, sv);
+    el("circle", { cx: X(b), cy: y, r: 6.5, fill: CAT[r.c].c }, sv);
+    const ch = r.a ? (b / r.a - 1) : 0, dt = el("text", { x: w - 2, y: y + 5, "text-anchor": "end", "font-size": 13.5, fill: ch > .15 ? "#b23a1f" : ch < -.15 ? "#3d6b4b" : "#5d4f41", "font-weight": Math.abs(ch) > .15 ? 600 : 400 }, sv);
+    dt.textContent = r.a < 1 ? (b > 1 ? "new" : "—") : `${ch >= 0 ? "+" : "−"}${Math.abs(Math.round(ch * 100))}%`; });
+  const k = el("g", { transform: `translate(${L},${44 + rh * rows.length})` }, sv); el("circle", { cx: 5, cy: -4, r: 5, fill: "#f5efe4", stroke: "#8a7b68", "stroke-width": 1.5 }, k);
+  const a = el("text", { x: 15, y: 0, "font-size": 12.5, fill: "#5d4f41", "font-style": "italic" }, k); a.textContent = "1–26 Nov 2025"; el("circle", { cx: 128, cy: -4, r: 6, fill: "#2b2118" }, k);
+  const b2 = el("text", { x: 139, y: 0, "font-size": 12.5, fill: "#5d4f41", "font-style": "italic" }, k); b2.textContent = "1–26 Nov 2026 · √ scale";
+}
+
+// ——————————————————— envelopes ———————————————————
+const avg6 = (c) => { let s2 = 0; for (let m = NOW_M - 6; m < NOW_M; m++) s2 += out[c][m]; return s2 / 6; };
+const ENV_DEFAULT = Object.fromEntries(["Groceries", "Dining", "Transport", "Health", "Subscriptions", "Gifts"].map((c) => [c, Math.round((c === "Dining" ? out[c][NOW_M] * .88 : Math.max(avg6(c) * 1.08, out[c][NOW_M] * 1.12)) / 10) * 10]));
+let budgets = { ...ENV_DEFAULT };
+const ENV_MAX = Object.fromEntries(Object.keys(ENV_DEFAULT).map((c) => [c, Math.ceil(Math.max(ENV_DEFAULT[c], out[c][NOW_M]) * 1.55 / 50) * 50]));
+function envelopes(){
+  $("env").innerHTML = Object.keys(ENV_DEFAULT).map((c) => `<div class="env" data-c="${c}"><span class="nm">${c}</span><div class="track"><div class="fill"></div><div class="cap"><span></span></div></div><span class="st"></span></div>`).join("");
+  for (const row of $("env").children) { const c = row.dataset.c, tr = row.querySelector(".track");
+    const setFrom = (e) => { const r = tr.getBoundingClientRect(); budgets[c] = Math.round(Math.max(10, Math.min(ENV_MAX[c], (e.clientX - r.left) / r.width * ENV_MAX[c])) / 5) * 5; envUpdate(); };
+    tr.onpointerdown = (e) => { tr.setPointerCapture(e.pointerId); setFrom(e); tr.onpointermove = setFrom; }; tr.onpointerup = () => { tr.onpointermove = null; }; }
+  envUpdate(); }
+function envUpdate(){ for (const row of $("env").children) { const c = row.dataset.c, spent = out[c][NOW_M], b = budgets[c], mx = ENV_MAX[c];
+    const f = row.querySelector(".fill"), cap = row.querySelector(".cap"), st = row.querySelector(".st"); const over = spent > b;
+    f.style.width = `${Math.min(100, spent / mx * 100)}%`; f.style.background = over ? `repeating-linear-gradient(135deg,${CAT[c].c},${CAT[c].c} 5px,${shade(CAT[c].c, .25)} 5px,${shade(CAT[c].c, .25)} 9px)` : CAT[c].c;
+    cap.style.left = `${b / mx * 100}%`; cap.querySelector("span").textContent = "";
+    st.className = "st" + (over ? " over" : ""); st.innerHTML = (over ? `${money(spent - b)} over` : `${money(b - spent)} left`) + `<span style="color:#8a7b68;font-weight:400"> of ${money(b)}</span>`; } }
+
+// ——————————————————— recurring payments, found by cadence ———————————————————
+function recurring(){
+  const by = new Map(); for (const t of tx) if (t[1] < 0) { const k = t[4]; if (!by.has(k)) by.set(k, []); by.get(k).push(t); }
+  const found = [];
+  for (const [m, list] of by) { if (list.length < 6) continue; const gaps = list.slice(1).map((t, i) => t[0] - list[i][0]); const g = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1];
+    const amts = list.map((t) => -t[1]), mean = amts.reduce((a, b) => a + b) / amts.length, sd = Math.sqrt(amts.reduce((s, a) => s + (a - mean) ** 2, 0) / amts.length);
+    const steady = gaps.filter((x) => Math.abs(x - g) <= 3).length / gaps.length;
+    if (g >= 26 && g <= 33 && steady > .8 && sd / mean < .25) found.push({ m, cat: list[0][2], amt: -list[list.length - 1][1], last: list[list.length - 1][0], months: new Set(list.map((t) => monthOf(t[0]))), varies: sd / mean > .03 }); }
+  found.sort((a, b) => b.amt - a.amt);
+  $("recNote").textContent = `${found.length} monthly, by cadence`;
+  $("rec").innerHTML = found.slice(0, 8).map((r) => { const nx = dateOf(r.last + 30.4), ticks = [...Array(12).keys()].map((i) => `<u class="${r.months.has(NOW_M - 11 + i) ? "on" : ""}"></u>`).join("");
+    return `<div class="rec"><i style="background:${CAT[r.cat].c}"></i><span class="m">${r.m}</span><span class="ticks" title="last 12 months">${ticks}</span><span class="am">${r.varies ? "≈" : ""}${money(r.amt)}</span><span class="nx">monthly · next ${nx.getUTCDate()} ${MNAME[nx.getUTCMonth()]}${r.varies ? " · amount varies" : ""}</span></div>`; }).join(""); while ($("rec").children.length > 2 && $("rec").getBoundingClientRect().bottom > innerHeight - 34) $("rec").lastElementChild.remove(); }
+
+function renderAll(){ figs(); riverLegend(); river(); renderTM(TM.path); compare(1); envelopes(); recurring(); }
+addEventListener("resize", () => renderAll());
+(async () => { await document.fonts.ready;
+  renderAll(); requestAnimationFrame(() => { document.documentElement.dataset.ready = "1"; }); })();
+</script>
+</body>
+</html>

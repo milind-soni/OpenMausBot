@@ -2,6 +2,14 @@
  * server's own profile person). */
 export type RoomThreadSpeaker = { botId: string } | { person: { id?: string; name?: string } };
 
+/** Who closed a room thread: a person who can post in the room (`id`: their person key, "owner" for the server's own
+ * profile person) or one of its bots (`id`: the bot's id). */
+export interface RoomThreadCloser {
+  kind: "person" | "bot";
+  id: string;
+  name: string;
+}
+
 /** One of a room's threads as its feed shows it. `first` is the thread's first conversation line, its text clamped to
  * ROOM_THREAD_FIRST_CHARS (`clipped` when cut); null while the thread has no line yet. `replies` counts the conversation
  * lines after it, on every branch of the thread; `repliers` are the latest distinct speakers of those, newest first, at
@@ -14,7 +22,7 @@ export interface RoomThreadSummary {
   repliers: RoomThreadSpeaker[];
 }
 
-/** GET /api/groups/:id/threads/summary: the room's threads that are not archived. */
+/** GET /api/groups/:id/threads/summary: the room's threads that are not archived, and with ?archived=1 the archived ones too. */
 export interface RoomThreadSummariesResponse {
   threads: RoomThreadSummary[];
 }

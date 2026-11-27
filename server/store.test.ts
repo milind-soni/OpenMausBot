@@ -726,6 +726,25 @@ describe("Store", () => {
     expect(whole.hasMore).toBe(false);
   });
 
+  it("newestMessageId answers from the cached thread, or with one indexed read when it is not cached", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    expect(store.newestMessageId(bot.threadId)).toBeUndefined();
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "first" });
+    const last = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "second" });
+    expect(store.newestMessageId(bot.threadId)).toBe(last.id);
+    flushLaterSaves();
+    const read = vi.spyOn(mdb, "readThread");
+    try {
+      const fresh = new Store(selection);
+      expect(fresh.newestMessageId(bot.threadId)).toBe(last.id);
+      expect(fresh.newestMessageId("no-such-thread")).toBeUndefined();
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("caches a complete tail but never caches a zero-message page as an empty thread", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
@@ -2085,6 +2104,19 @@ describe("Store change stream", () => {
     expect(titled?.openedBy?.botId).toBe(sender.id);
     store.renameTask(recipient.id, row.threadId, "Export verification");
     expect(store.retitleTask(recipient.id, row.threadId, `@Scout ${brief}`, "Late title")).toBeNull();
+  });
+
+  it("a first line that is only OpenMausBot's note leaves the thread untitled for the next line", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Scout" });
+    const retry = "[From OpenMausBot · retry · information only — requested by OpenMausBot, automatically. Continue the request above.]";
+    const row = store.createTask(bot.id)!;
+    expect(store.titleTaskFromFirstMessage(bot.id, retry, row.threadId)).toBeNull();
+    expect(store.titleTaskFromFirstMessage(bot.id, "Check the invoices", row.threadId)?.title).toBe("Check the invoices");
+    const group = store.createGroup("Ops", [bot.id])!;
+    const task = store.activeGroupTask(group.id)!;
+    expect(store.titleGroupTaskFromFirstMessage(group.id, retry, task.threadId)).toBeNull();
+    expect(store.titleGroupTaskFromFirstMessage(group.id, "Audit the payroll", task.threadId)?.title).toBe("Audit the payroll");
   });
 
   it("channel first-message titling reports the row it named, and a late retitle cannot undo a rename", () => {

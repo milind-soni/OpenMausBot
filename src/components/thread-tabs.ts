@@ -1,8 +1,10 @@
 import type { Bot, Task } from "@/state/store";
 import type { NewChat } from "@/state/new-chat";
 import { isNewChatThread, newChatThreadId } from "@/state/new-chat";
-import { ownThread } from "./sidebar-thread-labels";
 import { isArchived, isSnoozed, isWorking, orderedThreadList } from "./SidebarThreadRow";
+
+/** The factory title a thread starts with, shown localized. */
+const UNTITLED = "New thread";
 
 export interface ThreadTab {
   threadId: string;
@@ -20,8 +22,11 @@ export type TabsBot = Pick<Bot, "id" | "threadId"> & Partial<Pick<Bot, "mainThre
 /** The open thread: where a switch is going, or the blank New thread chat. */
 export const openTabId = (bot: Pick<Bot, "threadId" | "switchingTo">): string => bot.switchingTo ?? bot.threadId;
 
-const tabbed = (task: Task, open: string) =>
-  task.threadId === open || task.pinned === true || (ownThread(task) && !isArchived(task) && !isSnoozed(task) && !task.closedBy);
+/** A thread someone is still talking in, whoever opened it: not a routine's run or a burst's, and not ended, archived or snoozed. */
+const stillOpen = (task: Task) => !task.routineRunId && !task.openedBy?.burstId && !isArchived(task) && !isSnoozed(task) && !task.closedBy;
+
+const tabbed = (task: Task, open: string, main: string | undefined) =>
+  task.threadId === open || task.threadId === main || task.pinned === true || stillOpen(task);
 
 /**
  * A bot's threads as tabs, in its sidebar order: pinned first, then by recent use. The blank New thread chat sits where
@@ -29,7 +34,7 @@ const tabbed = (task: Task, open: string) =>
  */
 export function threadTabs(bot: TabsBot): ThreadTab[] {
   const open = openTabId({ threadId: bot.threadId, switchingTo: bot.switchingTo });
-  const tasks = orderedThreadList((bot.tasks ?? []).filter((task) => tabbed(task, open)));
+  const tasks = orderedThreadList((bot.tasks ?? []).filter((task) => tabbed(task, open, bot.mainThreadId)));
   const main = bot.mainThreadId;
   const real = tasks.length;
   const tabs: ThreadTab[] = tasks.map((task) => {
@@ -48,8 +53,30 @@ export function threadTabs(bot: TabsBot): ThreadTab[] {
   return tabs;
 }
 
-/** The strip shows for a bot with two threads or more, its blank New thread chat counted. */
+const sameTab = (a: ThreadTab, b: ThreadTab) => a.threadId === b.threadId && a.title === b.title && a.pinned === b.pinned
+  && a.working === b.working && a.draft === b.draft && a.closable === b.closable && a.renamable === b.renamable;
+
+/** Whether two strips draw the same tabs in the same order. */
+export function sameTabs(a: readonly ThreadTab[], b: readonly ThreadTab[]): boolean {
+  return a === b || (a.length === b.length && a.every((tab, i) => sameTab(tab, b[i]!)));
+}
+
+/** Whether a bot has two threads or more to switch between, its blank New thread chat counted: Simple's pill switcher
+ * shows for these. The tab strip shows whenever Thread tabs is on, see stripTabs. */
 export const showsTabs = (tabs: readonly ThreadTab[]): boolean => tabs.length > 1;
+
+/** The thread tab strip's tabs: the bot's threads, and the open one before it has a thread row of its own, so a bot
+ * with one thread, or none yet, still gets a tab to sit on beside the strip's +. */
+export function stripTabs(bot: TabsBot): ThreadTab[] {
+  const tabs = threadTabs(bot);
+  const open = openTabId({ threadId: bot.threadId, switchingTo: bot.switchingTo });
+  if (!open || tabs.some((tab) => tab.threadId === open)) return tabs;
+  const at = tabs.findIndex((tab) => !tab.pinned);
+  const tab: ThreadTab = {
+    threadId: open, title: UNTITLED, pinned: false, working: open === bot.threadId && Boolean(bot.busy), draft: false, closable: false, renamable: false,
+  };
+  return [...tabs.slice(0, at < 0 ? tabs.length : at), tab, ...tabs.slice(at < 0 ? tabs.length : at)];
+}
 
 /** Where closing a tab goes when it was the open one: the tab after it, else the one before. */
 export function neighbourOf(tabs: readonly ThreadTab[], threadId: string): string | undefined {
@@ -58,7 +85,7 @@ export function neighbourOf(tabs: readonly ThreadTab[], threadId: string): strin
   return (tabs[at + 1] ?? tabs[at - 1])?.threadId;
 }
 
-/** Whether the strip shows for this bot in the chat: the header's New thread plus gives way to the strip's own. */
+/** Whether this bot has two threads or more in the chat, its blank New thread chat counted, as showsTabs. */
 export function botShowsTabs(bot: TabsBot | undefined, newChat: NewChat | null | undefined): boolean {
   if (!bot) return false;
   const shown = newChat?.botId === bot.id ? { ...bot, threadId: newChatThreadId(bot.id), switchingTo: undefined } : bot;

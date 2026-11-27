@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, type MutableRefObject } from "react";
 import { appVersion, openExternalLink } from "@/lib/app-links";
 import { useStore } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
-import { RPC_HOST_REFUSED, type JsonRpcError } from "../../../shared/app-frame/bridge";
+import { PAGE_RPC_METHODS, RPC_HOST_REFUSED, type JsonRpcError } from "../../../shared/app-frame/bridge";
 import { callAppRpc, newAppSendId, postAppContext, sendAppMessage } from "./app-api";
 import { mountAppFrame, type AppSelection } from "./app-frame-host";
 import { appHostContext, appMaxHeight, appThemeContext } from "./app-host-context";
@@ -39,6 +39,8 @@ export interface AppFrameProps {
   onHeading?(heading: boolean | null): void;
   /** Takes the page's message instead of sending it. */
   onDraft?(text: string): void;
+  /** Why the page's data and state calls can't be answered here (a saved app whose chat is gone): they fail with it. */
+  pageRefusal?: string;
 }
 
 const refusal = (message: string): JsonRpcError => ({ code: RPC_HOST_REFUSED, message });
@@ -70,6 +72,8 @@ export function AppFrame(props: AppFrameProps) {
       onHeading: (heading) => latest.current.onHeading?.(heading),
       adapter: {
         async callRpc(method, params) {
+          const refused = latest.current.pageRefusal;
+          if (refused && (PAGE_RPC_METHODS as readonly string[]).includes(method)) throw refusal(refused);
           const outcome = await callAppRpc({ botId, threadId, messageId, method, params });
           if (outcome.ok) return outcome.result;
           if (outcome.signIn) {

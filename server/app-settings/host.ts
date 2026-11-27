@@ -12,7 +12,7 @@ import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { ThemeTool } from "../themes/tool.ts";
 import { cardElsewhere, cardNotInRoom, cardShownStatus, SETTINGS_CARDS } from "./cards.ts";
 import type { TakenPicture } from "./picture-file.ts";
-import { findPlaces, placePath, placesList } from "./places.ts";
+import { advancedOnlyPlace, findPlaces, placePath, placesList } from "./places.ts";
 import { findSettings, personOnly, type SettingEntry, type WritableEntry } from "./registry.ts";
 
 export const TOOL = "app_settings";
@@ -91,7 +91,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
 
   const reply = (status: number, body: Record<string, unknown>) => ({ status, body });
   const refuse = (status: number, error: string) => reply(status, { error });
-  const describe = (entry: SettingEntry) => ({ id: entry.id, label: entry.label, tier: entry.tier, value: text(entry.read()), where: placePath(entry.where) });
+  const describe = (entry: SettingEntry) => ({ id: entry.id, label: entry.label, tier: entry.tier, value: text(entry.read()), where: placePath(entry.where),
+    ...(entry.tier !== "owner-only" && advancedOnlyPlace(entry.where) ? { inSimple: "set it as usual; never switch modes for it" } : {}) });
   /** Null when the turn is the owner's own; otherwise why not, so the refusal can say what the person can do instead. */
   const notOwners = (turn: Turn): NotOwners | null =>
     deps.guestDriven(turn.threadId) ? "guest" : deps.turnOwner(turn) !== null ? null : (deps.ownerRefusal?.(turn) ?? "unknown");

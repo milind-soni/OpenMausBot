@@ -5,14 +5,19 @@ import { track } from "@/lib/analytics";
 import { cloudPlanView, moneyBackShort, offerPlanLabel, trialRunning, trialTerms, usd } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { WHATS_NEW_NOTICE } from "@/lib/notices";
+import type { TeamsAction } from "@/lib/teams-whats-new";
 
-export type WhatsNewSlide = "pro" | "team";
+/** The plan slides, which sell a Cloud plan or a team. Someone they don't sell to is told what is new instead: `cloudNews`
+ * for a Cloud they have, `teamNews` for a team they are in. `apps` and `publish` tell everyone; `together` carries the notice
+ * of "This computer and My Cloud together". */
+export type PlanSlide = "pro" | "team";
+export type WhatsNewSlide = PlanSlide | "apps" | "publish" | "cloudNews" | "teamNews" | "together";
 /** Who the account is to MausBot Cloud: no plan, a plan of its own, in a team, or something else (being bought, needing
  * attention, not checked). Null until the sign-in is restored and checked. */
 export type WhatsNewAudience = "none" | "own" | "team" | "other";
 
 /** Each slide's tag on the Cloud's funnel: `src` on its links, and `source` on the checkout the app opens from it. */
-export const WHATS_NEW_SOURCES = { pro: "app_whats_new_pro", team: "app_whats_new_team" } as const satisfies Record<WhatsNewSlide, string>;
+export const WHATS_NEW_SOURCES = { pro: "app_whats_new_pro", team: "app_whats_new_team" } as const satisfies Record<PlanSlide, string>;
 const CLOUD_SITE = "https://cloud.openmausbot.com", STAGING_SITE = "https://omb-cloud-staging.fly.dev";
 
 /** The Cloud website's Home, which shows the plans to someone without one; `src` on /cloud opens that page. */
@@ -35,18 +40,30 @@ export function whatsNewAudience(account: CloudAccountState | null): WhatsNewAud
 }
 
 /** No plan: the new Cloud, then Team. A plan of one's own: Team. Anyone in a team, or not known: nothing. */
-export function whatsNewSlides(audience: WhatsNewAudience | null): WhatsNewSlide[] {
+export function whatsNewSlides(audience: WhatsNewAudience | null): PlanSlide[] {
   return audience === "none" ? ["pro", "team"] : audience === "own" ? ["team"] : [];
 }
 
+/** The Team slide's main button: invite people to the team this page is, or start one, in the app's own Add a Cloud or on
+ * the website. */
+export type WhatsNewTeam = { kind: "invite"; url: string } | { kind: "start"; inApp: boolean };
+
 export interface WhatsNewView {
   slides: WhatsNewSlide[];
-  audience: "none" | "own";
+  /** "other": whoever this page can't tell the Cloud plan of (a Cloud's page, a browser, a sign-in being bought or checked). */
+  audience: "none" | "own" | "other";
   signedIn: boolean;
   staging: boolean;
   /** Each slide's plan in the Admin's words: its name, and its price line. */
-  plans: Partial<Record<WhatsNewSlide, { name: string; terms: string }>>;
+  plans: Partial<Record<PlanSlide, { name: string; terms: string }>>;
+  /** Without it, the Team slide starts a team: in the app for a plan of one's own, else on the website. */
+  team?: WhatsNewTeam;
+  /** The Apps slide: which section of Published apps lists the apps saved here, and whether this page opens one in its own
+   * window and installs it on the computer. */
+  apps?: WhatsNewApps;
 }
+
+export interface WhatsNewApps { place: "computer" | "cloud"; install: boolean }
 
 /** "loading" while the account or the offer is read; "none" when nothing is for this account now (a later launch may say
  * otherwise). A slide whose plan the Admin doesn't offer is left out. */
@@ -69,8 +86,53 @@ export function whatsNewView(account: CloudAccountState | null, offer: CloudOffe
   return { slides, audience, signedIn: account?.status === "connected", staging: account?.staging === true, plans };
 }
 
-export type WhatsNewAction = "seen" | "next" | "back" | "get_pro" | "see_cloud" | "start_team" | "not_now" | "close";
+/**
+ * Whether What's new carries the slide of "This computer and My Cloud together": where its corner notice would show (this
+ * computer's own page, never a branded build's), while main calls it due (`due`, null until main answers) and it was
+ * never drawn on screen before (`drawn`: an earlier launch showed the corner notice, which stays the one it gets). `kept`:
+ * this page's carousel already showed the slide, which stays in it however main's answer reads now.
+ */
+export function togetherSlideDue({ here, due, drawn, kept }: { here: boolean; due: boolean | null; drawn: boolean; kept: boolean }): boolean | null {
+  if (kept) return true;
+  if (!here || due === false) return false;
+  return due === null ? null : !drawn;
+}
 
-export function reportWhatsNew(action: WhatsNewAction, slide: WhatsNewSlide, view: Pick<WhatsNewView, "audience" | "signedIn">) {
-  track("whats_new", { action, slide, audience: view.audience === "own" ? "own_plan" : "no_plan", signed_in: view.signedIn, campaign: WHATS_NEW_NOTICE });
+/**
+ * What's new, for everyone once, in this order:
+ * - Apps and Publish your bots, on every page;
+ * - the new Cloud where `plans` (whatsNewView, "none" where this page can't sell a plan) has it, else what is new on the
+ *   Cloud the person has (`cloud`);
+ * - Team where `team` starts or grows one, unless the Admin's offer was read and sells no Team plan (`teamSold` false), else
+ *   what is new in the team they are in (`team` "got-it");
+ * - the notice of "This computer and My Cloud together" last, where `together` (togetherSlideDue).
+ */
+export function whatsNewCarousel({ plans, team, teamSold, cloud, apps, staging = false, together = false }: {
+  plans: WhatsNewView | "loading" | "none"; team: TeamsAction | null; teamSold?: boolean; cloud: boolean; apps: WhatsNewApps; staging?: boolean;
+  together?: boolean;
+}): WhatsNewView | "loading" | "none" {
+  if (plans === "loading") return "loading";
+  const sold = typeof plans === "object" ? plans : null;
+  const teamSlide: WhatsNewTeam | null = !team || team.kind === "got-it" || (team.kind === "start" && teamSold === false) ? null
+    : team.kind === "invite" ? { kind: "invite", url: team.url } : { kind: "start", inApp: team.inApp };
+  const slides: WhatsNewSlide[] = [
+    "apps", "publish",
+    ...(sold?.slides.includes("pro") ? ["pro" as const] : cloud ? ["cloudNews" as const] : []),
+    ...(teamSlide ? ["team" as const] : team?.kind === "got-it" ? ["teamNews" as const] : []),
+    ...(together ? ["together" as const] : []),
+  ];
+  const teamTerms = teamSlide?.kind !== "start" ? null : sold?.plans.team ?? { name: "Team", terms: t("teamsNew.price") };
+  return {
+    slides, audience: sold?.audience ?? "other", signedIn: sold?.signedIn ?? false, staging: sold?.staging ?? staging,
+    plans: { ...(sold?.plans.pro && slides.includes("pro") ? { pro: sold.plans.pro } : {}), ...(teamTerms ? { team: teamTerms } : {}) },
+    ...(teamSlide ? { team: teamSlide } : {}), apps,
+  };
+}
+
+export type WhatsNewAction = "seen" | "next" | "back" | "got_it" | "get_pro" | "see_cloud" | "start_team" | "invite" | "open_apps" | "not_now" | "close";
+
+/** Every step of every slide on `whats_new`. */
+export function reportWhatsNew(action: WhatsNewAction, slide: WhatsNewSlide, view: Pick<WhatsNewView, "audience" | "signedIn" | "team">, campaign: string = WHATS_NEW_NOTICE) {
+  const audience = view.team?.kind === "invite" ? "team_admin" : view.audience === "own" ? "own_plan" : view.audience === "none" ? "no_plan" : "other";
+  track("whats_new", { action, slide, audience, signed_in: view.signedIn, campaign });
 }

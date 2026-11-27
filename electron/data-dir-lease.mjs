@@ -8,6 +8,9 @@ const LEASE_NAME = "openmausbot-server.lease";
 const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
 // Internal parent-to-child capability, obtained only from utilityServerLeaseEnvironment(); never public configuration.
 const CHILD_LEASE_ENV = "OPENMAUSBOT_INTERNAL_DATA_DIR_LEASE";
+// Beside it, the parent's boot session and hashed machine id: its child runs on the same machine in the same boot, so it
+// does not start `sysctl` and `ioreg` (macOS) or `reg.exe` (Windows) again before it can listen.
+const CHILD_HOST_ENV = "OPENMAUSBOT_INTERNAL_DATA_DIR_HOST";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_PID = 0x7fffffff;
 const MAX_BOOT_ID = 128;
@@ -54,6 +57,11 @@ function normalizeBootId(value) {
 function bootSession() {
   if (cachedBootSession === undefined) cachedBootSession = readBootSession();
   return cachedBootSession;
+}
+
+/** This boot's id (Linux boot_id, macOS kern.bootsessionuuid), read once per process; null where there is none. */
+export function hostBootSession() {
+  return bootSession();
 }
 
 function uptimeMs() {
@@ -129,9 +137,20 @@ function ownerPredatesThisBoot(owner) {
   return false;
 }
 
-/** The only liveness question this module should ever ask about a record. */
-function ownerIsAlive(owner) {
-  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && ownerIdentityMatches(owner);
+/** The only liveness question this module should ever ask about a record. `parentPid`: the pid of the process that started
+ * this one, when the record is that parent's own (a delegated child checking the lease it was handed). */
+function ownerIsAlive(owner, parentPid = null) {
+  return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && ownerIdentityMatches(owner, parentPid);
+}
+
+/**
+ * Whether a live pid must still be matched to the record by its creation time (Windows reuses pids). Not for the process
+ * that started this one and handed it the record's own token: it is alive (it answered) and it is this process' parent,
+ * and Chromium ends a utility process with its browser process. That query is `wmic`, or on Windows 11, where wmic is
+ * gone, a PowerShell start that takes a second or more, run twice before the desktop's server could listen.
+ */
+export function creationTimeNeeded(platform, ownerPid, parentPid) {
+  return platform === "win32" && !(isPid(parentPid) && ownerPid === parentPid);
 }
 
 /**
@@ -448,13 +467,13 @@ function cimHasPid(pid) {
 }
 
 /** Pids are reused within a boot: a process that started at another moment, or after the lease, is not its owner. */
-function ownerIdentityMatches(owner) {
+function ownerIdentityMatches(owner, parentPid = null) {
   if (process.platform === "linux") {
     if (!Number.isSafeInteger(owner.start) || typeof owner.ns !== "string" || owner.ns !== pidNamespace()) return true;
     const started = processStartTicks(owner.pid);
     return started === null || started === owner.start;
   }
-  if (process.platform !== "win32") return true;
+  if (process.platform !== "win32" || !creationTimeNeeded(process.platform, owner.pid, parentPid)) return true;
   return windowsCreationFitsLease(processCreationTimeMs(owner.pid), owner.createdAt);
 }
 
@@ -635,7 +654,7 @@ function validateChildDelegation(dataDir, encoded) {
     && owner.pid === capability.pid
     && owner.token === capability.token
     && sameMachine(owner, dataDir)
-    && ownerIsAlive(owner));
+    && ownerIsAlive(owner, process.ppid));
   if (!matchesLiveParent(readOwner(parentLeasePath))) {
     throw invalid();
   }
@@ -732,7 +751,7 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
     },
     utilityServerLeaseEnvironment() {
       if (released) throw leaseError("OpenMausBot cannot delegate a released data-directory lease.");
-      return Object.freeze({ [CHILD_LEASE_ENV]: capabilityFor(owner) });
+      return Object.freeze({ [CHILD_LEASE_ENV]: capabilityFor(owner), [CHILD_HOST_ENV]: hostIdentityFor(owner) });
     },
   });
 }
@@ -815,8 +834,30 @@ export function describeDataDirLease(dataDir) {
   }
 }
 
+function hostIdentityFor(owner) {
+  return `${owner.boot ?? "-"} ${owner.machine ?? "-"}`;
+}
+
+/** The parent's boot session and machine id, each kept only when well formed; read once and removed, like the capability. */
+export function consumeHostIdentity(environment) {
+  const value = environment[CHILD_HOST_ENV];
+  if (value === undefined) return null;
+  try { delete environment[CHILD_HOST_ENV]; } catch {}
+  const [boot, machine, extra] = String(value).split(" ");
+  if (extra !== undefined) return null;
+  return {
+    boot: boot === "-" ? null : normalizeBootId(boot) === boot ? boot : undefined,
+    machine: machine === "-" ? null : MACHINE_ID.test(machine ?? "") ? machine : undefined,
+  };
+}
+
 export function acquireDataDirLeaseForProcess(dataDir, environment = process.env) {
+  const host = consumeHostIdentity(environment);
   const encoded = consumeChildCapability(environment);
+  if (encoded !== null && host) {
+    if (cachedBootSession === undefined && host.boot !== undefined) cachedBootSession = host.boot;
+    if (cachedMachineId === undefined && host.machine !== undefined) cachedMachineId = host.machine;
+  }
   return encoded === null
     ? acquireDataDirLease(dataDir)
     : validateChildDelegation(dataDir, encoded);

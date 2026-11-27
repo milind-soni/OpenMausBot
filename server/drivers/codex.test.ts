@@ -29,7 +29,7 @@ import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { unsupportedCallsNotice } from "./codex-unsupported-calls.ts";
-import { rebuiltSessionNotice } from "../resume-recovery.ts";
+import { instructionsOverflowNotice, rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
 import { ownMcpHttpRoutes } from "../routes/own-mcp-http.ts";
@@ -735,6 +735,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(owner.calls.find((call) => call.method === "turn/start")?.params).not.toHaveProperty("environments");
   });
 
+  it("runs work from the person's other place with the shell off and no environment, in Ask's workspace sandbox", async () => {
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-link", text: "rm -rf ~", system: "You are Testy.", model: "gpt-5.6-sol", approvalMode: "ask", linkLimited: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[]; calls: Array<{ method: string; params: any }> };
+    for (const override of ["features.shell_tool=false", "features.unified_exec=false", "features.view_image=false"]) {
+      expect(seen.argv[seen.argv.indexOf(override) - 1], override).toBe("-c");
+    }
+    const started = seen.calls.find((call) => call.method === "turn/start")?.params;
+    expect(started.environments).toEqual([]);
+    expect(started.sandboxPolicy).toMatchObject({ type: "workspaceWrite" });
+    expect(started.approvalPolicy).toBe("on-request");
+  });
+
   it("refuses a guest's turn when Codex did not take the shell-off overrides", async () => {
     await create({ environment: { FAKE_CODEX_IGNORE_FEATURES: "1" } });
     const dump = join(scratch, "dump.json");
@@ -858,6 +874,29 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const fourth = await send("split-4.json", "fourth", "Memory: moved to Toronto.", "codex-thread-1", true);
     expect(turnText(fourth)).toContain("Memory: moved to Toronto.");
     expect(turnText(fourth)).toContain("fourth");
+  });
+
+  it("replaces a resumed thread whose accumulated instruction blocks pass the provider cap with a fresh session", async () => {
+    await create({ mode: "resume" });
+    process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+    const instructions = `Stable rules.${codexSandboxSuffix}`;
+    const receiptPath = join(DATA_DIR, "codex-instructions", `${createHash("sha256").update(JSON.stringify(["t-overflow", "codex-thread-1"])).digest("hex")}.sha256`);
+    mkdirSync(dirname(receiptPath), { recursive: true });
+    // An earlier block, with the thread's blocks already near the cap: injecting this changed one would cross it.
+    writeFileSync(receiptPath, JSON.stringify({ instructions: createHash("sha256").update("Older rules.").digest("hex"), injected: 84_900 }), { mode: 0o600 });
+    const dump = join(scratch, "instruction-overflow.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const recoveryText = "History\nUser: go on";
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-overflow", text: "go on", systemStable: instructions, systemVolatile: "", resumeCursor: "codex-thread-1", recoveryText });
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.map((call: { method: string }) => call.method)).not.toContain("thread/resume");
+    expect(calls.map((call: { method: string }) => call.method)).not.toContain("thread/inject_items");
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toMatchObject([{ reason: "instruction_overflow" }]);
+    expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === turnId)).toEqual([]);
+    expect(recorder.events.filter((e) => e.type === "session.started").at(-1)).toMatchObject({ sessionId: "codex-thread-1", rebuilt: true });
+    expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([expect.objectContaining({ message: instructionsOverflowNotice("Codex") })]);
   });
 
   it("saves a conversation's thread but not one no later turn resumes", async () => {
@@ -1459,7 +1498,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const plain = { command: "python3", args: ["todo.py"], env: {} };
       await instance.adapter.sendTurn({ threadId: "t-box-no-env", text: "go", integrations: { custom: { plain } } });
       await recorder.until((event) => event.type === "turn.completed" && event.threadId === "t-box-no-env");
-      expect(appServer()).not.toHaveProperty("box");
+      expect(appServer()?.box).toEqual({ engine: "codex" });
     } finally {
       spawnSpy.mockRestore();
     }
@@ -1701,7 +1740,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
         expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "plan-box")).toMatchObject({ ok: true });
         const appServer = spawns.find(([, args]) => args.includes("app-server"))?.[2];
         expect(appServer?.env?.OMB_CODEX_AUTH_SOCKET).toBeTruthy();
-        expect(appServer?.box).toEqual({ rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
+        expect(appServer?.box).toEqual({ engine: "codex", rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
       } finally {
         spawnSpy.mockRestore();
       }
@@ -4262,7 +4301,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const { done, errors } = await runTurn("t-no-login");
       expect(errors).toEqual([expect.objectContaining({ message: codexNotSignedIn(), setup: true })]);
       expect(codexNotSignedIn().includes("Sign-ins don't copy over when you move to My Cloud.")).toBe(Boolean(role));
-      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required", unsent: true });
       expect(spawn).not.toHaveBeenCalled();
     });
 

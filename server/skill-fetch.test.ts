@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchSkillFromSource, githubSkillLink, latestSkillCommit, parseSkillSource } from "./skill-fetch.ts";
+import { githubToken, provideGithubSignIn } from "./github/token.ts";
+import { fetchSkillFromSource, githubSkillLink, latestSkillCommit, parseSkillSource, skillImportToken } from "./skill-fetch.ts";
 import { SKILL_FOLDER_LIMITS } from "./skill-folder.ts";
 import { fakeGitHub, type FakeRepoEntry } from "./testing/fake-github.ts";
 
@@ -23,6 +24,23 @@ const ok = <T,>(result: { skills: T[] } | { error: string }) => {
   if ("error" in result) throw new Error(result.error);
   return result.skills;
 };
+
+const SIGNED_IN = "gho_syntheticSkillImportToken";
+const OWNER_SIGN_IN = "gho_ownerSignInMustNotLeak";
+
+afterEach(() => provideGithubSignIn(null));
+
+function recordingFetch(inner: typeof fetch) {
+  const calls: Array<{ url: string; headers: Headers; redirect: RequestInit["redirect"] }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), headers: new Headers(init?.headers), redirect: init?.redirect });
+    return inner(input, init);
+  };
+  return { fetch: fetcher, calls };
+}
+
+const apiCalls = <T extends { url: string }>(calls: readonly T[]) => calls.filter((call) => call.url.startsWith("https://api.github.com/"));
+const rawCalls = <T extends { url: string }>(calls: readonly T[]) => calls.filter((call) => call.url.startsWith("https://raw.githubusercontent.com/"));
 
 describe("importing a skill's whole folder", () => {
   it.each([
@@ -72,6 +90,130 @@ describe("importing a skill's whole folder", () => {
     expect(downloads).toHaveLength(7);
     expect(downloads.every((url) => url.startsWith(`https://raw.githubusercontent.com/a/b/${commit}/skills/pdf/`))).toBe(true);
     expect(github.requests.filter((url) => url.includes("/git/trees/"))).toHaveLength(1);
+  });
+
+  it("sends the connected GitHub sign-in on every API request and keeps raw downloads anonymous", async () => {
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const recorded = recordingFetch(github.fetch);
+    let lookups = 0;
+    const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", recorded.fetch, undefined, async () => {
+      lookups += 1;
+      return { token: SIGNED_IN };
+    }));
+    expect(skill!.github?.commit).toBe(github.commitOf("a/b"));
+    const api = apiCalls(recorded.calls);
+    const raw = rawCalls(recorded.calls);
+    expect(api.length).toBeGreaterThan(1);
+    expect(lookups).toBe(1);
+    expect(api.some((call) => call.url.includes("/commits/"))).toBe(true);
+    expect(api.some((call) => call.url.includes("/contents/"))).toBe(true);
+    expect(api.some((call) => call.url.includes("/git/trees/"))).toBe(true);
+    expect(recorded.calls.every((call) => !call.url.includes(SIGNED_IN))).toBe(true);
+    expect(api.every((call) => call.headers.get("authorization") === `Bearer ${SIGNED_IN}`)).toBe(true);
+    expect(api.find((call) => call.url.includes("/commits/"))?.headers.get("accept")).toBe("application/vnd.github.sha");
+    expect(api.every((call) => call.redirect === "manual")).toBe(true);
+    expect(raw.length).toBeGreaterThan(0);
+    expect(raw.every((call) => call.headers.get("authorization") === null && call.redirect === "error")).toBe(true);
+  });
+
+  it("cancels the import while the GitHub credential lookup is still pending", async () => {
+    let release: (signIn: { token: string | null }) => void = () => {};
+    const credential = new Promise<{ token: string | null }>((resolve) => { release = resolve; });
+    let markEntered: () => void = () => {};
+    const getterEntered = new Promise<void>((resolve) => { markEntered = resolve; });
+    const fetchSpy = vi.fn(async () => new Response("unused")) as typeof fetch;
+    const controller = new AbortController();
+    const result = fetchSkillFromSource("a/b", fetchSpy, controller.signal, async () => {
+      markEntered();
+      return credential;
+    });
+    try {
+      await getterEntered;
+      controller.abort(new Error("fixture import cancelled"));
+      const checkpoint = new Promise<void>((resolve) => { setImmediate(resolve); });
+      const settled = await Promise.race([
+        result.then((value) => ({ settled: true as const, value })),
+        checkpoint.then(() => ({ settled: false as const })),
+      ]);
+      expect(settled).toEqual({ settled: true, value: { error: "fixture import cancelled" } });
+      release({ token: SIGNED_IN });
+      release = () => {};
+      await new Promise<void>((resolve) => { setImmediate(resolve); });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      release({ token: null });
+    }
+  });
+
+  it("stays anonymous when the sign-in getter has no token", async () => {
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const recorded = recordingFetch(github.fetch);
+    let lookups = 0;
+    const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", recorded.fetch, undefined, async () => {
+      lookups += 1;
+      return { token: null };
+    }));
+    expect(skill!.files.length).toBeGreaterThan(0);
+    const api = apiCalls(recorded.calls);
+    const raw = rawCalls(recorded.calls);
+    expect(api.length).toBeGreaterThan(1);
+    expect(lookups).toBe(1);
+    expect(api.length).toBeGreaterThan(0);
+    expect(raw.length).toBeGreaterThan(0);
+    expect(recorded.calls.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(api.every((call) => call.redirect === undefined)).toBe(true);
+    expect(raw.every((call) => call.redirect === "error")).toBe(true);
+  });
+
+  it("stays anonymous for an explicit empty sign-in even when the server holds an owner token", async () => {
+    const asked: Array<string | null | undefined> = [];
+    provideGithubSignIn({
+      token: async (audience) => { asked.push(audience); return OWNER_SIGN_IN; },
+      reportAuthFailure: () => {},
+      signedIn: () => true,
+    });
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const recorded = recordingFetch(github.fetch);
+    ok(await fetchSkillFromSource("a/b", recorded.fetch, undefined, async () => ({ token: null })));
+    expect(recorded.calls.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(JSON.stringify(recorded.calls)).not.toContain(OWNER_SIGN_IN);
+    expect(asked).toEqual([]);
+  });
+
+  it("does not read the owner sign-in when the audience was refused", async () => {
+    const asked: Array<string | null | undefined> = [];
+    provideGithubSignIn({
+      token: async (audience) => {
+        asked.push(audience);
+        return audience === undefined || audience === null || audience === "owner" ? OWNER_SIGN_IN : null;
+      },
+      reportAuthFailure: () => {},
+      signedIn: () => true,
+    });
+    expect(await githubToken(null)).toBe(OWNER_SIGN_IN);
+    asked.length = 0;
+    expect(await skillImportToken(null)).toEqual({ token: null });
+    expect(asked).toEqual([]);
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const recorded = recordingFetch(github.fetch);
+    ok(await fetchSkillFromSource("a/b", recorded.fetch, undefined, () => skillImportToken(null)));
+    expect(recorded.calls.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(JSON.stringify(recorded.calls)).not.toContain(OWNER_SIGN_IN);
+    expect(asked).toEqual([]);
+  });
+
+  it("uses the server sign-in when the caller does not pass a getter", async () => {
+    provideGithubSignIn({ token: async () => SIGNED_IN, reportAuthFailure: () => {}, signedIn: () => true });
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const recorded = recordingFetch(github.fetch);
+    ok(await fetchSkillFromSource("a/b", recorded.fetch));
+    const api = apiCalls(recorded.calls);
+    const raw = rawCalls(recorded.calls);
+    expect(api.length).toBeGreaterThan(0);
+    expect(raw.length).toBeGreaterThan(0);
+    expect(api.every((call) => call.headers.get("authorization") === `Bearer ${SIGNED_IN}`)).toBe(true);
+    expect(raw.every((call) => call.headers.get("authorization") === null)).toBe(true);
+    expect(recorded.calls.every((call) => !call.url.includes(SIGNED_IN))).toBe(true);
   });
 
   it("records HEAD for a link that names no branch, so updates follow the default branch", async () => {
@@ -175,7 +317,7 @@ describe("importing a skill's whole folder", () => {
       skipped: [{ path: "", reason: "unlisted" }],
     });
     expect(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", github.fetch))
-      .toEqual({ error: expect.stringContaining("limit for requests without sign-in") });
+      .toEqual({ error: expect.stringContaining("API rate limit was reached") });
   });
 
   it.each([
@@ -196,7 +338,11 @@ describe("importing a skill's whole folder", () => {
   it("finds the commit a skill's link names now, and the link that imports it again", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL });
     const [skill] = ok(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", github.fetch));
-    expect(await latestSkillCommit(skill!.github!, github.fetch)).toBe(github.commitOf("a/b"));
+    const recorded = recordingFetch(github.fetch);
+    expect(await latestSkillCommit(skill!.github!, recorded.fetch, async () => ({ token: SIGNED_IN }))).toBe(github.commitOf("a/b"));
+    const lookups = recorded.calls.filter((call) => call.url.includes("/commits/"));
+    expect(lookups.length).toBeGreaterThan(0);
+    expect(lookups.every((call) => call.headers.get("authorization") === `Bearer ${SIGNED_IN}` && call.headers.get("accept") === "application/vnd.github.sha")).toBe(true);
     const again = ok(await fetchSkillFromSource(githubSkillLink(skill!.github!), github.fetch));
     expect(again[0]!.github).toEqual(skill!.github);
     expect(await latestSkillCommit({ ...skill!.github!, repo: "gone" }, github.fetch)).toEqual({ error: expect.stringContaining("404") });
@@ -268,9 +414,38 @@ describe("skill fetch host pinning", () => {
       if (!String(input).endsWith("/contents/skills/search-helper?ref=" + github.commitOf("a/b"))) return response;
       return Response.json([{ type: "file", name: "SKILL.md", path: "skills/search-helper/SKILL.md", download_url }]);
     }) as typeof fetch;
-    expect(await fetchSkillFromSource("https://skills.sh/a/b/wanted-skill", fetcher))
-      .toEqual({ error: expect.stringContaining('no skill named "wanted-skill"') });
+    const [skill] = ok(await fetchSkillFromSource("https://skills.sh/a/b/wanted-skill", fetcher));
+    expect(skill!.source).toBe("github.com/a/b/skills/search-helper");
     expect(vi.mocked(fetcher).mock.calls.map(([input]) => String(input))).not.toContain(download_url);
+  });
+
+  it("does not fetch a Contents API download_url, even one with a temporary token", async () => {
+    const skillMd = "---\nname: Find Skills\ndescription: finds things\n---\n# A skill";
+    const github = fakeGitHub({ "vercel-labs/skills": { "skills/search-helper/SKILL.md": skillMd } });
+    const tokenized = `https://raw.githubusercontent.com/vercel-labs/skills/${github.commitOf("vercel-labs/skills")}/skills/search-helper/SKILL.md?token=v1.private-file-token`;
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const response = await github.fetch(input, init);
+      if (!String(input).includes("/contents/skills/search-helper?ref=")) return response;
+      return Response.json([{
+        type: "file",
+        name: "SKILL.md",
+        path: "skills/search-helper/SKILL.md",
+        download_url: tokenized,
+      }]);
+    }) as typeof fetch;
+    const recorded = recordingFetch(fetcher);
+    const [skill] = ok(await fetchSkillFromSource(
+      "https://skills.sh/vercel-labs/skills/find-skills",
+      recorded.fetch,
+      undefined,
+      async () => ({ token: SIGNED_IN }),
+    ));
+    expect(skill!.source).toBe("github.com/vercel-labs/skills/skills/search-helper");
+    const urls = recorded.calls.map((call) => call.url);
+    expect(urls).not.toContain(tokenized);
+    expect(urls.every((url) => !url.includes("token="))).toBe(true);
+    expect(rawCalls(recorded.calls).every((call) => call.headers.get("authorization") === null && !call.url.includes("?"))).toBe(true);
+    expect(JSON.stringify(urls)).not.toContain("v1.private-file-token");
   });
 
   it("refuses a pasted plain-http raw link without fetching it", async () => {
@@ -294,6 +469,112 @@ describe("skill fetch host pinning", () => {
     const result = await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", fetcher);
     expect("skills" in result).toBe(false);
     expect(vi.mocked(fetcher).mock.calls.map(([input]) => String(input))).not.toContain(offhost);
+  });
+
+  it("does not follow an API redirect off api.github.com when the request carries a sign-in", async () => {
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const offhost = "https://evil.example.com/repos/a/b/commits/HEAD";
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === offhost) return new Response("relocated");
+      if (url.startsWith("https://api.github.com/") && url.includes("/commits/")) {
+        // Like the platform fetch: redirect "manual" hands back the 302, anything else follows it off-origin.
+        if (init?.redirect === "manual") return new Response(null, { status: 302, headers: { location: offhost } });
+        return fetcher(offhost, init);
+      }
+      return github.fetch(input, init);
+    }) as typeof fetch;
+    const result = await fetchSkillFromSource("a/b", fetcher, undefined, async () => ({ token: SIGNED_IN }));
+    const urls = vi.mocked(fetcher).mock.calls.map(([input]) => String(input));
+    expect(urls.some((url) => url.startsWith("https://api.github.com/") && url.includes("/commits/"))).toBe(true);
+    expect(urls).not.toContain(offhost);
+    expect(result).toEqual({ error: expect.any(String) });
+    expect(JSON.stringify(result)).not.toContain(SIGNED_IN);
+    const api = vi.mocked(fetcher).mock.calls.find(([input]) => String(input).includes("/commits/"));
+    expect(new Headers(api?.[1]?.headers).get("authorization")).toBe(`Bearer ${SIGNED_IN}`);
+    expect(api?.[1]?.redirect).toBe("manual");
+  });
+
+  it("follows a renamed repository's API redirect within api.github.com, still signed in", async () => {
+    const github = fakeGitHub({ "a/b": PDF_SKILL });
+    const moved = "https://api.github.com/repositories/70107786";
+    const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("https://api.github.com/repos/old/b/")) {
+        return new Response(null, { status: 301, headers: { location: url.replace("https://api.github.com/repos/old/b", moved) } });
+      }
+      if (url.startsWith(`${moved}/`)) return github.fetch(url.replace(moved, "https://api.github.com/repos/a/b"), init);
+      return github.fetch(input, init);
+    }) as typeof fetch;
+    expect(await latestSkillCommit({ owner: "old", repo: "b", ref: "HEAD", commit: "", path: "" }, fetcher, async () => ({ token: SIGNED_IN })))
+      .toBe(github.commitOf("a/b"));
+    const followed = vi.mocked(fetcher).mock.calls.find(([input]) => String(input).startsWith(`${moved}/`));
+    expect(followed).toBeDefined();
+    expect(new Headers(followed?.[1]?.headers).get("authorization")).toBe(`Bearer ${SIGNED_IN}`);
+    expect(followed?.[1]?.redirect).toBe("manual");
+  });
+
+  it("leaves a sign-in that cannot be a header out of the error", async () => {
+    const credential = "gho_not\r\na header";
+    const refused: string[] = [];
+    const fetcher = vi.fn(async () => new Response("no", { status: 401 })) as typeof fetch;
+    const result = await fetchSkillFromSource("owner/repo", fetcher, undefined, async () => ({ token: credential, refused: () => { refused.push(credential); } }));
+    expect(result).toEqual({ error: expect.stringContaining("401") });
+    expect(JSON.stringify(result)).not.toContain("gho_not");
+    expect(new Headers(vi.mocked(fetcher).mock.calls[0]?.[1]?.headers).get("authorization")).toBeNull();
+    expect(refused).toEqual([]);
+  });
+
+  it("reports one refused API request for the audience whose token was sent", async () => {
+    const member = "p_adaaaaaaaaaaaaaaaaaaaaa";
+    const refused: Array<string | null | undefined> = [];
+    const asked: Array<string | null | undefined> = [];
+    provideGithubSignIn({
+      token: async (audience) => { asked.push(audience); return audience === member ? SIGNED_IN : null; },
+      reportAuthFailure: (audience) => { refused.push(audience); },
+      signedIn: () => true,
+    });
+    const fetcher = vi.fn(async () => new Response("no", { status: 401 })) as typeof fetch;
+    const result = await fetchSkillFromSource("owner/repo", fetcher, undefined, () => skillImportToken(member));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ error: expect.stringContaining("401") });
+    expect(JSON.stringify(result)).not.toContain(SIGNED_IN);
+    expect(new Headers(vi.mocked(fetcher).mock.calls[0]?.[1]?.headers).get("authorization")).toBe(`Bearer ${SIGNED_IN}`);
+    expect(asked).toEqual([member]);
+    expect(refused).toEqual([member]);
+  });
+
+  it("reports the server sign-in when its own API request is refused", async () => {
+    const refused: Array<string | null | undefined> = [];
+    provideGithubSignIn({
+      token: async () => SIGNED_IN,
+      reportAuthFailure: (audience) => { refused.push(audience); },
+      signedIn: () => true,
+    });
+    const fetcher = vi.fn(async () => new Response("no", { status: 401 })) as typeof fetch;
+    const result = await fetchSkillFromSource("owner/repo", fetcher);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ error: expect.stringContaining("401") });
+    expect(JSON.stringify(result)).not.toContain(SIGNED_IN);
+    expect(refused).toEqual(["owner"]);
+  });
+
+  it("does not report an anonymous API refusal", async () => {
+    const refused: Array<string | null | undefined> = [];
+    const asked: Array<string | null | undefined> = [];
+    provideGithubSignIn({
+      token: async (audience) => { asked.push(audience); return OWNER_SIGN_IN; },
+      reportAuthFailure: (audience) => { refused.push(audience); },
+      signedIn: () => true,
+    });
+    const fetcher = vi.fn(async () => new Response("no", { status: 401 })) as typeof fetch;
+    const result = await fetchSkillFromSource("owner/repo", fetcher, undefined, () => skillImportToken(null));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ error: expect.stringContaining("401") });
+    expect(new Headers(vi.mocked(fetcher).mock.calls[0]?.[1]?.headers).get("authorization")).toBeNull();
+    expect(asked).toEqual([]);
+    expect(refused).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain(OWNER_SIGN_IN);
   });
 
   it("downloads only from the pinned raw host, with redirects refused", async () => {

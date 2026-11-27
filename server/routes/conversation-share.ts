@@ -129,7 +129,7 @@ export function createConversationSharing(deps: ConversationShareDeps): { routes
       const saved = deps.shares.share(threadId, me.person, to);
       deps.audienceChanged(bot.id, threadId);
       deps.changed(bot.id);
-      if (recipient) tell(to, bot, threadId, "server.share.withYouTitle", "server.share.withYou", { name: deps.nameOf(me.email), title: task.title || bot.name, bot: bot.name }, { name: deps.nameOf(me.email), email: me.email });
+      if (recipient) tell(to, bot, threadId, "server.share.withYouTitle", "server.share.withYou", { name: deps.nameOf(me.email), title: task.title || bot.name, bot: bot.name }, { name: deps.nameOf(me.email), email: me.email }, "shared");
       return json(res, 200, { shared: sharedAs(saved) });
     }
 
@@ -173,11 +173,11 @@ export function createConversationSharing(deps: ConversationShareDeps): { routes
   return { routes, personLeft };
 
   /** The one line in `to`'s inbox about this conversation, and one notification linking it when the line is new. */
-  function tell(to: string, bot: BotRecord, threadId: string, titleKey: ServerLineKey, textKey: ServerLineKey, params: Record<string, string>, from: { name: string; email?: string; botId?: string }): void {
+  function tell(to: string, bot: BotRecord, threadId: string, titleKey: ServerLineKey, textKey: ServerLineKey, params: Record<string, string>, from: { name: string; email?: string; botId?: string }, reason?: "shared"): void {
     const language = deps.language(to);
     const heading = serverLine(language, titleKey, params);
     const kept = deps.inbox().keepOne(to, {
-      kind: "message", from, origin: { botId: bot.id, threadId },
+      kind: "message", ...(reason ? { reason } : {}), from, origin: { botId: bot.id, threadId },
       text: serverLine(language, textKey, params), title: heading, notify: "mention",
     });
     if (kept?.created) deps.notify({ kind: "mention", botId: bot.id, botName: bot.name, threadId, title: heading, body: params.title ?? "", forPerson: to, ...(bot.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}) });
