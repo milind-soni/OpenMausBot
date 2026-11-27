@@ -61,7 +61,7 @@ export const KEYRING_PROBES: ReadonlyArray<{ command: string; args: string[] }> 
 /** Whether the box's filter refuses a kernel-keyring call (EPERM), and what made the call. Security: with neither
  * interpreter here the check fails rather than passes, since nothing else can tell this filter from none. */
 export function keyringDenied(
-  run: (command: string, args: string[]) => { error?: Error; stdout?: string; stderr?: string; status: number | null } = (command, args) => spawnSync(command, args, { encoding: "utf8", timeout: 10_000 }),
+  run: (command: string, args: string[]) => { error?: Error; stdout?: string; stderr?: string; status: number | null } = (command, args) => spawnSync(command, args, { encoding: "utf8", timeout: 10_000, windowsHide: true }),
 ): [ok: boolean, detail: string] {
   for (const probe of KEYRING_PROBES) {
     const result = run(probe.command, probe.args);

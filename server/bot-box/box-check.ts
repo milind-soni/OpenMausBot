@@ -44,7 +44,7 @@ export async function boxExec(command: readonly string[], env: Record<string, st
   try {
     return await new Promise((resolve) => {
       const piped = out.stdio === "pipe";
-      const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: [piped ? "ignore" : "inherit", piped ? "pipe" : "inherit", piped ? "pipe" : "inherit", ...wrapped.extraFds] });
+      const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, windowsHide: true, stdio: [piped ? "ignore" : "inherit", piped ? "pipe" : "inherit", piped ? "pipe" : "inherit", ...wrapped.extraFds] });
       for (const fd of wrapped.extraFds) try { closeSync(fd); } catch {}
       let stdout = "", stderr = "";
       child.stdout?.on("data", (chunk) => { stdout += chunk; });
