@@ -29,12 +29,16 @@ export function readProduct(file = join(ROOT, "product.json")) {
   return product;
 }
 
+/** A Windows checkout carries CRLF; every pattern here is written for LF. */
+const lf = (text) => text.replace(/\r\n/g, "\n");
+
 const field = (yaml, key) => yaml.match(new RegExp(`^${key}: (.+)$`, "m"))?.[1];
 const publishField = (yaml, key) => yaml.match(new RegExp(`^publish:\\n(?:  .*\\n)*?    ${key}: (.+)$`, "m"))?.[1];
 
 /** electron-builder.yml as product.json says it should read. The previous app name is replaced wherever it appears, so
  * installer names, usage descriptions and helper paths follow it. */
-export function applyProduct(yaml, product) {
+export function applyProduct(text, product) {
+  const yaml = lf(text);
   const previous = field(yaml, "productName");
   if (!previous) throw new Error("electron-builder.yml has no productName");
   let next = previous === product.appName ? yaml : yaml.split(previous).join(product.appName);
@@ -44,7 +48,8 @@ export function applyProduct(yaml, product) {
   return next;
 }
 
-export function checkProduct(yaml, product) {
+export function checkProduct(text, product) {
+  const yaml = lf(text);
   const expected = {
     productName: product.appName,
     appId: product.appId,
@@ -64,7 +69,7 @@ export function checkProduct(yaml, product) {
 /** The web app manifest with product.json's app name; the rest of it is kept as written. */
 export function applyManifest(text, product) {
   const name = JSON.stringify(product.appName);
-  return text.replace(/^(\s*"name": )".*?"(,?)$/m, `$1${name}$2`).replace(/^(\s*"short_name": )".*?"(,?)$/m, `$1${name}$2`);
+  return lf(text).replace(/^(\s*"name": )".*?"(,?)$/m, `$1${name}$2`).replace(/^(\s*"short_name": )".*?"(,?)$/m, `$1${name}$2`);
 }
 
 export function checkManifest(text, product) {

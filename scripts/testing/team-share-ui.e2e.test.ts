@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -6,10 +7,10 @@ import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { request } from "../mcp-server.ts";
-import { SERVICES } from "../../shared/services.ts";
 import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const launchedServices = JSON.parse(readFileSync(join(ROOT, "product.json"), "utf8")).services as { teamLibrary: unknown };
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
 const forced = process.env.OMB_UI_E2E === "1";
 const enabled = forced || Boolean(binary);
@@ -57,7 +58,7 @@ describe("Share a department in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("Chats, memory and keys are never shared");
     const dialog = await snapshot();
     for (const line of ["Share Sales desk", "Publishing isn't available here", "Save folder…"]) expect(dialog).toContain(line);
-    if (SERVICES.teamLibrary) expect(dialog).toContain("Upload on GitHub");
+    if (launchedServices.teamLibrary) expect(dialog).toContain("Upload on GitHub");
     else expect(dialog).not.toContain("Upload on GitHub");
     expect(dialog, "shared instructions are not the card's line").not.toContain("Quote list prices only.");
     expect(await evaluate("document.querySelector('[data-share-department]').closest('[role=dialog]').querySelectorAll('input, textarea, select, [role=checkbox]').length")).toBe(0);

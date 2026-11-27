@@ -2953,7 +2953,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       const expectedDeveloper = system
         ? `${system}${codexSandboxSuffix}`
         : codexSandboxSuffix
-          ? `No OpenMausBot bot-specific instructions remain.${codexSandboxSuffix}`
+          ? `No ${APP_NAME} bot-specific instructions remain.${codexSandboxSuffix}`
           : "";
       // A call naming a permission profile leaves the sandbox to that profile, so it carries no sandbox note; the
       // legacy-sandbox retry after a refused profile does.

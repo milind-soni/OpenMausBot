@@ -15,6 +15,13 @@ describe("product.json drives the installer config", () => {
     expect(checkManifest(manifest, readProduct())).toEqual([]);
   });
 
+  it("reads a Windows checkout's CRLF files the same way", () => {
+    const crlf = (text) => text.replace(/\r?\n/g, "\r\n");
+    expect(checkProduct(crlf(yaml), readProduct())).toEqual([]);
+    expect(checkProduct(applyProduct(crlf(yaml), renamed), renamed)).toEqual([]);
+    expect(checkManifest(applyManifest(crlf(manifest), renamed), renamed)).toEqual([]);
+  });
+
   it("renames every installer name, the app id and the update source in one pass", () => {
     const current = readProduct();
     const next = applyProduct(yaml, renamed);
