@@ -36,7 +36,10 @@ export interface SeatsRouteDeps {
 /** Also hands the count to license-seats.ts, which limits invites on a licensed server: this route is made once, with the
  * server's one sign-in list and session registry. */
 export function createSeatsRoutes(deps: SeatsRouteDeps): RouteHandler {
-  registerSeatSources({ used: () => seatCount(deps.signInList(), deps.sessions()), usedWith: (list) => seatCount(list, deps.sessions()) });
+  registerSeatSources({
+    used: () => seatCount(deps.signInList(), deps.sessions()), usedWith: (list) => seatCount(list, deps.sessions()),
+    domains: () => { const list = deps.signInList(); return [...new Set([...list.admins, ...list.members].filter((entry) => entry.startsWith("@")))]; },
+  });
   return async ({ res, path, method, json }) => {
     if (path !== "/api/seats" || method !== "GET") return PASS;
     return json(res, 200, { seats: seatCount(deps.signInList(), deps.sessions()) });

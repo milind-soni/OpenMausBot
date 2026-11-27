@@ -8,9 +8,9 @@
 // fields from the licence itself: the allowance lets nobody else in.
 import type { IncomingMessage } from "node:http";
 
-import { licenseFilesUsed, licenseProofMatch, licenseState, type LicenseState } from "../enterprise.ts";
-import { LICENSE_PROOF_HEADER } from "../license-proof.ts";
-import { seatsInUse } from "../license-seats.ts";
+import { licenseEverOffered, licenseFilesUsed, licenseProofMatch, licenseState, type LicenseState } from "../enterprise.ts";
+import { CONNECTOR_HEADER, LICENSE_PROOF_HEADER } from "../license-proof.ts";
+import { seatDomains, seatsInUse } from "../license-seats.ts";
 import { ownerOrAdmin } from "../request-auth.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -19,6 +19,8 @@ export const LICENSE_PATH = "/api/license";
 const CONNECTED_MS = 10 * 60_000;
 
 let connectorReadAt: number | null = null;
+/** The connector's last read of any kind that reached this route: the server is connected, licensed or not yet. */
+let connectorSeenAt: number | null = null;
 
 /** What the connector reports: the server's own judgement of its licence, never its customer, features or notice. */
 export function licenseForConnector(state: LicenseState) {
@@ -26,11 +28,14 @@ export function licenseForConnector(state: LicenseState) {
 }
 
 /** What the owner's Settings shows: the state, how many people can sign in now, whether licence files are used here at all
- * (false on a desktop or a Cloud home, which show no licence card), and whether the licence in force is one the MausBot
- * connector delivered and still reads. */
+ * (false on a desktop or a Cloud home), whether the licence in force is one the MausBot connector delivered and still
+ * reads, and `shown`: whether Settings has a licence card at all. That is a server that reads licence files and has, or
+ * has had, a licence, or that the connector reads; a free server that never had a licence shows nothing new. */
 export function licenseForSettings(state: LicenseState, now: number = Date.now()) {
-  const connected = connectorReadAt !== null && now - connectorReadAt < CONNECTED_MS && state.source === "file";
-  return { ...state, seatsUsed: seatsInUse(), files: licenseFilesUsed(), connected };
+  const recent = (at: number | null) => at !== null && now - at < CONNECTED_MS;
+  const connected = recent(connectorReadAt) && state.source === "file";
+  const files = licenseFilesUsed();
+  return { ...state, seatsUsed: seatsInUse(), seatDomains: seatDomains(), files, connected, shown: files && (licenseEverOffered() || state.source !== null || recent(connectorSeenAt)) };
 }
 
 const proofOf = (req: IncomingMessage): string | undefined => {
@@ -45,6 +50,9 @@ export async function licenseRoutes({ req, res, path, method, auth, json }: Rout
   if (method !== "GET") return json(res, 405, { error: "GET only" });
   const match = licenseProofMatch(proofOf(req));
   if (match === "in-force") connectorReadAt = Date.now();
+  // Only a read this route answers marks the server as connected: the owner's loopback, or a proof it accepts.
+  const connector = req.headers[CONNECTOR_HEADER] === "customer-run";
+  if (connector && (ownerOrAdmin(auth) || match)) connectorSeenAt = Date.now();
   res.setHeader("cache-control", "no-store");
   if (ownerOrAdmin(auth)) return json(res, 200, licenseForSettings(licenseState()));
   if (match && auth.kind === "loopback" && licenseFilesUsed()) return json(res, 200, licenseForConnector(licenseState()));
@@ -54,4 +62,5 @@ export async function licenseRoutes({ req, res, path, method, auth, json }: Rout
 /** For tests: forget the connector's last read. */
 export function resetLicenseRouteForTests(): void {
   connectorReadAt = null;
+  connectorSeenAt = null;
 }

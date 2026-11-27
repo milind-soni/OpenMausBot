@@ -11,7 +11,7 @@ import { LICENCE_PASTE_COMMAND, LicenceCard, LicenceRows, SeatLimitBanner } from
 
 const STATE: LicenceState = {
   valid: true, source: "file", plan: "business-server", seats: 20, expiresAt: "2026-12-31", expiresInDays: 34, graceEndsAt: "2027-01-14",
-  graceDaysLeft: null, seatsUsed: 7, files: true, connected: true,
+  graceDaysLeft: null, seatsUsed: 7, seatDomains: [], files: true, shown: true, connected: true,
 };
 
 let host: HTMLDivElement;
@@ -84,6 +84,12 @@ describe("the licence card", () => {
     expect(fetches.some((url) => url.endsWith("/api/license"))).toBe(true);
     expect(text()).toBe("");
     expect(readLicenceState({ ...STATE, files: false })).toBeNull();
+    // A free server install that never had a licence: no card either.
+    answer = { ...STATE, valid: false, source: null, plan: null, seats: null, expiresAt: null, shown: false };
+    draw(createElement(LicenceCard, { enabled: true }));
+    await act(async () => {});
+    expect(text()).toBe("");
+    expect(readLicenceState(answer)).toBeNull();
   });
 });
 
@@ -93,7 +99,14 @@ describe("the seat banner", () => {
     draw(createElement(SeatLimitBanner, { enabled: true }));
     await act(async () => {});
     expect(host.querySelector("[data-seat-banner]")?.textContent).toBe(
-      "23 people can sign in, more than the 20 seats on this server's plan. New invites wait until seats are added from your MausBot account. Nobody is signed out.",
+      "This server counts 23 people, more than the 20 seats on its plan. New invites wait until seats are added from your MausBot account. Nobody is signed out.",
+    );
+    answer = { ...STATE, seatsUsed: 23, seatDomains: ["@acme.example", "@lab.acme.example"] };
+    draw(createElement(SeatLimitBanner, { enabled: false }));
+    draw(createElement(SeatLimitBanner, { enabled: true }));
+    await act(async () => {});
+    expect(host.querySelector("[data-seat-banner]")?.textContent).toContain(
+      "Nobody is signed out. Anyone with an address at acme.example, lab.acme.example can still sign in, and counts once they have.",
     );
     expect(overSeats({ ...STATE, seatsUsed: 20 })).toBeNull();
     expect(overSeats({ ...STATE, seatsUsed: 23, valid: false })).toBeNull();

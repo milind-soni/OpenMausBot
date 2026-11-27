@@ -7,7 +7,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 
 import {
-  CUSTOMER_HOME_IMAGE, LICENCE_WRITE_EXIT, VERSION_LABEL, boxReport, homeReadsCommand, licenceWriteCommand, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource,
+  CUSTOMER_HOME_IMAGE, LICENCE_EXIT, VERSION_LABEL, boxReport, homeReadsCommand, licenceCommand, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource,
 } from "./customer-run.ts";
 import type { ContainerInfo, Docker, Mount } from "./docker.ts";
 import { JobFailure } from "./failure.ts";
@@ -36,6 +36,9 @@ const MADE_BY_LABEL = "com.mausbot.by";
 
 const lastLine = (text: string) => text.trim().split("\n").pop()?.slice(0, 300) ?? "";
 const gb = (bytes: number) => Math.round((bytes / 1e9) * 10) / 10;
+
+/** What licenceFile found or did. */
+export type LicenceFileState = "no_home" | "same" | "recent" | "differs" | "written";
 
 export interface Install {
   container: ContainerInfo;
@@ -143,18 +146,20 @@ export class AdoptedHome {
   }
 
   /**
-   * Saves `licence` as license.key in the home's data folder, from inside the home's container as the user it runs as
-   * (customer-run.ts, section 5). "same": the file already holds it; "no_home": the home is not running, so nothing was
-   * written and the caller tries again later. Not exclusive with jobs: it touches nothing a job does, and a long update
-   * must not hold up a licence.
+   * Compares `licence` with license.key in the home's data folder (`check`), or saves it there (`write`), from inside the
+   * home's container as the user it runs as (customer-run.ts, section 5). "no_home": the home is not running, so nothing
+   * was read or written and the caller tries again later. Throws when the file cannot be written. Not exclusive with jobs:
+   * it touches nothing a job does, and a long update must not hold up a licence.
    */
-  async writeLicence(licence: string): Promise<"written" | "same" | "no_home"> {
+  async licenceFile(mode: "check" | "write", licence: string): Promise<LicenceFileState> {
     const container = await this.container(SERVICE);
     if (!container?.State.Running) return "no_home";
-    const { code, output } = await this.docker.exec(container.Id, licenceWriteCommand(licence), 30_000);
-    if (code === LICENCE_WRITE_EXIT.same) return "same";
-    if (code !== LICENCE_WRITE_EXIT.written) throw new Error(`the home could not save its licence (exit ${code}${output.trim() ? `: ${lastLine(output)}` : ""})`);
-    return "written";
+    const { code, output } = await this.docker.exec(container.Id, licenceCommand(mode, licence), 30_000);
+    if (code === LICENCE_EXIT.same) return "same";
+    if (code === LICENCE_EXIT.recent) return "recent";
+    if (code === LICENCE_EXIT.differs && mode === "check") return "differs";
+    if (code === LICENCE_EXIT.written && mode === "write") return "written";
+    throw new Error(`the home could not save its licence (exit ${code}${output.trim() ? `: ${lastLine(output)}` : ""})`);
   }
 
   get previousImage(): string | null {

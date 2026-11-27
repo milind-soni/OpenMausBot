@@ -4,6 +4,9 @@
 import { createHash } from "node:crypto";
 
 export const LICENSE_PROOF_HEADER = "x-openmausbot-licence-proof";
+/** The connector names itself on its read (connector/src/customer-run.ts CONNECTOR_HEADER), so Settings shows the licence
+ * card on a connected server before its first licence. It grants nothing. */
+export const CONNECTOR_HEADER = "x-openmausbot-connector";
 
 /** Proof that a caller holds a licence this server accepted, without sending the licence: the same digest the connector
  * computes (connector/src/customer-run.ts licenceProof). Whoever can make it could read the licence's claims anyway. */

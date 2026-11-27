@@ -93,7 +93,8 @@ export function SeatLimitBanner({ enabled }: { enabled: boolean }) {
   return (
     <div role="status" data-seat-banner="" className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2.5 text-[13px] leading-relaxed text-warning">
       <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-      <span>{t("settings.licence.banner", { used: over.used, seats: over.seats })}</span>
+      <span>{t("settings.licence.banner", { used: over.used, seats: over.seats })}
+        {over.domains.length > 0 && <> {t("settings.licence.bannerDomains", { domains: over.domains.map((domain) => domain.slice(1)).join(", ") })}</>}</span>
     </div>
   );
 }

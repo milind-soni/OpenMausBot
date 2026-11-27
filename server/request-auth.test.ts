@@ -786,6 +786,9 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     expect(check("POST", "/api/license", { trust: "service", headers }).auth).toBeNull();
     expect(check("PUT", "/api/config", { trust: "service", headers }).auth).toBeNull();
     expect(check("GET", "/api/license", { trust: "service", headers: { ...headers, "x-forwarded-for": "203.0.113.9" } }).auth).toBeNull();
+    for (const path of ["/api/config", "/api/license/x", "/api/licensex", "/api/license/", "/api/auth/pairing"]) {
+      expect(check("GET", path, { trust: "service", headers }).auth, path).toBeNull();
+    }
   });
 
   it("still admits a real session with its own scopes on a service-trust server", () => {

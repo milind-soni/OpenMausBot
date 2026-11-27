@@ -84,10 +84,11 @@ MausBot can send this server its licence, which the connector saves to the serve
 - The licence comes inside the Admin's signed configuration for your server, never as a job. Only text with the shape of a licence (`omb1.` and two base64url parts, a few kilobytes at most) is saved. Anything else is ignored and logged.
 - The connector writes it from inside your server's container, as the user your server runs as, to `license.key` in the data folder (`/data/.openmausbot` in the container). The file is readable by that user only. It is written to a temporary file beside it and then renamed, so your server never reads half a licence.
 - Before writing, it compares the file with the licence, inside the container, and writes nothing when they are the same. It checks again every hour, so a restore that put an older `license.key` back is corrected.
+- A `license.key` changed in the last three minutes that holds a different licence is left alone until it is older, so a licence you paste by hand is read by your server first. A `license.key` that is a folder, or a link to one, is never written into; that counts as a failed write. After a failed write the connector waits five minutes before it tries again.
 - It never removes a licence. When a configuration carries none, for example after a plan is cancelled, the licence on your server stays and runs out by itself.
 - It never decides which licence wins. Your server reads every licence it has (`license.key`, `OMB_LICENSE_KEY` and the copy it keeps of the last one it accepted), checks each signature itself, and keeps the one issued last.
 - It is not a job, so pausing remote management and your policy file do not stop it. A licence changes no bot, no data and no setting; refusing one would only let a paid server run into its grace period. To refuse licences from MausBot, stop the connector.
-- Each licence saved is one line in your audit log, with the first 12 characters of its SHA-256, never the licence itself.
+- Before each licence is written, one line goes to your audit log, with the first 12 characters of its SHA-256, never the licence itself. When that line cannot be written, the licence is not written either. A write that then fails gets a second line saying so.
 
 Without a connection, the same file takes a licence you paste: download it from your MausBot account and run, on the server:
 
@@ -105,7 +106,7 @@ People sign in to your server with your server's own sign-in: a pairing code you
 
 ## Your log, your rules, your switch
 
-- **The audit log.** Every job, each of its steps, its result, every request, every refusal and every licence saved is one line in `/var/log/mausbot/audit.jsonl` on your server, owned by root. Each line carries the hash of the line before it, so a removed or changed line shows. A job that would change something is refused when the log cannot be written. A failed job's full reason is here; only its code leaves the server.
+- **The audit log.** Every job, each of its steps, its result, every request, every refusal and every licence written is one line in `/var/log/mausbot/audit.jsonl` on your server, owned by root. Each line carries the hash of the line before it, so a removed or changed line shows. A job that would change something is refused when the log cannot be written. A failed job's full reason is here; only its code leaves the server.
 
   ```sh
   docker exec mausbot-connector mausbot-connector audit --tail 50
@@ -139,7 +140,7 @@ The seat count is the number of people who can sign in: the addresses on your si
 
 The licence state never includes the licence, the name it was issued to, or its feature list. The server's own id lets MausBot issue a licence for this server.
 
-To build this the connector reads six things from your server, on the server's own loopback: that it answers, whether its bots' sandbox is on or off (not its checks), its version, its own id, its seat count, and its licence state. It keeps those fields and drops the rest of each answer. It reads no chat, file, key, name or address, and it sends no line of any log. On a server where a local request without a session is treated as a bot's (`OMB_LOOPBACK_TRUST=service`), the licence-state read carries a SHA-256 digest of the licence the connector saved; the server answers it only for a licence it accepted, so no bot's shell can make the same read.
+To build this the connector reads six things from your server, on the server's own loopback: that it answers, whether its bots' sandbox is on or off (not its checks), its version, its own id, its seat count, and its licence state. It keeps those fields and drops the rest of each answer. It reads no chat, file, key, name or address, and it sends no line of any log. On a server where a local request without a session is treated as a bot's (`OMB_LOOPBACK_TRUST=service`), the licence-state read carries a SHA-256 digest of the licence the connector saved; the server answers it only for a licence it accepted, so no bot's shell can make the same read. The read also says it is the connector's, which does nothing but let your server's Settings show its licence card before the first licence arrives.
 
 ## What your server itself still sends
 

@@ -84,6 +84,16 @@ describe("seats on a licensed server install", () => {
     expect(seatInviteRefusal({ admins: ["owner@acme.test"], members: ["a@acme.test", "b@acme.test", "c@acme.test", "d@acme.test"] })).toEqual({ seats: 2, used: 4 });
   });
 
+  it("counts a list the environment pins, so a patch that sends only the other list cannot leave those people out", async () => {
+    await licensed({ seats: 4 });
+    const env = { OMB_SIGNIN_EMAILS: "owner@acme.test,x@acme.test,y@acme.test" };
+    people(["owner@acme.test", "x@acme.test", "y@acme.test"], ["a@acme.test"]);
+    expect(seatInviteRefusal({ members: ["a@acme.test", "b@acme.test"] }, env)).toEqual({ seats: 4, used: 4 });
+    expect(seatInviteRefusal({ members: ["b@acme.test"] }, env)).toBeNull();
+    // Without the pin the same patch would replace the admins too, and the count after it would be two.
+    expect(seatInviteRefusal({ members: ["a@acme.test", "b@acme.test"] }, {})).toBeNull();
+  });
+
   it("keeps the last licence's seats during the grace period", async () => {
     await licensed({ seats: 2, expiresAt: day(-3) });
     people(["owner@acme.test"], ["a@acme.test"]);

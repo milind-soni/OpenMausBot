@@ -156,6 +156,9 @@ const RECORD_END = "\u001e";
  * service (a shared server, where every bot's shell is a local caller too): `licenceProof` of the licence the connector
  * saved. The server answers it with the six fields above and nothing else, and only while that licence is one it accepted. */
 export const LICENCE_PROOF_HEADER = "x-openmausbot-licence-proof";
+/** Says the read is the connector's, so the server's Settings shows its licence card even before a first licence. It
+ * opens nothing: a request without a session or a proof is refused where it was refused before. */
+export const CONNECTOR_HEADER = "x-openmausbot-connector";
 /**
  * Run inside the home's container: curl comes with the image, and the home listens on its own loopback only. `proof` is
  * the one argument, after the fixed script: `licenceProof` of the licence the connector saved, or "" when it saved none.
@@ -165,7 +168,7 @@ export function homeReadsCommand(proof: string | null): string[] {
   return [
     "sh", "-c",
     `for path in ${HOME_READS.slice(0, 3).join(" ")}; do curl -s --max-time 5 "http://127.0.0.1:\${OMB_PORT:-8799}$path" || true; printf '\\n\\036\\n'; done; `
-      + `curl -s --max-time 5 -H "${LICENCE_PROOF_HEADER}: $1" "http://127.0.0.1:\${OMB_PORT:-8799}${HOME_READS[3]}" || true; printf '\\n\\036\\n'`,
+      + `curl -s --max-time 5 -H "${CONNECTOR_HEADER}: customer-run" -H "${LICENCE_PROOF_HEADER}: $1" "http://127.0.0.1:\${OMB_PORT:-8799}${HOME_READS[3]}" || true; printf '\\n\\036\\n'`,
     "sh", safe,
   ];
 }
@@ -354,16 +357,22 @@ export function reducedReply(reply: JobReply): JobReply {
 // below compares the file with the licence before writing, and that comparison happens inside the container.
 //
 // - Only a licence of the right shape is written: `omb1`, then two base64url parts, at most a few kilobytes. This shape is
-//   also what makes it safe to hand to the command below as its one argument.
+//   also what makes it safe to hand to the command below as an argument.
 // - An absent licence removes nothing. A cancelled plan stops new licences; the one on the server runs out by itself.
 // - The connector never decides which of two licences is newer: the server reads every licence it has and keeps the one
 //   issued last (server/enterprise.ts). The connector compares licences as exact strings only, to skip writing one twice.
+// - A license.key changed in the last three minutes that is not this licence is left alone until it is older: someone
+//   pasted a licence by hand, and the server, which looks at the file once a minute, must get to read it first.
+// - A license.key that is a folder, or a link to one, is never written into: that is a failure, reported and retried later.
 // - It is not a job: pausing remote management and the server's policy file do not stop it. A licence changes no bot, no
-//   data and no setting of the server; refusing one would only let a paid server run into its grace period. Every licence
-//   saved is one line in the audit log, with a short fingerprint, never the licence.
+//   data and no setting of the server; refusing one would only let a paid server run into its grace period. Before each
+//   licence is written, one line goes to the audit log, with a short fingerprint, never the licence; when that line cannot
+//   be written, neither is the licence.
 
 export const LICENCE_FILE = "license.key";
 const LICENCE_SHAPE = /^omb1\.[A-Za-z0-9_-]{16,6000}\.[A-Za-z0-9_-]{43,200}$/;
+/** A license.key changed this recently, and different from the licence, is someone's own: the connector waits. */
+export const LICENCE_PASTE_MINUTES = 3;
 
 /** The licence, when it has the shape of one; null otherwise. */
 export function checkLicence(value: unknown): string | null {
@@ -380,18 +389,25 @@ export function licenceFingerprint(licence: string): string {
   return createHash("sha256").update(licence).digest("hex").slice(0, 12);
 }
 
-/** Exit codes of `licenceWriteCommand`. */
-export const LICENCE_WRITE_EXIT = { written: 0, failed: 1, same: 3 } as const;
+/** Exit codes of `licenceCommand`: written; cannot be written; already the licence; someone changed it just now; would
+ * be written (`check` only). */
+export const LICENCE_EXIT = { written: 0, failed: 1, same: 3, recent: 4, differs: 5 } as const;
 
-/** Run inside the home's container, as the user it runs as. `licence` has passed `checkLicence`. */
-export function licenceWriteCommand(licence: string): string[] {
+/**
+ * Run inside the home's container, as the user it runs as. `check` only compares; `write` compares and then writes.
+ * `licence` has passed `checkLicence`; it and the mode are the two arguments after the fixed script.
+ */
+export function licenceCommand(mode: "check" | "write", licence: string): string[] {
   if (!checkLicence(licence)) throw new Error("not a licence");
+  const { written, failed, same, recent, differs } = LICENCE_EXIT;
   return [
     "sh", "-c",
-    `umask 077; dir="\${OMB_DATA_DIR:-/data/.openmausbot}"; file="$dir/${LICENCE_FILE}"; tmp="$dir/.${LICENCE_FILE}.connector.tmp"; `
-      + `if [ -f "$file" ] && [ ! -L "$file" ] && [ "$(cat "$file")" = "$1" ]; then exit ${LICENCE_WRITE_EXIT.same}; fi; `
-      + `[ -d "$dir" ] || exit ${LICENCE_WRITE_EXIT.failed}; rm -f "$tmp"; `
-      + `if printf '%s\\n' "$1" > "$tmp" && mv -f "$tmp" "$file"; then exit ${LICENCE_WRITE_EXIT.written}; fi; rm -f "$tmp"; exit ${LICENCE_WRITE_EXIT.failed}`,
-    "sh", licence,
+    `umask 077; set -C; dir="\${OMB_DATA_DIR:-/data/.openmausbot}"; file="$dir/${LICENCE_FILE}"; tmp="$dir/.${LICENCE_FILE}.connector.tmp"; `
+      + `[ -d "$dir" ] || exit ${failed}; [ -d "$file" ] && exit ${failed}; `
+      + `if [ -f "$file" ] && [ ! -L "$file" ] && [ "$(cat "$file")" = "$2" ]; then exit ${same}; fi; `
+      + `if { [ -e "$file" ] || [ -L "$file" ]; } && [ -n "$(find "$file" -prune -mmin -${LICENCE_PASTE_MINUTES} 2>/dev/null)" ]; then exit ${recent}; fi; `
+      + `[ "$1" = write ] || exit ${differs}; rm -f "$tmp"; `
+      + `if printf '%s\\n' "$2" > "$tmp" && mv -f "$tmp" "$file"; then exit ${written}; fi; rm -f "$tmp"; exit ${failed}`,
+    "sh", mode, licence,
   ];
 }

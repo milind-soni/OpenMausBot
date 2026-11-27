@@ -2,6 +2,7 @@
 // core never imports it statically. Its one obligation is `register()`, turning a licence key into entitlements. The key
 // comes from <data>/license.key, OMB_LICENSE_KEY or the kept copy of the last one accepted (license-source.ts), and is
 // read again while a server install runs.
+import { timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -71,6 +72,7 @@ let loaded: { entry: string | undefined; dataDir: string | undefined; envKey: st
 let held: { source: LicenseSource; layer: Layer; proof: string } | null = null;
 /** licenseStateProof of each licence the last read accepted, and of the one in force: what the connector may present. */
 let acceptedProofs: ReadonlySet<string> = new Set();
+let everOffered = false;
 let clockWarned: string | undefined;
 let lastChangeLog = Number.NEGATIVE_INFINITY;
 /** The last licence problem logged, so an hourly re-read of the same bad file logs it once. */
@@ -163,6 +165,7 @@ export async function loadEnterpriseLayer(
   const entry = dirs.map(layerEntry).find((candidate) => candidate !== undefined);
   const reads = await readSources(options.dataDir);
   const keyGiven = reads.file.state !== "absent" || reads.lastGood.state !== "absent" || Boolean(envKey);
+  everOffered = keyGiven;
   loaded = { entry, dataDir: options.dataDir, envKey, keyAtStart: keyGiven || options.serverInstall === true };
   if (!entry) {
     const named = reads.file.state !== "absent" ? `${licenseFilePath(options.dataDir!)} holds a licence` : "OMB_LICENSE_KEY is set";
@@ -242,6 +245,7 @@ async function grant(reads: { file: LicenseFileRead; lastGood: LicenseFileRead }
   const problems: string[] = [];
   const offered: { key: string; source: LicenseSource }[] = [];
   for (const [read, source] of [[reads.file, "file"], [envKey ? { state: "present", key: envKey } as const : { state: "absent" } as const, "env"], [reads.lastGood, "last-good"]] as const) {
+    if (read.state !== "absent") everOffered = true;
     if (read.state === "present") offered.push({ key: read.key, source });
     else if (read.state === "unreadable") problems.push(read.error);
   }
@@ -409,8 +413,15 @@ export function licenseFilesUsed(): boolean {
  * none it knows. The MausBot connector presents it to read the licence state on a server where loopback is a service. */
 export function licenseProofMatch(proof: string | undefined): "in-force" | "accepted" | null {
   if (!proof || !/^[0-9a-f]{64}$/.test(proof)) return null;
-  if (held && current.edition === "enterprise" && held.proof === proof) return "in-force";
-  return acceptedProofs.has(proof) ? "accepted" : null;
+  const same = (known: string) => timingSafeEqual(Buffer.from(known), Buffer.from(proof));
+  if (held && current.edition === "enterprise" && same(held.proof)) return "in-force";
+  return [...acceptedProofs].some(same) ? "accepted" : null;
+}
+
+/** Whether this server has, or has had since it started, a licence on offer: license.key, OMB_LICENSE_KEY or the kept
+ * copy, accepted or not. A server that never had one shows no licence card. */
+export function licenseEverOffered(): boolean {
+  return everOffered;
 }
 
 /** No countdown, grace date or operator notice for a non-admin session. */

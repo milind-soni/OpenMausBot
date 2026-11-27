@@ -78,7 +78,7 @@ describe("GET /api/license", () => {
     expect(await (await fetch(`${base}/api/license`)).json()).toEqual({
       valid: false, source: null, customer: null, plan: null, seats: null, features: [],
       expiresAt: null, expiresInDays: null, graceEndsAt: null, graceDaysLeft: null, notice: null,
-      seatsUsed: null, files: false, connected: false,
+      seatsUsed: null, seatDomains: [], files: false, connected: false, shown: false,
     });
   });
 
@@ -121,11 +121,53 @@ describe("GET /api/license", () => {
     }
   });
 
+  it("refuses a valid digest from a member's session, and on a place that reads no licence files", async () => {
+    const key = await licensed();
+    const proof = { [LICENSE_PROOF_HEADER]: licenseStateProof(key) };
+    const member = await serve(session(["client"]));
+    const refused = await fetch(`${member}/api/license`, { headers: proof });
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).not.toContain("valid");
+    // A desktop or a Cloud home reads OMB_LICENSE_KEY alone (no data folder): the same digest of the same licence opens nothing.
+    const layer = mkdtempSync(join(tmpdir(), "omb-license-route-layer-"));
+    dirs.push(layer);
+    mkdirSync(join(layer, "server"));
+    writeFileSync(join(layer, "server", "index.js"), `export function register() { return { customer: "Acme", features: [], expiresAt: "2099-01-01", seats: 20 }; }`);
+    await loadEnterpriseLayer({ dir: layer, licenseKey: key });
+    const desktop = await serve(service);
+    expect((await fetch(`${desktop}/api/license`, { headers: proof })).status).toBe(403);
+  });
+
+  it("shows the licence card only on a server that reads licence files and has had a licence, or that the connector reads", async () => {
+    const base = await serve(session(["admin", "client"]));
+    const shown = async () => ((await (await fetch(`${base}/api/license`)).json()) as { shown: boolean }).shown;
+    // A free server that never had a licence: nothing new.
+    const data = mkdtempSync(join(tmpdir(), "omb-license-route-data-"));
+    const layer = mkdtempSync(join(tmpdir(), "omb-license-route-layer-"));
+    dirs.push(data, layer);
+    mkdirSync(join(layer, "server"));
+    writeFileSync(join(layer, "server", "index.js"), `export function register() { return { customer: "Acme", features: [], expiresAt: "2099-01-01" }; }`);
+    await loadEnterpriseLayer({ dir: layer, dataDir: data, licenseKey: undefined, serverInstall: true });
+    expect(await shown()).toBe(false);
+    // Connected: the connector's read through the owner's loopback.
+    const owner = await serve({ kind: "loopback", scopes: ["admin", "client"] });
+    await fetch(`${owner}/api/license`, { headers: { "x-openmausbot-connector": "customer-run" } });
+    expect(await shown()).toBe(true);
+    resetLicenseRouteForTests();
+    // The same header from a bot's shell on a shared server, without a proof, is refused and changes nothing.
+    await fetch(`${await serve(service)}/api/license`, { headers: { "x-openmausbot-connector": "customer-run" } });
+    expect(await shown()).toBe(false);
+    // A licence, even one this server refused, shows the card from then on.
+    writeFileSync(join(data, "license.key"), "omb1.not.genuine");
+    await loadEnterpriseLayer({ dir: layer, dataDir: data, licenseKey: undefined, serverInstall: true });
+    expect(await shown()).toBe(true);
+  });
+
   it("tells the owner the seats in use, that this server reads licence files, and whether the connector delivered the licence", async () => {
-    registerSeatSources({ used: () => 23, usedWith: () => 23 });
+    registerSeatSources({ used: () => 23, usedWith: () => 23, domains: () => ["@acme.test"] });
     const key = await licensed();
     const owner = await serve(session(["admin", "client"]));
-    expect(await (await fetch(`${owner}/api/license`)).json()).toMatchObject({ valid: true, seats: 20, seatsUsed: 23, files: true, connected: false });
+    expect(await (await fetch(`${owner}/api/license`)).json()).toMatchObject({ valid: true, seats: 20, seatsUsed: 23, seatDomains: ["@acme.test"], files: true, connected: false, shown: true });
     // The connector's read marks the licence as delivered by MausBot; an owner's own read with a digest counts as well.
     const connector = await serve(service);
     expect((await fetch(`${connector}/api/license`, { headers: { [LICENSE_PROOF_HEADER]: licenseStateProof(key) } })).status).toBe(200);

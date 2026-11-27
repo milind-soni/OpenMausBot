@@ -12,10 +12,15 @@ export interface LicenceState {
   expiresInDays: number | null;
   graceEndsAt: string | null;
   graceDaysLeft: number | null;
-  /** How many people can sign in now (server/routes/seats.ts). */
+  /** How many people the seats count now (server/routes/seats.ts): each address on the sign-in list and each person who
+   * has signed in. */
   seatsUsed: number | null;
+  /** The sign-in list's `@domain` entries: anyone there can sign in, and counts once they have. */
+  seatDomains: string[];
   /** This server reads licence files: false on a desktop and a Cloud home. */
   files: boolean;
+  /** Settings has a licence card: a server that has, or has had, a licence, or that the connector reads. */
+  shown: boolean;
   /** The licence in force came from MausBot through the connector, which still reads it. */
   connected: boolean;
 }
@@ -26,7 +31,7 @@ export const LICENCE_CHANGED = "omb-licence-changed";
 export function readLicenceState(value: unknown): LicenceState | null {
   if (!value || typeof value !== "object") return null;
   const said = value as Partial<LicenceState>;
-  if (typeof said.valid !== "boolean" || said.files !== true) return null;
+  if (typeof said.valid !== "boolean" || said.files !== true || said.shown !== true) return null;
   const count = (n: unknown) => (typeof n === "number" && Number.isFinite(n) ? n : null);
   const text = (s: unknown) => (typeof s === "string" && s ? s : null);
   return {
@@ -34,14 +39,15 @@ export function readLicenceState(value: unknown): LicenceState | null {
     source: said.source === "file" || said.source === "env" || said.source === "last-good" ? said.source : null,
     plan: text(said.plan), seats: count(said.seats), expiresAt: text(said.expiresAt), expiresInDays: count(said.expiresInDays),
     graceEndsAt: text(said.graceEndsAt), graceDaysLeft: count(said.graceDaysLeft), seatsUsed: count(said.seatsUsed),
-    files: true, connected: said.connected === true,
+    seatDomains: Array.isArray(said.seatDomains) ? said.seatDomains.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("@")) : [],
+    files: true, shown: true, connected: said.connected === true,
   };
 }
 
 /** Over the plan's seats: invites are refused until seats are added. Only while the licence is in force. */
-export function overSeats(state: LicenceState | null): { used: number; seats: number } | null {
+export function overSeats(state: LicenceState | null): { used: number; seats: number; domains: string[] } | null {
   if (!state?.valid || state.seats === null || state.seatsUsed === null || state.seatsUsed <= state.seats) return null;
-  return { used: state.seatsUsed, seats: state.seats };
+  return { used: state.seatsUsed, seats: state.seats, domains: state.seatDomains };
 }
 
 /** The licence of the server this page belongs to, read when `enabled` (an admin on a server's page) and again after the

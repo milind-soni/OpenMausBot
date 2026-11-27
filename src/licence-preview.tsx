@@ -1,7 +1,8 @@
 // Dev-only: the real Settings window of a self-hosted server, as its admin sees it, served at /licence-preview.html; not in
 // the packaged app. Every request is answered here, so it needs no server.
-// ?state=connected|pasted|grace|lapsed|over|none|unlicensed&page=overview|people&skin=midnight|daylight&lang=pt-br
-// `unlicensed` answers as a server from before the licence card (or a desktop): no card, no banner.
+// ?state=connected|pasted|env|kept|grace|graceover|lapsed|over|domains|waiting|never|unlicensed&page=overview|people&skin=midnight|daylight&lang=pt-br
+// `never`: a free server install that never had a licence (no card, as before the card existed). `waiting`: connected to
+// MausBot, no licence yet. `unlicensed`: a server from before the card, or a desktop.
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
@@ -12,15 +13,23 @@ const state = params.get("state") ?? "connected";
 
 const BASE = {
   valid: true, source: "file", customer: "Acme Analytical", plan: "business-server", seats: 20, features: ["budgets", "whitelabel"],
-  expiresAt: "2026-12-31", expiresInDays: 34, graceEndsAt: "2027-01-14", graceDaysLeft: null, notice: null, seatsUsed: 14, files: true, connected: true,
+  expiresAt: "2026-12-31", expiresInDays: 34, graceEndsAt: "2027-01-14", graceDaysLeft: null, notice: null, seatsUsed: 14, seatDomains: [] as string[],
+  files: true, shown: true, connected: true,
 };
+const GRACE = { connected: false, expiresAt: "2026-11-23", expiresInDays: -4, graceEndsAt: "2026-12-07", graceDaysLeft: 10 };
+const NONE = { valid: false, source: null, customer: null, plan: null, seats: null, features: [], expiresAt: null, expiresInDays: null, graceEndsAt: null, seatsUsed: 3, connected: false };
 const LICENCE: Record<string, unknown> = {
   connected: BASE,
   pasted: { ...BASE, connected: false },
-  grace: { ...BASE, connected: false, expiresAt: "2026-11-23", expiresInDays: -4, graceEndsAt: "2026-12-07", graceDaysLeft: 10 },
+  env: { ...BASE, source: "env", connected: false },
+  kept: { ...BASE, source: "last-good", connected: false },
+  grace: { ...BASE, ...GRACE },
+  graceover: { ...BASE, ...GRACE, seatsUsed: 23 },
   lapsed: { ...BASE, valid: false, connected: false, features: [], expiresAt: "2026-10-31", expiresInDays: -27, graceEndsAt: "2026-11-14", graceDaysLeft: 0 },
   over: { ...BASE, seatsUsed: 23 },
-  none: { ...BASE, valid: false, source: null, customer: null, plan: null, seats: null, features: [], expiresAt: null, expiresInDays: null, graceEndsAt: null, seatsUsed: 3, connected: false },
+  domains: { ...BASE, seatsUsed: 23, seatDomains: ["@acme.example"] },
+  waiting: { ...BASE, ...NONE },
+  never: { ...BASE, ...NONE, shown: false },
   unlicensed: { error: "not found" },
 };
 const PEOPLE = ["maya@acme.example", "sam@acme.example", "lee@acme.example", "noor@acme.example", "ravi@acme.example"];

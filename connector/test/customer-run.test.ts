@@ -9,7 +9,7 @@ import { AuditLog, type AuditEvent, type AuditLine } from "../src/audit.ts";
 import { serveCustomerRunRequest } from "../src/customer-run-requests.ts";
 import {
   CUSTOMER_RUN_JOBS, CUSTOMER_RUN_LOCAL_JOBS, CUSTOMER_RUN_REQUESTS, HOME_READS, LICENCE_PROOF_HEADER, checkCustomerRunJob, checkLicence, customerRunRefusal, homeReadsCommand,
-  licenceFingerprint, licenceProof, licenceReport, licenceWriteCommand, olderVersionRefusal, parseHomeReads, reducedHeartbeat, reducedReply,
+  LICENCE_PASTE_MINUTES, licenceCommand, licenceFingerprint, licenceProof, licenceReport, olderVersionRefusal, parseHomeReads, reducedHeartbeat, reducedReply,
 } from "../src/customer-run.ts";
 import { LicenceDelivery } from "../src/licence.ts";
 import { enroll } from "../src/enroll.ts";
@@ -82,15 +82,20 @@ async function server(options: { image?: string; seats?: number | null } = {}) {
     proofs: new Set<string>(),
     /** The data folder cannot be written (a full disk): the licence write fails. */
     readOnly: false,
+    /** license.key was changed by hand within the paste window. */
+    pastedJustNow: false,
   };
   docker.onExec = (_container, command) => {
     home.execs.push(command);
-    // The licence write: as the script does it, a compare and then the whole file at once.
-    if (command[3] === "sh" && command[4]?.startsWith("omb1.") && command[2]?.includes("license.key")) {
+    // The licence check and write, as the script does them (connector/test/licence-write.test.ts runs the script itself).
+    if (command[3] === "sh" && (command[4] === "check" || command[4] === "write") && command[5]?.startsWith("omb1.")) {
       const files = docker.folder(dataDir).files;
-      if (files.get(LICENCE_PATH) === `${command[4]}\n`) return { code: 3, output: "" };
+      const licence = command[5];
+      if (files.get(LICENCE_PATH) === `${licence}\n`) return { code: 3, output: "" };
+      if (files.has(LICENCE_PATH) && home.pastedJustNow) return { code: 4, output: "" };
+      if (command[4] === "check") return { code: 5, output: "" };
       if (home.readOnly) return { code: 1, output: "sh: can't create /data/.openmausbot/.license.key.connector.tmp: Read-only file system\n" };
-      files.set(LICENCE_PATH, `${command[4]}\n`);
+      files.set(LICENCE_PATH, `${licence}\n`);
       return { code: 0, output: "" };
     }
     if (!home.answers) return { code: 0, output: "\n\u001e\n\n\u001e\n\n\u001e\n\n\u001e\n" };
@@ -348,19 +353,21 @@ describe("a customer-run server: what leaves it", () => {
 });
 
 describe("a customer-run server: its licence", () => {
-  async function delivering(options: { paused?: boolean } = {}) {
+  async function delivering(options: { paused?: boolean; audit?: string } = {}) {
     const fixture = await server();
     await fixture.install();
     if (options.paused) fixture.state.savePause(true);
-    const audit = new AuditLog(join(fixture.dir, "audit.jsonl"));
+    const audit = new AuditLog(options.audit ?? join(fixture.dir, "audit.jsonl"));
     let clock = 1_800_000_000_000;
     const delivery = new LicenceDelivery({
-      home: fixture.adopted, log: (line) => fixture.lines.push(line), record: (event) => audit.append(event), now: () => clock, recheckMs: 60 * 60_000,
+      home: fixture.adopted, log: (line) => fixture.lines.push(line), record: (event) => audit.append(event), now: () => clock, recheckMs: 60 * 60_000, retryMs: 5 * 60_000,
     });
-    const writes = () => fixture.home.execs.filter((command) => command[4]?.startsWith("omb1.")).length;
+    const writes = () => fixture.home.execs.filter((command) => command[4] === "write").length;
+    const licenceExecs = () => fixture.home.execs.filter((command) => command[4] === "check" || command[4] === "write").length;
     const onDisk = () => fixture.docker.folder(fixture.dataDir).files.get(LICENCE_PATH);
     const audits = () => audit.tail(100).map((line) => JSON.parse(line) as AuditLine);
-    return { ...fixture, audit, delivery, writes, onDisk, audits, later: (ms: number) => { clock += ms; } };
+    const said = () => audits().filter((line) => line.event === "licence").map((line) => (line as { what: string }).what);
+    return { ...fixture, audit, delivery, writes, licenceExecs, onDisk, audits, said, later: (ms: number) => { clock += ms; } };
   }
 
   it("saves a licence from MausBot's config once, as license.key in the server's data folder, from inside the server's container", async () => {
@@ -368,13 +375,14 @@ describe("a customer-run server: its licence", () => {
     await fixture.delivery.offer(LICENCE);
     expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
     expect(fixture.writes()).toBe(1);
-    // In the home's container, through its own shell: the licence is the one argument after a fixed script.
+    // In the home's container, through its own shell: a check, then the write; the licence is an argument after a fixed script.
+    expect(fixture.home.execs.slice(-2)).toEqual([licenceCommand("check", LICENCE), licenceCommand("write", LICENCE)]);
     const command = fixture.home.execs.at(-1)!;
-    expect(command).toEqual(licenceWriteCommand(LICENCE));
     expect(command.slice(0, 2)).toEqual(["sh", "-c"]);
     expect(command[2]).not.toContain(LICENCE);
-    expect(command[2]).toContain("umask 077");
+    expect(command[2]).toContain("umask 077; set -C;");
     expect(command[2]).toMatch(/> "\$tmp" && mv -f "\$tmp" "\$file"/);
+    expect(command[2]).toContain(`-mmin -${LICENCE_PASTE_MINUTES}`);
     expect(fixture.docker.calls.filter((call) => call.startsWith("exec ")).every((call) => call === "exec openmausbot-omb-1")).toBe(true);
     expect(fixture.docker.calls.some((call) => /create|start|stop|remove|volume/.test(call))).toBe(false);
   });
@@ -388,7 +396,7 @@ describe("a customer-run server: its licence", () => {
     await fixture.delivery.offer(RENEWED);
     expect(fixture.onDisk()).toBe(`${RENEWED}\n`);
     expect(fixture.writes()).toBe(2);
-    expect(fixture.audits().filter((line) => line.event === "licence").map((line) => (line as { what: string }).what)).toEqual(["saved", "saved"]);
+    expect(fixture.said()).toEqual(["writing", "writing"]);
   });
 
   it("ignores and logs a licence that does not have the shape of one, and writes nothing", async () => {
@@ -398,14 +406,13 @@ describe("a customer-run server: its licence", () => {
       await fixture.delivery.offer(malformed);
     }
     expect(checkLicence(LICENCE)).toBe(LICENCE);
-    expect(fixture.writes()).toBe(0);
+    expect(fixture.licenceExecs()).toBe(0);
     expect(fixture.onDisk()).toBeUndefined();
     expect(fixture.lines.some((line) => line.startsWith("ignored the licence in MausBot's config: it is not a licence"))).toBe(true);
-    const refused = fixture.audits().filter((line) => line.event === "licence");
-    expect(refused.length).toBeGreaterThan(0);
-    expect(refused.every((line) => (line as { what: string }).what === "refused")).toBe(true);
-    expect(JSON.stringify(refused)).not.toContain("rm -rf");
-    expect(() => licenceWriteCommand(`${LICENCE}'; reboot; '`)).toThrow();
+    expect(fixture.said().length).toBeGreaterThan(0);
+    expect(fixture.said().every((what) => what === "refused")).toBe(true);
+    expect(JSON.stringify(fixture.audits())).not.toContain("rm -rf");
+    expect(() => licenceCommand("write", `${LICENCE}'; reboot; '`)).toThrow();
   });
 
   it("leaves the licence on the server when a config carries none: cancelling stops new licences, it removes nothing", async () => {
@@ -419,15 +426,34 @@ describe("a customer-run server: its licence", () => {
     expect(fixture.home.execs.every((command) => !/\brm -f "\$file"|unlink/.test(command[2] ?? ""))).toBe(true);
   });
 
-  it("writes one audit line for each licence saved, with a fingerprint and never the licence", async () => {
+  it("writes one audit line before each licence it writes, with a fingerprint and never the licence", async () => {
     const fixture = await delivering();
     await fixture.delivery.offer(LICENCE);
-    const saved = fixture.audits().filter((line) => line.event === "licence");
-    expect(saved).toEqual([expect.objectContaining({ event: "licence", what: "saved", by: "admin", fingerprint: licenceFingerprint(LICENCE) })]);
+    expect(fixture.audits().filter((line) => line.event === "licence")).toEqual([
+      expect.objectContaining({ event: "licence", what: "writing", by: "admin", fingerprint: licenceFingerprint(LICENCE) }),
+    ]);
     expect(licenceFingerprint(LICENCE)).toMatch(/^[0-9a-f]{12}$/);
     const text = readFileSync(fixture.audit.file, "utf8");
     expect(text).not.toContain(LICENCE.split(".")[1]);
     expect(text).not.toContain(LICENCE.split(".")[2]);
+  });
+
+  it("writes no licence when the audit log cannot be written, and tries again five minutes later", async () => {
+    const blocked = mkdtempSync(join(tmpdir(), "omb-audit-blocked-"));
+    cleanups.push(() => rmSync(blocked, { recursive: true, force: true }));
+    writeFileSync(join(blocked, "not-a-folder"), "");
+    const fixture = await delivering({ audit: join(blocked, "not-a-folder", "audit.jsonl") });
+    await fixture.delivery.offer(LICENCE);
+    expect(fixture.writes()).toBe(0);
+    expect(fixture.onDisk()).toBeUndefined();
+    expect(fixture.lines.some((line) => line.startsWith("could not save the licence MausBot sent: the audit log cannot be written") && line.endsWith("trying again in 5 minutes"))).toBe(true);
+    const checks = fixture.licenceExecs();
+    fixture.later(60_000);
+    await fixture.delivery.tick();
+    expect(fixture.licenceExecs()).toBe(checks);
+    fixture.later(4 * 60_000);
+    await fixture.delivery.tick();
+    expect(fixture.licenceExecs()).toBe(checks + 1);
   });
 
   it("saves it while remote management is paused: a licence is not a job on the server's bots", async () => {
@@ -437,7 +463,7 @@ describe("a customer-run server: its licence", () => {
     expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
   });
 
-  it("waits for the home to run, retries a failed write, and puts the licence back after the hourly check finds it replaced", async () => {
+  it("waits for the home to run, backs off five minutes after a failed write, and puts the licence back after the hourly check finds it replaced", async () => {
     const fixture = await delivering();
     await fixture.docker.stopContainer("openmausbot-omb-1");
     await fixture.delivery.offer(LICENCE);
@@ -446,8 +472,14 @@ describe("a customer-run server: its licence", () => {
     fixture.home.readOnly = true;
     await fixture.delivery.tick();
     expect(fixture.onDisk()).toBeUndefined();
-    expect(fixture.lines.some((line) => line.startsWith("could not save the licence MausBot sent: the home could not save its licence (exit 1"))).toBe(true);
+    expect(fixture.lines.filter((line) => line.startsWith("could not save the licence MausBot sent: the home could not save its licence (exit 1"))).toHaveLength(1);
+    expect(fixture.said()).toEqual(["writing", "failed"]);
     fixture.home.readOnly = false;
+    await fixture.delivery.tick();
+    fixture.later(60_000);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBeUndefined();
+    fixture.later(4 * 60_000);
     await fixture.delivery.tick();
     expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
     // A restore puts an older license.key back: the next hourly check writes the licence again; the same file, nothing.
@@ -459,7 +491,22 @@ describe("a customer-run server: its licence", () => {
     expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
     fixture.later(60 * 60_000);
     await fixture.delivery.tick();
-    expect(fixture.audits().filter((line) => line.event === "licence")).toHaveLength(2);
+    expect(fixture.said()).toEqual(["writing", "failed", "writing", "writing"]);
+  });
+
+  it("leaves a licence someone pasted in the last few minutes for the server to read first, then writes MausBot's", async () => {
+    const fixture = await delivering();
+    fixture.docker.folder(fixture.dataDir).files.set(LICENCE_PATH, `${licenceOf("pasted")}\n`);
+    fixture.home.pastedJustNow = true;
+    await fixture.delivery.offer(LICENCE);
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${licenceOf("pasted")}\n`);
+    expect(fixture.writes()).toBe(0);
+    expect(fixture.said()).toEqual([]);
+    expect(fixture.lines.filter((line) => line.includes("changed in the last few minutes"))).toHaveLength(1);
+    fixture.home.pastedJustNow = false;
+    await fixture.delivery.tick();
+    expect(fixture.onDisk()).toBe(`${LICENCE}\n`);
   });
 
   it("reads the licence state with the licence's digest, so a shared server answers the connector and not a bot's shell", async () => {
