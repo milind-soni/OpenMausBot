@@ -164,8 +164,44 @@ async function runOnVm(context: ExecutorContext, input: Parameters<StepExecutors
   if (vm.status !== 409 || vm.body.code !== "no_vm_for_turn") return { ok: false, error: String(vm.body.error ?? "the command failed") };
   const computer = await context.internal("computer", "/api/internal/computer/mcp", { jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "exec", arguments: { command } } }, input.signal);
   if (!computer.ok) return { ok: false, error: String(vm.body.error ?? computer.body.error ?? "there is no cloud computer to run this on") };
-  const result = callText(computer.body);
-  return result.ok && typeof result.output === "string" && Buffer.byteLength(result.output) > input.maxBytes ? tooLarge(input.maxBytes) : result;
+  return finishCloudCommand(context, computer.body, input);
+}
+
+async function finishCloudCommand(context: ExecutorContext, first: Record<string, unknown>, input: Parameters<StepExecutors["shell"]>[0]): Promise<ExecResult> {
+  let frame = first;
+  let processId: string | undefined;
+  for (;;) {
+    input.signal.throwIfAborted();
+    const result = callText(frame);
+    if (!result.ok) return result;
+    if (Buffer.byteLength(String(result.output)) > input.maxBytes) return tooLarge(input.maxBytes);
+    const content = record(frame.result)?.content;
+    const progress = (Array.isArray(content) ? content : []).flatMap((part) => {
+      const text = record(part)?.text;
+      if (typeof text !== "string") return [];
+      try {
+        const value = record(JSON.parse(text));
+        return value && typeof value.status === "string" ? [value] : [];
+      } catch { return []; }
+    })[0];
+    if (!progress) return processId ? { ok: false, error: "The cloud computer did not return the command's status. Check it before retrying." } : result;
+    if (progress.status === "finished") {
+      if (!Number.isInteger(progress.exitCode)) return { ok: false, error: "The cloud command's exit code is unknown. Check it before retrying." };
+      return progress.exitCode === 0 ? { ok: true, output: progress } : {
+        ok: false, error: String(progress.stderr || progress.stdout || `exit code ${progress.exitCode}`),
+      };
+    }
+    if (progress.status !== "running") return { ok: false, error: String(progress.note || progress.stderr || "The cloud computer lost track of the command. Check it before retrying.") };
+    if (typeof progress.processId !== "string" || !progress.processId || (processId && progress.processId !== processId)) {
+      return { ok: false, error: "The cloud computer did not identify the running command. Check it before retrying." };
+    }
+    processId = progress.processId;
+    const status = await context.internal("computer", "/api/internal/computer/mcp", {
+      jsonrpc: "2.0", id: rpcId(), method: "tools/call", params: { name: "exec_status", arguments: { process_id: processId, wait_seconds: 20 } },
+    }, input.signal);
+    if (!status.ok) return { ok: false, error: String(status.body.error ?? "The cloud computer could not report the command's status. Check it before retrying.") };
+    frame = status.body;
+  }
 }
 
 /** Single-quoted for a POSIX shell: the value is data, never code. */
