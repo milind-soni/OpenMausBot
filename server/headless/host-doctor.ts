@@ -266,7 +266,7 @@ export function hostReport(checks: readonly HostCheck[]): { result: Record<strin
 
 function run(command: string, args: string[]): Promise<CommandResult> {
   return new Promise((done) => {
-    execFile(command, args, { timeout: 10_000, env: { ...process.env, LC_ALL: "C" } }, (error, stdout, stderr) => {
+    execFile(command, args, { timeout: 10_000, env: { ...process.env, LC_ALL: "C" }, windowsHide: true }, (error, stdout, stderr) => {
       done({ ok: !error, stdout: String(stdout), stderr: String(stderr), missing: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" });
     });
   });

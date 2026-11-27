@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { noHostContainerEnv } from "./testing/container-env.ts";
 import { workerPort } from "./testing/worker-port.ts";
 
 
@@ -84,6 +85,7 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       HOME: home,
       USERPROFILE: home,
       OMB_PORT: String(PORT),
+      ...noHostContainerEnv(home),
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {

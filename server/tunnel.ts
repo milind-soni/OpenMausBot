@@ -236,6 +236,7 @@ export async function ensureCloudflared(options: {
     const child = spawn(process.execPath, [prepareEntry(options.here), "--current", "--root", options.dataDir], {
       env,
       stdio: ["ignore", "inherit", "inherit"],
+      windowsHide: true,
     });
     child.on("error", (error) => fail(new Error(`could not prepare cloudflared: ${error.message}`)));
     child.on("exit", (code) => (code === 0 ? done() : fail(new Error(`the cloudflared ${refreshStaged ? "refresh" : "download"} failed (exit ${code ?? "signal"})`))));

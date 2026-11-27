@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
-import { OutsideWorkspacePreview, refusedAsOutsideWorkspace } from "./OutsideWorkspacePreview";
+import { OutsideWorkspacePreview, canOpenOutsideWorkspace, refusedAsOutsideWorkspace } from "./OutsideWorkspacePreview";
 import { TableDialog } from "./RichTable";
 import { readTableResponse, TableFileContent } from "./TableFilePreview";
 import { cn } from "@/lib/cn";
@@ -136,34 +136,42 @@ export function OpenInBrowserButton({ source, name, onError }: { source: string;
 }
 
 function HtmlFileContent({ path, shownPath, name, message, fill }: { path: string; shownPath: string; name: string; message: MessageAttachmentContext; fill: boolean }) {
+  const fileKey = `${message.threadId}:${message.messageId}:${path}`;
   const [attempt, setAttempt] = useState(0);
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<"size" | "load" | "outside" | { reason: string } | null>(null);
+  const [canOpenOutside, setCanOpenOutside] = useState(false);
+  const [allowOutsideFor, setAllowOutsideFor] = useState<string | null>(null);
+  const allowOutside = allowOutsideFor === fileKey;
   const [showSource, setShowSource] = useState(false);
   const [openFailed, setOpenFailed] = useState("");
   const save = useLocalFileSave(path, name, message);
   useEffect(() => {
     const controller = new AbortController();
     setError(null);
+    setCanOpenOutside(false);
     setSource(null);
     void (async () => {
       let answered = false;
       try {
-        const response = await requestMessageFile(path, message, controller.signal);
+        const response = await requestMessageFile(path, message, controller.signal, allowOutside ? { allowOutsideWorkspace: true } : undefined);
         answered = true;
         const text = await readTableResponse(response, controller.signal, PREVIEW_MAX_BYTES);
         if (!controller.signal.aborted) setSource(text);
       } catch (reason) {
         if (controller.signal.aborted) return;
         // A refusal from the server says why; only a request that got no answer (TypeError) is the connection.
-        if (refusedAsOutsideWorkspace(reason)) setError("outside");
+        if (refusedAsOutsideWorkspace(reason)) {
+          setCanOpenOutside(canOpenOutsideWorkspace(reason));
+          setError("outside");
+        }
         else if (!answered && reason instanceof Error && !(reason instanceof TypeError)) setError({ reason: reason.message });
         else setError(reason instanceof Error && reason.message === "size" ? "size" : "load");
       }
     })();
     return () => controller.abort();
-  }, [path, message.threadId, message.messageId, attempt]);
-  if (error === "outside") return <OutsideWorkspacePreview filePath={shownPath} />;
+  }, [path, message.threadId, message.messageId, attempt, allowOutside]);
+  if (error === "outside") return <OutsideWorkspacePreview filePath={shownPath} onOpenOutside={canOpenOutside ? () => setAllowOutsideFor(fileKey) : undefined} />;
   if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "attach.fileTooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (source === null) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("html.loading")}</div>;
   return <div className={cn("flex flex-col gap-2", fill && "min-h-0 flex-1")}>
@@ -171,7 +179,7 @@ function HtmlFileContent({ path, shownPath, name, message, fill }: { path: strin
       <button type="button" className="table-action" aria-pressed={showSource} aria-label={t(showSource ? "html.rendered" : "html.source")} title={t(showSource ? "html.rendered" : "html.source")} onClick={() => setShowSource(!showSource)}>{showSource ? <Eye size={14} /> : <Code2 size={14} />}</button>
       <button type="button" className="table-action" aria-label={t("html.reload")} title={t("html.reload")} onClick={() => setAttempt(attempt + 1)}><RotateCcw size={14} /></button>
       <OpenInBrowserButton source={source} name={name} onError={setOpenFailed} />
-      <button type="button" className="table-action" aria-label={t("attach.saveAria", { name })} title={t("attach.saveAria", { name })} disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} /></button>
+      <button type="button" className="table-action" aria-label={t("attach.saveAria", { name })} title={t("attach.saveAria", { name })} disabled={save.state === "saving"} onClick={() => void save.save(allowOutside ? { allowOutsideWorkspace: true } : undefined)}><Download size={14} /></button>
     </div>
     {save.state === "failed" && <p role="alert" className="text-end text-[12px] text-danger">{save.reason}</p>}
     {openFailed && <p role="alert" className="text-end text-[12px] text-danger">{openFailed}</p>}
