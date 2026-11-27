@@ -69,6 +69,17 @@ describe("room member holds", () => {
     expect(classifyHoldDirective("para @Scout", ["scout"]).hold).toEqual([]);
   });
 
+  it("does not widen a punctuated bot name into a hold for everyone", () => {
+    for (const name of ["all+Ada", "all++Ada", "everyone.Bot", "everyone--Ada"]) {
+      const text = `@${name} stop`;
+      expect(isStopCommand(text, name), text).toBe(true);
+      expect(addressesEveryone(text), text).toBe(false);
+      const directive = classifyHoldDirective(text, ["scout"]);
+      expect(directive.holdAll, text).toBe(false);
+      expect(applyHoldDirective({}, directive, members, 1).held, text).toEqual(["scout"]);
+    }
+  });
+
   it("applies directives to the room's holds and reports what changed", () => {
     const first = applyHoldDirective(undefined, classifyHoldDirective("stop @Scout", ["scout"]), members, 10);
     expect(first).toEqual({ holds: { scout: { at: 10 } }, held: ["scout"], released: [] });

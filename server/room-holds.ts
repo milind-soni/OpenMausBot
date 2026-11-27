@@ -78,7 +78,8 @@ export function addressesEveryone(text: string): boolean {
       if (
         isMentionBoundary(surface, at) &&
         candidate.toLocaleLowerCase() === word &&
-        !isMentionNameContinuation(surface.slice(at + 1 + word.length))
+        !isMentionNameContinuation(surface.slice(at + 1 + word.length)) &&
+        !/^[.+-]+[\p{L}\p{M}\p{N}_]/u.test(surface.slice(at + 1 + word.length))
       ) return true;
     }
   }
