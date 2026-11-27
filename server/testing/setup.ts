@@ -25,6 +25,8 @@ delete process.env.HERMES_HOME;
 delete process.env.CODEX_HOME;
 // Pi turns copy from the person's Pi agent folder ($PI_CODING_AGENT_DIR or ~/.pi/agent): keep it in the throwaway home.
 delete process.env.PI_CODING_AGENT_DIR;
+// The canonical event log's bounds are server settings; a developer's shell must not shrink a test bus's queue.
+for (const name of ["OMB_EVENT_LOG_BATCH_LINES", "OMB_EVENT_LOG_QUEUE_BYTES", "OMB_EVENT_LOG_QUEUE_EVENTS", "OMB_EVENT_LOG_DRAIN_THREADS"]) delete process.env[name];
 // No server in a test downloads the project's announcement cards; its tests hand the store a fake fetch.
 process.env.OMB_DISABLE_ANNOUNCEMENTS = "1";
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.
