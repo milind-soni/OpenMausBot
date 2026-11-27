@@ -269,8 +269,10 @@ function withHeldGoModels(
   const held = previous.options.filter((option) => option.id.startsWith(OPENCODE_GO_MODEL_PREFIX)
     && !catalog.options.some((present) => present.id === option.id));
   if (!held.length) return catalog;
-  unconfirmedModelCatalog(catalog);
-  return { ...catalog, options: [...catalog.options, ...held] };
+  // The startup cache asks about the very object it is handed, so the merged copy is the one marked.
+  const merged = { ...catalog, options: [...catalog.options, ...held] };
+  unconfirmedModelCatalog(merged);
+  return merged;
 }
 
 /** `models --verbose` is OpenCode 1 only (2 rejects the flag). Plain `opencode models` on 2 answers from a

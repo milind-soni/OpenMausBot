@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { readStartupModelCacheEntry, startupModelCachePath, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { runtimeNoticeTool } from "../../chat-notices.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
@@ -798,6 +799,14 @@ describe("OpenCode catalog discovery from the ACP session", () => {
       // earlier Go models instead of hiding the provider.
       const partial = await discoverOpenCodeModels({ ...goEnv, FAKE_ACP_MODELS: "opencode/big-pickle" }, FAKE_CLI);
       expect(partial.options.map((option) => option.id)).toEqual(["opencode/big-pickle", "opencode-go/minimax-m3"]);
+      // Saved for the next start as unconfirmed, so that start reads the catalog again.
+      const cacheId = `opencode-go-hold-${process.pid}`;
+      try {
+        writeStartupModelCache(cacheId, partial);
+        expect(readStartupModelCacheEntry(cacheId)?.checkedAt).toBe(0);
+      } finally {
+        rmSync(startupModelCachePath(cacheId)!, { force: true });
+      }
       // Without a Go login on file the same partial listing is taken as it is.
       const loggedOut = await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle" }, FAKE_CLI);
       expect(loggedOut.options.map((option) => option.id)).toEqual(["opencode/big-pickle"]);
