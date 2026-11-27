@@ -9,6 +9,7 @@ import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { SidebarInboxRow } from "@/components/SidebarInboxRow";
 import { loadLocale } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
+import { writeInboxWaitingOnly } from "@/lib/inbox-waiting-only";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { currentInbox, openInbox, setInboxView } from "@/state/inbox";
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
@@ -19,6 +20,7 @@ const params = new URLSearchParams(location.search);
 const team = params.get("scope") !== "personal";
 const skin = params.get("skin") ?? "midnight";
 setAdvancedMode(params.get("mode") === "advanced");
+writeInboxWaitingOnly(params.get("waiting") === "1");
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
 await loadLocale(params.get("lang") ?? "en");
 

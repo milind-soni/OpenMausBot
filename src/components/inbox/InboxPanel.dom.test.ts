@@ -20,9 +20,11 @@ vi.mock("../../state/api", () => ({
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
 import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
+import { setTeamPeople } from "@/state/team-people";
 import { approvalRow, INBOX_NOW, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
+import { INBOX_WAITING_ONLY_KEY } from "@/lib/inbox-waiting-only";
 import { InboxPanel } from "./InboxPanel";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,9 +37,14 @@ const mount = (child: ReactElement, bots: Bot[] = []) => act(async () => {
 });
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const click = (selector: string) => act(async () => { document.querySelector<HTMLElement>(selector)!.click(); });
+const type = (element: HTMLInputElement, value: string) => act(async () => {
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")!.set!.call(element, value);
+  element.dispatchEvent(new Event("input", { bubbles: true }));
+});
 const shown = (view: InboxView) => { server.view = view; setInboxView(view); };
 
 beforeEach(() => {
+  localStorage.removeItem(INBOX_WAITING_ONLY_KEY);
   root = createRoot(document.body.appendChild(document.createElement("div")));
   server.calls.length = 0;
   dispatch.mockClear();
@@ -45,10 +52,121 @@ beforeEach(() => {
 });
 afterEach(() => {
   act(() => root.unmount());
+  setTeamPeople(null);
   closeInbox();
   setInboxView(null);
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
+});
+
+describe("the inbox waiting filter", () => {
+  const listed = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
+
+  it("is off by default, then keeps only needs-you rows and remembers the choice", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const toggle = () => document.querySelector<HTMLElement>("[data-inbox-waiting-only]")!;
+    expect(toggle().getAttribute("aria-pressed")).toBe("false");
+    expect(toggle().textContent).toBe("Waiting for me");
+    expect(listed()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
+
+    await click("[data-inbox-waiting-only]");
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(listed()).toEqual([approvalRow.id, questionRow.id]);
+    expect(localStorage.getItem(INBOX_WAITING_ONLY_KEY)).toBe("1");
+
+    await act(async () => root.unmount());
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    expect(toggle().getAttribute("aria-pressed")).toBe("true");
+    expect(listed()).toEqual([approvalRow.id, questionRow.id]);
+  });
+
+  it("says when nothing is waiting and offers the full inbox", async () => {
+    shown(inboxView([messageRow, reportRow]));
+    localStorage.setItem(INBOX_WAITING_ONLY_KEY, "1");
+    openInbox();
+    await mount(createElement(InboxPanel));
+    expect(document.querySelector("[data-inbox-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-waiting-empty]")!.textContent).toContain("Nothing is waiting on you.");
+    await click("[data-inbox-waiting-empty] button");
+    expect(document.querySelector("[data-inbox-waiting-only]")!.getAttribute("aria-pressed")).toBe("false");
+    expect(listed()).toEqual([messageRow.id, reportRow.id]);
+    expect(localStorage.getItem(INBOX_WAITING_ONLY_KEY)).toBe("0");
+  });
+
+  it("does not claim nothing is waiting when a teammate fix is", async () => {
+    shown(inboxView([messageRow, reportRow]));
+    localStorage.setItem(INBOX_WAITING_ONLY_KEY, "1");
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [
+      { kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" },
+    ] }); });
+    expect(document.querySelector("[data-inbox-waiting-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
+  });
+
+  it("keeps a search and its no-match line reachable while a fix shows", async () => {
+    shown(inboxView([messageRow, reportRow]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [
+      { kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" },
+    ] }); });
+    await type(document.querySelector<HTMLInputElement>('input[type="search"]')!, "Daily");
+    await click("[data-inbox-waiting-only]");
+    expect(document.querySelector("[data-inbox-waiting-empty]")).toBeNull();
+    expect(document.querySelector('input[type="search"]')).not.toBeNull();
+    expect(document.querySelector("[data-inbox-list]")!.textContent).toContain("Nothing in the inbox matches.");
+  });
+
+  it("keeps Mark all as read working while the filter is on", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await click("[data-inbox-waiting-only]");
+    await click("[data-inbox-mark-all]");
+    expect(server.calls).toContainEqual({ path: "/api/inbox/read-all", method: "POST" });
+  });
+
+  it("leaves the active and finished conversation lists out while it is on", async () => {
+    const ada = { id: "ada", name: "Ada", threadId: "ada-main", tasks: [
+      { threadId: "ada-run", title: "Ada running", createdAt: 0, updatedAt: INBOX_NOW - 60_000, busy: true },
+      { threadId: "ada-done", title: "Ada finished", createdAt: 0, updatedAt: INBOX_NOW - 500 * 60_000 },
+    ] } as unknown as Bot;
+    openInbox();
+    await mount(createElement(InboxPanel), [ada]);
+    expect(document.querySelector("[data-inbox-active]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-finished]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-thread-filter]")).not.toBeNull();
+    await click("[data-inbox-waiting-only]");
+    expect(document.querySelector("[data-inbox-active]")).toBeNull();
+    expect(document.querySelector("[data-inbox-finished]")).toBeNull();
+    expect(document.querySelector("[data-inbox-thread-filter]")).toBeNull();
+  });
+
+  it("keeps what a teammate must fix visible while the conversation lists are hidden", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await act(async () => { setTeamPeople({ people: [], me: null, admin: true, needsYou: [
+      { kind: "connection", id: "c", at: 1, app: "github", botIds: ["reporter"], threadId: "rep-main", text: "Reconnect GitHub" },
+    ] }); });
+    expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
+    await click("[data-inbox-waiting-only]");
+    expect(document.querySelector("[data-inbox-fixes]")).not.toBeNull();
+    expect(document.querySelector("[data-inbox-active]")).toBeNull();
+  });
+
+  it("says no inbox line matches the search instead of claiming nothing waits", async () => {
+    openInbox();
+    await mount(createElement(InboxPanel));
+    await click("[data-inbox-waiting-only]");
+    await type(document.querySelector<HTMLInputElement>('input[type="search"]')!, "daily");
+    expect(document.querySelector("[data-inbox-waiting-empty]")).toBeNull();
+    expect(document.querySelector("[data-inbox-list]")!.textContent).toContain("Nothing in the inbox matches.");
+  });
 });
 
 describe("the inbox panel", () => {

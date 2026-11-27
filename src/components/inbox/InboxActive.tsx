@@ -66,7 +66,7 @@ export function unreadConversations(entries: readonly AttentionThread[], view?: 
   return entries.filter((entry) => entry.task.unread === true && !lined.has(entry.task.threadId)).length;
 }
 
-export function InboxActive({ view, current, exclude, faces, filter = {} }: {
+export function InboxActive({ view, current, exclude, faces, filter = {}, conversations = true }: {
   view: InboxView | null; current?: OpenThread;
   /** The bots' pictures, from botFaces: each row leads with its own. */
   faces: readonly BotFace[];
@@ -74,6 +74,8 @@ export function InboxActive({ view, current, exclude, faces, filter = {} }: {
   exclude?: ReadonlySet<string>;
   /** The bot and status the person picked above the lists. */
   filter?: ThreadFilter;
+  /** False while only the waiting lines show: what a team's person must fix stays, the conversation list does not. */
+  conversations?: boolean;
 }) {
   const jump = useInboxJump();
   const team = useTeamPeople();
@@ -88,7 +90,7 @@ export function InboxActive({ view, current, exclude, faces, filter = {} }: {
           {fixes.map((item) => <NeedsYouLine key={`${item.kind}:${item.id}`} item={item} onOpened={closeInbox} />)}
         </section>
       )}
-      {(entries.length > 0 || pinned) && (
+      {conversations && (entries.length > 0 || pinned) && (
         <section data-inbox-active aria-label={t("attention.title")} className="border-t border-hairline/40 px-1.5 py-1.5">
           <div className="flex items-center gap-1 px-2 py-0.5">
             <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink-secondary">{t("attention.title")}</span>
