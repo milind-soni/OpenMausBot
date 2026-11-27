@@ -73,7 +73,7 @@ import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
-import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceLine } from "./OtherPlaceBots"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, NO_MENU, otherPlaceDispatch, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots } from "@/lib/place-rows"; import { useOneList } from "./one-list-sidebar"; const NO_SECTIONS: string[] = []; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
+import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceLine } from "./OtherPlaceBots"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, otherPlaceDispatch, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots } from "@/lib/place-rows"; import { openPlacedMenu, PlacedBotMenuHost, PlacedRowActions } from "./PlacedBotMenu"; import { isPlaceId } from "@/lib/place-chat"; import { useOneList } from "./one-list-sidebar"; const NO_SECTIONS: string[] = []; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerPickerHost } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople"; import { SidebarInboxRow } from "./SidebarInboxRow"; import { TeamSideSwitch, useTeamSideLists } from "./TeamSideSwitch"; import { SidebarActiveThreads } from "./SidebarActiveThreads"; import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned"; import { useInboxSupport } from "@/state/inbox";
 import { TeamMenuItems } from "./SidebarTeamMenu";
@@ -902,7 +902,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
           className={cn("absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink", simpleRow ? "end-[3px] top-1.5 size-6 translate-y-0 rounded-lg" : "right-1",
             selected && !simpleRow ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70")}><MoreHorizontal size={16} /></button>
-      </>}{!renaming && !deleting && simpleRow && !placed && <ThreadFoldChevron bot={bot} dispatch={dispatch} />}
+      </>}{!renaming && !deleting && simpleRow && !placed && <ThreadFoldChevron bot={bot} dispatch={dispatch} />}{placed && !iconOnly && <PlacedRowActions bot={bot} selected={selected} simpleRow={simpleRow} />}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
           <Loader2 size={12} className="animate-spin" />
@@ -1078,7 +1078,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() }), roomDrag = useSidebarRoomDrag({ dispatch, announce: sections.announce, enabled: (sections.interactive || density === "icons") && !phone && !q, groups: state.groups });
 
   const sideLists = useTeamSideLists(state), matchingBots = sideLists.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && !isPlaceId(b.id)) // a My Cloud bot open in place is drawn as its own row of the one list
     .filter(
       (b) =>
         !q ||
@@ -1118,7 +1118,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const showAttention = (advanced && inboxSupport === "no") || (attentionPinned && density !== "icons");
   const attention = showAttention ? crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups) : [];
   const restoreBot = teamFeedback?.restoreBot, pendingUndo = teamFeedback?.undo ?? (restoreBot ? () => void undoBotArchive(restoreBot) : undefined);
-  const botRow = (bot: Bot) => isPlacedBot(bot) ? botRowProps(state, otherPlaceDispatch(bot), bot, { density, query: q, onMenu: NO_MENU, placeHere, ...drops.row(bot.id) }) : botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
+  const botRow = (bot: Bot) => isPlacedBot(bot) ? botRowProps(state, otherPlaceDispatch(bot, dispatch), bot, { density, query: q, onMenu: openPlacedMenu, placeHere, ...drops.row(bot.id) }) : botRowProps(state, dispatch, bot, { density, query: q, onMenu: setMenu, placeHere, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const railSearch = () => {
     if (collapseToIcons) return openCommandPalette();
     setSearchOpen(true);
@@ -1457,7 +1457,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               </div>
             );
           })}
-          <OtherPlaceLine query={query} icons={density === "icons"} /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          <OtherPlaceLine query={query} icons={density === "icons"} /><PlacedBotMenuHost /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}

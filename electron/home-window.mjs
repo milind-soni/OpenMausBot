@@ -8,6 +8,7 @@
 // signed-out app (its automations would run twice). The page that counts as home is the main window's main frame at the
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
+import { REFRESH_MS } from "./cloud-cadence.mjs";
 import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
 import { cloudMachine, cloudState, myCloudOf, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { cloudOperationAt, createOperationOutages, OPERATION_FRESH_MS, OPERATION_REFRESH_MS } from "./cloud-operation.mjs";
@@ -767,8 +768,12 @@ export function createHomeWindow(deps) {
     /** The place the window was last sent to: My Cloud, or a team's or another own Cloud (`{ kind: "team" | "own", id, name, origin }`). */
     shown: () => shown,
     /** The screen asked again (as it opens, back online, or the window focused); `pressed`: the person pressed Try again, which
-     * no wait holds except the Admin's own 429. */
-    retry: ({ pressed = false } = {}) => { if (pressed) waits.pressed(); return show(); },
+     * no wait holds except the Admin's own 429, and which also reads the session when its last read began a minute ago. */
+    async retry({ pressed = false } = {}) {
+      // The screen is drawn at once; a session read that was due draws it again when it lands, however long it takes.
+      if (pressed) { waits.pressed(); const reading = account()?.freshen?.(); if (reading) void Promise.resolve(reading).then(() => show(), () => {}).catch(() => {}); }
+      return show();
+    },
     /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens
      * again; one with an account My Cloud isn't (`other`) ends first, so the browser can sign in another; one that is still
      * good only looks again. */
@@ -859,13 +864,14 @@ export function createHomeWindow(deps) {
     /** The operation the Admin says has the place on screen down now (cloud-operation.mjs), with a team's or other Cloud's
      * `name`, else null: its own page asks while its live stream is down (backing off by itself), so it can say "Updating My
      * Cloud" instead of "unable to connect"; the page keeps its own hard end. The session is read again first when the last
-     * read is OPERATION_FRESH_MS old or more (the Admin is the one that knows; the place doesn't answer), never while the Admin
-     * itself is failing: the account's own retry wait is kept then (cloud-account.mjs `failingUntil`). */
+     * read is OPERATION_FRESH_MS old or more (the Admin is the one that knows; the place doesn't answer); while the Admin itself
+     * is failing, only once its last read began a minute ago (cloud-account.mjs `failingUntil`, `lastAttemptAt`). */
     async operation() {
       const origin = placeOrigin(), current = state();
       if (!origin || current?.status !== "connected") return null;
       const client = account(), failing = Number(client?.failingUntil?.() ?? 0);
-      if (!(now() - (current.verifiedAt ?? 0) < OPERATION_FRESH_MS) && !(failing > now())) await Promise.resolve(client?.refresh?.()).catch(() => {});
+      const tried = Number(client?.lastAttemptAt?.() ?? 0);
+      if (!(now() - (current.verifiedAt ?? 0) < OPERATION_FRESH_MS) && (!(failing > now()) || now() - tried >= REFRESH_MS)) await Promise.resolve(client?.refresh?.()).catch(() => {});
       const operation = cloudOperationAt(state(), origin), name = otherPlace(shown) && shown.origin === origin ? shown.name : null;
       return operation ? { ...operation, ...(name ? { name } : {}) } : null;
     },
