@@ -10007,6 +10007,7 @@
   "native.splash.openingCloud": "Opening My Cloud…",
   "native.splash.wakingCloud": "Waking My Cloud…",
   "native.splash.openingNamed": "Opening {name}…",
+  "native.splash.openingWorkspace": "Opening your installation…",
   "native.splash.wakingNamed": "Waking {name}…",
   "native.common.close": "Close",
   "native.tray.open": "Open OpenMausBot",
