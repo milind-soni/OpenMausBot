@@ -302,7 +302,7 @@ import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peer
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import { messagePages, pageMessage, pageSize, slimMessage } from "./host/message-pages.ts"; import { SUGGESTION_MAX_AGE_MS, suggestedSelection } from "./host/suggested-selection.ts"; import { otherProviderSelection } from "./checker-model.ts"; import { checkWorkFile, createCheckWork } from "./host/check-work.ts";
 import { coordinateResultMessage, createAsksActingPerson, createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts"; import { createMausBotOwnChat } from "./host/mausbot-own-chat.ts"; import { moveMemoryLayer } from "./memory-move.ts";
-import { createQueuedReason } from "./host/queued-reason.ts";
+import { createQueuedReason } from "./host/queued-reason.ts"; import { roomReasonFor } from "./host/room-queued-reason.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
 import {
   mentionedBots,
@@ -3705,30 +3705,11 @@ function coordinationSystemInstructions(): string {
 }
 
 const threadReadableFrom = (threadId: string) => (other: string): boolean => !proactive.fence.confines(other) && !botApiThread(other) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(other) : !CLOUD_HOME || cloudOwnerOnlyThread(other));
-const queuedDeps = { botName: (id: string) => store.bot(id)?.name, threadBusy, groupTurn: (id: string) => Boolean(activeGroupTurnForBot(id)), behindPerson: queuedBehindPerson,
-  roomReason: roomQueuedReason,
+const queuedDeps = { botName: (id: string) => store.bot(id)?.name, threadBusy, groupTurn: (id: string) => Boolean(activeGroupTurnForBot(id)), behindPerson: queuedBehindPerson, roomReason: roomReasonFor({ group: (id: string) => store.group(id), groupByThread: (id: string) => store.groupByThread(id), speakers: groupSpeakers }),
   waitsForComputer: (node: HandoffView) => parkedSeatTaken(node.id),
   slots: (id: string) => ({ busy: store.tasks(id).filter((task) => threadBusy(id, task.threadId)).map(({ threadId, title }) => ({ threadId, title })), limit: maxConcurrentChildThreads(cfg, botThreadsHost(cloudPlanTier.starter())) }) }; const queuedStatus = createQueuedReason(queuedDeps), queuedNotes = createQueuedNotes({ ...queuedDeps, now: Date.now, language: (threadId) => threadLanguage(threadId), parent: (node) => node.parentId ? coordinator.node(node.parentId) : undefined, node: (id) => coordinator.node(id), post: (parent, node, line) => { const bot = store.bot(node.botId), title = store.taskByThread(node.botId, node.threadId)?.title; store.appendMessage(parent.threadId, { role: "bot", kind: "activity", ...(bot ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}), tool: { name: line, ok: true }, ...(title ? { threadRef: { botId: node.botId, threadId: node.threadId, title } } : {}) }); } });
 const asksActingPerson = createAsksActingPerson({ team: Boolean(CLOUD_TEAM), requester: (threadId, generation) => actingPeople.requester(threadId, generation), askedPerson: (botId, threadId) => teamOwners.routing.askedPerson(botId, threadId) });
 const teammatePrompts = createTeammatePrompts({ store, asksActingPerson, outstandingDirect: (threadId) => coordinator.outstandingDirect(threadId), openPersonCard, queuedStatus, isUnattended, fullAccess: fullAccessForSource, startedOutside, guestDriven: cloudGuestDriven, confined: (threadId) => proactive.fence.confines(threadId), readableFrom: threadReadableFrom, waitingForPerson: (chief, teammates, readable) => questionRouting.waitingForPerson(chief, teammates, readable) });
-
-/** A room hand-off waits on whatever holds that room, so name it instead of leaving every room node with the same line. */
-function roomQueuedReason(node: HandoffView): string | undefined {
-  if (!node.groupId) return undefined;
-  const group = store.group(node.groupId);
-  if (!group) return undefined;
-  const ownsThread = (threadId: string) => group.dm ? threadId === group.threadId : Boolean(store.groupTaskByThread(group.id, threadId));
-  const speaker = groupSpeakers.get(node.threadId)
-    ?? groupSpeakers.get(group.threadId)
-    ?? [...groupSpeakers].find(([threadId]) => ownsThread(threadId))?.[1];
-  if (speaker) return `waiting for ${speaker.name} to finish its turn in this room`;
-  const held = activeGroupTurnForBot(node.botId);
-  if (!held) return undefined;
-  const name = store.bot(node.botId)?.name ?? "that teammate";
-  return held.group.id === group.id
-    ? `waiting for ${name} to finish its turn in this room`
-    : `waiting for ${name} to finish its turn in the room ${JSON.stringify(held.group.name)}`;
-}
 
 function queuedBehindPerson(node: HandoffView): { threadId: string; kind: PersonWaitKind; title: string } | undefined {
   if (node.groupId || node.status !== "queued" || threadBusy(node.botId, node.threadId) || !botAtThreadCapacity(node.botId, undefined, true)) return undefined;
