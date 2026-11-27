@@ -785,6 +785,27 @@ describe("OpenCode catalog discovery from the ACP session", () => {
 
   const efforts = (ids: string[]) => ({ currentValue: "default", options: ids.map((value) => ({ value, name: value === "xhigh" ? "Xhigh" : value })) });
 
+  it("keeps the Go models a partial listing dropped while the Go login is still on file", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-go-hold-"));
+    try {
+      const goEnv = {
+        ...process.env, HOME: scratch,
+        OPENCODE_AUTH_CONTENT: JSON.stringify({ "opencode-go": { access: "tok", type: "oauth" } }),
+      };
+      const full = await discoverOpenCodeModels({ ...goEnv, FAKE_ACP_MODELS: "opencode/big-pickle,opencode-go/minimax-m3" }, FAKE_CLI);
+      expect(full.options.some((option) => option.id === "opencode-go/minimax-m3")).toBe(true);
+      // OpenCode 2's shared service can answer before its catalog refetch has reached Go: the partial read keeps the
+      // earlier Go models instead of hiding the provider.
+      const partial = await discoverOpenCodeModels({ ...goEnv, FAKE_ACP_MODELS: "opencode/big-pickle" }, FAKE_CLI);
+      expect(partial.options.map((option) => option.id)).toEqual(["opencode/big-pickle", "opencode-go/minimax-m3"]);
+      // Without a Go login on file the same partial listing is taken as it is.
+      const loggedOut = await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle" }, FAKE_CLI);
+      expect(loggedOut.options.map((option) => option.id)).toEqual(["opencode/big-pickle"]);
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
+
   it("offers each model's efforts on OpenCode 2, where only its ACP session names them", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-discover-v2-efforts-"));
     try {
