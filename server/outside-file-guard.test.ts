@@ -28,6 +28,7 @@ describe("files a self-hosted owner may open from outside the workspace", () => 
   it.each([
     "id_rsa", "id_rsa.pub", "id_ed25519", "id_ecdsa_work", "server.pem", "tls.KEY", "cert.p12", "cert.pfx", "vault.kdbx",
     "credentials", "credentials.json", "production.env",
+    "deploy.ppk", "backup.kdb", "server.jks", "app.keystore", "AuthKey_7A2B3C4D5E.p8", "private.asc", "secring.gpg",
   ])("refuses a name that looks like a key or credential: %s", (name) => {
     expect(outsideFileRefused(`/home/ada/Downloads/${name}`, linux)).toBe(true);
   });
