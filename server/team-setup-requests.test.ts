@@ -721,6 +721,14 @@ describe("team setup below Full access", () => {
     expect(h.peer.modelSelection).toEqual({ instanceId: "claude", model: "sonnet", effort: "low" });
   });
 
+  it("refuses Undo when a backup list changes after the setup applied", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);
+    h.peer.fallback = [{ instanceId: "claude", model: "opus" }];
+    expect(await undo(h, response.requestId)).toMatchObject({ state: "invalid", stale: true });
+    expect(h.peer.title).toBe("Research lead");
+  });
+
   it("refuses Undo, changing nothing, once a bot it touched changed or the new bot was used", async () => {
     const h = harness(); h.autoApply.mockReturnValue("level");
     const updated = await h.submit([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);

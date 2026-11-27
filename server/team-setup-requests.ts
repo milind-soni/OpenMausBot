@@ -70,7 +70,7 @@ export class TeamSetupError extends Error {
 export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): string {
   if (fields === undefined) {
     return createHash("sha256").update(JSON.stringify({
-      ...profileSnapshot(bot), section: section(bot.section), modelSelection: bot.modelSelection,
+      ...profileSnapshot(bot), section: section(bot.section), modelSelection: bot.modelSelection, fallback: bot.fallback ?? [],
       hidden: Boolean(bot.hidden), chiefOfStaff: Boolean(bot.chiefOfStaff),
       managedSections: bot.managedSections,
       approvalMode: bot.approvalMode, autoApprove: bot.autoApprove, approvalGrant: bot.approvalGrant,

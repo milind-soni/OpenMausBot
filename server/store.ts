@@ -1358,14 +1358,9 @@ export class Store {
         const previous = nextBots[at];
         next = { ...previous, ...reshowWhenMoved(previous, operation.fields) };
         if (operation.fields.modelSelection) next.tasks = this.withDefaultModel(previous, operation.fields.modelSelection);
-        const backups = operation.fields.fallback;
-        if (backups !== undefined) {
-          if (backups.length) next.fallback = structuredClone(backups);
-          else delete next.fallback;
-        }
         nextBots[at] = next;
       }
-      if (operation.fields.chiefOfStaff === false) delete next.managedSections; if (!Array.isArray(next.mcpServers)) delete next.mcpServers; // Undo's "every enabled server"
+      if (operation.fields.chiefOfStaff === false) delete next.managedSections; if (!Array.isArray(next.mcpServers)) delete next.mcpServers; if (operation.fields.fallback?.length) next.fallback = structuredClone(operation.fields.fallback); else if (operation.fields.fallback) delete next.fallback; // Undo's "every enabled server"
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);
