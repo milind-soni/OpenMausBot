@@ -7,7 +7,7 @@ import { useBotHasThreads, useThreadTabsShown } from "./HeaderThreadTabs";
 
 export function NewThreadHeaderButton({ botId }: { botId: string }) {
   const dispatch = useStoreDispatch();
-  const tabs = useThreadTabsShown(botId);
+  const tabs = useThreadTabsShown();
   const simplePill = !useAdvancedMode() && window.ogb?.remoteClient?.active !== true;
   const pillHasIt = useBotHasThreads(botId) && simplePill;
   if (pillHasIt) return null;

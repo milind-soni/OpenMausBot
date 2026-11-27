@@ -333,7 +333,7 @@
     },
     {
       "name": "close_thread",
-      "description": "Mark a thread you opened (or one of your own) as finished once you have read its result: it leaves the person's default sidebar list (still under all threads, with a note saying you closed it) and list_threads reports it as closed. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
+      "description": "Mark a thread you opened (or one of your own) as finished once you have read its result: it leaves the person's default sidebar list (still under all threads, with a note saying you closed it) and list_threads reports it as closed. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. In a room thread, leave thread_id out to close the one you are in once your reply ends. If a close is refused, do not retry it.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -342,10 +342,7 @@
             "type": "string",
             "description": "The thread id from list_threads or start_thread."
           }
-        },
-        "required": [
-          "thread_id"
-        ]
+        }
       }
     },
     {
@@ -367,7 +364,7 @@
     },
     {
       "name": "set_main_thread",
-      "description": "Set or clear your own main thread (where your automations and briefs report). Only when the person or your instructions ask.",
+      "description": "Set or clear your own main thread (where your automations and briefs report). Only when the person or your instructions ask. If they say main is stale or they work in another thread now, ask \"Make this thread your main chat?\" and call only after a yes.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -633,7 +630,7 @@
     },
     {
       "name": "show_html",
-      "description": "Show a small self-contained web page in this chat, where the person can point at a part to change: a mini app, a game, a chart, a calculator, a report. Forms and choices go in show_widget, plain data in a markdown table. Send `html` (a document or a fragment, with inline style and script), `jsx`, one React component file with a default export (it can import react, lucide-react icons, echarts, and Chart and useTheme from \"mausbot\", and style with Tailwind classes), or `path`, a folder in your working folder with index.html and its files (up to 5 MB). It runs in a locked sandbox: no network requests, storage, popups or form posts; scripts, styles and fonts load only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and Google Fonts, images only as data: URLs or from those; embed the data. Theme: --color-text-primary, --color-background-primary, --color-border-primary, --font-sans. In the page, mausbot.send(text) puts text in their message box after they click in it, mausbot.open(url) opens a link, mausbot.setContext(text) tells you what they see. At most 256 KB. Call again with its app_id to replace it; it reloads. Never put secrets in it. In rooms everyone sees it, view-only. For a data dashboard, follow the data-dashboards skill. Asked for a claude.ai Artifact? Those need Claude's own claude.ai sign-in and are not available to bots here: say so in one line, then make it with this tool, or publish_page for a public link.",
+      "description": "Show a small self-contained web page in this chat, where the person can point at a part to change: a mini app, a game, a chart, a calculator, a report. Forms and choices go in show_widget, plain data in a markdown table. Send `html` (a document or a fragment, with inline style and script), `jsx`, one React component file with a default export (it can import react, lucide-react icons, echarts, and Chart and useTheme from \"mausbot\", and style with Tailwind classes), or `path`, a folder in your working folder with index.html and its files (up to 5 MB). It runs in a locked sandbox: no network requests, storage, popups or form posts; scripts, styles and fonts load only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and Google Fonts, images only as data: URLs or from those; embed the data. Theme: --color-text-primary, --color-background-primary, --color-border-primary, --font-sans. In the page, mausbot.send(text) puts text in their message box after they click in it, mausbot.open(url) opens a link, mausbot.setContext(text) tells you what they see. uses [\"data\"]: mausbot.data.query(sql) SELECTs your Data tables; \"state\": mausbot.state.get/set. At most 256 KB. Call again with its app_id to replace it; it reloads. Never put secrets in it. In rooms everyone sees it, view-only. For a data dashboard, follow the data-dashboards skill. Asked for a claude.ai Artifact? Those need Claude's own claude.ai sign-in and are not available to bots here: say so in one line, then make it with this tool, or publish_page for a public link.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -667,6 +664,12 @@
           "live": {
             "type": "boolean",
             "description": "With path: true reloads it when its folder changes."
+          },
+          "uses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "app_id": {
             "type": "string",

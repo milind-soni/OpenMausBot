@@ -65,7 +65,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
         ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at,
             ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) }
         : undefined,
-      closedBy: "closedBy" in task && task.closedBy
+      closedBy: "closedBy" in task && task.closedBy && "botId" in task.closedBy
         ? { botId: task.closedBy.botId, name: task.closedBy.name, at: task.closedBy.at }
         : undefined,
       pinned: task.pinned === true ? true : undefined,

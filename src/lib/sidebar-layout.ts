@@ -5,6 +5,7 @@ import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
 import { hiddenFromSidebar, someoneElsesDefaultBot } from "./default-bot";
 import { botShowsUnread } from "./bot-unread";
+import { reorderNamesStable } from "../../shared/bot-order";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const UNREAD_SECTION_ID = "builtin:unread";
@@ -341,6 +342,17 @@ export function mergeSectionOrder(
     included.add(id);
   }
   return result;
+}
+
+/** The departments in the workspace's order, the same on every device: the places they hold in `ids` are filled in
+ * `departments` order. Built-in sections, and a department the workspace does not list, keep their places. */
+export function withDepartmentOrder(ids: SidebarSectionId[], departments: readonly string[]): SidebarSectionId[] {
+  return reorderNamesStable(ids, departments.map(userSectionId));
+}
+
+/** The departments in `ids`, by name, in that order. */
+export function departmentsIn(ids: readonly SidebarSectionId[]): string[] {
+  return ids.flatMap((id) => userSectionName(id) ?? []);
 }
 
 export function sameSectionOrder(a: SidebarSectionId[], b: SidebarSectionId[]): boolean {

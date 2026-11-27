@@ -122,7 +122,7 @@ function pinnedCopy(input: ServiceInstallInput, io: ServiceIo): string | null {
 function installWithNpm(prefix: string, version: string): boolean {
   mkdirSync(prefix, { recursive: true, mode: 0o700 });
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  return spawnSync(npm, ["install", "--prefix", prefix, `openmausbot@${version}`, "--no-audit", "--no-fund"], { stdio: "inherit" }).status === 0;
+  return spawnSync(npm, ["install", "--prefix", prefix, `openmausbot@${version}`, "--no-audit", "--no-fund"], { stdio: "inherit", windowsHide: true }).status === 0;
 }
 
 function bundleHasSentinel(script: string): boolean {

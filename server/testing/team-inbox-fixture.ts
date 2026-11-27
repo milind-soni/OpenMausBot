@@ -81,6 +81,7 @@ export function teamInbox(options: { team?: boolean; place?: boolean; named?: Te
     },
     patchGroup: (id: string) => { unread.push(id); return null; },
     messagesFor: (threadId: string) => threads.get(threadId) ?? [],
+    newestMessageId: (threadId: string) => threads.get(threadId)?.at(-1)?.id,
     activePath: (threadId: string) => threads.get(threadId) ?? [],
     onChange: (listener: (change: StoreChange) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
   };

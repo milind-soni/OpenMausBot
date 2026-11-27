@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; roomFeedSince?: number; teamBoard?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; roomFeedSince?: number; suggestedReplies?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -102,6 +102,12 @@ export function skillBurgerEnabled(config: FeatureFlagConfig | null | undefined)
   return config?.features?.skillBurger !== false;
 }
 
+/** A faded next-line suggestion in an empty composer after a bot replies. The server reports it on unless switched off; a
+ * server that doesn't report it has no suggestions to give. */
+export function suggestedRepliesEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.suggestedReplies === true;
+}
+
 export function threadTabsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.threadTabs === true;
 }
@@ -111,8 +117,4 @@ export function threadTabsEnabled(config: FeatureFlagConfig | null | undefined):
  * that never opted in, keeps every room's single transcript until it updates. */
 export function roomFeedEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.roomFeed === true || typeof config?.features?.roomFeedSince === "number";
-}
-
-export function teamBoardEnabled(config: FeatureFlagConfig | null | undefined): boolean {
-  return config?.features?.teamBoard === true;
 }

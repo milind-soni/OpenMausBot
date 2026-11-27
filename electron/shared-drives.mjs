@@ -5,7 +5,10 @@
 // directory that happens to be its own partition, and never a virtual filesystem. The decision is made on the
 // canonical path the OS resolved, so a symlink to a drive is judged by where it ends up.
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+
+const identify = async candidate => { const info = await fsp.stat(candidate, { bigint: true }); return `${info.dev}:${info.ino}`; };
 
 /** Linux filesystems that live on a real disk or network share. tmpfs, proc, sysfs, overlay, squashfs, cgroup and the
  * desktop's fuse portals are not on this list, so they are never a drive. */
@@ -61,4 +64,15 @@ export async function readLinuxMounts() {
 /** The check validateSharedFolders makes for a path that is a volume root. Unreadable mount tables fail closed. */
 export async function shareableDrive(canonical, platform = process.platform, readMounts = readLinuxMounts) {
   return isShareableDriveRoot(canonical, platform, platform === "linux" ? await readMounts() : []);
+}
+
+/** Whether `target` is the whole drive the home folder is on (C:\\ on Windows), lent only when asked for by name (`system`
+ * in validateSharedFolders) after its own warning. Windows only: elsewhere "/" holds /proc and the system's own files. */
+export async function isSystemDrive(target, platform = process.platform) {
+  if (platform !== "win32") return false;
+  try {
+    const canonical = await fsp.realpath(target);
+    if (path.parse(canonical).root !== canonical) return false;
+    return (await identify(canonical)) === (await identify(path.parse(await fsp.realpath(os.homedir())).root));
+  } catch { return false; }
 }

@@ -303,10 +303,24 @@ describe("Settings → Features", () => {
     expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { skillBurger: false } }) });
   });
 
-  it("shows the Board switch only where the server reports it (a Team Cloud)", () => {
+  it("shows Suggested replies on by default, says it uses a little of the plan, and saves it off", async () => {
+    const { api } = await import("@/state/store");
+    fixture.config = { features: { skillBurger: true, threadTabs: false, suggestedReplies: true } };
+    const html = render("features");
+    expect(html).toContain("Suggested replies");
+    expect(html).toContain("uses a little of your plan or API credit");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, suggestedReplies: true });
+    fixture.switches.find((props) => (props as { "data-feature-switch"?: string })["data-feature-switch"] === "suggestedReplies")!.onClick!({} as never);
+    expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { suggestedReplies: false } }) });
+    fixture.config = { features: { skillBurger: true, threadTabs: false, suggestedReplies: false } };
+    render("features");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, suggestedReplies: false });
+  });
+
+  it("shows no Board switch on a Team Cloud, even from an older server that still reports one", () => {
     fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false, teamBoard: false } };
-    expect(render("features")).toContain("Board");
-    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, teamBoard: false });
+    expect(render("features")).not.toContain("Board");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false });
   });
 
   it("shows no switch its server doesn't know, and isn't offered to a team's member", () => {

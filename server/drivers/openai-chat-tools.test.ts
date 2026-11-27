@@ -1538,20 +1538,26 @@ describe("a turn with the person's Windows computer, the built-in browser and th
   };
 
   it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
-    let firstAt = 0;
-    const notes = catalog(["note"], { startMs: 1_500 });
+    // The slow server cannot start until the first request has arrived: a turn that waited for it would give up on it
+    // first, so its tools could never be listed in the next round, however slow the runner.
+    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-slow-"));
+    cleanups.push(() => removeTempDir(gate));
+    const go = join(gate, "go");
+    let settledBeforeFirst: boolean | null = null;
+    const notes = catalog(["note"], { after: [go] });
     const f = await fixture(async (_body, response, round) => {
       if (round > 1) return answer(response);
-      firstAt = Date.now();
+      settledBeforeFirst = mountSettled.servers.has("notes");
+      writeFileSync(go, "");
       // The turn has the slow server's tools in hand before the next round.
       await settledServer("notes");
       sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
     });
-    const startedAt = Date.now();
     await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
     expect(await f.completed()).toMatchObject({ ok: true });
-    expect(firstAt - startedAt).toBeLessThan(1_000);
+    expect(settledBeforeFirst).toBe(false);
     expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
+    expect(f.recorder.events.filter((event) => event.type === "runtime.notice" || event.type === "runtime.error")).toEqual([]);
   });
 
   it("lists fewer tools when servers that joined after a tool call go past the provider's limit", async () => {

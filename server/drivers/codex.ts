@@ -58,7 +58,7 @@ import { mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRe
 import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexPlanUnsupportedInput, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexTierOf } from "./codex-tier.ts"; import { codexLoginCheck, keptCodexLogin, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
-import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
+import { classifyResumeFailure, instructionsOverflowNotice, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
 import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
@@ -392,7 +392,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // Interrupt state belongs to this turn so activity on other threads cannot cancel or revive its retry.
       let stopRequested = false;
       let promptSubmitted = false;
-      let recoveredMissingSession = false, droppedUnsupportedSession = false;
+      let recoveredMissingSession = false, droppedSession: "unsupported-input" | "instruction-overflow" | null = null;
       let loginRaceRetried = false;
       const stopSignal = new AbortController();
       const { threadId } = turn;
@@ -890,7 +890,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       };
       const turnError = (error: { message?: unknown; codexErrorInfo?: unknown }) => {
         const raw = String(error.message);
-        if (!droppedUnsupportedSession && resumedNativeThread && !state.streamed && !stopRequested && turn.recoveryText?.trim() && codexPlanUnsupportedInput(raw, route)) { droppedUnsupportedSession = true; void relaunch("unsupported_input", raw, "rpc_error").catch(() => {}); return; }
+        if (!droppedSession && resumedNativeThread && !state.streamed && !stopRequested && turn.recoveryText?.trim() && codexPlanUnsupportedInput(raw, route)) { droppedSession = "unsupported-input"; void relaunch("unsupported_input", raw, "rpc_error").catch(() => {}); return; }
         const refused = chatgptTurn && loginMark() !== null && (codexSignInRefused(error) ||
           (state.authRecovery && !/\b403\b|forbidden/i.test(raw) && /\b401\b|unauthorized/i.test(raw)));
         if (retryLoginRace(raw, refused)) return;
@@ -1245,10 +1245,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // only Full may synthesize approvals.
         autoAcceptPermissions = approvalMode === "full";
         const selection = codexThreadSelection({ routedProvider: routed ? routedProvider : undefined, plan }, turn.model);
-        const cursor = !droppedUnsupportedSession && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+        const cursor = !droppedSession && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
         // The plan refused the dropped session before anything ran, so replaying the chat repeats no side effects.
-        let { text: promptText, replayed: rebuiltFromReplay } = droppedUnsupportedSession ? recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure: "before-accept" }) : { text: turn.text, replayed: false };
+        let { text: promptText, replayed: rebuiltFromReplay } = droppedSession ? recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure: "before-accept" }) : { text: turn.text, replayed: false };
         if (reused) {
           codexThreadId = reused.nativeThreadId; approvalParams = reused.carried.approvalParams; resumedNativeThread = true;
           rolloutAt = rolloutMark(reused.carried.rolloutPath); state.usageBaseline = connection.usageTotal;
@@ -1318,15 +1318,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
-        const { deliverVolatile, hadVolatile, commitVolatile } = await syncCodexInstructions(
-          threadId,
-          codexThreadId,
-          instructionsFor(approvalParams),
-          promptSplit ? turn.systemVolatile ?? "" : "",
-          resumedNativeThread,
-          request,
-          Boolean(turn.mentionTurn),
-        );
+        const { deliverVolatile, hadVolatile, commitVolatile, resetSession } = await syncCodexInstructions(threadId, codexThreadId, instructionsFor(approvalParams),
+          promptSplit ? turn.systemVolatile ?? "" : "", resumedNativeThread, request, Boolean(turn.mentionTurn), Boolean(turn.recoveryText?.trim()));
+        if (resetSession) { droppedSession = "instruction-overflow"; return relaunch("instruction_overflow", "Codex did not shut down while moving this conversation to a fresh session", "rpc_error"); }
         if (deliverVolatile) {
           promptText = withContextNote(
             volatileContextNote(promptSplit ? turn.systemVolatile ?? "" : "", hadVolatile),
@@ -1334,7 +1328,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           );
         }
         emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null, ...(rebuiltFromReplay ? { rebuilt: true } : {}) });
-        if (rebuiltFromReplay) emit({ ...base(threadId, turnId), type: "runtime.notice", message: rebuiltSessionNotice("Codex") });
+        if (rebuiltFromReplay) emit({ ...base(threadId, turnId), type: "runtime.notice", message: droppedSession === "instruction-overflow" ? instructionsOverflowNotice("Codex") : rebuiltSessionNotice("Codex") });
         const turnInput = [
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...await codexImageInputs(turn.images),

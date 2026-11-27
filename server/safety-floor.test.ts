@@ -148,6 +148,14 @@ const BLOCKED: Case[] = [
   ["if true; then rm -rf /; fi", "delete-root"],
   ["echo $(rm -rf /)", "delete-root"],
   ["echo `rm -rf ~`", "delete-home"],
+  // a substitution inside `${…}` or an array runs
+  ["echo ${X:-$(rm -rf /)}", "delete-root"],
+  ['echo "${X:-"$(rm -rf /)"}"', "delete-root"],
+  [': "${DIR:=`rm -rf ~`}"', "delete-home"],
+  ["files=( $(mkfs.ext4 /dev/sda1) )", "format-disk"],
+  // a newline inside a substitution does not start the outer heredoc's body
+  [": <<EOF ${X:-$(printf ok\n)}; ( rm -rf ~\nEOF\n); echo }", "delete-home"],
+  [": <<EOF $(printf ok\n); ( rm -rf ~\nEOF\n)", "delete-home"],
   ["rm -rf \\\n  /", "delete-root"],
   // formatting or overwriting a disk
   ["mkfs.ext4 /dev/sda1", "format-disk"],
@@ -452,6 +460,8 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   ["rm -rf $BUILD_DIR/"],
   ['rm -rf "${TMPDIR:-/tmp}/work"'],
   ['rm -rf "$(mktemp -d)"'],
+  ['DIR="${DIR:-$(mktemp -d)}"'],
+  ["files=( $(ls) )"],
   ["rm -rf /$NAME"],
   ["rm -rf ~/../shared-scratch"],
   ["rm -rf ~other"],
@@ -621,7 +631,8 @@ const NOT_CLEAR: Array<[command: string, on: Platform | "posix" | "all", outcome
   ["x=$((2 << 3)); echo $x", "all", "unreadable"],
   ["(( x << 1 ))\nrm -rf /", "all", "unreadable"],
   ["echo $[1<<2]\nrm -rf /", "all", "unreadable"],
-  ["echo $((1 << 2))\nrm -rf /", "all", "unreadable"],
+  // inside `$(( … ))` the heredoc stays in the substitution, so the next line is still read
+  ["echo $((1 << 2))\nrm -rf /", "all", "delete-root"],
   // `env -S` expands `$NAME`, reads backslashes and drops `#` comments by
   // rules of its own, and a value the shell computed is not known
   ["env -S 'rm -rf ${TARGET}'", "all", "unreadable"],

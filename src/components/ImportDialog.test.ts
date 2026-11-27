@@ -16,7 +16,7 @@ vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => place.admin 
 const openLink = vi.fn(async (_url: string) => {});
 vi.mock("@/lib/app-links", () => ({ openExternalLink: (url: string) => openLink(url) }));
 const { ImportDialog } = await import("./ImportDialog");
-const { ShareDepartmentDialog } = await import("./ShareDepartmentDialog");
+const { ShareTemplateDialog } = await import("./ShareTemplateDialog");
 
 const details: TemplateDetails = {
   scope: "bot", name: "Quill", tagline: "Writes outreach.", bots: [{ key: "quill", name: "Quill", color: "purple", skills: [] }],
@@ -129,7 +129,7 @@ describe("a department's Share", () => {
   it("makes the template at once and publishes it to the community, then shows the link and the pull request", async () => {
     api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
       : { ...card, status: "published", link: LINK, prUrl: "https://github.com/milind-soni/openmausbot-teams/pull/9" });
-    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    const view = mount(createElement(ShareTemplateDialog, { target: { department: "Sales desk" }, onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(document.body.textContent).toContain("2 bots · 1 skill · 1 routine (paused)"));
       expect(api).toHaveBeenCalledWith("/api/share/export", { method: "POST", body: JSON.stringify({ department: "Sales desk" }) });
@@ -150,7 +150,7 @@ describe("a department's Share", () => {
       replaced = true;
       return answer;
     });
-    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    const view = mount(createElement(ShareTemplateDialog, { target: { department: "Sales desk" }, onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(button("Add to Acme's templates")).toBeTruthy());
       button("Add to Acme's templates")!.click();
@@ -166,7 +166,7 @@ describe("a department's Share", () => {
     api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
       : path === "/api/share/github" ? (connected ? { connected: true } : { connected: false, reason: "not_connected", error: "Connect GitHub in Apps first." })
       : { kind: "pull_request", url: "https://github.com/acme/playbooks/pull/3", link: "https://github.com/acme/playbooks/tree/mausbot-sales-desk-abc123/sales-desk", branch: "mausbot-sales-desk-abc123" });
-    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    const view = mount(createElement(ShareTemplateDialog, { target: { department: "Sales desk" }, onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(button("Your GitHub repo…")).toBeTruthy());
       expect(button("Add to Acme's templates")).toBeUndefined();
@@ -193,7 +193,7 @@ describe("a department's Share", () => {
   it("shows the server's own sentence when GitHub is refused here, with no Open Apps", async () => {
     api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
       : { connected: false, reason: "refused", error: "Acme's rules turn GitHub off." });
-    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    const view = mount(createElement(ShareTemplateDialog, { target: { department: "Sales desk" }, onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(button("Your GitHub repo…")).toBeTruthy());
       button("Your GitHub repo…")!.click();
@@ -207,7 +207,7 @@ describe("a department's Share", () => {
     place.state = { config: { team: { id: "t1", name: "Acme" } } };
     place.admin = false;
     api.mockResolvedValue(card);
-    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    const view = mount(createElement(ShareTemplateDialog, { target: { department: "Sales desk" }, onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(button("Publish to community")).toBeTruthy());
       expect(button("Your GitHub repo…")).toBeUndefined();
@@ -217,7 +217,7 @@ describe("a department's Share", () => {
 
   it("says why it couldn't be made, with Try again", async () => {
     api.mockRejectedValueOnce(new Error("This department has no bots to share.")).mockResolvedValueOnce(card);
-    const view = mount(createElement(ShareDepartmentDialog, { department: "Empty", onClose: vi.fn() }));
+    const view = mount(createElement(ShareTemplateDialog, { target: { department: "Empty" }, onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(document.body.textContent).toContain("This department has no bots to share."));
       button("Try again")!.click();

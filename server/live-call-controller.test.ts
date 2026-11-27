@@ -596,6 +596,15 @@ describe("LiveCallController lifecycle", () => {
       }
     });
 
+    it("lets a phone app that runs Gemini's session itself start the call", async () => {
+      for (const client of ["ios", "android"] as const) {
+        const t = gemini();
+        const started = await t.controller.start({ auth: owner, ...BOT, client, relays: ["gemini"] });
+        expect(started.gemini?.type).toBe("gemini");
+        expect(t.deps.createSession).toHaveBeenCalledTimes(1);
+      }
+    });
+
     it("never calls Gemini with a key saved for another provider", async () => {
       const t = gemini();
       t.settings.endpoint = { provider: "fish", apiBase: "https://api.fish.audio/v1/agent", model: "agent_1" };

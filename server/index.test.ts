@@ -1736,6 +1736,7 @@ describe("harness HTTP API", () => {
     expect(body.app).toBe("openmausbot");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+    expect(body.eventLogDrops).toEqual({ events: expect.any(Number), bytes: expect.any(Number) });
   });
 
   it("refuses a second live server that shares the same data directory", async () => {
@@ -5009,6 +5010,43 @@ describe("harness HTTP API", () => {
       expect(await managed(partial.id)).toEqual([""]);
     } finally {
       for (const bot of [whole, partial]) await api("DELETE", `/api/bots/${bot.id}`);
+      for (const name of made) await api("DELETE", `/api/sidebar-sections?section=${encodeURIComponent(name)}`);
+    }
+  });
+
+  it("stores the department order: a partial, stable reorder every client reads back and is sent live", async () => {
+    const made = ["Order fixture A", "Order fixture B", "Order fixture C"];
+    const mine = (names: string[]) => names.filter((name) => made.includes(name));
+    const listed = async () => mine((await api("GET", "/api/sidebar-sections")).body.sections);
+    try {
+      for (const name of made) expect((await api("POST", "/api/sidebar-sections", { name, botIds: [] })).status).toBe(200);
+      expect(await listed()).toEqual(made);
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        const moved = await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture C", "Order fixture A"] });
+        expect(moved.status).toBe(200);
+        expect(mine(moved.body.sections)).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+        const frame = await stream.until((candidate) => candidate.kind === "sections" && mine(candidate.sections ?? [])[0] === "Order fixture C");
+        expect(frame.sections).toEqual(moved.body.sections);
+      } finally {
+        stream.close();
+      }
+      expect(await listed()).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+      // A late device's first offer of its old order does not undo the order someone set.
+      const offered = await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A", "Order fixture C"], first: true });
+      expect(offered.status).toBe(200);
+      expect(mine(offered.body.sections)).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+
+      const invalid = { status: 400, body: { error: "sections must be a non-empty array of distinct department names" } };
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A", "Order fixture A"] })).toMatchObject(invalid);
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: [] })).toMatchObject(invalid);
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A"], extra: true })).toMatchObject(invalid);
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A", "Nowhere"] }))
+        .toMatchObject({ status: 400, body: { error: "unknown department: Nowhere" } });
+      expect(await listed()).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+    } finally {
       for (const name of made) await api("DELETE", `/api/sidebar-sections?section=${encodeURIComponent(name)}`);
     }
   });
@@ -9962,7 +10000,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9972,7 +10010,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
@@ -9984,11 +10022,13 @@ describe("harness HTTP API", () => {
     const kept = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).features;
     expect(kept).toMatchObject({ skillBurger: false, threadTabs: true });
     expect(kept.roomFeed).toBeUndefined();
-    await api("PATCH", "/api/config", { features: { skillBurger: true, threadTabs: false } });
+    const quiet = await api("PATCH", "/api/config", { features: { suggestedReplies: false } });
+    expect(quiet.body.features).toMatchObject({ suggestedReplies: false });
+    await api("PATCH", "/api/config", { features: { skillBurger: true, threadTabs: false, suggestedReplies: true } });
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {

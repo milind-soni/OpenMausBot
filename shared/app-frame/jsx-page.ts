@@ -2,7 +2,7 @@
 // pinned and come from cdn.jsdelivr.net, which a bot page's CSP already allows, through one import map; nothing is
 // bundled into the app. In a chat frame the shell transpiles the file itself with Sucrase; a published page carries
 // the server's transpiled code instead and loads no compiler.
-import { APP_THEME_STYLE } from "./helper.ts";
+import { APP_THEME_STYLE, PUBLISHED_PAGE_NO_BOT } from "./helper.ts";
 
 /** Exact versions, each at least two weeks old when pinned; `sucrase` matches the server's own dependency. */
 export const JSX_PAGE_LIBRARIES = {
@@ -17,7 +17,7 @@ export const JSX_PAGE_LIBRARIES = {
 const NPM = "https://cdn.jsdelivr.net/npm";
 const REACT = `${NPM}/react@${JSX_PAGE_LIBRARIES.react}/+esm`;
 
-/** What a page's file may import. `mausbot` is the shell's own: Chart, useTheme, send, open and setContext. */
+/** What a page's file may import. `mausbot` is the shell's own: Chart, useTheme, send, open, setContext, data, state and connectors. */
 export const JSX_PAGE_IMPORTS: Readonly<Record<string, string>> = {
   react: REACT,
   "react/jsx-runtime": `${NPM}/react@${JSX_PAGE_LIBRARIES.react}/jsx-runtime/+esm`,
@@ -158,11 +158,22 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
         style: Object.assign({ width: "100%", height: props.height || 320 }, props.style) });
     };
     var bridge = function () { return win.mausbot && typeof win.mausbot.send === "function" ? win.mausbot : null; };
+    var unpublished = function () { return Promise.reject(new Error(${JSON.stringify(PUBLISHED_PAGE_NO_BOT)})); };
     return {
       __esModule: true, Chart: Chart, useTheme: useTheme,
       send: function (text) { return bridge() ? bridge().send(text) : Promise.resolve(); },
       open: function (url) { if (bridge()) return bridge().open(url); win.open(url, "_blank", "noopener"); return Promise.resolve(); },
-      setContext: function (text) { return bridge() ? bridge().setContext(text) : Promise.resolve(); }
+      setContext: function (text) { return bridge() ? bridge().setContext(text) : Promise.resolve(); },
+      data: { query: function (sql, params) { return bridge() ? bridge().data.query(sql, params) : unpublished(); } },
+      state: {
+        get: function (key) { return bridge() ? bridge().state.get(key) : unpublished(); },
+        set: function (key, value) { return bridge() ? bridge().state.set(key, value) : unpublished(); },
+        keys: function () { return bridge() ? bridge().state.keys() : unpublished(); }
+      },
+      connectors: {
+        call: function (name, tool, args) { return bridge() ? bridge().connectors.call(name, tool, args) : unpublished(); },
+        list: function () { return bridge() ? bridge().connectors.list() : unpublished(); }
+      }
     };
   };
   var compile = function () {

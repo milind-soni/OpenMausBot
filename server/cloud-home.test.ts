@@ -667,6 +667,34 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env
   }
 });
 
+// The supervisor runs on Linux only; Windows has no inherited descriptor 4 to write to.
+it.skipIf(process.platform === "win32")("gives the server a pipe to the supervisor's clock keeper only when asked, which carries its kicker's check line", async () => {
+  const dir = directory();
+  const script = join(dir, "kick.mjs");
+  writeFileSync(script, `
+const { clockKicker, CLOCK_FD_ENV } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "cloud-clock.ts")).href)});
+const named = process.env[CLOCK_FD_ENV] ?? "none";
+const kick = clockKicker();
+kick?.(); kick?.();
+process.stdout.write(named + " " + String(process.env[CLOCK_FD_ENV]));
+setTimeout(() => {}, 200);
+`);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
+  const run = async (clockPipe: boolean) => {
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, true, clockPipe);
+    let out = "", kicked = "";
+    child.stdout?.on("data", (chunk) => { out += chunk; });
+    (child.stdio[4] as NodeJS.ReadableStream | undefined)?.on("data", (chunk) => { kicked += chunk; });
+    await new Promise((resolve) => child.once("close", resolve));
+    return { out, kicked, fds: child.stdio.length };
+  };
+  const piped = await run(true);
+  expect(piped.out).toBe("4 undefined");
+  expect(piped.kicked).toBe("check\n");
+  const plain = await run(false);
+  expect(plain).toEqual({ out: "none undefined", kicked: "", fds: 4 });
+});
+
 it("captures a child's stdout and stderr when asked, and shares this process's otherwise", async () => {
   const dir = directory();
   const script = join(dir, "streams.mjs");

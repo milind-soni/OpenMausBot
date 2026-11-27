@@ -204,7 +204,10 @@ element's job and never a pixel value:
   the sidebar thread row's menu behind a quiet More (hover, focus and touch),
   a pin mark when pinned, and its unread or waiting dot; the thread beside the
   feed has the same menu in its header, with its export. Archived threads come
-  back under "Show archived threads" at the top of the feed. The header is plain
+  back under "Show archived threads" at the top of the feed. A closed thread (its
+  work done; Close in the menu, or its bot closes it) folds with its closed
+  neighbours into one quiet "4 closed threads" row that opens in place, ten at a
+  time; one with news stays a row, and a new line opens it again. The header is plain
   words, so the feed is masked under it. Below 768px the room is today's single
   transcript.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:

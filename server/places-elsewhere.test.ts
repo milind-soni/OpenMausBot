@@ -98,6 +98,18 @@ describe("when the app couldn't read a place lately", () => {
     expect(resolveTeammate(bots, bots[0]!, "Ziggy", here.explain)).toEqual({ error: expect.stringContaining("hasn't seen the bots on My Cloud lately, so it may live there.") });
   });
 
+  it("a place the link reaches is not said to be out of reach: no note for the bot and no line for the person; a team's still is", () => {
+    const here = createPlacesElsewhere({ dataDir: dataDir() });
+    here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ name: "My Cloud", kind: "cloud", bots: ["Cocoa"] }, { name: "Acme", kind: "team", bots: ["Sales"] }] });
+    const linked = (kind: string) => kind !== "team";
+    expect(here.mentioned("ask @Cocoa", [])).toContain("can't be reached from here");
+    expect(here.mentioned("ask @Cocoa", [], linked)).toBe("");
+    expect(here.missed("ask @Cocoa", [])).toHaveLength(1);
+    expect(here.missed("ask @Cocoa", [], linked)).toEqual([]);
+    expect(here.mentioned("ask @Sales", [], linked)).toContain("Sales lives in Acme, the person's team, not here.");
+    expect(here.missed("ask @Sales", [], linked)).toHaveLength(1);
+  });
+
   it("a place the app no longer lists is named, but nothing is offered there", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [{ ...ZIGGY, away: true }, { name: "Acme", kind: "team", bots: ["Sales"], away: true }] });
@@ -213,7 +225,7 @@ describe("a team the person is a member of", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [ACME] });
     const told = (here.explain("Support") as { where: string }).where;
-    expect(told).toContain("Tell the person they can ask it in Acme, or, from My Cloud, move a bot to Acme.");
+    expect(told).toContain("Tell the person they can ask it in Acme, or, from a My Cloud of theirs, move a bot to Acme.");
     expect(told).not.toMatch(/bring their bots together|my home|Bring them together|Keep this computer/);
     expect(resolveTeammate([{ id: "chief", name: "Chief" }], { id: "chief", name: "Chief" }, "Support", here.explain)).toEqual({ error: told });
   });

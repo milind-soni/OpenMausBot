@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { waitForExit } from "../testing/cleanup.ts";
+import { fitToolListForBudget, toolSchemaProfile } from "../tool-schema-profile.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -66,7 +67,8 @@ function profiles(): Record<string, Profile> {
   // The plan's included app hosting reaches only a Cloud home the Admin wired for it; the fullest profile carries it.
   all["skills+shared+voice+x+team+images+hosting"] = { env: { ...all["skills+shared+voice+x+team+images"]!.env, OMB_APP_HOSTING: "1" } };
   all["default+hosting"] = { env: { ...all.default!.env, OMB_APP_HOSTING: "1" } };
-  // A Team Cloud with its board on mounts the three board tools, in a chat and in a room; never on the fullest profile.
+  // Every Team Cloud bot has the three board tools, in a chat and in a room. The Team profiles without them, the fullest
+  // one among them, still pin the rest of the list but no longer ship as they are: see the Gemini check below.
   all["skills+shared+voice+x+team+board"] = { env: { ...all["skills+shared+voice+x+team"]!.env, OMB_TEAM_BOARD: "1" } };
   all["default+room+board"] = { env: { ...all["default+room"]!.env, OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1" } };
   // A bot whose person turned groups off; the fullest profile has every group on.
@@ -99,16 +101,16 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+voice": 64611,
   "skills+shared": 66095,
   "skills+shared+voice": 66876,
-  "non-chief": 52961,
-  "voice+non-chief": 53742,
-  "shared+non-chief": 55226,
-  "shared+voice+non-chief": 56007,
-  "skills+non-chief": 55282,
-  "skills+voice+non-chief": 56063,
-  "skills+shared+non-chief": 57547,
-  "skills+shared+voice+non-chief": 58328,
+  "non-chief": 53136,
+  "voice+non-chief": 53917,
+  "shared+non-chief": 55401,
+  "shared+voice+non-chief": 56182,
+  "skills+non-chief": 55457,
+  "skills+voice+non-chief": 56238,
+  "skills+shared+non-chief": 57722,
+  "skills+shared+voice+non-chief": 58503,
   "skills+shared+voice+cloud-home": 66632,
-  "skills+shared+voice+non-chief+cloud-home": 58084,
+  "skills+shared+voice+non-chief+cloud-home": 58259,
   "default+legacy-switches": 61509,
   "default+mausbot": 62160,
   "skills+shared+voice+mausbot": 67527,
@@ -284,7 +286,7 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts the three board tools only on a Team Cloud with the board on, in a chat and in a room, and adds nothing else", () => {
+  it("mounts the three board tools where the harness says (every Team Cloud bot), in a chat and in a room, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
     expect(names(wires["skills+shared+voice+x+team+board"]!).filter((tool) => !BOARD_TOOLS.includes(tool))).toEqual(names(wires["skills+shared+voice+x+team"]!));
     expect(names(wires["default+room+board"]!).filter((tool) => !BOARD_TOOLS.includes(tool))).toEqual(names(wires["default+room"]!));
@@ -292,6 +294,15 @@ describe("agents proxy tools/list golden", () => {
       for (const tool of BOARD_TOOLS) expect(names(wires[name]!).includes(tool), `${name}: ${tool}`).toBe(profile.env.OMB_TEAM_BOARD === "1");
     }
   });
+
+  it("fits a Team Cloud's real fullest list, the board tools included, under Gemini's list budget with every name kept", async () => {
+    const tools = toolsOf(await toolsListWire(PROXY_SOURCE, { ...PROFILES[FULL]!.env, OMB_TEAM_BOARD: "1" })) as Array<Tool & { inputSchema?: unknown }>;
+    for (const tool of BOARD_TOOLS) expect(tools.map((one) => one.name)).toContain(tool);
+    const gemini = toolSchemaProfile("gemini")!;
+    const fitted = fitToolListForBudget(tools, gemini);
+    expect(Buffer.byteLength(JSON.stringify(fitted), "utf8")).toBeLessThanOrEqual(gemini.maxListBytes!);
+    expect(fitted.map((tool) => tool.name)).toEqual(tools.map((tool) => tool.name));
+  }, 60_000);
 
   it("mounts generate_image and edit_image only when an image provider is set up, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);

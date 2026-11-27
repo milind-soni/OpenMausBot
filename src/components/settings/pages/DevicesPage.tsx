@@ -3,7 +3,7 @@ import { Laptop, Loader2 } from "lucide-react";
 import { deviceGroup, privateNetwork, groupByKind, type Device, type DeviceAction, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { showTunnelRetiredNotice } from "@/lib/phone-link";
+import { olderAppPhones, showTunnelRetiredNotice } from "@/lib/phone-link";
 import { revealPhonePairing, takePairOnOpen } from "@/lib/phone-pairing";
 import { phoneRemovePath } from "@/lib/phones";
 import { useDevices } from "@/lib/use-devices";
@@ -17,6 +17,7 @@ import { DeviceMap, deviceMapShown } from "../../devices/DeviceMap";
 import { usePairAccess } from "../../devices/PairCodePanel";
 import { ComputerNameMore, OtherPlacesSection, PairWithCloudRow, PhoneAppFacts, ServerPhoneNotes } from "../../devices/PhoneSections";
 import { needsFirst, needsPerson } from "../../devices/device-parts";
+import { useUpdateAllOnPage } from "../../devices/UpdateAll";
 import { networkLine, sshAliasOfAnchor } from "../../devices/device-words";
 import { AlwaysOnHomeSection } from "../../AlwaysOnHomeSection";
 import { PhoneControls } from "../../PairedPhones";
@@ -59,6 +60,8 @@ const ADD_LABEL: Record<DeviceGroup, Parameters<typeof t>[0]> = { phones: "devic
 /** Each group's Add opens its own steps; Clouds and your own servers opens the choice, which has both. */
 const ADD_KIND: Record<DeviceGroup, AddKind | null> = { phones: "phone", computers: "computer", servers: null };
 const PHONES_ADD = "[data-add-group=phones]";
+
+const NO_PHONES: readonly string[] = [];
 
 type Adding = { start: AddKind | null; from: string; keys: boolean; ask?: PairAsk };
 
@@ -176,10 +179,14 @@ export function DevicesPage() {
   const phoneConnected = devices.some((device) => device.kind === "phone" && device.status === "online");
   useEffect(() => { if (loaded) setDevicesSignal({ place: signalPlace, needsYou, phoneConnected }); }, [loaded, signalPlace, needsYou, phoneConnected]);
 
+  const olderPhones = ctx.here && c.state && showTunnelRetiredNotice(c.account, c.state) ? olderAppPhones(c.state).map((phone) => phone.id) : NO_PHONES;
+  const updateAll = useUpdateAllOnPage({ enabled: ctx.here, devices, olderPhones });
+  const updateButton = updateAll.button;
   const isAdding = adding !== null;
-  const addButton = useMemo(() => <span data-settings-block="add" className="flex scroll-mt-4">
+  const addButton = useMemo(() => <span data-settings-block="add" className="flex scroll-mt-4 items-center gap-2">
+    {updateButton}
     <button type="button" data-add-device="" onClick={() => startAdding(null, "[data-add-device]")} className="ui-button ui-button-primary ui-button-sm shrink-0">{t("devicesPage.add")}</button>
-  </span>, [startAdding]);
+  </span>, [startAdding, updateButton]);
   useLayoutEffect(() => {
     if (!setHeaderAction) return;
     setHeaderAction(isAdding ? null : addButton);
@@ -259,6 +266,7 @@ export function DevicesPage() {
     onPairing: (device, on, connected) => { setPairing(on); if (connected) { setNotice({ text: t("devicesPage.pairedAgain", { name: device.name }), group: deviceGroup(device) }); refresh(); } },
     onRemoved: (text, device) => { setOpen(null); setNotice(text ? { text, group: deviceGroup(device) } : null); refresh(); },
     extra: phoneExtra,
+    progress: updateAll.progress,
   };
 
   if (adding) {
@@ -340,5 +348,6 @@ export function DevicesPage() {
         onAddComputer={() => startAdding("computer", "[data-always-on-add-computer]")} onConnect={() => startAdding("server", "[data-always-on-connect]")} />
       : <span data-settings-block="always-on" className="contents" />)}
     <OtherPlacesSection devices={devices} />
+    {updateAll.dialog}
   </>;
 }

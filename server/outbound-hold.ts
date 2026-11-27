@@ -30,7 +30,7 @@ export type OutboundHoldAnswer = { ok: true; approved: boolean } | { ok: false; 
 
 /** The rule a send goes out under without the card, or null when it waits on the card. At Full access a bot with no
  * sending rule of its own sends without asking; a stored rule is kept exactly as set. */
-function sendsWithoutAsking(rule: OutboundPolicy | undefined, fullAccess: boolean, opaque: boolean): "full-access" | "allow" | null {
+export function sendsWithoutAsking(rule: OutboundPolicy | undefined, fullAccess: boolean, opaque: boolean): "full-access" | "allow" | null {
   if (fullAccess && rule === undefined) return "full-access";
   // A call it cannot inspect (code run) goes out under "allow" only at Full access, as it would with no rule.
   return effectiveOutboundPolicy(rule, fullAccess).policy === "allow" && (!opaque || fullAccess) ? "allow" : null;

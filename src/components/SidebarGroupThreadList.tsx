@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type Dispatch } from "react";
 import { useStore, type Action, type Group } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
 import { roomThreadAttention, roomThreadWorking } from "@/lib/room-threads";
+import { setRoomThreadClosed, threadRowCloser } from "@/lib/room-thread-close";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useRevealedThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 
@@ -12,6 +13,7 @@ export function roomThreadRowActions(groupId: string, dispatch: Dispatch<Action>
     onDelete: (task: { threadId: string }) => dispatch({ type: "deleteGroupTask", groupId, threadId: task.threadId }),
     onPin: (task: { threadId: string; title: string }, pinned: boolean) => dispatch({ type: "pinGroupTask", groupId, threadId: task.threadId, pinned, title: task.title }),
     onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "archiveGroupTask", groupId, threadId: task.threadId, archivedAt }),
+    onSetClosed: (task: { threadId: string }, closed: boolean) => setRoomThreadClosed(groupId, task.threadId, closed, dispatch),
   };
 }
 
@@ -21,10 +23,12 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
   const [showAll, setShowAll] = useState(false);
   const tasks = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).map((task) => {
     const { waiting, unread } = roomThreadAttention(group, task, state.bots);
-    return { ...task, busy: roomThreadWorking(group, task.threadId), unread, activity: waiting ? "waiting-on-you" as const : undefined };
+    return { ...task, busy: roomThreadWorking(group, task.threadId), unread, activity: waiting ? "waiting-on-you" as const : undefined, closedBy: undefined, closer: threadRowCloser(task) };
   });
   const bulk = useBulkSelect();
-  const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll || bulk.active));
+  // A closed room thread stays in the list, marked; only the feed folds them.
+  const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll || bulk.active))
+    .map(({ closer, ...task }) => ({ ...task, closedBy: closer }));
   const selection = bulk.forRows(visible);
   useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
   const latest = useRef(group);

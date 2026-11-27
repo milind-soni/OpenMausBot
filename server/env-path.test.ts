@@ -659,13 +659,18 @@ winOnly("resolveCli (Windows)", () => {
     expect(resolveCli("ombfake", [], { PATH: "", PATHEXT: ".CMD" })).toEqual({ command: "ombfake", args: [] });
   });
 
-  it("preserves the DeepSeek desktop shim's Electron CLI entry point", () => {
+  it.each(["archive file", "virtual directory"])("resolves the DeepSeek desktop CLI with an ASAR %s", (archiveType) => {
     const exe = join(dir, "DeepSeek Harness.exe");
     const archive = join(dir, "resources", "app.asar");
     const shim = join(dir, "dsh.cmd");
     writeFileSync(exe, "MZ");
     mkdirSync(join(dir, "resources"));
-    writeFileSync(archive, "");
+    if (archiveType === "virtual directory") {
+      mkdirSync(join(archive, "dsh"), { recursive: true });
+      writeFileSync(join(archive, "dsh", "cli.js"), "");
+    } else {
+      writeFileSync(archive, "");
+    }
     writeFileSync(shim, [
       "@echo off",
       'set "ELECTRON_RUN_AS_NODE=1"',

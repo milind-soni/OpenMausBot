@@ -25,7 +25,8 @@ export async function callSetMainThreadTool(args: Json, context: ToolCallContext
 export const SET_MAIN_THREAD_TOOL_DEFINITION = {
   name: SET_MAIN_THREAD_TOOL,
   description:
-    "Set or clear your own main thread (where your automations and briefs report). Only when the person or your instructions ask.",
+    "Set or clear your own main thread (where your automations and briefs report). Only when the person or your instructions ask. "
+    + "If they say main is stale or they work in another thread now, ask \"Make this thread your main chat?\" and call only after a yes.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
