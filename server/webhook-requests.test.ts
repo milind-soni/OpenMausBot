@@ -50,6 +50,35 @@ function harness() {
 const create = { action: "create", webhook: { name: "Interested replies", instructions: "Draft a follow-up for the lead in the payload." } };
 
 describe("WebhookRequestService", () => {
+  it.each([
+    ["pause", false], ["pause", true], ["resume", false], ["resume", true],
+  ] as const)("restores the previous enabled state after %s from %s", (action, enabled) => {
+    const { service, webhooks, store, tick } = harness();
+    const prompt = "Use token=fixture-private-value.";
+    const payloadFilter = { note: "token=fixture-filter-value" };
+    const saved = webhooks.create({ name: "Status fixture", prompt, payloadFilter, botId: "bot-a", enabled }).webhook;
+    tick();
+    const applied = service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action, webhookId: saved.id } });
+    expect(webhooks.list()[0]!.enabled).toBe(action === "resume");
+    const card = store.messagesFor("thread-a")[0]!.card!;
+    expect(JSON.stringify(card)).not.toContain("fixture-private-value");
+    expect(JSON.stringify(card)).not.toContain("fixture-filter-value");
+    expect(card.webhookRequest?.undo?.before?.payloadFilter).toBeUndefined();
+    expect(service.undo({ botId: "bot-a", threadId: "thread-a", requestId: applied.requestId })).toMatchObject({ state: "undone" });
+    expect(webhooks.list()[0]).toMatchObject({ enabled, prompt, payloadFilter });
+  });
+
+  it.each(["pause", "resume"] as const)("still undoes a legacy %s receipt without a before snapshot", (action) => {
+    const { service, webhooks, store, tick } = harness();
+    const enabled = action === "pause";
+    const saved = webhooks.create({ name: "Legacy fixture", prompt: "Check the queue.", botId: "bot-a", enabled }).webhook;
+    tick();
+    const applied = service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action, webhookId: saved.id } });
+    delete store.messagesFor("thread-a")[0]!.card!.webhookRequest!.undo!.before;
+    expect(service.undo({ botId: "bot-a", threadId: "thread-a", requestId: applied.requestId })).toMatchObject({ state: "undone" });
+    expect(webhooks.list()[0]!.enabled).toBe(enabled);
+  });
+
   it("refuses replacing redacted instructions atomically but allows a rename", () => {
     const { service, webhooks, store } = harness();
     const prompt = "Review the queue.\n".repeat(180) + "Use token=fixture-secret-value.";
