@@ -301,24 +301,33 @@ describe("bounded scheduled overlap and run health", () => {
     await h.manager.tick();
   });
 
-  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done", async () => {
+  it("keeps a run that failed only on a step, after its reply came back, failed but marked partly done; only a safety-floor block after the reply completes it", async () => {
     const h = harness(start);
     const routine = h.manager.create({ ...input(), enabled: false });
     const event = (threadId: string, patch: Record<string, unknown>) => h.manager.handleRuntimeEvent({ eventId: `e-${Math.random()}`, provider: "fake", threadId, createdAt: new Date().toISOString(), ...patch } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
-    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false } = {}) => {
+    const attempt = async (threadId: string, partial: boolean, { reply = true, cutOff = false, stopReason, blocked = false }: { reply?: boolean; cutOff?: boolean; stopReason?: string; blocked?: boolean } = {}) => {
       h.manager.runNow(routine.id); await h.manager.tick();
       if (reply) event(threadId, { type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "Here is the summary." });
-      event(threadId, { type: "runtime.error", message: "Stopped because the tool call “read_file” failed.", terminal: true, ...(partial ? { partial: true } : {}) });
+      const message = blocked ? "Stopped because the tool call “shell_exec” wasn't allowed." : "Stopped because the tool call “read_file” failed.";
+      event(threadId, { type: "runtime.error", message, terminal: true, ...(partial ? { partial: true } : {}), ...(blocked ? { blockedAfterReply: true } : {}) });
       if (cutOff) h.manager.failThread(threadId, "Provider settings changed");
-      else event(threadId, { type: "turn.completed", ok: false, stopReason: partial ? "tool_error" : "refusal" });
+      else event(threadId, { type: "turn.completed", ok: false, stopReason: stopReason ?? (partial ? "tool_error" : "refusal"), ...(blocked ? { denials: ["shell_exec"] } : {}) });
     };
     await attempt("thread-1", true);
     await attempt("thread-2", false);
     await attempt("thread-3", true, { reply: false });
     await attempt("thread-4", true, { cutOff: true });
-    const [partly, failed, silent, cutOff] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    await attempt("thread-5", true, { blocked: true });
+    await attempt("thread-6", true, { blocked: true, reply: false });
+    await attempt("thread-7", true, { blocked: true, stopReason: "refusal" });
+    const [partly, failed, silent, cutOff, blocked, blockedSilent, blockedOtherStop] = h.manager.listRuns().sort((a, b) => a.threadId!.localeCompare(b.threadId!));
+    // A step that broke after the reply: the reply is no proof, so the run fails, marked partly done.
     expect(partly).toMatchObject({ status: "failed", partial: true, output: "Here is the summary.", error: expect.stringContaining("read_file") });
     expect([failed, silent, cutOff].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", undefined], ["queued", undefined]]);
+    // Every failed call was blocked by the safety floor after the reply: nothing ran, the run completes partly done.
+    expect(blocked).toMatchObject({ status: "completed", partial: true, output: "Here is the summary.", error: expect.stringContaining("shell_exec"), denials: ["shell_exec"] });
+    // With no reply, or another stop, a block still fails the run.
+    expect([blockedSilent, blockedOtherStop].map((run) => [run.status, run.partial])).toEqual([["failed", undefined], ["failed", true]]);
   });
 
   it("tells of a failure once per streak, and again when it changes or after a run completes", async () => {
@@ -1635,6 +1644,38 @@ describe("RoutineManager", () => {
     expect(new RoutineManager(h.options).listRuns()).toHaveLength(1);
   });
 
+  it("fails a run the restart after a memory freeze cut, with the given line, instead of starting it again", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Prices", prompt: "Check the prices page", botId: "maus-1", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 5).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const line = "Ran out of room, so I closed the browser to keep everything else running.";
+    const asked: Array<[string, string]> = [];
+    h.options.restartCut = (threadId, startedAt) => { asked.push([threadId, typeof startedAt]); return line; };
+    h.options.onRunFailed = (run) => h.failed.push(run);
+    const reloaded = new RoutineManager(h.options);
+    expect(asked).toEqual([["thread-1", "number"]]);
+    expect(reloaded.listRuns()).toMatchObject([{ routineId: routine.id, status: "failed", threadId: "thread-1", error: line }]);
+    expect(reloaded.listRuns()[0]!.retried).toBeUndefined();
+    expect(h.failed).toMatchObject([{ status: "failed", error: line }]);
+    h.setNow(routine.nextRunAt! + 60_000);
+    await reloaded.tick();
+    expect(h.started.map((turn) => turn.threadId)).toEqual(["thread-1"]);
+  });
+
+  it("keeps a run that waits on teammates' hand-offs waiting through the restart after a memory freeze", async () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Prices", prompt: "Check the prices page", botId: "maus-1", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 5).getTime() } });
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick();
+    const asked: string[] = [];
+    h.options.restartCut = (threadId) => { asked.push(threadId); return "Ran out of room, so I closed the browser to keep everything else running."; };
+    h.options.hasPendingDelegations = () => true;
+    const reloaded = new RoutineManager(h.options);
+    expect(asked).toEqual([]);
+    expect(reloaded.listRuns()).toMatchObject([{ routineId: routine.id, status: "waiting", threadId: "thread-1" }]);
+  });
+
   it("migrates optional attachment and timeout metadata without losing legacy records", () => {
     const h = harness();
     h.setBot("busy");
@@ -2395,6 +2436,59 @@ describe("RoutineManager", () => {
     expect(h.interruptedTurns).toEqual([
       { botId: "maus-timeout", threadId: "thread-1" },
     ]);
+  });
+
+  it("keeps a run that already delivered its report as partly done when its limit stops it", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Bounded check",
+      prompt: "Check the queue",
+      botId: "maus-timeout",
+      schedule: { type: "daily", time: "23:59", weekdays: [1] },
+      timeoutMinutes: 5,
+    });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const startedAt = h.manager.listRuns().find((candidate) => candidate.id === run.id)?.startedAt;
+    h.manager.handleRuntimeEvent({ eventId: "reply", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "The invoice is issued and validated." } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+
+    h.setNow(startedAt! + 5 * 60_000);
+    await h.manager.tick();
+
+    expect(h.manager.listRuns().find((candidate) => candidate.id === run.id)).toMatchObject({
+      status: "failed",
+      partial: true,
+      output: "The invoice is issued and validated.",
+      error: "Stopped after reaching the 5-minute run limit",
+    });
+  });
+
+  it("keeps the report it delivered when a later empty item arrives before its limit stops it", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Bounded check",
+      prompt: "Check the queue",
+      botId: "maus-timeout",
+      schedule: { type: "daily", time: "23:59", weekdays: [1] },
+      timeoutMinutes: 5,
+    });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const startedAt = h.manager.listRuns().find((candidate) => candidate.id === run.id)?.startedAt;
+    const say = (itemId: string, text: string) => h.manager.handleRuntimeEvent({ eventId: itemId, provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "item.completed", itemType: "assistant_text", itemId, text } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+    say("reply", "The invoice is issued and validated.");
+    say("blank", "   ");
+    say("empty", "");
+
+    h.setNow(startedAt! + 5 * 60_000);
+    await h.manager.tick();
+
+    expect(h.manager.listRuns().find((candidate) => candidate.id === run.id)).toMatchObject({
+      status: "failed",
+      partial: true,
+      output: "The invoice is issued and validated.",
+      error: "Stopped after reaching the 5-minute run limit",
+    });
   });
 
   it("keeps legacy duration metadata without imposing a timeout", async () => {
@@ -4091,9 +4185,11 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     expect(h.started).toEqual([]);
   });
 
+  // The host hands this only a bot the person paused (bot-holds.ts): one the Starter limit paused is woken for its routine
+  // (host/starter-routine-wake.ts) and never reaches here.
   it("fails a paused bot's runs at once in the person's words, making no conversation and waking nothing for them", async () => {
     const h = harness(start);
-    let paused: string | null = "Paused: Starter keeps 5 bots awake.";
+    let paused: string | null = "Ada is paused, so it takes no new work.";
     h.options.pausedText = (botId) => (botId === "maus-1" ? paused : null);
     h.manager.create(once(start + 60_000));
     expect(h.manager.nextDueAt()).toBeNull();
@@ -4102,7 +4198,7 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start });
     await h.manager.tick();
     expect([h.taskTitles, h.started]).toEqual([[], []]);
-    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Paused: Starter keeps 5 bots awake."], ["failed", "Paused: Starter keeps 5 bots awake."]]);
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["failed", "Ada is paused, so it takes no new work."], ["failed", "Ada is paused, so it takes no new work."]]);
 
     paused = null;
     h.manager.create(once(start + 120_000));
@@ -4126,6 +4222,19 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
     await h.manager.tick();
     expect(h.manager.listRuns().find((run) => run.manual)).toMatchObject({ status: "failed", error: paused });
     expect(h.failed).toHaveLength(1);
+  });
+});
+
+describe("an app-event run its automation refuses as it starts", () => {
+  it("does not start a queued app-event run its automation now refuses, and tells the hook which run it is", async () => {
+    const h = harness();
+    const refused = "Its bot may no longer use this account, so this event's run did not start";
+    h.options.pausedText = (_botId, run) => (run?.eventSource === "app" && run.webhookId === "trigger-1" ? refused : null);
+    h.manager.enqueueWebhook({ webhookId: "trigger-1", webhookName: "Sales mail", prompt: "Draft a reply.", botId: "maus-1", runOn: "maus", deliveryId: "msg_1", receivedAt: Date.now(), eventSource: "app" });
+    h.manager.enqueueWebhook({ webhookId: "trigger-2", webhookName: "Support mail", prompt: "Draft a reply.", botId: "maus-1", runOn: "maus", deliveryId: "msg_2", receivedAt: Date.now(), eventSource: "app" });
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns().map((run) => [run.webhookId, run.status, run.error])).toEqual(expect.arrayContaining([["trigger-1", "failed", refused], ["trigger-2", "running", undefined]]));
   });
 });
 

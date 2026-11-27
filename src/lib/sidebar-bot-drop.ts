@@ -54,6 +54,22 @@ export function planBotDrop(lists: BotLists, botId: string, drop: BotDrop): BotM
   return placed(lists, botId, from, to, (others) => others.indexOf(drop.botId) + (drop.place === "after" ? 1 : 0));
 }
 
+/** The saved order of a list that draws `botId` where `shown` (that list as drawn after the move: working or waiting bots
+ * first) has it. The bot goes after the one drawn just above it, moved no further than it takes to stay between the
+ * nearest bots drawn around it that `floats` alike; every other bot keeps its saved place, so the drawn order is never
+ * stored. */
+export function savedPlacement(saved: readonly string[], shown: readonly string[], botId: string, floats: (id: string) => boolean): string[] {
+  const order = saved.filter((id) => id !== botId);
+  const at = shown.indexOf(botId), above = shown.slice(0, at), below = shown.slice(at + 1);
+  const alike = (id: string) => floats(id) === floats(botId);
+  let index = above.length ? order.indexOf(above.at(-1)!) + 1 : below.length ? order.indexOf(below[0]!) : order.length;
+  const low = above.findLast(alike), high = below.find(alike);
+  if (low !== undefined) index = Math.max(index, order.indexOf(low) + 1);
+  if (high !== undefined) index = Math.min(index, order.indexOf(high));
+  order.splice(index, 0, botId);
+  return order;
+}
+
 export function stepBot(lists: BotLists, botId: string, direction: -1 | 1): BotMove | null {
   const from = botListOf(lists, botId);
   if (from === undefined) return null;

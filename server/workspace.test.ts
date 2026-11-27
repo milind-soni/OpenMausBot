@@ -386,6 +386,21 @@ describe("workspace", () => {
     expect(archive()).toBe("");
   });
 
+  it.each(["\n", "\r\n"])("keeps a newly appended %j code block when the remaining space is too small", (newline) => {
+    const now = new Date(2026, 9, 3, 12);
+    const hand = Array.from({ length: MEMORY_MAX_LINES - 1 }, (_, i) => `- project note ${i}`).join("\n") + "\n";
+    writeMemoryFile(BOT, hand);
+    const text = ["Deploy command:", "```sh", "pnpm deploy --prod", "```"].join(newline);
+    expect(updateMemory(BOT, { action: "append", text }, { now }))
+      .toMatchObject({ ok: true, truncated: true, moved: [] });
+    const saved = readMemoryFile(BOT).text;
+    expect(saved.startsWith(hand)).toBe(true);
+    expect(saved).toContain("- 2026-10-03 · Deploy command:");
+    expect(saved).toContain("  pnpm deploy --prod");
+    expect(memoryLineCount(saved)).toBe(MEMORY_MAX_LINES + 3);
+    expect(archive()).toBe("");
+  });
+
   // Permissions do not stop root or Windows from reading the file.
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fails the write, changing nothing, when the archive exists but cannot be read", () => {
     const full = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- 2026-09-01 · old ${i}\n`).join("");

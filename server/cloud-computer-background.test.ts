@@ -16,6 +16,7 @@ const calls: Array<{ method: string; path: string; query: string; body: any; aut
 let nextProcessId = 41;
 let hold = false;
 let holdStatusAfterFirst = false;
+let statusHeld: (() => void) | undefined;
 let syncReply: Record<string, unknown> = { exitCode: 0, stdout: "done", stderr: "" };
 let startReply: { status: number; body: unknown } | undefined;
 let statusReply: { status: number; body: unknown } | undefined;
@@ -43,7 +44,7 @@ beforeAll(async () => {
       if (statusReply) return send(statusReply.status, statusReply.body);
       const process = processes.get(`${box}:${pid}`);
       if (!process) return send(404, { ok: false, code: "not_found", message: "No such process." });
-      if (holdStatusAfterFirst && process.polls > 0) return;
+      if (holdStatusAfterFirst && process.polls > 0) return statusHeld?.();
       const running = process.polls++ < process.runningFor;
       return send(200, {
         ok: true, type: "command.status", success: true, processId: Number(pid), status: running ? "running" : process.lost ? "lost" : "exited", running,
@@ -176,7 +177,7 @@ describe("background status deadlines", () => {
 });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
-  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; startReply = undefined; statusReply = undefined;
+  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; statusHeld = undefined; startReply = undefined; statusReply = undefined;
   syncReply = { exitCode: 0, stdout: "done", stderr: "" };
 });
 
@@ -268,12 +269,14 @@ describe.each([
   it("propagates cancellation during a follow-up status read", async () => {
     const processId = await start();
     holdStatusAfterFirst = true;
+    const held = new Promise<void>(resolve => { statusHeld = resolve; });
+    const stoppedClock = { now: () => 0, sleep: async () => {}, timeout: () => new AbortController().signal };
     const controller = new AbortController();
-    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal);
-    await expect.poll(() => calls.filter(entry => entry.method === "GET").length).toBe(2);
+    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal, stoppedClock);
+    await held;
+    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
-    server.closeAllConnections();
   });
 
   it("returns only the end of long output, and never half a character", async () => {

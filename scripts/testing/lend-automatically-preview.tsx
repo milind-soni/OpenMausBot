@@ -4,7 +4,7 @@ import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE } from "../../src/lib/cloud-setup";
 import { withTourFinished } from "../../src/lib/guided-tour";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
-import { GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
+import { GROK_MOVE_NOTICE, TEAMS_NOTICE, WHATS_NEW_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkin, type SkinId } from "../../src/lib/skins";
 import "../../src/styles.css";
@@ -20,7 +20,7 @@ setEmailGateDone("skipped");
 markSimpleModePromptSeen();
 localStorage.setItem(GROK_MOVE_NOTICE, "1");
 localStorage.setItem(TEAMS_NOTICE, "1");
-localStorage.setItem(MODELGO_OFFER_NOTICE, "1");
+localStorage.setItem(WHATS_NEW_NOTICE, "1");
 setAdvancedMode(true);
 applySkin((params.get("skin") ?? "midnight") as SkinId);
 

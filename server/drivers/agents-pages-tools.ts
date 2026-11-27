@@ -17,7 +17,7 @@ export const PAGE_TOOL_DEFINITIONS = [
   {
     name: "publish_page",
     description:
-      "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files and data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
+      "Publish a page you made to a public link anyone with it can open, when the person wants others to open it (share, send to someone, post) or asks to publish it: an .html file, or a folder with an index.html (static files and data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets, or money, health, ID or customer details the person didn't ask to make public; give the file instead. For a data dashboard, follow the data-dashboards skill.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

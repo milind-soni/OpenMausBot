@@ -6,7 +6,8 @@
 //   - its HOME read-write (the engine's own login and settings live there), with the server's data folder replaced by an
 //     empty private folder, so messages.db, config.json, logins, other bots' folders and the server's sockets are not there;
 //     on a Team Cloud that HOME is the audience's engine home instead (server/engine-homes), with only the team's engine
-//     sign-ins bound into it, so no other audience's transcripts are there;
+//     sign-ins bound into it, so no other audience's transcripts are there; in the server's HOME every engine sign-in but
+//     the one of the engine account the process runs is masked, as are the folders only the server reads (sign-in-masks.ts);
 //   - put back inside that empty folder: this turn's working folder, the bot's own folder (workspaces/<bot>) and what the
 //     caller names (the turn's permission socket, a read-only file the command line points at); and, read-only, the
 //     bot's own SOUL.md (bots/<bot>/SOUL.md, which it may read but never write) and the engines OpenMausBot installed
@@ -26,10 +27,11 @@ import { isLayerId } from "../audience.ts";
 
 export type BoxNet = "isolated" | "shared";
 
-/** One line of the plan. `bind` is read-write, `ro` read-only; `tmpfs` an empty private folder; `symlink` a link. */
+/** One line of the plan. `bind` is read-write, `ro` read-only; `tmpfs` an empty private folder; `mask` an empty read-only
+ * file over an existing one; `symlink` a link. */
 export type Mount =
   | { kind: "ro" | "bind"; source: string; target: string; optional?: boolean }
-  | { kind: "tmpfs" | "proc" | "dev" | "dir"; target: string }
+  | { kind: "tmpfs" | "proc" | "dev" | "dir" | "mask"; target: string }
   | { kind: "symlink"; link: string; target: string };
 
 export interface BoxBridge { port: number; socket: string; name: string }
@@ -95,6 +97,21 @@ export interface BoxRequest {
   conversationBot?: string;
   /** On a Team Cloud: what the conversation's audience gives the box of the bot's team things (BoxAudience). */
   audience?: BoxAudience;
+  /** The driver kind of the engine this process runs, whose sign-in in the server's HOME it keeps (SignInMasks). */
+  engine?: string;
+}
+
+/** What of the engines' sign-ins in the server's HOME a box keeps (sign-in-masks.ts), for a box that has that HOME. */
+export interface SignInMasks {
+  /** The folders between HOME and those files, parents first, bound over themselves read-write. */
+  folders: readonly string[];
+  /** The spawn's own sign-in files, bound over themselves read-write: a refresh then writes in place instead of renaming a
+   * new file over the old one, which would lift that file's mask in every other running box. */
+  own: readonly string[];
+  /** Other engines' and accounts' sign-in files, each replaced by an empty read-only file. */
+  masked: readonly string[];
+  /** Folders only the server reads, replaced by an empty private one. */
+  hidden: readonly string[];
 }
 
 /** On a Team Cloud, what one conversation's boxes get of what is the team's (docs/team-cloud.md, "The audience rule"):
@@ -148,6 +165,25 @@ export function taskWorkspaceIds(cwd: string, dataDir: string): { botId: string;
   return { botId: rel[0]!, threadId: rel[1]! };
 }
 
+/** The conversation whose uploads a box in `cwd` sees: a conversation folder's own, or for a turn working in its bot's own
+ * folder (workspaces/<bot>: a room, a bot whose folder is its own), that turn's conversation. Null for any other folder. */
+export function uploadsConversation(cwd: string, dataDir: string, turn?: { botId: string; threadId: string } | null): { botId: string; threadId: string } | null {
+  const ids = taskWorkspaceIds(cwd, dataDir);
+  if (ids || !turn || !ID.test(turn.botId) || !ID.test(turn.threadId)) return ids;
+  return cwd === join(dataDir, "workspaces", turn.botId) ? { botId: turn.botId, threadId: turn.threadId } : null;
+}
+
+/** The conversation whose uploads a box for `request` sees: its conversation folder's, or for a turn in its bot's own
+ * folder, that turn's (`request.conversationFolder`, of the same bot). Null for any other box. */
+export function boxUploadsConversation(request: BoxRequest, dataDir: string): { botId: string; threadId: string } | null {
+  const cwd = request.cwd ? resolve(request.cwd) : null;
+  if (!cwd) return null;
+  const ids = taskWorkspaceIds(cwd, dataDir);
+  if (ids) return ids;
+  const turn = request.conversationFolder ? taskWorkspaceIds(resolve(request.conversationFolder), dataDir) : null;
+  return turn && turn.botId === request.botId ? uploadsConversation(cwd, dataDir, turn) : null;
+}
+
 /** The server-owned folder holding a conversation's uploads for its boxes (server/box-attachments.ts), bound read-only. */
 export function boxUploadsDir(dataDir: string, botId: string, threadId: string): string {
   return join(dataDir, "box-uploads", botId, threadId);
@@ -165,7 +201,7 @@ export function argvPaths(args: readonly string[]): string[] {
 }
 
 /** Environment values that name folders the engine writes: its own config and caches. */
-export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "TMPDIR"] as const;
+export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "PI_CODING_AGENT_DIR", "TMPDIR"] as const;
 
 /** The only part of /sys the box has: how many CPUs the machine has. Programs built with TCMalloc (Google's Antigravity
  * runtime) read `possible` at start and stop themselves (SIGABRT, exit 134) when it is missing. */
@@ -185,7 +221,7 @@ function assertReadOnlySource(source: string): void {
   }
 }
 
-export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
+export function planBox(setup: BoxSetup, request: BoxRequest, signIns?: SignInMasks): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
   const dataDir = resolve(setup.dataDir), home = resolve(setup.home);
   const net: BoxNet = mutate.has("share-net") ? "shared" : request.net ?? "isolated";
@@ -219,6 +255,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   // An engine home lives in the data folder, so it goes back after that.
   const ownHome = request.home ? resolve(request.home) : null;
   if (!ownHome) rw(home);
+  // Before the data folder's line, so one of these holding the data folder never shows it.
+  if (!ownHome) for (const folder of signIns?.folders ?? []) if (under(folder, home) && folder !== home) mounts.push({ kind: "bind", source: folder, target: folder, optional: true });
   const dataInsideHome = under(dataDir, home);
   if (!mutate.has("bind-data")) {
     if (dataInsideHome) mounts.push({ kind: "tmpfs", target: dataDir });
@@ -281,9 +319,12 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
   }
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
-  if (ids) {
+  // A turn in its bot's own folder sees only its own conversation's: a process there is never shared with another
+  // conversation (procs.ts sharedBoxScope), so this holds for one started for several of them too.
+  const uploadsOf = boxUploadsConversation(request, dataDir);
+  if (uploadsOf) {
     const shown = scoped ? [...scoped.rw, ...scoped.ro].filter((id) => ID.test(id)).map((id) => boxUploadsDir(dataDir, threads!, id))
-      : [threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId)];
+      : [threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, uploadsOf.botId, uploadsOf.threadId)];
     for (const folder of shown) mounts.push({ kind: "ro", source: folder, target: folder, optional: true });
   }
   // The team's conversations a non-team shared process may read, and the team's folder, after every read-write line too.
@@ -327,6 +368,14 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     if (teamFiles.write) mounts.push({ kind: "ro", source: join(resolve(teamFiles.source), TEAM_FILES_LIBRARY), target: join(TEAM_FILES_IN_BOX, TEAM_FILES_LIBRARY), optional: true });
   }
 
+  // Security: last, so no line above puts another engine's or account's sign-in back. Only in the server's HOME.
+  if (!ownHome && signIns) {
+    const inHome = (path: string) => under(path, home) && !under(path, dataDir);
+    for (const file of signIns.own) if (inHome(file)) mounts.push({ kind: "bind", source: file, target: file, optional: true });
+    for (const file of signIns.masked) if (inHome(file)) mounts.push({ kind: "mask", target: file });
+    for (const folder of signIns.hidden) if (inHome(folder)) mounts.push({ kind: "tmpfs", target: folder });
+  }
+
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
   if (!mutate.has("share-pid")) options.push("--unshare-pid");
   if (setup.seccompFd !== undefined && !mutate.has("no-seccomp")) options.push("--seccomp", String(setup.seccompFd));
@@ -360,6 +409,7 @@ export function bwrapArgs(plan: BoxPlan): string[] {
       case "proc": args.push("--proc", mount.target); break;
       case "dev": args.push("--dev", mount.target); break;
       case "dir": args.push("--dir", mount.target); break;
+      case "mask": args.push("--ro-bind", "/dev/null", mount.target); break;
       case "symlink": args.push("--symlink", mount.target, mount.link); break;
     }
   }

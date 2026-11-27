@@ -87,6 +87,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   attach_file: "activity.tool.team.attachFile",
   close_thread: "activity.tool.team.closeThread",
   rename_thread: "activity.tool.team.renameThread",
+  set_main_thread: "activity.tool.team.setMainThread",
   coordinate_bots: "activity.tool.team.coordinateBots",
   create_bot: "activity.tool.team.createBot",
   create_room: "activity.tool.team.createRoom",
@@ -94,6 +95,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   decide: "activity.tool.team.decide",
   delegate_bot: "activity.tool.team.delegateBot",
   extract: "activity.tool.team.extract",
+  what_changed: "activity.tool.team.whatChanged",
   fill_login: "activity.tool.team.fillLogin",
   find_tool: "activity.tool.team.findTool",
   generate_image: "activity.tool.team.generateImage",
@@ -140,6 +142,8 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   show_widget: "activity.tool.team.showWidget",
   skill_manage: "activity.tool.team.skillManage",
   skills_list: "activity.tool.team.skillsList",
+  run_workflow: "activity.tool.team.runWorkflow",
+  workflow_edit: "activity.tool.team.workflowEdit",
   start_thread: "activity.tool.team.startThread",
   burst: "activity.tool.team.burst",
   tool_result_read: "activity.tool.team.toolResultRead",
@@ -241,7 +245,7 @@ export function describedTool(name: string, input?: unknown): Described {
 }
 
 const DECISION_SCAN = 20_000;
-const EVENTS_PER_THREAD = 2_000;
+export const EVENTS_PER_THREAD = 2_000;
 /** A verdict is written as the request opens and the run follows, occasionally a clock skew's worth earlier. */
 const MATCH_BEFORE_MS = 5_000;
 const MATCH_AFTER_MS = 30_000;

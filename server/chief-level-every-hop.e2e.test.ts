@@ -7,7 +7,7 @@ import { handleToolCall, request } from "../scripts/mcp-server.ts";
 
 // A Chief's level reached the teammate it handed work to and stopped there: Clive on Approve for me, Ada ran at auto,
 // and the work Ada handed Bea ran at Ask ("default").
-it("carries a Chief's level down every hop it hands out, in threads and in a room, and never an ordinary bot's", async () => {
+it("carries a Chief's level down every hop it hands out, in threads and in a room; an ordinary bot's only opens a thread at its conversation's level", async () => {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir, logPath } = fixture.info;
   const planPath = join(dataDir, "room-plan.json");
@@ -69,7 +69,8 @@ it("carries a Chief's level down every hop it hands out, in threads and in a roo
     expect(await chips(adaTurn.threadId)).toEqual(["Approve for me — handed on by Clive, a Chief of Staff on Approve for me"]);
     expect(await chips(beaTurn.threadId)).toEqual(["Approve for me — handed on by Ada, from Clive, a Chief of Staff on Approve for me"]);
 
-    // Ola's own Approve for me came from the person, not a Chief: the work she hands Bea stays on Bea's level.
+    // Ola's own Approve for me came from the person, not a Chief: no Chief's level comes down with it, but the work thread it
+    // opens on Bea takes the level of Ola's conversation, as any thread a conversation opens does (spawn-level.ts).
     plan(ola.id,
       { steps: [coordinate(bea.id, "ordinary-bea", "Run the check and report the result.")], reply: "Handed to Bea." },
       { reply: "Bea ran the check." });
@@ -79,7 +80,7 @@ it("carries a Chief's level down every hop it hands out, in threads and in a roo
     expect((await cli("wait", "--bot", ola.id, "--task", ola.activeTaskId, "--timeout", "25")).status).toBe("settled");
     const ordinaryTurn = turnOf(bea.id, 1);
     expect(ordinaryTurn.threadId).not.toBe(beaTurn.threadId);
-    expect(ordinaryTurn.permissionMode).toBe("default");
+    expect(ordinaryTurn.permissionMode).toBe("auto");
     expect(await chips(ordinaryTurn.threadId)).toEqual([]);
 
     // The same chain inside a room. The room thread is shared, so nothing is patched onto it: each turn's level rides

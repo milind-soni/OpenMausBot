@@ -2,12 +2,16 @@ import { useContext, useState, type ReactNode } from "react";
 import { SettingsLook } from "./SettingsPrimitives";
 import { useUpdatedOnce } from "@/hooks/use-updated-once";
 import { ArrowUpRight, Check, ChevronDown, RefreshCw } from "lucide-react";
-import { useStore, type InstanceInfo } from "@/state/store";
+import { type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { sponsorRowRaised } from "@/lib/modelgo-offer";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { useStoreActions } from "@/state/store-select";
 
 export function engineReady(instance: InstanceInfo): boolean {
+  // Only found installed while its checks could not finish: its sign-in is not known yet.
+  if (instance.snapshot.unverified === true) return false;
   if (instance.driverKind === "clineAgent") {
     return instance.snapshot.state === "available" && instance.snapshot.authenticated === true;
   }
@@ -76,16 +80,19 @@ export function EngineCard({ instance, children, summary, bare = false }: { inst
   );
 }
 
-export function EngineSections({ instances, renderEngine, isReady = engineReady }: {
+export function EngineSections({ instances, renderEngine, isReady = engineReady, offerModelgo = false }: {
   instances: InstanceInfo[];
   renderEngine: (instance: InstanceInfo) => ReactNode;
   isReady?: (instance: InstanceInfo) => boolean;
+  /** The sponsor's provider stands among the first three of its section, where it may be offered (modelgoOfferable). */
+  offerModelgo?: boolean;
 }) {
   // Flat, instance-keyed siblings: separate section parents would remount a card that moves between groups and drop
   // unsaved input.
   return <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
     {[true, false].flatMap((ready) => {
-      const rows = instances.filter((instance) => isReady(instance) === ready);
+      const listed = instances.filter((instance) => isReady(instance) === ready);
+      const rows = offerModelgo ? sponsorRowRaised(listed, listed.find((instance) => instance.driverKind === "modelgo"), (instance) => instance.driverKind === "cursorAgent") : listed;
       if (!rows.length) return [];
       const label = t(ready ? "onboarding.engines.ready" : "onboarding.engines.needsSetup");
       return [
@@ -101,7 +108,7 @@ export function EngineSections({ instances, renderEngine, isReady = engineReady 
 }
 
 export function RefreshEngines() {
-  const { refreshInstances } = useStore();
+  const { refreshInstances } = useStoreActions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);

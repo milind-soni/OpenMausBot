@@ -1,3 +1,4 @@
+import { ComputerIdleTimer } from "./computer-idle.ts";
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { execFileSync } from "node:child_process";
@@ -35,6 +36,7 @@ import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
   VPS_ENVIRONMENT_LABEL,
+  vpsEnvironmentId,
   VPS_IMAGE,
   VPS_MANAGED_LABEL,
   VPS_VIEWER_LABEL,
@@ -42,7 +44,9 @@ import {
   vpsComputerJoin,
   vpsDesktopConnection,
   closeVpsDesktopTunnel,
+  stopVpsDesktopTunnel,
   closeAllVpsDesktopTunnels,
+  vpsComputerRunning,
   vpsComputerScreenshot,
   vpsComputerStatus,
   vpsComputerMcp,
@@ -517,6 +521,31 @@ describe("VPS computer", () => {
     expect(stopped.container).toBe("stopped");
     expect(stop.calls.some(({ args }) => args[2] === "stop" && args[3] === CONTAINER_ID)).toBe(true);
     expect(stop.calls.some(({ args }) => ["rm", "system", "reboot", "shutdown"].includes(args[2]!))).toBe(false);
+  });
+
+  it("leaves the desktop running when work arrives during idle-stop inspection", async () => {
+    const fake = fixture({ environmentId: vpsEnvironmentId() });
+    let idle = true;
+    const runner: typeof fake.runner = (args, options) => { idle = false; return fake.runner(args, options); };
+    const result = await vpsComputerAction("stop", CONFIG, BOT_ID, runner, () => idle);
+    expect(result.container).toBe("running");
+    expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
+  });
+
+  it("restarts the same container after an unattended idle stop", async () => {
+    const fake = fixture({ environmentId: vpsEnvironmentId() });
+    const stopped = await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => true);
+    expect(stopped.container).toBe("stopped");
+    const resumed = await vpsComputerAction("provision", CONFIG, BOT_ID, fake.runner);
+    expect(resumed.ready).toBe(true);
+    expect(resumed.container_id).toBe(CONTAINER_ID);
+    expect(fake.calls.some(({ args }) => ["rm", "run"].includes(args[2]!))).toBe(false);
+  });
+
+  it.each([null, "another-installation"])("leaves an unverified idle desktop running (%s)", async environmentId => {
+    const fake = fixture({ environmentId });
+    await vpsComputerAction("stop", CONFIG, BOT_ID, fake.runner, () => true);
+    expect(fake.calls.some(({ args }) => ["stop", "rm"].includes(args[2]!))).toBe(false);
   });
 
   it("serializes concurrent provisioning for the same bot", async () => {
@@ -1220,10 +1249,10 @@ describe("remote desktop tunnel ownership", () => {
     } };
   }
 
-  async function openFixture() {
+  async function openFixture(onViewerClosed?: () => void) {
     const { children, runner, cleanup } = tunnelFixture();
     try {
-      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true, onViewerClosed);
       return { child: children[0]!, runner };
     } catch (error) { cleanup(); throw error; }
   }
@@ -1261,13 +1290,15 @@ describe("remote desktop tunnel ownership", () => {
   it("ignores an old tunnel's queued expiry and close after replacement", async () => {
     const { children, runner, cleanup } = tunnelFixture();
     const timers = vi.spyOn(globalThis, "setTimeout");
+    const closed = vi.fn();
     try {
-      await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
+      await vpsComputerJoin(CONFIG, BOT_ID, runner, true, closed);
       const expired = timers.mock.calls.find(([, delay]) => delay === 30_000)![0] as () => void;
       closeAllVpsDesktopTunnels();
       await vpsComputerJoin(CONFIG, BOT_ID, runner, true);
       expired();
       children[0]!.emit("close", 0);
+      expect(closed).not.toHaveBeenCalled();
       expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
       expect(children[1]!.killed).toBe(false);
     } finally { timers.mockRestore(); cleanup(); }
@@ -1334,6 +1365,42 @@ describe("remote desktop tunnel ownership", () => {
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
   });
+  it.each(["grace expiry", "SSH exit"])("renews the full VPS idle window after %s", async (end) => {
+    const stop = vi.fn(async () => {});
+    const timer = new ComputerIdleTimer(300_000, () => Boolean(vpsDesktopConnection(BOT_ID)), stop);
+    const { child } = await openFixture(() => timer.touch());
+    vi.useFakeTimers();
+    try {
+      timer.touch();
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      await vi.advanceTimersByTimeAsync(240_000);
+      release();
+      if (end === "SSH exit") child.kill();
+      else await vi.advanceTimersByTimeAsync(30_000);
+      expect(vpsDesktopConnection(BOT_ID)).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally { timer.cancel(); closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("waits a full idle window after a short desktop view closes", async () => {
+    const stop = vi.fn(async () => {});
+    const timer = new ComputerIdleTimer(1000, () => Boolean(vpsDesktopConnection(BOT_ID)), stop);
+    await openFixture(() => timer.touch());
+    vi.useFakeTimers();
+    try {
+      timer.touch();
+      await vi.advanceTimersByTimeAsync(400);
+      expect(closeVpsDesktopTunnel(BOT_ID)).toEqual({ closed: true });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally { timer.cancel(); closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
   it("keeps remote tabs connected when the native viewer closes", async () => {
     const { child, runner } = await openFixture();
     try {
@@ -1346,6 +1413,33 @@ describe("remote desktop tunnel ownership", () => {
       await vi.advanceTimersByTimeAsync(30_001);
       expect(child.kill).toHaveBeenCalledTimes(1);
     } finally { closeAllVpsDesktopTunnels(); vi.useRealTimers(); }
+  });
+
+  it("stops an open viewer tunnel on a server switch without firing onViewerClosed, so the next join opens a fresh tunnel", async () => {
+    const closed = vi.fn();
+    const { child, runner } = await openFixture(closed);
+    try {
+      const release = vpsDesktopConnection(BOT_ID)!.retain();
+      expect(stopVpsDesktopTunnel(BOT_ID)).toBe(true);
+      expect(child.killed).toBe(true);
+      release();
+      child.emit("close", 0);
+      expect(closed).not.toHaveBeenCalled();
+      expect(vpsDesktopConnection(BOT_ID)).toBeUndefined();
+      const next = await vpsComputerJoin({ vps: { sshAlias: "alpha-vps" } }, BOT_ID, runner, true);
+      expect(next.state).toBe("running");
+      expect(vpsDesktopConnection(BOT_ID)?.live()).toBe(true);
+    } finally { closeAllVpsDesktopTunnels(); }
+  });
+
+  it("checks whether a managed VPS desktop container is running without throwing on unreachable or missing hosts", async () => {
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ running: true }).runner)).toBe(true);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ running: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ container: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ managed: false }).runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, fixture({ environmentId: "another-installation" }).runner)).toBe(false);
+    expect(await vpsComputerRunning({}, BOT_ID, fixture().runner)).toBe(false);
+    expect(await vpsComputerRunning(CONFIG, BOT_ID, async () => { throw new Error("ssh: connect timeout"); })).toBe(false);
   });
 });
 

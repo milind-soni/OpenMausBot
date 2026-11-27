@@ -78,6 +78,20 @@ describe("the person's message goes first", () => {
     expect(h.requeued).toEqual([]);
   });
 
+  it("does not queue a steered message again that the engine already read, when the next call runs long without text", async () => {
+    const h = harness();
+    h.turnStarted();
+    h.toolStarted("first");
+    await h.advance(10_000);
+    h.first.wait(T, h.steered());
+    await h.advance(5_000);
+    h.toolDone("first");
+    h.toolStarted("second", "npm test");
+    await h.advance(PERSON_FIRST_MS);
+    expect(h.stops).toHaveLength(1);
+    expect(h.requeued).toEqual([]);
+  });
+
   it("stops the call when it reaches its minute with the message still unread", async () => {
     const h = harness();
     h.turnStarted();

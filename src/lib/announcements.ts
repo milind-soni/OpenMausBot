@@ -13,6 +13,7 @@ import {
   ADMIN_PLACES, audienceMatches, cardPlaces, parseAnnouncementCard, type AnnouncementCard, type AnnouncementFacts, type AnnouncementKind,
   type AnnouncementPlan, type AnnouncementPlatform, type AnnouncementSurface,
 } from "../../shared/announcements";
+import { parseRelease, type ReleaseEntry } from "../../shared/release-notes";
 
 /** Sponsor cards (the announcements' and the app's own) for a Team Cloud's members who are not its owner or an admin. Off:
  * a sponsor's card is for whoever chooses the team's providers. The owner's call; flip this to show them to every member. */
@@ -36,6 +37,7 @@ export const sponsorDayKey = (day: string) => `${SPONSOR_DAY_PREFIX}${day}`;
 // ---- The cards this server hands over: asked at launch, then about hourly while the app is in use.
 
 let cards: AnnouncementCard[] = [];
+let releases: ReleaseEntry[] = [];
 let updatedAt: number | null = null;
 let askedAt: number | null = null;
 let answered = false;
@@ -51,12 +53,22 @@ function readCards(answer: unknown): AnnouncementCard[] {
   });
 }
 
+/** The notes of the latest releases, newest first; none from a server older than them. */
+function readReleases(answer: unknown): ReleaseEntry[] {
+  const list = (answer as { releases?: unknown } | null)?.releases;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((raw) => {
+    const parsed = parseRelease(raw);
+    return parsed.ok ? [parsed.release] : [];
+  });
+}
+
 function ask(now: number): void {
   if (asking || (askedAt !== null && now >= askedAt && now - askedAt < (answered ? ANNOUNCEMENT_REFRESH_MS : RETRY_MS))) return;
   asking = true;
   askedAt = now;
   void api("/api/announcements").then((answer) => {
-    cards = readCards(answer); answered = true;
+    cards = readCards(answer); releases = readReleases(answer); answered = true;
     const date = Date.parse(String((answer as { updatedAt?: unknown } | null)?.updatedAt ?? ""));
     updatedAt = Number.isFinite(date) ? date : null;
   }, () => {})
@@ -74,6 +86,14 @@ export function useAnnouncementCards(enabled: boolean, now: () => number = Date.
   return enabled ? current : [];
 }
 
+const releasesSnapshot = () => releases;
+
+/** What the latest releases brought, as the same answer handed them over (useAnnouncementCards asks for it). */
+export function useReleaseNotes(enabled: boolean): ReleaseEntry[] {
+  const current = useSyncExternalStore(subscribe, releasesSnapshot, releasesSnapshot);
+  return enabled ? current : [];
+}
+
 /** When the cards' file last changed (epoch ms), as the server said; null before it answers or from an older server. */
 export function announcementFeedUpdatedAt(): number | null {
   return updatedAt;
@@ -81,7 +101,7 @@ export function announcementFeedUpdatedAt(): number | null {
 
 /** Tests: start from a page that has asked nothing. */
 export function forgetAnnouncementCards(): void {
-  cards = []; updatedAt = null; askedAt = null; answered = false; asking = false;
+  cards = []; releases = []; updatedAt = null; askedAt = null; answered = false; asking = false;
 }
 
 // ---- What this page knows.

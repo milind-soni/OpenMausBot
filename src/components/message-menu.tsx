@@ -99,7 +99,7 @@ export function useBotMessageMenu({
       onSelect: onToggleRaw,
     });
   }
-  if (onRegenerate) items.push({ key: "regenerate", icon: <RefreshCw {...ACTION_ICON} />, label: t("chat.regenerate"), onSelect: onRegenerate });
+  if (onRegenerate) items.push({ key: "regenerate", icon: <RefreshCw {...ACTION_ICON} />, label: t("chat.regenerate"), onSelect: onRegenerate, idleOnly: true });
   items.push(...teamMemory, ...pinItem(pin), idItem(messageId));
   return items;
 }

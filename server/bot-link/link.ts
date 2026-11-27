@@ -10,20 +10,30 @@
 // hand-off, its result and its stop go only to the place they belong to.
 //
 // Security: the link joins only servers the same person signs in to as owner (server/routes/bot-link.ts), and work that
-// crosses it counts as the person's own, as it does between two bots of one place. Open risk: whoever controls one side
-// can have the other side's bots act at their own approval levels; turning the link off on the computer ends that.
+// crosses it counts as the person's own, as it does between two bots of one place. Work the Cloud hands a computer, and
+// any turn there that what the Cloud wrote started (a far room member's answer that names a bot), follows the person's
+// grant to their Clouds on that computer (server/bot-link/far-side.ts; turning this link on grants it, the OpenMausBot
+// icon takes it back). While "Let Clouds run commands on this computer" is off, such a turn runs in its thread's own
+// scratch folder with no shell, computer use, browser, phones, own MCP servers, Data tools or reads outside that folder;
+// connected apps and Email only read; it writes no memory, schedules nothing, changes no setting, answers nothing for the
+// person and leaves no words in another conversation; an engine that can't be held to that refuses it. Work a computer
+// hands its Cloud runs in the Cloud's box. Still open: what comes back (results, files, a far member's line in a room) is
+// read by the person's own turns at their level, and the grant is read when each turn starts. Turning the link off on
+// the computer ends all of it.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { z } from "zod";
 
 import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
-import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
-import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedBotSchema, linkedId, parseLinked, peerKey, placeSchema,
+import { bothPlaces } from "./both-places.ts";
+import { armBackground, BACKGROUND_WAIT_MS, backgroundWaitNote, cloudUnreachableTooLong, neverSent } from "./away.ts";
+import { endedSchema, stateSchema, type EndedLink, type LinkState, type Work } from "./link-state.ts";
+import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedId, parseLinked, peerKey,
   type FileMeta, type FileWay, type Frame, type HandoffFrame, type LinkedBot, type Numbered, type Place, type ResultFrame } from "./protocol.ts";
 
 const FILE = "bot-link.json";
@@ -41,6 +51,7 @@ const ALIVE_EVERY_MS = 60_000;
 /** How often a place's last contact is written down. */
 const SEEN_WRITE_MS = 60 * 60_000;
 const STOPPED = "Coordinated work was stopped";
+const OFF_STOP = "The link to the person's other place was turned off, so this work was stopped.";
 const SPOOL = "bot-link-files";
 /** Bytes that crossed and were never stored (their hand-off was dropped, a side restarted) are removed after this long,
  * and the oldest go first when all of them together pass the size. */
@@ -51,6 +62,10 @@ const FILE_TRIES = 3;
 /** A file that could not cross yet is tried again after this long, doubling up to five minutes. */
 const FILE_RETRY_MS = 5_000;
 const FILE_RETRY_MAX_MS = 5 * 60_000;
+/** This place's bots changed: the other places hear the new list once changes settle, so a burst of them is one hello. */
+const TELL_AFTER_MS = 250;
+/** Under changes that do not stop, the other places still hear at least this often. */
+const TELL_WITHIN_MS = 1_500;
 
 /** How a computer moves a file's bytes: it puts the ones it sends and gets the ones it is sent. `holds`: the Cloud already
  * has this file, so it is not sent again. `gone` on an error: the Cloud said it will not take it or has no such file, so
@@ -66,45 +81,10 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 const metaOf = (files: readonly PassedFile[]): FileMeta[] => files.slice(0, FILES_MAX).map(({ name, mime, kind, bytes }) => ({ name: name.slice(0, 255), mime: mime.slice(0, 200), kind, bytes }));
 const GONE = "The result is no longer kept.";
 
-const workSchema = z.object({
-  /** The place it came from: its result goes there and nowhere else. */
-  peer: z.string(),
-  root: z.string(), from: z.string(), person: z.string().optional(), at: z.number(),
-  /** The assignment here that does the work; its words are read from the runtime's own row. */
-  child: z.string().optional(),
-  done: z.object({ ok: z.boolean(), outcome: z.string().optional(), /** Kept only when no assignment here ran. */ text: z.string().optional() }).optional(),
-  /** When the requester said it has the result. */
-  ackedAt: z.number().optional(),
-});
-const peerSchema = z.object({
-  place: placeSchema, bots: z.array(linkedBotSchema),
-  /** On the Cloud: the one session that may use this computer's link. */
-  sessionId: z.string().optional(),
-  seenAt: z.number(),
-});
-const stateSchema = z.object({
-  v: z.literal(2),
-  /** `dialer`: a computer, which asks. `acceptor`: the Cloud, which answers. */
-  role: z.enum(["dialer", "acceptor"]),
-  self: placeSchema,
-  /** dialer: the Cloud's address, this link's sign-in there, and the account it was made for. */
-  origin: z.string().optional(), token: z.string().optional(), account: z.string().optional(),
-  /** dialer: the Cloud is on a plan that sleeps, so it is asked only when it is known awake or there is work for it. */
-  sleeps: z.boolean().optional(),
-  peers: z.record(z.string(), peerSchema),
-  /** Another place's thread names, each with the thread here its work runs in. */
-  threads: z.record(z.string(), z.object({ threadId: z.string(), at: z.number() })),
-  /** Hand-offs taken from another place, by assignment id. */
-  work: z.record(z.string(), workSchema),
-});
-export type LinkState = z.infer<typeof stateSchema>;
-type Work = z.infer<typeof workSchema>;
-const endedSchema = z.array(z.object({ origin: z.string(), token: z.string(), at: z.number() })).max(10);
-/** A link that was turned off while its Cloud could not be told: the Cloud is told when it can next be reached. */
-export type EndedLink = z.infer<typeof endedSchema>[number];
+export type { EndedLink, LinkState } from "./link-state.ts";
 
 interface LocalBot { id: string; name: string; color?: string; hidden?: boolean; title?: string; description?: string; movedTo?: unknown;
-  mascotBody?: string | null; mascotFaceColor?: string | null; chiefOfStaff?: boolean; threadId?: string }
+  mascotBody?: string | null; mascotFaceColor?: string | null; mascotBodyColor?: string | null; mascotMaterial?: string | null; chiefOfStaff?: boolean; threadId?: string }
 
 export interface BotLinkDeps {
   dataDir: string;
@@ -113,11 +93,16 @@ export interface BotLinkDeps {
   bot(id: string): LocalBot | null | undefined;
   /** Why this bot takes no work now (it moved away, it is paused), or null. */
   refusal?(bot: LocalBot): string | null;
+  /** Why this bot cannot take work from the other place now, though it takes other work (its engine cannot be held to
+   * what such work may do here): asked only as a hand-off arrives, never part of what the other places are told. */
+  acceptRefusal?(bot: LocalBot): string | null;
   model?(bot: LocalBot): string | undefined;
   level(bot: LocalBot): Level;
   /** Opens the thread another place's work runs in, and returns its id. */
-  openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }): string | undefined;
+  openThread(bot: LocalBot, title: string, opener: { botId: string; name: string; threadId: string }, brief: string): string | undefined;
   hasThread(botId: string, threadId: string): boolean;
+  /** Work from the other place reached `botId`'s thread `threadId`: its main chat may say so (server/host/handed-line.ts). */
+  handed?(input: { botId: string; threadId: string; from: { botId: string; name: string }; text: string }): void;
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
   sentRow(input: { sender: LocalBot; threadId: string; recipient: { id: string; name: string }; workThreadId: string; nodeId: string; reason?: string; doneWhen?: string;
@@ -155,7 +140,15 @@ export interface BotLinkDeps {
   /** On the Cloud: ends the session a computer's link used. */
   revoke?(sessionId: string): void;
   now?: () => number;
+  /** On a computer: how long work no person waits on waits for a Cloud that cannot be reached (away.ts). */
+  backgroundWaitMs?: number;
   log?(line: string): void;
+  /** How long after the last change to this place's bots the other places are told (TELL_AFTER_MS), and the longest a
+   * change waits while more keep coming (TELL_WITHIN_MS). */
+  tellAfterMs?: number;
+  tellWithinMs?: number;
+  /** The person paused this bot, or the plan keeps it asleep: it takes no work now. */
+  paused?(bot: LocalBot): boolean;
 }
 
 export interface CoordinateContext {
@@ -169,15 +162,18 @@ export interface CoordinateContext {
   problem?: string;
   handed(nodeId: string): void;
 }
-type CoordinateResult = { status: number; body: Record<string, unknown> };
 type Remote = { peer: string; bot: LinkedBot };
-/** `level`: what that place's version reads (protocol.ts), 1 until it says more. `told`: the level its last hello was made for. */
-type Live = { online: boolean; seq: number; outbox: Numbered[]; level: number; told?: number };
+/** `level`: what that place's version reads (protocol.ts), 1 until it says more. `told`: the level its last hello was made
+ * for, and `bots` the list it carried. */
+type Live = { online: boolean; seq: number; outbox: Numbered[]; level: number; told?: number; bots?: string };
 
 export type BotLink = ReturnType<typeof createBotLink>;
 
 export function createBotLink(deps: BotLinkDeps) {
   const now = deps.now ?? Date.now;
+  const backgroundWait = deps.backgroundWaitMs ?? BACKGROUND_WAIT_MS;
+  /** A computer's own word, from its dialer, that the Cloud was woken too often this hour for work a person waits on: until when. */
+  const wakeLater = new Map<string, number>();
   const log = deps.log ?? (() => {});
   const file = join(deps.dataDir, FILE), endedFile = join(deps.dataDir, ENDED_FILE);
   let state: LinkState | null = null;
@@ -188,14 +184,19 @@ export function createBotLink(deps: BotLinkDeps) {
 
   const live = new Map<string, Live>();
   const outboundListeners = new Set<(peer: string) => void>();
-  const wantedListeners = new Set<() => void>();
+  /** `person`: the work traces to a person's own line, so they wait on it (dial.ts may wake a sleeping Cloud for it). */
+  const wantedListeners = new Set<(person: boolean) => void>();
   /** Hand-offs this side sent whose result has not come back. */
   type Pending = { peer: string; frame: HandoffFrame; files: readonly PassedFile[]; settle(result: HostTurnResult): void; threadId: string; cancelled: boolean; busy?: boolean; tries: number };
   const pending = new Map<string, Pending>();
+  /** What each bot of another place was called when work went to it: kept so a hand-off that ends after the link went
+   * still names its bot. */
+  const namedHere = new Map<string, string>();
   /** Hand-offs whose result came: the rest that end here (cut by restarts, refused, stopped) are stopped where they run. */
   const resulted = new Set<string>();
   let alive: NodeJS.Timeout | undefined;
-  let toldBots = "";
+  /** A change to this place's bots waits here to be told, since `tellingSince`. */
+  let telling: NodeJS.Timeout | undefined, tellingSince = 0;
   /** Hand-offs whose files are being taken in, and results whose files are being sent: one at a time each. */
   const accepting = new Set<string>(), resultsGoing = new Set<string>();
   /** What waits to be tried again because a file could not cross yet, by what it is for. */
@@ -205,12 +206,18 @@ export function createBotLink(deps: BotLinkDeps) {
   const save = () => { if (state) writeFileAtomic(file, JSON.stringify(state), { mode: 0o600 }); };
   const linkOf = (peer: string): Live => { let one = live.get(peer); if (!one) { one = { online: false, seq: 0, outbox: [], level: 1 }; live.set(peer, one); } return one; };
   const isOnline = (peer: string) => live.get(peer)?.online === true;
+  /** Places asleep that this computer is waking for work a person waits on (the dialer says so; never persisted). */
+  const waking = new Set<string>();
   const placeName = (peer: string) => state?.peers[peer]?.place.name ?? "the other place";
-  const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !bot.movedTo && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
+  /** A bot that moved to another place for good leaves a hidden stub here; one still moving is here and says so. */
+  const movedAway = (bot: LocalBot) => (bot.movedTo as { state?: unknown } | null | undefined)?.state === "moved";
+  const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !movedAway(bot) && /^[\w-]{1,128}$/u.test(bot.id)).map((bot) => ({
     id: bot.id, name: bot.name, ...(bot.title ? { title: bot.title.slice(0, 200) } : {}), ...(bot.description ? { description: bot.description.slice(0, 400) } : {}),
     ...(deps.model?.(bot) ? { model: deps.model(bot)!.slice(0, 200) } : {}), level: deps.level(bot),
     ...(bot.color ? { color: bot.color.slice(0, 64) } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody.slice(0, 64) } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor.slice(0, 64) } : {}),
+    ...(bot.mascotBodyColor ? { mascotBodyColor: bot.mascotBodyColor.slice(0, 64) } : {}), ...(bot.mascotMaterial ? { mascotMaterial: bot.mascotMaterial.slice(0, 64) } : {}),
     ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}),
+    ...(deps.paused?.(bot) || deps.refusal?.(bot) ? { paused: true } : {}),
   })).slice(0, 500);
 
   function send(peer: string, frame: Frame): void {
@@ -221,12 +228,22 @@ export function createBotLink(deps: BotLinkDeps) {
   }
   /** A place on the first version takes a hello only with the fields that version knows. */
   const basic = ({ id, name, title, description, model, level }: LinkedBot): LinkedBot => ({ id, name, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(model ? { model } : {}), ...(level ? { level } : {}) });
-  const hello = (peer: string) => {
+  const hello = (peer: string, bots = directory()) => {
     if (!state) return;
-    const bots = directory(), one = linkOf(peer);
-    toldBots = JSON.stringify(bots);
+    const one = linkOf(peer);
+    one.bots = JSON.stringify(bots);
     one.told = one.level;
+    // A hello not yet taken says less than this one: only the newest goes.
+    one.outbox = one.outbox.filter((entry) => entry.frame.t !== "hello");
     send(peer, { t: "hello", place: state.self, bots: one.level >= 2 ? bots : bots.map(basic) });
+  };
+  /** Each place that was told this place's bots and now holds another list hears the new one. A place not yet in a session
+   * hears it when its session starts, and one that is away when it is back. */
+  const tellBots = () => {
+    telling = undefined;
+    if (!state) return;
+    const bots = directory(), listed = JSON.stringify(bots);
+    for (const peer of Object.keys(state.peers)) { const one = live.get(peer); if (one?.bots !== undefined && one.bots !== listed) hello(peer, bots); }
   };
 
   const spoolRoot = join(deps.dataDir, SPOOL);
@@ -301,6 +318,7 @@ export function createBotLink(deps: BotLinkDeps) {
   function setOnline(peer: string, next: boolean): void {
     const peerState = state?.peers[peer];
     if (!peerState) return;
+    if (next) waking.delete(peer);
     if (next && now() - peerState.seenAt > SEEN_WRITE_MS) { peerState.seenAt = now(); save(); }
     const one = linkOf(peer);
     if (one.online === next) return;
@@ -308,28 +326,49 @@ export function createBotLink(deps: BotLinkDeps) {
     deps.kick();
   }
 
+  /** A far bot's name and place, as the last time it was known (`namedHere`), so work that ends after its link went names it. */
+  const farName = (linked: string) => { const remote = remoteOf(linked); if (remote) namedHere.set(linked, `${remote.bot.name} (${placeName(remote.peer)})`); return namedHere.get(linked) ?? "Teammate"; };
   const remoteOf = (linked: string): Remote | undefined => {
     const address = parseLinked(linked), bot = address ? state?.peers[address.peer]?.bots.find((one) => one.id === address.botId) : undefined;
     return address && bot ? { peer: address.peer, bot } : undefined;
   };
-  const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
   /** The bot of another place `raw` names: by its address here, or by a name no bot here has and only one bot elsewhere has.
    * A bot's id here, in any case, or the start of one (8+ characters), stays with the local resolver, so a bot elsewhere
    * named after it never takes that bot's work or its files. */
   function resolve(raw: string): Remote | undefined {
-    if (!state) return undefined;
+    const matches = candidates(raw), awake = matches.length > 1 ? matches.filter((remote) => !remote.bot.paused) : matches;
+    return awake.length === 1 ? awake[0] : undefined;
+  }
+  /** Every bot of another place `raw` could name, by the rules of `resolve`: one is that bot, more say nothing. */
+  function candidates(raw: string): Remote[] {
+    if (!state) return [];
     const wanted = raw.trim(), lower = wanted.toLowerCase();
-    const local = deps.bots();
-    if (local.some((bot) => bot.id.toLowerCase() === lower)) return undefined;
-    if (isLinkedId(wanted)) return remoteOf(wanted);
-    if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return undefined;
-    const named = fold(wanted);
-    if (!named || local.some((bot) => !bot.hidden && fold(bot.name) === named)) return undefined;
-    const matches = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => fold(bot.name) === named).map((bot) => ({ peer, bot })));
-    return matches.length === 1 ? matches[0] : undefined;
+    // A bot that moved away is named by its own id still: that is the bot of the place it moved to, never its stub here.
+    const stub = deps.bots().find((bot) => movedAway(bot) && bot.id.toLowerCase() === lower);
+    if (stub) return Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => bot.id === stub.id).map((bot) => ({ peer, bot })));
+    const local = deps.bots().filter((bot) => !movedAway(bot));
+    if (local.some((bot) => bot.id.toLowerCase() === lower)) return [];
+    if (isLinkedId(wanted)) { const remote = remoteOf(wanted); return remote ? [remote] : []; }
+    if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return [];
+    const named = foldName(wanted);
+    if (!named || local.some((bot) => !bot.hidden && foldName(bot.name) === named)) return [];
+    return Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => foldName(bot.name) === named).map((bot) => ({ peer, bot })));
+  }
+  /** A name more than one bot of the other places has (and no bot here): which one is meant, by its address. */
+  function sharedName(raw: string): string | null {
+    // A bot its place paused would refuse the work, so it is no choice to offer.
+    const matches = candidates(raw).filter((remote) => !remote.bot.paused);
+    if (matches.length < 2) return null;
+    const listed = matches.slice(0, 12).map((remote) => `${remote.bot.name} on ${placeName(remote.peer)} (id ${linkedId(remote.peer, remote.bot.id)})`).join("; ");
+    return `${matches.length} bots of the person's other places are named "${raw.trim().slice(0, 120)}", so nothing was sent: ${listed}${matches.length > 12 ? `; and ${matches.length - 12} more` : ""}. Send it again with the id of the one you mean.`;
   }
 
-  const offlineNote = (peer: string) => `${placeName(peer)} is offline now (off, asleep or not connected), so this waits and is delivered when it is back`;
+  /** `person`: work a person waits on (it may wake a sleeping Cloud); other work never wakes it, and may be given up. */
+  const offlineNote = (peer: string, person = true) => waking.has(peer) ? wakingNote(peer)
+    : state?.role === "dialer" && !person ? backgroundWaitNote(placeName(peer), backgroundWait)
+    : state?.role === "dialer" && (wakeLater.get(peer) ?? 0) > now() ? `${placeName(peer)} was woken for work several times in the last hour already, so this waits and is sent by itself when it may be woken again, in about ${Math.max(1, Math.ceil(((wakeLater.get(peer) ?? 0) - now()) / 60_000))} minutes, or sooner if it wakes`
+    : `${placeName(peer)} is offline now (off, asleep or not connected), so this waits and is delivered when it is back`;
+  const wakingNote = (peer: string) => `${placeName(peer)} was asleep and is waking up for this now, so this is delivered as soon as it answers`;
 
   function keepAlive(): void {
     if (pending.size === 0) { if (alive) { clearInterval(alive); alive = undefined; } return; }
@@ -342,6 +381,7 @@ export function createBotLink(deps: BotLinkDeps) {
   function runRemote(node: HandoffView, signal: AbortSignal): Promise<HostTurnResult> {
     const coordinator = deps.coordinator();
     const address = parseLinked(node.botId)!;
+    farName(node.botId);
     const parent = node.parentId ? coordinator.node(node.parentId) : undefined;
     const sender = parent ? deps.bot(parent.botId) : undefined;
     const record = coordinator.status(node.id)?.assignment;
@@ -459,7 +499,7 @@ export function createBotLink(deps: BotLinkDeps) {
     const refuse = (text: string) => { state!.work[frame.id] = work; recordResult(frame.id, { ok: false, text, outcome: "refused" }); };
     const bot = deps.bot(frame.to);
     if (!bot || bot.hidden) return refuse("That bot is no longer here.");
-    const refusal = deps.refusal?.(bot);
+    const refusal = deps.refusal?.(bot) ?? deps.acceptRefusal?.(bot);
     if (refusal) return refuse(refusal);
     const coordinator = deps.coordinator();
     try {
@@ -470,7 +510,7 @@ export function createBotLink(deps: BotLinkDeps) {
       const key = `${peer}:${frame.thread}`;
       let threadId = state.threads[key]?.threadId;
       if (!threadId || !deps.hasThread(bot.id, threadId)) {
-        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId });
+        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId }, frame.text);
         if (!opened) throw new Error("That bot is no longer here.");
         threadId = opened;
       }
@@ -480,6 +520,12 @@ export function createBotLink(deps: BotLinkDeps) {
       if (files.length) deps.files?.crossed(node.id, "sent", { botId: address.botId, name: frame.from.name }, files);
       work.child = node.id;
       state.work[frame.id] = work;
+      // A room's turn for a member of this place is not a hand-off to the bot (its work thread is named after the room).
+      // A failure there never stops the work: it is logged, and the hand-off goes on.
+      if (!frame.thread.includes(":room:")) {
+        try { deps.handed?.({ botId: bot.id, threadId, from: { botId: address.botId, name: frame.from.name }, text: frame.text }); }
+        catch (error) { log(`bot link: the hand-off line for ${frame.id} was not written (${said(error)})`); }
+      }
       save();
       coordinator.endTurn(root, { ok: true, text: "" });
       if (frame.mode === "notify") recordResult(frame.id, { ok: true, text: "" });
@@ -540,7 +586,7 @@ export function createBotLink(deps: BotLinkDeps) {
         deps.coordinator().cancelDirect(work.root, `Stopped by ${work.from || "the requester"}`);
         return;
       }
-      case "bye": return state.role === "acceptor" ? dropPeer(peer, `The link to ${placeName(peer)} was turned off before the work came back.`) : off(true);
+      case "bye": return state.role === "acceptor" ? dropPeer(peer, `The link to ${placeName(peer)} was turned off before the work came back.`, `The link to ${placeName(peer)} was turned off, so this work was stopped.`) : off(true, OFF_STOP);
     }
   }
 
@@ -573,6 +619,14 @@ export function createBotLink(deps: BotLinkDeps) {
     }
   }
 
+  /** Work this place runs for `peer` (or for every place) that has not ended is stopped: its result has nowhere to go. */
+  function stopWorkFor(peer: string | null, reason: string): void {
+    if (!state) return;
+    for (const work of Object.values(state.work)) {
+      if (work.done || (peer !== null && work.peer !== peer)) continue;
+      try { deps.coordinator().cancelDirect(work.root, reason); } catch (error) { log(`bot link: work for ${work.peer} not stopped (${String(error)})`); }
+    }
+  }
   function failPending(peer: string | null, reason: string): void {
     for (const [id, entry] of pending) {
       if (peer !== null && entry.peer !== peer) continue;
@@ -585,14 +639,16 @@ export function createBotLink(deps: BotLinkDeps) {
   }
 
   /** On the Cloud: one computer's link ends. Its session is revoked and work waiting for it ends with the reason. */
-  function dropPeer(peer: string, reason: string): void {
+  /** `stopped`: the link was turned off, so the work this place runs for that computer stops, with these words. */
+  function dropPeer(peer: string, reason: string, stopped?: string): void {
     const known = state?.peers[peer];
     if (!state || !known) return;
+    if (stopped) stopWorkFor(peer, stopped);
     delete state.peers[peer];
     live.delete(peer);
     if (known.sessionId) deps.revoke?.(known.sessionId);
     failPending(peer, reason);
-    if (Object.keys(state.peers).length === 0) { off(true); return; }
+    if (Object.keys(state.peers).length === 0) { off(true, stopped); return; }
     save();
     deps.directoryChanged?.();
     for (const listener of outboundListeners) listener(peer);
@@ -609,15 +665,21 @@ export function createBotLink(deps: BotLinkDeps) {
 
   /** The link is off here: nothing more is sent, and work waiting on another place ends with the reason. `told`: the other
    * side knows. A computer whose Cloud could not be told keeps what it takes to tell it later. */
-  function off(told: boolean): void {
+  function off(told: boolean, stopped?: string): void {
     if (!state) return;
+    // Only a real turn-off (the person's switch, the other side's goodbye) stops what runs here for the other place.
+    if (stopped) stopWorkFor(null, stopped);
     const was = state;
     state = null;
-    try { rmSync(file, { force: true }); } catch (error) { log(`bot link: its record was not removed (${String(error)})`); }
+    clearTimeout(telling);
+    telling = undefined;
+    // The end is written down before the link's record goes, so a server stopped in between still tells its Cloud later.
     if (!told && was.role === "dialer" && was.origin && was.token) writeEnded([...readEnded().filter((one) => one.token !== was.token), { origin: was.origin, token: was.token, at: now() }]);
+    try { rmSync(file, { force: true }); } catch (error) { log(`bot link: its record was not removed (${String(error)})`); }
     if (was.role === "acceptor") for (const known of Object.values(was.peers)) if (known.sessionId) deps.revoke?.(known.sessionId);
     const peers = [...live.keys()];
     live.clear();
+    waking.clear();
     for (const retry of retries.values()) clearTimeout(retry.timer);
     retries.clear();
     rmSync(spoolRoot, { recursive: true, force: true });
@@ -634,6 +696,8 @@ export function createBotLink(deps: BotLinkDeps) {
   /** coordinate_bots for targets that live in another place; the rest go on as they always did (`local`). */
   async function coordinate(call: CoordinateBotsCall, context: CoordinateContext, local: (call: CoordinateBotsCall) => Promise<CoordinateResult>): Promise<CoordinateResult> {
     if (!state || context.external) return local(call);
+    const byName = deps.bots().filter((bot) => !movedAway(bot) && !bot.hidden);
+    for (const raw of call.botIds) { const shared = bothPlaces({ raw, here: byName, peers: state.peers, placeName }) ?? sharedName(raw); if (shared) return { status: 403, body: { error: shared } }; }
     const away = new Map<string, Remote>();
     for (const raw of call.botIds) { const remote = resolve(raw); if (remote) away.set(raw, remote); }
     if (away.size === 0) return local(call);
@@ -655,11 +719,17 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!duplicate && call.files?.length) deps.files?.crossed(node.id, "sent", { botId: context.sender.id, name: context.sender.name }, call.files);
         const files = call.files?.length && !deps.files ? " Its files were not sent: files do not cross to the other place here, so put what it needs in the message." : "";
         const online = isOnline(remote.peer);
+        // Said first, so a computer whose Cloud sleeps has asked it to wake before the bot is told what happens next. Only
+        // work a person's own line started may wake it; a routine's or a scheduled run's waits as before.
+        const person = coordinator.status(node.id)?.assignment?.origin?.kind === "person";
+        if (!online) for (const listener of wantedListeners) listener(person);
+        // On a computer, work no person waits on is looked at again once its wait is over (host.validate, away.ts).
+        if (!online && state?.role === "dialer" && !person) { const later = setTimeout(() => deps.kick(), backgroundWait + 50); later.unref?.(); }
+        const told = !online && waking.has(remote.peer) ? `Finish your turn and tell the person ${place} is waking up for it.` : `Finish your turn and tell the person it waits for ${place}.`;
         receipts.push(receipt(remote, duplicate && node.status !== "queued" ? "injected" : "queued",
           duplicate ? `already sent to ${remote.bot.name} on ${place}: it is ${node.status === "queued" ? "queued" : "under way"} and ${returns}`
-            : online ? `sent to ${remote.bot.name} on ${place}; ${returns}.${files}` : `${offlineNote(remote.peer)}; ${returns} then. Finish your turn and tell the person it waits for ${place}.${files}`,
+            : online ? `sent to ${remote.bot.name} on ${place}; ${returns}.${files}` : `${offlineNote(remote.peer, person)}; ${returns} then. ${told}${files}`,
           { requestId: node.id }));
-        if (!online) for (const listener of wantedListeners) listener();
         if (!duplicate) {
           context.handed(node.id);
           deps.sentRow({ sender: context.sender, threadId: context.address.threadId, recipient: { id: linked, name: `${remote.bot.name} (${place})` }, workThreadId: threadId, nodeId: node.id, ...(context.address.groupId && !deps.rooms?.member(context.address.groupId, linked) ? { roomId: context.address.groupId } : {}),
@@ -671,20 +741,7 @@ export function createBotLink(deps: BotLinkDeps) {
         receipts.push(receipt(remote, "failed", said));
       }
     }
-    const sent = refused.length < receipts.length;
-    const mine = sent ? `Handed to the person's other place. ${call.reply === "none" ? "Nothing comes back from a one-way notice." : "Finish your turn now: the result resumes you when it is back."}` : "";
-    if (here.length === 0) return { status: sent ? 200 : 409, body: { receipts, ...(sent ? { message: mine } : { error: refused.join("; ") }) } };
-    const rest = await local({ ...call, botIds: here });
-    const theirs = Array.isArray(rest.body.receipts) ? rest.body.receipts as PeerDeliveryReceipt[] : [];
-    const ok = sent || rest.status === 200;
-    const errors = [...refused, ...(typeof rest.body.error === "string" ? [rest.body.error] : [])];
-    // Instruction-only is the whole call's verdict: nothing was delivered anywhere and no refusal of another place is a
-    // real failure. One genuine refusal, or a delivery, keeps this a failed call however the local part answered.
-    const { instructionOnly: localInstructionOnly, ...restBody } = rest.body;
-    const instructionOnly = !ok && refused.length === 0 && localInstructionOnly === true;
-    return { status: ok ? 200 : rest.status, body: { ...restBody, receipts: [...receipts, ...theirs],
-      ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }),
-      ...(instructionOnly ? { instructionOnly: true } : {}) } };
+    return withTargetsHere(call, here, { receipts, refused, message: `Handed to the person's other place. ${call.reply === "none" ? "Nothing comes back from a one-way notice." : "Finish your turn now: the result resumes you when it is back."}` }, local);
   }
   /** Why this call cannot go to another place at all, or null. */
   function unsupportedHere(call: CoordinateBotsCall, context: CoordinateContext, place: string): string | null {
@@ -695,26 +752,43 @@ export function createBotLink(deps: BotLinkDeps) {
       : call.answers || call.post || call.ownThread ? `That does not reach ${place} yet: send the bot plain work or a question instead`
       : call.consult && call.reply === "none" ? "consult asks a question whose answer comes back to you; leave reply out" : null;
   }
+  /** On a computer: work no person waits on, for a Cloud that cannot be reached now, that waits no longer (away.ts): why, or
+   * undefined. Only work the Cloud never took is given up, so nothing is stopped there for it. On the Cloud nothing is. */
+  function givenUp(node: HandoffView, peer: string): string | undefined {
+    if (state?.role !== "dialer" || deps.coordinator().status(node.id)?.assignment?.origin?.kind === "person") return undefined;
+    const one = live.get(peer), queued = one?.outbox.some((entry) => entry.frame.t === "handoff" && entry.frame.id === node.id) === true;
+    const said = cloudUnreachableTooLong(node, placeName(peer), neverSent(node) || queued, now(), backgroundWait);
+    if (!said) return undefined;
+    if (one && queued) one.outbox = one.outbox.filter((entry) => !(entry.frame.t === "handoff" && entry.frame.id === node.id));
+    const entry = pending.get(node.id);
+    if (entry) { entry.cancelled = true; pending.delete(node.id); keepAlive(); entry.settle({ ok: false, text: said }); }
+    resulted.add(node.id);
+    return said;
+  }
   /** The coordinator's host with other places' bots in it: their nodes run there, every other node as before. */
   function host(inner: CoordinatorHost): CoordinatorHost {
     const awayNode = (node: HandoffView) => isLinkedId(node.botId);
     const peerOf = (node: HandoffView) => parseLinked(node.botId)?.peer ?? "";
     const workOf = (parent: HandoffView | undefined) => (parent && awayNode(parent) ? state?.work[handoffOfRoot(parent.id)] : undefined);
-    const nameOf = (linked: string) => { const remote = remoteOf(linked); return remote ? `${remote.bot.name} (${placeName(remote.peer)})` : "Teammate"; };
+    const nameOf = farName;
     return {
       ...inner,
       validate: (node, parent) => {
         if (!awayNode(node)) return inner.validate(node, parent && awayNode(parent) ? undefined : parent);
         if (!node.parentId) return undefined;
-        if (!state) return "The link to the person's other place was turned off, so this was not delivered.";
+        // Never "not delivered" for work that went: it was, and the link going stops it there.
+        if (!state) return node.status === "queued" ? "The link to the person's other place was turned off, so this was not sent."
+          : `The link to the person's other place was turned off while ${nameOf(node.botId)} worked on this, so its result will not come back.`;
         const left = deps.rooms?.problem(node);
         if (left) return left;
-        return remoteOf(node.botId) ? undefined : "That bot's place is no longer linked, or the bot is no longer there.";
+        if (!remoteOf(node.botId)) return "That bot's place is no longer linked, or the bot is no longer there.";
+        const peer = peerOf(node);
+        return isOnline(peer) ? undefined : givenUp(node, peer);
       },
       // A node that only stands for who asked (a room, another place's requester) has no parent and runs nothing: it is
       // never busy, so it ends as soon as the work under it has ended, whether or not any place is connected.
       busy: (node) => (awayNode(node) ? Boolean(node.parentId) && !isOnline(peerOf(node)) : inner.busy(node)),
-      holdReason: (node) => (awayNode(node) ? offlineNote(peerOf(node)) : inner.holdReason?.(node) as string),
+      holdReason: (node) => (awayNode(node) ? offlineNote(peerOf(node), deps.coordinator().status(node.id)?.assignment?.origin?.kind === "person") : inner.holdReason?.(node) as string),
       // Work for a place that cannot be reached, waiting to go or already running there, is held by no clock.
       away: (node) => (awayNode(node) ? Boolean(state) && Boolean(node.parentId) && !isOnline(peerOf(node)) : inner.away?.(node) ?? false),
       run: (node, resumed, signal, composed) => {
@@ -756,7 +830,7 @@ export function createBotLink(deps: BotLinkDeps) {
   const cloudPeer = () => (state?.role === "dialer" ? Object.keys(state.peers)[0] ?? null : null);
 
   return {
-    host, coordinate, resolve,
+    host, coordinate, resolve, candidates,
     on: () => state !== null,
     /** What this place is called, as the other places were told. */
     selfName: () => state?.self.name ?? "",
@@ -780,9 +854,21 @@ export function createBotLink(deps: BotLinkDeps) {
     /** Every bot of every linked place, with its address here. `kind`: what that place is, in the words the sidebar's
      * own rows use for where a bot lives: a computer links to its Cloud, a Cloud to computers. */
     linked: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), peer, place: known.place, kind: state!.role === "dialer" ? "cloud" as const : "computer" as const, online: isOnline(peer), bot }))),
+    /** What a bot that named no bot here or there is told past "no such bot" while the link is on: the other places' bots
+     * it can reach through the link, each by the id that reaches it. */
+    reachableElsewhere(): string {
+      if (!state) return "";
+      const far = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => !bot.paused).map((bot) => ({ peer, bot })));
+      const places = [...new Set(Object.keys(state.peers).map(placeName))].join(", ");
+      if (!far.length) return `This place is linked to ${places}, but no bot there can be reached through the link now.`;
+      const listed = far.slice(0, 12).map(({ peer, bot }) => `${bot.name} on ${placeName(peer)} (id ${linkedId(peer, bot.id)})`).join(", ");
+      return `Through the link to ${places} you can also reach: ${listed}${far.length > 12 ? `, and ${far.length - 12} more` : ""}.`;
+    },
+    /** On a computer: the Cloud was woken for work a person waits on as often as an hour allows; it is woken again by itself in `ms`. */
+    wakeLater(peer: string, ms: number): void { if (ms > 0) wakeLater.set(peer, now() + ms); else wakeLater.delete(peer); },
     /** Other places' bots as list_bots names them. */
     agents: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), name: bot.name, section: "", model: bot.model ?? "", busy: false,
-      status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : `on ${known.place.name}, offline now: work for it waits until it is back`,
+      status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : waking.has(peer) ? `on ${known.place.name}, waking up now: work for it is delivered as soon as it answers` : `on ${known.place.name}, offline now: work for it waits until it is back`,
       title: bot.title || undefined, description: bot.description || undefined }))),
     /** Turned on, on a computer: it keeps the Cloud's address, its sign-in there and the account that was for. */
     turnOn(input: { self: Place; origin: string; token: string; account?: string; peer: Place }): void {
@@ -813,10 +899,10 @@ export function createBotLink(deps: BotLinkDeps) {
     unpair(computerId?: string): void {
       if (state?.role !== "acceptor") return;
       const reason = "The link to that computer was turned off before the work came back.";
-      for (const peer of computerId === undefined ? Object.keys(state.peers) : [peerKey(computerId)]) dropPeer(peer, reason);
+      for (const peer of computerId === undefined ? Object.keys(state.peers) : [peerKey(computerId)]) dropPeer(peer, reason, `The link to ${placeName(peer)} was turned off, so this work was stopped.`);
     },
     /** Turned off on a computer. `told`: its Cloud knows; otherwise the Cloud is told when it can next be reached. */
-    turnOff(told: boolean): void { off(told); },
+    turnOff(told: boolean): void { off(told, OFF_STOP); },
     ended: readEnded,
     /** These ended links' Clouds know now. */
     forgetEnded(tokens: readonly string[]): void { writeEnded(readEnded().filter((one) => !tokens.includes(one.token))); },
@@ -830,9 +916,18 @@ export function createBotLink(deps: BotLinkDeps) {
       for (const [id, work] of Object.entries(state.work)) if (work.peer === peer && work.done && work.ackedAt === undefined) dispatchResult(id);
     },
     /** Housekeeping, at start and once a day: old records go, and on the Cloud a computer long gone is unlinked. */
-    tidy(): void { prune(); expire(); sweep(); },
-    /** This place's bots changed: connected places hear the new list. */
-    botsChanged(): void { if (state && JSON.stringify(directory()) !== toldBots) for (const [peer, one] of live) if (one.online) hello(peer); },
+    tidy(): void { prune(); expire(); sweep(); if (state?.role === "dialer") armBackground(deps.coordinator().active().filter((node) => isLinkedId(node.botId) && node.parentId), now(), backgroundWait, deps.kick); },
+    /** This place's bots changed (one was made, renamed, hidden, moved, deleted, paused, its look, model or level changed):
+     * once changes settle (or every TELL_WITHIN_MS while they do not), the other places hear the new list, and nothing when
+     * what they are told did not change. */
+    botsChanged(): void {
+      if (!state) return;
+      const at = Date.now();
+      if (!telling) tellingSince = at;
+      clearTimeout(telling);
+      telling = setTimeout(tellBots, Math.max(0, Math.min(deps.tellAfterMs ?? TELL_AFTER_MS, tellingSince + (deps.tellWithinMs ?? TELL_WITHIN_MS) - at)));
+      telling.unref?.();
+    },
     setOnline,
     /** What that place's version reads, as its last exchange said. One that turns out to read more than its last hello
      * was made for is told again, in full. */
@@ -881,20 +976,24 @@ export function createBotLink(deps: BotLinkDeps) {
       const taken: Numbered[] = [];
       let bytes = 0;
       for (const entry of one.outbox) {
-        bytes += JSON.stringify(entry.frame).length;
+        bytes += Buffer.byteLength(JSON.stringify(entry.frame), "utf8");
         if (taken.length > 0 && (bytes > EXCHANGE_BYTES || taken.length >= 500)) break;
         taken.push(entry);
       }
       return taken;
     },
     hasOutgoing: (peer: string, ack = 0) => live.get(peer)?.outbox.some((entry) => entry.seq > ack) === true,
+    /** Work a person waits on, for `peer`, that has not ended (held while the link is parked, so not in the outbox). */
+    personWaiting: (peer: string) => deps.coordinator().active().some((node) => parseLinked(node.botId)?.peer === peer && Boolean(node.parentId) && deps.coordinator().status(node.id)?.assignment?.origin?.kind === "person"),
     onOutgoing(listener: (peer: string) => void): () => void { outboundListeners.add(listener); return () => outboundListeners.delete(listener); },
     /** Work was handed to a place that is not connected: a computer asks its Cloud for it now. */
     /** There is work for a place that is not connected, handed over outside `coordinate` (a room turn). */
-    wanted(): void { for (const listener of wantedListeners) listener(); },
-    onWanted(listener: () => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
+    wanted(person = false): void { for (const listener of wantedListeners) listener(person); },
+    onWanted(listener: (person: boolean) => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
+    /** The dialer is waking this place, asleep, for work a person waits on (until it answers or parks again). */
+    setWaking(peer: string, on: boolean): void { if (on) waking.add(peer); else waking.delete(peer); },
     sleeps: () => state?.sleeps === true,
     setSleeps(sleeps: boolean): void { if (state && state.role === "dialer" && (state.sleeps === true) !== sleeps) { state.sleeps = sleeps; save(); } },
-    close(): void { if (alive) clearInterval(alive); alive = undefined; for (const retry of retries.values()) clearTimeout(retry.timer); retries.clear(); outboundListeners.clear(); wantedListeners.clear(); },
+    close(): void { if (alive) clearInterval(alive); alive = undefined; clearTimeout(telling); telling = undefined; for (const retry of retries.values()) clearTimeout(retry.timer); retries.clear(); outboundListeners.clear(); wantedListeners.clear(); },
   };
 }

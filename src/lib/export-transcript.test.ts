@@ -108,6 +108,22 @@ describe("export-transcript", () => {
     expect(markdown).toContain("Implementation is in progress.");
   });
 
+  it.each(["```js\nconst answer = 42;", "~~~js\nconst answer = 42;", "````md\n```js\nconst answer = 42;"])("keeps later speakers outside an unfinished code block: %s", (text) => {
+    const markdown = formatTranscriptMarkdown({
+      title: "Coder", botName: "Coder", exportedAt: fixedDate,
+      messages: [
+        { id: "partial", role: "bot", kind: "text", text, at: 1 },
+        { id: "follow-up", role: "user", kind: "text", text: "Please use Python instead.", at: 2 },
+      ],
+    });
+    const nodes = fromMarkdown(markdown).children;
+    expect(nodes.filter((node) => node.type === "heading")).toHaveLength(3);
+    expect(nodes.filter((node) => node.type === "code").map((node) => node.value)).toEqual([
+      fromMarkdown(text).children.find((node) => node.type === "code")!.value,
+    ]);
+    expect(nodes.some((node) => node.type === "paragraph" && node.children.some((child) => child.type === "text" && child.value === "Please use Python instead."))).toBe(true);
+  });
+
   it("formats option cards and tool activities cleanly", () => {
     const messages: Message[] = [
       {

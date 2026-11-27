@@ -70,13 +70,13 @@ export function PairingFailureCheck({ account, state, setupTimedOut }: { account
   return <RemoteAccessSteps className="mt-4" diagnosis={diagnoseRemoteAccess(remoteAccessFacts(account, state, setupTimedOut, true))} />;
 }
 
-/** Settings → Phone & devices: a closed row whose value is the headline; open, the steps. */
+/** Settings → Devices: a closed row whose value is the headline; open, the steps. */
 export function RemoteAccessCheckRow({ account, state }: { account: CompanionAccountState | null; state: CompanionState }) {
   const [open, setOpen] = useState(false);
   const diagnosis = diagnoseRemoteAccess(remoteAccessFacts(account, state));
   return (
-    <SettingsFoldRow id="connection-check" title={t("remote.diagnosis.title")} subtitle={t("remote.diagnosis.subtitle")} open={open} onToggle={() => setOpen(!open)}
-      value={<span data-remote-access-headline="" className={cn("max-w-[16rem] truncate", diagnosis.failed && "text-danger")}>{diagnosis.headline}</span>}>
+    <SettingsFoldRow id="connection-check" title={t("remote.diagnosis.title")} open={open} onToggle={() => setOpen(!open)}
+      subtitle={<span data-remote-access-headline="" className={cn(diagnosis.failed && "text-danger")}>{diagnosis.headline}</span>}>
       <div className="px-4 py-3"><RemoteAccessSteps diagnosis={diagnosis} /></div>
     </SettingsFoldRow>
   );

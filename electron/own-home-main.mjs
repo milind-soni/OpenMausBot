@@ -134,14 +134,15 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     onChange: () => onChange(),
     t,
   });
-  /** The chosen server as the move sees a Cloud: always ready, never ended once home is there, since nothing ends it; until
-   * then, a server forgotten in this app ends the move before anything runs there. Once the move is done the bots' files
-   * stay there: this copy is never deleted, so a later pass must not send them again. */
+  /** The chosen server as the move sees a Cloud: always ready, and ended only once it is forgotten in this app. Before the
+   * switch that ends the move before anything runs there; after it, this computer's own copy opens again and nothing is
+   * asked of that server. Once the move is done the bots' files stay there: this copy is never deleted, so a later pass
+   * must not send them again. */
   const target = () => {
     const picked = chosen();
     if (!picked) return null;
     return { origin: picked.origin, account: `own:${picked.environmentId}`, machine: picked.origin, ready: true, moves: true, paid: false, name: picked.name,
-      ended: !placeOf(picked) && !awayIn(parseJournal(journal.read())) };
+      ended: !placeOf(picked) };
   };
   const home = createOneHome({
     journal,

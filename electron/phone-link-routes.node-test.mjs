@@ -191,6 +191,15 @@ test("one status reading tells ready, signed out, not running and not allowed ap
   assert.equal(tailscaleEnvironment({ PATH: "" }).TAILSCALE_BE_CLI, "1");
 });
 
+test("a running node outside .ts.net (Headscale) is told apart from one signed out, and one without a name needs MagicDNS", () => {
+  const running = (DNSName) => JSON.stringify({ BackendState: "Running", Self: { DNSName, TailscaleIPs: ["100.64.0.5"] } });
+  assert.deepEqual(readTailscaleStatus(running("mini.example.internal.")), { state: "custom-name" });
+  assert.deepEqual(readTailscaleStatus(running("")), { state: "magicdns" });
+  assert.deepEqual(readTailscaleStatus(running("100.64.0.5.")), { state: "magicdns" });
+  assert.equal(readTailscaleStatus(running("mac.tail1.ts.net.")).state, "ready");
+  assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "NeedsLogin", Self: { DNSName: "mini.example.internal." } })), { state: "signed-out" });
+});
+
 test("a computer waiting for its tailnet's approval is told apart from one signed out", () => {
   assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "NeedsMachineAuth", Self: { DNSName: "mac.tail1.ts.net." } })), { state: "needs-approval" });
   assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "NeedsLogin" })), { state: "signed-out" });

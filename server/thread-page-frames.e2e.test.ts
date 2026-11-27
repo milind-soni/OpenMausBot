@@ -189,7 +189,7 @@ describe("transcript pages on bot and room frames", () => {
     expect(created.status).toBe(201);
     const room = created.body.group;
     // mentions only, so no member answers the posts below
-    expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "complete", defaultResponder: { kind: "mentions" }, bulletin: "" })).status).toBe(200);
+    expect((await api("PATCH", `/api/groups/${room.id}`, { defaultResponder: { kind: "mentions" } })).status).toBe(200);
     for (let i = 0; i < LONG; i++) {
       expect((await api("POST", `/api/groups/${room.id}/messages`, { text: `message ${i}` })).status).toBe(202);
     }

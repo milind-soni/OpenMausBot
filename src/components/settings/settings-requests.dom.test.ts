@@ -94,7 +94,7 @@ describe("opening Settings on Overview", () => {
     expect(gets("/api/auth/session")).toBe(1);
     expect(gets("/api/auth/sessions")).toBe(1);
     expect(gets("/api/config")).toBe(1);
-    expect(document.querySelector("[data-glance='phone']")?.textContent).toContain("Not set up");
+    expect(document.querySelector("[data-glance='devices']")?.textContent).toContain("Not set up");
     await close();
   });
 

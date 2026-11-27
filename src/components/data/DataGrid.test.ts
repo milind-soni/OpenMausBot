@@ -67,6 +67,28 @@ describe("AG Grid component lifecycle", () => {
     expect(handle.current!.visibleRows().rows.length).toBeLessThan(PAGE);
   });
 
+  it.each([
+    { modifier: "ctrlKey", selected: false },
+    { modifier: "metaKey", selected: true },
+  ])("copies intact cell text with $modifier (selected: $selected)", async ({ modifier, selected }) => {
+    const rows = [["0001", "line one\r\nline two"], ["0002", 'a\t"quoted"']];
+    fixture.api.mockResolvedValue({ columns, rows, offset: 0, rowCount: rows.length });
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    render("copy");
+    await vi.waitFor(() => expect(handle.current?.visibleRows().rows).toEqual(rows));
+    if (selected) {
+      const cell = host.querySelector<HTMLElement>('.ag-row[row-index="1"] .ag-cell')!;
+      flushSync(() => cell.click());
+      await vi.waitFor(() => expect(host.querySelector('.ag-row[row-index="1"]')?.getAttribute("aria-selected")).toBe("true"));
+    }
+    const viewport = host.querySelector('[data-testid="data-grid-viewport"]')!;
+    flushSync(() => viewport.dispatchEvent(new KeyboardEvent("keydown", { key: "c", [modifier]: true, bubbles: true, cancelable: true })));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls[0]![0]).toBe(selected
+      ? 'id\tdisplay.name\n0002\t"a\t""quoted"""'
+      : 'id\tdisplay.name\n0001\t"line one\r\nline two"\n0002\t"a\t""quoted"""');
+  });
+
   it("filters a selected column, switches back to global search and clears", async () => {
     render("filters");
     await vi.waitFor(() => expect(fixture.api).toHaveBeenCalled());

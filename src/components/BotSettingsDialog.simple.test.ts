@@ -6,6 +6,7 @@ import type { Routine } from "@/lib/routines";
 import type { MemoryDoc } from "@/lib/memory";
 import type { Bot, BotSettingsSection, InstanceInfo } from "@/state/store";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
+import { EVERYDAY_BODY_IDS } from "../../shared/bot-body";
 import type { ManagedSkill } from "./bot-settings/SkillsSection";
 import type { McpServerSummary } from "@/lib/mcp-servers";
 import type { BotApps } from "./bot-settings/useBotApps";
@@ -37,7 +38,7 @@ const fixture = vi.hoisted(() => {
       refresh: (() => Promise.resolve()) as () => Promise<void>,
       putAssignments: (() => Promise.resolve()) as (name: string, remove?: boolean) => Promise<void>,
     },
-    memory: { docs: null as MemoryDoc[] | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
+    memory: { docs: null as MemoryDoc[] | null, thread: null as (MemoryDoc & { scoped: boolean }) | null, error: false, mine: false, setDoc: (() => {}) as (doc: MemoryDoc) => void, reload: () => Promise.resolve() },
     saveMemory: (() => Promise.resolve({ ok: true })) as (...args: unknown[]) => Promise<unknown>,
     openExternal: (() => Promise.resolve()) as (url: string) => Promise<void>,
     derived: {} as Record<string, unknown>,
@@ -127,8 +128,11 @@ const { DetailsTab } = await import("./bot-panel/DetailsTab");
 const { BotConversations } = await import("./bot-panel/Conversations");
 const { SettingsPage } = await import("./bot-panel/SettingsPage");
 const { LibraryTab } = await import("./bot-panel/LibraryTab");
+const { BotKeeps } = await import("./bot-panel/Keeps");
 const { ApprovalChip } = await import("./ComposerPlusMenu");
 const { callMode, setCallMode } = await import("@/lib/call-mode");
+const { CloudBackendPicker } = await import("./CloudBackendPicker");
+const { CloudPreference } = await import("./bot-settings/AccessSection");
 const { ComputerTab, WherePage } = await import("./bot-panel/ComputerTab");
 const { PageBody, AppsPage, RoutinesPage, MemoryPage, SkillsPage, FolderPage, BrowserPage } = await import("./bot-panel/pages");
 const { BrowserLogins } = await import("./bot-panel/browser-logins");
@@ -147,6 +151,8 @@ const { SignedInSites } = await import("./SignedInSites");
 const { AvatarImageGenerator } = await import("./AvatarImageGenerator");
 const { AvatarFraming } = await import("./avatar-editing");
 const { MascotFaceColorPicker } = await import("./MascotFaceColorPicker");
+const { MascotMaterialPicker } = await import("./MascotMaterialPicker");
+const { MascotBodyColorSwatch } = await import("./MascotBodyColorSwatch");
 const { Switch } = await import("./SettingsPrimitives");
 const { OrgSkillsCard } = await import("./bot-settings/OrgSkillsCard");
 const { PackageProvenance } = await import("./bot-settings/PackageProvenance");
@@ -201,7 +207,8 @@ const dialog = (bot: Bot) => capture(() => BotSettingsDialog({ bot }));
 const botTab = (bot: Bot) => capture(() => DetailsTab({ bot, derived: derived(), onOpen }));
 const settingsPage = (bot: Bot, editingInstructions = false) =>
   capture(() => SettingsPage({ bot, derived: derived(), onOpen, editingInstructions, onEditInstructions }));
-const library = (bot: Bot) => capture(() => LibraryTab({ bot, onOpen }));
+const library = (bot: Bot) => capture(() => LibraryTab({ bot }));
+const keeps = (bot: Bot) => capture(() => BotKeeps({ bot, routines: fixture.derived.botRoutines as Routine[], onOpen }));
 const computer = (bot: Bot) => capture(() => ComputerTab({ bot, derived: derived(), onOpen }));
 const find = (rendered: { nodes: Node[] }, attr: string, value: unknown = true) => {
   const found = rendered.nodes.find((node) => node.props[attr] === value);
@@ -262,7 +269,7 @@ beforeEach(() => {
     skills: [], loading: false, working: "", error: "", reviewing: null, toggle: vi.fn(() => Promise.resolve()),
     setWorking: vi.fn(), setError: vi.fn(), refresh: vi.fn(() => Promise.resolve()), putAssignments: vi.fn(() => Promise.resolve()),
   };
-  fixture.memory = { docs: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
+  fixture.memory = { docs: null, thread: null, error: false, mine: false, setDoc: vi.fn(), reload: vi.fn(() => Promise.resolve()) };
   patch.mockReset();
   onOpen.mockReset();
   onClose.mockReset();
@@ -336,9 +343,8 @@ describe("the bot panel in Simple mode", () => {
     (ofType(page, PageHeader)!.props.onBack as () => void)();
     expect(shown(panel(bot))).toEqual({ tab: "details", page: undefined });
 
-    click(find(panel(bot), "data-panel-tab", "library"));
-    (ofType(panel(bot), LibraryTab)!.props.onOpen as (page: string) => void)("memory");
-    expect(ofType(panel(bot), PageHeader)!.props).toMatchObject({ back: "Library", title: "What it remembers" });
+    (ofType(panel(bot), DetailsTab)!.props.onOpen as (page: string) => void)("memory");
+    expect(ofType(panel(bot), PageHeader)!.props).toMatchObject({ back: "Details", title: "What it remembers" });
     (ofType(panel(bot), PageHeader)!.props.onBack as () => void)();
 
     click(find(panel(bot), "data-panel-tab", "computer"));
@@ -381,7 +387,7 @@ describe("the bot panel in Simple mode", () => {
 
   it.each([
     ["overview", "details", undefined], ["identity", "details", undefined], ["slack", "details", undefined],
-    ["soul", "details", "settings"], ["skills", "library", "skills"], ["memory", "library", "memory"],
+    ["soul", "details", "settings"], ["skills", "details", "skills"], ["memory", "details", "memory"],
     ["routines", "details", "routines"], ["access", "computer", undefined], ["model", "details", undefined],
     ["permissions", "details", "settings"], ["voice", "details", undefined], ["visibility", "details", undefined],
     ["history", "details", undefined], ["usage", "details", undefined],
@@ -508,10 +514,10 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("shows the ten bodies and twelve colors, with the festival bodies and the faces behind More looks", () => {
+  it("shows the shapes and objects and twelve colors, with the festival bodies and the faces behind More looks", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(10);
+    expect(rendered.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(EVERYDAY_BODY_IDS.length);
     expect(rendered.html.match(/aria-label="Use \w+ mascot color"/g)).toHaveLength(12);
     expect(rendered.html).not.toContain(">Halloween<");
     expect(rendered.html).not.toContain(">Diwali<");
@@ -534,7 +540,7 @@ describe("the avatar editor", () => {
     click(more);
     const open = editor(bot);
     expect(find(open, "data-avatar-more").props["aria-expanded"]).toBe(true);
-    expect(open.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(30);
+    expect(open.html.match(/aria-label="Use the [\w ]+ body"/g)).toHaveLength(EVERYDAY_BODY_IDS.length + 20);
     expect(open.html).toContain(">Halloween<");
     expect(open.html).toContain(">Diwali<");
     click(find(open, "aria-label", "Use the Pumpkin body"));
@@ -566,7 +572,28 @@ describe("the avatar editor", () => {
 
   it("resets the mascot as the Advanced card does", () => {
     click(find(editor(makeBot()), "data-avatar-reset"));
-    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null });
+    expect(patch).toHaveBeenLastCalledWith({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor", mascotFaceColor: null, mascotBodyColor: null, mascotMaterial: null });
+  });
+
+  it("picks a custom body color after the swatches, and a named swatch clears it", () => {
+    const plain = ofType(editor(makeBot()), MascotBodyColorSwatch)!.props as Parameters<typeof MascotBodyColorSwatch>[0];
+    const unset = capture(() => MascotBodyColorSwatch(plain));
+    const ring = find(unset, "data-avatar-body-color");
+    expect(ring.props["aria-pressed"]).toBe(false);
+    expect(ring.props["aria-label"]).toBe("Pick a custom body color");
+    const input = find(unset, "type", "color");
+    expect(input.props.value).toBe("#009957");
+    (input.props.onChange as (event: { target: { value: string } }) => void)({ target: { value: "#12AB9F" } });
+    expect(patch).toHaveBeenLastCalledWith({ mascotBodyColor: "#12ab9f" });
+
+    fresh();
+    const tinted = editor(makeBot({ mascotBodyColor: "#12ab9f" }));
+    expect(find(tinted, "aria-label", "Use green mascot color").props["aria-pressed"]).toBe(false);
+    const set = capture(() => MascotBodyColorSwatch(ofType(tinted, MascotBodyColorSwatch)!.props as Parameters<typeof MascotBodyColorSwatch>[0]));
+    expect(find(set, "data-avatar-body-color").props["aria-pressed"]).toBe(true);
+    expect(find(set, "type", "color").props.value).toBe("#12ab9f");
+    click(find(tinted, "aria-label", "Use green mascot color"));
+    expect(patch).toHaveBeenLastCalledWith({ color: "green", mascotBodyColor: null });
   });
 
   it("edits facial feature color without changing body color or expression", () => {
@@ -576,6 +603,33 @@ describe("the avatar editor", () => {
     expect(choices.options.map((option) => option.value)).toEqual(["white", "black"]);
     choices.onChange("white");
     expect(patch).toHaveBeenLastCalledWith({ mascotFaceColor: "white" });
+  });
+
+  it("offers the finishes only on an engine-drawn body, and Flat clears one", () => {
+    const fur = (bot: Bot) => {
+      const props = ofType(editor(bot), MascotMaterialPicker)!.props as Parameters<typeof MascotMaterialPicker>[0];
+      return capture(() => MascotMaterialPicker(props));
+    };
+    expect(fur(makeBot()).html).toBe("");
+    fresh();
+    expect(fur(makeBot({ mascotBody: "cursor" })).html).toBe("");
+    fresh();
+    const bare = fur(makeBot({ mascotBody: "blob" }));
+    expect(bare.html).toContain(">Finish<");
+    const choices = segment(bare, "data-avatar-material");
+    expect(choices.value).toBe("off");
+    expect(choices.options.map((option) => [option.value, option.label])).toEqual([
+      ["off", "Flat"], ["matte", "Matte"], ["metallic", "Metallic"], ["fluffy", "Fluffy"],
+    ]);
+    for (const finish of ["matte", "metallic", "fluffy"]) {
+      choices.onChange(finish);
+      expect(patch).toHaveBeenLastCalledWith({ mascotMaterial: finish });
+    }
+    fresh();
+    const furred = segment(fur(makeBot({ mascotBody: "obj-mug", mascotMaterial: "fluffy" })), "data-avatar-material");
+    expect(furred.value).toBe("fluffy");
+    furred.onChange("off");
+    expect(patch).toHaveBeenLastCalledWith({ mascotMaterial: null });
   });
 
   it("generates with the shared generator, and uploads with shape and framing", () => {
@@ -614,16 +668,16 @@ describe("the avatar editor", () => {
 
 
 describe("the Details tab", () => {
-  it("holds the model, the conversations, this conversation's rows and routines, in that order, with no switch or Thinking row", () => {
+  it("holds the model, what the bot keeps with its routines, the conversations and this conversation's rows, in that order, with no switch or Thinking row", () => {
     const rendered = botTab(makeBot());
     expect(ofType(rendered, ModelPicker)!.props).toMatchObject({ bot: expect.objectContaining({ id: "scout" }), threadId: "thread-scout", contained: true });
     expect(ofType(rendered, BotConversations)!.props.bot).toMatchObject({ id: "scout" });
-    const order = ['data-panel-row="model"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"', 'data-panel-empty="routines"']
+    const order = ['data-panel-row="model"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"', 'data-panel-page="routines"', 'data-panel-card="conversations"', 'data-panel-item="find"', 'data-panel-item="activity"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     for (const gone of ['data-panel-row="thinking"', 'data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="goal"', 'data-panel-row="call-mode"',
-      'data-panel-page="apps"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"']) {
+      'data-panel-page="apps"']) {
       expect(rendered.html, gone).not.toContain(gone);
     }
     expect(rendered.html).not.toContain(">Settings<");
@@ -657,7 +711,29 @@ describe("the Details tab", () => {
       expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="max" selected="">/);
     });
 
-    it.each([true, false, null] as const)("sets a reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
+    it("sets an owner's reasoning level on the open conversation and as the bot's default, as the Model row does", () => {
+      fixture.ownerOrAdmin = true;
+      expect(pickHigh(thread())).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...opus, effort: "high" },
+      });
+      const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
+      expect(pickHigh(thread({ ...haiku, effort: "low" }))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...haiku, effort: "high" },
+      });
+    });
+
+    it("keeps an owner's pick in a conversation on another engine to that conversation when the bot's approval level would first drop to Ask", () => {
+      fixture.ownerOrAdmin = true;
+      fixture.storeState = { ...fixture.storeState, instances: [engine(), engine({ instanceId: "codex", driverKind: "codex" })] };
+      const codex = { instanceId: "codex", model: "gpt-5.6" };
+      const onCodex = (approvalMode: Bot["approvalMode"]) => ({ ...thread({ ...codex, effort: "low" }), approvalMode });
+      expect(pickHigh(onCodex("edits"))).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...codex, effort: "high" } });
+      expect(pickHigh(onCodex("full"))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true, selection: { ...codex, effort: "high" },
+      });
+    });
+
+    it.each([false, null] as const)("sets a guest's reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
       fixture.ownerOrAdmin = ownerOrAdmin;
       expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
       const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
@@ -665,32 +741,73 @@ describe("the Details tab", () => {
         type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...haiku, effort: "high" },
       });
     });
+
+    describe("while a blank chat is open", () => {
+      const blank = (held: unknown[] = []) => {
+        fixture.storeState = { ...fixture.storeState, newChat: { session: 1, botId: "scout", held } };
+      };
+
+      it.each([true, false, null] as const)("sets the reasoning level on the blank chat, not the conversation it covers (owner: %s)", (ownerOrAdmin) => {
+        fixture.ownerOrAdmin = ownerOrAdmin;
+        blank();
+        const haiku = { instanceId: "claude", model: "claude-haiku-4-5", effort: "max" as const };
+        expect(pickHigh(thread(haiku))).toEqual({ type: "setModel", botId: "scout", threadId: "new-chat-scout",
+          ...(ownerOrAdmin ? { updateBotDefault: true } : {}), selection: { ...opus, effort: "high" } });
+      });
+
+      it("shows the blank chat's choices in both rows, and a held level as picked", () => {
+        blank([{ type: "setModel", botId: "scout", threadId: "new-chat-scout", selection: { ...opus, effort: "high" } }]);
+        const rendered = botTab(thread({ instanceId: "claude", model: "claude-haiku-4-5", effort: "max" }));
+        const picker = ofType(rendered, ModelPicker)!;
+        expect(picker.props.threadId).toBe("new-chat-scout");
+        expect(picker.key).toMatch(/new-chat-scout$/);
+        expect((picker.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "high" });
+        const row = ofType(rendered, EffortRow)!;
+        expect(row.props.threadId).toBe("new-chat-scout");
+        expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="high" selected="">/);
+      });
+
+      it("hands a model-variant engine's row the blank chat too", () => {
+        fixture.storeState = { ...fixture.storeState, instances: [engine({ capabilities: { modelVariants: true },
+          models: { default: opus.model, options: [{ id: opus.model, label: "Opus", variants: [{ id: "deep", label: "Deep" }] }] } } as Partial<InstanceInfo>)] };
+        blank();
+        const row = ofType(botTab(thread({ ...opus, variant: "deep" })), EffortRow)!;
+        const variants = capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).nodes[0]!;
+        expect(variants.props.threadId).toBe("new-chat-scout");
+        expect((variants.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "low" });
+        expect(variants.props.updateBotDefault).toBe(false);
+        fixture.ownerOrAdmin = true;
+        const owned = ofType(botTab(thread({ ...opus, variant: "deep" })), EffortRow)!;
+        expect(capture(() => EffortRow(owned.props as Parameters<typeof EffortRow>[0])).nodes[0]!.props.updateBotDefault).toBe(true);
+      });
+
+      it("leaves another bot's blank chat alone", () => {
+        fixture.storeState = { ...fixture.storeState, newChat: { session: 1, botId: "pepper", held: [] } };
+        expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
+      });
+    });
   });
 
-  it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
-    const empty = botTab(makeBot());
-    expect(empty.html).toContain('data-panel-empty="routines"');
-    expect(empty.html).toContain('title="Jobs this bot runs on a schedule, like a news roundup every morning."');
-    expect(empty.html).toMatch(/data-panel-automations=""[^>]*>Automations<svg/);
+  it("keeps Routines a row under Working folder while the bot has none, which says what routines are and opens the page to add one", () => {
+    const empty = keeps(makeBot());
     expect(empty.html.match(/data-panel-page="routines"/g)).toHaveLength(1);
-    const add = find(empty, "data-panel-page", "routines");
-    expect(empty.html).toMatch(/data-panel-page="routines"[^>]*>.*<span class="truncate">Add a routine<\/span><\/button>/);
-    click(add);
+    for (const gone of ['data-panel-empty="routines"', "data-panel-automations", "Add a routine"]) expect(empty.html, gone).not.toContain(gone);
+    expect(empty.html).toMatch(/data-panel-page="routines" title="Jobs this bot runs on a schedule, like a news roundup every morning."/);
+    expect(rowValue(empty, "routines")).toBe("None");
+    click(find(empty, "data-panel-page", "routines"));
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine()];
-    const some = botTab(makeBot());
-    expect(some.html).not.toContain('data-panel-empty="routines"');
-    expect(some.html.indexOf('data-panel-card="conversations"')).toBeLessThan(some.html.indexOf('data-panel-page="routines"'));
+    expect(keeps(makeBot()).html).not.toContain('title="Jobs this bot runs');
   });
 
   it("values Routines by how many are on, and opens the routines page", () => {
     fixture.derived.botRoutines = [routine(), routine({ id: "r2", enabled: false }), routine({ id: "r3" })];
-    const rendered = botTab(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "routines")).toBe("2 on");
     click(find(rendered, "data-panel-page", "routines"));
     expect(onOpen).toHaveBeenLastCalledWith("routines");
     fixture.derived.botRoutines = [routine({ enabled: false })];
-    expect(rowValue(botTab(makeBot()), "routines")).toBe("None");
+    expect(rowValue(keeps(makeBot()), "routines")).toBe("None");
   });
 
   it("lists Find, Activity and the Inspector for this conversation as rows that run them, leaving Copy and Download to Share", () => {
@@ -936,45 +1053,45 @@ describe("the Bot settings page", () => {
 });
 
 describe("the Library tab", () => {
-  it("says what it will hold while the bot has made nothing, then what it remembers, its skills and its folder", () => {
+  it("says what it will hold while the bot has made nothing, and holds nothing else", () => {
     const rendered = library(makeBot());
     expect(rendered.html).toContain('data-panel-empty="library"');
-    const order = ['data-panel-empty="library"', 'data-panel-page="memory"', 'data-panel-page="skills"', 'data-panel-page="folder"'].map((marker) => rendered.html.indexOf(marker));
-    expect(order.every((index) => index > -1)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(rendered.html).not.toContain("data-panel-page");
   });
+});
 
-  it("values What it remembers by the notes in MEMORY.md, says Off when memory is off, and opens the memory page", () => {
-    expect(rowValue(library(makeBot()), "memory")).toBeUndefined();
+describe("what the bot keeps, on the Details tab", () => {
+  it("shows no count on What it remembers, only Nothing yet when it is empty or Off, and opens the memory page", () => {
+    expect(rowValue(keeps(makeBot()), "memory")).toBeUndefined();
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n- Uses Resolve\n- Works nights\n")];
-    const rendered = library(makeBot());
-    expect(rowValue(rendered, "memory")).toBe("3 notes");
+    const rendered = keeps(makeBot());
+    expect(rowValue(rendered, "memory")).toBeUndefined();
     click(find(rendered, "data-panel-page", "memory"));
     expect(onOpen).toHaveBeenLastCalledWith("memory");
-    fixture.memory.docs = [memoryDoc("- One thing\n")];
-    expect(rowValue(library(makeBot()), "memory")).toBe("1 note");
     fixture.memory.docs = [memoryDoc("# Empty\n")];
-    expect(rowValue(library(makeBot()), "memory")).toBe("Nothing yet");
-    expect(rowValue(library(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
+    expect(rowValue(keeps(makeBot()), "memory")).toBe("Nothing yet");
+    fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
+    expect(rowValue(keeps(makeBot()), "memory")).toBeUndefined();
+    expect(rowValue(keeps(makeBot({ memoryEnabled: false })), "memory")).toBe("Off");
   });
 
   it("values Skills by how many are on, and opens the skills page", () => {
-    expect(rowValue(library(makeBot()), "skills")).toBe("None");
+    expect(rowValue(keeps(makeBot()), "skills")).toBe("None");
     fixture.skills.skills = [skill("triage", true), skill("summarise", false), skill("deploy", true)];
-    const rendered = library(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "skills")).toBe(2);
     click(find(rendered, "data-panel-page", "skills"));
     expect(onOpen).toHaveBeenLastCalledWith("skills");
     fixture.skills.loading = true;
-    expect(rowValue(library(makeBot()), "skills")).toBeUndefined();
+    expect(rowValue(keeps(makeBot()), "skills")).toBeUndefined();
   });
 
   it("values Working folder as Private or the folder's short name, and opens the folder page", () => {
-    const rendered = library(makeBot());
+    const rendered = keeps(makeBot());
     expect(rowValue(rendered, "folder")).toBe("Private");
     click(find(rendered, "data-panel-page", "folder"));
     expect(onOpen).toHaveBeenLastCalledWith("folder");
-    expect(rowValue(library(makeBot({ cwd: "/Users/omkar/Projects/site" })), "folder")).toBe("/Users/omkar/Projects/site");
+    expect(rowValue(keeps(makeBot({ cwd: "/Users/omkar/Projects/site" })), "folder")).toBe("/Users/omkar/Projects/site");
   });
 });
 
@@ -1028,6 +1145,29 @@ describe("the Where it works page", () => {
   const choices = (rendered: Rendered) => rendered.nodes.filter((node) => node.props["data-panel-choice"] !== undefined)
     .map((node) => [node.props["data-panel-choice"], node.props.title, Boolean(node.props.disabled), node.props.checked]);
   const choose = (rendered: Rendered, value: string) => click(find(rendered, "data-panel-choice", value));
+
+  it.each([undefined, "cloud"] as const)("offers the hosted desktop backend for an existing bot kept on %s", (computer) => {
+    fixture.storeState = { ...fixture.storeState, config: { vps: { sshAlias: "fixture-vps" } } };
+    const bot = makeBot({ computer, cloudBackend: "box" });
+    const preference = ofType(where(bot), CloudPreference);
+    expect(preference).toBeDefined();
+    expect(preference!.props).toMatchObject({ bot, patch });
+    expect(where(bot).html).toContain("Self-hosted VPS");
+    const picker = ofType(capture(() => CloudPreference({ bot, patch })), CloudBackendPicker)!;
+    (picker.props.onChange as (backend: string) => void)("vps");
+    expect(patch).toHaveBeenLastCalledWith({ cloudBackend: "vps" });
+    (picker.props.onChange as (backend: string) => void)("box");
+    expect(patch).toHaveBeenLastCalledWith({ cloudBackend: "box" });
+  });
+
+  it.each(["local", "browser", "vm", "off"] as const)("does not offer a hosted backend for a bot kept on %s", (computer) => {
+    expect(where(makeBot({ computer })).html).not.toContain("Self-hosted VPS");
+  });
+
+  it("does not offer a hosted backend on a Cloud home", () => {
+    fixture.storeState = { ...fixture.storeState, config: { cloudHome: true } };
+    expect(where(makeBot()).html).not.toContain("Self-hosted VPS");
+  });
 
   it("offers Let it choose, this computer, the bot's browser, the Cloud desktop and the private desktop, with the chosen one checked", () => {
     // The tests run on no platform in particular, so this computer is a PC; a Mac says This Mac.
@@ -1218,43 +1358,29 @@ describe("the drill-in pages", () => {
     expect(ofType(body("routines"), RoutineEditor)!.props).toMatchObject({ lockedBotId: "scout", routine: undefined });
   });
 
-  it("lists what MEMORY.md remembers, forgets one line through the memory file route, and adds one", async () => {
+  it("is MEMORY.md as plain text, with this conversation's notes above it when it keeps them, and nothing else", () => {
     fixture.memory.docs = [memoryDoc("# Notes\n- Likes short replies\n\n- Uses Resolve Studio\n")];
     const rendered = body("memory");
-    expect(rendered.html).toContain("Likes short replies");
-    expect(rendered.html).toContain("Uses Resolve Studio");
-    expect(rendered.html).not.toContain("# Notes");
-    // Memory upkeep is the page's one switch; the rest of advanced Memory stays out.
-    expect(switches(rendered.html)).toBe(1);
-    expect(rendered.html).toContain("Memory upkeep");
-    for (const text of ["Tidy now", "Obsidian", "Daily logs", "Journal"]) expect(rendered.html).not.toContain(text);
-    click(rendered.nodes.filter((node) => node.props.label === "Forget")[0]!);
-    await Promise.resolve();
-    expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n\n- Uses Resolve Studio\n", "h1", false);
-    await Promise.resolve();
-    expect(fixture.memory.setDoc).toHaveBeenLastCalledWith(expect.objectContaining({ text: "# Notes\n\n- Uses Resolve Studio\n", hash: "h2" }));
-
-    (find(body("memory"), "data-panel-form", "memory-add").props.onChange as (value: string) => void)("  Prefers the free version ");
-    (find(body("memory"), "data-panel-form", "memory-add").props.onSubmit as () => void)();
-    await Promise.resolve();
-    expect(fixture.saveMemory).toHaveBeenLastCalledWith("scout", "MEMORY.md", "# Notes\n- Likes short replies\n\n- Uses Resolve Studio\n- Prefers the free version\n", "h1", false);
+    expect(rendered.html).toContain("# Notes\n- Likes short replies\n\n- Uses Resolve Studio");
+    expect(rendered.html).toContain('data-memory-scope="everywhere"');
+    expect(rendered.html).not.toContain('data-memory-scope="thread"');
+    expect(switches(rendered.html)).toBe(0);
+    for (const text of ["Memory upkeep", "Tidy now", "Obsidian", "Daily logs", "Journal", "Edit as text", "Full window"]) expect(rendered.html).not.toContain(text);
+    expect(has(rendered, "data-panel-form", "memory-add")).toBe(false);
+    fixture.memory.thread = { ...memoryDoc("- Acme NDA: two years\n"), path: "memory/threads/t1.md", scoped: true };
+    const scoped = body("memory").html;
+    expect(scoped.indexOf("This thread")).toBeGreaterThan(-1);
+    expect(scoped.indexOf("This thread")).toBeLessThan(scoped.indexOf("Everywhere"));
+    expect(scoped).toContain("- Acme NDA: two years");
   });
 
-  it("says when memory is off, empty or unreadable, and re-reads on a conflict", async () => {
+  it("says when memory is off, empty or unreadable", () => {
     expect(body("memory", makeBot({ memoryEnabled: false })).html).toContain("Memory is off for Scout.");
-    expect(has(body("memory", makeBot({ memoryEnabled: false })), "data-panel-form", "memory-add")).toBe(false);
+    expect(body("memory", makeBot({ memoryEnabled: false })).html).not.toContain("textarea");
     fixture.memory.docs = [memoryDoc("")];
-    expect(body("memory").html).toContain("Nothing remembered yet.");
+    expect(body("memory").html).toContain("Nothing remembered here yet. Write anything you want it to know.");
     fixture.memory = { ...fixture.memory, docs: null, error: true };
     expect(body("memory").html).toContain("Couldn&#x27;t read the memory file just now.");
-
-    fixture.memory = { ...fixture.memory, docs: [memoryDoc("- Old\n")], error: false };
-    fixture.saveMemory = vi.fn(() => Promise.resolve({ ok: false, conflict: true, current: "- New\n", currentHash: "h3" }));
-    click(find(body("memory"), "label", "Forget"));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(fixture.memory.reload).toHaveBeenCalled();
-    expect(body("memory").html).toContain("Scout changed this file while you were editing.");
   });
 
   it("switches skills, removes one, adds one from a link and browses the library or skills.sh", async () => {

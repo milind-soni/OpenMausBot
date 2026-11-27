@@ -6,7 +6,10 @@ import {
   BOT_AVATAR_CROPS,
   botAvatarCropSchema,
   botAvatarUrlSchema,
+  mascotBodyColorSchema,
   mascotFaceColorSchema,
+  mascotMaterialSchema,
+  MASCOT_MATERIALS,
 } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
 import { REPLY_STYLES } from "../shared/reply-style.ts";
@@ -29,6 +32,8 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "avatarFocusY",
   "mascotBody",
   "mascotFaceColor",
+  "mascotBodyColor",
+  "mascotMaterial",
   "voice",
   "speakReplies",
   "replyStyle",
@@ -68,6 +73,8 @@ export const profilePatchSchema = z.object({
   avatarFocusY: z.number({ error: "avatarFocusY must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
   mascotBody: botBodySchema.optional(),
   mascotFaceColor: mascotFaceColorSchema.nullable().optional(),
+  mascotBodyColor: mascotBodyColorSchema.nullable().optional(),
+  mascotMaterial: mascotMaterialSchema.nullable().optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -93,6 +100,8 @@ export type BotProfilePatch = Partial<
     | "avatarFocusY"
     | "mascotBody"
     | "mascotFaceColor"
+    | "mascotBodyColor"
+    | "mascotMaterial"
     | "voice"
     | "speakReplies"
     | "replyStyle"
@@ -123,6 +132,12 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     }
     if (issue?.path[0] === "mascotFaceColor") {
       return { ok: false, error: "mascotFaceColor must be white, black, or null" };
+    }
+    if (issue?.path[0] === "mascotBodyColor") {
+      return { ok: false, error: "mascotBodyColor must be a #rrggbb hex colour or null" };
+    }
+    if (issue?.path[0] === "mascotMaterial") {
+      return { ok: false, error: `mascotMaterial must be ${MASCOT_MATERIALS.join(", ")}, or null` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

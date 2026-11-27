@@ -20,6 +20,7 @@ import { PageBoundary } from "./components/PageBoundary";
 import { endedBeforeReload, forgetEndedSession } from "./lib/session-ended";
 import { signInGateShown } from "./lib/sign-in-gate";
 import { startDesktopLaunchMarks } from "./lib/launch-marks";
+import { serverFetch } from "./lib/relay-server";
 import "./styles.css";
 
 // Before first paint; settleInterfaceMode must run before applySkin writes omb-skin.
@@ -33,13 +34,13 @@ const pageLanguage = loadPageLanguage();
 
 // The app is its own chunk, so these pages don't parse it. Everywhere else its fetch starts now, alongside the session
 // read, instead of after it. A failed fetch renders as a throw, so PageBoundary offers a reload.
-const PAGES_WITHOUT_THE_APP = new Set(["/home", "/pair", "/desktop-viewer"]);
+const PAGES_WITHOUT_THE_APP = new Set(["/home", "/pair", "/desktop-viewer", "/local-app"]);
 const loadApp = () => import("./App").catch((error: unknown) => ({ default: (): never => { throw error; } }));
 const appPage = PAGES_WITHOUT_THE_APP.has(location.pathname) ? null : loadApp();
 if (appPage) startDesktopLaunchMarks();
 
 /** A team's name as its server describes itself to anyone (the descriptor's label), null when it can't say. */
-const teamName = () => fetch("/.well-known/openmausbot/environment").then((res) => res.json() as Promise<{ label?: unknown; capabilities?: { cloudTeam?: unknown } }>)
+const teamName = () => serverFetch("/.well-known/openmausbot/environment").then((res) => res.json() as Promise<{ label?: unknown; capabilities?: { cloudTeam?: unknown } }>)
   .then((descriptor) => (descriptor.capabilities?.cloudTeam === true && typeof descriptor.label === "string" ? descriptor.label : null), () => null);
 
 async function chooseRoot(): Promise<React.ReactNode> {
@@ -75,6 +76,11 @@ async function chooseRoot(): Promise<React.ReactNode> {
   if (location.pathname === "/desktop-viewer") {
     const { DesktopViewer } = await import("./components/DesktopViewer");
     return <DesktopViewer />;
+  }
+  if (location.pathname === "/local-app") {
+    const { LocalAppWindow } = await import("./local-app-window");
+    await pageLanguage;
+    return <LocalAppWindow id={new URLSearchParams(location.search).get("id") ?? ""} />;
   }
   const { default: App } = await (appPage ?? loadApp());
   void loadTheme();

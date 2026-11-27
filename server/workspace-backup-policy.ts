@@ -1,4 +1,4 @@
-import { readlinkSync } from "node:fs";
+import { lstatSync, readlinkSync, type Stats } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseStoredConfig } from "./config.ts";
 import { inSecretFolder } from "./secret-folder.ts";
@@ -38,6 +38,8 @@ export function excludedWorkspaceAuthPath(path: string): boolean {
   if (inSecretFolder(path)) return true;
   if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
+  // Bot API keys saved for teammates on other servers stay on the server they were saved on, like any other credential.
+  if (/^remote-teammates\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // Saved website logins and their key never leave the computer they were saved on, nor does the key sealing webhook secrets.
   if (/^(?:logins\.json\.enc|member-secrets\.json\.enc|logins-key|webhook-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // A Cloud home's connected-apps installation: its connected accounts belong to it, so a copy would share them.
@@ -46,6 +48,8 @@ export function excludedWorkspaceAuthPath(path: string): boolean {
   if (/^team-policy\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // A Team Cloud member's own installation, keys and sign-ins: theirs, never in the team's backup.
   if (/^people-connections(?:\/|$)/.test(path)) return true;
+  // GitHub sign-ins (github/sign-in.ts): each holds its token in plain text for GitHub CLI, and stays on this server.
+  if (/^github(?:\/|$)/.test(path)) return true;
   // A dated copy of the settings file, and the copy of one that could not be understood: they hold the credentials
   // the settings file holds, so they never leave the computer they were taken on.
   if (/^config\.json\.(?:bak\.\d{8}-\d{6}(?:-\d+)?|unreadable-[0-9a-f]{12})(?:\.\d+\.[0-9a-f-]+\.tmp)?$/.test(path)) return true;
@@ -62,9 +66,10 @@ export function ephemeralWorkspaceTokenPath(path: string): boolean {
   return /^(?:hook-tokens(?:\/|$)|sessions\.json\.open$)/.test(path);
 }
 
-/** Not a consistent snapshot while the engine holds it open (unflushed WAL), and reloadable from its sources. */
-export function liveDataEnginePath(path: string): boolean {
-  return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
+/** DuckDB's spill folder for a bot's Data tables: scratch space for one query, emptied when the database closes. The
+ * database itself (data.duckdb) goes, taken at rest (workspace-backup-databases.ts). */
+export function dataEngineSpillPath(path: string): boolean {
+  return /^bots\/[^/]+\/data-tmp(?:\/|$)/.test(path);
 }
 
 /** Read the link text, never follow it. A link points at the bot's own skill, or at the same-named skill brought in
@@ -79,3 +84,25 @@ export function managedTaskSkillLink(source: string, path: string, roots: string
     return (rel !== "" && !rel.startsWith("..") && !isAbsolute(rel)) || relative(join(root, "imported-skills", match[2]), target) === "";
   });
 }
+
+/** A folder a project installs and can install again, never carried: node_modules, and a Python virtual environment (any
+ * folder holding pyvenv.cfg, as `python -m venv`, virtualenv, uv and Poetry make them), whose bin/python links to the
+ * Python it was made with, outside the workspace. Either may itself be a link. */
+export function installedDependencyFolder(source: string, name: string, stat: Stats): boolean {
+  if (!stat.isDirectory() && !stat.isSymbolicLink()) return false;
+  if (name === "node_modules") return true;
+  try { return lstatSync(join(source, "pyvenv.cfg")).isFile(); } catch { return false; }
+}
+
+/** A Chromium browser's own profile folder (it holds "Local State"), as a bot's project may keep one: its sign-ins and
+ * cookies stay on the computer they were made on, as the app's own browser profiles do, and its caches are large. */
+export function browserProfileFolder(source: string, stat: Stats): boolean {
+  if (!stat.isDirectory()) return false;
+  try { return lstatSync(join(source, "Local State")).isFile(); } catch { return false; }
+}
+
+/** Up to three of `paths`, for a note that names what was left out. */
+export const examplePaths = (paths: readonly string[]): string => `${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ", …" : ""}`;
+
+/** Python's bytecode cache, written again the next time the code runs. */
+export const bytecodeCache = (name: string, stat: Stats): boolean => name === "__pycache__" && (stat.isDirectory() || stat.isSymbolicLink());

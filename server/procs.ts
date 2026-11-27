@@ -28,6 +28,8 @@ import { spawnBotWork } from "./oom-score.ts";
 import { noticeFailure } from "./chat-notices.ts";
 import { processBudget } from "./process-room.ts";
 import { shortageCode } from "./process-shortage.ts";
+import { inconclusiveMark } from "./harness/probe-hold.ts";
+import { unboxedGitCredential } from "./github/git-credential.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -60,7 +62,7 @@ export function assertSafeCliArgv(
 const cliGroups = new WeakSet<ChildProcess>();
 const stopping = new WeakMap<ChildProcess, Promise<boolean>>();
 
-type LinuxProcess = { pid: number; parent: number; start: string; state: string };
+type LinuxProcess = { pid: number; parent: number; start: string; state: string; session?: number };
 const linuxTrees = new WeakMap<ChildProcess, Map<number, string>>();
 
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/;
@@ -104,7 +106,7 @@ function linuxProcess(pid: number, file = `/proc/${pid}/stat`): LinuxProcess | n
   const state = fields[0];
   const parent = Number(fields[1]);
   if (!start || !state || !Number.isInteger(parent)) throw new Error("Unreadable Linux process identity");
-  return { pid, parent, start, state };
+  return { pid, parent, start, state, session: Number(fields[3]) };
 }
 
 /** /proc/<pid>/task/<tid>/children needs CONFIG_PROC_CHILDREN (CONFIG_CHECKPOINT_RESTORE before Linux 4.2); a kernel built without it, or gVisor, has no such file. */
@@ -131,6 +133,42 @@ function linuxChildren(pid: number): number[] | null {
   return children;
 }
 
+/** A daemon a CLI starts on purpose to outlive it, in a session of its own: Hermes' shared gateway, which every other
+ * conversation's `hermes acp` on the same profile attaches to. A stop leaves it and its own children out of the tree. */
+function outlivesLauncher({ pid, session }: LinuxProcess): boolean {
+  if (session !== pid) return false;
+  try {
+    const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    if (!argv.some((word, at) => word === "gateway" && argv[at + 1] === "run")) return false;
+    return readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes("HERMES_GATEWAY_DETACHED=1");
+  } catch {
+    return false;
+  }
+}
+
+/** Such a daemon, or a process in its session: its own children, even one recorded before the daemon's exec. */
+function leftRunning(current: LinuxProcess): boolean {
+  if (process.platform !== "linux") return false;
+  const { session } = current;
+  if (session === undefined || session === current.pid) return outlivesLauncher(current);
+  try {
+    const leader = linuxProcess(session);
+    return leader !== null && outlivesLauncher(leader);
+  } catch {
+    return false;
+  }
+}
+
+/** A child recorded between its fork and its exec still showed its launcher's command line and environment, so a
+ * gateway and its children can already be in the tree: forget them before walking the tree. */
+function forgetOutliving(tree: Map<number, string>): void {
+  for (const [pid, start] of tree) {
+    let current: LinuxProcess | null;
+    try { current = linuxProcess(pid); } catch { continue; }
+    if (current?.start === start && leftRunning(current)) tree.delete(pid);
+  }
+}
+
 function isLinuxProcess(pid: number, start: string): boolean {
   try { return linuxProcess(pid)?.start === start; } catch { return false; }
 }
@@ -144,6 +182,7 @@ export function captureCliTree(child: ChildProcess): void {
     tree = new Map();
     linuxTrees.set(child, tree);
   }
+  if (process.platform === "linux") forgetOutliving(tree);
   if (process.platform === "darwin" || !linuxChildrenFiles() || !addLinuxDescendants(tree)) {
     try { addDescendantsFromEveryProcess(tree); } catch {}
   }
@@ -163,7 +202,7 @@ function addLinuxDescendants(tree: Map<number, string>): boolean {
       let current: LinuxProcess | null;
       try { current = linuxProcess(pid); } catch { return false; }
       if (!current || current.parent !== parent) return false;
-      if (tree.get(pid) === current.start) continue;
+      if (tree.get(pid) === current.start || leftRunning(current)) continue;
       tree.set(pid, current.start);
       queue.push([pid, current.start]);
     }
@@ -192,6 +231,7 @@ function addDescendantsFromEveryProcess(tree: Map<number, string>): void {
     discovered = false;
     for (const current of snapshot.values()) {
       if (current.pid === process.pid || !parents.has(current.parent) || tree.get(current.pid) === current.start) continue;
+      if (leftRunning(current)) continue;
       tree.set(current.pid, current.start);
       parents.add(current.pid);
       discovered = true;
@@ -206,7 +246,7 @@ function linuxDescendantsStopped(child: ChildProcess): boolean {
   for (const [pid, start] of tree) {
     try {
       const current = read(pid);
-      if (current?.start === start && current.state !== "Z" && current.state !== "X") return false;
+      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !leftRunning(current)) return false;
     } catch { return false; }
   }
   return true;
@@ -247,7 +287,7 @@ function signalLinuxDescendants(child: ChildProcess, value: NodeJS.Signals): voi
   for (const [pid, start] of tree) {
     try {
       const current = read(pid);
-      if (current?.start === start && current.state !== "Z" && current.state !== "X") process.kill(pid, value);
+      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !leftRunning(current)) process.kill(pid, value);
     } catch {}
   }
 }
@@ -292,7 +332,7 @@ export type CliOwner = "bot" | "openmausbot";
 /** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
  * paths or the host's network, and `false` keeps a spawn out of it. */
 export interface BoxSpawnOptions {
-  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured">;
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured" | "engine">;
   /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
   engineHome?: boolean;
   /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
@@ -313,12 +353,13 @@ export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner
 }
 
 /** A configured project folder can lie inside another bot's folder, so a turn working there still needs its own bot's
- * folder and conversation folder in its box. */
+ * folder and conversation folder in its box. A turn in its bot's own folder (a room's) needs its conversation's too, for
+ * that conversation's uploads (server/box-attachments.ts). */
 function projectFolderTurn(cwd: string | undefined): { botId: string; conversationFolder: string } | null {
   const dataDir = botBox.startOptions()?.dataDir, turn = currentTurn();
   if (!cwd || !dataDir || !turn?.botId) return null;
   const full = resolve(cwd), workspaces = join(resolve(dataDir), "workspaces"), conversations = join(resolve(dataDir), "task-workspaces");
-  if (under(full, conversations) || dirname(full) === workspaces || full === workspaces) return null;
+  if (under(full, conversations) || (dirname(full) === workspaces && basename(full) !== turn.botId) || full === workspaces) return null;
   return { botId: turn.botId, conversationFolder: join(conversations, turn.botId, turn.threadId) };
 }
 
@@ -337,9 +378,11 @@ export function sharedBoxScope(cwd: string): string | null {
   if (!botBox.enabled()) return null;
   const parent = dirname(resolve(cwd));
   if (basename(dirname(parent)) !== "task-workspaces") {
-    // Another bot's turn in the same project folder has that bot's folder in its box, so it never shares this process.
+    // Another bot's turn in the same project folder has that bot's folder in its box, so it never shares this process;
+    // nor does another conversation's turn in the bot's own folder, whose box has only its own conversation's uploads.
     const turn = projectFolderTurn(cwd);
-    return turn ? `${resolve(cwd)}#${turn.botId}` : resolve(cwd);
+    if (!turn) return resolve(cwd);
+    return `${resolve(cwd)}#${basename(resolve(cwd)) === turn.botId ? turn.conversationFolder : turn.botId}`;
   }
   const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
   const threads = botBox.sharedThreadsKey({ cwd, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}) });
@@ -377,6 +420,9 @@ export function spawnCli(
     : homed ? { ...opts, env } : opts;
   const boxed = boxedSpawn(resolved, options, owner, homed);
   const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
+  // An unboxed bot's git gets this server's GitHub sign-in after the person's own credentials (git-credential.ts).
+  const github = !boxed && owner === "bot" ? unboxedGitCredential(spawnOpts.env ?? process.env) : null;
+  if (github) spawnOpts.env = github.env as NodeJS.ProcessEnv;
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
   // A server that restarts in place stops what an earlier one left by this tag (engine-records.ts).
@@ -395,6 +441,7 @@ export function spawnCli(
   } catch (error) {
     // Node throws some refusals (ENOMEM) at once rather than reporting them on the child.
     if (shortageCode(error)) refused((error as NodeJS.ErrnoException).code);
+    github?.release();
     throw error;
   } finally {
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
@@ -404,6 +451,7 @@ export function spawnCli(
   child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) refused(error.code); });
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
+  if (github) { child.once("exit", github.release); child.once("error", () => { if (!child.pid) github.release(); }); }
   if (process.platform !== "win32") cliGroups.add(child);
   if ((process.platform === "linux" || process.platform === "darwin") && child.pid) {
     const tree = new Map<number, string>();
@@ -517,7 +565,8 @@ function cutOffError(cli: string, timeout: number | undefined): Error {
 
 export const CLI_VERSION_TIMEOUT_MS = 30_000;
 
-export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
+/** `busy`: the check could not finish (probe-hold.ts), which says nothing about whether the CLI is installed. */
+export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string; busy?: true } {
   let last: string | null = null;
   return (err, stdout) => {
     const version = err ? "" : stdout.trim();
@@ -535,7 +584,7 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
     if (last && (timedOut || !err || typeof failure?.code === "number")) return { version: last };
     return { reason: timedOut
       ? `\`${cli}\` took longer than ${CLI_VERSION_TIMEOUT_MS / 1000} seconds to answer --version. The machine may be busy; check again.`
-      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.` };
+      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.`, ...inconclusiveMark(err) };
   };
 }
 

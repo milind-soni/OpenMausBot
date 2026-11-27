@@ -156,6 +156,18 @@ describe("profile history", () => {
 });
 
 describe("instruction changes in the Changes list", () => {
+  it("shows legacy instruction changes that have no provenance field", () => {
+    const id = "hist-legacy-soul-changes";
+    withBotFolder(id);
+    writeFileSync(historyFile(id), JSON.stringify({ at: 1, actor: "user", field: "soul", before: "Be brief.", after: "Use metric units." }) + "\n");
+    const history = readHistory(id);
+    const changes = soulChanges(id, history);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ id: history[0]!.id, actor: "person", via: "", canRevert: true, added: 1, removed: 1 });
+    expect(changes[0]!.diff).toContain("+Use metric units.");
+    expect(changes[0]!.diff).toContain("-Be brief.");
+  });
+
   it("says who changed them, with a diff, and offers Undo for each", async () => {
     const id = "hist-soul-changes";
     withBotFolder(id);

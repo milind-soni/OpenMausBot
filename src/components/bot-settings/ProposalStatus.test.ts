@@ -6,6 +6,7 @@ import { StoreProvider, api, type Bot } from "@/state/store";
 import { BotEditorContext } from "./BotEditorContext";
 
 const fixture = vi.hoisted(() => ({ bots: [] as Bot[] }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, bots: fixture.bots }, dispatch: vi.fn() }) };

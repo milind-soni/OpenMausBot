@@ -257,6 +257,86 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(recorder.events).toEqual([]);
   });
 
+  it("resuming a session, is taken only by a turn that resumes that same session", async () => {
+    expect(await started("t-resumed", 1, { resumeCursor: "session-old" })).toBe(true);
+    expect(lines(launches)[0].argv).toEqual(expect.arrayContaining(["--resume", "session-old"]));
+    await instance.adapter.sendTurn(turn("t-resumed", { resumeCursor: "session-old" }));
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-resumed");
+    expect(pids()).toHaveLength(1);
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+
+    for (const [threadId, cursor] of [["t-new-session", undefined], ["t-other-session", "session-other"]] as const) {
+      const before = pids().length;
+      expect(await started(threadId, before + 1, { resumeCursor: "session-old" })).toBe(true);
+      const [spare] = pids().slice(-1);
+      await instance.adapter.sendTurn(turn(threadId, cursor ? { resumeCursor: cursor } : {}));
+      await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId);
+      expect(pids()).toHaveLength(before + 2);
+      await until(() => !alive(spare!), "the unused process to exit");
+      expect(lines(launches).at(-1).argv).not.toContain("session-old");
+    }
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
+  });
+
+  it("waits as long as it was started to wait", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(await instance.adapter.prestart!.start(turn("t-longer", { text: "" }), 180_000)).toBe(true);
+    vi.advanceTimersByTime(PRESTART_IDLE_MS);
+    expect(instance.adapter.prestart!.held("t-longer")).toBe(true);
+    vi.advanceTimersByTime(180_000 - PRESTART_IDLE_MS);
+    vi.useRealTimers();
+    await until(() => !instance.adapter.prestart!.held("t-longer"), "the driver to close it");
+    await until(() => pids().every((pid) => !alive(pid)), "the process to exit");
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("closes at the end of its wait even while the person keeps the conversation in front of them (a presence hold)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(await instance.adapter.prestart!.start(turn("t-held", { text: "" }))).toBe(true);
+    expect(instance.adapter.cacheKeepWarm!.hold("t-held", Date.now() + 600_000)).toBe(false);
+    vi.advanceTimersByTime(PRESTART_IDLE_MS);
+    vi.useRealTimers();
+    await until(() => !instance.adapter.prestart!.held("t-held"), "the driver to close it");
+    await until(() => pids().every((pid) => !alive(pid)), "the process to exit");
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("is never taken once it waited past its time by the wall clock (the machine slept)", async () => {
+    expect(await started("t-slept", 1)).toBe(true);
+    const [spare] = pids();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + PRESTART_IDLE_MS + 60 * 60_000);
+    try {
+      await instance.adapter.sendTurn(turn("t-slept"));
+    } finally { clock.mockRestore(); }
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(pids()).toHaveLength(2);
+    await until(() => !alive(spare!), "the stale process to exit");
+    expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+  });
+
+  it("is no session to keep warm, ping or summarize: nothing is sent to the engine for it", async () => {
+    expect(await started("t-quiet", 1, { resumeCursor: "session-quiet" })).toBe(true);
+    const ping = await instance.adapter.cacheKeepWarm!.ping("t-quiet");
+    expect(ping).toMatchObject({ ok: false });
+    expect(instance.adapter.cacheKeepWarm!.hold("t-quiet", Date.now() + 600_000)).toBe(false);
+    expect(lines(prompts)).toEqual([]);
+    expect(pids()).toHaveLength(1);
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("says a conversation's engine is up while one waits or a turn kept one, and not once it is gone", async () => {
+    expect(instance.adapter.prestart!.running("t-up")).toBe(false);
+    expect(await started("t-up", 1)).toBe(true);
+    expect(instance.adapter.prestart!.running("t-up")).toBe(true);
+    await instance.adapter.sendTurn(turn("t-up"));
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(instance.adapter.prestart!.held("t-up")).toBe(false);
+    expect(instance.adapter.prestart!.running("t-up")).toBe(true);
+    await instance.adapter.stopAll();
+    expect(instance.adapter.prestart!.running("t-up")).toBe(false);
+  });
+
   it("says nothing when it cannot start", async () => {
     await instance.adapter.prestart!.start(turn("t-nowhere", { text: "", cwd: join(scratch, "no-such-folder") }));
     await until(() => !instance.adapter.prestart!.held("t-nowhere"), "the driver to forget it");

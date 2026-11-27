@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Message } from "../store.ts";
-import { createPeerLimitResend, nothingRan, type PeerLimitResendDeps, type PeerTurnOpts } from "./peer-limit-resend.ts";
+import { nothingRan } from "../turn-outcome.ts";
+import { createPeerLimitResend, type PeerLimitResendDeps, type PeerTurnOpts } from "./peer-limit-resend.ts";
 
 type Outcome = { ok: boolean; text: string };
 type Opts = PeerTurnOpts<Outcome> & { origin?: { kind: string } };
@@ -17,6 +18,8 @@ describe("nothingRan", () => {
     expect(nothingRan([ask, failure], 100, "turn-1")).toBe(true);
     // Some engines send the limit sentence as reply text.
     expect(nothingRan([{ ...reply, text: LIMIT }], 100, "turn-1", LIMIT)).toBe(true);
+    expect(nothingRan([{ ...reply, kind: "compaction", text: undefined }, failure], 100, "turn-1"), "a summary of earlier context").toBe(true);
+    expect(nothingRan([{ ...reply, kind: "screen", text: undefined, turnId: undefined, png: "iVBORw0KGgo=", mime: "image/png" }, failure], 100, "turn-1"), "the screen captured as the turn settled").toBe(true);
     expect(nothingRan([toolCall, failure], 100, "turn-1")).toBe(false);
     expect(nothingRan([reply, failure], 100, "turn-1")).toBe(false);
     expect(nothingRan([{ ...reply, kind: "widget" } as Message], 100, "turn-1")).toBe(false);
@@ -47,7 +50,7 @@ function fixture(rows: Message[] = [], overrides: Partial<PeerLimitResendDeps<Op
       activePath: () => rows, appendMessage: (_threadId: string, row: Message) => { appended.push(row); return row; }, switchTaskModel,
     },
     registry: { get: (id: string) => id === "codex" ? engine("codex", "codex") : engine("claude", "claude") },
-    takeover: () => ({ backups: () => [{ instanceId: "codex", model: "gpt" }], carriedOn: () => [{ name: "recovery: Claude is at its limit, Codex carries on", ok: true }] }),
+    takeover: () => ({ weighBackups: () => ({ backups: [{ instanceId: "codex", model: "gpt" }], skipped: [] }), passedOver: () => {}, carriedOn: () => [{ name: "recovery: Claude is at its limit, Codex carries on", ok: true }] }),
     turnStops: { read: () => ({ error: `Claude says: ${LIMIT}`, flags: { limit: "engine" } }), failureCause: () => `Claude says: ${LIMIT}` },
     hostedModels: null,
     providerConfigs: () => ({}),
@@ -127,7 +130,7 @@ describe("peer limit resend", () => {
   });
 
   it("reports the held failure as before when no backup can take it or a newer turn took the thread", async () => {
-    const none = fixture([ask, failure], { takeover: () => ({ backups: () => [], carriedOn: () => [] }) } as never);
+    const none = fixture([ask, failure], { takeover: () => ({ weighBackups: () => ({ backups: [], skipped: [] }), passedOver: () => {}, carriedOn: () => [] }) } as never);
     none.resend.track({ generation: "gen-1", botId: "helper", threadId: "t1", text: "x", opts: peerOpts, userMessage: ask });
     none.resend.ended(none.failed, "gen-1", false);
     none.resend.hold("gen-1", { ok: false, text: "limit" });

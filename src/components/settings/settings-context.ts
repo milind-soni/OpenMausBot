@@ -1,43 +1,39 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { appVersion } from "@/lib/app-links";
 import { pageIsThisComputer } from "@/lib/companion-bridge";
-import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { savedStepsHere, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 export { useSettingsPlace, type PlaceKind, type SettingsPlace } from "./settings-place";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { railShown, usePlaces, type RailPlace } from "@/lib/places";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore } from "@/state/store";
+import { useStorageReport } from "@/lib/use-storage-report";
+import { useStoreSelector } from "@/state/store-select";
 import { workspacesAvailable } from "../WorkspacesSection";
 import type { SettingsContext } from "./settings-index";
 
 export function useSettingsContext(): SettingsContext {
-  const { state } = useStore();
+  const config = useStoreSelector((state) => state.config);
   const advanced = useAdvancedMode();
   const admin = useOwnerOrAdmin() === true;
   const places = usePlaces();
   const known = useKnownPlaceCount();
   const ogb = typeof window === "undefined" ? undefined : window.ogb;
   const client = ogb?.remoteClient?.active === true;
-  const cloud = state.config?.cloudHome === true;
-  const team = Boolean(state.config?.team);
+  const cloud = config?.cloudHome === true;
+  const team = Boolean(config?.team);
   const desktop = Boolean(ogb);
-  return {
-    desktop,
-    here: pageIsThisComputer(),
-    home: pageIsThisComputer() || Boolean(ogb?.home),
-    cloud,
-    team,
-    client,
-    admin,
-    places: known > 1 || (!ogb?.environments && railShown(places)),
-    plan: desktop ? Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud)) : cloud && !team && admin,
-    organization: Boolean(ogb?.organization) && !client,
-    environments: Boolean(ogb?.environments),
-    installations: workspacesAvailable(state.config),
-    skills: skillsLibraryEnabled(state.config),
-    advanced,
-  };
+  const here = pageIsThisComputer();
+  const home = here || Boolean(ogb?.home);
+  const placesShown = known > 1 || (!ogb?.environments && railShown(places));
+  const plan = desktop ? Boolean(ogb?.cloudAccount || (ogb?.cloudPlan && cloud)) : cloud && !team && admin;
+  const organization = Boolean(ogb?.organization) && !client;
+  const environments = Boolean(ogb?.environments);
+  const installations = workspacesAvailable(config);
+  const skills = skillsLibraryEnabled(config), savedSteps = savedStepsHere(config);
+  const storage = useStorageReport({ enabled: admin && !client }).status === "ready";
+  return useMemo(() => ({ desktop, here, home, cloud, team, client, admin, places: placesShown, plan, organization, environments, installations, skills, advanced, storage, savedSteps }),
+    [desktop, here, home, cloud, team, client, admin, placesShown, plan, organization, environments, installations, skills, advanced, storage, savedSteps]);
 }
 
 /** How many places this app knows (a hidden rail's included), from main's environments list. */
@@ -75,7 +71,7 @@ export function useOtherPlaces(page?: string): OtherPlace[] {
       setListed(state.environments.filter((entry) => entry.id !== state.activeId).map((entry) => ({
         key: entry.id,
         name: entry.kind === "local" && !entry.dataDir ? t("rail.thisComputer") : entry.name,
-        kind: entry.kind === "remote" ? "cloud" as const : "computer" as const,
+        kind: entry.kind !== "remote" ? "computer" as const : entry.home || entry.cloud ? "cloud" as const : "server" as const,
         color: entry.color ?? null,
         open: () => void environments.switch(entry.id),
       })));

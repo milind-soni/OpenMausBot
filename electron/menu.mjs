@@ -46,6 +46,8 @@ function roleMenus(t, isMac) {
       { type: "separator" },
       role(t, "resetZoom", "native.role.actualSize"),
       role(t, "zoomIn", "native.role.zoomIn"),
+      // Electron's Zoom In key is Ctrl+Plus (Ctrl+Shift+=), so the unshifted =/+ key needs its own hidden item off macOS.
+      ...(isMac ? [] : [{ ...role(t, "zoomIn", "native.role.zoomIn"), accelerator: "CommandOrControl+=", visible: false }]),
       role(t, "zoomOut", "native.role.zoomOut"),
       { type: "separator" },
       role(t, "togglefullscreen", "native.role.toggleFullScreen"),
@@ -111,7 +113,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
       ...(onAddCloud ? [{ id: "add-cloud", label: t("native.menu.addCloud"), click: () => onAddCloud() }] : []),
       { type: "separator" },
       { id: "organization-sign-in", label: t("native.menu.orgSignIn"), click: onOrganizationSignIn },
-      { label: t("native.menu.connect"), click: onConnect },
+      { label: t("native.menu.connectOther"), click: onConnect },
       { label: t("native.menu.addFromLink"), click: () => onAddFromClipboard() },
       {
         label: active ? t("native.menu.forgetNamed", { name: active.name }) : t("native.menu.forgetServer"),

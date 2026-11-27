@@ -31,12 +31,12 @@ describe("approval modes", () => {
     expect(modelSwitchNeedsAsk("full", "codex", undefined)).toBe(false);
   });
   it("only exposes implemented provider capabilities", () => {
-    for (const driver of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo", "qwenAgent", "geminiAgent"]) {
+    for (const driver of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo", "qwenAgent", "geminiAgent", "hermesAgent", "deepseekAgent"]) {
       expect(supportsApprovalMode(driver, "full")).toBe(true);
       expect(supportsApprovalMode(driver, "custom")).toBe(driver === "codex");
-      // Qwen's `--approval-mode auto` is an LLM classifier; Gemini has no reviewer
-      expect(hasNativeAutoReview(driver)).toBe(["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent"].includes(driver));
-      expect(supportsApprovalMode(driver, "edits")).toBe(["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent"].includes(driver));
+      // Qwen's `--approval-mode auto` is an LLM classifier; Gemini and Hermes have no reviewer
+      expect(hasNativeAutoReview(driver)).toBe(["codex", "claudeAgent", "cursorAgent", "grokAgent", "qwenAgent", "deepseekAgent"].includes(driver));
+      expect(supportsApprovalMode(driver, "edits")).toBe(["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent", "hermesAgent"].includes(driver));
     }
     expect(supportsApprovalMode(undefined, "full")).toBe(true);
     expect(supportsApprovalMode(undefined, "edits")).toBe(false);
@@ -49,7 +49,7 @@ describe("approval modes", () => {
   // No permissive mode of their own: the harness answers the permission
   // requests they leave, so Full runs there too.
   it.each([
-    "kimiAgent", "droidAgent", "hermesAgent", "customAcp",
+    "kimiAgent", "droidAgent", "customAcp",
     "piAgent", "unknown",
   ])("runs Full on %s without claiming native Auto or Edits", (driver) => {
     expect(supportsApprovalMode(driver, "ask")).toBe(true);

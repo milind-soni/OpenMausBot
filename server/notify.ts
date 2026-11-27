@@ -5,10 +5,15 @@ import { conversationLanguage, serverLine, type ServerLineKey } from "./server-l
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
 /** Fenced code stays out of a banner, as before; the rest of the Markdown becomes the readable line a lock screen shows. */
 export function summarize(text: string, max = 140): string {
   const line = plainPreviewText(text.replace(/```[\s\S]*?```/g, " "));
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+  if (line.length <= max) return line;
+  const cutoff = max - 1;
+  const boundary = graphemes.segment(line).containing(cutoff)?.index ?? cutoff;
+  return `${line.slice(0, boundary).trimEnd()}…`;
 }
 
 export interface NotifyBot {
@@ -49,7 +54,7 @@ export function buildNotification(
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string; label?: string; app?: string; handoff?: boolean; routine?: boolean },
 ): Notification | null {
   if (bot.notifications === false) return null;
 
@@ -58,7 +63,8 @@ export function buildNotification(
   const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
   const title = kind === "secret" ? serverLine(language, "server.notify.secret", { who, label: extra?.label ?? "" })
     : kind === "sign-in"
-      ? extra?.app ? serverLine(language, "server.notify.connect", { who, app: extra.app })
+      ? extra?.handoff ? serverLine(language, "server.notify.handoff", { who })
+        : extra?.app ? serverLine(language, "server.notify.connect", { who, app: extra.app })
         : extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })
       : serverLine(language, TITLE[kind] ?? "server.notify.done", { who });
 
@@ -67,6 +73,7 @@ export function buildNotification(
   const notification: Notification = { kind, botId: bot.id, botName: bot.name, threadId, title, body };
   if (extra?.avatarUrl) notification.avatarUrl = extra.avatarUrl;
   if (extra?.group) notification.groupId = extra.group.id;
+  if (extra?.routine && kind === "done") notification.routine = true;
   return notification;
 }
 

@@ -7,6 +7,7 @@ import { ComputerSharingSettings } from "./ComputerSharingSettings";
 import { ServerList, type OwnServerSharing } from "./ServerList";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
+import { replaceUrl } from "@/lib/replace-url";
 
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 
@@ -47,16 +48,12 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
     const timer = setInterval(read, 5000);
     return () => { current = false; clearInterval(timer); };
   }, [sharing, saved]);
-  const share = (id: string, on: boolean) => void perform(async () => {
-    if (on) { if (await sharing?.allow?.(id)) setComputerId(id); } else await sharing?.revoke(id);
-    if (sharing?.servers) setOwnServers(await sharing.servers());
-  });
   useEffect(() => {
     const consume = (id?: string | null) => {
       if (id) setComputerId(id);
       const url = new URL(window.location.href);
       url.searchParams.delete("share-computer");
-      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      replaceUrl(`${url.pathname}${url.search}${url.hash}`);
     };
     consume();
     return bridge?.onOpenSettings?.(consume);
@@ -92,7 +89,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
   return <>
     <SettingsGroup label={label} description={description} block="your-computers">
       {!saved ? <SettingsRows><SettingRow title={t(error ? "servers.yours.loadFailed" : "servers.yours.loading")}>{null}</SettingRow></SettingsRows> :
-        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null} onShare={share}
+        <ServerList saved={saved} busy={busy} sharingOffered={sharingOffered} ownServers={ownServers} appVersion={window.ogb?.app?.version ?? null}
           onSwitch={(id) => void perform(async () => { await bridge.switch(id); return true; })} onForget={(id) => void perform(() => bridge.forget(id))} onComputerAccess={setComputerId} />}
       {saved && error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
     </SettingsGroup>

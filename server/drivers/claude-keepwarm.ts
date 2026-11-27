@@ -14,6 +14,7 @@
 // The CLI starts every command server in its MCP config as it launches, before any tool call, and the bot's own servers
 // are in that config (the tool list is part of the prefix). So a fork runs where the bot's turns run: in the bot box
 // where that is on, with the same plan a turn gets (forkSpawnOptions).
+import { claudeCostSnapshot, readCostHistory, restoredCostBase, turnCostFromRunningTotal, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,7 +83,22 @@ export const KEEP_WARM_DENY_HOOK = `process.stdout.write(JSON.stringify({ hookSp
 
 const count = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 
-export function parseKeepWarmResult(stdout: string, stderr: string, code: number | null): CacheWarmPingResult {
+export function forkUsage(frame: Record<string, unknown>, earlier: readonly ClaudeCostSnapshot[]) {
+  const usage = (frame.usage ?? {}) as Record<string, unknown>;
+  const models = frame.modelUsage && typeof frame.modelUsage === "object" && !Array.isArray(frame.modelUsage)
+    ? Object.keys(frame.modelUsage) : [];
+  const tokens = {
+    input: count(usage.input_tokens),
+    cacheRead: count(usage.cache_read_input_tokens),
+    cacheWrite: count(usage.cache_creation_input_tokens),
+    output: count(usage.output_tokens),
+  };
+  const state = claudeCostSnapshot(frame.total_cost_usd, frame.modelUsage);
+  const costUsd = state ? turnCostFromRunningTotal(state.total, restoredCostBase(earlier, state, tokens)) : null;
+  return { ...tokens, costUsd, model: models[0] ?? null };
+}
+
+export function parseKeepWarmResult(stdout: string, stderr: string, code: number | null, earlier: readonly ClaudeCostSnapshot[] = []): CacheWarmPingResult {
   let frame: Record<string, unknown> | null = null;
   try {
     const parsed = JSON.parse(stdout.trim());
@@ -99,18 +115,7 @@ export function parseKeepWarmResult(stdout: string, stderr: string, code: number
     const limit = frame.api_error === "usage_limit_reached" || USAGE_LIMIT.test(text);
     return { ok: false, reason: limit ? "the account's usage limit refused the ping" : `the ping failed: ${text.slice(0, 300) || "API error"}`, ...(limit ? { limit: true } : {}) };
   }
-  const usage = (frame.usage ?? {}) as Record<string, unknown>;
-  const models = frame.modelUsage && typeof frame.modelUsage === "object" && !Array.isArray(frame.modelUsage)
-    ? Object.keys(frame.modelUsage) : [];
-  return {
-    ok: true,
-    input: count(usage.input_tokens),
-    cacheRead: count(usage.cache_read_input_tokens),
-    cacheWrite: count(usage.cache_creation_input_tokens),
-    output: count(usage.output_tokens),
-    costUsd: typeof frame.total_cost_usd === "number" && Number.isFinite(frame.total_cost_usd) ? frame.total_cost_usd : null,
-    model: models[0] ?? null,
-  };
+  return { ok: true, ...forkUsage(frame, earlier) };
 }
 
 /** How a fork is started: in the conversation's engine home and, where turns are boxed, in a box like its turns'
@@ -118,7 +123,7 @@ export function parseKeepWarmResult(stdout: string, stderr: string, code: number
  * by owner: a fork is not the bot's engine, so nothing tracks it as one. `dir` holds the fork's private files; the deny
  * hook in it is named only inside the settings file, so the folder is put in the box, read-only. */
 export function forkSpawnOptions(contract: Pick<KeepWarmContract, "cwd">, env: NodeJS.ProcessEnv, dir: string): CliSpawnOptions {
-  return { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true, botWork: true, box: { ro: [dir] } };
+  return { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true, botWork: true, box: { ro: [dir], engine: "claudeAgent" } };
 }
 
 /** Never throws. The credentialed MCP config, settings and prompt live in a 0700 temp dir removed at exit. */
@@ -129,8 +134,9 @@ export function runKeepWarmPing(opts: {
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<CacheWarmPingResult> {
+  const earlier = readCostHistory()[opts.sessionId] ?? [];
   return runForkedPrompt({ ...opts, what: "ping", prompt: KEEP_WARM_PROMPT, persist: false, timeoutMs: opts.timeoutMs ?? KEEP_WARM_TIMEOUT_MS,
-    parse: parseKeepWarmResult, failed: (reason) => ({ ok: false, reason }) });
+    parse: (stdout, stderr, code) => parseKeepWarmResult(stdout, stderr, code, earlier), failed: (reason) => ({ ok: false, reason }) });
 }
 
 /** One prompt on a fork of a live session, with that session's exact launch contract so its cached prompt start is read

@@ -21,6 +21,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 
 const { setTeamPeople } = await import("@/state/team-people");
 const { ShareBotButton } = await import("./ShareBotButton");
+await (await import("../lazy-screens")).ShareBotDialog.preload();
 
 const ADA = { email: "ada@acme.test", name: "Ada", role: "admin" };
 const BOB = { email: "bob@acme.test", name: "Bob", role: "member" };

@@ -153,6 +153,27 @@ describe.skipIf(!posix)("deploy/update.sh on a Podman install", () => {
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
   });
 
+  it("says why in the server's own words when the new version exits at once and Podman removes its container before it is looked at", () => {
+    const box = install({ behaviour: "exits", lastWords: "broken on purpose" });
+    const failed = box.run();
+    expect(failed.status, failed.stdout + failed.stderr).toBe(1);
+    expect(failed.said.slice(-3)).toEqual([
+      "The update to 0.1.151 did not work: it stopped as it started (broken on purpose).",
+      "Putting back the version and the data from before the update…",
+      "Your server runs 0.1.150 again, with its data as it was before the update.",
+    ]);
+    expect(box.unit()).toBe(unitText(OLD.refs[1]!));
+    expect(box.state().containers.omb).toMatchObject({ image: OLD.id, status: "running" });
+  });
+
+  it("says why in the server's own words when the new version's container stays listed but never answers a read", () => {
+    const box = install({ behaviour: "uninspectable", lastWords: "broken on purpose" });
+    const failed = box.run([], { OMB_UPDATE_WAIT_S: "2" });
+    expect(failed.status, failed.stdout + failed.stderr).toBe(1);
+    expect(failed.said.at(-3)).toBe("The update to 0.1.151 did not work: it stopped as it started (broken on purpose).");
+    expect(box.unit()).toBe(unitText(OLD.refs[1]!));
+  });
+
   it("names systemctl and journalctl, never docker compose, when a person has to step in", () => {
     // The data cannot be put back: the way to run the server on the data as it is.
     const restore = install({ behaviour: "silent" }, { failRestore: true });

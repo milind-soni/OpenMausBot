@@ -134,6 +134,8 @@ interface ClientAuth {
   id: string;
   secret?: string;
   method: TokenAuthMethod;
+  /** Issued by the server's dynamic registration, not configured: kept with the sign-in so refreshes can prove it. */
+  registered?: boolean;
 }
 
 /** RFC 8414 §2: an absent list means client_secret_basic. */
@@ -251,6 +253,7 @@ export class McpOAuthManager {
   private recordClient(name: string, record: McpOAuthRecord): ClientAuth | null {
     if (!record.clientId) return null;
     if (!record.tokenAuth) return { id: record.clientId, method: "none" };
+    if (record.clientSecret) return { id: record.clientId, secret: record.clientSecret, method: record.tokenAuth };
     const configured = this.clients(name, record.url);
     return configured?.clientId === record.clientId && configured.clientSecret
       ? { id: record.clientId, secret: configured.clientSecret, method: record.tokenAuth }
@@ -528,8 +531,9 @@ export class McpOAuthManager {
     }
   }
 
-  /** A fresh public client per sign-in: authorization servers prune idle clients, so a cached id goes stale. */
-  private async register(meta: McpAuthMetadata, redirectUri: string): Promise<string> {
+  /** A fresh client per sign-in: authorization servers prune idle clients, so a cached id goes stale. It asks to be
+   * public; a server that issues a secret anyway (Supabase) gets it back on every token request. */
+  private async register(meta: McpAuthMetadata, redirectUri: string): Promise<ClientAuth> {
     if (!meta.registrationEndpoint) {
       throw new McpOAuthError("no-registration", "This server only signs in apps registered with it in advance. Edit the server and add that app's client ID under Sign-in app.");
     }
@@ -547,11 +551,19 @@ export class McpOAuthManager {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     const parsed: unknown = await response.json().catch(() => null);
-    const body = (parsed && typeof parsed === "object" ? parsed : {}) as { client_id?: unknown; error_description?: unknown };
+    const body = (parsed && typeof parsed === "object" ? parsed : {}) as {
+      client_id?: unknown;
+      client_secret?: unknown;
+      token_endpoint_auth_method?: unknown;
+      error_description?: unknown;
+    };
     if (!response.ok || typeof body.client_id !== "string" || !body.client_id) {
       throw new RegistrationRefused(registrationRefusal(response, body.error_description));
     }
-    return body.client_id;
+    if (typeof body.client_secret !== "string" || !body.client_secret) return { id: body.client_id, method: "none" };
+    const issued = body.token_endpoint_auth_method;
+    const method = issued === "client_secret_basic" || issued === "client_secret_post" ? issued : tokenAuthMethod(meta, body.client_secret);
+    return { id: body.client_id, secret: body.client_secret, method, registered: true };
   }
 
   private async begin(name: string, url: string, starting: StartingFlow, wwwAuthenticate?: string | null): Promise<McpSignInStatus> {
@@ -561,15 +573,27 @@ export class McpOAuthManager {
     if (!meta) throw new McpOAuthError("not-oauth", "This server does not offer an OAuth sign-in. Add its token as a header instead.");
     const registered = this.clients(name, url);
 
+    /** An app with a configured return address always returns there: it is the one address the provider has registered,
+     * and the only one a browser on another computer can reach. The public route completes it, so no listener runs. */
+    if (registered?.redirectUri) {
+      const client: ClientAuth = {
+        id: registered.clientId,
+        ...(registered.clientSecret ? { secret: registered.clientSecret } : {}),
+        method: tokenAuthMethod(meta, registered.clientSecret),
+      };
+      const scopes = registered.scopes?.length ? registered.scopes : meta.scopes;
+      return { ...this.open(name, url, starting, meta, registered.redirectUri, client, null, scopes).status };
+    }
+
     if (!registered && starting.browser.remote && starting.browser.origin) {
       const redirectUri = `${starting.browser.origin}${CALLBACK_PATH}`;
-      let clientId: string | null = null;
+      let client: ClientAuth | null = null;
       try {
-        clientId = await this.register(meta, redirectUri);
+        client = await this.register(meta, redirectUri);
       } catch (error) {
         if (!(error instanceof RegistrationRefused)) throw error;
       }
-      if (clientId) return { ...this.open(name, url, starting, meta, redirectUri, { id: clientId, method: "none" }, null, meta.scopes).status };
+      if (client) return { ...this.open(name, url, starting, meta, redirectUri, client, null, meta.scopes).status };
     }
 
     const listener = await this.listener(preferredPort(url), registered !== undefined);
@@ -577,7 +601,7 @@ export class McpOAuthManager {
       const redirectUri = `http://127.0.0.1:${listener.port}${CALLBACK_PATH}`;
       const client: ClientAuth = registered
         ? { id: registered.clientId, ...(registered.clientSecret ? { secret: registered.clientSecret } : {}), method: tokenAuthMethod(meta, registered.clientSecret) }
-        : { id: await this.register(meta, redirectUri), method: "none" };
+        : await this.register(meta, redirectUri);
       const scopes = registered?.scopes?.length ? registered.scopes : meta.scopes;
       const flow = this.open(name, url, starting, meta, redirectUri, client, listener, scopes);
       listener.reserved -= 1;
@@ -778,6 +802,7 @@ export class McpOAuthManager {
         state: "signed-in",
         issuer: flow.meta.issuer,
         clientId: flow.client.id,
+        ...(flow.client.registered && flow.client.secret ? { clientSecret: flow.client.secret } : {}),
         ...(flow.client.method !== "none" ? { tokenAuth: flow.client.method } : {}),
         redirectUri: flow.redirectUri,
         tokenEndpoint: flow.meta.tokenEndpoint,

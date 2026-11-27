@@ -89,39 +89,17 @@ What the screenshot looks like when the recipe passes (`evidence/chat-ui/chat-ui
 
 The permanent form of this recipe is `scripts/testing/control-omb-ui.e2e.test.ts`:
 
-The fixture also hit-tests the rendered empty band beside **This run**. It
-must target the conversation rather than the transparent dock, while points
-inside the card and composer still target those controls. This checks browser
-pointer targeting, not native OS wheel delivery.
-
 ```sh
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
 ```
 
-The asserted recipe now also covers the floating **This run** card with a
-successful, failed, and dry-run command. The card records every shell command
-the bot ran in the current ask — the commands after the person's last message —
-and marks the ones that went through the control CLI **verified**; reads
-(`cat`, `git log`, `gh pr view`, a `curl` that only fetches) and computer-use
-are left out, and a run of one unverified command shows no card. Those tool
-outcomes are **simulated provider events**, not executions of the commands
-written in the chips; the card's summary reads `3 steps · 3 verified · 1 failed
-· 1 dry run`. The recipe then presses **Save as skill**, which fills the
-composer in one of two shapes. A run with a verified step opens with the
-trigger phrase (`Create a verification skill from the run below.`), then
-`Goal: hello` (the person's request), the rule not to re-run, and one line per
-step with the verified ones tagged `(verified)`. A run with no verified step
-asks in plain words instead — `Save the steps below as a reusable skill for my
-review.`, then `Goal: <request>`, then "Keep the exact commands and note the
-failed ones as gotchas. Do not re-run anything.", then the step lines; the
-server (`server/skill-learn.ts`) expands a turn that opens with that sentence
-into the same skill-authoring turn as `/learn`, so nobody sees or types a slash
-command. In both shapes the caret is in the composer and no new user message
-was sent — the transcript still holds exactly one `StaticText "hello"`. The person adds any notes and
-sends as usual; the card never sends on its own. Separately, the recipe runs a
-real fixture health check and verifies that clicking a deliberately missing
-control fails. The card remains collapsible; the old execution timeline is no
-longer shown above chat.
+A run of two real steps or more (a command that changed something, an app
+action, a file written, a page opened) also floats the **Skill Burger** card in
+the chat's corner: one layer per step, the ask on its top bun, and **Add skill**
+as its bottom bun, which saves the run as a workflow skill in one click, with
+an Undo. Its unit and DOM tests are `shared/skill-burger/draft.test.ts`,
+`server/skill-burger/*.test.ts` and
+`src/components/skill-burger/SkillBurger.dom.test.ts`.
 
 For activity detail, click **More → Inspector → Run Log**. It shows the selected
 conversation's recorded commands, statuses and timestamps; command previews
@@ -134,8 +112,10 @@ unasserted user outcome.
 
 `scripts/testing/usage-details-ui.e2e.test.ts` checks the header's **More** menu,
 usage breakdown, clipboard success and refusal, and responsive geometry at
-390, 800, 1100 and 1600 px. It checks that opening bot settings folds the sidebar
-without changing its saved density and closing settings restores it. Evidence
+390, 800, 1100 and 1600 px. It checks that opening Advanced's bot settings at 1100
+folds the sidebar without changing its saved density and closing settings
+restores it, and that Simple's 320px bot panel keeps the 280px sidebar open
+beside a chat of at least 440 at 1040 px, folding it at 1039. Evidence
 includes screenshots and a `.usage-details.json` next to the fixture log.
 These are renderer checks, not native Windows caption-button verification.
 

@@ -3,6 +3,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { useRevealOriginalMenu } from "./RevealOriginalMenu";
+import { MessageAttachmentGallery } from "./AttachmentGallery";
 import { ChatMarkdown } from "./ChatMarkdown";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -71,5 +72,34 @@ it("offers the original on a file the reply links inline instead of showing it i
   expect(menuButton()?.textContent).toBe("Show in folder");
   await act(async () => { menuButton()!.click(); });
   expect(revealInFolder).toHaveBeenCalledWith(ORIGINAL);
+  act(() => root.unmount());
+});
+
+it("reveals an ordinary Windows file link without a delivered attachment", async () => {
+  const revealInFolder = vi.fn(async () => "shown");
+  (window as { ogb?: unknown }).ogb = { platform: "win32", revealInFolder };
+  const root = await mount(createElement(ChatMarkdown, {
+    text: "[report](file:///C:/My%20Files/report.pdf)",
+    message: { threadId: "t1", messageId: "m1" },
+  }));
+  const link = [...document.querySelectorAll("button")].find(button => button.textContent === "report")!;
+  await openMenu(link);
+  expect(menuButton()?.textContent).toBe("Show in folder");
+  await act(async () => { menuButton()!.click(); });
+  expect(revealInFolder).toHaveBeenCalledWith("C:/My Files/report.pdf");
+  act(() => root.unmount());
+});
+
+it("reveals the linked file from its gallery chip", async () => {
+  const revealInFolder = vi.fn(async () => "shown");
+  (window as { ogb?: unknown }).ogb = { platform: "linux", revealInFolder };
+  const root = await mount(createElement(MessageAttachmentGallery, {
+    text: "[report](/home/me/Reports/quarter%201.pdf)",
+    message: { threadId: "t1", messageId: "m1" },
+  }));
+  const chip = document.querySelector('button[aria-label="Save a copy of quarter 1.pdf"]')!;
+  await openMenu(chip);
+  await act(async () => { menuButton()!.click(); });
+  expect(revealInFolder).toHaveBeenCalledWith("/home/me/Reports/quarter 1.pdf");
   act(() => root.unmount());
 });

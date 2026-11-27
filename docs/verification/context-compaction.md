@@ -9,7 +9,17 @@ session, and shows the engine's compaction as a note in the chat when the
 engine reports it (Claude Code's `compact_boundary`, Codex's
 `contextCompaction` item). **Compact now** asks the engine first: for Claude
 Code that is its own `/compact` on a fork of the session, as for a warm
-summary below, and the conversation moves to that fork.
+summary below, and the conversation moves to that fork. For Codex it is
+`thread/compact/start` on the app-server the last turn left running, in place:
+the conversation stays on its thread, nothing is resent and no summary is
+written. It runs only on that kept process (it never starts one), and only when
+the conversation's next message would carry on the same thread, as it would
+after the same checks a message makes before it reuses the process (the same
+Codex account, config.toml and CLI, the thread's provider). The usage Codex
+reports for it is recorded; when it sends no usage notification the row has no
+tokens and no cost (a fallback, not an estimate), and the context
+reading from before it is dropped (the meter shows nothing until the next turn
+reports one). With `context.compactAt` set, Compact now on Codex folds instead.
 
 OpenMausBot's own fold (below) is what compacts in every other case:
 
@@ -25,7 +35,8 @@ OpenMausBot's own fold (below) is what compacts in every other case:
 - `context.compactAt` set in config.json: the fold runs there for every
   engine, as it did before engines were left to compact themselves;
 - Compact now when the engine cannot run its own (no session open or parked,
-  a Claude Code too old to fork, Codex).
+  a Claude Code too old to fork, a Codex whose app-server was closed, whose
+  next message would not carry on its thread, or with `context.compactAt` set).
 
 ```sh
 pnpm exec vitest run server/host/conversation-compaction.test.ts server/context-compaction.e2e.test.ts

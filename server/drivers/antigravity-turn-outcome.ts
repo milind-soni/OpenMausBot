@@ -7,7 +7,16 @@
 //     the quota and reset patterns, and the before and after reads of the
 //     session's own unlinked log);
 //   - apps/server/src/provider/acp/AntigravityProfilePaths.ts (the proof that
-//     no component of a path below the profile is a link).
+//     no component of a path below the profile is a link);
+//   - from pingdotgg/t3code@f9a3c38c505: a lost thinking signature marks the
+//     session broken, and the next turn starts a fresh one from this
+//     conversation's context instead of resuming it;
+//   - from pingdotgg/t3code@f68d36d8aa9: the 1.5 "STATUS (code NNN): message"
+//     form, and a 404 after the model already answered in this turn counted
+//     as a temporary server error, not a refusal (the one resend T3 sends then
+//     rides its 1.5 steering and is not ported);
+//   - every failure found this way restarts the runtime before the next turn,
+//     as T3 Code does after any hidden failure.
 // The failure is a plain error for the shared ACP runtime to throw, worded as every engine's usage limit is. A reset
 // time is taken only inside the coming eight days, and a log or step too large to read quickly is not read.
 import type { Stats } from "node:fs";
@@ -20,11 +29,18 @@ import { engineFailure } from "./engine-errors.ts";
 
 // CORTEX_STEP_TYPE_ERROR_MESSAGE in the native trajectory.
 const ERROR_STEP_TYPE = 17;
+// CORTEX_STEP_TYPE_PLANNER_RESPONSE: the model answered within this turn.
+const PLANNER_RESPONSE_STEP_TYPE = 15;
 // The harness error text leads the payload; a Go stack trace follows it.
 const MAX_ERROR_PAYLOAD_BYTES = 16_384;
 // The Go harness's rendering of a Google API error, as the agent's api_errors.py reads it.
 const API_ERROR = /Error (\d{3}), Message: (.+?), Status: ([A-Z_]+)/s;
+// Antigravity 1.5 with a Google account writes "STATUS (code NNN): message".
+const STATUS_ERROR = /(?<![A-Z_])([A-Z_]+) \(code (\d{3})\): (\P{Cc}+)/u;
 const QUOTA_EXHAUSTED = /\breason:QUOTA_EXHAUSTED\b/;
+// Claude rejects a saved thinking block without a valid signature. It sits in the native history, so every later prompt
+// to that session fails the same way.
+const INVALID_THINKING_SIGNATURE = /\bmessages\.\d+\.content\.\d+(?:\.thinking\.signature: Field required|: Invalid `signature` in `thinking` block)/;
 const RESET_TIMESTAMP = /\bquotaResetTimeStamp:([^\s\]]+)/;
 const RESET_DELAY = /\bquotaResetDelay:((?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|h|m|s))+)(?=[\s\]])/;
 // google.rpc.RetryInfo, which plain rate limits carry instead of a quota reset.
@@ -51,6 +67,8 @@ const CONVERSATION_SEGMENTS = ["antigravity-acp", "conversations"];
 interface LastStep {
   type: number;
   payload: Uint8Array | null;
+  /** A planner response step came before it in this turn: the model had answered. */
+  reachedModel?: boolean;
 }
 
 export type AntigravityPromptCheck = (result: unknown) => Promise<AcpReportedFailure | undefined>;
@@ -97,7 +115,8 @@ const lastStepAfter = (index: number) => (database: DatabaseSync): LastStep | un
   if (typeof row?.type !== "number") return undefined;
   if (row.type !== ERROR_STEP_TYPE || typeof row.bytes !== "number" || row.bytes > MAX_STEP_BYTES) return { type: row.type, payload: null };
   const payload = database.prepare("SELECT substr(step_payload, 1, ?) AS payload FROM steps WHERE idx = ?").get(MAX_ERROR_PAYLOAD_BYTES, row.idx)?.payload;
-  return { type: row.type, payload: payload instanceof Uint8Array ? payload : null };
+  const reachedModel = database.prepare("SELECT 1 FROM steps WHERE idx > ? AND step_type = ? LIMIT 1").get(index, PLANNER_RESPONSE_STEP_TYPE) !== undefined;
+  return { type: row.type, payload: payload instanceof Uint8Array ? payload : null, reachedModel };
 };
 
 function resetAtFrom(text: string, now: number): number | undefined {
@@ -135,6 +154,17 @@ function usageLimit(provider: string, text: string, now: number, timeZone?: stri
   return new AcpReportedFailure({ ...failure, ...(resetsAt === undefined ? {} : { limitResetsAt: resetsAt }) }, true);
 }
 
+/** Reorders STATUS_ERROR's groups to API_ERROR's: HTTP status, message, status name. */
+function statusError(text: string): readonly [string, string, string, string] | null {
+  const match = STATUS_ERROR.exec(text);
+  return match === null ? null : [match[0], match[2]!, match[3]!, match[1]!];
+}
+
+/** Any failure read from the session log restarts the runtime before the next turn; a broken session is not resumed. */
+function restarting(failure: AcpReportedFailure, broken = false): AcpReportedFailure {
+  return Object.assign(failure, { acpSessionFailure: true }, broken ? { acpSessionBroken: true } : {});
+}
+
 /** The failure a prompt's result and the last step it added stand for; undefined for a normal reply. */
 export function antigravityTurnFailure(
   provider: string,
@@ -147,13 +177,25 @@ export function antigravityTurnFailure(
   // The agent maps only the SDK's QUOTA_EXHAUSTED stop reason to `refusal`.
   if (errorText === undefined && stopReason !== "refusal") return undefined;
   const text = errorText ?? "";
-  const apiError = API_ERROR.exec(text);
-  if (stopReason === "refusal" || QUOTA_EXHAUSTED.test(text)) return usageLimit(provider, text, now, timeZone);
-  if (apiError === null) return new AcpReportedFailure(engineFailure(provider, "", { kind: "refused", status: null })!, false);
+  const apiError = API_ERROR.exec(text) ?? statusError(text);
+  if (stopReason === "refusal" || QUOTA_EXHAUSTED.test(text)) return restarting(usageLimit(provider, text, now, timeZone));
+  if (INVALID_THINKING_SIGNATURE.test(text)) {
+    return restarting(new AcpReportedFailure({ message: `${provider}'s saved conversation can no longer be sent to the model. The next message starts a fresh ${provider} session with this conversation's context.` }, false), true);
+  }
+  if (apiError === null) return restarting(new AcpReportedFailure(engineFailure(provider, "", { kind: "refused", status: null })!, false));
   const [, httpStatus, message, status] = apiError;
-  if (httpStatus === "429" || status === "RESOURCE_EXHAUSTED") return usageLimit(provider, text, now, timeZone);
+  if (httpStatus === "429" || status === "RESOURCE_EXHAUSTED") return restarting(usageLimit(provider, text, now, timeZone));
   const http = Number(httpStatus);
-  return new AcpReportedFailure(engineFailure(provider, message!.trim(), { kind: http >= 500 ? "server" : "refused", status: http })!, false);
+  // A 404 before the model answered is an unknown or unentitled model; after, a transient edge error.
+  const transient = http >= 500 || (http === 404 && step?.reachedModel === true);
+  return restarting(new AcpReportedFailure(engineFailure(provider, message!.trim(), { kind: transient ? "server" : "refused", status: http })!, false));
+}
+
+/** The usage limit a harness failure line on stderr reports, when it reports one; undefined for any other failure. */
+export function antigravityHarnessLimit(provider: string, line: string, now: number = Date.now()): AcpReportedFailure | undefined {
+  const apiError = API_ERROR.exec(line) ?? statusError(line);
+  const exhausted = QUOTA_EXHAUSTED.test(line) || apiError?.[1] === "429" || apiError?.[3] === "RESOURCE_EXHAUSTED";
+  return exhausted ? usageLimit(provider, line, now) : undefined;
 }
 
 /**

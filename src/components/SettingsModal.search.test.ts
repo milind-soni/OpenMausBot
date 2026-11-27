@@ -79,15 +79,16 @@ describe("Settings search in Simple mode", () => {
     expect(first.textContent, "a browser tab is This browser").toContain("This browser");
     expect(first.textContent).not.toContain("General");
     type("phone");
-    expect(document.querySelector("[data-settings-hit]")!.textContent).toContain("Phone & devices");
+    expect(document.querySelector("[data-settings-hit]")!.getAttribute("data-settings-hit")).toBe("page:devices");
+    expect(document.querySelector("[data-settings-hit]")!.textContent).toContain("Devices");
   });
 
-  it("tags an Advanced row from Simple; choosing it turns Advanced mode on and lands on the row", () => {
+  it("tags an Advanced row from Simple; choosing it lands on the row and Simple mode stays on", () => {
     type("parallel threads");
     const hit = document.querySelector<HTMLButtonElement>('[data-settings-hit="parallel"]')!;
     expect(hit.textContent).toContain("Advanced");
     flushSync(() => hit.click());
-    expect(vi.mocked(setAdvancedMode)).toHaveBeenCalledWith(true);
+    expect(vi.mocked(setAdvancedMode)).not.toHaveBeenCalled();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "bots" });
   });
 

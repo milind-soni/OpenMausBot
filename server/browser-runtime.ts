@@ -467,7 +467,7 @@ export class BrowserRuntime {
     if (method !== "tools/call") return result;
     if (result === null || result === undefined) return scrubBrowserResult({ isError: true, content: [{ type: "text", text: LANE_BUSY }] }, this.scrub);
     if (!gate.reopened || refusedSlot(result)) return scrubBrowserResult(result, this.scrub);
-    const note = gate.reopened === "restart" ? PERSON_RESTARTED : idleClosedNote(spec.env.AGENT_BROWSER_RESTORE_SAVE !== "never");
+    const note = gate.reopened === "restart" ? PERSON_RESTARTED : idleClosedNote(spec.env.AGENT_BROWSER_RESTORE_SAVE !== "never" || attachesToChrome(spec.env)); // an attached browser keeps its sign-ins in its own profile
     gate.reopened = null;
     const content = (result as { content?: unknown } | null)?.content;
     return scrubBrowserResult({ ...result as object, content: [{ type: "text", text: note }, ...Array.isArray(content) ? content : []] }, this.scrub);
@@ -628,7 +628,7 @@ export class BrowserRuntime {
         phases.stepsMs = (phases.stepsMs ?? 0) + performance.now() - afterStarted;
         beforeDispatch?.();
         const shaped = shapeBrowserToolResult(result, { toolName, budget: this.options.resultBudget }) as { content?: unknown[] };
-        const final = extra?.parts.length && Array.isArray(shaped?.content) ? { ...shaped, content: [...shaped.content, ...extra.parts] } : shaped;
+        const final = extra?.parts.length && Array.isArray(shaped?.content) ? { ...shaped, content: [...shaped.content, ...extra.parts], ...(extra.failed ? { isError: true } : {}) } : shaped;
         phases.chars = resultChars(final);
         return final;
       }
@@ -770,7 +770,7 @@ export class BrowserRuntime {
   }
 
   heldBy(session: string): string | null { return this.gates.get(session)?.owner ?? null; }
-
+  /** Stops the session's engine client when it was started under other launch settings and nothing uses it now (the place the browser runs changed between a turn's tools/list and its first call), so the next call starts one under these. */ async closeIfLaunchChanged(session: string, spec: BrowserSpawnSpec): Promise<boolean> { const entry = this.clients.get(session); if (!entry || entry.key === launchSettingsKey(spec) || this.working(session)) return false; await this.close(session); return true; }
   /** An interrupted action left the browser's state unknown until the engine answers again or the browser restarts. */
   interrupted(session: string): boolean { return this.gates.get(session)?.uncertain === true; }
 

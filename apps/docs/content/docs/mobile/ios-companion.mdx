@@ -40,5 +40,5 @@ Your computer must remain on, awake, and running MausBot. In desktop Companion S
 The companion sidecar uses a default-deny route allowlist. Provider keys, pairing administration, Local VM lifecycle, webhook secrets, team import/export, and internal peer-agent routes remain unreachable from the phone.
 
 <Callout type="warn" title="Foreground-oriented connection">
-  Live and replayed events can produce alerts while the companion is connected, but a terminated iOS app cannot be awakened without a future APNs relay.
+  Live and replayed events can produce alerts while the companion is connected. A closed app is not woken yet: closed-app push is not available in the phone app.
 </Callout>

@@ -24,7 +24,9 @@ interface Scene {
   under?: Array<{ position?: "absolute" | "fixed"; width: number | "window"; height: number | "window"; freed?: number }>;
 }
 
-function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?: boolean; room?: boolean } = {}) {
+function boot(engaged = true, options: {
+  scene?: Scene; start?: number; loaded?: boolean; room?: boolean; can?: Partial<AppDocument["can"]>; rpc?: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+} = {}) {
   const room = options.room === true;
   const page = new Window();
   pages.push(page);
@@ -85,13 +87,13 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
   }
   const seen = { messages: [] as string[], links: [] as string[], contexts: [] as unknown[], heights: [] as number[], selections: [] as unknown[] };
   bridge = createAppBridge({
-    doc: room ? { ...DOC, can: { ...ROOM_CAN }, room: true } : DOC,
+    doc: room ? { ...DOC, can: { ...ROOM_CAN }, room: true } : { ...DOC, can: { ...DOC.can, ...options.can } },
     hostContext: { theme: "dark", styles: { variables: { "--color-text-primary": "#fafafa", "not-a-variable": "x" } } },
     source: () => frame,
     hostVersion: "1",
     adapter: {
       post: (message) => (frame.postMessage as (data: unknown) => void)(message),
-      callRpc: async () => ({}),
+      callRpc: async (method, params) => (options.rpc ? options.rpc(method, params) : {}),
       sendMessage: async (text) => { seen.messages.push(text); },
       openLink: (url) => { seen.links.push(url); },
       setContext: (update) => { seen.contexts.push(update); },
@@ -125,6 +127,9 @@ function boot(engaged = true, options: { scene?: Scene; start?: number; loaded?:
     },
     mausbot: () => frame.mausbot as {
       send(text: string): Promise<void>; open(url: string): Promise<void>; setContext(text: string): Promise<void>; theme: string; room: boolean;
+      data: { query(sql: string, params?: unknown): Promise<unknown> };
+      state: { get(key: string): Promise<unknown>; set(key: string, value?: unknown): Promise<void>; keys(): Promise<string[]> };
+      connectors: { call(name: string, tool: string, args?: unknown): Promise<unknown>; list(): Promise<unknown[]> };
     },
   };
 }
@@ -164,6 +169,55 @@ describe("the bot-page helper", () => {
     await page.mausbot().setContext("Looking at March");
     await expect.poll(() => page.seen.contexts.length).toBe(1);
     expect(page.seen.contexts[0]).toEqual({ content: [{ type: "text", text: "Looking at March" }] });
+  });
+
+  it("reads data and keeps state through the bridge when the page declared them, with no click", async () => {
+    const asked: Array<[string, Record<string, unknown>]> = [];
+    const saved: Record<string, unknown> = {};
+    const page = boot(false, {
+      can: { data: true, state: true },
+      rpc: async (method, params) => {
+        asked.push([method, params]);
+        if (method === "mausbot/data/query") return { columns: [{ name: "n", type: "INTEGER" }], rows: [{ n: 1 }], truncated: false };
+        if (method === "mausbot/state/set") { if ("value" in params) saved[params.key as string] = params.value; else delete saved[params.key as string]; return {}; }
+        if (method === "mausbot/state/get") return params.key as string in saved ? { value: saved[params.key as string] } : {};
+        return { keys: Object.keys(saved) };
+      },
+    });
+    expect(await page.mausbot().data.query("SELECT ? AS n", [1])).toEqual({ columns: [{ name: "n", type: "INTEGER" }], rows: [{ n: 1 }], truncated: false });
+    await page.mausbot().state.set("filter", { region: "north" });
+    expect(await page.mausbot().state.get("filter")).toEqual({ region: "north" });
+    expect(await page.mausbot().state.keys()).toEqual(["filter"]);
+    await page.mausbot().state.set("filter");
+    expect(await page.mausbot().state.get("filter")).toBeUndefined();
+    expect(asked[0]).toEqual(["mausbot/data/query", { sql: "SELECT ? AS n", params: [1] }]);
+    expect(asked[4]).toEqual(["mausbot/state/set", { key: "filter" }]);
+  });
+
+  it("calls declared connector tools and lists them through the bridge, answering with the tool's result alone", async () => {
+    const asked: Array<[string, Record<string, unknown>]> = [];
+    const page = boot(false, {
+      can: { connectors: [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }] },
+      rpc: async (method, params) => {
+        asked.push([method, params]);
+        return method === "mausbot/connectors/list"
+          ? { connectors: [{ connector: "gmail", label: "Gmail", connected: true, tools: ["GMAIL_FETCH_EMAILS"] }] }
+          : { result: { messages: [{ id: "1" }] }, truncated: true };
+      },
+    });
+    expect(await page.mausbot().connectors.call("gmail", "GMAIL_FETCH_EMAILS", { max_results: 3 })).toEqual({ messages: [{ id: "1" }] });
+    expect(await page.mausbot().connectors.list()).toEqual([{ connector: "gmail", label: "Gmail", connected: true, tools: ["GMAIL_FETCH_EMAILS"] }]);
+    expect(asked).toEqual([
+      ["mausbot/connectors/call", { connector: "gmail", tool: "GMAIL_FETCH_EMAILS", arguments: { max_results: 3 }, engaged: false }],
+      ["mausbot/connectors/list", {}],
+    ]);
+    await expect(page.mausbot().connectors.call("gmail", "GMAIL_SEND_EMAIL")).rejects.toThrow("This page did not declare GMAIL_SEND_EMAIL");
+  });
+
+  it("rejects data and state with the reason when the page did not declare them", async () => {
+    const page = boot();
+    await expect(page.mausbot().data.query("SELECT 1")).rejects.toThrow('This page did not declare "data"');
+    await expect(page.mausbot().state.keys()).rejects.toThrow('This page did not declare "state"');
   });
 
   it("in a room, says so, and its send and setContext resolve without asking the host; a page that asks anyway is refused", async () => {

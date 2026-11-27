@@ -50,6 +50,8 @@ vi.mock("@/lib/connected-apps", () => ({
 vi.mock("@/lib/connected-apps-cache", () => ({ readCachedInventory: () => null, writeCachedInventory: () => {} }));
 vi.mock("@/lib/product-events", () => ({ connectorConnect: vi.fn() }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => null }));
+vi.mock("./github/GithubAppCard", () => ({ GITHUB_CARD_SEARCH: "github git", GITHUB_CARD_CATEGORIES: ["Developer tools"], GithubAppCard: () => null }));
+vi.mock("@/lib/github-sign-in", () => ({ useGithubConnected: () => null, useGithubShown: () => true }));
 vi.mock("./XCard", () => ({ X_CARD_SEARCH: "x", XCard: () => null }));
 vi.mock("./PostizCard", () => ({ PostizCard: () => null }));
 vi.mock("./EmailCard", () => ({ EmailCard: () => null }));
@@ -98,6 +100,12 @@ const tileRenders = async (step: () => void) => {
   await flush();
   return fixture.tileRenders - before;
 };
+/** The tiles rendered while `step` ran, and the tiles it put on the page that were not on it before. */
+const rendersAndAdded = async (step: () => void) => {
+  const before = new Set(host.querySelectorAll("[data-app-tile]"));
+  const renders = await tileRenders(step);
+  return { renders, added: Array.from(host.querySelectorAll("[data-app-tile]")).filter((tile) => !before.has(tile)).length };
+};
 const storeChange = () => {
   fixture.state = { ...fixture.state, tick: Number(fixture.state.tick) + 1 };
   for (const watch of Array.from(fixture.watchers)) watch();
@@ -108,6 +116,15 @@ const type = (text: string) => {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 };
 const loadingShown = () => host.textContent!.includes(t("connectors.loadingCatalog"));
+
+// happy-dom lays nothing out: a long list needs a view to mount the rows in it.
+Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+  configurable: true,
+  get(this: HTMLElement) {
+    if (this.classList.contains("overflow-y-auto")) return 640;
+    return this.hasAttribute("data-app-tile") ? 56 : 0;
+  },
+});
 
 beforeEach(() => {
   host = document.createElement("div");
@@ -155,8 +172,10 @@ describe("how often the Apps panel renders its tiles", () => {
     expect(await tileRenders(storeChange)).toBe(0);
 
     const showAll = Array.from(host.querySelectorAll("button")).find((button) => button.textContent === t("apps.showAll", { count: String(APPS) }))!;
-    expect(await tileRenders(() => showAll.click())).toBeGreaterThan(0);
-    expect(tiles()).toBeGreaterThanOrEqual(APPS);
+    const shown = await rendersAndAdded(() => showAll.click());
+    expect(shown.renders).toBe(shown.added);
+    expect(tiles()).toBeGreaterThan(0);
+    expect(tiles()).toBeLessThan(APPS);
     expect(await tileRenders(storeChange)).toBe(0);
   });
 
@@ -173,11 +192,15 @@ describe("how often the Apps panel renders its tiles", () => {
 
   it("renders only the tiles a search brings in, and none of those it keeps as the search narrows", async () => {
     const all = APPS / KINDS.length;
-    expect(await tileRenders(() => type("m"))).toBeGreaterThan(0);
-    expect(tiles()).toBe(3 * all);
-    expect(await tileRenders(() => type("ma"))).toBe(0);
-    expect(tiles()).toBe(2 * all);
-    expect(await tileRenders(() => type("mai"))).toBe(0);
+    const m = await rendersAndAdded(() => type("m"));
+    expect(m.renders).toBeGreaterThan(0);
+    expect(m.renders).toBe(m.added);
+    expect(tiles()).toBeLessThan(3 * all);
+    const ma = await rendersAndAdded(() => type("ma"));
+    expect(ma.renders).toBe(ma.added);
+    expect(tiles()).toBeLessThan(2 * all);
+    const mai = await rendersAndAdded(() => type("mai"));
+    expect(mai.renders).toBe(mai.added);
     expect(tiles()).toBe(all);
     expect(host.querySelector("input")!.value).toBe("mai");
     expect(await tileRenders(storeChange)).toBe(0);

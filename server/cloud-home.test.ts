@@ -393,9 +393,11 @@ it("gives the edge only its routing name and the server the contract, never a ga
   expect(server).toMatchObject({ HOME: "/data", OMB_DATA_DIR: "/data/.openmausbot", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile", OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800",
     OMB_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_WEBHOOK_PUBLIC_URL: "https://omb-u-1a2b3c4d5e6f.fly.dev", OMB_CLOUD_SECRETS_FD: "3" });
   for (const key of CLOUD_IGNORED_KEYS) expect(server).not.toHaveProperty(key);
-  // The bot box switch reaches the server; an unknown name does not.
-  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0" });
+  // The bot box and image-engines switches reach the server; an unknown name does not.
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_BOT_BOX: "0", OMB_IMAGE_ENGINES: "1", OMB_SOMETHING_ELSE: "x" }, "/data").server).toMatchObject({ OMB_BOT_BOX: "0", OMB_IMAGE_ENGINES: "1" });
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_SOMETHING_ELSE: "x" }, "/data").server).not.toHaveProperty("OMB_SOMETHING_ELSE");
+  // So does the switch that gives Antigravity accounts Google's native CLI, which a Cloud home could otherwise never turn on.
+  expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_ANTIGRAVITY_NATIVE_CLI: "1" }, "/data").server).toMatchObject({ OMB_ANTIGRAVITY_NATIVE_CLI: "1" });
   expect(JSON.stringify(server)).not.toContain(token);
   expect(secrets).toEqual({ OMB_CLOUD_BOOTSTRAP_SECRET: secret, ...relay });
   for (const value of Object.values(secrets)) {
@@ -484,6 +486,14 @@ it("holds requests at the edge while the server starts only when the Admin asked
   expect(cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CLOUD_EDGE_HOLD: "30s" }, "/data").server).not.toHaveProperty("OMB_CLOUD_EDGE_HOLD");
   for (const raw of [undefined, "", "30", "1m", "-5s", "121s", "30s; respond 200", "9999s"]) expect(edgeHold(raw), String(raw)).toBe("0s");
   expect(edgeHold(" 045s ")).toBe("45s");
+});
+
+it("hands the server the tool cache switch, and moves no cache of the server's own", () => {
+  const config = cloudHomeConfiguration(withGateway())!;
+  const server = cloudHomeChildEnvironments(config, { ...withGateway(), PATH: "/usr/bin", OMB_CACHE_ROOT: "on", OMB_CACHE_SWEEP: "on", OMB_CACHE_CAP_TOOLS: "4G", OMB_CACHE_CAP_APP: "1G" }, "/data").server;
+  expect(server).toMatchObject({ OMB_CACHE_ROOT: "on", OMB_CACHE_SWEEP: "on", OMB_CACHE_CAP_TOOLS: "4G", OMB_CACHE_CAP_APP: "1G", HOME: "/data", NODE_COMPILE_CACHE: "/data/.openmausbot/cache/node-compile" });
+  // Only the bot box adds the tools' variables (bot-box/tool-caches.ts), for each box's own HOME.
+  for (const name of ["npm_config_cache", "PIP_CACHE_DIR", "UV_CACHE_DIR", "HF_HUB_CACHE", "XDG_CACHE_HOME"]) expect(server).not.toHaveProperty(name);
 });
 
 it("hands the server the Admin's export-only switch, so an ended Cloud started for its owner's export runs frozen", () => {
@@ -655,6 +665,34 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env
   } finally {
     await removeTempDir(dir);
   }
+});
+
+// The supervisor runs on Linux only; Windows has no inherited descriptor 4 to write to.
+it.skipIf(process.platform === "win32")("gives the server a pipe to the supervisor's clock keeper only when asked, which carries its kicker's check line", async () => {
+  const dir = directory();
+  const script = join(dir, "kick.mjs");
+  writeFileSync(script, `
+const { clockKicker, CLOCK_FD_ENV } = await import(${JSON.stringify(pathToFileURL(join(import.meta.dirname, "cloud-clock.ts")).href)});
+const named = process.env[CLOCK_FD_ENV] ?? "none";
+const kick = clockKicker();
+kick?.(); kick?.();
+process.stdout.write(named + " " + String(process.env[CLOCK_FD_ENV]));
+setTimeout(() => {}, 200);
+`);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
+  const run = async (clockPipe: boolean) => {
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, true, clockPipe);
+    let out = "", kicked = "";
+    child.stdout?.on("data", (chunk) => { out += chunk; });
+    (child.stdio[4] as NodeJS.ReadableStream | undefined)?.on("data", (chunk) => { kicked += chunk; });
+    await new Promise((resolve) => child.once("close", resolve));
+    return { out, kicked, fds: child.stdio.length };
+  };
+  const piped = await run(true);
+  expect(piped.out).toBe("4 undefined");
+  expect(piped.kicked).toBe("check\n");
+  const plain = await run(false);
+  expect(plain).toEqual({ out: "none undefined", kicked: "", fds: 4 });
 });
 
 it("captures a child's stdout and stderr when asked, and shares this process's otherwise", async () => {

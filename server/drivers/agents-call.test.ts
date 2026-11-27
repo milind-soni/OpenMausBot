@@ -222,7 +222,7 @@ describe("skill_manage", () => {
     const sent: unknown[] = [];
     const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
     expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
-      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source, all_bots.',
       isError: true,
     });
     expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
@@ -684,6 +684,23 @@ it("falls back to a nonblank camelCase groupId when group_id is blank", async ()
   });
 });
 
+describe("assignment_status", () => {
+  const stub = (status: number, body: Record<string, unknown>) => context({
+    client: { apiResponse: async () => ({ ok: false, status, body }), api: async () => ({}) },
+  });
+
+  it("answers an id sent this turn as an instruction, and keeps a real failure a failure", async () => {
+    const text = "Assignment asg-1 was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.";
+    const answer = await callTool("assignment_status", { id: "asg-1" }, stub(409, { error: text, sentThisTurn: true }));
+    expect(answer.isError).toBeUndefined();
+    expect(answer.text).toBe(text);
+    expect((await callTool("assignment_status", { id: "asg-1" }, stub(409, { error: text }))).isError).toBe(true);
+    const unknown = await callTool("assignment_status", { id: "asg-2" }, stub(404, { error: "unknown assignment id" }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("No assignment asg-2 is known here");
+  });
+});
+
 describe("blank optional arguments", () => {
   it("drops blank session_search ids, so a blank-filled search stays a search", async () => {
     const paths: string[] = [];
@@ -759,5 +776,17 @@ describe("reset_cloud_computer", () => {
     expect(tool({})).toBeUndefined();
     expect(Object.keys(tool({ OMB_MEETINGS: "1" })?.inputSchema.properties ?? {})).toEqual(["why"]);
     expect(Object.keys(tool({ OMB_MEETINGS: "1", OMB_CHIEF_OF_STAFF: "1" })?.inputSchema.properties ?? {})).toEqual(["why", "for_bot_id"]);
+  });
+});
+
+describe("list_bots", () => {
+  const elsewhere = "The person's bots in their other places, which can't be reached from here: Ziggy (on My Cloud). If asked for one, say where it lives.";
+  const list = (answer: Record<string, unknown>) => callTool("list_bots", {}, context({ client: { api: async () => answer, apiResponse: async () => ({ ok: true, status: 200, body: answer }) } }));
+
+  it("names the bots of the person's other places after the ones here, so none of them is taken for no such bot", async () => {
+    const result = await list({ bots: [{ id: "bot-scout", name: "Scout", model: "m", status: "available" }], elsewhere });
+    expect(result.text).toMatch(/^Bots you can reach .*\n- Scout \[id: bot-scout, model: m\]\n\n.*resume you automatically\.\n\nThe person's bots in their other places/su);
+    expect((await list({ bots: [], elsewhere })).text).toBe(`No other bots you can reach yet.\n\n${elsewhere}`);
+    expect((await list({ bots: [] })).text).toBe("No other bots you can reach yet.");
   });
 });

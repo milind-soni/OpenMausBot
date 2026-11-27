@@ -27,10 +27,11 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   ],
   "routines and automations": ["routines.", "automations."],
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],
-  "Apps": ["apps.", "connectors."],
+  "Apps": ["apps.", "connectors.", "githubSignIn."],
   "the Settings pages Simple mode shows": ["settings.section.", "settings.group.", "settings.mcpCalls.", "settings.logins."],
-  "Settings's pages, its search and Phone & devices": [
+  "Settings's pages, its search and Devices": [
     "settings.page.", "settings.scope.", "settings.place.", "settings.glance.", "settings.overview.", "settings.search.", "phone.pair.", "phone.reach.",
+    "devicesPage.",
   ],
   "the Usage page and its traces": ["trace.", "usage.page."],
 };
@@ -94,6 +95,7 @@ const ALLOWED: Record<string, string> = {
   "chat.notice.modelServerStoppedAnswering": "the person's model server at a named host, not the app's internal server",
   "rail.local": "the owner's own name for the ＋ choice that adds a workspace of this computer's own",
   "rail.localNumbered": "a new workspace's first name, which the person may change, in the owner's word for it",
+  "devicesPage.map.servers": "the device map's narrow column header, which the owner asked to keep short; the list under it says your own servers",
 };
 
 const prefixes = Object.values(EVERYDAY_PREFIXES).flat();

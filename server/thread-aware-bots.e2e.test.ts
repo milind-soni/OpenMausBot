@@ -449,7 +449,8 @@ describe("start_thread on another model, reporting back", () => {
       const token = await heldTurn(pm, "Ask a different engine.");
       const listed = (await api("GET", "/api/internal/models", undefined, token)).body;
       const row = (instanceId: string) => listed.engines.find((engine: any) => engine.instanceId === instanceId);
-      expect(row("curious")).toEqual({ instanceId: "curious", name: "Curious fixture", unusable: expect.stringContaining("can't run now: it is signed out") });
+      expect(row("curious")).toEqual({ instanceId: "curious", name: "Curious fixture", unusable: expect.stringContaining("can't run now: it is signed out"),
+        connect: expect.stringContaining("Settings → AI → Providers") });
       const { instances } = (await api("GET", "/api/instances")).body;
       const pick = (instanceId: string) => {
         const engine = instances.find((instance: any) => instance.instanceId === instanceId);
@@ -654,9 +655,13 @@ describe("coordinate_bots on a teammate", () => {
       // The review turn quotes the requests, gate markers included, so the engine files its prompt under the first request's gate.
       expect(promptsOf(gate(1)).at(-1)?.message.content).toContain("Your downstream room requests have settled");
       expect(stream.frames.filter((frame) => frame.kind === "notify" && frame.notification?.botId === qa.id)).toEqual([]);
+      // The person's conversation with the teammate records the three hand-offs into one thread as one quiet line that
+      // opens it; nothing is marked unread, and the work stays in its own thread.
       expect((await botState(qa.id)).tasks.filter((task: any) => task.unread)).toEqual([]);
       expect((await botState(qa.id)).threadId).toBe(qa.threadId);
-      expect(await messages(qa.threadId)).toEqual(originalConversation);
+      const handedLine = expect.objectContaining({ role: "bot", kind: "activity", threadRef: expect.objectContaining({ botId: qa.id, threadId: thread }),
+        tool: expect.objectContaining({ nameCode: "chat.notice.askedMe" }), askedBy: expect.objectContaining({ botId: pm.id, threadIds: [thread] }) });
+      expect(await messages(qa.threadId)).toEqual([...originalConversation, handedLine]);
     } finally {
       stream.close();
       await cleanup([pm.id, qa.id]);
@@ -733,7 +738,8 @@ describe("coordinate_bots on a teammate", () => {
       expect((await messages(pm.threadId)).some(message => message.roomRequest?.id === opened.id && message.roomRequest.phase === "result" && message.tool?.ok === false)).toBe(true);
       release(hold.threadId);
       await expect.poll(async () => (await taskOf(qa.id, hold.threadId))?.busy, { timeout: 15_000 }).toBe(false);
-      expect(await messages(qa.threadId)).toEqual(originalConversation);
+      // Nothing of the work fell back into Quinn's own conversation: only the hand-off's quiet line is there.
+      expect(await messages(qa.threadId)).toEqual([...originalConversation, expect.objectContaining({ kind: "activity", threadRef: expect.objectContaining({ threadId: opened.threadId }) })]);
     } finally {
       await cleanup([pm.id, qa.id]);
       expect((await api("PUT", "/api/config", { threads: { maxConcurrentPerBot: 2 } })).status).toBe(200);
@@ -916,6 +922,9 @@ describe("a Chief of Staff tidying its team (MOCA-202)", () => {
       await expect.poll(() => handoffs().find(node => node.id === child.id)?.status, { timeout: 15_000 }).toBe("completed");
       await expect.poll(async () => (await taskOf(qa.id, child.threadId)).closedBy, { timeout: 15_000 })
         .toMatchObject({ botId: pm.id, name: "Parker" });
+      // The settled handoff wakes Parker once more on this thread. Between the first turn's end and that wake's start Parker
+      // is not busy, so a message sent then queues behind the wake: wait until the wake has started, then until it ends.
+      await expect.poll(() => promptsOf(pm.threadId).some((prompt) => JSON.stringify(prompt).includes("Your downstream room requests have settled.")), { timeout: 15_000 }).toBe(true);
       token = await heldTurn(pm, "Close the completed QA task.");
       const closed = await close(opened.body.threadId);
       expect(closed.status).toBe(200);

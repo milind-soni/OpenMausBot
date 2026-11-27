@@ -334,7 +334,13 @@ export function runLine(run: RoutineRun, now = Date.now()): { when: string; mark
   const firstLine = (text: string | undefined) => (text ?? "").split("\n").map((line) => line.trim()).find(Boolean) ?? "";
   const short = (text: string) => (text.length > 110 ? `${text.slice(0, 109).trimEnd()}…` : text);
   const when = capital(lastWhen(runTime(run), now));
-  if (run.status === "completed") return { when, mark: "✓", text: run.report?.state === "quiet" ? t("automations.run.nothingNew") : short(firstLine(run.output)) || t("automations.run.done") };
+  if (run.status === "completed") {
+    if (partlyDone(run)) {
+      const reason = short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams)));
+      return { when, mark: "!", text: t("automations.run.partial", { reason }) };
+    }
+    return { when, mark: "✓", text: run.report?.state === "quiet" ? t("automations.run.nothingNew") : short(firstLine(run.output)) || t("automations.run.done") };
+  }
   if (run.status === "waiting") return waitsOnTeammates(run) ? { when, mark: "…", text: t("automations.run.waitingOnTeam") } : { when, mark: "!", text: t("automations.reason.answer") };
   if (run.status === "running" || run.status === "queued") return { when, mark: "…", text: t("automations.runningNow") };
   if (run.status === "cancelled") {

@@ -117,10 +117,11 @@ describe("the Simple composer in a bot chat", () => {
     const pill = container.querySelector('[data-tour="composer"]')!.className.split(" ");
     expect(pill).toEqual(expect.arrayContaining(["rounded-[22px]", "bg-composer", "p-2", "ring-[0.5px]", "hover:ring-ink/[0.22]", "focus-within:ring-ink/[0.22]",
       "[transition:border-radius_300ms,box-shadow_150ms]"]));
-    expect(pill.filter((name) => name.startsWith("shadow"))).toEqual(["shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03),0_0_0_1px_rgb(228_228_228/0.04)]"]);
+    expect(pill.filter((name) => name.startsWith("shadow"))).toEqual(["shadow-(--shadow-composer)"]);
+    expect(pill).toContain("composer-shell");
     expect(container.querySelector("[data-composer-row]")!.className).not.toContain("flex-wrap");
     expect(container.querySelector("[data-composer-actions]")!.className.split(" ")).toContain("gap-2");
-    expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.05]", "ring-inset", "text-ink-tertiary"]));
+    expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.06]", "inset-ring-[0.5px]", "inset-ring-ink/[0.08]", "text-ink-tertiary"]));
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
     expect(container.querySelector("[data-goal-chip]")).toBeNull();
     expect(container.querySelector("[data-approval-chip]")).toBeNull();
@@ -132,6 +133,31 @@ describe("the Simple composer in a bot chat", () => {
     const row = menu()!.querySelector("[data-menu-key='attach']")!.className.split(" ");
     expect(row).toEqual(expect.arrayContaining(["h-8", "gap-2", "px-2", "rounded-md", "text-[14px]", "leading-5"]));
     expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[12px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
+  });
+
+  it("has no place picker, and only marks a conversation an Advanced choice put somewhere other than its bot", () => {
+    const onVm = { ...bot, computer: "vm" as const };
+    const chat = (surface?: "cloud" | "vm", surfaceAuto?: true) => ({ ...onVm, tasks: [{ threadId: bot.threadId, title: "Chat", createdAt: 1, surface, surfaceAuto }] });
+    render({ bot: chat() });
+    expect(container.querySelector('[data-testid="place-chip"]')).toBeNull();
+    expect(container.querySelector('[data-testid="place-mark"]')).toBeNull();
+    openPlus();
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach"]);
+    expect(document.body.textContent).not.toContain("Works on");
+
+    for (const [shown, marked] of [[chat("cloud"), true], [chat("vm"), false], [chat("cloud", true), false]] as const) {
+      flushSync(() => root.unmount());
+      root = createRoot(container);
+      render({ bot: shown });
+      const mark = container.querySelector<HTMLElement>('[data-testid="place-mark"]');
+      expect(Boolean(mark), JSON.stringify(shown.tasks)).toBe(marked);
+      expect(container.querySelector('[data-testid="place-chip"]')).toBeNull();
+      if (!mark) continue;
+      expect(mark.getAttribute("aria-label")).toBe("Where this conversation works: Cloud desktop");
+      expect(mark.closest("button")).toBeNull();
+      expect(mark.querySelector("button, [role=menu], [tabindex]")).toBeNull();
+    }
+    expect(fixture.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateTask" }));
   });
 
   it("starts a /learn draft from Teach a task, ahead of anything already typed", () => {

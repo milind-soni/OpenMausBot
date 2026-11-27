@@ -2,10 +2,12 @@
 // server's store and coordinator, the computer's end that asks the Cloud, and the routes. With the link off (no
 // bot-link.json in the data folder) `start` asks nobody and every hook here answers as if the link did not exist.
 import { dirname } from "node:path";
+import { mascotBodyColorSchema, mascotMaterialSchema } from "../../shared/bot-avatar.ts";
 
 import { createDialer } from "../bot-link/dial.ts";
 import { createBotLink } from "../bot-link/link.ts";
 import type { Coordinator, HandoffView } from "../coordinator.ts";
+import type { createPlacesElsewhere, Explained } from "../places-elsewhere.ts";
 import { redactSecretsInText } from "../redact.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createBotLinkRoutes, linkSessionUser } from "../routes/bot-link.ts";
@@ -31,7 +33,15 @@ export interface BotLinkHostDeps {
   coordinator(): Coordinator;
   kick(): void;
   level(bot: BotRecord): Level;
+  /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
+  titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
+  /** One line in the receiving bot's main chat for each hand-off the other place sends it (server/host/handed-line.ts). */
+  handedLine?(input: { botId: string; threadId: string; from: { botId: string; name: string }; text: string }): void;
   refusal(bot: BotRecord): string | null;
+  /** Why this bot cannot take work from the other place now (server/bot-link/far-side.ts), or null. */
+  acceptRefusal?(bot: BotRecord): string | null;
+  /** The person paused this bot, or its plan keeps it asleep: the other places are told, so they do not offer it. */
+  paused?(botId: string): boolean;
   language(threadId: string): string | undefined;
   personName(threadId: string): string | undefined;
   sessions: { issue(input: { label: string; scopes: Array<"admin" | "client">; email?: string; userId?: string }): { token: string; session: { id: string } }; revoke(id: string): boolean };
@@ -44,6 +54,18 @@ export interface BotLinkHostDeps {
   log(line: string): void;
 }
 
+type PlacesElsewhere = ReturnType<typeof createPlacesElsewhere>;
+
+/** Another place's body tint and fur land here only as valid values, since the avatar paints them. */
+const bodyColor = (value: string | undefined) => {
+  const color = mascotBodyColorSchema.safeParse(value).data;
+  return color ? { mascotBodyColor: color } : {};
+};
+const fur = (value: string | undefined) => {
+  const style = mascotMaterialSchema.safeParse(value).data;
+  return style ? { mascotMaterial: style } : {};
+};
+
 export function createBotLinkHost(deps: BotLinkHostDeps) {
   const { store } = deps;
   /** Each bot of each linked place as a record this place finds by its address: its name and look, and where it lives.
@@ -53,14 +75,15 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     for (const { id, peer, place, kind, bot } of link.linked()) {
       next.set(id, { id, name: bot.name, color: bot.color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: bot.model ?? "" },
         home: { place: peer, placeName: place.name, botId: bot.id, kind }, ...(bot.title ? { title: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}),
-        ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}) } as unknown as BotRecord);
+        ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}),
+        ...bodyColor(bot.mascotBodyColor), ...fur(bot.mascotMaterial) } as unknown as BotRecord);
     }
     // A far member of a room here that cannot be reached now (the link is off, its place is unlinked, or its place no
     // longer has it) stays a member: it is found by its address, named as it was last known, and takes no turn.
     rooms.sync();
-    for (const { id, gone, name, color, place, placeName, botId, kind, title, mascotBody, mascotFaceColor } of rooms.absent()) {
+    for (const { id, gone, name, color, place, placeName, botId, kind, title, mascotBody, mascotFaceColor, mascotBodyColor, mascotMaterial } of rooms.absent()) {
       next.set(id, { id, name, color: color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: "" },
-        home: { place, placeName, botId, ...(kind ? { kind } : {}), gone }, ...(title ? { title } : {}), ...(mascotBody ? { mascotBody } : {}), ...(mascotFaceColor ? { mascotFaceColor } : {}) } as unknown as BotRecord);
+        home: { place, placeName, botId, ...(kind ? { kind } : {}), gone }, ...(title ? { title } : {}), ...(mascotBody ? { mascotBody } : {}), ...(mascotFaceColor ? { mascotFaceColor } : {}), ...bodyColor(mascotBodyColor), ...fur(mascotMaterial) } as unknown as BotRecord);
     }
     store.standIns.clear();
     for (const [id, record] of next) if (isLinkedId(id)) store.standIns.set(id, record);
@@ -73,16 +96,23 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
   };
   /** What the app was last told of each room's far members. */
   const farTold = new Map<string, string>();
-  const rooms = createLinkedRooms({ dataDir: deps.dataDir, store, coordinator: deps.coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: () => link.wanted(),
+  const rooms = createLinkedRooms({ dataDir: deps.dataDir, store, coordinator: deps.coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), linkedBots: () => link.linked(), selfName: () => link.selfName(), wanted: (person) => link.wanted(person),
     personName: deps.personName, line: deps.roomLine, window: deps.roomWindow, log: deps.log, ...(deps.roomOpener ? { opener: deps.roomOpener } : {}), ...(deps.roomFollow ? { follow: deps.roomFollow } : {}) });
   const link = createBotLink({
     dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, rooms, directoryChanged: () => { syncStandIns(); }, revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
     bots: () => store.bots, bot: (id) => store.bot(id),
     refusal: (bot) => deps.refusal(bot as BotRecord),
+    acceptRefusal: (bot) => deps.acceptRefusal?.(bot as BotRecord) ?? null,
+    paused: (bot) => deps.paused?.(bot.id) ?? false,
     model: (bot) => (bot as BotRecord).modelSelection.model,
     level: (bot) => deps.level(bot as BotRecord),
-    openThread: (bot, title, opener) => store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId,
+    openThread: (bot, title, opener, brief) => {
+      const threadId = store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId;
+      if (threadId) deps.titleHanded?.(bot.id, threadId, brief, `@${opener.name} · `);
+      return threadId;
+    },
     hasThread: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
+    ...(deps.handedLine ? { handed: deps.handedLine } : {}),
     personName: deps.personName,
     files: {
       carried: deps.files.carried, crossed: deps.files.crossed,
@@ -113,9 +143,11 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
   });
   const dialer = createDialer({ link, log: deps.log });
   let stopWatching: (() => void) | undefined, upkeep: NodeJS.Timeout | undefined;
-  /** While the link is on: bot changes reach the other places, and old records and stray file bytes are cleared hourly. */
+  /** While the link is on: bot changes reach the other places, and old records and stray file bytes are cleared hourly.
+   * Every change to a bot can change what the other places are told (a bot made, renamed, hidden, moved, its look, model
+   * or level); the link tells them once changes settle, and only what did change. */
   const watch = () => {
-    stopWatching ??= store.onChange((change) => { if (change.type.startsWith("bot.")) link.botsChanged(); });
+    stopWatching ??= store.onChange((change) => { if (link.on() && (change.type === "bot" || change.type === "bot.deleted" || change.type === "bots.order")) link.botsChanged(); });
     watchRooms();
     if (upkeep) return;
     upkeep = setInterval(() => link.tidy(), 60 * 60_000);
@@ -135,6 +167,16 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     revoke: (sessionId) => { deps.sessions.revoke(sessionId); } });
   return {
     link, routes, rooms,
+    /** Why no bot here has the name a bot asked for, past "no such bot". With the link on, the other places' bots it can
+     * reach are listed and nothing says another place cannot be reached; a team, which the link never joins, is named as
+     * before. Off: what the person's app said of their other places, as always. */
+    explain(name: string, places: Pick<PlacesElsewhere, "explain" | "kindOf">): Explained {
+      if (!link.on() || places.kindOf(name) === "team") return places.explain(name);
+      return { hint: link.reachableElsewhere() };
+    },
+    /** A kind of the person's other places the link reaches now: its bots are in every roster and list_bots, so nothing
+     * says they can't be reached (places-elsewhere.ts `skip`). A team, which the link never joins, never is. */
+    reaches: (kind: string): boolean => link.on() && kind !== "team",
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
     start(): void {
       // Off: nothing, unless a room here still has a member from another place, which is then found and shown as away.

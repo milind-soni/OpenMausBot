@@ -2,6 +2,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
+import { githubFolders } from "../github/sign-in.ts";
+import { chatgptAccountHome } from "../drivers/codex-account-home.ts";
+import { boxEnvironment } from "./env.ts";
 import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
@@ -176,6 +179,13 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, join(dataDir, "providers", "key"))).toBe("none");
   });
 
+  it("MausBot's own Pi agent folder (PI_CODING_AGENT_DIR) goes back read-write, and no other instance's", () => {
+    const own = join(dataDir, "providers", "pi-own", "a".repeat(64), "agent");
+    const plan = planBox(setup(), { command: "/usr/bin/pi", args: ["--mode", "rpc"], cwd, env: { HOME: home, PI_CODING_AGENT_DIR: own } });
+    expect(visibleInBox(plan, join(own, "models.json"))).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "providers", "pi-own", "b".repeat(64), "agent", "models.json"))).toBe("none");
+  });
+
   it("a cwd outside the data folder is the turn's folder; a bot named by the caller gets its own folder", () => {
     const plan = planBox(setup(), { command: "/usr/bin/codex", args: [], cwd: "/data/projects/site", env: { HOME: home }, botId: "bot-z" });
     expect(plan.botId).toBe("bot-z");
@@ -256,6 +266,32 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(ask({ XDG_CACHE_HOME: join(dataDir, "workspaces", "b", "cache") }, true), join(dataDir, "workspaces", "b", "cache", "x"))).toBe("rw");
     // An engine OpenMausBot starts keeps the home it was given there.
     expect(visibleInBox(ask({ CODEX_HOME: join(dataDir, "providers", "codex-1") }, false), join(dataDir, "providers", "codex-1", "auth.json"))).toBe("rw");
+  });
+
+  it("gives a ChatGPT account's turn its own Codex home and no other account's", () => {
+    const work = chatgptAccountHome("chatgpt-work", dataDir), spare = chatgptAccountHome("chatgpt-spare", dataDir);
+    const env = boxEnvironment({ HOME: home, CODEX_HOME: work, OMB_DATA_DIR: dataDir });
+    expect(env).toEqual({ HOME: home, CODEX_HOME: work });
+    const plan = planBox(setup(), { command: "codex", args: ["app-server"], cwd, env });
+    expect(visibleInBox(plan, join(work, "auth.json"))).toBe("rw");
+    expect(visibleInBox(plan, join(spare, "auth.json"))).toBe("none");
+  });
+
+  it("never shows a GitHub sign-in's folder (its token, gh's config and HOME), whatever the turn asks", () => {
+    const owner = githubFolders(dataDir, "owner"), member = githubFolders(dataDir, `p_${"a".repeat(22)}`);
+    const files = [join(owner.config, "hosts.yml"), join(owner.home, ".gitconfig"), join(member.config, "hosts.yml"), join(dataDir, "github")];
+    const memberHome = join(dataDir, "engine-homes", "member-aaaaaaaaaaaaaaaa");
+    const plans = [
+      turn(),
+      planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true }),
+      planBox(setup(), { command: "/usr/local/bin/claude", args: [], cwd, env: { HOME: memberHome }, home: memberHome }),
+      // A command line or a configured server's environment naming the folder is not a grant.
+      planBox(setup(), { command: "/usr/bin/gh", args: ["auth", "token", join(owner.config, "hosts.yml")], cwd, env: { HOME: home }, botId: "bot-a" }),
+      planBox(setup(), { command: "sh", args: [], cwd, env: { XDG_CONFIG_HOME: owner.home, XDG_CACHE_HOME: join(dataDir, "github") }, botId: "bot-a", configured: true }),
+    ];
+    for (const plan of plans) for (const file of files) expect(visibleInBox(plan, file), file).toBe("none");
+    // The check bites: with the data folder bound, the token file is there.
+    expect(visibleInBox(turn(["bind-data"]), join(owner.config, "hosts.yml"))).toBe("rw");
   });
 
   it("each mutation opens exactly the hole it names", () => {

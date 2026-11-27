@@ -31,6 +31,12 @@ export declare function clearRecordsFromOtherMachines(
   dataDir: string,
 ): { path: string; host: string; pid: number }[];
 
+export declare function creationTimeNeeded(platform: NodeJS.Platform, ownerPid: number, parentPid: number | null): boolean;
+
+export declare function consumeHostIdentity(environment: Record<string, string | undefined>): { boot: string | null | undefined; machine: string | null | undefined } | null;
+
+export declare function hostBootSession(): string | null;
+
 export declare function macMountIsLocal(dfOutput: string, mountTable: string): boolean;
 
 export declare function inMacSyncedFolder(path: string, home: string): boolean;

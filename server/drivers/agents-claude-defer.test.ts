@@ -19,13 +19,16 @@ const PROFILES: Record<string, Record<string, string>> = {
     OMB_TEAM_PEOPLE: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1",
   },
 };
+// A Team Cloud with its board on: the three board tools come deferred, their names only.
+PROFILES.board = { ...PROFILES.fullest!, OMB_TEAM_BOARD: "1" };
 const DEFER = { [DEFER_TOOLS_ENV]: "1" };
 
 /** Bytes Claude Code sends up front for the agents server when the budget was last set; each may move at most 2%. */
 const UP_FRONT_BASELINE: Record<string, { whole: number; deferred: number }> = {
-  default: { whole: 3855, deferred: 1252 },
-  specialist: { whole: 1495, deferred: 1080 },
-  fullest: { whole: 3855, deferred: 1589 },
+  default: { whole: 3896, deferred: 1360 },
+  specialist: { whole: 1495, deferred: 1188 },
+  fullest: { whole: 3896, deferred: 1721 },
+  board: { whole: 3896, deferred: 1794 },
 };
 
 const listed = (env: Record<string, string>) => agentsToolList(env).listed as Array<{ name: string; description: string; inputSchema: unknown; _meta?: Record<string, unknown> }>;

@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider, useStore, type Action, type AppState, type Bot, type Group, type Message } from "./store";
+import { newChatThreadId } from "./new-chat";
 
 class FixtureEventSource {
   static current: FixtureEventSource;
@@ -70,11 +71,7 @@ beforeEach(async () => {
   snapshot = deferred();
   switchResponse = undefined;
   newTaskResponse = undefined;
-  const stored = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, String(value)); },
-    removeItem: (key: string) => { stored.delete(key); }, clear: () => stored.clear(),
-  });
+  localStorage.clear();
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
     if (path.startsWith("/api/bots?")) {
@@ -108,8 +105,9 @@ describe("navigation while a reconnect snapshot is in flight", () => {
   it.each(["bot", "group"])("keeps a new %s task entry without restoring tasks omitted by the server", async owner => {
     await resync();
     newTaskResponse = deferred();
+    if (owner === "bot") flushSync(() => dispatch({ type: "newTask", botId: "bot" }));
     flushSync(() => dispatch(owner === "bot"
-      ? { type: "newTask", botId: "bot" }
+      ? { type: "send", botId: "bot", threadId: newChatThreadId("bot"), text: "First", sendId: "first" }
       : { type: "newGroupTask", groupId: "room" }));
     const createdBot = bot("c", "created"), createdRoom = room("c", "created");
     createdBot.tasks = [...tasks, { threadId: "c", title: "Created", createdAt: 2 }];
@@ -120,7 +118,7 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     await applySnapshot("a", ["a"]);
 
     expect(current().threadId).toBe(owner === "bot" ? "c" : "room-c");
-    expect(current().messages.map(message => message.id)).toEqual(["created"]);
+    expect(current().messages[0]?.id).toBe("created");
     expect(current().tasks?.map(task => task.threadId)).toEqual(owner === "bot" ? ["a", "c"] : ["room-a", "room-c"]);
   });
 

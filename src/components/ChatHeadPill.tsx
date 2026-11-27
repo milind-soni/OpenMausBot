@@ -1,6 +1,6 @@
 import { localizedTaskTitle } from "@/lib/task-title";
 import { ChevronRight, Lock, UserRound, Users } from "lucide-react";
-import type { ComponentProps } from "react";
+import { useMemo, type ComponentProps } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -11,6 +11,8 @@ import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { BOT_PANEL_ID } from "./bot-panel/side-panel";
 import { sharedChatAudience } from "./TeamPrivateChatsLine";
+import { showsTabs, threadTabs } from "./thread-tabs";
+import { ThreadSwitcherPill } from "./ThreadSwitcherPill";
 
 /** The factory title a new conversation starts with. */
 const UNTITLED = "New thread";
@@ -29,11 +31,13 @@ function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
   }
 }
 
-/** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. Away from
- * the bot's main conversation it also names the one on screen. A dot says another of the bot's conversations needs a
+/** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. With two
+ * threads or more it also names the one on screen, which opens the bot's threads to switch; with one, away from the bot's
+ * main conversation, it names that. A dot says another of the bot's conversations needs a
  * look; a team chat says who can read it with one quiet glyph. */
-export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
+export function ChatHeadPill({ bot, avatar, privacy, onToggle, switcher = false }: {
   bot: Bot;
+  switcher?: boolean;
   avatar: Pick<ComponentProps<typeof BotAvatar>, "state" | "motion" | "motionKey" | "animated">;
   privacy: ChatHeadPrivacy;
   onToggle: () => void;
@@ -47,6 +51,16 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const conversation = !awayFromMainThread(bot, false) ? (privacy?.kind === "shared" ? t("task.sharedChat") : null)
     : !title || title === UNTITLED ? t("task.untitledChat") : localizedTaskTitle(title);
   const label = t("chat.openProfileAria", { name: bot.name });
+  const tabs = useMemo(() => (switcher ? threadTabs(bot) : []), [switcher, bot.id, bot.threadId, bot.switchingTo, bot.mainThreadId, bot.tasks, bot.busy]);
+  if (showsTabs(tabs)) {
+    const head = <>
+      <BotAvatar bot={bot} size={28} {...avatar} />
+      <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
+      {privacyLabel && <span data-chathead-privacy={privacy?.kind} title={privacyLabel} className="flex shrink-0 text-ink-tertiary"><PrivacyIcon size={13} aria-hidden="true" /><span className="sr-only">{privacyLabel}</span></span>}
+      {elsewhere > 0 && <span role="img" data-chathead-elsewhere aria-label={t("task.otherActivity", { count: elsewhere })} className="size-1.5 shrink-0 rounded-full bg-accent" />}
+    </>;
+    return <ThreadSwitcherPill bot={bot} tabs={tabs} head={<span className="flex min-w-0 items-center gap-2 pe-1">{head}</span>} label={label} panelOpen={open} onToggle={onToggle} />;
+  }
   return (
     <button
       type="button"
@@ -57,9 +71,9 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
       aria-label={conversation ? `${label}, ${conversation}` : label}
       aria-expanded={open}
       aria-controls={open ? BOT_PANEL_ID : undefined}
-      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[7.5px] pl-[7.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+      className={cn("group flex min-w-0 max-w-full items-center gap-2 rounded-full py-[5.5px] pl-[5.5px] pr-[13.5px] text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
     >
-      <BotAvatar bot={bot} size={24} {...avatar} />
+      <BotAvatar bot={bot} size={28} {...avatar} />
       <span dir="auto" className="min-w-0 truncate text-[14px] font-medium leading-5">{bot.name}</span>
       {conversation && (
         <>

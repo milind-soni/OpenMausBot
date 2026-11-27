@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { mascotFaceColorSchema } from "./bot-avatar.ts";
+import { mascotBodyColorSchema, mascotFaceColorSchema, mascotMaterialSchema } from "./bot-avatar.ts";
 
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
@@ -122,6 +122,8 @@ const backupSchema = z.object({
     mascotExpression: z.string().max(80).optional(),
     mascotBody: z.string().max(40).optional(),
     mascotFaceColor: mascotFaceColorSchema.optional(),
+    mascotBodyColor: mascotBodyColorSchema.optional(),
+    mascotMaterial: mascotMaterialSchema.optional(),
     chiefOfStaff: z.boolean(),
     hidden: z.boolean(),
     playbooks: z.array(playbook).max(200),

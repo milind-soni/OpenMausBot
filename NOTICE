@@ -100,6 +100,11 @@ viewers and screencast pacing, tool definitions and snapshot bound
 (apps/server/src/preview and apps/server/src/mcp), Copyright 2026 T3 Tools
 Inc., used under the MIT License (third_party/t3-code/LICENSE).
 
+The input gate of the bots' browser desktop view
+(server/browser/desktop/rfb-filter.ts) adapts the RFB client-message filter of
+Hermes Agent, https://github.com/NousResearch/hermes-agent, Copyright (c) 2025
+Nous Research, used under the MIT License (third_party/hermes-agent/LICENSE).
+
 The social post previews template (skills/social-posts/posts.html) adapts the
 post card markup and platform styling of MiniMock,
 https://github.com/minianon/MiniMock, Copyright (c) 2026 Tushar Bhardwaj, used
@@ -124,3 +129,9 @@ Teams' display-name rule. Copyright 2025-2026 Vexa.ai Inc. and the Vexa
 contributors, used under the Apache License, Version 2.0
 (third_party/vexa/LICENSE). The adapted parts were rewritten in our own code;
 no Vexa file is included unmodified.
+
+The object avatars bots can wear include the engine and avatar definitions of
+Open Bot Avatar 0.3.0, with the changes its vendored README lists,
+https://github.com/DominikScholz/open-bot-avatar, Copyright (c) 2026 Dominik
+Scholz, used under the MIT License
+(packages/phone-protocol/src/open-bot-avatar/LICENSE).

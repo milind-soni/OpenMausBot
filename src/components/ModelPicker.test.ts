@@ -13,6 +13,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   return { instances: [] as InstanceInfo[], modelVariantSessions: {} as AppState["modelVariantSessions"], dispatch: vi.fn() };
 });
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
@@ -132,6 +133,36 @@ describe("EffortRow", () => {
 
   it("renames xhigh, the one level that does not capitalize cleanly", () => {
     expect(renderEffort([engine(["xhigh"])])).toContain(">X-High<");
+  });
+
+  it("offers per-model effort levels (including Ultra) and clears unsupported effort on switch", () => {
+    const tieredEngine: InstanceInfo = {
+      ...engine(["low", "medium", "high", "xhigh", "max", "ultra"]),
+      models: {
+        default: "gpt-6.2-sol",
+        options: [
+          { id: "gpt-6.2-sol", label: "GPT-6.2-Sol", effortLevels: ["low", "medium", "high", "xhigh", "max", "ultra"] },
+          { id: "gpt-6-luna", label: "GPT-6-Luna", effortLevels: ["low", "medium", "high", "xhigh", "max"] },
+        ],
+      },
+    };
+    fixture.instances = [tieredEngine];
+
+    const solMarkup = renderToStaticMarkup(createElement(EffortRow, {
+      bot: { ...bot("ultra"), modelSelection: { instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" } },
+    }));
+    expect(levelButtons(solMarkup).map((button) => button.label)).toEqual(["Default", "Low", "Medium", "High", "X-High", "Max", "Ultra"]);
+
+    const lunaMarkup = renderToStaticMarkup(createElement(EffortRow, {
+      bot: { ...bot(), modelSelection: { instanceId: "codex", model: "gpt-6-luna" } },
+    }));
+    expect(levelButtons(lunaMarkup).map((button) => button.label)).toEqual(["Default", "Low", "Medium", "High", "X-High", "Max"]);
+
+    expect(modelSelectionForPick(
+      { instanceId: "codex", model: "gpt-6.2-sol", effort: "ultra" },
+      tieredEngine,
+      "gpt-6-luna",
+    )).toEqual({ instanceId: "codex", model: "gpt-6-luna" });
   });
 });
 

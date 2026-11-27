@@ -6,9 +6,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
-import { codexHome } from "./drivers/codex-identity.ts";
+import { codexHome } from "./drivers/codex-identity.ts"; import { chatgptAccountHome, chatgptAccountSignsInByDevice } from "./drivers/codex-account-home.ts";
 import { codexHasCredits } from "./codex-credits.ts";
-import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
+import { antigravityNativePlanUsage, antigravityPlanUsage, antigravityRunsNativeCli } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
@@ -72,6 +72,8 @@ export interface PlanAccount {
   configDir?: string;
   /** No usage reading: a ChatGPT plan signed in through OpenMausBot has no CLI login on disk, and a Claude instance whose config sets `usageMeter: false` keeps its login unread (a refused turn still fails over). */
   noUsage?: true;
+  /** An Antigravity account's CLI path: whether it runs the native CLI is read when its limits are. */
+  antigravityCli?: string;
 }
 
 export interface PlanCredential {
@@ -144,21 +146,21 @@ const PRODUCT_NAME: Record<PlanDriver, string> = {
   antigravity: "Antigravity",
 };
 
-export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
+export function planAccountsFromInstances(instances: InstanceConfigMap, env: NodeJS.ProcessEnv = process.env): PlanAccount[] {
   const accounts: PlanAccount[] = [];
   for (const [id, entry] of Object.entries(instances)) {
     const driver = DRIVER_OF[entry.driver];
     if (!driver) continue;
-    const config = asRecord(entry.config);
-    const configDir = typeof config?.configDir === "string" ? config.configDir : undefined;
+    const config = asRecord(entry.config), configDir = typeof config?.configDir === "string" ? config.configDir : undefined;
+    const ownCodexHome = driver === "codex" && chatgptAccountSignsInByDevice(config, env);
     accounts.push({
       id,
       name: entry.displayName?.trim() || PRODUCT_NAME[driver],
       driver,
-      environment: { ...entry.environment },
+      environment: { ...entry.environment, ...(ownCodexHome ? { CODEX_HOME: chatgptAccountHome(id) } : {}) },
       ...(configDir ? { configDir } : {}),
-      // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : {}),
+      // Reading ~/.codex/auth.json for a browser-signed ChatGPT plan would report (and hold it on) another account's limit.
+      ...((config?.authMode === "chatgpt-plan" && !ownCodexHome) || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : driver === "antigravity" && typeof config?.cli === "string" ? { antigravityCli: config.cli } : {}),
     });
   }
   return accounts;
@@ -328,12 +330,7 @@ function closedWindow(): PlanWindow {
 
 function openWindow(usedPercent: number, resetsAt: string | null): PlanWindow {
   const used = clampPercent(usedPercent);
-  return {
-    available: true,
-    usedPercent: used,
-    remainingPercent: clampPercent(100 - used),
-    resetsAt,
-  };
+  return { available: true, usedPercent: used, remainingPercent: clampPercent(100 - used), resetsAt };
 }
 
 function extraLine(label: string, window: PlanWindow): PlanExtra {
@@ -704,7 +701,7 @@ function planUsageCacheKey(accounts: PlanAccount[]): string {
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([name, value]) => `${name}=${value}`)
       .join("\n");
-    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage"].join("\u0000");
+    return [account.id, account.driver, account.name, account.configDir ?? "", environment, account.noUsage ? "no-usage" : "usage", account.antigravityCli ?? ""].join("\u0000");
   }).join("\n");
 }
 
@@ -916,7 +913,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
 
 async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
-  if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
+  if (account.driver === "antigravity") { const native = await antigravityRunsNativeCli(account.antigravityCli, { ...process.env, ...account.environment }); const windows = await (native ? antigravityNativePlanUsage(account.id, account.environment, deps) : antigravityPlanUsage(account.id, deps)); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
   try {
     credential = await deps.credentials.read(account);
   } catch {

@@ -1,10 +1,13 @@
 import { hintSeen, hintSeenPatch, type OnboardingStatus } from "@/lib/onboarding";
 
-/** "MausBot is better with your team": every person sees it once, on every surface but a branded build or an organization's
- * desktop, ahead of every other notice. On a Team Cloud its record is each person's (TEAM_PERSONAL_HINTS). */
+/** "MausBot is better with your team": once per person whom What's new has nothing for (a Team Cloud's members), on every
+ * surface but a branded build or an organization's desktop. On a Team Cloud its record is each person's (TEAM_PERSONAL_HINTS). */
 export const TEAMS_NOTICE = "teams-2026-11b";
-/** The What's new popup's campaign: each person sees it once. A new id shows it once more. */
-export const WHATS_NEW_NOTICE = "whats-new-2026-11";
+/** What's new, the new Cloud, Team and the sponsor's slides: each person sees it once, as the launch's notice. A new id shows
+ * it once more. Seeing it counts as seeing the Teams popup and the sponsor's card. On a Team Cloud its record is each person's. */
+export const WHATS_NEW_NOTICE = "whats-new-2026-11b";
+/** The earlier What's new, with the new Cloud and Team only. */
+export const EARLIER_WHATS_NEW_NOTICE = "whats-new-2026-11";
 export const UPDATES_CONSENT_NOTICE = "updates-consent";
 /** The Simple mode popup, once per browser (simple-mode-prompt.ts keeps whether it was closed). */
 export const SIMPLE_MODE_NOTICE = "simple-mode-prompt";
@@ -14,20 +17,21 @@ export const CLOUD_NOTICE = "cloud-notice";
 export const STAR_NOTICE = "github-star-dismissed";
 /** Bots on this computer and on another place of the person's (two-places.ts): dismissed per place, by main. */
 export const TWO_PLACES_NOTICE = "two-places";
+/** "This computer and My Cloud together" is on by default now: once per person on this computer (main keeps that). */
+export const TOGETHER_NOTICE = "together-default";
 export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
 /** The Move from Grok Bot popup: each person sees it once, first of all, after their welcome. */
 export const GROK_MOVE_NOTICE = "grok-move-2026-11";
-/** The sponsor's card for ModelGo: each person sees it once, on every page but a branded build or a desktop whose organization
- * refuses it, and on the first launch it may show in: first when nothing else is due, else right after the launch's notice. */
+/** The sponsor's card for ModelGo, now What's new's last slide: kept as seen with it, and listed in Announcements. */
 export const MODELGO_OFFER_NOTICE = "modelgo-offer-2026-11";
 /** Update MausBot on your phone: once per phone with an older app after this computer's secure link ended. */
 export const PHONE_UPDATE_NOTICE = "phone-app-update";
 /** A card from the project's announcements file (src/lib/announcements.ts keeps which ones each person saw, and allows one a
- * launch): after every notice someone must act on and every built-in offer, and, as the sponsor's card, it may follow the
- * launch's notice once that is closed, after the product-updates question and the sponsor's card. */
+ * launch): after every notice someone must act on and every built-in offer, and it may follow the launch's notice once that
+ * is closed, after the product-updates question. */
 export const ANNOUNCEMENT_NOTICE = "announcement";
 
 /**
@@ -38,15 +42,15 @@ export const NOTICES = [
   TEAMS_NOTICE,
   GROK_MOVE_NOTICE,
   PHONE_UPDATE_NOTICE,
-  SIMPLE_MODE_NOTICE,
   WHATS_NEW_NOTICE,
+  SIMPLE_MODE_NOTICE,
   UPDATES_CONSENT_NOTICE,
   TWO_PLACES_NOTICE,
   PRODUCT_HUNT_NOTICE,
   CLOUD_INTRO,
   CLOUD_TRIAL_NOTICE,
   CLOUD_NOTICE,
-  MODELGO_OFFER_NOTICE,
+  TOGETHER_NOTICE,
   BOAT_OFFER_NOTICE,
   ANNOUNCEMENT_NOTICE,
   STAR_NOTICE,
@@ -56,13 +60,13 @@ export type NoticeId = (typeof NOTICES)[number];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 
-/** What may still come in a launch another notice took: the product-updates question, the sponsor's card and a card from the
- * announcements file, which everyone is to see on the first launch they may show in. Each in its place in NOTICES. */
-export const FOLLOWERS: readonly NoticeId[] = [UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE];
+/** What may still come in a launch another notice took: the product-updates question and a card from the announcements
+ * file, which everyone is to see on the first launch they may show in. Each in its place in NOTICES. */
+export const FOLLOWERS: readonly NoticeId[] = [UPDATES_CONSENT_NOTICE, ANNOUNCEMENT_NOTICE];
 /** The followers that are cards of their own: they never go ahead of a notice to act on, nor replace a card still up. */
-const FOLLOWING_CARDS: readonly NoticeId[] = [MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE];
-/** Notices the person has to act on. The sponsor's card and an announcement card never go ahead of one, even one left for a
- * later launch: they wait for that launch and follow it there. */
+const FOLLOWING_CARDS: readonly NoticeId[] = [ANNOUNCEMENT_NOTICE];
+/** Notices the person has to act on. An announcement card never goes ahead of one, even one left for a later launch: it
+ * waits for that launch and follows it there. */
 export const MUST_ACT: readonly NoticeId[] = [GROK_MOVE_NOTICE, PHONE_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE];
 
 /** `launch`: the notice this launch already showed (launchNotice), the only one besides FOLLOWERS that may show again in it.

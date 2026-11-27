@@ -187,7 +187,9 @@ process.stdout.write(typeof result === 'string' ? result : JSON.stringify(result
 
   const harnessPort = new URL(fixture.info.url).port;
   const companionPort = await freePort();
-  const controlPort = await freePort();
+  // Picked after the first listener closed, so the OS can hand the same port back; the sidecar refuses a shared one.
+  let controlPort = await freePort();
+  while (controlPort === companionPort) controlPort = await freePort();
   const controlToken = randomBytes(32).toString("base64url");
   const controlHeaders = { "x-openmausbot-control-token": controlToken };
   const companionHome = join(scratch, "companion-home");

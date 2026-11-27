@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
 import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
+import { trimmedHeaderValues, unsendableHeader } from "./bot-box/broker-headers.ts";
 
 export { importedMcpServerName } from "../shared/mcp-name.ts";
 
@@ -34,6 +35,23 @@ export interface McpOAuthClientConfig {
   clientId: string;
   clientSecret?: string;
   scopes?: string[];
+  /** Where the app is registered to return, when it is an https address rather than this computer's loopback: the only
+   * return a browser on another computer can reach. Absent: the loopback address, pasted back. */
+  redirectUri?: string;
+}
+
+/** The return address a configured app may name: this server's https address, at the callback path. */
+export function mcpConfiguredRedirectError(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return "The redirect URI must be an https address ending in /mcp-oauth/callback.";
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || url.pathname !== "/mcp-oauth/callback") {
+    return "The redirect URI must be an https address ending in /mcp-oauth/callback.";
+  }
+  return null;
 }
 export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   enabled: boolean;
@@ -67,7 +85,7 @@ export interface RemoteMcpServerListing {
   enabled: boolean;
   resultBudget?: number;
   apps: boolean;
-  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
+  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean; redirectUri?: string };
   runsOn?: McpRunsOn;
   bot?: string;
 }
@@ -183,6 +201,10 @@ function headerError(name: string, value: string): string | null {
   return null;
 }
 
+function unsendableHeaderError(name: string, value: string): string | null {
+  return unsendableHeader({ [name]: value }) ? `Header “${name}” has characters that are not allowed in a header (such as a curly quote or a control character).` : null;
+}
+
 /** Credentials belong in a write-only header, not in the address the listing shows. */
 function urlError(value: string): string | null {
   let parsed: URL;
@@ -232,6 +254,7 @@ const oauthClientSchema = z.object({
     .regex(CLIENT_ID, "A client ID is printable text on one line."),
   clientSecret: z.string().min(1).max(CLIENT_SECRET_MAX).regex(CLIENT_ID, "A client secret is printable text on one line.").optional(),
   scopes: z.array(z.string().max(256).regex(SCOPE, "Scopes are single words, like offline_access or api://my-app/mcp.read.")).max(32).optional(),
+  redirectUri: z.string().trim().max(2_048).optional(),
 }).strict();
 
 const remoteEntrySchema = z.object({
@@ -271,9 +294,19 @@ function resolveOAuthClient(
     clientSecret = incoming.clientSecret;
   }
   const scopes = [...new Set(incoming.scopes ?? [])];
+  if (incoming.redirectUri !== undefined) {
+    const redirectError = mcpConfiguredRedirectError(incoming.redirectUri);
+    if (redirectError) return { ok: false, error: redirectError };
+  }
+  const redirectUri = incoming.redirectUri ?? (saved?.clientId === incoming.clientId ? saved.redirectUri : undefined);
   return {
     ok: true,
-    value: { clientId: incoming.clientId, ...(clientSecret ? { clientSecret } : {}), ...(scopes.length ? { scopes } : {}) },
+    value: {
+      clientId: incoming.clientId,
+      ...(clientSecret ? { clientSecret } : {}),
+      ...(scopes.length ? { scopes } : {}),
+      ...(redirectUri ? { redirectUri } : {}),
+    },
   };
 }
 
@@ -357,7 +390,10 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   }
   const headers = resolveSecrets(incoming, existing && isRemoteMcpServer(existing) ? existing.headers : undefined);
   if (!headers.ok) return headers;
-  const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value)).find((error) => error !== null);
+  // The whitespace a paste leaves around a value (a trailing newline) is dropped, on a save and on a read of what an earlier
+  // version saved. A save refuses what still cannot be sent; a stored one is read as it is, and the broker refuses only its request.
+  headers.values = trimmedHeaderValues(headers.values);
+  const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value) ?? (mutation ? unsendableHeaderError(name, value) : null)).find((error) => error !== null);
   if (invalidHeader) return { ok: false, error: invalidHeader };
   const oauth = resolveOAuthClient(parsed.data.oauth, existing && isRemoteMcpServer(existing) ? existing.oauth : undefined);
   if (!oauth.ok) return oauth;
@@ -474,7 +510,12 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
         apps: server.apps !== false,
         ...(server.oauth ? {
-          oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
+          oauth: {
+            clientId: server.oauth.clientId,
+            scopes: server.oauth.scopes ?? [],
+            clientSecretConfigured: Boolean(server.oauth.clientSecret),
+            ...(server.oauth.redirectUri ? { redirectUri: server.oauth.redirectUri } : {}),
+          },
         } : {}),
         ...(server.runsOn ? { runsOn: server.runsOn } : {}),
         ...(server.bot ? { bot: server.bot } : {}),

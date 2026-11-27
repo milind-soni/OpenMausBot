@@ -20,6 +20,7 @@ import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { sawThread } from "../thread-presence.ts";
+import { stillHeldUnread } from "../host/room-reads.ts";
 import { refusalBody, refusalText, userError } from "../user-errors.ts";
 import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
@@ -55,6 +56,10 @@ export interface BotSettingsRouteDeps {
   /** A Team Cloud: marks a bot's shared conversation read or unread for this person alone (host/room-reads.ts); false
    * for a private chat, which keeps its one mark. */
   personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
+  /** A Team Cloud: whether this person's unread mark on a bot's shared conversation still holds; null for a private chat. */
+  personHeldUnread?(auth: RequestAuth, threadId: string): boolean | null;
+  /** A bot's model changed (host/no-terminal.ts). */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
 }
 
 export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandler {
@@ -162,6 +167,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       if (!bot) return json(res, 404, { error: "no such bot" });
       store.patchTask(bot.id, selected.threadId, { modelSelection: undefined,
         ...hostedModels?.resetTask(selected.modelSelection, checked.selection) });
+      deps.modelSwitched?.(bot.id, selected.threadId, selected.modelSelection, checked.selection, true);
       return json(res, 200, { bot: wireBot(bot) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/read$/);
@@ -169,6 +175,11 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const body = await readBody(req);
       requirePinnedClientThread(m[1], body?.threadId);
       const current = requestedTaskBot(m[1], body?.threadId);
+      // "seen": the conversation is only on screen. A mark the person made with it open holds against that.
+      if (body?.reason === "seen" && (deps.personHeldUnread?.(auth, current.threadId) ??
+        stillHeldUnread(store.activePath(current.threadId), store.taskByThread(current.id, current.threadId)?.heldUnread, store.messagesFor(current.threadId)))) {
+        return json(res, 200, { bot: wireBot(store.bot(current.id)!) });
+      }
       sawThread(current.threadId);
       deps.threadRead?.(auth, current.threadId);
       if (deps.personMarkThread?.(auth, current.threadId, false)) {
@@ -176,7 +187,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
         return json(res, 200, { bot: wireBot(store.bot(current.id)!) });
       }
       const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
-      const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
+      const changed = Boolean(task?.unread) || task?.heldUnread !== undefined || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
       if (changed) store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
       readThreadNotifications(current.threadId, broadcast, notificationListed(auth));
       const visible = wireBot(store.bot(current.id)!);

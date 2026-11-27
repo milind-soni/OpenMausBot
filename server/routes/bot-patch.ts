@@ -6,6 +6,7 @@ import { isBotLiveVoice } from "../../shared/live-call.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
 import { parseToolScope, toolScopeWidens } from "../../shared/tool-scope.ts";
+import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
@@ -24,7 +25,10 @@ import type { ModelSelection } from "../contracts.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
+import { heldFrom } from "../host/room-reads.ts";
+import { unreadTargetTask } from "../task-record.ts";
 import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
+import { mainThreadChoicePatch } from "../main-thread.ts";
 import type { MemoryUpkeep } from "../memory-upkeep.ts";
 import { phoneAppsFor } from "../phones/access.ts";
 import { profileSnapshot } from "../profile-revision.ts";
@@ -90,6 +94,9 @@ export interface BotPatchRouteDeps {
   chiefChanged?(changed: readonly BotRecord[]): void;
   /** The bots of the turns now running, each with the grants its turn reads. */
   turnBots?: { values(): Iterable<BotRecord> };
+  /** A bot's model changed, from `before` to `after`, seen in `threadId` (host/no-terminal.ts says there what it takes away). */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
+  vpsServerSwitched?(bot: BotRecord): void;
 }
 
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
@@ -238,10 +245,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       // null clears the choice; otherwise an open conversation the main-thread resolver may pick, never a routine run or archived.
       // Same 400 for unknown and ineligible ids, so a private thread's existence is not revealed.
       if (body.mainThreadChoice !== undefined) {
-        const chosen = typeof body.mainThreadChoice === "string" ? deps.mainThreadTasks(m[1]).find((task) => task.threadId === body.mainThreadChoice) : null;
-        if (body.mainThreadChoice === null) patch.mainThreadChoice = undefined;
-        else if (chosen && !chosen.routineRunId && chosen.archivedAt === undefined) patch.mainThreadChoice = chosen.threadId;
-        else return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
+        const choice = body.mainThreadChoice === null || typeof body.mainThreadChoice === "string" ? mainThreadChoicePatch(deps.mainThreadTasks(m[1]), body.mainThreadChoice) : null;
+        if (!choice) return json(res, 400, { error: "mainThreadChoice must be one of this bot's conversations" });
+        Object.assign(patch, choice);
       }
       if (section !== undefined) patch.section = section ?? undefined;
       if (body.chiefOfStaff === false) patch.chiefOfStaff = false;
@@ -249,16 +255,22 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
           return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
         }
-        const chain: Array<{ instanceId: string; model: string }> = [];
+        const chain: ModelSelection[] = [];
         for (const entry of body.fallback as unknown[]) {
-          const row = entry && typeof entry === "object" ? (entry as { instanceId?: unknown; model?: unknown }) : null;
+          const row = entry && typeof entry === "object" ? (entry as Partial<Record<keyof ModelSelection, unknown>>) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
           if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
           const model = row.model.trim();
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
-          chain.push({ instanceId: row.instanceId, model });
+          if (row.effort === undefined && row.variant === undefined) {
+            chain.push({ instanceId: row.instanceId, model });
+          } else {
+            const checked = deps.checkedModelSelection(row);
+            if (!checked.ok) return json(res, checked.status, refusalBody(checked));
+            chain.push(checked.selection);
+          }
         }
         patch.fallback = chain;
       }
@@ -370,6 +382,16 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.memoryUpkeep !== "boolean") return json(res, 400, { error: "memoryUpkeep must be true or false" });
         patch.memoryUpkeep = body.memoryUpkeep;
       }
+      let memoryModel: MemoryModelSelection | undefined;
+      if (body.memoryModel !== undefined) {
+        const parsed = z.object({
+          instanceId: z.string().min(1).max(200),
+          model: z.string().min(1).max(500).regex(/^[A-Za-z0-9][\x21-\x7e]*$/),
+        }).strict().nullable().safeParse(body.memoryModel);
+        if (!parsed.success) return json(res, 400, { error: "memoryModel must name a connection and model, or be null for Automatic" });
+        memoryModel = parsed.data ?? undefined;
+        patch.memoryModel = memoryModel;
+      }
       // true/false overrides the workspace, null follows it.
       if (body.cacheKeepWarm !== undefined) {
         if (body.cacheKeepWarm !== null && typeof body.cacheKeepWarm !== "boolean") return json(res, 400, { error: "cacheKeepWarm must be true, false or null" });
@@ -378,6 +400,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.helperModel !== undefined) {
         if (typeof body.helperModel !== "boolean") return json(res, 400, { error: "helperModel must be true or false" });
         patch.helperModel = body.helperModel;
+      }
+      // An object turns Check before done on, naming the bot that checks or none for a thread on another model; null turns it off.
+      if (body.checkWork !== undefined) {
+        const parsed = z.object({ checker: z.string().min(1).max(128).optional() }).strict().nullable().safeParse(body.checkWork);
+        if (!parsed.success) return json(res, 400, { error: "checkWork must be null or an object with an optional checker bot id" });
+        const checker = parsed.data?.checker;
+        if (checker !== undefined && (checker === m[1] || !store.bot(checker) || deps.levelOf(auth, checker) === "none")) return json(res, 400, { error: "checkWork.checker must be another bot here that you can reach" });
+        patch.checkWork = parsed.data ?? undefined;
       }
       if (body.browser !== undefined) {
         if (typeof body.browser !== "boolean") return json(res, 400, { error: "browser must be true or false" });
@@ -650,6 +680,15 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      if (memoryModel && freshBrowserBot) {
+        const { instanceId, model } = memoryModel;
+        const instance = registry.get(instanceId);
+        if (instanceId !== (normalizedSelection ?? freshBrowserBot.modelSelection).instanceId || !instance?.openRouter ||
+            !instance.enabled || !instance.models.options.some((option) => option.id === model) ||
+            hostedModels?.allows({ instanceId, model }) === false) {
+          return json(res, 400, { error: "Choose a model from this bot's current OpenRouter connection." });
+        }
+      }
       // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&
           body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&
@@ -694,27 +733,45 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
+      const beforeVpsAlias = freshBrowserBot ? vpsSshAliasForBot(cfg, freshBrowserBot) : null;
+      // Fires once the alias commits, so a later profile save that throws cannot strand the old tunnel and idle timer.
+      let vpsSwitchNotified = false;
+      const notifyVpsSwitch = (next: BotRecord | null | undefined) => {
+        if (!existingBot || !next || vpsSwitchNotified || vpsSshAliasForBot(cfg, next) === beforeVpsAlias) return;
+        vpsSwitchNotified = true;
+        deps.vpsServerSwitched?.(next);
+      };
+      // A mark goes out with its hold in one frame, below.
+      delete patch.unread;
       if (Array.isArray(patch.alwaysAllow)) dropRemovedGrants(store, deps.turnBots?.values() ?? [], m[1], patch.alwaysAllow);
       if (profile.patch.soul !== undefined) {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
       // Runtime fields keep their fail-closed order; only the profile fields commit atomically.
         const runtimePatch = { ...patch };
         for (const field of Object.keys(profile.patch)) delete runtimePatch[field];
-        if (Object.keys(runtimePatch).length) store.patchBot(m[1], runtimePatch);
+        if (Object.keys(runtimePatch).length) notifyVpsSwitch(store.patchBot(m[1], runtimePatch));
         bot = store.patchBotProfile(m[1], profile.patch);
       } else {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
-        bot = store.patchBot(m[1], patch);
+        bot = Object.keys(patch).length ? store.patchBot(m[1], patch) : store.bot(m[1]) ?? null;
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (typeof body.unread === "boolean") {
+        // A mark skips a routine run or an archived conversation for the open main one (task-record.ts).
+        const target = unreadTargetTask(bot, store.activeTask(bot.id), body.unread);
+        if (target) store.patchTask(bot.id, target.threadId, { unread: body.unread, heldUnread: body.unread ? heldFrom(store.activePath(target.threadId), store.messagesFor(target.threadId)) : undefined });
+        else if (!bot.tasks?.length) bot = store.patchBot(bot.id, { unread: body.unread }) ?? bot;
+      }
       if (body.applyToAllThreads === true && requestedApprovalMode !== "custom") store.setAllThreadApprovalMode(bot.id, requestedApprovalMode);
       if (body.memoryUpkeep === false || body.memoryEnabled === false) memoryUpkeep.dropBot(bot.id);
       if (body.cacheKeepWarm !== undefined) cacheKeepWarm.refresh();
       if (computerSpecified && requestedComputer !== undefined) store.clearAutoSurfacePins(m[1], requestedComputer);
       if (normalizedSelection && movedTask) store.patchTask(bot.id, movedTask.threadId, { modelSelection: undefined,
         ...hostedModels?.resetTask(movedTask.modelSelection, normalizedSelection) });
+      if (normalizedSelection && existingBot) deps.modelSwitched?.(bot.id, movedTask?.threadId ?? existingBot.threadId, movedTask?.modelSelection ?? existingBot.modelSelection, normalizedSelection, true);
       if (existingBot) {
         settleBrowserChange(bot, { browserProfile: beforeBrowserProfile, browser: beforeBrowserEnabled }, { closeForBot: (id) => browserLive.closeForBot(id), forgetTemporaryBrowser });
+        notifyVpsSwitch(bot);
       }
       const chiefChanges =
         body.chiefOfStaff === true || chiefMovedSections

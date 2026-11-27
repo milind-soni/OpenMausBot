@@ -167,6 +167,21 @@ describe("bot-first sidebar", () => {
     expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
   });
 
+  it("shows a Simple row's engine mark only while the row is hovered, focused or on a touch screen, and Advanced's always", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [], messages: [{ id: "m", role: "bot", kind: "text", text: "Done.", at: 1 }] } as Bot;
+    const badgeClass = (markup: string) => /<span data-testid="model-badge"[^>]*class="([^"]*)"/.exec(markup)?.[1]?.split(" ") ?? [];
+    const simple = badgeClass(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))));
+    expect(simple).toEqual(expect.arrayContaining(["opacity-0", "group-hover:opacity-100", "group-focus-within:opacity-100", "touch:opacity-100", "motion-reduce:transition-none"]));
+    // The row it reveals on is the hover group, so focus anywhere in the row (its ⋯ too) shows the mark.
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/^<div class="group relative/);
+    fixture.advanced = true;
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(advanced).toContain('data-testid="model-badge"');
+    expect(badgeClass(advanced)).not.toContain("opacity-0");
+  });
+
   it("fades the collapsed rail's engine badge in both modes", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
@@ -546,7 +561,7 @@ describe("bot-first sidebar", () => {
     ]);
   });
 
-  it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person, keeping its dots, in %s density", (density) => {
+  it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person or is going, keeping its dots, in %s density", (density) => {
     // Its threads were left expanded in Advanced mode.
     fixture.advanced = true;
     let tree: ReactNode;
@@ -561,18 +576,21 @@ describe("bot-first sidebar", () => {
       expect(markup).toContain(`data-sidebar-bot-row="${bot.id}"`);
       expect(markup).not.toContain("data-sidebar-thread-row");
       expect(markup).not.toContain("data-sidebar-folder-row");
-      expect(markup).not.toContain('aria-label="Atlas threads"');
-      if (density === "icons") expect(markup).not.toContain("data-sidebar-bot-activity");
-      else {
-        // It asks the person something, or has a reply they have not read; running, queued and idle threads stay out.
-        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "unread"]);
+      if (density === "icons") {
+        expect(markup).not.toContain("data-sidebar-bot-activity");
+        expect(markup).not.toContain('aria-label="Atlas threads"');
+      } else {
+        // Folded: what asks the person something, is going or queued, or has a reply they have not read; idle threads stay out.
+        expect(markup).toContain('data-bot-threads-fold="atlas" aria-expanded="false"');
+        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "queued", "unread", "working"]);
       }
       expect(markup).toContain('data-testid="waiting-dot"');
     }
     const unread = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, tasks: [bot.tasks![0]!, bot.tasks![5]!] })));
     expect(unread.includes('data-sidebar-activity-row="unread"')).toBe(density !== "icons");
     const read = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, unread: false, tasks: [bot.tasks![0]!, bot.tasks![1]!, bot.tasks![3]!] })));
-    expect(read).not.toContain("data-sidebar-activity-row");
+    // Nothing unread, but a thread still running keeps its row while the bot is folded.
+    expect([...read.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1])).toEqual(density === "icons" ? [] : ["working"]);
     expect(unread).toContain(density === "icons" ? "rounded-full border border-panel bg-accent" : density === "comfortable" ? 'data-testid="unread-dot"' : 'aria-label="Unread threads"');
     forgetSearchDisclosuresForTests();
   });

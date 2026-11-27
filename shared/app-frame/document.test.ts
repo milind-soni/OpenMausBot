@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { BOT_HTML_CSP, mcpAppCsp } from "./csp.ts";
-import { botHtmlDocument, buildSrcdoc, CSP_META_PREFIX, mcpAppDocument, stripDocumentPreamble } from "./document.ts";
-import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
+import { botHtmlDocument, buildSrcdoc, CSP_META_PREFIX, mcpAppDocument, publishedBotHtml, stripDocumentPreamble } from "./document.ts";
+import { APP_HELPER_SOURCE, APP_ROOM_HELPER_SOURCE, APP_THEME_STYLE, PUBLISHED_PAGE_NO_BOT } from "./helper.ts";
 import { APP_POINT_SOURCE } from "./point.ts";
 
 const CSP = "default-src 'none'";
@@ -90,5 +90,32 @@ describe("documents", () => {
     expect(doc.csp).toBe(mcpAppCsp(network));
     expect(doc.srcdoc).toBe(`${CSP_META_PREFIX}${mcpAppCsp(network)}"><html><body>app</body></html>`);
     expect(doc).toMatchObject({ tool: { name: "create_view" }, toolInput: { a: 1 }, network });
+  });
+});
+
+describe("a bot page's declared uses", () => {
+  it("become the page's can, and a room's page gets none of them", () => {
+    expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>" }).can).toEqual({ serverTools: false, serverResources: false, message: true, openLinks: true, modelContext: true });
+    expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data"] }).can).toMatchObject({ data: true });
+    expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data"] }).can.state).toBeUndefined();
+    expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data", "state"] }).can).toMatchObject({ data: true, state: true });
+    const connectors = [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }, { server: "notes", tools: ["search"] }];
+    expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", connectors }).can.connectors).toEqual(connectors);
+    const room = botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data", "state"], connectors, room: true }).can;
+    expect(room.data).toBeUndefined();
+    expect(room.state).toBeUndefined();
+    expect(room.connectors).toBeUndefined();
+  });
+
+  it("are refused with a plain reason on a published page", async () => {
+    const html = publishedBotHtml("<p>x</p>");
+    const script = /<script>(.*?)<\/script>/.exec(html)![1]!;
+    const window: Record<string, unknown> = { matchMedia: () => ({ matches: false }), open: () => null };
+    new Function("window", "matchMedia", script)(window, window.matchMedia);
+    const mausbot = window.mausbot as { data: { query(): Promise<unknown> }; state: { set(): Promise<unknown> }; connectors: { call(): Promise<unknown>; list(): Promise<unknown> } };
+    await expect(mausbot.connectors.call()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
+    await expect(mausbot.connectors.list()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
+    await expect(mausbot.data.query()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
+    await expect(mausbot.state.set()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
   });
 });

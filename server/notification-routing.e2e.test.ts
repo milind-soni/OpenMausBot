@@ -386,7 +386,8 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(consult.threadId).not.toBe(peer.threadId);
       expect(ink.tasks.find((task: { threadId: string }) => task.threadId === consult.threadId)?.openedBy)
         .toMatchObject({ botId: asker.id, kind: "work" });
-      expect(ink.messages).toEqual(peerConversation);
+      // Ink's own chat only gets the hand-off's quiet line, which opens the consultation's thread.
+      expect(ink.messages).toEqual([...peerConversation, expect.objectContaining({ kind: "activity", threadRef: expect.objectContaining({ botId: peer.id, threadId: consult.threadId }) })]);
       expect(current.groups.find((group: { dm?: boolean }) => group.dm === true)).toBeUndefined();
       const pen = current.bots.find((candidate: { id: string }) => candidate.id === asker.id);
       const replied = pen.messages.find(
@@ -529,6 +530,7 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       const consult = await consultation(asked.body.receipts[0].requestId);
       expect(consult.threadId).not.toBe(peer.threadId);
       await expect.poll(() => handoffs().find((node) => node.id === consult.id)?.status, { timeout: 20_000 }).toBe("completed");
+      // The hand-off is recorded in Vellum's chat, not announced: nothing there is unread.
       expect((await botState(peer.id))?.unread).toBeFalsy();
 
       expect((await api("POST", `/api/bots/${peer.id}/messages`, { text: "and for me?" })).status).toBe(202);
@@ -566,6 +568,7 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
       expect(asked.body.receipts[0]).toMatchObject({ botId: peer.id, outcome: "queued" });
       const consult = await consultation(asked.body.receipts[0].requestId);
       expect(consult.threadId).not.toBe(peer.threadId);
+      // The hand-off is recorded in Folio's chat, not announced: nothing there is unread.
       expect((await botState(peer.id))?.unread).toBeFalsy();
 
       expect((await api("PATCH", `/api/bots/${peer.id}`, {

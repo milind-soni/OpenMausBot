@@ -22,7 +22,10 @@
 //   FAKE_CLAUDE_MCP_RECONNECT  JSON-lines file: an mcp_reconnect control_request is appended to it and answered with
 //     success, as Claude Code 2.1.321 answers once the server is connected again; "refuse" answers it as a failure
 //   FAKE_CLAUDE_LAUNCHES  JSON-lines file every stream-json process appends its {pid, argv} to as it starts
+//   FAKE_CLAUDE_STARTUP_MS  ms a stream-json process takes to start up before it reads its input, as the real CLI takes
+//     seconds to load and connect its MCP servers
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
+//   FAKE_CLAUDE_SIGNED_OUT_FILE  path: while it exists, every turn answers as not-logged-in (a sign-in that lapses and comes back)
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
 //     calls a tool first
 //   FAKE_CLAUDE_GONE_AFTER_TURN  path: after the turn stop reading stdin, write <path>.closed, exit once <path> exists
@@ -42,11 +45,12 @@
 //   FAKE_CLAUDE_CHECK  fail | hang: how the connection check answers (default OK)
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
+//   FAKE_CLAUDE_MARKERS_LATEST  1: reply and tool-call markers match only the prompt after its history block
 //   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?, hold?}] each turn calls before its reply (unset: one Bash call). A call
 //     with `hold` keeps running until FAKE_CLAUDE_RELEASE exists, sending a tool_progress every FAKE_CLAUDE_TOOL_PROGRESS_MS
 //     (default 30000) as 2.1.306 does; hold "busy" | "idle" | "network" also keeps a stand-in child process that burns CPU,
 //     sleeps, or holds a loopback TCP connection, as the call's command would
-//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
+//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none, or {"marker": [calls]} picked by the prompt
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message
@@ -76,6 +80,7 @@
 //     claude.ai link and writes it from the pasted code (`alice-…` signs in alice@example.com, `bad-…` is refused),
 //     `auth logout` removes it
 //   FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS  --model values where `--permission-mode auto` runs "default" (2.1.266)
+//   FAKE_CLAUDE_STEER_LOG  JSON-lines file every steered line's text is appended to
 //   FAKE_CLAUDE_LATE_STEER_GATE  path: a late steer runs as the next native turn (2.1.282), replying once it exists
 //   FAKE_CLAUDE_LATE_STEER_INIT_GATE  path: that late turn's `init` also waits for it
 //   FAKE_CLAUDE_LATE_STEER_SILENT  1: the late turn prints `init` and nothing else
@@ -202,10 +207,20 @@ const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
   }
 };
 const scriptedToolCallsAtStart = parseToolCalls(process.env.FAKE_CLAUDE_TOOL_CALLS);
-const turnToolCalls = (): ScriptedToolCall[] | null => {
+/** The file may also hold {"marker": [calls], …}: the first marker the turn's prompt contains picks its calls, so bots
+ * sharing one fake engine each play their own part; a prompt with none of them calls nothing. */
+const turnToolCalls = (prompt?: string): ScriptedToolCall[] | null => {
   const file = process.env.FAKE_CLAUDE_TOOL_CALLS_FILE;
   if (!file) return scriptedToolCallsAtStart;
-  try { return parseToolCalls(readFileSync(file, "utf8")) ?? []; } catch { return []; }
+  try {
+    const raw = readFileSync(file, "utf8");
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const hit = Object.entries(parsed as Record<string, unknown>).find(([marker]) => marker !== "" && (prompt ?? "").includes(marker));
+      return hit ? parseToolCalls(JSON.stringify(hit[1])) ?? [] : [];
+    }
+    return parseToolCalls(raw) ?? [];
+  } catch { return []; }
 };
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
@@ -244,9 +259,18 @@ const markerReplies = (() => {
     return null;
   }
 })();
+/** With FAKE_CLAUDE_MARKERS_LATEST=1, markers match only the newest message of a prompt that carries history or notes
+ * ahead of it, so an earlier turn's words never pick this turn's script. */
+const markerText = (text: string): string => {
+  if (process.env.FAKE_CLAUDE_MARKERS_LATEST !== "1") return text;
+  const at = text.lastIndexOf("[Now reply to the user's latest message:]");
+  if (at >= 0) return text.slice(at);
+  const sent = text.lastIndexOf("Current time when this message was sent:");
+  return sent < 0 ? text : text.slice(sent);
+};
 const replyForPrompt = (prompt: JsonValue): string[] | null => {
   if (!markerReplies) return null;
-  const text = steeredText(prompt);
+  const text = markerText(steeredText(prompt));
   const hit = markerReplies.find(([marker]) => marker !== "" && text.includes(marker));
   return hit ? [hit[1]] : null;
 };
@@ -1080,7 +1104,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 
   // A signed-out CLI's frames, as Claude Code 2.1.296 sends them: only the frame's own error fields mark the failure.
-  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
+  const signedOutNow = Boolean(process.env.FAKE_CLAUDE_SIGNED_OUT_FILE && existsSync(process.env.FAKE_CLAUDE_SIGNED_OUT_FILE));
+  if (mode === "not-logged-in" || signedOutNow || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
     if (process.env.FAKE_CLAUDE_AUTH_AFTER_WORK === "1") out({
       type: "assistant", message: { model: "claude-fixture", content: [{ type: "tool_use", id: "before-sign-out", name: "Bash", input: { command: "pwd" } }] },
     });
@@ -1265,7 +1290,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     emitPart(0);
     return;
   }
-  const scriptedToolCalls = turnToolCalls();
+  const scriptedToolCalls = turnToolCalls(markerText(steeredText(prompt)));
   if (scriptedToolCalls?.some((call) => call.hold)) {
     playHeldCalls(scriptedToolCalls, usage, () => {
       for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
@@ -1401,12 +1426,18 @@ process.stdin.on("data", (c) => {
         steeredMessages.push(prompt);
       }
       if (process.env.FAKE_CLAUDE_STEER_RECEIVED) writeFileSync(process.env.FAKE_CLAUDE_STEER_RECEIVED, "received");
+      if (process.env.FAKE_CLAUDE_STEER_LOG) appendFileSync(process.env.FAKE_CLAUDE_STEER_LOG, `${JSON.stringify(steeredText(prompt))}\n`);
     } else {
       playTurn(prompt);
       armSteerGate();
     }
   }
 });
+const startupMs = Number(process.env.FAKE_CLAUDE_STARTUP_MS);
+if (startupMs > 0) {
+  process.stdin.pause();
+  setTimeout(() => process.stdin.resume(), startupMs);
+}
 process.stdin.on("end", () => {
   stdinEnded = true;
   finishIfDone();

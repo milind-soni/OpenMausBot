@@ -5,14 +5,15 @@ import { useSyncExternalStore } from "react";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import type { CloudSource } from "@/lib/cloud-plan";
 import type { OnboardingStatus } from "@/lib/onboarding";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, dismissNotice, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL,
-  TEAMS_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL,
+  PRODUCT_HUNT_URL, TEAMS_NOTICE } from "@/lib/notices";
 import type { LocaleKey } from "@/locales";
 import type { ConfigStatus } from "@/state/config-status";
 import { api } from "@/state/store";
 import { ANNOUNCEMENTS_READ_HINT, announcementsReadAt as readMarkOf } from "../../shared/cloud-hints";
 import { MODELGO_URL } from "../../shared/modelgo";
-import type { AnnouncementCard } from "../../shared/announcements";
+import { compareVersions, type AnnouncementCard } from "../../shared/announcements";
+import type { ReleaseEntry } from "../../shared/release-notes";
 
 /** What decides whom a built-in announcement was for, by its own rules (never whether they saw it, nor its dates). */
 export interface HistoryFacts {
@@ -65,7 +66,7 @@ export const BUILT_IN_ANNOUNCEMENTS: readonly BuiltInAnnouncement[] = [
     open: { buttons: [{ label: "modelgoOffer.getKey", action: { open_url: MODELGO_URL } }] } },
   { id: GROK_MOVE_NOTICE, date: "2026-11-04", title: "settings.import.grokTitle", body: "grokMove.popup.body", mark: "grok",
     for: facts => everywhere(facts) && !facts.remote && facts.canSave && !facts.team, open: { modal: "grok-move" } },
-  { id: WHATS_NEW_NOTICE, date: "2026-10-31", title: "whatsNew.cloud.title", body: "whatsNew.cloud.body", mark: "cloud",
+  { id: EARLIER_WHATS_NEW_NOTICE, date: "2026-10-31", title: "whatsNew.cloud.title", body: "whatsNew.cloud.body", mark: "cloud",
     for: facts => everywhere(facts) && facts.cloudSale, open: { modal: "whats-new" } },
   { id: BOAT_OFFER_NOTICE, date: "2026-10-31", title: "boatOffer.title", body: "boatOffer.body", mark: "boat", for: facts => facts.sponsors && !facts.branded,
     open: { buttons: [{ label: "boatOffer.get", action: { open_url: BOAT_OFFER.url } }, { label: "boatOffer.claim", action: { email: boatClaimMailto() } }] }, until: BOAT_OFFER.until },
@@ -81,23 +82,40 @@ export const READ_BASELINE = Date.parse("2026-11-11");
 
 export type HistoryItem =
   | { source: "built-in"; id: string; at: number; entry: BuiltInAnnouncement; ended: boolean }
-  | { source: "feed"; id: string; at: number; card: AnnouncementCard };
+  | { source: "feed"; id: string; at: number; card: AnnouncementCard }
+  /** What a release brought (announcements/releases.json); `pending` for a downloaded update the file does not list yet. */
+  | { source: "release"; id: string; at: number; release: ReleaseEntry; pending?: true };
 
-/** Newest first; a feed card is dated by its `starts`, else by when its file last changed, else now. */
-export function announcementHistory({ facts, cards, feedUpdatedAt, now }: {
-  facts: HistoryFacts; cards: readonly AnnouncementCard[]; feedUpdatedAt: number | null; now: number;
+const releaseItem = (release: ReleaseEntry, at = Date.parse(release.date)): Extract<HistoryItem, { source: "release" }> =>
+  ({ source: "release", id: `release-${release.version}`, at, release });
+
+/** Newest first; a feed card is dated by its `starts`, else by when its file last changed, else now; a release by its
+ * date. A branded build lists no releases, as it has none of the built-in announcements. */
+export function announcementHistory({ facts, cards, feedUpdatedAt, now, releases = [] }: {
+  facts: HistoryFacts; cards: readonly AnnouncementCard[]; feedUpdatedAt: number | null; now: number; releases?: readonly ReleaseEntry[];
 }): HistoryItem[] {
   const builtIn: HistoryItem[] = BUILT_IN_ANNOUNCEMENTS.filter(entry => entry.for(facts)).map(entry => ({
     source: "built-in", id: entry.id, at: Date.parse(entry.date), entry, ended: typeof entry.until === "number" && now >= entry.until,
   }));
   const feed: HistoryItem[] = cards.map(card => ({ source: "feed", id: card.id, at: card.starts ? Date.parse(card.starts) : feedUpdatedAt ?? now, card }));
-  return [...builtIn, ...feed].map((item, order) => ({ item, order })).sort((a, b) => b.item.at - a.item.at || a.order - b.order).map(({ item }) => item);
+  const notes: HistoryItem[] = facts.branded ? [] : releases.map(release => releaseItem(release));
+  return [...builtIn, ...feed, ...notes].map((item, order) => ({ item, order })).sort((a, b) => b.item.at - a.item.at || a.order - b.order).map(({ item }) => item);
+}
+
+/** An update downloaded and waiting for a restart: its row, from its own notes (`notes`, as an entry) when the list
+ * does not have it yet, goes on top. Nothing in a branded build. */
+export function withDownloadedUpdate(items: readonly HistoryItem[], update: { version: string; notes: ReleaseEntry } | null, branded: boolean,
+  now: number): readonly HistoryItem[] {
+  if (!update || branded || items.some(item => item.source === "release" && item.release.version === update.version)) return items;
+  const top = Math.max(now, ...items.map(item => item.at));
+  return [{ ...releaseItem(update.notes, top), pending: true }, ...items];
 }
 
 // ---- When the person last opened Announcements: this browser, this desktop's record for every page of its window, and
 // the place's record (on a Team Cloud, the person's own). The newest of them counts.
 
 const READ_KEY = "omb.announcements.read-at";
+const FIRST_VERSION_KEY = "omb.announcements.first-version";
 const stored = (key: string): string | null => { try { return localStorage.getItem(key); } catch { return null; } };
 const store = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch {} };
 
@@ -116,6 +134,17 @@ export interface PersonRecord {
   record: OnboardingStatus | undefined;
   /** This desktop's record (DesktopNoticesState.seen); empty in a browser. */
   desktopSeen: readonly string[];
+  /** The app version this browser first listed announcements on (firstListedVersion): only releases after it are new. */
+  firstVersion?: string | null;
+}
+
+/** The app version this browser first listed announcements on, kept from the first time; `current` when nothing can be
+ * kept. So a new install, or a new browser on a Cloud, is not told about every release before it. */
+export function firstListedVersion(current: string): string {
+  const kept = stored(FIRST_VERSION_KEY);
+  if (kept && compareVersions(kept, kept) === 0) return kept;
+  if (compareVersions(current, current) === 0) store(FIRST_VERSION_KEY, current);
+  return current;
 }
 
 export function announcementsReadAt({ record, desktopSeen }: PersonRecord): number {
@@ -125,14 +154,23 @@ export function announcementsReadAt({ record, desktopSeen }: PersonRecord): numb
 }
 
 export function itemSeen(item: HistoryItem, { record, desktopSeen }: PersonRecord): boolean {
+  if (item.source === "release") return false;
   const key = item.source === "feed" ? `announcement:${item.id}` : item.id;
   return noticeSeen(record, key) || desktopSeen.includes(key);
+}
+
+/** A release counts for the dot only when it is after the version this browser first listed announcements on; a
+ * downloaded update's own row never does (it is dated now). */
+function releaseCounts(item: HistoryItem, person: PersonRecord): boolean {
+  if (item.source !== "release") return true;
+  if (item.pending || !person.firstVersion) return false;
+  return (compareVersions(item.release.version, person.firstVersion) ?? 0) > 0;
 }
 
 /** The dot: something here is newer than the person's last look and they have not seen it. */
 export function announcementsUnread(items: readonly HistoryItem[], person: PersonRecord): boolean {
   const readAt = announcementsReadAt(person);
-  return items.some(item => item.at > readAt && !itemSeen(item, person));
+  return items.some(item => item.at > readAt && !itemSeen(item, person) && releaseCounts(item, person));
 }
 
 export interface RecordWriter {
@@ -143,10 +181,10 @@ export interface RecordWriter {
   saved: (config: ConfigStatus) => void;
 }
 
-function savePersonal(hint: string, hintsSeen: string[] | null, writer: RecordWriter): void {
-  void writer.desktop?.seen(hint).catch(() => {});
+function savePersonal(hints: readonly string[], hintsSeen: string[] | null, writer: RecordWriter): void {
+  for (const hint of hints) void writer.desktop?.seen(hint).catch(() => {});
   const saving = writer.team
-    ? api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints: [hint] }) }).then(() => api<ConfigStatus>("/api/config"))
+    ? api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints }) }).then(() => api<ConfigStatus>("/api/config"))
     : hintsSeen ? api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) }) : null;
   void saving?.then(writer.saved).catch(() => {});
 }
@@ -156,14 +194,15 @@ export function markAnnouncementsRead(now: number, record: OnboardingStatus | un
   const mark = readMark(now), hints = record?.hintsSeen ?? [];
   store(READ_KEY, String(Math.floor(now)));
   const next = [...hints.filter(hint => !ANNOUNCEMENTS_READ_HINT.test(hint)), mark];
-  savePersonal(mark, next.length > 100 ? null : next, writer);
+  savePersonal([mark], next.length > 100 ? null : next, writer);
   changed();
 }
 
-/** The person closed (or used) a built-in popup that is theirs alone, as the Teams one is on a Team Cloud. */
-export function rememberNoticeSeen(id: string, record: OnboardingStatus | undefined, writer: RecordWriter): void {
-  const patch = dismissNotice(record, id);
-  savePersonal(id, writer.team ? [] : patch?.onboarding.hintsSeen ?? null, writer);
+/** The person closed (or used) a built-in popup that is theirs alone, as the Teams one is on a Team Cloud; `also`, the
+ * notices it stands for. */
+export function rememberNoticeSeen(id: string, record: OnboardingStatus | undefined, writer: RecordWriter, also: readonly string[] = []): void {
+  const ids = [id, ...also], patch = dismissNotices(record, ids);
+  savePersonal(ids, writer.team ? [] : patch?.onboarding.hintsSeen ?? null, writer);
   changed();
 }
 

@@ -181,7 +181,7 @@ async function readStyles(frames: FrameTree, items: Item[]): Promise<void> {
             functionDeclaration: STYLE_READ,
             arguments: present.map((entry) => ({ objectId: entry.objectId })),
             returnByValue: true,
-          });
+          }, { readOnly: true });
           (result.value ?? []).forEach(([pointer, input], i) => {
             const item = present[i]!.item;
             item.pointer = pointer && !INTERACTIVE.has(item.role);

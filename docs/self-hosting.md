@@ -7,7 +7,7 @@ bot’s remote desktop, see [Bring Your Own VPS](byo-vps.md) and the
 Run the server on a machine you control (a VPS, a home server, a Mac mini in a
 closet). Then connect the desktop app, browsers and phones to it. Every path
 below ends the same way: the server prints **one link**, and you paste it into
-MausBot under **＋ → Connect to a server**.
+MausBot under **＋ → Connect to another computer**.
 
 > **Security first:** the server listens on `127.0.0.1:8799`, and a program on
 > that machine counts as its owner. Never forward that port yourself. Let one
@@ -56,7 +56,7 @@ Reach    https://maus.example.com   ✓ answers as this server (11:04)
 Pairing code   7KQ2-M9XD-H4TP   works once, until 11:14 · everything
 Link           https://maus.example.com/pair#code=7KQ2-M9XD-H4TP
 
-  Desktop app   ＋ → Connect to a server, paste the link
+  Desktop app   ＋ → Connect to another computer, paste the link
   Phone         scan with your camera or the MausBot app
 
   ▄▄▄▄▄▄▄ ▄ ▄▄ ▄▄▄▄▄▄▄   (QR of the link)
@@ -71,7 +71,7 @@ Each way in has its own Reach line:
 - `--tailscale`: `… · your tailnet`
 - `--tunnel`: `… · MausBot web address`
 
-Paste the link into MausBot: **＋ → Connect to a server**. The sheet names the
+Paste the link into MausBot: **＋ → Connect to another computer**. The sheet names the
 server it found ("✓ hetzner-1 · MausBot 0.1.147 · HTTPS"), and **Connect to
 hetzner-1** finishes. You can also type the address (`maus.example.com`,
 `192.168.1.20:8799`) and the pairing code in their own fields.
@@ -500,7 +500,7 @@ docker compose exec omb openmausbot pair             # prints a code, a link and
 ```
 
 Paste the link (`https://<DOMAIN>/pair#code=…`) into MausBot under **＋ →
-Connect to a server**, or open it in a browser, and it is paired; see "Using it from your computer" for what a session is. Webhook
+Connect to another computer**, or open it in a browser, and it is paired; see "Using it from your computer" for what a session is. Webhook
 URLs (`https://<DOMAIN>/hooks/wh_…`) work without a session, and that is the
 base the app prints on new hooks because the stack sets
 `OMB_WEBHOOK_PUBLIC_URL`.
@@ -521,8 +521,9 @@ What the stack does, so you can adapt it:
   left Caddy refusing HTTPS in the old one while both showed healthy.
 - [`deploy/Caddyfile`](../deploy/Caddyfile) terminates TLS and forwards
   the real `Host` plus `X-Forwarded-For`/`X-Forwarded-Proto`; the server's
-  own pairing is the login. A shared-password `basic_auth` block is there,
-  commented out, if you want a second wall in front of pairing.
+  own pairing is the login. It adds no password: a Caddy password would
+  refuse clients that send their own `Authorization` header. For a second
+  wall, use a tailnet or a firewall.
 
 Update with `git pull && ./update.sh`: it copies the data aside, starts the
 stable version, and puts the old version and the data back if the new one
@@ -904,7 +905,7 @@ days, renewed on use up to 180 days from pairing, revocable) and the app
 loads. `npx openmausbot devices` lists the paired devices and
 `devices revoke ID` signs one out.
 
-From the **desktop app**, choose **＋ → Connect to a server** and paste the
+From the **desktop app**, choose **＋ → Connect to another computer** and paste the
 link. You can also type the address (`maus.example.com`,
 `192.168.1.20:8799`, a `*.ts.net` name) and the pairing code in its own
 field. The sheet looks the address up and names what it found, for example
@@ -923,18 +924,23 @@ chats. A link copied elsewhere also works from the **Server** menu's **Add
 Server from Copied Pairing Link…** (on Windows and Linux, press Alt to show
 the menu bar).
 
-**Let your server use this computer.** When the desktop pairs with a code for
-everything (the server's owner), it asks once: **Let <server> use this
-computer?** with **Allow** or **Not now**. Allow lets the server's bots see and
-use the apps on this computer's screen, and run the MCP servers you keep for
-it, while the app is open. Folders and the terminal are added in **Settings →
-Servers**, where each server of yours has a **Share this computer** switch and
+**Let your server use this computer** (Windows x64, macOS 13 or later, Linux).
+When the desktop is paired with a code for everything (the server's owner), one
+switch, **Let <server>'s bots use this computer**, lets the server's bots see
+and use the apps on this computer's screen, and run the MCP servers you keep
+for it, while the app is open. It is in the add form (**Connect to another computer**),
+on the server's row in **Settings → This app → Your computers**, on its card in
+**Settings → Devices**, and in the Screen panel on the server's own page (which
+asks once more in a native window, since that page comes from the server). On
+a Mac, macOS asks for Accessibility and Screen Recording the first time; on
+Windows there is nothing more. Folders and the terminal are added with
 **Choose what it can use**; the switch turns it off at once, and the menu bar's
-OpenMausBot item pauses it with your Clouds. The server needs nothing turned on:
+or tray's MausBot item pauses it with your Clouds. See
+`apps/docs/content/docs/computers/lend-to-your-server.mdx`. The server needs nothing turned on:
 it takes a computer from its owner's pairings only, and a phone code or another
 person's pairing is never asked. Set `features.sharedComputers` to `false` in the
 server's config to turn this off, or to `true` to let every paired session lend
-its computer. Nothing is shared without that Allow, unless you make the server
+its computer. Nothing is shared until you turn that switch on, unless you make the server
 your bots' home (below). In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
@@ -1354,6 +1360,10 @@ set `X-Forwarded-Proto` to the browser-facing scheme. This also applies when
 using Tailscale Serve. Viewer requests require an admin session. Logging out
 or revoking that session closes open viewers. Client-only pairing does not
 grant desktop control.
+
+Managed VPS desktops stop after 480 idle minutes by default. Set
+`vpsIdle.timeoutMinutes` in `config.json` to a whole number from 5 to 1440.
+Private desktops have their own `localVm.idleTimeoutMinutes` setting.
 
 An open Local VM viewer keeps that VM's idle timer active. Remote VPS viewers
 share a tunnel; it closes 30 seconds after the last viewer leaves, allowing
@@ -1853,6 +1863,12 @@ routine's run row, or in the Chief's "Problems to look at" chat.
 | `OMB_STARTUP_ROUTINE_GAP_MS` | `1800000` (30 minutes) | On a server not started by the desktop app, how soon after the start that last ran them routines set to "Also run when OpenMausBot starts" may run again. A start within that time leaves one row per routine: "Not run at 4 starts because OpenMausBot started again soon after the start that last ran it". `0` runs them at every start. |
 | `OMB_ROUTINE_RESTART_STAGGER_MS` | `30000` (30 seconds) | The time between the runs a restart cut off as each starts again, so they do not all start at once. From `0`. |
 | `OMB_BURST_PART_MAX_RESTARTS` | `2` | The times a burst's part, or its merge, starts again after a restart cut it off. Past that the part fails with "Not started again: OpenMausBot restarted while this part ran 3 times.", and the parts are posted as they came instead of merged. From `0`. |
+| `OMB_ROUTINE_RUN_LIMIT_HOURS` | `3` | The hours of work a routine run may do when its routine sets no limit of its own. From `1` to `24`. |
+| `OMB_ROUTINE_GOAL_RUN_LIMIT_HOURS` | `12` | The same for a room goal's run, which stays running across every member's turn. From `1` to `24`. |
+
+A run stops when it has worked for its limit, and names it: "Stopped: this run
+ran longer than the 3-hour limit". A routine that sets a limit of its own keeps
+it, whatever the server's environment says.
 
 A routine every minute (`* * * * *`) is still accepted and is spaced out the
 same way. Identical failures are told to you and to the Chief once: two
@@ -1965,9 +1981,9 @@ is newer than the one it reports), and asks before it puts back data from an
 update an earlier run left unfinished.
 [Every step, the rollback and the exit codes](deploy-vps.md#update).
 
-For the npm service there is no one-command updater yet:
-[do the same steps by hand](deploy-vps.md#paths-a-and-c-npm-with-the-service-above-the-same-steps-by-hand),
-as the service user while the server is stopped. For a foreground invocation,
+For the [fixed-prefix Linux npm service](deploy-vps.md#paths-a-and-c-npm-with-the-service-above),
+run `sudo ./deploy/update-npm.sh` from a trusted checkout on the server. The
+[manual steps](deploy-vps.md#manual-update) cover custom units. For a foreground invocation,
 `npx --yes openmausbot@X.Y.Z serve --tunnel` selects a particular published
 release; replace `X.Y.Z` with that version.
 

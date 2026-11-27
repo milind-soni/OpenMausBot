@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { deviceSignInPrompt, type DeviceSignInProvider } from "../../shared/device-sign-in.ts";
+import { withSignInReason, type SignInOutcome } from "../../shared/sign-in-outcome.ts";
 import type { ProviderAuthenticationStart, ProviderAuthenticationStatus } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 
@@ -40,6 +41,8 @@ export interface DeviceSignIn {
   install: string;
   /** One safe sentence for a failed login command; never the CLI's own words, which may carry tokens. */
   failure(output: string): string;
+  /** The same as a fixed code (shared/sign-in-outcome.ts); unset: `exited`. */
+  failureReason?(output: string): SignInOutcome;
   /** Checked before a sign-in, so a working one is never replaced, and after it to confirm. */
   status?: { args: readonly string[]; read(code: number | null, output: string): DeviceSignInState };
   /** Without a status command: whether the sign-in a turn uses is now there. */
@@ -134,21 +137,21 @@ export class DeviceAuthController {
           expiresAt: new Date(Date.now() + (this.options.lifetimeMs ?? 15 * 60_000)).toISOString(),
         },
         child: null, ready: false, resolve: resolveStart, reject, homeKey,
-        startupTimer: setTimeout(() => this.finish(flow, "failed", `${product} did not provide a sign-in code in time. Check the server connection and update ${product}, then try again.`), this.options.startupTimeoutMs ?? 30_000),
-        expiryTimer: setTimeout(() => this.finish(flow, "expired", `The ${account} sign-in code expired. Start sign-in again.`), this.options.lifetimeMs ?? 15 * 60_000),
+        startupTimer: setTimeout(() => this.finish(flow, "failed", `${product} did not provide a sign-in code in time. Check the server connection and update ${product}, then try again.`, "timed_out"), this.options.startupTimeoutMs ?? 30_000),
+        expiryTimer: setTimeout(() => this.finish(flow, "expired", `The ${account} sign-in code expired. Start sign-in again.`, "expired"), this.options.lifetimeMs ?? 15 * 60_000),
       };
       flow.startupTimer.unref();
       flow.expiryTimer.unref();
       this.flow = flow;
       const login = () => this.run(flow, [...this.spec.loginArgs], env, home, (loginCode, loginOutput) => {
         if (loginCode !== 0 || !flow.ready) {
-          this.finish(flow, "failed", this.spec.failure(loginOutput));
+          this.finish(flow, "failed", this.spec.failure(loginOutput), this.spec.failureReason?.(loginOutput) ?? "exited");
           return;
         }
-        flow.startupTimer = setTimeout(() => this.finish(flow, "failed", `${product} finished sign-in but could not confirm the account. Refresh Settings and try again.`), this.options.startupTimeoutMs ?? 30_000);
+        flow.startupTimer = setTimeout(() => this.finish(flow, "failed", `${product} finished sign-in but could not confirm the account. Refresh Settings and try again.`, "timed_out"), this.options.startupTimeoutMs ?? 30_000);
         flow.startupTimer.unref();
         this.confirm(flow, env, home, (signedIn) => this.finish(flow, signedIn ? "succeeded" : "failed",
-          `${product} finished sign-in but did not confirm a ${account} account. Refresh Settings and try again.`));
+          `${product} finished sign-in but did not confirm a ${account} account. Refresh Settings and try again.`, signedIn ? undefined : "failed"));
       }, true);
       // Never overwrite a working login; one the provider refused is not working, whatever status says.
       if (!status) { login(); return; }
@@ -156,8 +159,8 @@ export class DeviceAuthController {
         const state = status.read(code, output);
         if (state === "signed-in" && !this.options.signInRejected?.()) this.finish(flow, "succeeded");
         else if (state === "signed-in" || state === "signed-out") login();
-        else if (state === "other") this.finish(flow, "failed", `${product} already has a different sign-in method on this server. Ask the server administrator to review it before changing accounts.`);
-        else this.finish(flow, "failed", `${product} could not confirm the existing sign-in on this server. Update ${product} and check its login status before trying again.`);
+        else if (state === "other") this.finish(flow, "failed", `${product} already has a different sign-in method on this server. Ask the server administrator to review it before changing accounts.`, "failed");
+        else this.finish(flow, "failed", `${product} could not confirm the existing sign-in on this server. Update ${product} and check its login status before trying again.`, "failed");
       });
     });
   }
@@ -168,7 +171,7 @@ export class DeviceAuthController {
   }
 
   async cancel(): Promise<void> {
-    if (this.flow?.status.phase === "waiting") this.finish(this.flow, "cancelled", `${this.spec.account} sign-in cancelled.`);
+    if (this.flow?.status.phase === "waiting") this.finish(this.flow, "cancelled", `${this.spec.account} sign-in cancelled.`, "cancelled");
     await this.flow?.stopping;
     if (this.flow?.terminationFailed) throw new Error(this.flow.status.message);
     if (this.command && !await this.stopChild(this.command)) {
@@ -312,7 +315,7 @@ export class DeviceAuthController {
     try {
       child = spawnCli(this.options.cli, args, { env: { ...env, NO_COLOR: "1", ...this.spec.env }, cwd, stdio: ["pipe", "pipe", "pipe"] });
     } catch {
-      this.finish(flow, "failed", `${product} could not start on this server. Install or update the configured ${product} CLI, then try again.`);
+      this.finish(flow, "failed", `${product} could not start on this server. Install or update the configured ${product} CLI, then try again.`, "failed");
       return;
     }
     flow.child = child;
@@ -321,7 +324,7 @@ export class DeviceAuthController {
     const receive = (chunk: Buffer) => {
       if (flow.status.phase !== "waiting") return;
       if (output.length + chunk.length > MAX_OUTPUT) {
-        this.finish(flow, "failed", `${product} returned an unexpected sign-in response. Update the server's ${product} CLI and try again.`);
+        this.finish(flow, "failed", `${product} returned an unexpected sign-in response. Update the server's ${product} CLI and try again.`, "failed");
         return;
       }
       output += chunk.toString("utf8");
@@ -336,7 +339,7 @@ export class DeviceAuthController {
     };
     child.stdout.on("data", receive);
     child.stderr.on("data", receive);
-    child.once("error", (error: NodeJS.ErrnoException) => this.finish(flow, "failed", this.startFailure(error)));
+    child.once("error", (error: NodeJS.ErrnoException) => this.finish(flow, "failed", this.startFailure(error), error.code === "ENOENT" ? "not_installed" : "failed"));
     child.once("close", (code) => {
       if (flow.child === child) flow.child = null;
       if (flow.status.phase === "waiting") done(code, stripVTControlCharacters(output));
@@ -344,7 +347,8 @@ export class DeviceAuthController {
     });
   }
 
-  private finish(flow: Flow, phase: Exclude<ProviderAuthenticationStatus["phase"], "waiting">, message?: string): void {
+  /** `reason`: why it ended, as a fixed code, on the status and on the error a waiting start gets. */
+  private finish(flow: Flow, phase: Exclude<ProviderAuthenticationStatus["phase"], "waiting">, message?: string, reason?: SignInOutcome): void {
     const { product, account } = this.spec;
     if (flow.status.phase !== "waiting") return;
     clearTimeout(flow.startupTimer);
@@ -352,16 +356,20 @@ export class DeviceAuthController {
     flow.status = {
       phase, flowId: flow.status.flowId, authorizationUrl: null, expiresAt: null,
       ...(phase !== "succeeded" && message ? { message } : {}),
+      ...(phase !== "succeeded" && reason ? { reason } : {}),
     };
     if (!flow.ready) {
       if (phase === "succeeded") flow.resolve({ ...flow.status, phase });
-      else flow.reject(new Error(message ?? `${account} sign-in did not finish.`));
+      else {
+        const error = new Error(message ?? `${account} sign-in did not finish.`);
+        flow.reject(reason ? withSignInReason(error, reason) : error);
+      }
     }
     flow.stopping = this.stopChild(flow.child).catch(() => false).then((stopped) => {
       const release = () => authenticatingHomes.delete(flow.homeKey);
       if (stopped) { release(); return; }
       flow.terminationFailed = true;
-      flow.status = { ...flow.status, phase: "failed", message: `${product} could not be stopped on this server. Ask the server administrator to stop the login process before trying again.` };
+      flow.status = { ...flow.status, phase: "failed", message: `${product} could not be stopped on this server. Ask the server administrator to stop the login process before trying again.`, reason: "failed" };
       // Retain the credential-home lock until the OS actually reports exit.
       const child = flow.child;
       if (!child || child.exitCode !== null || child.signalCode !== null) release();

@@ -4,12 +4,12 @@ import type { HandoffView } from "../coordinator.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
-import { askToolName, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
+import { askToolName, CARD_SETTLE_MS, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
 
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
 
-function world(options: { inboxThread?: string; live?: string[] } = {}) {
+function world(options: { inboxThread?: string; live?: string[]; privateThreads?: string[] } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const bots = [
@@ -43,21 +43,27 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
   const answered: Array<{ id: string; text: string }> = [];
   const notified: Notification[] = [];
   const answers: Array<{ threadId: string; requestId: string; message: string }> = [];
+  const live = new Set(options.live ?? []);
   let refuse: { status: number; error: string } | null = null;
+  let afterAnswer: (() => void) | null = null;
+  let clock = 0;
   const deps: AskCardsDeps = {
     store: store as unknown as AskCardsDeps["store"],
     node: (id) => nodes.get(id),
     delegatorOf: (threadId) => (threadId === "work" ? { threadId: "inbox", botId: "scout" } : undefined),
     notify: (notification) => { if (notification) notified.push(notification); },
     copiedInto: (inboxThreadId) => inboxThreadId === options.inboxThread,
-    live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
+    keptPrivate: (threadId) => (options.privateThreads ?? []).includes(threadId),
+    live: (_threadId, requestId) => live.has(requestId),
     answerCard: vi.fn(async (input) => {
       if (refuse) return { ok: false as const, ...refuse };
       answers.push({ threadId: input.threadId, requestId: input.requestId, message: input.message });
+      live.delete(input.requestId);
+      afterAnswer?.();
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
-    now: () => 0,
+    now: () => clock,
     answerNode: (id, text) => {
       const parked = nodes.get(id);
       if (!parked || parked.status !== "waiting") return false;
@@ -76,7 +82,10 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
   };
   nodes.set("root", { id: "root", rootId: "root", threadId: "inbox", botId: "scout" } as HandoffView);
   const say = (threadId: string, text: string) => store.appendMessage(threadId, { role: "bot", kind: "text", text });
-  return { cards, store, rows, notified, answers, answered, node, say, deps, refuse: (value: typeof refuse) => { refuse = value; } };
+  return { cards, store, rows, notified, answers, answered, node, say, deps, open: (requestId: string) => live.add(requestId),
+    refuse: (value: typeof refuse) => { refuse = value; }, afterAnswer: (value: typeof afterAnswer) => { afterAnswer = value; },
+    /** Moves the clock past every card shown so far, as when the person reads a card before typing. */
+    settle: () => { clock = Math.max(clock, ...[...threads.values()].flat().map((row) => row.at)) + CARD_SETTLE_MS; } };
 }
 
 describe("a teammate's NEEDS INPUT question", () => {
@@ -345,12 +354,112 @@ describe("a typed line answers a question card", () => {
     expect(fixed.answers).toEqual([]);
   });
 
-  it("leaves a line in a chat no teammate handed on to be steered or queued, even while its question card waits", async () => {
+  it("answers the card its turn waits on in the bot's own chat with exactly the person's words", async () => {
     const w = world({ live: ["req-1"] });
     const asked = question(w, "chat");
-    expect(await w.cards.typed(AUTH, "chat", "Take the second one", undefined, {})).toBeNull();
-    expect(await w.cards.typed(AUTH, "chat", "Take the second one", asked, {})).toBeNull();
+    w.settle();
+    const result = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-3" });
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "What time is it?" }]);
+    expect(result).toMatchObject({ status: 202, message: { role: "user", text: "What time is it?", replyToId: asked.id, sendId: "send-3" } });
+  });
+
+  it("files a structured question's answer under its text, as an answer typed on the card would be", async () => {
+    const w = world({ live: ["req-1"] });
+    question(w, "chat", { questionRequest: { version: 1, questions: [{ question: "Should I?", options: [{ label: "Yes" }, { label: "No" }] }] } });
+    w.settle();
+    await w.cards.typed(AUTH, "chat", "Not yet", undefined, {});
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "The user answered your questions.\n\nQ: Should I?\nA: Not yet" }]);
+  });
+
+  it("never touches a card in the bot's own chat that only takes a tap: the line goes on to the usual send", async () => {
+    const several = { questionRequest: { version: 1 as const, questions: [{ question: "A?", options: [{ label: "x" }] }, { question: "B?", options: [{ label: "y" }] }] } };
+    for (const card of [{ fixedOptions: true }, several]) {
+      const w = world({ live: ["req-1"] });
+      const asked = question(w, "chat", card);
+      w.settle();
+      expect(await w.cards.typed(AUTH, "chat", "Something else first", undefined, {})).toBeNull();
+      expect(await w.cards.typed(AUTH, "chat", "Something else first", asked, {})).toBeNull();
+      expect(w.deps.answerCard).not.toHaveBeenCalled();
+      expect(w.rows("chat")).toEqual([asked]);
+    }
+  });
+
+  it("leaves a line to the usual send when its card opened as the person typed, unless the line replies to that card", async () => {
+    const w = world({ live: ["req-1"] });
+    const asked = question(w, "chat");
+    expect(await w.cards.typed(AUTH, "chat", "And the header too", undefined, { sendId: "send-8" })).toBeNull();
     expect(w.answers).toEqual([]);
+    const replied = await w.cards.typed(AUTH, "chat", "The footer only", asked, { sendId: "send-10" });
+    expect(replied).toMatchObject({ status: 202, message: { text: "The footer only", replyToId: asked.id } });
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "The footer only" }]);
+  });
+
+  it("gives a send tried again the line it wrote, and touches no card it finds open then", async () => {
+    const w = world({ live: ["req-1"] });
+    question(w, "chat");
+    w.settle();
+    const first = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-4" });
+    question(w, "chat", { requestId: "req-2" });
+    w.open("req-2");
+    w.settle();
+    const again = await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-4" });
+    expect(again).toEqual({ status: 202, message: first!.message });
+    expect(w.answers.map((answer) => answer.requestId)).toEqual(["req-1"]);
+    expect(await w.cards.typed(AUTH, "chat", "Something else", undefined, { sendId: "send-4" }), "other words go on to be refused").toBeNull();
+    expect(w.answers).toHaveLength(1);
+    expect(w.rows("chat").filter((row) => row.role === "user")).toHaveLength(1);
+  });
+
+  it("answers once when the same send arrives twice at the same time", async () => {
+    const w = world({ live: ["req-1"] });
+    question(w, "chat");
+    w.settle();
+    const [one, two] = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-5" })));
+    expect(two?.message?.id).toBe(one?.message?.id);
+    expect(w.answers).toHaveLength(1);
+  });
+
+  it("answers one card when the same send arrives twice at once and a new card opens before its line is written", async () => {
+    const w = world({ live: ["req-1"] });
+    question(w, "chat");
+    w.settle();
+    w.afterAnswer(() => {
+      w.afterAnswer(null);
+      question(w, "chat", { requestId: "req-2" });
+      w.open("req-2");
+      w.settle();
+    });
+    const tries = await Promise.all([1, 2].map(() => w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-6" })));
+    expect(tries[1]?.message?.id).toBe(tries[0]?.message?.id);
+    expect(w.answers.map((answer) => answer.requestId)).toEqual(["req-1"]);
+  });
+
+  it("leaves a line in the bot's own chat to the usual send while two question cards wait there", async () => {
+    for (const second of [{}, { fixedOptions: true }]) {
+      const w = world({ live: ["req-1", "req-2"] });
+      const first = question(w, "chat");
+      question(w, "chat", { requestId: "req-2", ...second });
+      w.settle();
+      expect(await w.cards.typed(AUTH, "chat", "What time is it?", undefined, {})).toBeNull();
+      expect(await w.cards.typed(AUTH, "chat", "What time is it?", first, {})).toBeNull();
+      expect(w.answers).toEqual([]);
+    }
+  });
+
+  it("leaves a line in the bot's own chat to the usual send when no turn waits on its card, it is Stop, it replies to another line or carries a file", async () => {
+    const idle = world();
+    question(idle, "chat");
+    idle.settle();
+    expect(await idle.cards.typed(AUTH, "chat", "Take the second one", undefined, {})).toBeNull();
+    const busy = world({ live: ["req-1"] });
+    question(busy, "chat");
+    const other = busy.say("chat", "I checked.");
+    busy.settle();
+    expect(await busy.cards.typed(AUTH, "chat", "stop", undefined, {})).toBeNull();
+    expect(await busy.cards.typed(AUTH, "chat", "Thanks", other, {})).toBeNull();
+    expect(await busy.cards.typed(AUTH, "chat", 'Look <attached-image path="a.png" />', undefined, {})).toBeNull();
+    expect(idle.answers).toEqual([]);
+    expect(busy.answers).toEqual([]);
   });
 
   it("passes on why an answer was refused, and writes no line", async () => {
@@ -359,6 +468,18 @@ describe("a typed line answers a question card", () => {
     w.refuse({ status: 403, error: "This question is Ben's to answer." });
     expect(await w.cards.typed(AUTH, "work", "Yes", undefined, {})).toEqual({ status: 403, error: "This question is Ben's to answer." });
     expect(w.rows("work").filter((row) => row.role === "user")).toEqual([]);
+  });
+
+  it("leaves a line in the bot's own chat to the usual send when its card could not take it as the answer", async () => {
+    for (const refusal of [{ status: 403, error: "This question is Ben's to answer." }, { status: 409, error: "This card was already answered." }]) {
+      const w = world({ live: ["req-1"] });
+      const asked = question(w, "chat");
+      w.settle();
+      w.refuse(refusal);
+      expect(await w.cards.typed(AUTH, "chat", "What time is it?", undefined, { sendId: "send-9" })).toBeNull();
+      expect(w.deps.answerCard).toHaveBeenCalledWith(expect.objectContaining({ requestId: "req-1", behavior: "answer" }));
+      expect(w.rows("chat")).toEqual([asked]);
+    }
   });
 });
 
@@ -394,6 +515,65 @@ describe("the chip in the conversation that handed the work on", () => {
     const team = world({ inboxThread: "inbox" });
     team.cards.showWaitingOnPersonChip("work", "req-1", asker, "answer");
     expect(team.rows("inbox")).toEqual([]);
+  });
+
+  it("links to a sign-in, password or app to connect left open in the work, once, and says when it no longer waits", () => {
+    const desk = world();
+    desk.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    desk.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    desk.cards.showWaitingOnCardChip("work", { kind: "connect", messageId: "c2", label: "Gmail" }, asker);
+    expect(desk.rows("inbox")).toMatchObject([
+      { kind: "activity", from: { botId: "ledger", name: "Ledger" }, threadRef: { botId: "ledger", threadId: "work", title: "Pricing page: fix" },
+        tool: { name: "Waiting on you to sign in to example.com in @Ledger", nameCode: "chat.notice.waitingSignInElsewhere", nameParams: { name: "Ledger", label: "example.com" } } },
+      { tool: { name: "Waiting on you to connect Gmail in @Ledger", nameCode: "chat.notice.waitingConnectElsewhere" } },
+    ]);
+    desk.cards.settleWaitingOnCardChip("work", "c1");
+    const [settled, open] = desk.rows("inbox");
+    expect(settled?.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
+    expect(settled?.tool?.nameCode).toBeUndefined();
+    expect(settled?.threadRef).toMatchObject({ threadId: "work" });
+    expect(open?.tool?.name).toBe("Waiting on you to connect Gmail in @Ledger");
+  });
+
+  it("says the same line waits again when the card waits again, without a second line", () => {
+    const desk = world();
+    desk.cards.reopenWaitingOnCardChip("work", "c1");
+    expect(desk.rows("inbox")).toEqual([]);
+    desk.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    desk.cards.settleWaitingOnCardChip("work", "c1");
+    desk.cards.reopenWaitingOnCardChip("work", "c1");
+    const rows = desk.rows("inbox");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.tool).toMatchObject({ name: "Waiting on you to sign in to example.com in @Ledger", nameCode: "chat.notice.waitingSignInElsewhere" });
+    expect(rows[0]!.tool?.ok).toBeUndefined();
+    desk.cards.settleWaitingOnCardChip("work", "c1");
+    expect(desk.rows("inbox")[0]!.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
+  });
+
+  it("keeps a private conversation's card, site and title out of a conversation that belongs to someone else", () => {
+    const team = world({ privateThreads: ["work"] });
+    team.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    expect(team.rows("inbox")).toEqual([]);
+  });
+
+  it("leaves a settled chip settled when its conversation has since become private to someone else", () => {
+    const privateThreads: string[] = [];
+    const team = world({ privateThreads });
+    team.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    team.cards.settleWaitingOnCardChip("work", "c1");
+    privateThreads.push("work");
+    team.cards.reopenWaitingOnCardChip("work", "c1");
+    expect(team.rows("inbox")[0]!.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
+  });
+
+  it("leaves a card's chip out of the person's inbox, which has the card, and out of work nobody handed on", () => {
+    const team = world({ inboxThread: "inbox" });
+    team.cards.showWaitingOnCardChip("work", { kind: "password", messageId: "c1", label: "API key" }, asker);
+    expect(team.rows("inbox")).toEqual([]);
+    const desk = world();
+    desk.cards.showWaitingOnCardChip("inbox", { kind: "password", messageId: "c1", label: "API key" }, asker);
+    desk.cards.showWaitingOnCardChip("work", { kind: "question", messageId: "c2", label: "Which?" }, asker);
+    expect(desk.rows("inbox")).toEqual([]);
   });
 });
 

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Cloud, Gift, Megaphone, Rocket, UsersRound } from "lucide-react";
 import type { CloudOffer } from "../../../electron/cloud-home.mjs";
-import { itemSeen, rememberNoticeSeen, type HistoryAction, type HistoryItem, type HistoryMark, type HistoryModal } from "@/lib/announcement-history";
+import { itemSeen, rememberNoticeSeen, withDownloadedUpdate, type HistoryAction, type HistoryItem, type HistoryMark, type HistoryModal } from "@/lib/announcement-history";
+import { appVersion, desktopAppVersion } from "@/lib/app-links";
 import { openEmailDraft, openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
+import { EARLIER_WHATS_NEW_NOTICE } from "@/lib/notices";
 import { activeLocale, t } from "@/lib/i18n";
 import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
+import { installUpdate, useUpdaterState } from "@/lib/updater";
 import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewView, type WhatsNewView } from "@/lib/whats-new";
 import { useStore } from "@/state/store";
 import { localized, type AnnouncementAction, type AnnouncementPlace } from "../../../shared/announcements";
@@ -18,12 +21,13 @@ import { ModelgoMark, type IconProps } from "../ProviderIcons";
 import { TOOL_PAGE_TITLE, ToolPage, ToolPageHeader } from "../ToolPageShell";
 import { TeamsPopup } from "../whats-new/TeamsPopup";
 import { WhatsNewPopup } from "../whats-new/WhatsNewPopup";
+import { BODY_TEXT, CHIP, DATE_TEXT, downloadedUpdate, MARK_TILE, QUIET_BUTTON, ReleaseRow, TITLE_TEXT, type ReleaseContext } from "./ReleaseRow";
 import { useAnnouncements, type Announcements } from "./use-announcements";
 
 const BUILT_IN_MARK: Record<HistoryMark, ComponentType<IconProps>> = {
   teams: UsersRound, cloud: Cloud, boat: Gift, modelgo: ModelgoMark, grok: GrokBotMark, "product-hunt": Rocket,
 };
-const QUIET_BUTTON = "ui-button min-h-9 gap-1.5 px-3 py-1.5";
+type NoticeItem = Exclude<HistoryItem, { source: "release" }>;
 
 /** A button that opens what an announcement's own notice opens, never anything else. */
 export interface AnnouncementRun {
@@ -46,21 +50,21 @@ const dateText = (at: number, locale: string) => {
   try { return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(at); } catch { return new Date(at).toISOString().slice(0, 10); }
 };
 
-function Mark({ item }: { item: HistoryItem }) {
+function Mark({ item }: { item: NoticeItem }) {
   const Icon = item.source === "built-in" ? BUILT_IN_MARK[item.entry.mark] : item.card.image && "mark" in item.card.image ? MARK[item.card.image.mark] : KIND_ICON[item.card.kind];
-  return <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-ink/[0.05] text-ink-secondary"><Icon size={18} /></span>;
+  return <span aria-hidden="true" className={MARK_TILE}><Icon size={18} /></span>;
 }
 
 /** One announcement: its date, mark, title and line or two, and its own buttons; a popup's row opens the popup again. */
 function Row({ item, locale, onModal, canReopen, to }: {
-  item: HistoryItem; locale: string; onModal: (modal: HistoryModal) => void; canReopen: (modal: HistoryModal) => boolean; to: AnnouncementRun;
+  item: NoticeItem; locale: string; onModal: (modal: HistoryModal) => void; canReopen: (modal: HistoryModal) => boolean; to: AnnouncementRun;
 }) {
   const title = item.source === "built-in" ? t(item.entry.title) : localized(item.card.title, locale);
   const body = item.source === "built-in" ? t(item.entry.body) : localized(item.card.body, locale);
   const words = <>
-    <time dateTime={new Date(item.at).toISOString()} className="block text-[12px] leading-4 text-ink-tertiary">{dateText(item.at, locale)}</time>
-    <span className="mt-0.5 block text-[14px] font-medium leading-5 text-ink">{title}</span>
-    <span className="mt-0.5 line-clamp-2 block text-[13px] leading-[18px] text-ink-secondary">{body}</span>
+    <time dateTime={new Date(item.at).toISOString()} className={DATE_TEXT}>{dateText(item.at, locale)}</time>
+    <span className={TITLE_TEXT}>{title}</span>
+    <span className={BODY_TEXT}>{body}</span>
   </>;
   const modal = item.source === "built-in" && "modal" in item.entry.open ? item.entry.open.modal : null;
   if (modal && canReopen(modal)) {
@@ -73,7 +77,7 @@ function Row({ item, locale, onModal, canReopen, to }: {
     </li>;
   }
   let buttons: ReactNode = null;
-  if (item.source === "built-in" && item.ended) buttons = <span data-announcement-ended className="rounded-full bg-ink/[0.06] px-2.5 py-1 text-[12px] text-ink-secondary">{t("announcements.ended")}</span>;
+  if (item.source === "built-in" && item.ended) buttons = <span data-announcement-ended className={CHIP}>{t("announcements.ended")}</span>;
   else if (item.source === "built-in" && "buttons" in item.entry.open) {
     buttons = item.entry.open.buttons.map((button, index) => <button key={button.label} type="button" className={index === 0 ? PRIMARY_BUTTON : QUIET_BUTTON}
       onClick={() => run(button.action, to)}>{t(button.label)}</button>);
@@ -91,8 +95,9 @@ function Row({ item, locale, onModal, canReopen, to }: {
 }
 
 /** The list itself, as the page draws it: newest first. */
-export function AnnouncementList({ items, locale = activeLocale(), onModal, canReopen = () => true, to }: {
+export function AnnouncementList({ items, locale = activeLocale(), onModal, canReopen = () => true, to, release = { installed: appVersion(), updater: null }, onRestart = () => {} }: {
   items: readonly HistoryItem[]; locale?: string; onModal: (modal: HistoryModal) => void; canReopen?: (modal: HistoryModal) => boolean; to: AnnouncementRun;
+  release?: ReleaseContext; onRestart?: () => void;
 }) {
   if (!items.length) {
     return <section aria-label={t("announcements.empty")} className="px-6 py-16 text-center">
@@ -101,7 +106,9 @@ export function AnnouncementList({ items, locale = activeLocale(), onModal, canR
     </section>;
   }
   return <ul aria-label={t("announcements.title")} className="flex flex-col divide-y divide-hairline/40 rounded-2xl border border-hairline/50 bg-card/40">
-    {items.map(item => <Row key={`${item.source}:${item.id}`} item={item} locale={locale} onModal={onModal} canReopen={canReopen} to={to} />)}
+    {items.map(item => item.source === "release"
+      ? <ReleaseRow key={`${item.source}:${item.id}`} item={item} date={dateText(item.at, locale)} context={release} onRestart={onRestart} />
+      : <Row key={`${item.source}:${item.id}`} item={item} locale={locale} onModal={onModal} canReopen={canReopen} to={to} />)}
   </ul>;
 }
 
@@ -136,7 +143,7 @@ function Replay({ modal, found, whatsNew, onClose }: { modal: HistoryModal; foun
   }
   if (modal === "whats-new") {
     if (!whatsNew) return null;
-    return <WhatsNewPopup view={whatsNew} report={(action, slide) => reportWhatsNew(action, slide, whatsNew)} onDone={done}
+    return <WhatsNewPopup view={whatsNew} report={(action, slide) => reportWhatsNew(action, slide, whatsNew, EARLIER_WHATS_NEW_NOTICE)} onDone={done}
       onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })} />;
   }
   if (moving) return <GrokMoveDialog onClose={onClose} />;
@@ -149,6 +156,9 @@ export function AnnouncementsPage() {
   const found = useAnnouncements();
   const [open, setOpen] = useState<HistoryModal | null>(null);
   const back = useRef<HTMLButtonElement>(null);
+  const updater = useUpdaterState();
+  const [openedAt] = useState(Date.now);
+  const items = withDownloadedUpdate(found.items, downloadedUpdate(updater, openedAt), found.branded, openedAt);
   const whatsNew = useWhatsNewView(found, found.items.some(item => item.source === "built-in" && "modal" in item.entry.open && item.entry.open.modal === "whats-new"));
   useEffect(() => { back.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => { if (found.unread) found.markRead(); }, [found.unread]);
@@ -164,9 +174,10 @@ export function AnnouncementsPage() {
       <ToolPageHeader backLabel={t("automations.back")} onBack={() => dispatch({ type: "showChat" })} backRef={back}>
         <h1 className={TOOL_PAGE_TITLE}>{t("announcements.title")}</h1>
       </ToolPageHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto" data-announcements={found.items.length}>
+      <div className="min-h-0 flex-1 overflow-y-auto" data-announcements={items.length}>
         <div className={cn("mx-auto w-full max-w-2xl p-4 sm:p-6")}>
-          <AnnouncementList items={found.items} onModal={setOpen} canReopen={modal => modal !== "whats-new" || whatsNew !== null} to={to} />
+          <AnnouncementList items={items} onModal={setOpen} canReopen={modal => modal !== "whats-new" || whatsNew !== null} to={to}
+            release={{ installed: desktopAppVersion(), updater }} onRestart={() => void installUpdate().catch(() => undefined)} />
         </div>
       </div>
       {open && <Replay modal={open} found={found} whatsNew={whatsNew} onClose={() => setOpen(null)} />}

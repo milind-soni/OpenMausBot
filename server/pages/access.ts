@@ -4,6 +4,7 @@
 //   a desktop's main process fetches its sign-in's own pages token and hands it over on the private parent port.
 // Neither is ever written to config, sent to a client, or given to an engine. No Cloudflare credential is held here.
 import { createHash, createHmac, randomBytes } from "node:crypto";
+import { cloudSignedTimestamp } from "../cloud-clock.ts";
 
 export const PAGES_TOKEN_PATH = "/api/cloud/pages/token";
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
@@ -22,7 +23,7 @@ export function pagesHomeSignature(secret: string, machineId: string, timestamp:
 /** The headers that prove a request to an Admin route comes from this account. */
 export function pagesAuthHeaders(access: PagesAccess, body: string, now = Date.now(), label = "omb-pages-v1"): Record<string, string> {
   if (access.kind === "desktop") return { authorization: `Bearer ${access.token}` };
-  const timestamp = String(Math.floor(now / 1000)), nonce = randomBytes(18).toString("base64url");
+  const timestamp = cloudSignedTimestamp(now), nonce = randomBytes(18).toString("base64url");
   return {
     "x-omb-cloud-machine": access.machineId,
     "x-omb-cloud-timestamp": timestamp,

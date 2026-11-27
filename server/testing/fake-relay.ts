@@ -9,6 +9,8 @@ export interface FakeGeometry {
   url: string; title: string; vw: number; vh: number; dpr: number; sx: number; sy: number;
   focus: null | { role: string; name: string; editable: boolean; valueLength: number; secret: boolean; rect: { x: number; y: number; w: number; h: number }; frame?: "same" | "cross" | null };
   unmasked: number;
+  /** What the typed-text read answers: whether the focused field holds text. */
+  typed?: boolean | null;
 }
 
 export class FakeRelay {
@@ -26,6 +28,8 @@ export class FakeRelay {
   requests: Array<Record<string, unknown>> = [];
   geometry: FakeGeometry = { url: "https://app.example.com/signup", title: "Sign up", vw: 1280, vh: 720, dpr: 1, sx: 0, sy: 0, focus: null, unmasked: 0 };
   boxes: Record<string, { x: number; y: number; width: number; height: number }> = {};
+  /** Elements by selector, for the reads that check a bot's action landed: whether enabled, a field's value, the text. */
+  elements: Record<string, { enabled?: boolean; value?: string; text?: string }> = {};
   /** Bytes a screenshot writes; null fails the capture. */
   picture: Buffer | null = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9]);
   typed: string[] = [];
@@ -91,6 +95,13 @@ export class FakeRelay {
         case "boundingbox": {
           const box = this.boxes[String(command.selector)];
           return box ? reply({ ...box }) : reply(null, "Element not found");
+        }
+        case "isenabled":
+        case "inputvalue":
+        case "innertext": {
+          const element = this.elements[String(command.selector)];
+          if (!element) return reply(null, "Element not found");
+          return reply(command.action === "isenabled" ? { enabled: element.enabled ?? true } : command.action === "inputvalue" ? { value: element.value ?? "" } : { text: element.text ?? "" });
         }
         case "screenshot":
           if (!this.picture) return reply(null, "capture failed");

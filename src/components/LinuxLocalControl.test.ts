@@ -55,6 +55,17 @@ describe("Linux local control on Omarchy", () => {
     expect(markup).not.toContain("GNOME may also ask");
   });
 
+  it("shows nothing on a page served by another server, whose bots can't use this desktop", () => {
+    fixture.localComputer = {
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+      reasonCode: "remote-server",
+    } as DesktopCapabilities["localComputer"];
+    expect(renderToStaticMarkup(createElement(LinuxLocalControl))).toBe("");
+  });
+
   it("keeps the Wayland safety block on other desktops", () => {
     fixture.localComputer = {
       available: false,
@@ -65,7 +76,25 @@ describe("Linux local control on Omarchy", () => {
     } as DesktopCapabilities["localComputer"];
     const markup = renderToStaticMarkup(createElement(LinuxLocalControl));
     expect(markup).toContain("Unavailable on Wayland");
+    expect(markup).toContain("Ubuntu on Xorg");
     expect(markup).not.toContain("cua-hyprland-plugin");
+    expect(markup).not.toContain("Try again");
+  });
+
+  it("points Fedora and other non-Ubuntu Wayland desktops to an Xorg session or a cloud desktop", () => {
+    fixture.localComputer = {
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+      reasonCode: "linux-wayland-seat-safety-blocked",
+      ubuntuDesktop: false,
+    } as DesktopCapabilities["localComputer"];
+    const markup = renderToStaticMarkup(createElement(LinuxLocalControl));
+    expect(markup).toContain("Unavailable on Wayland");
+    expect(markup).toContain("such as Fedora");
+    expect(markup).toContain("Cloud desktop");
+    expect(markup).not.toContain("Ubuntu on Xorg");
     expect(markup).not.toContain("Try again");
   });
 });

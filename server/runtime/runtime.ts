@@ -20,6 +20,9 @@ export interface RuntimeOptions {
   log?: (line: string) => void;
   /** Turns a restart cut start again at most one per this many ms (default RERUN_GAP_MS). */
   rerunGapMs?: number;
+  /** What a turn a restart cut, which would start again, ends with instead; null to start it again (memory-freeze-restart.ts:
+   * a turn that browsed when the server froze for want of memory). */
+  restartCut?: (threadId: string, startedAt: number | undefined) => string | null;
 }
 
 /** After a restart, the first RERUN_BURST turns it cut start again at once and the rest one at a time this far apart: a
@@ -88,6 +91,7 @@ export class Runtime {
   /** Monotonic: no turn a restart cut starts before this. */
   private nextRerunAt = Number.NEGATIVE_INFINITY;
   private rerunsStarted = 0;
+  private readonly restartCut: RuntimeOptions["restartCut"];
 
   constructor(store: RuntimeStore, runner: TurnRunner, options: RuntimeOptions = {}) {
     this.store = store;
@@ -98,6 +102,7 @@ export class Runtime {
     this.log = options.log ?? (line => console.error("runtime:", line));
     this.bootAt = this.clock.now();
     this.rerunGapMs = options.rerunGapMs ?? RERUN_GAP_MS;
+    this.restartCut = options.restartCut;
   }
 
   /** Restart reconciliation and re-park of needs_input, from stored data only. Idempotent; runs before the first tick. */
@@ -119,6 +124,7 @@ export class Runtime {
         }
         if (n.status !== "running") continue;
         const carried = n.carrying ?? [];
+        let stop: string | null;
         const handedOut = childrenSince(this.store, n).length > 0;
         const outward = handedOut ? [] : this.outwardOf(n);
         if (handedOut) {
@@ -131,6 +137,9 @@ export class Runtime {
         } else if (n.restart === "rerun") {
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: cut twice" });
           this.settle(n, "failed", "interrupted", CUT_TWICE);
+        } else if ((stop = this.safe("restartCut", () => this.restartCut?.(n.assignee.destination.threadId, n.startedAt)) ?? null) !== null) {
+          this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: froze for want of memory" });
+          this.settle(n, "failed", "interrupted", stop);
         } else {
           n.restart = "rerun"; n.restarts += 1; n.lastActivityAt = now;
           n.status = this.store.children(n.id).length ? "resume" : "queued";

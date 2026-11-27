@@ -197,6 +197,9 @@ describe("the bot-memory module through the route table", () => {
       ["GET", "/api/profile/learned"],
       ["POST", "/api/profile/learned/e1/remove"],
       ["POST", "/api/bots/b1/memory/open"],
+      ["GET", "/api/bots/b1/memory/thread/t1"],
+      ["PUT", "/api/bots/b1/memory/thread/t1"],
+      ["DELETE", "/api/bots/b1/memory/thread/t1"],
     ] as const) {
       expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
     }
@@ -261,5 +264,34 @@ describe("the bot-memory family behind the gate on a real server", () => {
       const status = await call(method, path, body, { authorization: `Bearer ${token}`, origin: fixture.info.url });
       expect(status, `${method} ${path}`).toBe(403);
     }
+  });
+});
+
+describe("a conversation's own notes through the route table", () => {
+  const threadNotes = { owns: (botId: string, threadId: string) => botId === "bot-123" && threadId !== "not-mine", scoped: (_botId: string, threadId: string) => threadId === "acme" };
+  const put = (url: string, body: unknown) => fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("reads, saves against the hash it read and deletes one conversation's notes, and says whether saves go there", async () => {
+    const base = await serve({ threadNotes });
+    const read = await fetch(`${base}/api/bots/bot-123/memory/thread/acme`);
+    expect(await read.json()).toMatchObject({ path: "memory/threads/acme.md", text: "", exists: false, scoped: true });
+    const saved = await put(`${base}/api/bots/bot-123/memory/thread/acme`, { text: "- NDA, two years\n" });
+    expect(saved.status).toBe(200);
+    const body = (await saved.json()) as { hash: string };
+    expect(body).toMatchObject({ ok: true, text: "- NDA, two years\n", scoped: true });
+    const stale = await put(`${base}/api/bots/bot-123/memory/thread/acme`, { text: "- mine\n", expectedHash: "0".repeat(64) });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ current: "- NDA, two years\n", currentHash: body.hash });
+    expect(await (await fetch(`${base}/api/bots/bot-123/memory/thread/main`)).json()).toMatchObject({ scoped: false });
+    const gone = await fetch(`${base}/api/bots/bot-123/memory/thread/acme`, { method: "DELETE" });
+    expect(await gone.json()).toMatchObject({ exists: false, text: "" });
+  });
+
+  it("answers only for the bot's own conversations, and keeps notes off the memory file route and its journal", async () => {
+    const base = await serve({ threadNotes });
+    expect((await fetch(`${base}/api/bots/bot-123/memory/thread/not-mine`)).status).toBe(404);
+    expect((await fetch(`${base}/api/bots/bot-123/memory/file?path=memory/threads/acme.md`)).status).toBe(400);
+    expect((await put(`${base}/api/bots/bot-123/memory/file`, { path: "memory/threads/acme.md", text: "x" })).status).toBe(400);
+    expect((await fetch(`${await serve()}/api/bots/bot-123/memory/thread/acme`)).status).toBe(404);
   });
 });

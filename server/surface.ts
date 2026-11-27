@@ -245,10 +245,18 @@ export function failedOnHostPath(command: unknown, result: { exitCode?: unknown;
   return Number(result.exitCode ?? 0) !== 0 && result.timedOut !== true && namesHostPath(command, platform);
 }
 
-/** On a server where This computer can be picked: a host path or "my PC" is this computer, never the mounted place. */
-function ownFilesSentence(own: { bot: string; botId?: string; platform: NodeJS.Platform }, place: Surface | null, canSelect: boolean): string {
+/** On a server where This computer can be picked: a host path (or "my PC", when nothing is lent) is this computer, never the mounted place. */
+function ownFilesSentence(own: { bot: string; botId?: string; platform: NodeJS.Platform; desktopApp?: boolean }, place: Surface | null, canSelect: boolean,
+  lent?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>): string {
   const example = HOST_PATHS[own.platform]?.example;
-  return ` A file or folder on the person's own computer (${example ? `a path such as ${example}, ` : ""}their Desktop, Documents, Downloads or OneDrive, or "my PC") is on this computer${place ? `, which ${surfaceLabel(place)} cannot reach` : ""}, and it is never one of the shared computers. ${thisComputerSwitch({ place, bot: own.bot, canSelect, ...(own.botId ? { botId: own.botId } : {}) })}`;
+  const unreachable = place ? `, which ${surfaceLabel(place)} cannot reach` : "";
+  const switchLine = thisComputerSwitch({ place, bot: own.bot, canSelect, ...(own.botId ? { botId: own.botId } : {}) });
+  // A person who lends this server a computer has their own files there too: "my PC" no longer names this computer. A
+  // server no desktop app runs (a VPS) can never be switched to This computer, so the lent computer is the only way.
+  if (lent?.length) {
+    return ` A file or folder at a path of this computer${example ? ` (a path such as ${example})` : ""} is on this computer${unreachable}. A file or folder on ${theirComputer(lent).theirs} is on that computer: reach it only through shared_computer, as above. When they don't say which computer a file is on, ask in one line.${own.desktopApp === false ? "" : ` ${switchLine}`}`;
+  }
+  return ` A file or folder on the person's own computer (${example ? `a path such as ${example}, ` : ""}their Desktop, Documents, Downloads or OneDrive, or "my PC") is on this computer${unreachable}, and it is never one of the shared computers. ${switchLine}`;
 }
 
 /** A Cloud home without the shared-computer tools cannot reach the person's own computer at all. */
@@ -290,13 +298,18 @@ export function computerSelectionPrompt(opts: { cloudHome?: boolean } = {}): str
 }
 
 /** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
- * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
+ * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools.
+ * `lentToServer`: the same on any other server, for a person who lends it a computer. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
   opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; selectionRules?: boolean; cloudHome?: boolean; botOpened?: boolean;
     ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
-    /** This computer can be picked for this bot here: its name, and the platform this server runs on. */
-    thisComputer?: { bot: string; botId?: string; platform: NodeJS.Platform } } = {},
+    lentToServer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
+    /** The bot's Works on is Auto: no place of its own was chosen (Off refuses the lent screen, and a chosen place is the person's). */
+    worksOnAuto?: boolean;
+    /** This computer can be picked for this bot here: its name, the platform this server runs on, and whether the desktop
+     * app runs this server (false: a server no app launched, whose This computer no bot can use). */
+    thisComputer?: { bot: string; botId?: string; platform: NodeJS.Platform; desktopApp?: boolean } } = {},
 ): string {
   const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
@@ -336,8 +349,15 @@ export function surfacePrompt(
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
     text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
   }
+  if (!opts.cloudHome && opts.lentToServer?.length) {
+    for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
+    text += ownComputerSentence(opts.lentToServer, computer);
+    // With no place chosen, "select_computer is the way to connect them" read as the way to the lent computer too, and a
+    // bot asked for desktop apps selected a Local VM that was never set up.
+    if (opts.worksOnAuto && !computer && !opts.pinned) text += ` No other computer is set for this conversation: for desktop apps, use ${theirComputer(opts.lentToServer).theirs} through shared_computer, and don't select a Local VM or another place for it unless they ask.`;
+  }
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
-    text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect));
+    text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect), opts.lentToServer);
   }
   return text + (opts.note ?? "");
 }

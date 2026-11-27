@@ -242,7 +242,7 @@ it("a pasted link main can't open says so and keeps the sheet; cancelling main's
 
 const settle = () => act(async () => { await new Promise((done) => setTimeout(done, 450)); });
 
-it("Connect to a server never sits grey without saying why: it says it is looking, and says so when the check itself fails", async () => {
+it("Connect to another computer never sits grey without saying why: it says it is looking, and says so when the check itself fails", async () => {
   let answer: (value: unknown) => void = () => {};
   const probe = vi.fn((): Promise<unknown> => new Promise((resolve, reject) => { answer = resolve; void reject; }));
   Object.assign(window, { ogb: { workspaces: { ...workspaces, probe }, cloudAdd } });
@@ -263,7 +263,7 @@ it("Connect to a server never sits grey without saying why: it says it is lookin
   expect(form.querySelector("[data-connect-problem]")?.textContent).toBe("Can't reach 192.168.1.21:8799. Check the server is running and reachable from this computer.");
 });
 
-it("Connect to a server says how another computer's desktop app is opened from here: its Your other computers link, or My Cloud", async () => {
+it("Connect to another computer says how another computer's desktop app is opened from here: its Your other computers link, or My Cloud", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address === "123456"
     ? { outcome: "problem", problem: "oldCode" }
     : { outcome: "problem", problem: "desktopApp", host: "192.168.1.30:8799" }));
@@ -272,18 +272,18 @@ it("Connect to a server says how another computer's desktop app is opened from h
   await click(host.querySelector("[data-rail-add]"));
   await click(document.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
-  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Phone & devices → Your other computers.");
+  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Devices → Private network → Your other computers.");
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.30:8799");
   await settle();
   const line = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Devices, then use the link shown there.");
   expect(line).toContain("My Cloud");
   expect(line).not.toMatch(/can't connect to another|isn't a MausBot server/);
   expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
   await type(form.querySelector("[data-own-server-link]"), "123456");
   await settle();
   const code = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Devices, then use the link shown there.");
   expect(code).toContain("My Cloud");
   expect(code).not.toMatch(/can't connect to another|older MausBot/);
 });
@@ -311,7 +311,7 @@ it("an address typed key by key stays in its box; a pasted one moves on to the c
   expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
 });
 
-it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
+it("Connect to another computer takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address.includes("192.168.1.20")
     ? { outcome: "found", origin: "http://192.168.1.20:8799", label: "kitchen-box", version: "0.1.147", transport: "private-http", code: null, credential: null }
     : { outcome: "problem", problem: "publicHttp", host: "203.0.113.9" }));
@@ -611,7 +611,7 @@ it("a server of the person's own that main offers as home: its menu's one tap st
   await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   const menu = await menuOf("garage");
   const row = menu!.querySelector("[data-rail-make-home-start]");
-  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it.");
+  expect(row?.textContent).toBe("Make Garage server my homeMoves this computer's bots, chats, memory and routines to Garage server, and this computer then works for it. Tables your bots loaded in Data don't move: they stay on this computer, where your bots can't open them once they live on Garage server.");
   await click(row);
   await settle();
   expect(makeHome).toHaveBeenCalledWith("garage");
@@ -892,4 +892,66 @@ it("two quick clicks: the place still marked can be clicked to stay, so the last
   await click(host.querySelector('[data-rail-place="profile:default"]'));
   await click(host.querySelector('[data-rail-place="profile:work"]'));
   expect(workspaces.open.mock.calls).toEqual([["profile:default"], ["profile:work"]]);
+});
+
+it("a server saved by hand: its menu offers Rename, saved by main on this computer only; a Cloud's menu does not", async () => {
+  const rename = vi.fn(async (_id: string, _name: string): Promise<{ outcome: "saved" | "name" | "failed" | "unsupported" }> => ({ outcome: "failed" }));
+  rail = { places: [
+    place("home", "My Cloud", { active: true, paint: { swatch: null } }),
+    place("vps", "ubuntu-lan", { kind: "server", renames: true, removable: true, forget: true, paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, rename }, cloudAdd, rail: { expand: vi.fn(async () => {}), onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const settle = () => act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`)!;
+  };
+  expect((await menuOf("home")).querySelector("[data-rail-rename]"), "a Cloud keeps the name its Admin gives it").toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  const menu = await menuOf("vps");
+  expect(document.activeElement, "Rename is the first row").toBe(menu.querySelector("[data-rail-rename]"));
+  await click(menu.querySelector("[data-rail-rename]"));
+  const field = menu.querySelector<HTMLInputElement>("[data-rail-rename-form] input")!;
+  expect(field.value, "starts from the name it has").toBe("ubuntu-lan");
+  await type(field, " 家里的服务器 ");
+  await submit(menu.querySelector("[data-rail-rename-form]"));
+  await settle();
+  expect(menu.querySelector("[data-rail-rename-form] [role='alert']")?.textContent).toBe("That didn't work. Try again in a moment.");
+  rename.mockResolvedValueOnce({ outcome: "saved" });
+  await submit(menu.querySelector("[data-rail-rename-form]"));
+  await settle();
+  expect(rename.mock.calls, "by the circle's own id, which main listed").toEqual([["vps", "家里的服务器"], ["vps", "家里的服务器"]]);
+  expect(host.querySelector("[data-rail-menu]"), "saved: the menu closes").toBeNull();
+});
+
+it("Show bots together: one checkable row in the menu of This computer, the workspace of its own that runs, and My Cloud, for the same switch; no other circle has it", async () => {
+  const expand = vi.fn();
+  let on = true;
+  const together = vi.fn(async (next: boolean) => { on = next; return on; });
+  rail = { places: [
+    place("local", "This Mac", { kind: "computer", profile: "default", active: true, paint: { swatch: null }, together: true }),
+    place("work", "Work", { kind: "computer", profile: "work", named: true, paint: { swatch: null } }),
+    place("home", "My Cloud", { paint: { swatch: null }, together: true }),
+    place("acme", "Acme", { kind: "team", paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, together }, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  const mine = await menuOf("local");
+  const row = mine!.querySelector<HTMLButtonElement>("[data-rail-together-row]")!;
+  expect([row.textContent, row.getAttribute("role"), row.getAttribute("aria-checked")]).toEqual(["Show bots together", "checkbox", "true"]);
+  await click(row);
+  await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  expect(together).toHaveBeenCalledWith(false);
+  expect(host.querySelector("[data-rail-menu='local'] [data-rail-together-row]")?.getAttribute("aria-checked"), "the menu stays open and shows main's answer").toBe("false");
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect((await menuOf("home"))?.querySelector("[data-rail-together-row]")).not.toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect((await menuOf("work"))?.querySelector("[data-rail-together-row]")).toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect((await menuOf("acme"))?.querySelector("[data-rail-together-row]")).toBeNull();
 });

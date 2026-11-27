@@ -44,14 +44,23 @@ where they belong instead of adding new places.
   screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
-  to show.
+  to show. One exception: **New thread** (a plus, also ⌘T) sits at the end of the
+  header in both modes, because starting a thread is an everyday action people
+  look for at the top. With Thread tabs on, the bot's threads take the pill's
+  place in the header as tabs, with the plus at their end. With it off, Simple
+  mode's pill opens a bot's threads once it has two, and the plus sits at their end.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
   Settings. Don't add a second home for the same setting.
 - **No new settings.** No new global settings, toggles or hidden flags. Make
   the behaviour automatic with a good default. An optional field on something
-  the person sets up is fine.
+  the person sets up is fine. One exception: **Settings → Features**, a short
+  list of plain on/off switches for whole features some people don't want
+  (Skill Burger, thread tabs, room feed). It's there so
+  Simple mode can turn off one feature at a time without switching to
+  Advanced. A switch goes there only when its off state is clean: the feature
+  is hidden whole, and nothing the person made is lost.
 - **No new asks.** No new permission asks, approval cards, confirm dialogs,
   nags or waits that interrupt the person, and no default below Full access.
   A bot gets on with the work; a change that needs undoing gets **Undo**.
@@ -121,6 +130,7 @@ are never tracked. Titles of 17px and up keep `tracking-[-0.01em]`.
 | Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 415 | `ink` or `ink-secondary` |
 | Names in lists (bots in the sidebar 14 / 20px) | 13 / 18px | 500 | `ink` |
 | Sidebar group labels ("Bots", "Tools", a department) | 13 / 18px | 415 | `ink-secondary` |
+| Sidebar places (the rows under "Tools") | 14 / 20px | 415 | `ink` |
 | Pinned bot captions | 12 / 16px | 415 | `ink` |
 | Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
 | Meta, hints, menu group labels | 12 / 16px | 415 (menu group labels 500) | `ink-tertiary` |
@@ -156,7 +166,7 @@ element's job and never a pixel value:
 | Fields, controls | 8px | `rounded-lg` |
 | Cards, menus, popovers, sidebar rows and pinned bots | 12px | `rounded-xl` |
 | Dialogs | 14px | `.ui-modal` |
-| Bubbles, cards in the transcript | 18px | `rounded-4xl` |
+| Bubbles, cards in the transcript | 18px; a bubble in a run of its sender's bubbles keeps a 6px tail at its bottom corner on its own side (`joinedCorners`) | `rounded-4xl` |
 | Composer | 22px (18px once it wraps, and always in Advanced mode, whose field sits above a footer row) | set by the composer |
 | Window panes | 0 | |
 
@@ -177,11 +187,42 @@ element's job and never a pixel value:
   chevrons at the end of a row, not before the label.
 - **Control heights: 24, 28, 32 or 36px.** Menu rows are 30px (32px in the
   composer's menu). The chat header's controls and the sidebar's top buttons
-  are 36px. On touch screens, targets grow to 40–44px with the `touch:`
+  are 36px; beside the thread tabs band both are 32px, on the same centre
+  line. On touch screens, targets grow to 40–44px with the `touch:`
   variant.
 - **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
-  in both modes; pinned bots are 95 × 92px tiles with a 60px avatar.
+  in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
+  pages never join them: a bot's pages are in its bot panel's Library tab.
+- **A room is a feed of its threads** (no switch; a home older than 0.1.181,
+  which lacks the feed's routes, keeps the single transcript). Each row is a
+  thread's first line, its reply count, who replied and when; a row, a room
+  thread opened from anywhere, and an Inbox line open their thread in a panel
+  beside the chat (`ForkPanel`), never by moving the room's current thread,
+  which is everyone's. The feed's composer starts a new thread; the room's
+  "+" in the sidebar brings the room up with the cursor in that composer. A row carries
+  the sidebar thread row's menu behind a quiet More (hover, focus and touch),
+  a pin mark when pinned, and its unread or waiting dot; the thread beside the
+  feed has the same menu in its header, with its export. Archived threads come
+  back under "Show archived threads" at the top of the feed. A closed thread (its
+  work done; Close in the menu, or its bot closes it) folds with its closed
+  neighbours into one quiet "4 closed threads" row that opens in place, ten at a
+  time; one with news stays a row, and a new line opens it again. The header is plain
+  words, so the feed is masked under it. Below 768px the room is today's single
+  transcript.
+- **The sidebar stays open beside a side panel** while the chat keeps 440px:
+  from 1040px with a 320px panel (a room, Simple's inbox, Notifications), from
+  1280px with a wider one. Narrower, it folds to its avatars.
+- **Simple's bot panel never moves the sidebar.** Opening or closing it leaves
+  the sidebar's width and its pinned bots exactly as they were. The chat makes
+  the room; under 920px, where the chat would get less than 320px, the panel
+  floats over the chat's edge instead.
+- **Simple's chat header floats over the transcript** (see [section 8](#8-surfaces-and-depth)):
+  the first message rests just below it at the top of the history, and only its
+  controls take clicks.
+- **The chat header's model pill folds to its AI's mark** while a side panel
+  narrows the chat, in a round button the size of the header's others; its
+  label still names the model.
 - **Group with space before you group with lines.** Add a divider only between
   groups that space alone can't separate. Never a divider under a heading.
 - **No cards inside cards.** If a card needs sections, use spacing and a group
@@ -213,10 +254,23 @@ element's job and never a pixel value:
 
 - **Only floating things cast shadows:** menus, popovers and dialogs. Use
   `menu-surface` or `popover-surface`, which carry each skin's shadow. Cards
-  in the page are flat, with a `hairline` border or a tint.
+  in the page are flat, with a `hairline` border or a tint. Two things in the
+  chat also float, over the scrolling transcript: the chat header's pill and
+  controls (`shadow-(--shadow-float)`, through `ELEVATED_FLOAT`) and the
+  composer (`shadow-(--shadow-composer)`, through `ELEVATED_COMPOSER`). The
+  lift shows on light grounds only; in Daylight the composer drops its 0.5px
+  ring at rest and gets it back on hover and focus.
+- **Simple's chat header has no band.** The transcript runs up to the
+  window's top edge under the floating pill and buttons and fades in, in even
+  steps, over the header's 60px (a mask on the scroller, so any skin's ground
+  shows through). A solid band cut messages off at the header; the floating
+  controls already carry their own lift. Advanced keeps its band.
 - **Borders are 1px `hairline`.** Panes meet on a 0.5px `edge`. An element in
   the page gets a border or a tint, not both, and no shadow. Floating surfaces
-  take their surface class, which already balances all three.
+  take their surface class, which already balances all three. One exception:
+  a bot's bubble is a tint finished with a faint top-lit sheen and a 0.5px
+  inset line of ink at 6% (`BOT_BUBBLE_FINISH`), on light grounds only; a
+  dark ground keeps the flat tint.
 - **Rich content in a reply stays in the bubble.** Tables, code and quotes are
   drawn alike: no fill of their own, a 1px hairline and a faint tint. One
   reply is one bubble.
@@ -251,12 +305,25 @@ Motion explains a change. It never decorates.
 - **Use the tokens:** `animate-pop-in` / `pop-out` (menus, 200ms),
   `animate-panel-in` (240ms), `animate-msg-in` (180ms), `animate-fade-in`.
   Movement eases with `cubic-bezier(0.22, 1, 0.36, 1)`; fades use `ease-out`.
-- **300ms ceiling.** Only first-run onboarding may run longer.
+- **Panes keep their width while they move.** A side panel slides in and out
+  over the window's edge at its full width (`animate-panel-beside-in`, 240ms)
+  while the room it takes grows or shrinks, so the chat glides and nothing in
+  the panel rewraps. Words leaving a control fade, drift a few pixels and soften
+  rather than being cut off; they never wrap mid-way.
+- **300ms ceiling.** Only first-run onboarding and a streaming reply's blocks
+  fading in (600ms, `ease-out`, once per block) may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
-  animate layout.
+  animate layout. One exception: buttons (`.ui-button`, `.ui-icon-button`)
+  and the sidebar's bot rows and pinned bots shrink to 98% while pressed, over
+  50ms, and not at all with reduced motion. The stylesheet does this; don't
+  add your own press scale.
 - **No loops** except a live status that is really live (a bot working).
   Never animate something just to draw the eye.
+- **Mascots hold still at rest.** A mascot moves while its bot is doing
+  something, for a beat that explains a change, and under the pointer (its
+  eyes follow, it blinks). Every change blends in over about 300ms, and it
+  settles and stops when the reason ends.
 - **Respect reduced motion.** Pair every transition with
   `motion-reduce:transition-none` and every animation with
   `motion-reduce:animate-none`, or gate it in CSS on
@@ -319,8 +386,9 @@ on. Simple is the default for new installs.
   place in both modes. Advanced may show more rows or more detail.
   One exception: where Advanced already shows something in place (a bot's
   threads as a tree under its row), Simple may offer a shortcut to the same
-  thing there instead of a second copy of it: a menu that opens on a click
-  of a small chevron, never on hover. A second: Advanced mode's composer puts
+  thing there instead of a second copy of it: a menu, or the threads unfolded
+  under the bot's row, that opens on a click of a small chevron, never on
+  hover. A second: Advanced mode's composer puts
   the field on its own line with a footer row under it, and the model and
   effort picker sits in that footer, next to the + menu both modes share.
 - **Switching modes never loses data.**

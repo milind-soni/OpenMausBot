@@ -100,6 +100,33 @@ If a provider or restricted Composio project policy prevents another authorizati
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
+Each bot can be kept to some of those accounts: open the bot's settings, then **Access**, turn on **Limit this bot to specific apps**, and under an app with two or more accounts tick **Accounts this bot may use**. The bot's calls that name another account are refused, its app-event automations can watch only the allowed accounts, and an automation whose account is later taken off the list starts no runs.
+
+## Tool argument names come from each tool's schema
+
+Every Composio tool advertises its own argument names, and two tools of the same app do not have to
+agree on them:
+
+- `GOOGLESHEETS_VALUES_GET` takes `spreadsheet_id` and `range`.
+- `GOOGLESHEETS_BATCH_UPDATE_VALUES_BY_DATA_FILTER` takes `spreadsheetId`, `data` and
+  `valueInputOption`.
+- `GOOGLESHEETS_BATCH_GET` mixes both conventions in one schema: `spreadsheet_id` beside
+  `valueRenderOption`.
+
+Read the schema a tool advertises before the first call and use exactly those names. A call whose
+arguments do not fit the advertised schema is refused before it reaches the app, and the refusal
+names the tool and the first problem with the arguments, for example:
+
+    Tool arguments do not match the advertised input schema: GOOGLESHEETS_VALUES_GET: must have required property 'spreadsheet_id'.
+
+That refusal is about the shape of the call — the name and type of its arguments. It says nothing
+about access, permissions or the account: a refused call does not mean the sheet, the mailbox or the
+file is unreachable. Fix the argument names and call again.
+
+The account to call with is chosen beside the tool, not inside the arguments: `account` names the
+connected account for the call and is not one of the tool's arguments. With several accounts
+connected for one app, a call needs one.
+
 ## Permissions the default connection does not ask for
 
 Each app you connect uses the Composio project's authorization for that app. Unless you set up your own, that is the Composio-managed one, which asks the provider only for Composio's default permissions. Some actions need more. In Gmail:
@@ -126,7 +153,7 @@ Composio runs app tools on its own servers, so a tool that takes a file (Google 
 - **Which files.** Only a file in the bot's working folder or Local VM folder, or one attached to this conversation (by its exact path: never the attachment store as a whole, which holds every conversation's and every team member's files). Never a file in a hidden folder (`.ssh`, `.aws`, `.config`, any dotfile) below the bot's folder or the home folder, nor in the app's own data (`DATA_DIR`, the desktop app's data folder) unless the bot's own folder is inside it, as its workspace is. Such a file is refused with the reason and the call does not go out.
 - **Anything else goes as it is.** A value that is not an existing file in those folders (a Dropbox path such as `/Apps/report.pdf`, `/images/logo.png`, text that starts with `/`, anything with a line break) is sent unchanged, with no refusal.
 - **When.** The files are read before the call's checks and listed in full (name, path, size) on a "Send on your behalf?" card, ahead of the arguments it cuts at 400 characters. They are uploaded only after the last check before sending, so a call refused there, or whose permission or turn ended meanwhile, uploads nothing.
-- **Where.** The harness asks for an upload link (`POST /v1/files/upload` on the managed service, which gives one only for a toolkit the installation has a working connection to; Composio's `POST /files/upload/request` with your own project key). It puts the bytes only to an HTTPS link on Composio's storage (`*.composio.dev` or AWS S3; with `OMB_COMPOSIO_API`, that backend's origin), never following a redirect. The call then carries `{ name, mimetype, s3key }`.
+- **Where.** The harness asks for an upload link (`POST /v1/files/upload` on the managed service, which gives one only for a toolkit the installation has a working connection to; Composio's `POST /files/upload/request` with your own project key). It puts the bytes only to an HTTPS link on Composio's storage (`*.composio.dev`, AWS S3, or Cloudflare R2; with `OMB_COMPOSIO_API`, that backend's origin), never following a redirect. The call then carries `{ name, mimetype, s3key }`.
 - **Failures.** A failed upload is refused with what failed, and nothing is written to the app. When Composio still cannot fetch a call's file (`Failed to download file with s3key …`), the bot is told to give a local path instead of an invented key. At most 10 files per call. Plain text needs no file: `GOOGLEDRIVE_CREATE_FILE_FROM_TEXT` takes the text itself.
 
 The managed service needs the updated broker as well as the updated app for this.

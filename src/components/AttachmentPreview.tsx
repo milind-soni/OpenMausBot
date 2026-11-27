@@ -33,11 +33,12 @@ import {
 } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { revealBridge, revealHostPath, revealProblemText, REVEALABLE_PATH } from "@/lib/reveal-host-path";
 import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
 
 export interface PreviewImage {
   src: string;
@@ -203,7 +204,7 @@ export function messageImagePreviewUrl(
 
 export async function messageImageOutsideWorkspace(src: string): Promise<boolean> {
   try {
-    const response = await fetch(src, { cache: "no-store" });
+    const response = await serverFetch(src, { cache: "no-store" });
     if (response.ok) {
       await response.body?.cancel();
       return false;
@@ -226,7 +227,7 @@ export async function requestMessageFile(
   signal: AbortSignal,
   options?: { entry?: string; list?: boolean; mediaLink?: boolean },
 ): Promise<Response> {
-  const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
+  const response = await serverFetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -416,31 +417,21 @@ export function MessageFolderFiles({ folderPath, listing, message }: {
   );
 }
 
-const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
-  const ogb = typeof window === "undefined" ? undefined : window.ogb;
-  return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
-}
-
-export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
+export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePath: string; standalone?: boolean }) {
   const [problem, setProblem] = useState("");
   const reveal = revealBridge();
   if (!reveal || !REVEALABLE_PATH.test(filePath)) {
     return (
-      <code title={t("attach.outsideWorkspacePath")} className="select-all break-all text-ink">
+      <code title={t("attach.outsideWorkspacePath")} className="select-all whitespace-pre-wrap break-all text-ink">
         {filePath}
       </code>
     );
   }
   const show = async () => {
     setProblem("");
-    try {
-      const result = await reveal(filePath);
-      if (result === "missing") setProblem(t("attach.revealMissing"));
-      else if (result !== "shown") setProblem(t("attach.revealFailed"));
-    } catch {
-      setProblem(t("attach.revealFailed"));
-    }
+    const result = await revealHostPath(filePath);
+    const text = revealProblemText(result);
+    if (text) setProblem(text);
   };
   return (
     <>
@@ -448,9 +439,9 @@ export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
         type="button"
         onClick={() => void show()}
         title={filePath}
-        className="inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"
+        className={standalone ? "ui-button touch:min-h-10" : "inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
       >
-        <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
+        <FolderOpen size={standalone ? 14 : 12} className="shrink-0" aria-hidden="true" />
         {t("attach.showInFolder")}
       </button>
       {problem && <span role="alert" className="text-danger">{problem}</span>}
@@ -891,15 +882,15 @@ export function MarkdownImagePreview({
   );
 }
 
-export function AttachedFileChip({ file, message, linked = false, compact = false, className }: {
-  file: TranscriptFileAttachment;
+export function AttachedFileChip({ file, message, linked = false, compact = false, className, note }: {
+  file: TranscriptFileAttachment & { shownPath?: string };
   message?: MessageAttachmentContext;
   linked?: boolean;
   compact?: boolean;
-  className?: string;
+  className?: string; note?: string; // note: a quiet word after the name, such as the conversation it came from
 }) {
   const save = useLocalFileSave(file.path, file.name, message);
-  const preview = useHtmlPreview(file.path, file.name, message);
+  const preview = useHtmlPreview(file.path, file.name, message, file.shownPath);
   const failed = save.state === "failed";
   if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} preview={preview} className={className} />;
   if (!message || (!file.private && !linked)) {
@@ -923,7 +914,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
           className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
+          <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>{note && <span className="min-w-0 max-w-[45%] shrink truncate text-[11px] text-ink-tertiary">{note}</span>}
           {preview.opens ? <Eye size={13} className="shrink-0" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" />
           ) : save.state === "saved" ? (
@@ -934,7 +925,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
             <Download size={13} className="shrink-0" />
           )}
         </button>
-        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} shownPath={file.shownPath} name={file.name} message={message} />}
         {preview.dialog}
       </div>
       {save.state !== "idle" && (
@@ -952,7 +943,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
               : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
-              <OutsideWorkspaceFile filePath={file.path} />
+              <OutsideWorkspaceFile filePath={file.shownPath ?? file.path} />
             </div>
           )}
         </div>
@@ -964,7 +955,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
 const FILE_CHIP = "inline-flex h-7 max-w-[16rem] items-center rounded-full bg-ink/[0.06] text-[13px] leading-none text-ink-secondary";
 
 function CompactFileChip({ file, message, linked, save, preview, className }: {
-  file: TranscriptFileAttachment;
+  file: TranscriptFileAttachment & { shownPath?: string };
   message?: MessageAttachmentContext;
   linked: boolean;
   save: ReturnType<typeof useLocalFileSave>;
@@ -1005,14 +996,14 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
             <Download size={13} className="shrink-0" aria-hidden="true" />
           )}
         </button>
-        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} shownPath={file.shownPath} name={file.name} message={message} />}
         {preview.dialog}
       </span>
       {save.state !== "idle" && save.state !== "saved" && (
         <span role={failed ? "alert" : "status"} className={cn("px-2.5 text-[12px]", failed ? "text-danger" : "text-ink-secondary")}>
           {save.state === "saving" ? t("attach.downloading") : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
-            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.path} /></span>
+            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.shownPath ?? file.path} /></span>
           )}
         </span>
       )}

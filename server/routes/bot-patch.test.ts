@@ -8,11 +8,12 @@ import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
-import type { ModelSelection } from "../contracts.ts";
+import type { ModelSelection, ProviderInstance } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import type { ManagedVpsInventory } from "../vps-computer.ts";
+import { stillHeldUnread } from "../host/room-reads.ts";
 import { createBotPatchRoutes, type BotPatchRouteDeps } from "./bot-patch.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -85,6 +86,24 @@ function fixture(extra: Partial<BotPatchRouteDeps> = {}) {
   };
   return { store, bot, activeVpsThreads, privateThreads, patch };
 }
+
+describe("PATCH /api/bots/:id memory model", () => {
+  it("saves a model from the bot's OpenRouter connection and restores Automatic on null", async () => {
+    const memoryModel = { instanceId: "router", model: "vendor/memory" };
+    const provider = { openRouter: true, enabled: true, models: { options: [{ id: memoryModel.model }] } } as ProviderInstance;
+    const { store, bot, patch } = fixture({ registry: { get: () => provider } });
+    const chatModel = { instanceId: "router", model: "vendor/chat" };
+    store.patchBot(bot.id, { modelSelection: chatModel });
+
+    expect((await patch(bot.id, { memoryModel: { ...memoryModel, instanceId: "other" } })).status).toBe(400);
+    expect((await patch(bot.id, { memoryModel: { ...memoryModel, model: "vendor/unknown" } })).status).toBe(400);
+    expect((await patch(bot.id, { memoryModel }, { headers: { "x-openmausbot-companion": "1" } })).status).toBe(403);
+    expect(await patch(bot.id, { memoryModel })).toMatchObject({ status: 200, body: { bot: { modelSelection: chatModel, memoryModel } } });
+    expect(new Store(() => sonnet).bot(bot.id)?.memoryModel).toEqual(memoryModel);
+    expect((await patch(bot.id, { memoryModel: null })).status).toBe(200);
+    expect(new Store(() => sonnet).bot(bot.id)?.memoryModel).toBeUndefined();
+  });
+});
 
 describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   it("skips the guard when pinning a bot to the host it already uses", async () => {
@@ -245,6 +264,53 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe(VPS_BOT_ALIAS_CHANGE_ERROR);
     expect(scan).toHaveBeenCalledTimes(3);
+  });
+
+  it("notifies vpsServerSwitched only when a committed patch changes the resolved SSH alias", async () => {
+    const switched: Array<string | undefined> = [];
+    const { store, bot, patch } = fixture({
+      vpsServerSwitched: (updated) => { switched.push(updated.vpsAlias); },
+    });
+
+    expect((await patch(bot.id, { vpsAlias: "production-vps" })).status).toBe(200);
+    expect((await patch(bot.id, { vpsAlias: null })).status).toBe(200);
+    expect(switched).toEqual([]);
+
+    expect((await patch(bot.id, { vpsAlias: "gamma-vps" })).status).toBe(200);
+    expect(switched).toEqual(["gamma-vps"]);
+
+    scan.mockResolvedValueOnce({
+      ...emptyInventory(),
+      instances: [{
+        name: vps.vpsContainerName(bot.id),
+        state: "running",
+        vpsAlias: "gamma-vps",
+        ownerBotId: bot.id,
+        ownerName: bot.name,
+        orphaned: false,
+        inUse: false,
+      }],
+    });
+    expect((await patch(bot.id, { vpsAlias: "delta-vps" })).status).toBe(409);
+    expect((await patch(bot.id, { vpsAlias: "delta-vps", toolsOff: ["browser"] })).status).toBe(400);
+    store.patchBot(bot.id, { busy: true });
+    expect((await patch(bot.id, { vpsAlias: "delta-vps" })).status).toBe(409);
+    expect(switched).toEqual(["gamma-vps"]);
+
+    store.patchBot(bot.id, { busy: false });
+    expect((await patch(bot.id, { vpsAlias: null })).status).toBe(200);
+    expect(switched).toEqual(["gamma-vps", undefined]);
+  });
+  it("notifies vpsServerSwitched for a committed alias even when the profile save that follows throws", async () => {
+    const switched: Array<string | undefined> = [];
+    const { store, bot, patch } = fixture({
+      vpsServerSwitched: (updated) => { switched.push(updated.vpsAlias); },
+    });
+    vi.spyOn(store, "patchBotProfile").mockImplementation(() => { throw new Error("saveBots failed"); });
+
+    await expect(patch(bot.id, { vpsAlias: "gamma-vps", soul: "New instructions" })).rejects.toThrow("saveBots failed");
+    expect(store.bot(bot.id)?.vpsAlias).toBe("gamma-vps");
+    expect(switched).toEqual(["gamma-vps"]);
   });
 });
 
@@ -536,5 +602,63 @@ describe("PATCH /api/bots/:id mainThreadChoice", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.mainThreadChoice).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id unread", () => {
+  it("holds a mark made right after a reply was inserted mid-history, until a reply written later comes", async () => {
+    const { store, bot, patch } = fixture();
+    const first = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "First answer." });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Thanks.", at: 1 });
+    store.insertMessageAfter(bot.threadId, first.id, { role: "bot", kind: "text", text: "A late note under the first answer." });
+    expect((await patch(bot.id, { unread: true })).status).toBe(200);
+    const held = () => stillHeldUnread(store.activePath(bot.threadId), store.taskByThread(bot.id, bot.threadId)?.heldUnread, store.messagesFor(bot.threadId));
+    expect(held(), "the inserted reply was there when the person marked").toBe(true);
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "A new answer.", at: 0 });
+    expect(store.taskByThread(bot.id, bot.threadId)?.heldUnread, "a reply written after it ends it, whatever its clock").toBeUndefined();
+  });
+
+  it("marks the open main conversation, not a routine run on screen", async () => {
+    const { store, bot, patch } = fixture();
+    const openThreadId = bot.threadId;
+    const routine = store.createTask(bot.id, "Daily check", true)!;
+    store.patchTask(bot.id, routine.threadId, { routineRunId: "run-1", unread: false });
+    expect(store.bot(bot.id)!.threadId).toBe(routine.threadId);
+    expect((await patch(bot.id, { unread: true })).status).toBe(200);
+    expect(store.taskByThread(bot.id, routine.threadId)?.unread).toBe(false);
+    expect(store.taskByThread(bot.id, openThreadId)?.unread).toBe(true);
+    expect(store.taskByThread(bot.id, openThreadId)?.heldUnread).toBeDefined();
+    expect(store.bot(bot.id)?.unread).toBe(true);
+  });
+});
+
+describe("PATCH /api/bots/:id fallback", () => {
+  it("checks a backup's reasoning as a model choice is checked, saves what that check returns, and passes plain rows as before", async () => {
+    const engine = { instanceId: "codex", driverKind: "codex", enabled: true } as unknown as ProviderInstance;
+    const checkedModelSelection = vi.fn((raw: unknown) => {
+      const row = raw as ModelSelection;
+      return row.effort === ("turbo" as never)
+        ? { ok: false as const, status: 400, error: `effort "turbo" is not recognized` }
+        : { ok: true as const, selection: { instanceId: row.instanceId, model: row.model.trim(), ...(row.effort ? { effort: row.effort } : {}), ...(row.variant ? { variant: row.variant } : {}) } };
+    });
+    const { store, bot, patch } = fixture({ registry: { get: () => engine }, checkedModelSelection } as unknown as Partial<BotPatchRouteDeps>);
+
+    const refused = await patch(bot.id, { fallback: [{ instanceId: "codex", model: "gpt-6", effort: "turbo" }] });
+    expect(refused.status).toBe(400);
+    expect(store.bot(bot.id)?.fallback).toBeUndefined();
+
+    const saved = await patch(bot.id, { fallback: [
+      { instanceId: "codex", model: "gpt-6-mini", effort: "low" },
+      { instanceId: "codex", model: "gpt-6", variant: "medium" },
+      { instanceId: "codex", model: "gpt-6-nano" },
+    ] });
+    expect(saved.status).toBe(200);
+    expect(store.bot(bot.id)?.fallback).toEqual([
+      { instanceId: "codex", model: "gpt-6-mini", effort: "low" },
+      { instanceId: "codex", model: "gpt-6", variant: "medium" },
+      { instanceId: "codex", model: "gpt-6-nano" },
+    ]);
+    // A row with no reasoning is saved as it was, without the model check a reasoning choice needs.
+    expect(checkedModelSelection).toHaveBeenCalledTimes(3);
   });
 });

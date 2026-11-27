@@ -84,6 +84,12 @@ describe("buildNotification", () => {
 
     expect(buildNotification("done", bot, "thread-1", "pushed")?.avatarUrl).toBeUndefined();
   });
+  it("marks a scheduled routine's finish as a report, and nothing else", () => {
+    expect(buildNotification("done", bot, "thread-1", "Daily digest ready", { routine: true })?.routine).toBe(true);
+    expect(buildNotification("done", bot, "thread-1", "Daily digest ready")).not.toHaveProperty("routine");
+    expect(buildNotification("done", bot, "thread-1", "Daily digest ready", { routine: false })).not.toHaveProperty("routine");
+    expect(buildNotification("routine-failed", bot, "thread-1", "boom", { routine: true })).not.toHaveProperty("routine");
+  });
   it("titles a finished wait and keeps its line as the body", () => {
     expect(buildNotification("wait", { id: "b", name: "Pepper" }, "t", "the build: done. ci passed.")).toEqual({
       kind: "wait", botId: "b", botName: "Pepper", threadId: "t", title: "Pepper's wait is over", body: "the build: done. ci passed.",
@@ -120,6 +126,12 @@ describe("summarize", () => {
     expect(long).toHaveLength(140);
     expect(long.endsWith("…")).toBe(true);
     expect(summarize("short")).toBe("short");
+  });
+
+  it.each(["🙂", "e\u0301", "👩‍💻"])("keeps %s whole when truncating a notification preview", (grapheme) => {
+    const prefix = "x".repeat(138);
+    const frame = buildNotification("done", bot, bot.threadId, `${prefix}${grapheme} done`);
+    expect(frame?.body).toBe(`${prefix}…`);
   });
 
   it("reads a bot's Markdown as the plain line a lock screen shows", () => {

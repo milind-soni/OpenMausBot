@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { createCloudHealth } from "../cloud-health.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { buildDevsReport } from "../devs-report.ts";
 import type { StoreChange } from "../store.ts";
+import { createDiskUsage } from "./disk-usage.ts";
 import { createPerfHost, PERF_FILE } from "./perf-host.ts";
 import { createLaunchTimings, LAUNCH_CHILDREN, LAUNCH_FILE, LAUNCH_HOSTS, LAUNCH_MARKS, LAUNCH_SPANS } from "./launch-timings.ts";
 import { PERF_HEALTH_MAX_BYTES, perfHealth } from "./perf-report.ts";
@@ -129,6 +130,37 @@ describe("performance diagnostics carry no content", () => {
     const report = createCloudHealth({ ...base, perf: perf.health }).report(undefined);
     expect(report.perf).toMatchObject({ v: 1, h24: { turns: 4, failovers: 3, limits: { "claudeAgent:engine": 3 } }, holds: [{ driver: "claude", window: "5-hour", blocked: true }] });
     expect(leaks(JSON.stringify(report.perf))).toEqual([]);
+  });
+});
+
+describe("the storage report carries no names from the disk", () => {
+  it("rides the signed health report as `storage` and the owner's route with no seeded secret, though every file and folder is named after one", async () => {
+    const home = mkdtempSync(join(tmpdir(), "perf-storage-"));
+    dirs.push(home);
+    const data = join(home, ".openmausbot");
+    const named = (secret: string) => secret.replace(/[/\\:?]/g, "_");
+    for (const secret of SECRETS) {
+      for (const parent of [home, data, join(data, "workspaces", "bot_ok"), join(data, "workspaces", named(secret)), join(data, "browser", "profiles", named(secret))]) {
+        mkdirSync(join(parent, named(secret)), { recursive: true });
+        writeFileSync(join(parent, named(secret), named(secret)), secret);
+      }
+    }
+    const store = { onChange: () => () => {}, botByThread: () => null, bots: [] };
+    const bus = { subscribe: () => () => {} };
+    const disk = createDiskUsage({ roots: [{ path: home, scope: "home" }, { path: data, scope: "data" }], volume: home, timer: false, firstPassAfterMs: 0, now: () => START,
+      knownBot: (id) => id === "bot_ok" });
+    const perf = createPerfHost({ dataDir: data, timer: false, now: () => START, wholeMachine: true, bus, store, disk });
+    expect(perf.storage()).toMatchObject({ v: 1, at: null });
+    for (let index = 0; index < 1_000 && (disk.running() || disk.report().at === null); index++) await disk.tick();
+    const cloud = { store, bus, engines: () => [], dataDir: data, eventsDir: data, version: "0.1.160", image: undefined, connectors: () => null,
+      browser: () => ({ available: true, installing: false, interrupted: 0 }), now: () => START };
+    const report = createCloudHealth({ ...cloud, storage: perf.storage }).report(undefined);
+    expect(report.storage).toMatchObject({ v: 1, at: START, bots: [{ id: "bot_ok" }] });
+    expect(report.storage!.categories.reduce((sum, row) => sum + row.files, 0)).toBe(SECRETS.length * 5);
+    expect(leaks(JSON.stringify(report.storage))).toEqual([]);
+    expect(leaks(JSON.stringify(perf.storage()))).toEqual([]);
+    expect(createCloudHealth(cloud).report(undefined)).not.toHaveProperty("storage");
+    perf.stop();
   });
 });
 

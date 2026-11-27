@@ -20,7 +20,7 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import { flushLaterSaves } from "./save-batch.ts";
-import { Store, toWireTask, type BotRecord } from "./store.ts";
+import { Store, toWireTask, type BotRecord, type Message } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
@@ -1800,6 +1800,27 @@ describe("Store", () => {
     ]);
   });
 
+  it("branchMessage keeps an automation's line automated when its words are sent again, and only then", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const followUp = "[Wait finished: the build] Tell me how it went.";
+    const automatedLine = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `${followUp}\n`, automated: true, waitId: "w1" });
+    const typed = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Thanks" });
+    const live: Message[] = [];
+    store.onChange((change) => { if (change.type === "message") live.push(change.message); });
+
+    const again = store.branchMessage(bot.threadId, automatedLine.id, followUp)!;
+    const edited = store.branchMessage(bot.threadId, automatedLine.id, "Tell me tomorrow instead.")!;
+    const typedAgain = store.branchMessage(bot.threadId, typed.id, "Thanks")!;
+
+    expect(live.map((message) => [message.id, message.automated, message.waitId])).toEqual([[again.id, true, "w1"], [edited.id, undefined, undefined], [typedAgain.id, undefined, undefined]]);
+    const reread = new Store(selection).messagesFor(bot.threadId);
+    expect(reread.find((message) => message.id === again.id)).toMatchObject({ text: followUp, automated: true, waitId: "w1" });
+    expect(reread.find((message) => message.id === edited.id)).not.toHaveProperty("automated");
+    expect(reread.find((message) => message.id === edited.id)).not.toHaveProperty("waitId");
+    expect(reread.find((message) => message.id === typedAgain.id)).not.toHaveProperty("automated");
+  });
+
   it("setActiveLeaf switches branches and descends to the newest leaf", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -2064,6 +2085,19 @@ describe("Store change stream", () => {
     expect(titled?.openedBy?.botId).toBe(sender.id);
     store.renameTask(recipient.id, row.threadId, "Export verification");
     expect(store.retitleTask(recipient.id, row.threadId, `@Scout ${brief}`, "Late title")).toBeNull();
+  });
+
+  it("a first line that is only OpenMausBot's note leaves the thread untitled for the next line", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Scout" });
+    const retry = "[From OpenMausBot · retry · information only — requested by OpenMausBot, automatically. Continue the request above.]";
+    const row = store.createTask(bot.id)!;
+    expect(store.titleTaskFromFirstMessage(bot.id, retry, row.threadId)).toBeNull();
+    expect(store.titleTaskFromFirstMessage(bot.id, "Check the invoices", row.threadId)?.title).toBe("Check the invoices");
+    const group = store.createGroup("Ops", [bot.id])!;
+    const task = store.activeGroupTask(group.id)!;
+    expect(store.titleGroupTaskFromFirstMessage(group.id, retry, task.threadId)).toBeNull();
+    expect(store.titleGroupTaskFromFirstMessage(group.id, "Audit the payroll", task.threadId)?.title).toBe("Audit the payroll");
   });
 
   it("channel first-message titling reports the row it named, and a late retitle cannot undo a rename", () => {

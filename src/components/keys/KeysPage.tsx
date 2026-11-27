@@ -1,7 +1,7 @@
 import { SettingsFoldRow, SettingsRows } from "../SettingsPrimitives";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Search } from "lucide-react";
-import { useStore, type ConfigStatus } from "@/state/store";
+import { type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { scrollParent, scrollWithin } from "@/lib/scroll-within";
 import { t } from "@/lib/i18n";
@@ -13,8 +13,10 @@ import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../O
 import { OllamaServer } from "../OllamaServer";
 import { KEY_CATALOG, KEY_SECTIONS, keyHidden, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
 import { finishKeyFocus, useKeyFocus, type KeyFocusRequest } from "./key-focus";
-import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./KeyPanels";
+import { AnthropicEveryClaudeBot, OpenAiCompatUrl, OpenCodeProviderKeys, VoiceServerUrl } from "./KeyPanels";
+import { VpsConnection } from "./VpsServersPanel";
 import { KEY_CONTENT, KEY_ROW, KeyRow, MaskedKey, RowHeading, type KeyStatus } from "./KeyRow";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const CARD = "rounded-xl bg-card in-data-[settings-look=simple]:rounded-[12px] in-data-[settings-look=simple]:border-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge) in-data-[settings-look=simple]:bg-menu";
 const HIGHLIGHT_MS = 1600;
@@ -23,6 +25,7 @@ const PANELS: Partial<Record<KeyId, (visible: boolean) => ReactNode>> = {
   opencodeProviders: () => <OpenCodeProviderKeys />,
   ollama: (visible) => <OllamaServer visible={visible} />,
   lmStudio: () => <LmStudioServer heading={false} />,
+  chatterbox: () => <VoiceServerUrl />,
   vps: () => <VpsConnection />,
 };
 
@@ -40,7 +43,7 @@ function connected(entry: KeyEntry, config: ConfigStatus | null | undefined): bo
 }
 
 function PanelRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const titleId = useId();
   const saved = savedState(entry, state.config);
   const status: KeyStatus = saved.configured ? { tone: "ok", text: t("keys.connected") } : null;
@@ -53,7 +56,7 @@ function PanelRow({ entry, visible }: { entry: KeyEntry; visible: boolean }) {
 }
 
 function ElsewhereRow({ entry }: { entry: KeyEntry }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const titleId = useId();
   const opens = entry.opens;
   const saved = savedState(entry, state.config);
@@ -84,7 +87,7 @@ export function KeyCatalogRow({ entry, visible }: { entry: KeyEntry; visible: bo
 }
 
 function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyEntry[]; open: boolean; onToggle: () => void }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const section = KEY_SECTIONS.find((candidate) => candidate.id === id)!;
   const headId = useId();
   const bodyId = useId();
@@ -129,7 +132,7 @@ function landOn(page: HTMLElement | null, request: KeyFocusRequest, section: Key
 /** `bare`: inside AI's Other services, every section is a fold row in one card; `exclude`: sections listed elsewhere
  * (AI providers are AI's own Providers list), unless a search or a link asks for a key in one. */
 export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclude?: KeySectionId[] } = {}) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<ReadonlySet<KeySectionId>>(() => new Set(
     KEY_SECTIONS.filter((section) => section.id === "ai" || KEY_CATALOG.some((entry) => entry.section === section.id && connected(entry, state.config)))

@@ -1,13 +1,13 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
-import type { PresenceFrame } from "./team-presence.ts";
+import type { PresenceFrame } from "./team-presence.ts"; import type { BoardItemFrame } from "./board.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
-import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
+import type { BotAvatarCrop, MascotFaceColor, MascotMaterial } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts"; import type { EmailOutgoingFields } from "./email.ts";
@@ -34,7 +34,7 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
-import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
+import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts"; import type { RoomThreadCloser } from "./room-threads.ts";
 import type { CompanionEndpointsSnapshot } from "./responses.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
@@ -45,7 +45,7 @@ export type { AuthPairResponse, AuthSessionResponse, BotCreateResponse, BotsResp
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
-export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+export const EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
 
 export function isEffortLevel(value: unknown): value is EffortLevel {
@@ -163,7 +163,7 @@ export interface WireTask extends InboxTask, HandoffStatusField {
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
   alwaysAllow?: string[];
-  unread?: boolean;
+  unread?: boolean; /** Marked unread by the person with it open: the newest message then ("" for none). Being on screen alone does not read it until a reply follows; opening it, writing in it or a new reply ends the mark. */ heldUnread?: string;
   /** The newest message on screen the last time the person read this
    * conversation. The New divider goes after it. */
   lastReadMessageId?: string;
@@ -285,7 +285,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   mascotExpression?: MausExpression | null;
   mascotBody?: BotBodyId | null;
   /** Overrides both eyes and mouth. Absent or null preserves the body's default inks. */
-  mascotFaceColor?: MascotFaceColor | null;
+  mascotFaceColor?: MascotFaceColor | null; /** Lowercase `#rrggbb` tint for the avatar body only. Absent or null uses `color`. */ mascotBodyColor?: string | null; mascotMaterial?: MascotMaterial | null;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;
@@ -370,19 +370,19 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
   phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
-  fallback?: Array<{ instanceId: string; model: string }>;
+  fallback?: ModelSelection[];
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Record a screenshot and a short note of each browser action, kept with
    * the conversation. Off unless true. */
   recordBrowserSteps?: boolean;
-  /** Memory upkeep: the harness captures facts from finished chats into
-   * MEMORY.md and topic files, adds facts about the person to About me and
-   * tidies nightly. On unless explicitly false. */
+  /** Capture facts from finished chats into memory and About me, and tidy nightly. On unless false. */
   memoryUpkeep?: boolean;
-  /** Prompt-cache keep-warm for this bot's Claude threads: true or false
-   * overrides the workspace setting; absent follows it. */
+  /** The model memory upkeep uses on this bot's OpenRouter connection; absent uses the connection's automatic pick. */
+  memoryModel?: { instanceId: string; model: string };
+  /** Prompt-cache keep-warm for this bot's Claude threads: true or false overrides the workspace setting; absent follows it. */
   cacheKeepWarm?: boolean;
+  checkWork?: import("./check-work.ts").CheckWork;
   /** false: the workspace's helper model never writes this bot's background texts. Absent or true: allowed. */
   helperModel?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
@@ -562,7 +562,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
   /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
-  doneWhen?: string;
+  doneWhen?: string; /** On a Check before done line that sent the answer back for fixing: that round, so a client can fold the answer it replaced. */ checkRound?: number;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report about that bot's thread
@@ -585,7 +585,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a Team Cloud, a line in its person's inbox: who it is from and where it came from. */
   inbox?: InboxItem;
   /** thread chips: "Opened thread #Title on @X". */
-  threadRef?: { botId: string; threadId: string; title: string };
+  threadRef?: { botId: string; threadId: string; title: string }; /** The quiet line recording hand-offs to this bot ("Mochi asked me: …"): who asked, how many it folds, their threads. */ askedBy?: { botId: string; name: string; count?: number; threadIds?: string[] };
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
@@ -753,7 +753,7 @@ export interface SecretRequestCardData {
 /** A bot asked the person to sign in to a website themselves: they type the
  * password into the page, or save a login the server fills for the bot. The
  * bot never sees the password either way. */
-export interface SignInRequestCardData {
+export interface SignInRequestCardData extends HandoffCardFields {
   /** The page to open, an http(s) address. */
   url: string;
   /** Its host, the card's headline. */
@@ -783,7 +783,7 @@ export interface SignInRequestCardData {
 
 /** The open sign-in request a bot's computer plea stands for, so whichever
  * panel shows the plea can settle that card. */
-export interface ComputerHelpRef {
+export interface ComputerHelpRef extends Pick<HandoffCardFields, "instruction"> {
   /** The asking bot: a team computer's plea reaches every member's panel. */
   botId: string;
   threadId: string;
@@ -820,7 +820,7 @@ export interface GroupTask {
    * the global group turn limit. Direct chats do not use this limit. */
   turnTimeoutMinutes?: number;
   /** Epoch ms when the person archived this thread; absent while it is in the list. */ archivedAt?: number;
-  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you";
+  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you"; /** Epoch ms when someone marked its work finished, with who did; both absent while it is open, and any new person's line or bot reply opens it again. Nothing is hidden from bots or search. */ closedAt?: number; closedBy?: RoomThreadCloser;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   lastThreadOrderAt?: number;
@@ -995,6 +995,6 @@ export type ServerFrame =
   /** A job is waiting for the phone whose registry key this is; it polls now. */
   | { kind: "device.job"; phone: string; id: string }
   /** Who is here on a Team Cloud (shared/team-presence.ts). */
-  | PresenceFrame
+  | PresenceFrame | /** A Team Board item was made, changed or removed (board.ts). */ BoardItemFrame
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

@@ -131,7 +131,8 @@ function requiredApps(bots: readonly BotRecord[]) {
   const requirements = new Map<string, { slug: string; label: string; reason: string; optional?: boolean }>();
   for (const bot of bots) {
     for (const app of bot.installedPackage?.requiredApps ?? []) {
-      if (!requirements.has(app.slug)) requirements.set(app.slug, { ...app });
+      const existing = requirements.get(app.slug);
+      if (!existing || (existing.optional === true && app.optional !== true)) requirements.set(app.slug, { ...app });
     }
   }
   return requirements;
@@ -312,6 +313,8 @@ export interface TeamExportInput {
   mcpServers?: Readonly<Record<string, unknown>>;
   skipped?: readonly TeamExportSkip[];
   preset?: DefaultsPreset | null;
+  /** Sees the package before key- and password-shaped values are replaced, so a caller can refuse one instead. */
+  beforeRedaction?(definition: Readonly<PackageDefinition>): void;
 }
 
 export interface TeamExportResult {
@@ -692,6 +695,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   if (packageSkills.size) definition.skills = { version: 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   if (connections.length) definition.connections = connections;
 
+  input.beforeRedaction?.(definition);
   const { document: redactedDocument, redacted } = redactPackageSecrets({
     format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);

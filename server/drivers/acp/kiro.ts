@@ -1,7 +1,8 @@
 // Kiro CLI over ACP (`kiro-cli acp --agent-engine=v3 --auth-method=cli`), billed to the Kiro account `kiro-cli login`
 // signed in, or to a Kiro Pro key in KIRO_API_KEY. Checked against kiro-cli 3.1.0:
 //   - initialize offers authMethods [aws-builder-id, aws-iam-identity-center] ([kiro-login] in older bundles) and no
-//     image input; `--auth-method=cli` keeps the access tokens inside Kiro;
+//     ACP image input, so an attached image reaches Kiro as its file path, which Kiro's own read tool opens;
+//     `--auth-method=cli` keeps the access tokens inside Kiro;
 //   - session/new advertises the account's models as the `model` config option, each model's effort as `effortLevel`,
 //     Kiro's agents as `mode`, and `autopilot` (on/off), which sessions start "on";
 //   - session/set_config_option sets each of them and answers with the full configOptions;
@@ -92,7 +93,6 @@ const SUPPORT: AcpSupport = {
   models: MODELS,
   defaultCli: "kiro-cli",
   nativeSource: "kiro.acp",
-  images: false,
   loginNote: LOGIN_NOTE,
   install: {
     command: { darwin: "curl -fsSL https://cli.kiro.dev/install | bash", linux: "curl -fsSL https://cli.kiro.dev/install | bash", win32: "irm 'https://cli.kiro.dev/install.ps1' | iex" },

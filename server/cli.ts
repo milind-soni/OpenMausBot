@@ -41,7 +41,7 @@ import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { routeCli, usage } from "./cli-usage.ts"; import { savedSessionHeaders } from "./headless/saved-servers.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
 import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
-import { cliCommand, cliPrefix } from "./cli-invocation.ts";
+import { cliCommand, cliPrefix } from "./cli-invocation.ts"; import { defaultDataDir, type DataHomes } from "./data-dir.ts";
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
 import { isLoopbackHost } from "../electron/server-address.mjs";
@@ -124,7 +124,7 @@ export interface CliOptions {
 
 const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "devices", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h", "--version", "-v", "version"];
 
-export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
+export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, homes: DataHomes = {}): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help" && argv[0] !== "--version");
   const [command = "start", ...rest] = implicitStart ? ["start", ...argv] : argv;
   if (!COMMANDS.includes(command)) {
@@ -133,7 +133,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   const options: CliOptions = {
     command: command === "--help" || command === "-h" ? "help" : command === "--version" || command === "-v" ? "version" : command === "devices" ? "sessions" : (command as CliOptions["command"]),
     port: Number(env.OMB_PORT || 8799),
-    dataDir: env.OMB_DATA_DIR || join(homedir(), ".openmausbot"),
+    dataDir: rest.includes("--data-dir") ? "" : defaultDataDir(env, homes.under, homes.realHome),
     tailscale: false,
     tunnel: false,
     client: false,
@@ -261,7 +261,7 @@ async function api(port: number, path: string, init: { method?: string; body?: s
   return { status: res.status, body };
 }
 
-export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Phone & devices, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
+export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Devices, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
 
 function refusedAsService(status: number, body: any): boolean {
   return status === 403 && typeof body?.error === "string" && /shared server|Sign in through the workspace portal/.test(body.error);

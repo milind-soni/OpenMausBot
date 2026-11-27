@@ -111,6 +111,17 @@ describe("cloud computer power", () => {
     expect(logs).toEqual(["cloud computer bot-a: asleep after 600s idle"]);
   });
 
+  it("says the browser sandbox's real idle time when it sleeps, not the computers' window", async () => {
+    fake.states.set("browser", "ready");
+    power.used("browser", 3 * MINUTE);
+    await vi.advanceTimersByTimeAsync(2 * MINUTE);
+    power.used("browser", 1_000);
+    // The shorter window never cuts the 3 minutes asked at the start: it sleeps then, a minute after its last use.
+    await vi.advanceTimersByTimeAsync(MINUTE);
+    expect(sleeps()).toEqual(["browser"]);
+    expect(logs).toEqual(["the Cloud's browser sandbox: asleep after 60s idle"]);
+  });
+
   it("counts the window from the end of a turn, however long the turn ran", async () => {
     fake.states.set("bot-a", "ready");
     power.attached(turn("t1"), "bot-a");

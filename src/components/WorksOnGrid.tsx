@@ -23,6 +23,12 @@ export function worksOnChoices(config: Parameters<typeof placeOffered>[1], capab
   return WORKS_ON_CHOICES.filter(([mode]) => mode === null || mode === "off" || (placeOffered(mode, config) && !(mode === "local" && pageOnRemoteServer(capabilities))));
 }
 
+/** A page on a remote server can't offer the desktop's own computer, so its line says how a shared one is used instead. */
+export function worksOnHintKey(config: Parameters<typeof placeOffered>[1], capabilities: DesktopCapabilities): LocaleKey {
+  if (config?.cloudHome) return "computer.worksOnHintCloudHome";
+  return pageOnRemoteServer(capabilities) ? "computer.worksOnHintServer" : "computer.worksOnHint";
+}
+
 export function worksOnSelected(mode: WorksOnMode, computer: Bot["computer"], capabilities: DesktopCapabilities): boolean {
   return mode === null ? !computer || (computer === "local" && pageOnRemoteServer(capabilities)) : computer === mode;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -6,7 +6,8 @@ import { glassPopupFrameStyle, glassPopupTopInset, GLASS_POPUP_GUTTER } from "@/
 import { scrollWithin } from "@/lib/scroll-within";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { setAdvancedMode } from "@/lib/interface-mode";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
 import { shortcutLabel } from "../ShortcutHint";
@@ -17,7 +18,7 @@ import { KEY_CATALOG, keyHidden, keyMatches, type KeyEntry } from "../keys/key-c
 import { openKeySettings } from "../keys/key-focus";
 import { useSettingsContext, useSettingsPlace } from "./settings-context";
 import { needsAdvanced, pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
-import { SettingsShellContext, type SettingsShell } from "./settings-shell";
+import { SettingsShellContext, type SettingsShell, type SettingsSub } from "./settings-shell";
 import { SettingsNav, hitLabel, pageLabel } from "./SettingsNav";
 import { SettingsPageHeader } from "./SettingsPageHeader";
 import { SettingsSkeletonCard, SettingsUnreachable } from "./SettingsStates";
@@ -50,20 +51,23 @@ export function revealAnchor(scroller: HTMLElement | null, anchor: string | null
 
 export function SettingsWindow() {
   const isTop = useIsTopLayer();
-  const { state, dispatch } = useStore();
+  const section = useStoreSelector((state) => state.appSettingsSection), config = useStoreSelector((state) => state.config);
+  const unreachable = useStoreSelector((state) => Boolean(state.error)), dispatch = useStoreDispatch();
   const ctx = useSettingsContext();
   const place = useSettingsPlace();
   const narrow = useMediaQuery(NARROW, false);
-  const target = resolveSettingsTarget(state.appSettingsSection, ctx);
+  const target = resolveSettingsTarget(section, ctx);
   const [anchor, setAnchor] = useState<string | null>(target.anchor ?? null);
-  const [narrowPage, setNarrowPage] = useState(state.appSettingsSection !== "overview");
+  const [narrowPage, setNarrowPage] = useState(section !== "overview");
   const [query, setQuery] = useState("");
+  const [sub, setSub] = useState<SettingsSub | null>(null);
+  const [headerAction, setHeaderAction] = useState<ReactNode | null>(null);
   const pages = visiblePages(ctx);
   const page = pageById(target.page);
   const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || state.appSettingsSection !== "overview"); }, [state.appSettingsSection, target.anchor]);
+  useEffect(() => { setAnchor(target.anchor ?? null); setNarrowPage((open) => open || section !== "overview"); }, [section, target.anchor]);
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       if (anchor) revealAnchor(scrollRef.current, anchor);
@@ -71,15 +75,13 @@ export function SettingsWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, target.page]);
-  // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
-  useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   useEffect(markOpened, []);
 
   const hits = useMemo(() => searchSettings(query, ctx, (entry) => hitLabel({ entry, elsewhere: false, score: 0 }, place, ctx.desktop),
     (candidate) => pageLabel(candidate, place, ctx.desktop)), [query, ctx, place]);
 
-  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => !keyHidden(entry.id, state.config) && keyMatches(entry, query.trim().toLowerCase(), state.config)).slice(0, 8)), [ctx.client, query, state.config]);
+  const keyHits = useMemo(() => (ctx.client || !query.trim() ? [] : KEY_CATALOG.filter((entry) => !keyHidden(entry.id, config) && keyMatches(entry, query.trim().toLowerCase(), config)).slice(0, 8)), [ctx.client, query, config]);
   const openKey = (entry: KeyEntry) => { setQuery(""); setNarrowPage(true); dispatch(entry.uses ? openKeySettings(entry.uses, entry.id) : openKeySettings(entry.id)); };
   const computer = useSwitchToComputer();
   const close = () => dispatch({ type: "toggleAppSettings", open: false });
@@ -96,8 +98,14 @@ export function SettingsWindow() {
     if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
     if (entry.jump === "bot") { close(); return; }
     if (hit.elsewhere) { computer.open?.(); return; }
-    if (hit.advanced || needsAdvanced({ page: entry.page, anchor: entry.anchor }, ctx)) setAdvancedMode(true);
     go(entry.page, entry.anchor);
+  };
+  /** Clearing the search puts away an Advanced setting it showed in Simple. */
+  const search = (next: string) => {
+    setQuery(next);
+    if (next.trim() || ctx.advanced) return;
+    if (!page.when(ctx)) dispatch({ type: "toggleAppSettings", open: true, section: "overview" });
+    else if (anchor && needsAdvanced({ page: target.page, anchor }, ctx)) setAnchor(null);
   };
   /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
   const setAdvanced = (on: boolean) => {
@@ -135,13 +143,15 @@ export function SettingsWindow() {
     return () => { window.removeEventListener("keydown", onKey); previousFocus?.focus(); };
   }, [dispatch, isTop]);
 
-  const shell: SettingsShell = { ctx, place, page: target.page, anchor, go };
+  const shell: SettingsShell = { ctx, place, page: target.page, anchor, go, narrow, setSub, setHeaderAction };
   const missing = target.missing ? pageLabel(pageById(target.missing), place, ctx.desktop) : undefined;
   const showList = narrow && !narrowPage;
   // Narrow header: the back label and the centred page title share 48 px of height; when the pair can't fit (half the
-  // width each side of the centre), the back button keeps only its chevron.
-  const compactBack = narrow && typeof window !== "undefined"
-    && window.innerWidth / 2 - 16 - (30 + t("settings.title").length * 7) < (pageLabel(page, place, ctx.desktop).length * 9) / 2;
+  // width each side of the centre), the back button says only "Back", and keeps only its chevron when even that can't.
+  const backFull = sub ? sub.back : t("settings.title");
+  const headTitle = sub ? sub.short ?? sub.title : pageLabel(page, place, ctx.desktop);
+  const backFits = (label: string) => typeof window === "undefined" || window.innerWidth / 2 - 16 - (30 + label.length * 7) >= (headTitle.length * 9) / 2;
+  const backLabel = !narrow || backFits(backFull) ? backFull : backFits(t("rail.back")) ? t("rail.back") : null;
   const closeButton = (
     <button type="button" onClick={close} aria-label={t("settings.close")} title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
       className={cn("ui-icon-button z-20 size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink", !narrow && "absolute right-3 top-3")}>
@@ -164,13 +174,13 @@ export function SettingsWindow() {
                 <div className="relative flex h-12 items-center justify-between gap-2 px-2">
                   {showList ? <h2 className="flex-1 px-2 text-[16px] font-semibold leading-[22px] text-ink">{t("settings.title")}</h2> : (
                     <>
-                      {/* "‹ Settings" when it fits beside the centred title; a longer pair (German, a long page name) keeps the
-                          chevron alone, so the title stays centred and clear of the close button. */}
-                      <button type="button" data-settings-back="" aria-label={compactBack ? t("settings.backTo") : undefined} onClick={() => { setNarrowPage(false); setQuery(""); }}
-                        className={cn("flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full text-[13px] font-medium leading-5 text-ink-secondary hover:bg-menu-hover hover:text-ink", compactBack ? "w-8 justify-center" : "pl-1 pr-2")}>
-                        <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{!compactBack && t("settings.title")}
+                      <button type="button" data-settings-back="" aria-label={backLabel === null ? sub?.back ?? t("settings.backTo") : undefined} title={backLabel === backFull ? undefined : backFull}
+                        onClick={() => { if (sub) { sub.onBack(); return; } setNarrowPage(false); setQuery(""); }}
+                        className={cn("flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full text-[13px] font-medium leading-5 text-ink-secondary hover:bg-menu-hover hover:text-ink", backLabel === null ? "w-8 justify-center" : "pl-1 pr-2")}>
+                        <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{backLabel}
                       </button>
-                      <h2 className={cn("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink", compactBack ? "max-w-[calc(100%-96px)]" : "max-w-[calc(100%-224px)]")}>{pageLabel(page, place, ctx.desktop)}</h2>
+                      <h2 className={cn("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink",
+                        backLabel === null ? "max-w-[calc(100%-96px)]" : backLabel === backFull ? "max-w-[calc(100%-224px)]" : "max-w-[calc(100%-160px)]")}>{headTitle}</h2>
                     </>
                   )}
                   {closeButton}
@@ -180,7 +190,7 @@ export function SettingsWindow() {
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
                 <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
+                  onQuery={search} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -188,11 +198,11 @@ export function SettingsWindow() {
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
-                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
+                      <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} peek={!ctx.advanced && !page.when(ctx) && !anchor} sub={sub} action={headerAction} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>
-                        <LicenseExpiryBanner config={state.config} />
-                        {page.owner === "place" && state.config === null
-                          ? state.error ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
+                        <LicenseExpiryBanner config={config} />
+                        {page.owner === "place" && config === null
+                          ? unreachable ? <SettingsUnreachable place={place.name} onRetry={() => void api<ConfigStatus>("/api/config").then((config) => dispatch({ type: "configStatus", config })).catch(() => {})} />
                             : <><SettingsSkeletonCard place={place.name} /><SettingsSkeletonCard place={place.name} /></>
                           : <SettingsPageBody page={target.page} />}
                       </div>

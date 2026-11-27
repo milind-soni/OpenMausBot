@@ -171,3 +171,16 @@ const readReducedMotion = () => globalThis.window?.matchMedia?.(REDUCED_MOTION).
 export function usePrefersReducedMotion(): boolean {
   return useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
 }
+
+const written = new WeakMap<Element, Map<string, string>>();
+
+/** Sets an attribute, or `opacity` as a style, only when it changes. */
+export function put(el: Element, name: string, value: string | null): void {
+  let seen = written.get(el);
+  if (!seen) written.set(el, (seen = new Map()));
+  if (seen.get(name) === (value ?? "")) return;
+  seen.set(name, value ?? "");
+  if (name === "opacity") (el as SVGElement).style.opacity = value ?? "";
+  else if (value === null) el.removeAttribute(name);
+  else el.setAttribute(name, value);
+}

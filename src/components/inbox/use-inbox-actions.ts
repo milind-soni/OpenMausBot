@@ -2,15 +2,19 @@ import { useCallback } from "react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
-import { openThread, useStore } from "@/state/store";
-import { closeInbox, doneInboxRow, openInbox, readInboxRow, refreshInbox } from "@/state/inbox";
+import { openThreadBeside } from "@/lib/room-feed";
+import { openThread } from "@/state/store";
+import { useStoreRef } from "@/state/store-ref";
+import { useStoreSelector } from "@/state/store-select";
+import { closeInbox, currentInboxPanel, doneInboxRow, openInbox, readInboxRow, refreshInbox } from "@/state/inbox";
 import type { CardResponse } from "@/lib/card-answer";
 import { answerThread, closeResponse, type QuickAction } from "./inbox-view";
+import { attentionJumpAction, type AttentionThread } from "../SidebarBotActivity";
 
 /** What a row's buttons do. An ask is answered through its copy's card here, which answers the card where it was asked,
  * as its buttons in the chat do; a line of news is done, or opened where it came from. */
 export function useInboxActions(view: InboxView | null) {
-  const { state, dispatch } = useStore();
+  const store = useStoreRef(), dispatch = store.dispatch;
   const showThreads = useShowThreads();
   const phone = useMediaQuery(PHONE_LAYOUT);
 
@@ -23,27 +27,38 @@ export function useInboxActions(view: InboxView | null) {
   }, [view, dispatch]);
 
   const openInChat = useCallback((row: InboxRow) => {
-    readInboxRow(row);
+    const sidePanelReadsIt = !phone && currentInboxPanel().open;
+    if (!sidePanelReadsIt) readInboxRow(row);
     const target = row.origin ? { botId: row.origin.botId, threadId: row.origin.threadId, messageId: row.origin.messageId }
       : view?.threadId && view.botId ? { botId: view.botId, threadId: view.threadId, messageId: row.id } : null;
     if (!target) return;
-    openThread(dispatch, { botId: target.botId, threadId: target.threadId }, state, showThreads);
+    if (phone || !openThreadBeside(dispatch, target.threadId, store.state())) openThread(dispatch, { botId: target.botId, threadId: target.threadId }, store.state(), showThreads);
     if (target.messageId) dispatch({ type: "focusMessage", threadId: target.threadId, messageId: target.messageId });
     // The conversation is in the main window; on a phone the inbox is a sheet over it.
     if (phone) closeInbox();
-  }, [view, state, dispatch, showThreads, phone]);
+  }, [view, store, dispatch, showThreads, phone]);
 
   const run = useCallback((row: InboxRow, action: QuickAction) => {
     if (action === "allow" || action === "deny") answer(row, { behavior: action });
     else if (action === "close") answer(row, closeResponse(row));
     else if (action === "done") doneInboxRow(row);
     else if (action === "open") openInChat(row);
-    else { readInboxRow(row); openInbox({ reading: row.id }); }
+    else openInbox({ reading: row.id });
   }, [answer, openInChat]);
 
-  /** The bot a line is from: its face leads the line's card and its colour is on the card's answer. None for a teammate's line. */
-  const askerOf = (row: InboxRow) => (row.from.botId ? state.bots.find((bot) => bot.id === row.from.botId) : undefined);
-  const colorOf = (row: InboxRow) => askerOf(row)?.color;
+  return { run, answer, openInChat };
+}
 
-  return { run, answer, openInChat, colorOf, askerOf };
+/** A room thread listed in the Inbox opens with its room's feed where the room shows as one; anything else opens in the chat. */
+export function useInboxJump() {
+  const store = useStoreRef(), dispatch = store.dispatch;
+  const phone = useMediaQuery(PHONE_LAYOUT);
+  return useCallback((entry: AttentionThread) => {
+    if (phone || !openThreadBeside(dispatch, entry.task.threadId, store.state())) dispatch(attentionJumpAction(entry));
+  }, [store, dispatch, phone]);
+}
+
+/** The bot a line is from: its face leads the line's card and its colour is on the card's answer. None for a teammate's line. */
+export function useInboxAsker(row: InboxRow) {
+  return useStoreSelector((state) => (row.from.botId ? state.bots.find((bot) => bot.id === row.from.botId) : undefined));
 }

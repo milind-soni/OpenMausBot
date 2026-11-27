@@ -21,6 +21,8 @@ export const USER_ERROR = {
   "serverError.model.accountUpdating": "this provider account is being updated — try again shortly",
   "serverError.chat.busyEdit": "the thread is working — stop it before editing",
   "serverError.chat.busyVersion": "the thread is working — stop it before switching versions",
+  "serverError.forkBusy": "Wait for this conversation to finish before forking it.",
+  "serverError.forkNoText": "This conversation has no text message to fork from yet.",
   "serverError.chat.busyFresh": "the thread is working — stop it before starting fresh",
   "serverError.chat.questionGone": "this question is no longer available",
   "serverError.chat.askerGone": "the bot that asked this question is no longer available",
@@ -100,6 +102,10 @@ export const USER_ERROR = {
   "serverError.department.deleteBusy": "Stop this department's active work before deleting it",
   "serverError.department.generalChief": "General already has a Chief of Staff. Move or change this department's Chief before deleting it",
   "serverError.backup.recursiveLink": "Cannot back up a symbolic link to the folder that contains it: {path}",
+  "serverError.backup.dataQueryRunning": "{bot}'s Data query is still running and did not stop when asked. Fully quit and reopen OpenMausBot (or restart the hosted server) to stop it, then try again.",
+  "serverError.backup.dataCloseFailed": "{bot}'s Data tables could not be closed for the backup ({detail}). Fully quit and reopen OpenMausBot (or restart the hosted server), then try again.",
+  "serverError.backup.tooLargeData": "This installation exceeds the 10 GB backup limit; {size} of it is bots' Data tables.",
+  "serverError.backup.legacyBursts": "This backup's burst records (bursts.db) are damaged, so nothing was restored and nothing here changed. Make a new backup where it came from.",
   "serverError.setup.noTools": "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.",
   "serverError.setup.missingConversation": "There is no such conversation.",
   "serverError.setup.stopOwner": "Only the person who pressed Set me up, or an owner or admin, can stop it.",
@@ -154,6 +160,7 @@ export const USER_ERROR = {
   "serverError.signIn.answeredInChat": "this sign-in request was already answered in the chat",
   "serverError.signIn.alreadyDone": "this sign-in request was already marked done",
   "serverError.signIn.alreadyCancelled": "this sign-in request was already cancelled",
+  "serverError.signIn.expired": "this request already expired",
   "serverError.inbox.answerNotPassed": "That answer can't be passed back.",
   "serverError.room.nameOneLine": "room name must fit on one line",
   "serverError.computer.systemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
@@ -224,6 +231,8 @@ export const USER_ERROR = {
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
   "serverError.voice.elevenLabsTranscribeConnection": "Couldn't reach ElevenLabs to hear you — check your connection.",
   "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. The file itself is still saved as {name}.",
+  "serverError.vps.tooManyCores": "{server} has {cores} CPU cores in all. Choose {cores} or fewer.",
+  "serverError.vps.tooMuchMemory": "{server} has about {memory} GB of memory. Choose {memory} GB or less.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

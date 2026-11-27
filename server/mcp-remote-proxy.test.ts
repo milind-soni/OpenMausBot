@@ -23,9 +23,10 @@ import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 const TOKEN = "disposable-remote-fixture-token";
 type Frame = { id?: string | number; method?: string; params?: Record<string, unknown> };
 
-async function remoteFixture(mode: "http" | "event-stream" | "sse") {
+async function remoteFixture(mode: "http" | "event-stream" | "sse", options: { strictMetaVersion?: boolean; echoProtocolVersion?: string } = {}) {
   const calls: string[] = [];
   const frames: Frame[] = [];
+  const headers: IncomingMessage["headers"][] = [];
   const events = new EventEmitter();
   const streams = new Set<ServerResponse>();
   let signalClosed!: () => void;
@@ -45,10 +46,17 @@ async function remoteFixture(mode: "http" | "event-stream" | "sse") {
       for await (const chunk of req) body += chunk.toString();
       const frame = JSON.parse(body) as Frame;
       frames.push(frame);
+      headers.push({ ...req.headers });
+      const meta: unknown = frame.params?._meta;
+      if (options.strictMetaVersion && frame.method !== "server/discover" && !!meta && typeof meta === "object" && Object.hasOwn(meta, "io.modelcontextprotocol/protocolVersion")) {
+        return res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ jsonrpc: "2.0", id: frame.id ?? null, error: { code: -32600, message: "Unsupported protocol version" } }));
+      }
       let result: unknown;
       let error: unknown;
       if (frame.method === "initialize") {
-        result = { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "disposable", version: "1" } };
+        result = { protocolVersion: options.echoProtocolVersion ?? "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "disposable", version: "1" } };
+      } else if (frame.method === "server/discover") {
+        result = { supportedVersions: ["2026-07-28", "2025-06-18"], serverInfo: { name: "disposable", version: "1" } };
       } else if (frame.method === "tools/list") {
         result = frame.params?.cursor === "next" ? { tools: [{ name: "write", inputSchema: { type: "object" } }] }
           : { tools: [{ name: "read", inputSchema: { type: "object" } }, { name: "write", inputSchema: { type: "object" } }], nextCursor: "next" };
@@ -89,7 +97,7 @@ async function remoteFixture(mode: "http" | "event-stream" | "sse") {
   const { port } = server.address() as AddressInfo;
   return {
     spec: { type: mode === "sse" ? "sse" as const : "http" as const, url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: `Bearer ${TOKEN}` } },
-    calls, frames, events, closed,
+    calls, frames, headers, events, closed,
     close: () => new Promise<void>((resolve) => { for (const stream of streams) stream.end(); server.closeAllConnections(); server.close(() => resolve()); }),
   };
 }
@@ -235,6 +243,58 @@ describe("scoped remote MCP subprocess", () => {
     const reply = await answer();
     expect(reply.error).toEqual({ code: -32603, message: "Could not reach this MCP server. Check its URL and that it is online." });
     expect(JSON.stringify(reply)).not.toContain(fixture.spec.url);
+  });
+
+  it("keeps the engine's protocol revision off the upstream request", async () => {
+    fixture = await remoteFixture("http", { strictMetaVersion: true });
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "tools/list", params: { _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": { roots: { listChanged: true } },
+      progressToken: "tok-1",
+    } } });
+    const listed = await answer();
+    expect(listed.error).toBeUndefined();
+    expect(listed.result.tools.map((tool: { name: string }) => tool.name)).toEqual(["read"]);
+    const upstreamList = fixture.frames.find((frame) => frame.method === "tools/list")!;
+    expect(upstreamList.params?._meta).toEqual({
+      "io.modelcontextprotocol/clientCapabilities": { roots: { listChanged: true } },
+      progressToken: "tok-1",
+    });
+  });
+
+  it("still hands server/discover the engine's protocol metadata", async () => {
+    fixture = await remoteFixture("http", { strictMetaVersion: true });
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "server/discover", params: { _meta: { "io.modelcontextprotocol/protocolVersion": "2026-07-28" } } });
+    const discovered = await answer();
+    expect(discovered.error).toBeUndefined();
+    expect(discovered.result.supportedVersions).toEqual(["2026-07-28", "2025-06-18"]);
+    const upstreamDiscover = fixture.frames.find((frame) => frame.method === "server/discover")!;
+    expect(upstreamDiscover.params?._meta).toEqual({ "io.modelcontextprotocol/protocolVersion": "2026-07-28" });
+  });
+
+  it("puts the negotiated revision, not a newer echo, on upstream requests", async () => {
+    fixture = await remoteFixture("http", { echoProtocolVersion: "2026-07-28" });
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "tools/list" });
+    await answer();
+    expect(fixture.headers.length).toBeGreaterThan(1);
+    for (const header of fixture.headers.slice(1)) expect(header["mcp-protocol-version"]).toBe("2025-06-18");
+  });
+
+  it("writes an upstream failure to stderr as well as the reply", async () => {
+    fixture = await remoteFixture("http");
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "tools/call", params: { name: "read", arguments: { status: 400 } } });
+    const reply = await answer();
+    expect(reply.error.message).toContain("HTTP 400");
+    expect(stderr).toContain("mcp-remote-proxy: tools/call failed: Remote MCP request failed (HTTP 400)");
+    expect(stderr).not.toContain(TOKEN);
   });
 
   it("runs the shipped helpers without a TypeScript source tree", async () => {
@@ -524,7 +584,7 @@ describe("remote MCP tool directory", () => {
   it("reads its settings from a private record when mounts share one environment", async () => {
     fake = await startFakeHttpMcp({ tools: catalog });
     const record = `OMB_REMOTE_MCP_CONFIG_${"a".repeat(64)}`;
-    const descriptor = mcpStdioServer(spec(fake.url), { directory: { name: "whop" }, configEnvName: record })!;
+    const descriptor = mcpStdioServer(spec(fake.url), { sourceEnv: {}, directory: { name: "whop" }, configEnvName: record })!;
     expect(descriptor.args!.slice(1)).toEqual(["--config-env", record]);
     expect(Object.keys(descriptor.env!)).toEqual([record]);
     expect(descriptor.args!.join(" ")).not.toContain("directory-fixture-token");

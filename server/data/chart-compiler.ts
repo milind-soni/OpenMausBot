@@ -123,9 +123,10 @@ function binned(x: Resolved, channel: string, bins: number, bars: boolean): Dime
   SELECT min(${v}) AS lo,
          ${width} AS width
   FROM src
+  WHERE isfinite(${v})
 `,
   };
-  const bin = `CASE WHEN ${x.id} IS NULL THEN NULL ELSE least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) END`;
+  const bin = `CASE WHEN isfinite(${v}) THEN least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) ELSE NULL END`;
   const start = `${cte.name}.lo + ${bin} * ${cte.name}.width`;
   const end = `${channel}2`;
   return bars
@@ -409,11 +410,12 @@ function planPie(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined): Plan
   const ctes = topNCtes(xExpr, m.expr, n);
   const folded = foldToOther(xExpr);
   const orderBy = spec.sort === "y" ? "y" : spec.sort === "-x" ? "x DESC" : spec.sort === "x" ? "x" : "y DESC";
+  const categoryOrder = spec.sort === "x" || spec.sort === "-x";
   const body = `SELECT ${folded} AS x,\n       ${m.expr} AS y\nFROM src\nGROUP BY ALL\nORDER BY ${orderBy}`;
   const encoding: Encoding = {
     theta: { field: "y", type: "quantitative", title: m.title },
     color: { field: "x", type: "nominal", title: x.column.name },
-    order: { field: "y", type: "quantitative", sort: spec.sort === "y" ? "ascending" : "descending" },
+    order: { field: categoryOrder ? "x" : "y", type: categoryOrder ? "nominal" : "quantitative", sort: spec.sort === "x" || spec.sort === "y" ? "ascending" : "descending" },
   };
   const tooltip: Encoding[] = [
     { field: "x", type: "nominal", title: x.column.name },

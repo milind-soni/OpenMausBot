@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CONNECTING_DELAY_MS, MIN_VISIBLE_MS, PhoneRow, phoneSubtitle, relayStatusLine, sortPhones, steadyAt } from "./PairedPhones";
+import { CONNECTING_DELAY_MS, MIN_VISIBLE_MS, PhoneControls, phoneSubtitle, relayStatusLine, sortPhones, steadyAt } from "./PairedPhones";
 import type { CompanionState, PhoneDevice, PhoneSetupController } from "./PhoneSetupFlow";
 
 const NOW = Date.now();
@@ -10,14 +10,14 @@ const phone = (extra: Partial<PhoneDevice> = {}): PhoneDevice => ({ id: "phone-1
 const state = (extra: Partial<CompanionState> = {}): CompanionState => ({ enabled: true, keepAwake: false, port: 8810, devices: [], pairing: null, ...extra });
 const c = { busy: false, act: async () => {} } as unknown as PhoneSetupController;
 const row = (device: PhoneDevice, companion: CompanionState) =>
-  renderToStaticMarkup(createElement(PhoneRow, { device, connected: false, state: companion, c, onRemoved: () => {}, defaultOpen: true }));
+  renderToStaticMarkup(createElement(PhoneControls, { device, c: { ...c, state: companion } as PhoneSetupController }));
 
 describe("paired phones", () => {
   it("keeps browser access separately off until granted, including old sidecar snapshots", () => {
     for (const browserControlAccess of [undefined, false, true]) {
       const markup = row(phone({ browserControlAccess }), state());
-      expect(markup.match(/<button[^>]*aria-label="Browser control access for Ada"[^>]*>/)?.[0]).toContain(`aria-checked="${browserControlAccess === true}"`);
-      expect(markup.match(/<button[^>]*aria-label="Computer view access for Ada"[^>]*>/)?.[0]).toContain('aria-checked="true"');
+      expect(markup.match(/<button[^>]*aria-label="See and use your bots’ browser from Ada"[^>]*>/)?.[0]).toContain(`aria-checked="${browserControlAccess === true}"`);
+      expect(markup.match(/<button[^>]*aria-label="See and use your bots’ desktops from Ada"[^>]*>/)?.[0]).toContain('aria-checked="true"');
     }
   });
 
@@ -26,12 +26,12 @@ describe("paired phones", () => {
     expect(row(phone(), state())).not.toContain("Connect from");
     const markup = row(phone({ routes: "local" }), state({ e2e }));
     expect(markup).toContain("Connect from");
-    expect(markup).toMatch(/aria-checked="true"[^>]*>Wi-Fi and Tailscale only</);
+    expect(markup).toMatch(/aria-checked="true"[^>]*>Only at home or on my private network</);
   });
 
   it("says the live route, or when it was last seen, in one line", () => {
     expect(phoneSubtitle(phone({ route: "relay", e2eAt: NOW }), true, true)).toBe("Connected · Relay");
-    expect(phoneSubtitle(phone({ route: "tailscale", routes: "local", e2eAt: NOW }), true, true)).toBe("Connected · Tailscale · Wi-Fi and Tailscale only");
+    expect(phoneSubtitle(phone({ route: "tailscale", routes: "local", e2eAt: NOW }), true, true)).toBe("Connected · Tailscale · Only at home or on my private network");
     expect(phoneSubtitle(phone(), true, true)).toBe("Connected · update the app to encrypt");
     expect(phoneSubtitle(phone(), true, false)).toBe("Connected");
     expect(phoneSubtitle(phone(), false, true)).toMatch(/^Last seen /);
@@ -40,10 +40,10 @@ describe("paired phones", () => {
   it("on a phone whose older app lost its way in, says to update and pair again, with Pair again right there", () => {
     const retired = { ...c, account: { available: true, status: "ready", tunnelRetired: true } } as unknown as PhoneSetupController;
     const rowFor = (device: PhoneDevice, controller: PhoneSetupController, onPairAgain?: () => void) =>
-      createElement(PhoneRow, { device, connected: false, state: state(), c: controller, onRemoved: () => {}, onPairAgain });
+      createElement(PhoneControls, { device, c: { ...controller, state: state() } as PhoneSetupController, onPairAgain });
     const markup = renderToStaticMarkup(rowFor(phone(), retired, () => {}));
     expect(markup).toContain("This phone has an older MausBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.");
-    expect(markup).toMatch(/<button type="button"[^>]*>Pair again<\/button>/);
+    expect(markup).toMatch(/<button type="button"[^>]*data-pair-again=""[^>]*>Pair again<\/button>/);
     expect(renderToStaticMarkup(rowFor(phone(), retired)), "no way to pair from here: no button").not.toContain("Pair again");
     expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older MausBot app");
     expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain("older MausBot app");

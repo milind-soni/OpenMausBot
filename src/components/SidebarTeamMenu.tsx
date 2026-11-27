@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCheck, Loader2, Pause, Play, Share2, SlidersHorizontal, SquarePen, Trash2, Users } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCheck, Loader2, Pause, Play, Share2, SlidersHorizontal, SquarePen, Trash2, Users } from "lucide-react";
 import { isPausedHere, setPaused } from "@/lib/bot-pause";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { cn } from "@/lib/cn";
@@ -53,25 +53,32 @@ function PauseDepartment({ name, className, onDone }: { name: string; className:
   </button>;
 }
 
-export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, department, onRead }: {
+export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll, onMoveUp, onMoveDown, department, onRead }: {
   /** The department this menu is for: with it, the menu offers Mark all as read. */
   department?: string;
   onRead?: () => void;
   onAddBots: () => void;
   onRename: () => void;
-  onShare: () => void;
+  /** Absent for a department this computer's server does not have (the one list's place department, which only the app
+   * keeps): sharing it would name a department the server lacks. */
+  onShare?: () => void;
   onDelete: () => void;
   onSetForAll?: () => void;
+  /** Reorder the department where dragging can't: on a phone, or from a menu. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const item = cn(MENU_ITEM, "hover:bg-menu-hover [&>svg]:text-ink-secondary");
   return (
     <>
       <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={16} />{t("team.addBots")}</button>
+      {onMoveUp && <button type="button" role="menuitem" data-team-move-up className={item} onClick={onMoveUp}><ArrowUp size={16} />{t("team.moveUp")}</button>}
+      {onMoveDown && <button type="button" role="menuitem" data-team-move-down className={item} onClick={onMoveDown}><ArrowDown size={16} />{t("team.moveDown")}</button>}
       {department !== undefined && <MarkDepartmentRead name={department} className={cn(item, "disabled:opacity-60")} onDone={onRead ?? (() => {})} />}
       {department !== undefined && <PauseDepartment name={department} className={cn(item, "disabled:opacity-60")} onDone={onRead ?? (() => {})} />}
       {onSetForAll && <button type="button" role="menuitem" className={item} onClick={onSetForAll}><SlidersHorizontal size={16} />{t("teamSettings.menu")}</button>}
       <button type="button" role="menuitem" className={item} onClick={onRename}><SquarePen size={16} />{t("team.rename")}</button>
-      <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={16} />{t("team.shareDepartment")}</button>
+      {onShare && <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={16} />{t("team.shareDepartment")}</button>}
       <button type="button" role="menuitem" className={cn(item, "text-danger [&>svg]:text-danger")} onClick={onDelete}><Trash2 size={16} />{t("team.delete")}</button>
     </>
   );

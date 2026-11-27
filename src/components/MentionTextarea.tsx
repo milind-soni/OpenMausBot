@@ -1,26 +1,33 @@
 import { cn } from "@/lib/cn";
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject, type TextareaHTMLAttributes } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject, type TextareaHTMLAttributes } from "react";
 import { type MentionPeer } from "@/lib/mentions";
 import { MentionText } from "./MentionText";
 
 const TEXT_LAYOUT = ["font-family", "font-size", "font-weight", "font-style", "font-stretch", "font-feature-settings", "font-variation-settings",
   "letter-spacing", "word-spacing", "line-height", "text-indent", "tab-size", "padding-top", "padding-right", "padding-bottom", "padding-left"] as const;
 
-export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, ghost, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   wrapperClassName?: string;
+  /** Drawn over the empty field in its own text layout, in place of the placeholder. */
+  ghost?: ReactNode;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   peers: readonly MentionPeer[];
   everyone?: boolean;
 }) {
   const [composing, setComposing] = useState(false);
   const mirrorRef = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
   const sync = useCallback(() => {
     const input = inputRef.current;
-    const mirror = mirrorRef.current;
-    if (!input || !mirror) return;
+    if (!input) return;
     const style = getComputedStyle(input);
-    for (const property of TEXT_LAYOUT) mirror.style.setProperty(property, style.getPropertyValue(property));
-    mirror.style.width = `${input.clientWidth}px`;
+    for (const layer of [mirrorRef.current, ghostRef.current]) {
+      if (!layer) continue;
+      for (const property of TEXT_LAYOUT) layer.style.setProperty(property, style.getPropertyValue(property));
+      layer.style.width = `${input.clientWidth}px`;
+    }
+    const mirror = mirrorRef.current;
+    if (!mirror) return;
     mirror.scrollTop = input.scrollTop;
     mirror.scrollLeft = input.scrollLeft;
   }, [inputRef]);
@@ -35,6 +42,8 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     sync();
   }, [inputRef, sync]);
   useLayoutEffect(resize, [props.value, props.className, resize]);
+  const ghostShown = Boolean(ghost);
+  useLayoutEffect(sync, [ghostShown, sync]);
   useLayoutEffect(() => {
     let width = inputRef.current?.clientWidth;
     const observer = new ResizeObserver(() => {
@@ -46,10 +55,11 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     if (inputRef.current) observer.observe(inputRef.current);
     return () => observer.disconnect();
   }, [inputRef, resize, sync]);
-  return <div data-composing={composing || undefined} className={cn("mention-editor relative min-w-0 flex-1 self-center", wrapperClassName)}>
+  return <div data-composing={composing || undefined} data-ghost={ghostShown ? "" : undefined} className={cn("mention-editor relative min-w-0 flex-1 self-center", wrapperClassName)}>
     <div ref={mirrorRef} dir={props.dir} aria-hidden="true" className="mention-editor-mirror pointer-events-none absolute inset-0 overflow-hidden">
       <MentionText text={String(props.value ?? "")} peers={peers} everyone={everyone} />{"\n"}
     </div>
+    {ghostShown ? <div ref={ghostRef} dir={props.dir} className="mention-editor-ghost pointer-events-none absolute inset-0 overflow-hidden">{ghost}</div> : null}
     <textarea {...props} ref={inputRef}
       onCompositionStart={(event) => { setComposing(true); props.onCompositionStart?.(event); }}
       onCompositionEnd={(event) => { setComposing(false); props.onCompositionEnd?.(event); }}

@@ -38,6 +38,9 @@ export interface RoutineFailureFacts {
   text?: ServerText;
   /** The turn's reply came back; only a step it ran failed or wasn't allowed (the runtime error's `partial`). */
   partial?: boolean;
+  /** With `partial`: the only failed calls were blocked by the safety floor after the reply came back (the runtime
+   * error's `blockedAfterReply`). Such a run completes, partly done; any other failed step still fails it. */
+  blockedAfterReply?: boolean;
 }
 
 /** On a failed run that only the owner's AI account could have let through: it spent nothing, so it does not count
@@ -49,6 +52,10 @@ export type RoutineFailureClass =
   | { kind: "busy" }
   | { kind: "owner"; cause: RoutineOwnerCause; resetsAt?: number }
   | { kind: "final" };
+
+/** Why a run that ended well fails instead, when more than its words: `partial: false` reads "didn't finish" whatever the
+ * bot said; `lendingRefused` marks a run only the owner can fix (server/host/refused-lending.ts). */
+export interface RefusedRunLine { text: string; partial?: false; lendingRefused?: true }
 
 /** A failure notification's own words; null stays quiet because the owner was already told. */
 export interface RoutineAlert { detail: string }
@@ -131,8 +138,8 @@ export function retriesTeammateThread(failure: string, facts: RoutineFailureFact
   return classifyRoutineFailure(failure, facts).kind === "retry";
 }
 
-export function engineFacts({ setup, stalled, trialCredit, limitResetsAt, limit, partial, text }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {
-  return { setup, stalled, trialCredit, limitResetsAt, limit, partial, text };
+export function engineFacts({ setup, stalled, trialCredit, limitResetsAt, limit, partial, blockedAfterReply, text }: RuntimeEvent & { type: "runtime.error" }): RoutineFailureFacts {
+  return { setup, stalled, trialCredit, limitResetsAt, limit, partial, blockedAfterReply, text };
 }
 
 /** Host-local, with its zone: on a Cloud home the host's zone need not be the reader's. */

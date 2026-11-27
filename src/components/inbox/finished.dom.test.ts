@@ -5,7 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group, Task } from "@/state/store";
 import { t } from "@/lib/i18n";
-import { FinishedThreads } from "./FinishedThreads";
+import { botFaces } from "../SidebarBotActivity";
+import { FinishedThreads, finishedThreads } from "./FinishedThreads";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -15,7 +16,7 @@ const bot = (id: string, tasks: Task[]): Bot => ({ id, name: id, tasks } as unkn
 
 let root: Root;
 const mount = (bots: Bot[], groups: Group[] = [], current?: { kind: "bot"; botId: string; threadId: string }) => act(async () => {
-  root.render(createElement(FinishedThreads, { bots, groups, queued: {}, now: NOW, current, onOpen: vi.fn() }));
+  root.render(createElement(FinishedThreads, { rows: finishedThreads(bots, groups, {}), faces: botFaces(bots), now: NOW, current, onOpen: vi.fn() }));
 });
 
 beforeEach(() => {

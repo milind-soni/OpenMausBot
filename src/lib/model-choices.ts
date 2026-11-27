@@ -1,4 +1,5 @@
 import type { InstanceInfo, ModelSelection } from "@/state/store";
+import { offeredEffortLevels } from "../../shared/wire";
 import { openCodeRunsTypedModel, typedOpenCodeModel, typedOpenCodeModelId } from "../../shared/opencode-model-id";
 import { t } from "./i18n";
 
@@ -28,7 +29,7 @@ export function modelSelectionForPick(selection: ModelSelection, instance: Insta
   const next: ModelSelection = { instanceId: instance.instanceId, model };
   if (instance.instanceId === selection.instanceId) {
     if (instance.capabilities?.modelVariants && model === selection.model && selection.variant !== undefined) next.variant = selection.variant;
-    else if (!instance.capabilities?.modelVariants && selection.effort) next.effort = selection.effort;
+    else if (!instance.capabilities?.modelVariants && selection.effort && offeredEffortLevels(instance, model).includes(selection.effort)) next.effort = selection.effort;
   }
   return next;
 }

@@ -79,13 +79,14 @@ describe("what the chat's own session reads", () => {
 });
 
 /** A real Store; the routine runs live in a stand-in for the RoutineManager, which keeps their report states. */
-function fixture(options: { threadLanguage?: (threadId: string) => string | undefined } = {}) {
+function fixture(options: { threadLanguage?: (threadId: string) => string | undefined; notes?: Map<string, string> } = {}) {
   const store = new Store(selection);
   const bot = store.createBot({ name: "Pepper" });
   const main = bot.threadId;
   const runs = new Map<string, RoutineRun>();
   const busy = new Set<string>();
   const notified: Array<{ kind: string; threadId: string; detail: string }> = [];
+  const notifiedRuns: string[] = [];
   const wrote: string[] = [];
   const routines = {
     listRuns: () => [...runs.values()].map((run) => ({ ...run })).reverse(),
@@ -105,8 +106,9 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
   const create = () => createAutomationReports({
     store, routines: () => manager, busy: (_botId, threadId) => busy.has(threadId),
     wrote: (_bot: BotRecord, threadId) => wrote.push(threadId),
-    notify: (kind, _bot, threadId, detail) => notified.push({ kind, threadId, detail }),
+    notify: (kind, _bot, threadId, detail, run) => { notified.push({ kind, threadId, detail }); notifiedRuns.push(run.id); },
     ...(options.threadLanguage ? { threadLanguage: options.threadLanguage } : {}),
+    ...(options.notes ? { notes: { has: (runId: string) => options.notes!.has(runId), take: (runId: string) => { const note = options.notes!.get(runId) ?? null; options.notes!.delete(runId); return note; } } } : {}),
   });
   const reports = create();
   let serial = 0;
@@ -128,7 +130,7 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
   /** Everything written into the chat since the bot said hello. */
   const added = () => store.messagesFor(main).filter((message) => !greeting.has(message.id));
   return {
-    store, bot, main, runs, busy, notified, wrote, reports, finished, lines, added, create,
+    store, bot, main, runs, busy, notified, notifiedRuns, wrote, reports, finished, lines, added, create,
     offline: () => { manager = null; },
     online: () => { manager = routines; },
   };
@@ -152,7 +154,21 @@ describe("automation reports", () => {
     expect(f.runs.get(run.id)!.report).toEqual({ state: "posted", threadId: f.main, messageId: f.lines()[0]!.id });
     expect(f.wrote).toEqual([f.main]);
     expect(f.notified).toEqual([{ kind: "done", threadId: f.main, detail: "Inbox brief: Acme replied about the order." }]);
+    expect(f.notifiedRuns, "the notice knows which run it reports on").toEqual([run.id]);
     expect(f.store.messagesFor(f.main).some((message) => message.kind === "routine.run")).toBe(false);
+  });
+
+  it("ends the person's own unread mark on the chat with a report, and keeps it through a run with nothing new", () => {
+    const f = fixture();
+    const held = () => f.store.taskByThread(f.bot.id, f.main)?.heldUnread;
+    f.store.patchTask(f.bot.id, f.main, { unread: true, heldUnread: f.store.activePath(f.main).at(-1)!.id });
+    const quiet = f.finished("NOTHING NEW");
+    f.reports.runSettled(quiet, `turn-${quiet.id}`);
+    expect(held(), "nothing was written").toBeDefined();
+    const run = f.finished("Acme replied about the order.");
+    f.reports.runSettled(run, `turn-${run.id}`);
+    expect(f.store.taskByThread(f.bot.id, f.main)).toMatchObject({ unread: true });
+    expect(held(), "a report the person has not read yet is news").toBeUndefined();
   });
 
   it("writes nothing, marks nothing and notifies nobody for a run with nothing new", () => {
@@ -260,6 +276,28 @@ describe("automation reports", () => {
     f.reports.runSettled(quietly, `turn-${quietly.id}`);
     expect(f.lines()).toHaveLength(1);
     expect(f.notified.map((entry) => entry.threadId)).toEqual([f.main, nowhere.threadId]);
+  });
+
+  it("puts the app's own line under a completed run's reply, apart from the bot's words, and says it even when the reply is quiet", () => {
+    const notes = new Map<string, string>();
+    const f = fixture({ notes });
+    const SAID = "\"Inbox brief\" can't use your PC because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.";
+    const replied = f.finished("No execution environment was mounted, so I couldn't check.");
+    notes.set(replied.id, SAID);
+    f.reports.runSettled(replied, `turn-${replied.id}`);
+    const quiet = f.finished("NOTHING NEW");
+    notes.set(quiet.id, SAID);
+    f.reports.runSettled(quiet, `turn-${quiet.id}`);
+    expect(f.lines().map((line) => [line.text, line.automation?.failed])).toEqual([
+      [`No execution environment was mounted, so I couldn't check.\n\n${SAID}`, undefined],
+      [SAID, undefined],
+    ]);
+    expect(f.notified.map((entry) => entry.detail)).toEqual([`Inbox brief: No execution environment was mounted, so I couldn't check.\n\n${SAID}`, `Inbox brief: ${SAID}`]);
+    const nowhere = f.finished("Done.", "Orphan", { resultsThreadId: undefined });
+    notes.set(nowhere.id, SAID);
+    f.reports.runSettled(nowhere, `turn-${nowhere.id}`);
+    expect(f.notified.at(-1)).toEqual({ kind: "done", threadId: nowhere.threadId, detail: `Done.\n\n${SAID}` });
+    expect(notes.size).toBe(0);
   });
 
   it("says a run whose reply came back but a step failed was partly done, not that it didn't finish", () => {
@@ -467,6 +505,57 @@ describe("automation reports", () => {
     f.store.patchTask(f.bot.id, run.threadId!, { routineRunId: undefined });
     f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card: { title: "Q", subtitle: "Which?", options: [], requestId: "ask-1", requestType: "question" } });
     expect(f.added()).toEqual([]);
+  });
+
+  it.each([
+    { answered: "answer", answeredText: "Work" },
+    { dismissed: true },
+    { expired: true },
+  ])("settles a copied question after the person took over: %j", (resolution) => {
+    const f = fixture();
+    const run = f.finished(null, "Inbox brief", { status: "waiting" });
+    const card = { title: "Question", subtitle: "Which account?", options: ["Work"], requestId: "ask-1", requestType: "question" as const };
+    const original = f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card });
+    const [copy] = f.lines();
+    expect(copy?.automation).toMatchObject({ copyOf: original.id, needsYou: true });
+    f.store.patchTask(f.bot.id, run.threadId!, { routineRunId: undefined });
+    f.store.patchTask(f.bot.id, f.main, { unread: false });
+
+    f.store.patchMessage(run.threadId!, original.id, { card: { ...card, ...resolution } });
+
+    expect(f.lines()).toEqual([expect.objectContaining({ id: copy!.id, card: { ...card, ...resolution } })]);
+    expect(f.lines()[0]!.automation).not.toHaveProperty("needsYou");
+    expect(f.store.taskByThread(f.bot.id, f.main)?.unread).toBe(false);
+    expect(f.notified).toEqual([]);
+  });
+
+  it("reconciles only matching, already copied questions on startup", () => {
+    const f = fixture();
+    const run = f.finished(null, "Inbox brief", { status: "waiting" });
+    const card = { title: "Question", subtitle: "Which account?", options: ["Work"], requestId: "ask-1", requestType: "question" as const };
+    const original = f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card });
+    const stillOpen = f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card: { ...card, requestId: "ask-2" } });
+    const [copy, openCopy] = f.lines();
+    expect(openCopy?.automation?.copyOf).toBe(stillOpen.id);
+    f.store.patchTask(f.bot.id, run.threadId!, { routineRunId: undefined });
+    f.offline();
+    const settled = { ...card, expired: true };
+    f.store.patchMessage(run.threadId!, original.id, { card: settled });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card: { ...settled, requestId: "never-copied" } });
+    const mismatched = f.store.appendMessage(f.main, {
+      role: "bot", kind: "options", card: { ...card, requestId: "different-request" }, automation: copy!.automation,
+    });
+    expect(f.lines()[0]?.card).toEqual(card);
+    f.online();
+
+    const restarted = f.create();
+    restarted.flush();
+    expect(f.lines()).toEqual([expect.objectContaining({ id: copy!.id, card: settled }), openCopy, mismatched]);
+    expect(f.lines()[0]!.automation).not.toHaveProperty("needsYou");
+    const patched = f.lines()[0];
+    f.create().flush();
+    expect(f.lines()[0]).toBe(patched);
+    expect(f.notified).toEqual([]);
   });
 
   it("carries what the run attached with its last reply", () => {

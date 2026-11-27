@@ -20,7 +20,8 @@ export class DataFailure extends Error {
   }
 }
 
-export type DataConnection = "bot" | "panel";
+/** `page`: bot pages' read-only queries, on their own connection so they never wait behind the bot or the panel. */
+export type DataConnection = "bot" | "panel" | "page";
 export type DataExtension = "httpfs" | "excel" | "azure" | "postgres" | "mysql" | "sqlite";
 
 export interface RunOptions {
@@ -56,6 +57,9 @@ export interface DescribeResult {
 export interface BotDatabase {
   readonly botId: string;
   run(sql: string, options: RunOptions): Promise<RunResult>;
+  /** One SELECT from a bot's page, judged by page-query.ts and run read-only on the page connection; at most `maxRows`
+   * rows, `truncated` when there were more. `rowCount` is the rows returned. */
+  pageQuery(sql: string, params: unknown[] | Record<string, unknown> | undefined, options: { maxRows: number; timeoutMs: number; signal?: AbortSignal }): Promise<RunResult>;
   materialise(sql: string, name: string, options: RunOptions): Promise<MaterialiseResult>;
   /** A missing table is not an error. */
   dropResult(name: string, connection?: DataConnection): Promise<void>;
@@ -66,9 +70,12 @@ export interface BotDatabase {
   listTables(): Promise<Array<{ name: string; sqlName?: string; rowCount: number; columns: DataColumn[] }>>;
   interrupt(connection: DataConnection): void;
   /** Resolves a bare or qualified identifier; `table_not_found` with candidates otherwise. */
-  resolveTable(name: string): Promise<string>;
+  resolveTable(name: string, connection?: DataConnection): Promise<string>;
   close(): Promise<void>;
 }
+
+/** A bot's database a release could not close, kept open (never a second instance on its file) until it can be. */
+export interface DataHeld { botId: string; why: "running" | "failed"; detail?: string }
 
 export interface DataEngine {
   unavailable(): string | null;
@@ -79,6 +86,9 @@ export interface DataEngine {
   onInstalledChange(listener: () => void): void;
   forBot(botId: string): Promise<BotDatabase>;
   deleteBot(botId: string): Promise<void>;
+  /** Closes every bot's database, its WAL written into the file, so its files are at rest until its next statement (a
+   * full backup copies them then). Returns the databases still open: a statement that did not stop, or a failed close. */
+  release(): Promise<DataHeld[]>;
   closeAll(): Promise<void>;
 }
 

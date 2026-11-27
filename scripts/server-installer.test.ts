@@ -62,6 +62,7 @@ esac`,
   curl: `echo "curl $*" >> "$FAKE_LOG"
 blocked() { case " \${FAKE_BLOCKED:-} " in *" $1 "*) return 0 ;; esac; return 1; }
 case "$*" in
+  *"-K -"*releases/latest*) cat >> "$FAKE_LOG.stdin"; [ -z "\${FAKE_TOKEN_REFUSED:-}" ] || exit 22; printf '{\\n  "tag_name": "%s",\\n  "name": "x"\\n}\\n' "$FAKE_RELEASE" ;;
   *"-K - -fsSL"*) cat >> "$FAKE_LOG.stdin"
     case "$*" in
       */manifests/sha256:*) printf '%s' "\${FAKE_MANIFEST:-}" ;;
@@ -354,6 +355,37 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     // Asked for no sandbox, or a registry that does not say: nothing to add.
     expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
     expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
+  });
+
+  it("reads the newest release without a token, and sends one only when a test run's OMB_INSTALL_GITHUB_TOKEN gives it, never on a command line", () => {
+    const stdin = (dir: string) => (existsSync(join(dir, "calls.log.stdin")) ? readFileSync(join(dir, "calls.log.stdin"), "utf8") : "");
+    const lookups = (result: { calls: string[] }) => result.calls.filter((call) => call.includes("releases/latest"));
+    const PLAIN = "curl -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
+    const WITH_TOKEN = "curl -K - -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
+    const plain = run(["--check", "--domain", "maus.example.com"]);
+    expect(plain.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(lookups(plain)).toEqual([PLAIN]);
+    // Only the registry's pull token goes to curl's standard input.
+    expect(stdin(plain.dir).split("\n").filter((line) => line.includes("Authorization") && !line.includes(TOKEN))).toEqual([]);
+
+    const token = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: "ghs_apiToken123" } });
+    expect(token.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(lookups(token)).toEqual([WITH_TOKEN]);
+    expect(token.calls.some((call) => call.includes("ghs_apiToken123"))).toBe(false);
+    expect(stdin(token.dir)).toContain('header = "Authorization: Bearer ghs_apiToken123"\n');
+
+    // A token GitHub refuses: the lookup is made once more without it, and the version is found.
+    const refused = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: "ghs_expired", FAKE_TOKEN_REFUSED: "1" } });
+    expect(refused.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(refused.fixes).toEqual([]);
+    expect(lookups(refused)).toEqual([WITH_TOKEN, PLAIN]);
+  });
+
+  it.each(['abc"def', "abc def", "abc\ndef", "abc\\def", "abc-def"])("never puts a token with anything but letters, digits and _ into curl's config (%j)", (bad) => {
+    const result = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: bad } });
+    expect(result.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(result.calls.filter((call) => call.includes("releases/latest"))).toEqual(["curl -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest"]);
+    expect(existsSync(join(result.dir, "calls.log.stdin")) ? readFileSync(join(result.dir, "calls.log.stdin"), "utf8") : "").not.toContain(bad);
   });
 
   it("uses the stable channel once it is published, and never the latest tag", () => {

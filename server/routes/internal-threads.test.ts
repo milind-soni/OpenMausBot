@@ -10,14 +10,19 @@ const task = (threadId: string, title: string, openedBy?: unknown) => ({ threadI
 const handoff = { id: "h-42", rootId: "h-1", parentId: "h-1", threadId: "t-ops-new", botId: "bot-ops", status: "queued" } as HandoffView;
 const tasks: Record<string, TaskRecord[]> = {
   "bot-lead": [task("t-lead", "Lead main")],
-  "bot-ops": [task("t-ops-busy", "Weekly report"), task("t-ops-new", "Export CSV", { botId: "bot-lead", name: "Lead", at: 5 })],
+  "bot-ops": [
+    task("t-ops-busy", "Weekly report"),
+    task("t-ops-new", "Export CSV", { botId: "bot-lead", name: "Lead", at: 5 }),
+    { ...task("t-ops-closed", "Closed question"), activity: "waiting-on-you", closedBy: { botId: ops.id, name: ops.name, at: 2 } },
+    { ...task("t-ops-open", "Open question"), activity: "waiting-on-you" },
+  ],
 };
 
 async function listThreads(from: BotRecord) {
   const route = createInternalThreadRoutes({
     store: { bot: (id: string) => [lead, ops].find((bot) => bot.id === id), bots: [lead, ops], tasks: (id: string) => tasks[id] ?? [] } as never,
     coordinator: { awaitingAnswer: () => false, parkedDirect: () => undefined, activeDirect: (threadId: string) => threadId === "t-ops-new" ? handoff : undefined, active: () => [handoff] } as never,
-    from, fromThreadId: "t-own", ownsThread: () => true, shown: () => true,
+    from, fromThreadId: "t-own", ownsThread: () => true, shown: () => true, mainThreadTasks: () => [],
     threadBusy: (_bot, threadId) => threadId === "t-ops-busy", queuedThreadPosition: () => null,
     queuedReason: (node, showTitle) => `${node.id} waits${showTitle ? " (titles)" : ""}`,
     readBody: async () => ({}),
@@ -40,6 +45,12 @@ describe("list_threads on a queued handoff", () => {
     expect(running).toMatchObject({ state: "running" });
     expect(running).not.toHaveProperty("waiting");
   });
+
+  it("reports a closed thread as closed even when its activity still says it waits on the person", async () => {
+    const rows = await listThreads(ops);
+    expect(rows.find((thread) => thread.threadId === "t-ops-closed")).toMatchObject({ state: "closed" });
+    expect(rows.find((thread) => thread.threadId === "t-ops-open")).toMatchObject({ state: "waiting-on-you" });
+  });
 });
 
 describe("list_threads past the first 100", () => {
@@ -49,7 +60,7 @@ describe("list_threads past the first 100", () => {
     const route = createInternalThreadRoutes({
       store: { bot: () => undefined, bots: [lead], tasks: (id: string) => id === lead.id ? many : [] } as never,
       coordinator: { awaitingAnswer: () => false, parkedDirect: () => undefined, activeDirect: () => undefined, active: () => [] } as never,
-      from: lead, fromThreadId: "t-own", ownsThread: () => true, shown: () => true,
+      from: lead, fromThreadId: "t-own", ownsThread: () => true, shown: () => true, mainThreadTasks: () => [],
       threadBusy: () => false, queuedThreadPosition: () => null, queuedReason: () => "", readBody: async () => ({}),
     });
     let body: { threads: Array<{ threadId: string }>; total: number; page: number; pageSize: number } | undefined;
@@ -81,7 +92,7 @@ describe("rename_thread on the conversation the turn speaks in", () => {
         renameTask: (botId: string, threadId: string, title: string) => { renamed.push([botId, threadId, title]); return { ...own, title }; },
       } as never,
       coordinator: {} as never,
-      from: lead, fromThreadId: "t-own", ownsThread: () => opts.owns ?? true, shown: () => true,
+      from: lead, fromThreadId: "t-own", ownsThread: () => opts.owns ?? true, shown: () => true, mainThreadTasks: () => [],
       threadBusy: () => false, queuedThreadPosition: () => null, queuedReason: () => "",
       readBody: async () => body,
     });
@@ -111,5 +122,58 @@ describe("rename_thread on the conversation the turn speaks in", () => {
       expect(refused.status).toBe(409);
       expect(refused.renamed).toEqual([]);
     }
+  });
+});
+
+describe("set_main_thread on the sender's own threads", () => {
+  const leadTasks = [
+    task("t-own", "Today"),
+    task("t-yesterday", "Yesterday"),
+    { ...task("t-run", "Daily brief run"), routineRunId: "run-1" } as TaskRecord,
+    { ...task("t-archived", "Old"), archivedAt: 3 } as TaskRecord,
+  ];
+  async function setMain(body: unknown, opts: { owns?: boolean } = {}) {
+    const patched: Array<[string, Partial<BotRecord>]> = [];
+    const route = createInternalThreadRoutes({
+      store: {
+        bot: () => lead, bots: [lead, ops], tasks: (id: string) => id === lead.id ? leadTasks : tasks[id] ?? [],
+        taskByThread: (botId: string, threadId: string) => (botId === lead.id ? leadTasks : tasks[botId] ?? []).find((one) => one.threadId === threadId),
+        patchBot: (botId: string, patch: Partial<BotRecord>) => { patched.push([botId, patch]); return lead; },
+      } as never,
+      coordinator: {} as never,
+      from: lead, fromThreadId: "t-own", ownsThread: () => opts.owns ?? true, shown: () => true,
+      mainThreadTasks: (botId: string) => botId === lead.id ? leadTasks : [],
+      threadBusy: () => false, queuedThreadPosition: () => null, queuedReason: () => "",
+      readBody: async () => body,
+    });
+    let status = 0;
+    let answer: Record<string, unknown> | undefined;
+    await route({ res: {}, path: "/api/internal/main-thread", method: "POST", json: (_res: unknown, code: number, value: never) => { status = code; answer = value; } } as never);
+    return { status, answer: answer!, patched };
+  }
+
+  it("makes the thread it speaks in, or one of its own it names, its main thread", async () => {
+    const here = await setMain({});
+    expect(here.status).toBe(200);
+    expect(here.patched).toEqual([["bot-lead", { mainThreadChoice: "t-own", mainThreadKept: undefined }]]);
+    const named = await setMain({ mainThreadId: "t-yesterday" });
+    expect(named.answer).toMatchObject({ threadId: "t-yesterday", title: "Yesterday" });
+    expect(named.patched).toEqual([["bot-lead", { mainThreadChoice: "t-yesterday", mainThreadKept: undefined }]]);
+  });
+
+  it("clears its own choice so the main thread goes back to the default", async () => {
+    const cleared = await setMain({ clear: true });
+    expect(cleared.status).toBe(200);
+    expect(cleared.patched).toEqual([["bot-lead", { mainThreadChoice: undefined, mainThreadKept: undefined }]]);
+  });
+
+  it("refuses a teammate's thread, an automation run, an archived thread and a sender that does not own its conversation", async () => {
+    const teammate = await setMain({ mainThreadId: "t-ops-busy" });
+    expect(teammate.status).toBe(404);
+    expect((await setMain({ mainThreadId: "t-run" })).status).toBe(409);
+    expect((await setMain({ mainThreadId: "t-archived" })).status).toBe(409);
+    expect((await setMain({}, { owns: false })).status).toBe(403);
+    expect((await setMain({ clear: true }, { owns: false })).patched).toEqual([]);
+    for (const threadId of ["t-ops-busy", "t-run", "t-archived"]) expect((await setMain({ mainThreadId: threadId })).patched).toEqual([]);
   });
 });

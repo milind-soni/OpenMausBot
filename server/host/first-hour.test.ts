@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RoutineRun } from "../routines.ts";
 import { Store, type Message } from "../store.ts";
-import { createFirstHour, firstName, greetingMessage, LOOK_DRAFTS, lookPrompt, OFFER_UNASKED_MS, type FirstHourDeps } from "./first-hour.ts";
+import { createFirstHour, firstName, greetingMessage, LOOK_DRAFTS, LOOK_RETRY_MS, lookPrompt, OFFER_UNASKED_MS, type FirstHourDeps } from "./first-hour.ts";
 import { createValueLedger } from "./value-ledger.ts";
 
 const MINUTE = 60_000;
@@ -13,6 +13,7 @@ const HOUR = 60 * MINUTE;
 const dirs: string[] = [];
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -22,6 +23,8 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
   dirs.push(dir);
   let now = Date.parse(options.start ?? "2026-10-27T15:00:00Z");
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
+  // The store keeps its bots in the data folder all these tests share: each new Cloud starts with none.
+  for (const id of store.bots.map((bot) => bot.id)) store.deleteBot(id);
   const chief = store.createBot({ name: "MausBot" }, { seedMessages: false });
   store.setChiefOfStaff(chief.id);
   const thread = () => store.bot(chief.id)!.threadId;
@@ -31,20 +34,30 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
     connected: { gmail: false, googlecalendar: false, ...options.connected }, briefOn: false, phones: 0, busy: false,
     pushed: [] as string[], turns: [] as Array<{ text: string; threadId: string }>, welcomeDone: 0, runs: [] as RoutineRun[],
     reply: "This week: Standup Tue 10:00." as string | null,
+    briefCard: undefined as { threadId: string; messageId: string } | undefined,
     /** While set, the first look's turn runs until this is called. */
     held: null as null | (() => void), hold: false,
+    /** A move into the Cloud is running; the next first look's start throws this. */
+    moving: false, refuse: null as null | Error, chiefId: chief.id, stopped: false,
+    /** Runs as a first look's turn starts. */
+    onTurn: undefined as undefined | (() => void),
+    /** How the next first look's turn fails: without a reply, or as a failed turn. */
+    failure: undefined as undefined | { text: string; stopReason?: string },
   };
   const ledger = createValueLedger({ dataDir: dir, now: () => now });
   const deps: FirstHourDeps = {
-    store, dataDir: dir, now: () => now, chief: () => store.bot(chief.id), mainThread: () => thread(), threadBusy: () => world.busy,
+    store, dataDir: dir, now: () => now, chief: () => store.bot(world.chiefId), mainThread: (botId) => store.bot(botId)?.threadId, threadBusy: () => world.busy,
     person: () => world.person, language: () => world.language, timeZone: () => world.zone,
     apps: { reachable: () => true, connected: async () => ({ ...world.connected }), card: async (slug) => ({ label: slug === "gmail" ? "Gmail" : "Google Calendar", description: "" }) },
-    briefOn: () => world.briefOn, ensureBrief: () => { world.briefOn = true; }, phones: () => world.phones,
+    briefOn: () => world.briefOn, ensureBrief: () => { world.briefOn = true; }, briefCard: () => world.briefCard, phones: () => world.phones,
+    moving: () => world.moving, stopped: () => world.stopped,
     startTurn: async (_botId, text, opts) => {
       world.turns.push({ text, threadId: opts.threadId });
+      world.onTurn?.();
+      if (world.refuse) throw world.refuse;
       const end = () => {
         if (world.reply) store.appendMessage(opts.threadId, { role: "bot", kind: "text", text: world.reply, turnId: "look" });
-        opts.onSettled({ ok: world.reply !== null, text: world.reply ?? "" });
+        opts.onSettled(world.failure ? { ok: false, text: world.failure.text, failure: world.failure } : { ok: world.reply !== null, text: world.reply ?? "" });
       };
       if (world.hold) world.held = end;
       else end();
@@ -76,6 +89,147 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
   };
   return { store, chief, thread, world, ledger, make, rows, texts, cards, write, reply, answer, advance: (ms: number) => { now += ms; }, set: (iso: string) => { now = Date.parse(iso); }, now: () => now };
 }
+
+describe("a new Cloud the person's own bots came to", () => {
+  const ONE = "Hi Sam! Coder is here now and keeps working while your computer is off. I'm MausBot, your Chief of Staff on this Cloud: carry on with Coder as before, or tell me what else you want off your plate.";
+
+  it("greets them with the bot that moved in, never offers the inbox unasked, and lets the Chief offer it only when asked", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    s.world.person = { name: "Sam Lee" };
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    fh.arrived();
+    expect(s.texts()).toEqual([ONE]);
+    await vi.advanceTimersByTimeAsync(OFFER_UNASKED_MS);
+    vi.useRealTimers();
+    fh.tick();
+    await s.answer(fh, "Is Coder still on my repo?");
+    expect(s.cards()).toEqual([]);
+    expect(s.texts().some((text) => text?.includes("connect Gmail"))).toBe(false);
+    s.advance(25 * HOUR);
+    fh.tick();
+    expect(s.texts().some((text) => text?.startsWith("So far"))).toBe(false);
+    expect(fh.health()!.ms.movedIn).toBe(0);
+    expect(fh.health()!.ms.offered).toBeUndefined();
+    fh.stop();
+  });
+
+  it("tells the Chief the bots are there and that the inbox waits until the person brings it up", () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    s.store.createBot({ name: "Writer" }, { seedMessages: false });
+    fh.tick();
+    expect(s.texts()[0]).toBe("Hi! Coder and Writer are here now and keep working while your computer is off. I'm MausBot, your Chief of Staff on this Cloud: carry on with them as before, or tell me what else you want off your plate.");
+    s.store.createBot({ name: "Scout" }, { seedMessages: false });
+    fh.tick();
+    expect(s.texts()[0]).toMatch(/^Hi! Your 3 bots are here now and keep working while your computer is off\./u);
+    const prompt = fh.prompt(s.chief.id, s.thread());
+    expect(prompt).toMatch(/Their own bots (?:Coder|Writer|Scout), (?:Coder|Writer|Scout), (?:Coder|Writer|Scout) are here too/u);
+    expect(prompt).toContain("If they bring up their email or calendar, you may offer to connect Gmail and Google Calendar then.");
+    expect(prompt).not.toContain("COMPOSIO_MANAGE_CONNECTIONS");
+    expect(prompt).not.toContain("morning brief is on");
+  });
+
+  it("holds the unasked offer while a move runs: a bot that arrives gets the greeting, a move that brings none lets the offer come", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const moved = setup();
+    const a = moved.make();
+    a.begin();
+    moved.world.moving = true;
+    a.arrived();
+    await vi.advanceTimersByTimeAsync(OFFER_UNASKED_MS);
+    expect(moved.cards()).toEqual([]);
+    moved.store.createBot({ name: "Coder" }, { seedMessages: false });
+    moved.world.moving = false;
+    a.tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(moved.cards()).toEqual([]);
+    expect(moved.texts()[0]).toMatch(/^Hi! Coder is here now/u);
+    a.stop();
+    const empty = setup();
+    const b = empty.make();
+    b.begin();
+    empty.world.moving = true;
+    b.arrived();
+    await vi.advanceTimersByTimeAsync(OFFER_UNASKED_MS);
+    b.tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(empty.cards()).toEqual([]);
+    empty.world.moving = false;
+    b.tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(empty.cards()).toHaveLength(2);
+    b.stop();
+  });
+
+  it("names the bots that came, not the computer's own MausBot that came with them, and stops rewriting the greeting after the first day", () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    s.store.createBot({ name: "MausBot (MacBook)" }, { seedMessages: false });
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    fh.tick();
+    expect(s.texts()[0]).toMatch(/^Hi! Coder is here now/u);
+    s.advance(25 * HOUR);
+    s.store.createBot({ name: "Writer" }, { seedMessages: false });
+    s.world.language = "de";
+    fh.tick();
+    fh.arrived();
+    fh.stop();
+    expect(s.texts()[0]).toMatch(/^Hi! Coder is here now/u);
+  });
+
+  it("changes nothing for a bot that comes after the first day", () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    s.advance(25 * HOUR);
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    fh.arrived();
+    fh.tick();
+    fh.stop();
+    expect(s.texts()[0]).toMatch(/^Hi! I'm MausBot/u);
+    expect(fh.health()!.ms.movedIn).toBeUndefined();
+  });
+
+  it("changes nothing for a bot made after the inbox was offered", async () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    await s.answer(fh);
+    expect(s.cards()).toHaveLength(2);
+    s.store.createBot({ name: "Coder" }, { seedMessages: false });
+    fh.arrived();
+    fh.tick();
+    fh.stop();
+    expect(s.texts()[0]).toMatch(/^Hi! I'm MausBot/u);
+    expect(fh.health()!.ms.movedIn).toBeUndefined();
+  });
+
+  it("leaves a Chief that arrived by a move alone: nothing posted in its chat and no first-day words for it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    const arrived = s.store.createBot({ name: "MausBot (MacBook)" }, { seedMessages: false });
+    s.store.setChiefOfStaff(arrived.id);
+    s.world.chiefId = arrived.id;
+    fh.arrived();
+    await vi.advanceTimersByTimeAsync(OFFER_UNASKED_MS);
+    fh.tick();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.store.messagesFor(arrived.threadId)).toEqual([]);
+    expect(fh.prompt(arrived.id, arrived.threadId)).toBe("");
+    // The computer's own MausBot is no news in the greeting: it stays as it was, and no inbox offer comes.
+    expect(s.texts()[0]).toMatch(/^Hi! I'm MausBot/u);
+    expect(fh.health()!.ms.movedIn).toBe(0);
+    fh.stop();
+  });
+});
 
 describe("a new Cloud's first hour", () => {
   it("begins once, on the new Cloud only: its welcome steps end and the Chief opens", () => {
@@ -187,18 +341,157 @@ describe("a new Cloud's first hour", () => {
     expect(fh.health()!.ms.declined).toBeDefined();
   });
 
-  it("says plainly when the first look could not run, and still offers the phone", async () => {
+  it("tries a failed first look once more after a short wait, then says which apps are in and how to get the look, and still offers the phone", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const s = setup({ connected: { googlecalendar: true } });
     const fh = s.make();
     fh.begin();
     s.world.reply = null;
     await s.answer(fh);
     expect(s.cards().map((card) => card.connector!.slug)).toEqual(["gmail"]);
+    expect(s.world.turns).toHaveLength(1);
     expect(s.world.turns[0]!.text).toContain("just connected Google Calendar");
-    expect(s.texts()).toContain("You're connected. I couldn't take a first look just now; I'll keep an eye on it and tell you when something needs you.");
+    const said = s.texts().length;
+    fh.tick();
+    await settle();
+    expect(s.texts()).toHaveLength(said);
+    expect(s.world.turns).toHaveLength(1);
+    expect(fh.health()).toMatchObject({ lookFailure: "error", lookTries: 1 });
+    expect(fh.health()!.look).toBeUndefined();
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(2);
+    expect(s.texts()).toContain("Google Calendar is connected, but I couldn't take my first look just now. Ask me \"what needs me today?\" whenever you like and I'll look then.");
+    expect(s.texts().some((text) => text?.includes("You're connected"))).toBe(false);
     fh.tick();
     expect(s.rows().at(-1)!.widget?.root.title).toBe("Get me on your phone");
+    expect(fh.health()).toMatchObject({ look: "failed", lookFailure: "error", lookTries: 2 });
+    const lines = warn.mock.calls.map((call) => String(call[0])).filter((line) => line.startsWith("first hour: the first look failed"));
+    expect(lines).toEqual([
+      expect.stringMatching(/^first hour: the first look failed \(try 1 of 2, again in 60 s\): path=settled ok=false replied=false stalled=false stop=- code=- sinceBoot=\d+ sinceApp=0 ms=0 apps=googlecalendar rows=[\w,-]+ drafts=0 cause="-"$/u),
+      expect.stringMatching(/^first hour: the first look failed \(try 2 of 2, the last\): path=settled ok=false replied=false/u),
+    ]);
+  });
+
+  it("gets the first look on its second try when the first one could not start, and logs the cause in the system's words only", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const s = setup({ connected: { gmail: true, googlecalendar: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.refuse = Object.assign(new Error("this provider account is being updated — try again shortly (sam@example.test)"), { status: 409, code: "settling" });
+    await s.answer(fh);
+    expect(s.world.turns).toHaveLength(1);
+    expect(fh.health()).toMatchObject({ lookFailure: "start", lookTries: 1 });
+    expect(warn.mock.calls.map((call) => String(call[0])).find((line) => line.startsWith("first hour: the first look failed"))).toMatch(/path=start code=settling .* cause="this provider account is being updated — try again shortly \(<address>\)"$/u);
+    s.world.refuse = null;
+    s.advance(LOOK_RETRY_MS - 1_000);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    s.advance(1_000);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(2);
+    expect(s.texts()).toContain("This week: Standup Tue 10:00.");
+    expect(s.world.pushed).toEqual(["Your first look is ready"]);
+    expect(fh.health()).toMatchObject({ look: "delivered", lookTries: 1 });
+  });
+
+  it("waits out a move into the Cloud: no look starts while it runs, and a try that fails during it is not counted", async () => {
+    const s = setup();
+    const fh = s.make();
+    fh.begin();
+    await s.answer(fh);
+    s.world.moving = true;
+    const gmail = s.cards().find((card) => card.connector!.slug === "gmail")!;
+    s.store.patchMessage(s.thread(), gmail.id, { connector: { ...gmail.connector!, status: "connected" } });
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toEqual([]);
+    s.world.moving = false;
+    s.world.reply = null;
+    s.world.onTurn = () => { s.world.moving = true; };
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(fh.health()!.lookTries).toBeUndefined();
+    expect(fh.health()!.look).toBeUndefined();
+    s.world.moving = false;
+    s.world.onTurn = undefined;
+    s.world.reply = "This week: Standup Tue 10:00.";
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(2);
+    expect(fh.health()).toMatchObject({ look: "delivered" });
+    expect(s.texts().some((text) => text?.includes("couldn't take my first look"))).toBe(false);
+  });
+
+  it("never starts again a first look the person stopped, and says nothing about it", async () => {
+    const s = setup({ connected: { gmail: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.reply = null;
+    s.world.stopped = true;
+    await s.answer(fh);
+    expect(fh.health()).toMatchObject({ look: "failed", lookFailure: "stopped" });
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(s.texts().some((text) => text?.includes("first look"))).toBe(false);
+  });
+
+  it("does not try again once the person has written in that chat since the first try failed", async () => {
+    const s = setup({ connected: { gmail: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.reply = null;
+    await s.answer(fh);
+    expect(fh.health()).toMatchObject({ lookTries: 1 });
+    s.write("Never mind, look at my repo instead.");
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
     expect(fh.health()).toMatchObject({ look: "failed" });
+    expect(s.texts().some((text) => text?.includes("first look"))).toBe(false);
+  });
+
+  it("does not repeat a first look that already wrote a draft: a second try would start its three drafts over", async () => {
+    const s = setup({ connected: { gmail: true } });
+    const fh = s.make();
+    fh.begin();
+    s.world.reply = null;
+    s.world.onTurn = () => { expect(fh.look(s.thread())!.draft({} as never)).toBe(true); };
+    await s.answer(fh);
+    expect(fh.health()).toMatchObject({ look: "failed", lookTries: 1 });
+    s.advance(LOOK_RETRY_MS);
+    fh.tick();
+    await settle();
+    expect(s.world.turns).toHaveLength(1);
+    expect(s.texts().some((text) => text?.startsWith("Gmail is connected, but I couldn't take my first look"))).toBe(true);
+  });
+
+  it("does not try again when the bot is paused, and logs a failed turn's stop reason", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const paused = setup({ connected: { gmail: true } });
+    const first = paused.make();
+    first.begin();
+    paused.world.refuse = Object.assign(new Error("MausBot is paused."), { status: 409, code: "bot_paused" });
+    await paused.answer(first);
+    expect(first.health()).toMatchObject({ look: "failed", lookFailure: "start", lookTries: 1 });
+    expect(paused.world.turns).toHaveLength(1);
+    expect(paused.texts().some((text) => text?.includes("first look"))).toBe(false);
+    const failing = setup({ connected: { gmail: true } });
+    const second = failing.make();
+    second.begin();
+    failing.world.reply = null;
+    failing.world.failure = { text: "Claude is signed out.", stopReason: "error" };
+    await failing.answer(second);
+    expect(second.health()).toMatchObject({ lookFailure: "error", lookTries: 1 });
+    expect(warn.mock.calls.map((call) => String(call[0])).at(-1)).toMatch(/path=settled ok=false replied=false stalled=false stop=error code=- .* cause="Claude is signed out."$/u);
   });
 
   it("pushes the first look to a phone paired after it, once; otherwise the first morning brief says it is the first", async () => {
@@ -247,8 +540,29 @@ describe("a new Cloud's first hour", () => {
     s.set("2026-10-28T12:00:00Z");
     fh.tick();
     fh.tick();
-    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual(["So far I've sorted 40 emails, drafted 6 replies and prepped 4 meetings: about 2 hours back."]);
+    expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual(["So far I've sorted 40 emails for your morning brief, drafted 6 replies and prepped 4 meetings: about 2 hours back."]);
     expect(fh.tally()).toEqual({ sorted: 40, drafted: 6, prepped: 4, routines: 0 });
+  });
+
+  it("points the recap's sorted count to the morning brief card in the same chat, and nowhere else", () => {
+    const recapWith = (sorted: number, card: "here" | "none" | "elsewhere") => {
+      const s = setup({ start: "2026-10-27T09:00:00Z" });
+      const fh = s.make();
+      fh.begin();
+      const brief = s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", text: "Your brief: 1 needs you", serverCard: true });
+      if (card !== "none") s.world.briefCard = { threadId: card === "here" ? s.thread() : "another-chat", messageId: brief.id };
+      if (sorted) s.ledger.add("sorted", sorted);
+      s.ledger.add("drafted", 2);
+      s.set("2026-10-28T09:00:00Z");
+      fh.tick();
+      return { recap: s.rows().findLast((row) => row.text?.startsWith("So far"))!, brief };
+    };
+    const linked = recapWith(12, "here");
+    expect(linked.recap.text).toBe("So far I've sorted 12 emails for your morning brief and drafted 2 replies: about 20 minutes back.");
+    expect(linked.recap.replyToId).toBe(linked.brief.id);
+    expect(recapWith(12, "none").recap.replyToId).toBeUndefined();
+    expect(recapWith(12, "elsewhere").recap.replyToId).toBeUndefined();
+    expect(recapWith(0, "here").recap.replyToId).toBeUndefined();
   });
 
   it("holds the recap while the person's newest message is still unanswered, so it never reads as the answer", () => {
@@ -265,7 +579,7 @@ describe("a new Cloud's first hour", () => {
     expect(s.texts().filter((text) => text?.startsWith("So far"))).toEqual([]);
     s.store.appendMessage(s.thread(), { role: "bot", kind: "widget", text: "Pick one", turnId: "turn-1" });
     fh.tick();
-    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails: about 30 minutes back.");
+    expect(s.texts().at(-1)).toBe("So far I've sorted 29 emails for your morning brief: about 30 minutes back.");
   });
 
   it("counts a routine's posted results in the recap, and says nothing at all when nothing was done", () => {

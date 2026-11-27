@@ -2067,38 +2067,30 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("persists room setup and blocks the first message until it is finished", async () => {
+  it("makes a room ready to chat at once, named after its bots, and still takes an older client's setup", async () => {
     const bot = (await api("GET", "/api/bots")).body.bots[0];
-    const created = await api("POST", "/api/groups", { name: "Setup probe", memberIds: [bot.id] });
+    const created = await api("POST", "/api/groups", { memberIds: [bot.id] });
     expect(created.status).toBe(201);
     const group = created.body.group;
     try {
-      expect(group).toMatchObject({ setupCompletedAt: null, setupSkippedAt: null, messages: [] });
-      const blocked = await api("POST", `/api/groups/${group.id}/messages`, { text: "before setup" });
-      expect(blocked.status).toBe(409);
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id).messages).toHaveLength(0);
+      expect(group).toMatchObject({ name: bot.name, bulletin: "", defaultResponder: { kind: "member", botId: bot.id }, setupSkippedAt: null, messages: [] });
+      expect(group.setupCompletedAt).toEqual(expect.any(Number));
+      const again = await api("POST", "/api/groups", { memberIds: [bot.id] });
+      expect(again.body.group.name).toBe(`${bot.name} 2`);
+      await api("DELETE", `/api/groups/${again.body.group.id}`);
 
-      const invalid = await api("PATCH", `/api/groups/${group.id}/setup`, {
-        action: "complete",
-        cwd: null,
-        bulletin: "",
-        defaultResponder: { kind: "member", botId: "missing" },
-      });
-      expect(invalid.status).toBe(400);
-
-      const completed = await api("PATCH", `/api/groups/${group.id}/setup`, {
+      const older = await api("PATCH", `/api/groups/${group.id}/setup`, {
         action: "complete",
         cwd: null,
         bulletin: "shared brief",
         defaultResponder: { kind: "member", botId: bot.id },
       });
-      expect(completed.status).toBe(200);
-      expect(completed.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: expect.any(Number) });
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id)).toMatchObject({
-        bulletin: "shared brief",
-        setupSkippedAt: null,
-      });
+      expect(older.status).toBe(200);
+      expect(older.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: group.setupCompletedAt });
+
+      expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "first words" })).status).toBe(202);
     } finally {
+      await api("POST", `/api/groups/${group.id}/interrupt`, {});
       await api("DELETE", `/api/groups/${group.id}`);
     }
   });
@@ -3570,6 +3562,9 @@ describe("harness HTTP API", () => {
       }
     };
     type ComputerDump = { mcpConfig: { mcpServers: { computer?: { args?: string[] } } } };
+    const loggedEvent = async (threadId: string, type: string) =>
+      ((await api("GET", `/api/threads/${threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+        .find((entry) => entry.kind === "runtime" && entry.data.type === type)?.data;
     const promptsOnBoat = () => boatRouteCalls.filter(call => call.method === "POST" && call.path === `/sandboxes/${managedBoatCreateId}/prompt`).length;
     let promptBaseline = 0;
     const promptedOnTeamComputer = async (count: number, botId: string) => {
@@ -3637,17 +3632,16 @@ describe("harness HTTP API", () => {
       expect(siblingMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
       const stoppedChip = siblingMessages.find((message) => (message.tool?.name ?? "").startsWith("Stopped waiting for the computer after "));
       expect(stoppedChip?.tool?.ok).toBe(true);
-      const siblingEvents = ((await api("GET", `/api/threads/${sibling.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
-        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(siblingEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+      await expect.poll(() => loggedEvent(sibling.threadId, "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
+        holder: { name: "Direct shared" },
+        outcome: "stopped",
+        waitedMs: expect.any(Number),
+      });
+      expect(await loggedEvent(sibling.threadId, "turn.wait_started")).toMatchObject({
         holder: { name: "Direct shared" },
         resource: expect.stringMatching(/^computer:/),
       });
-      expect(siblingEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
-        holder: { name: "Direct shared" },
-        outcome: "stopped",
-      });
-      expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
+      expect((await loggedEvent(sibling.threadId, "turn.wait_ended")).waitedMs).toBeGreaterThanOrEqual(0);
       expect(claudePrompts().length - promptBaseline, "the sibling ran from the start").toBe(2);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
@@ -3673,13 +3667,11 @@ describe("harness HTTP API", () => {
         (group: { id: string }) => group.id === roomId,
       ).messages;
       expect(roomMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
-      const roomEvents = ((await api("GET", `/api/threads/${room.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
-        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(roomEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
-        resource: expect.stringMatching(/^computer:/),
-      });
-      expect(roomEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+      await expect.poll(() => loggedEvent(room.threadId, "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
         outcome: "acquired",
+      });
+      expect(await loggedEvent(room.threadId, "turn.wait_started")).toMatchObject({
+        resource: expect.stringMatching(/^computer:/),
       });
       expect(promptsOnBoat()).toBe(0);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
@@ -9239,7 +9231,7 @@ describe("harness HTTP API", () => {
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
   });
 
-  it("cards asks when Claude's reviewer never started and remembers an exact configured MCP read", async () => {
+  it("cards asks when Claude's reviewer never started and remembers exact non-send MCP tools", async () => {
     // Haiku 4.5: the CLI takes `auto` but runs Manual and asks about everything.
     const bot = (await api("POST", "/api/bots", { name: "Quill" })).body.bot;
     const conns: Socket[] = [];
@@ -9334,9 +9326,25 @@ describe("harness HTTP API", () => {
       const linearWrite = raise("ask-linear-create", "create KAT issue", { team: "KAT" }, "mcp__linear__create_issue");
       await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "create KAT issue")?.card?.title).toBe("Approval needed");
       const writeCard = (await messages()).find((m) => m.card?.subtitle === "create KAT issue")!.card!;
-      expect(writeCard.allowKey).toBeUndefined();
+      expect(writeCard.allowKey).toMatch(/^provider-tool:claude:linear:create_issue:/);
       expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: writeCard.requestId, behavior: "deny" })).status).toBe(200);
       await expect(linearWrite).resolves.toMatchObject({ behavior: "deny" });
+
+      const batchTool = "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL";
+      const firstBatch = raise("ask-batch-1", "read mail batch", { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] }, batchTool);
+      await expect.poll(async () => (await messages()).find(m => m.card?.subtitle === "read mail batch")?.card?.allowKey).toBeTruthy();
+      const batchCard = (await messages()).find(m => m.card?.subtitle === "read mail batch")!.card!;
+      expect((await api("POST", `/api/bots/${bot.id}/always-allow`, { threadId: bot.threadId, allowKey: batchCard.allowKey })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: batchCard.requestId, behavior: "allow" })).status).toBe(200);
+      await expect(firstBatch).resolves.toMatchObject({ behavior: "allow" });
+      await expect(raise("ask-batch-2", "read mail batch again", {}, batchTool)).resolves.toMatchObject({ behavior: "allow" });
+      expect((await messages()).some(m => m.card?.subtitle === "read mail batch again")).toBe(false);
+      const send = raise("ask-send-after-grant", "send mail still asks", {}, "mcp__composio__GMAIL_SEND_EMAIL");
+      await expect.poll(async () => (await messages()).find(m => m.card?.subtitle === "send mail still asks")?.card).toBeTruthy();
+      const sendCard = (await messages()).find(m => m.card?.subtitle === "send mail still asks")!.card!;
+      expect(sendCard.allowKey).toBeUndefined();
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: sendCard.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(send).resolves.toMatchObject({ behavior: "deny" });
 
       const widen = raise("ask-widen", "ls /", { dangerouslyDisableSandbox: true });
       await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls /")?.card?.title).toBe("Approval needed");
@@ -9750,6 +9758,9 @@ describe("harness HTTP API", () => {
         expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
         expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
         const holder = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Hold the slot" })).body.task;
+        // The bot's main thread is never at capacity, and it stays on the first conversation: make the holder main so the
+        // greeting's thread waits for the slot.
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { mainThreadChoice: holder.threadId })).status).toBe(200);
         rmSync(fakeClaudeDump, { force: true });
         expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold the one slot", threadId: holder.threadId })).status).toBe(202);
         await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
@@ -9951,7 +9962,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9961,15 +9972,25 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
     expect(disk.features).toEqual({ ...untouched.features, skillAuthoring: false });
 
+    // The room feed has no switch: an older client's roomFeed is dropped, never saved, and the feed stays reported.
+    const burger = await api("PATCH", "/api/config", { features: { skillBurger: false, threadTabs: true, roomFeed: false } });
+    expect(burger.body.features).toMatchObject({ skillBurger: false, threadTabs: true, roomFeed: true });
+    const kept = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).features;
+    expect(kept).toMatchObject({ skillBurger: false, threadTabs: true });
+    expect(kept.roomFeed).toBeUndefined();
+    const quiet = await api("PATCH", "/api/config", { features: { suggestedReplies: false } });
+    expect(quiet.body.features).toMatchObject({ suggestedReplies: false });
+    await api("PATCH", "/api/config", { features: { skillBurger: true, threadTabs: false, suggestedReplies: true } });
+
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -11000,6 +11021,25 @@ describe("harness HTTP API", () => {
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, preserveInstalledApps: false });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+
+  it("keeps the config-file VPS desktop idle timeout apart from the private desktop's and out of the app's settings", async () => {
+    const get = async () => (await api("GET", "/api/config")).body;
+    expect((await get()).vpsIdle).toBeUndefined();
+    try {
+      for (const timeoutMinutes of [4, 1441, 5.5, "5", null]) {
+        expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes } })).status).toBe(400);
+      }
+      const saved = await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 5 } });
+      expect(saved.status).toBe(200);
+      expect(saved.body).toMatchObject({ localVm: { idleTimeoutMinutes: 480 } });
+      expect(saved.body.vpsIdle).toBeUndefined();
+      await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
+      expect(await get()).toMatchObject({ localVm: { idleTimeoutMinutes: 30 } });
+      expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).vpsIdle).toEqual({ timeoutMinutes: 5 });
+    } finally {
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 }, localVm: { idleTimeoutMinutes: 480 } });
+    }
   });
 
   it("validates, persists and applies the Local VM idle timeout in shared and per-bot modes", async () => {
@@ -12419,8 +12459,14 @@ describe("harness HTTP API", () => {
 
     const saved = await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
     expect(saved.status).toBe(200);
-    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps" });
+    expect(saved.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [], memoryGb: 4, cpus: 2 });
     expect(JSON.stringify(saved.body)).not.toContain("privateKey");
+
+    // Named servers are their own list: saving it leaves the default server alone.
+    const named = await api("PUT", "/api/config", { vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(named.status, JSON.stringify(named.body)).toBe(200);
+    expect(named.body.vps).toEqual({ configured: true, sshAlias: "production-vps", servers: [{ name: "Home lab", sshAlias: "home-lab" }], memoryGb: 4, cpus: 2 });
+    expect((await api("PUT", "/api/config", { vpsServers: [{ name: "Bad", sshAlias: "prod; reboot" }] })).status).toBe(400);
 
     const patched = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" });
     expect(patched.status).toBe(200);
@@ -12455,7 +12501,7 @@ describe("harness HTTP API", () => {
     const memberStream = await openSse(`${BASE}/api/events`, { authorization: `Bearer ${memberToken}` });
     const ownerStream = await openSse(`${BASE}/api/events`);
     try {
-      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "" });
+      expect((await asMember("GET", "/api/config")).body.vps).toEqual({ configured: true, sshAlias: "", servers: [], memoryGb: 4, cpus: 2 });
       const listed = (await asMember("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
       expect(listed).toMatchObject({ id: bot.id, cloudBackend: "vps" });
       expect(listed).not.toHaveProperty("vpsAlias");
@@ -12481,6 +12527,8 @@ describe("harness HTTP API", () => {
     expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
     expect(cleared.body.bot.vpsAlias).toBeUndefined();
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
+    const emptied = await api("PUT", "/api/config", { vpsServers: [] });
+    expect(emptied.body.vps.servers).toEqual([]);
   });
 
   it("validates a Composio project key, creates a Session, and keeps externally stored secrets off disk", async () => {
@@ -13415,7 +13463,7 @@ describe("bot memory API", () => {
         body: JSON.stringify({ command: "ls" }),
       });
       expect(exec.status).toBe(409);
-      expect(((await exec.json()) as { error: string }).error).toContain("no Local VM desktop");
+      expect(await exec.json()).toMatchObject({ code: "no_vm_for_turn", error: expect.stringContaining("no Local VM or Self-hosted VPS desktop") });
 
       for (let count = 2; count < 10; count += 1) expect((await attach({ path: "song.mp3" })).status).toBe(200);
       const flooded = await attach({ path: "song.mp3" });
@@ -14763,8 +14811,10 @@ describe("message pages", () => {
 });
 
 describe("resumable event stream", () => {
+  // A bot-level field: one numbered frame per change. A conversation's change (an unread mark is one) also sends the
+  // thread's own frame, which would number two.
   const nudge = async (botId: string) => {
-    const res = await api("PATCH", `/api/bots/${botId}`, { unread: true });
+    const res = await api("PATCH", `/api/bots/${botId}`, { mascotExpression: "happy" });
     expect(res.status).toBe(200);
   };
 

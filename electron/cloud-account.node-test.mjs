@@ -59,9 +59,10 @@ test("a failed check keeps the last verified answer (never a malformed one), say
 
 test("a check that fails is asked again after 15 s, 30 s, then each minute", async t => {
   const f = await fixture(t); await f.connect();
-  f.sessionStatus = 503; await f.client.refresh(); assert.equal(f.delay, 15_000);
+  assert.equal(f.client.failingUntil(), 0); f.sessionStatus = 503; await f.client.refresh(); assert.equal(f.delay, 15_000);
+  assert.equal(f.client.failingUntil(), f.now + 15_000, "a caller that would read it sooner (the Cloud's page) is told when it is tried again");
   for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
-  f.sessionStatus = 200; f.tick(); await until(() => f.timer);
+  f.sessionStatus = 200; f.tick(); await until(() => f.timer); assert.equal(f.client.failingUntil(), 0);
   f.sessionStatus = 503; f.tick(); await until(() => f.timer);
   assert.equal(f.delay, 15_000, "an answer starts the count again");
 });

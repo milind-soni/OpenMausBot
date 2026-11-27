@@ -13,6 +13,7 @@ import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import type { SessionRecord } from "../sessions.ts";
+import { cloudSignedTimestamp } from "../cloud-clock.ts";
 
 /** On the Admin; must match openmaus-cloud's TEAM_AWAY_MACHINE_PATH. */
 export const TEAM_AWAY_ADMIN_PATH = "/api/cloud/machines/team-away";
@@ -209,7 +210,7 @@ export function createTeamAway(deps: TeamAwayDeps) {
 
   const signedPost = async (request: AwayRequest): Promise<{ status: number; answer: z.infer<typeof answerSchema> | null }> => {
     const body = JSON.stringify(request);
-    const timestamp = String(Math.floor(now() / 1000)), nonce = randomBytes(18).toString("base64url");
+    const timestamp = cloudSignedTimestamp(now()), nonce = randomBytes(18).toString("base64url");
     const response = await fetcher(`${deps.adminOrigin}${TEAM_AWAY_ADMIN_PATH}`, { method: "POST", redirect: "error", cache: "no-store", body, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: {
       accept: "application/json", "content-type": "application/json", "x-omb-cloud-machine": deps.machineId, "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
       "x-omb-cloud-signature": `v1=${teamAwaySignature(deps.secret, deps.machineId, timestamp, nonce, body)}`,

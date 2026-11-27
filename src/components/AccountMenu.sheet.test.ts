@@ -61,3 +61,12 @@ it("hides the row again when a later check fails after an earlier yes", async ()
   f.effects[0]!(); await flush(); render();
   expect(result).toBe(false);
 });
+
+it("drops an earlier yes while a new check is still pending", async () => {
+  const offered = vi.fn().mockResolvedValueOnce(true).mockReturnValueOnce(new Promise(() => {}));
+  vi.stubGlobal("window", { ogb: { accountSheet: { offered, open: vi.fn() } } });
+  render(); f.effects[0]!(); await flush(); render();
+  expect(result).toBe(true);
+  f.effects[0]!(); render();
+  expect(result).toBe(false);
+});

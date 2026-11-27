@@ -1,13 +1,19 @@
 // More preferences the app window keeps, or reaches through the desktop app's bridge, each applied with Undo on a card
 // saying what it does. A window that can't apply one (a browser has no desktop bridge) refuses it.
-import { PLACE_SWATCHES, TALK_KEYS } from "../../shared/app-settings.ts";
+import { PLACE_SWATCHES, TALK_KEYS, type WindowPrefId } from "../../shared/app-settings.ts";
 import { personOnly, type SettingEntry, type WindowPref } from "./registry.ts";
 
 const turn = (on: boolean, yes: string, no: string) => (on ? yes : no);
 
-export function windowEntries(windowPref: WindowPref): SettingEntry[] {
-  const flag = (id: Parameters<WindowPref>[0], label: string, help: string, where: Parameters<WindowPref>[3], synonyms: string[], yes: string, no: string) =>
-    windowPref(id, label, help, where, synonyms, "true or false", { says: (on: boolean) => turn(on, yes, no) });
+/** `read` is the window's last report of its preferences. */
+export function windowEntries(windowPref: WindowPref, read: (id: WindowPrefId) => unknown): SettingEntry[] {
+  /** Simple mode draws this one as if unset (unless `shown`), so a change while the window is on Simple would show nothing:
+   * it is refused, and the bot never switches modes for it. */
+  const advancedOnly = (label: string, shown = () => false) => () => (read("appearance.advanced") === false && !shown()
+    ? `${label} shows only in Advanced mode and this app is on Simple, so nothing changed. Don't switch modes for it: tell the person in one line that it shows in Advanced mode, which they turn on with the switch at the bottom of Settings, then ask again.`
+    : null);
+  const flag = (id: Parameters<WindowPref>[0], label: string, help: string, where: Parameters<WindowPref>[3], synonyms: string[], yes: string, no: string, refusal?: () => string | null) =>
+    windowPref(id, label, help, where, synonyms, "true or false", { says: (on: boolean) => turn(on, yes, no), ...(refusal ? { refusal } : {}) });
   /** A way in to this computer: a bot may turn it on, but turning it off can cut off the device the person is using now. */
   const wayIn = (id: Parameters<WindowPref>[0], label: string, help: string, where: Parameters<WindowPref>[3], synonyms: string[], yes: string) =>
     windowPref(id, label, help, where, synonyms, "true (turning it off is done by the person, in Settings)",
@@ -15,19 +21,18 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
   return [
     flag("appearance.userBubbles", "Coloured messages", "Your own messages take the bot's colour.", "bubbles", ["bubbles", "message color", "my messages"],
       "Colour your messages with each bot's colour", "Show your messages in plain grey"),
-    flag("appearance.runCard", "This run card", "Show the card that follows a bot's run while it works.", "tool-calls", ["this run", "run card", "progress"],
-      "Show the card that follows each run", "Hide the card that follows each run"),
     flag("appearance.showThreads", "Threads in the sidebar", "List each bot's conversations under it in the sidebar.", "layout", ["threads", "conversations", "sidebar"],
-      "List each bot's threads in the sidebar", "Hide threads from the sidebar"),
+      "List each bot's threads in the sidebar", "Hide threads from the sidebar", advancedOnly("Threads in the sidebar")),
     windowPref("appearance.toolsLayout", "Sidebar tools layout", "How the sidebar shows its tools: rows, or a toolbar of icons.", "layout", ["tools layout", "toolbar", "rows"], "rows or toolbar",
-      { says: (layout: "rows" | "toolbar") => (layout === "rows" ? "Show the sidebar's tools as rows" : "Show the sidebar's tools as a toolbar of icons") }),
+      { says: (layout: "rows" | "toolbar") => (layout === "rows" ? "Show the sidebar's tools as rows" : "Show the sidebar's tools as a toolbar of icons"), refusal: advancedOnly("Sidebar tools layout") }),
     flag("appearance.pinnedCircles", "Pinned bots as circles", "Pinned bots show as a row of circles at the top of the sidebar.", "layout", ["pinned", "circles", "pins"],
-      "Show pinned bots as circles", "Show pinned bots as rows"),
+      "Show pinned bots as circles", "Show pinned bots as rows", advancedOnly("Pinned bots as circles")),
     flag("appearance.universalPins", "Universal pins", "Pinned bots stay pinned in every place on the rail.", "layout", ["universal pins", "pins everywhere"],
       "Keep pinned bots pinned in every place", "Pin bots in each place on its own"),
     windowPref("appearance.pinnedPages", "Pinned pages", "Web pages pinned beside the chat. Send the full list; chat pages pinned from a conversation stay.", "layout",
       ["pinned panels", "pinned pages", "web panel", "side page"], 'a list of up to 6 {"name","url"} with http(s) addresses; an empty list unpins every web page',
-      { says: (pages: Array<{ name: string; url: string }>) => (pages.length ? `Pin these pages beside the chat: ${pages.map((page) => `${page.name} (${page.url})`).join(", ")}` : "Unpin every web page beside the chat") }),
+      { says: (pages: Array<{ name: string; url: string }>) => (pages.length ? `Pin these pages beside the chat: ${pages.map((page) => `${page.name} (${page.url})`).join(", ")}` : "Unpin every web page beside the chat"),
+        refusal: advancedOnly("Pinned pages", () => read("appearance.windowFrame") === true) }),
     flag("appearance.showComputers", "Show your computers", "The rail of places down the side of the window (desktop app).", "layout", ["rail", "show your computers", "places"],
       "Show the rail of your computers and Clouds", "Hide the rail of your computers and Clouds"),
     flag("appearance.windowFrame", "Window frame", "Draw the system's own title bar around the window (desktop app; on Windows after a restart).", "layout", ["window frame", "title bar"],
@@ -54,7 +59,7 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       "Let your paired phones reach this computer on the same Wi-Fi"),
     wayIn("remote.relay", "Reach from anywhere", "Paired phones reach this computer from anywhere through MausBot's relay (needs a MausBot sign-in).", "relay", ["relay", "anywhere", "away", "remote access"],
       "Let your paired phones reach this computer from anywhere, through MausBot's relay"),
-    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "tailscale", ["tailscale", "tailnet", "remote access"],
+    wayIn("remote.tailscale", "Tailscale", "Paired devices reach this computer over your Tailscale network (Tailscale must be installed and signed in).", "private-network", ["tailscale", "tailnet", "remote access"],
       "Let your devices reach this computer over Tailscale"),
     flag("remote.keepAwake", "Keep awake", "Keep this computer awake while a way in is on, so paired phones can reach it.", "keep-awake", ["sleep", "awake", "overnight"],
       "Keep this computer awake so paired phones can reach it", "Let this computer sleep"),

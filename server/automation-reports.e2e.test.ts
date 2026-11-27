@@ -61,7 +61,7 @@ async function server(env: NodeJS.ProcessEnv = {}) {
   const settled = (id: string, status = "completed") => expect.poll(async () => (await run(id))?.status, { timeout: 30_000 }).toBe(status);
   const reported = (id: string, state: string) => expect.poll(async () => (await run(id))?.report?.state, { timeout: 30_000 }).toBe(state);
   const savedBot = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
-  const notified = () => events!.frames.filter((frame) => frame.kind === "notify").map((frame) => frame.notification as { kind: string; threadId: string; body: string });
+  const notified = () => events!.frames.filter((frame) => frame.kind === "notify").map((frame) => frame.notification as { kind: string; threadId: string; body: string; routine?: true });
   const header = (name: string) => `Routine ${JSON.stringify(name)} — do this now:`;
   /** Rows about these conversations in the workspace Chief's incidents conversation. */
   const chiefRows = async (...threadIds: string[]) => (await Promise.all((await api("GET", "/api/bots")).bots
@@ -130,10 +130,24 @@ it("reports each run into the main chat as the bot's own line, writes nothing fo
   expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a report that needs nothing from the person leaves the chat out of To review").toBe(false);
   const done = s.notified().filter((notification) => notification.kind === "done");
   expect(done).toEqual([expect.objectContaining({ threadId: s.main, body: "Inbox watch: Acme replied: they need the invoice by Friday." })]);
+  expect(done[0], "a Run now is not a scheduled report").not.toHaveProperty("routine");
   for (const key of ["first", "second", "third"]) expect(s.toldOnlyReplyLeaves(key)).toBe(true);
   const transcript = await s.messages(all[1].threadId);
   expect(transcript.find((message) => message.role === "user")?.text).toContain(s.header("Inbox watch"));
   expect(transcript.findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Acme replied: they need the invoice by Friday.");
+}, 120_000);
+
+it("marks the notice of a run its schedule started as a scheduled report", async () => {
+  const s = await server();
+  s.script([{ key: "due", match: ["Do the Morning digest check."], reply: "Two new orders overnight." }]);
+  const { routine } = await s.api("POST", "/api/routines", { name: "Morning digest", prompt: "Do the Morning digest check.", botId: s.bot.id, schedule: { type: "once", at: Date.now() + 1_000 } }, 201);
+  await expect.poll(async () => (await s.runs()).find((candidate) => candidate.routineId === routine.id)?.id, { timeout: 30_000 }).toEqual(expect.any(String));
+  const id = (await s.runs()).find((candidate) => candidate.routineId === routine.id).id as string;
+  await s.settled(id);
+  await s.reported(id, "posted");
+  expect(await s.run(id)).toMatchObject({ triggerSource: "schedule" });
+  await expect.poll(() => s.notified().some((notification) => notification.kind === "done"), { timeout: 10_000 }).toBe(true);
+  expect(s.notified().filter((notification) => notification.kind === "done")).toEqual([expect.objectContaining({ threadId: s.main, body: "Morning digest: Two new orders overnight.", routine: true })]);
 }, 120_000);
 
 it("opens a file a run linked in its report from the chat it reported to", async () => {
@@ -209,7 +223,10 @@ it("copies a question a run waits on into the main chat, and the answer given th
   await s.api("POST", `/api/threads/${s.main}/respond`, { requestId: copy.card.requestId, behavior: "answer", message: "Work" });
   await expect.poll(() => answers.find((answer) => answer.id === "which-account"), { timeout: 20_000 }).toMatchObject({ t: "answer", behavior: "answer", message: "Work", source: "user" });
   await s.settled(id, "running");
-  await expect.poll(async () => (await s.messages(s.main)).find((message) => message.id === copy.id)?.card?.answered, { timeout: 20_000 }).toBeTruthy();
+  await expect.poll(async () => {
+    const settledCopy = (await s.messages(s.main)).find((message) => message.id === copy.id);
+    return [settledCopy?.card?.answered, settledCopy?.automation?.needsYou];
+  }, { timeout: 20_000 }).toEqual(["answer", undefined]);
   expect((await s.messages(threadId)).find((message) => message.id === original.id)?.card?.answered).toBeTruthy();
   writeFileSync(gate, "done");
   await s.reported(id, "posted");
@@ -323,6 +340,9 @@ it("reports an outside event's run into a chat of its own, not the main chat", a
   expect(await s.lines()).toEqual([]);
   expect(await s.lines(done.resultsThreadId)).toEqual([expect.objectContaining({ text: "Drafted a follow-up for Ada.", automation: expect.objectContaining({ trigger: "webhook", name: "Sales form leads" }) })]);
   expect(s.toldOnlyReplyLeaves("lead")).toBe(true);
+  const leadNotices = s.notified().filter((notification) => notification.kind === "done" && notification.threadId === done.resultsThreadId);
+  expect(leadNotices, "an outside event's run is not a scheduled report").toEqual([expect.objectContaining({ body: "Sales form leads: Drafted a follow-up for Ada." })]);
+  expect(leadNotices[0]).not.toHaveProperty("routine");
   const saved = await s.savedBot();
   expect(saved.threadId).toBe(s.main);
   expect(saved.tasks.find((task: any) => task.threadId === done.resultsThreadId)).toMatchObject({ title: "Sales form leads · Results" });
