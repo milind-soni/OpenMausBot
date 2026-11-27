@@ -172,6 +172,18 @@ describe("the engine list", () => {
     expect(fake.probes).toHaveLength(2);
     expect(await probesAfterList()).toBe(2);
   });
+
+  it("shows a member names, models and capabilities only, and never reads the engines afresh for one", async () => {
+    const member = { kind: "session", via: "cookie", scopes: ["client"], session: {} } as unknown as RequestAuth;
+    const describeInstances = async () => [{ instanceId: "a", driverKind: "fake", displayName: "Fake", models: { default: "m", options: [{ id: "m", label: "M" }] },
+      capabilities: { queueing: true }, cli: "/home/owner/bin/fake", cliCandidates: ["/home/owner/bin/fake"], url: "https://llm.internal.example",
+      claudeAccount: { configDir: "/home/owner/.claude" }, snapshot: { state: "available", authenticated: true, account: { email: "owner@example.test" } } }];
+    const { call, fake } = await serve({ describeInstances } as Partial<InstanceRouteDeps>, member);
+    const { instances } = await call("GET", "/api/instances?fresh=1");
+    expect(instances).toEqual([{ instanceId: "a", driverKind: "fake", displayName: "Fake", readOnly: true, models: { default: "m", options: [{ id: "m", label: "M" }] },
+      capabilities: { queueing: true }, snapshot: { state: "available", authenticated: true } }]);
+    expect(fake.probes).toHaveLength(0);
+  });
 });
 
 describe("whether the server can start a bot", () => {

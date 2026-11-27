@@ -224,6 +224,10 @@ export function createCloudBrowserRails(options: CloudBrowserRailsOptions) {
       save();
     },
     pendingErasures: (): string[] => [...today().pendingErase],
+    /** The bots' profile keys this sandbox has carried sign-ins for: the profiles it holds, as far as the home knows. */
+    profilesIn: (boxId: string): string[] => Object.keys(today().carried).filter((stamp) => stamp.startsWith(`${boxId}:`)).map((stamp) => stamp.slice(boxId.length + 1)),
+    /** Whether any sandbox ever carried this profile's sign-ins (so it has a profile to erase). */
+    hasProfile: (key: string): boolean => Object.keys(today().carried).some((stamp) => stamp.endsWith(`:${key}`)),
     erased(key: string): void {
       const current = today();
       current.pendingErase = current.pendingErase.filter((one) => one !== key);

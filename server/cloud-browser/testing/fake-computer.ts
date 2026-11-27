@@ -45,6 +45,16 @@ export interface FakeComputer {
   chromes: number;
   /** A resume during `archiving` finds the machine already gone. */
   takeBackFails: boolean;
+  /** The relay says this sandbox can never resume (one that keeps nothing after a stop): its resumes answer 410
+   * `browser_sandbox_gone`, and nothing else changes. */
+  resumeGone: boolean;
+  /** `boat-only`: the sandbox takes no direct connections, so the relay answers its transfer links 409 `inbound_closed`, and
+   * files go through the provider's JSON file read and write (at most 5 MiB, under /home/user or /tmp). */
+  inbound: "open" | "boat-only";
+  /** The relay's cap on a request's JSON body (its 413 `request_too_large` past it), or null for none. */
+  relayJsonMax: number | null;
+  /** Whether the relay lets a browser sandbox use the JSON file calls (an Admin before that answers them 404). */
+  jsonFiles: boolean;
   /** Whether the launch could write the Chrome policy (sudo in the sandbox). */
   policy: boolean;
   requests: Request[];
@@ -81,7 +91,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
   let retired = true;
   const fake = {
     base: "", state: "ready", exists: true, startStatus: 200, startBody: { ok: true }, oldRelay: false, available: true, unavailableReason: "fleet_starts",
-    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, cookieCap: null, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
+    unavailableUntil: null, hostRoute: true, unprotected: false, chromeStarts: true, policy: true, takeBackFails: false, resumeGone: false, inbound: "open", relayJsonMax: null, jsonFiles: true, chromes: 2, caps: null, patchStatus: 200, oldRelayAnswer: 404, cookieCap: null, stall: new Map(), erased: [], requests: [], upgrades: [], frames: [], boxId: "bx_23456789",
     files: new Map(), cookies: new Map(), commands: [], failing: new Set(),
   } as unknown as FakeComputer;
   const watchers = new Map<string, Set<import("ws").WebSocket>>();
@@ -112,6 +122,11 @@ export async function startFakeComputer(): Promise<FakeComputer> {
         return;
       }
       const raw = Buffer.concat(chunks).toString("utf8");
+      if (fake.relayJsonMax !== null && chunks.reduce((sum, chunk) => sum + chunk.length, 0) > fake.relayJsonMax) {
+        res.writeHead(413, { "content-type": "application/json", connection: "close" });
+        res.end(JSON.stringify({ ok: false, error: { code: "request_too_large", message: "The request is too large." } }));
+        return;
+      }
       const body = raw && !url.pathname.startsWith("/put") ? JSON.parse(raw) as Record<string, unknown> : {};
       fake.requests.push({ method: req.method ?? "GET", path: url.pathname, body });
       const send = (status: number, payload: unknown) => { res.writeHead(status, { "content-type": "application/json", connection: "close" }); res.end(JSON.stringify(payload)); };
@@ -142,6 +157,7 @@ export async function startFakeComputer(): Promise<FakeComputer> {
         return send(200, { ok: true, operation: { id: `bdop_${"a".repeat(32)}`, status: "completed", kind: "sandbox", targetId: boxId } });
       }
       if (rest === `/sandboxes/${boxId}/resume`) {
+        if (fake.resumeGone) return send(410, { ok: false, error: { code: "browser_sandbox_gone", message: "This browser sandbox keeps nothing after a stop and cannot be resumed." } });
         // Taken back while still stopping, unless the machine already went: then the stop finishes and the answer is 409.
         if (fake.state === "archiving" && fake.takeBackFails) { fake.state = "archived"; return send(409, { ok: false, code: "sandbox_stopping" }); }
         if (fake.startStatus < 300) fake.state = "ready";
@@ -163,10 +179,31 @@ export async function startFakeComputer(): Promise<FakeComputer> {
       }
       if (rest === `/sandboxes/${boxId}/commands`) return send(404, { ok: false, code: "not_found" });
       if (rest === `/sandboxes/${boxId}/files/download-url` || rest === `/sandboxes/${boxId}/files/upload-url`) {
+        if (fake.inbound === "boat-only") return send(409, { ok: false, error: { code: "inbound_closed", message: "Files can't be copied to or from this browser yet: its sandbox takes no direct connections." } });
         const path = String(body.path ?? "");
         const download = rest.endsWith("download-url");
         if (!new RegExp(`^${HOME}/\\.omb-browser/\\.${download ? "downloads" : "uploads"}/[a-f0-9]{16}/[^/.][^/]*$`).test(path)) return send(404, { ok: false, code: "not_found" });
         return send(200, { ok: true, url: `${fake.base}/${download ? "file" : "put"}?p=${encodeURIComponent(path)}`, method: download ? "GET" : "PUT", path });
+      }
+      // The provider's JSON file read and write, as the relay lets a browser sandbox use them: one file in a profile's
+      // downloads (read) or uploads (write) folder, under /home/user or /tmp, at most 5 MiB after decoding.
+      if (rest === `/sandboxes/${boxId}/files` && (req.method === "GET" || req.method === "PUT")) {
+        if (!fake.jsonFiles) return send(404, { ok: false, error: { code: "not_found", message: "Not found." } });
+        const read = req.method === "GET";
+        const path = String(read ? url.searchParams.get("path") ?? "" : body.path ?? "");
+        if (!new RegExp(`^${HOME}/\\.omb-browser/\\.${read ? "downloads" : "uploads"}/[a-f0-9]{16}/[^/.][^/]*$`).test(path)) return send(404, { ok: false, code: "not_found" });
+        if (!/^\/(home\/user|tmp)\//.test(path)) return send(400, { ok: false, error: { code: "invalid_path", message: "The path must be under /home/user or /tmp." } });
+        if (read) {
+          const file = fake.files.get(path);
+          if (!file) return send(404, { ok: false, error: { code: "not_found", message: "No such file." } });
+          if (file.length > 5 * 1024 * 1024) return send(413, { ok: false, error: { code: "file_too_large", message: "Files up to 5 MiB." } });
+          return send(200, { ok: true, type: "file.read", success: true, path, encoding: url.searchParams.get("encoding") ?? "utf8", size: file.length,
+            content: url.searchParams.get("encoding") === "base64" ? file.toString("base64") : file.toString("utf8") });
+        }
+        const content = body.encoding === "base64" ? Buffer.from(String(body.content ?? ""), "base64") : Buffer.from(String(body.content ?? ""), "utf8");
+        if (content.length > 5 * 1024 * 1024) return send(413, { ok: false, error: { code: "file_too_large", message: "Inline writes are limited to 5 MiB." } });
+        fake.files.set(path, content);
+        return send(200, { ok: true, type: "file.written", success: true, path, encoding: body.encoding ?? "utf8", size: content.length });
       }
       if (rest === `/sandboxes/${boxId}/stop`) { fake.state = "archived"; return send(200, { ok: true }); }
       send(404, { ok: false, code: "not_found" });
