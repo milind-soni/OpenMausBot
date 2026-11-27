@@ -57,6 +57,11 @@ const reloaded = (patch: object, cfg: AppConfig = {}) =>
   changedInstanceIds(engineLaunches(instanceConfigs(cfg), {}), engineLaunches(instanceConfigs({ ...cfg, ...patch } as AppConfig), {}));
 
 describe("configuration boundaries", () => {
+  it("loads and takes a retired features.teamBoard without keeping it: the Team Board has no switch", () => {
+    expect(parseStoredConfig({ features: { teamBoard: true, threadTabs: true } }).features).toEqual({ threadTabs: true });
+    expect(parseConfigPatch({ features: { teamBoard: false } }).features).toEqual({});
+  });
+
   it("requires an explicit backup to opt into automatic recovery without reloading engines", () => {
     expect(parseStoredConfig({}).automaticRecovery).toBeUndefined();
     expect(parseConfigPatch({ automaticRecovery: { enabled: false } })).toEqual({ automaticRecovery: { enabled: false } });

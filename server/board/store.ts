@@ -19,7 +19,7 @@ const itemSchema = z.looseObject({
   forBotId: id.optional(),
   holder: z.object({ botId: id, since: z.number() }).optional(),
   attempts: z.number().int().min(0),
-  question: z.object({ text: z.string(), askedAt: z.number(), person: z.string().optional() }).optional(),
+  question: z.object({ text: z.string(), askedAt: z.number(), person: z.string().optional(), name: z.string().optional() }).optional(),
   later: z.object({ at: z.number(), note: z.string() }).optional(),
   laterCount: z.number().int().min(0).optional(),
   result: z.string().optional(),

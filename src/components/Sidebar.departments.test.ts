@@ -434,6 +434,15 @@ describe("a department's menu in Simple", () => {
     expect(dialog.props.body).toBe("Its bots and group chats stay, with their conversations, outside any department. The department and its shared instructions are deleted. This cannot be undone.");
   });
 
+  it("offers Move up and Move down only on the phone layout", () => {
+    const desk = openMenu("Work");
+    expect([desk.onMoveUp, desk.onMoveDown]).toEqual([undefined, undefined]);
+    fixture.phone = true;
+    const phone = openMenu("Work");
+    expect(phone.onMoveUp).toBeTypeOf("function");
+    expect(phone.onMoveDown).toBeTypeOf("function");
+  });
+
   it("keeps Advanced's rename dialog", () => {
     fixture.advanced = true;
     const button = { getBoundingClientRect: () => ({ right: 280, bottom: 300 }), focus: vi.fn(), isConnected: true } as unknown as HTMLButtonElement;
