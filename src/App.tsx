@@ -494,8 +494,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
       <PlaceChatKeeper />{(state.settingsOpen || state.computerOpen) && bot && isPlaceId(bot.id) && <PlacedBotPanel key={`placed:${bot.id}`} bot={bot} />}{state.settingsOpen && bot && !isPlaceId(bot.id) && (
         remoteClient
-          ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
+          ? <RemoteAgentSettingsPanel key="settings" bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
+          : <BotSettingsDialog key="settings" bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
       )}
       {state.computerOpen && bot && !isPlaceId(bot.id) && (
         remoteClient ? (
@@ -541,7 +541,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-hidden
         data-drawer-button-no-drag
         style={captionChrome.noDragStyle}
-        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
+        className="pointer-events-none absolute left-3 top-3 size-7.5 md:hidden"
       />}
       </div>
       {/* Last child on purpose: Blink resolves -webkit-app-region in DOM order, so no-drag buttons must follow every drag region. */}

@@ -72,6 +72,16 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
   }, [linkedSection, link]);
 
   useEffect(() => {
+    const target = initialTarget(linkedSection, link);
+    setTab(target.tab);
+    setStack(target.page ? [target.page] : []);
+    setAnchor(target.anchor ?? null);
+    setEditorOpen(false);
+    setEditingInstructions(Boolean(target.editInstructions));
+    scrollTop();
+  }, [bot.id]);
+
+  useEffect(() => {
     if (!anchor) return;
     bodyRef.current?.querySelector(`[data-panel-card="${anchor}"]`)?.scrollIntoView({ block: "start" });
     setAnchor(null);
@@ -96,7 +106,7 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" onKeyDown={onKeyDown}>
-      <div {...dragProps} className="flex h-[50px] shrink-0 items-start justify-end gap-2.5 px-[13px] pt-[13px]">
+      <div {...dragProps} className="flex h-12.5 shrink-0 items-start justify-end gap-2.5 px-3.25 pt-3.25">
         <ChatShareMenu bot={bot} className={roundButtonCls} />
         <button
           type="button"
@@ -135,9 +145,9 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
             <div
               role="tablist"
               aria-label={t("botSettings.simple.tabs")}
-              className="sticky top-0 z-[1] -mx-4 mt-[15px] flex justify-center bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
+              className="sticky top-0 z-1 -mx-4 mt-3.75 flex justify-center bg-app px-4 pb-2.5 pt-1 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-3 after:bg-linear-to-b after:from-app after:to-transparent"
             >
-              <div className="flex min-w-0 gap-0.5 rounded-full bg-ink/[0.05] p-[3px]">
+              <div className="flex min-w-0 gap-0.5 rounded-full bg-ink/5 p-0.75">
               {PANEL_TABS.map((id) => (
                 <button
                   key={id}
@@ -147,8 +157,8 @@ export function BotPanel({ bot, derived, linkedSection, onClose }: {
                   data-panel-tab={id}
                   onClick={() => openTab(id)}
                   className={cn(
-                    "h-[26px] min-w-0 shrink truncate rounded-full px-3 text-[13px] leading-[18px] transition-colors",
-                    tab === id ? "bg-ink/[0.1] font-medium text-ink" : "text-ink-secondary hover:text-ink",
+                    "h-6.5 min-w-0 shrink truncate rounded-full px-3 text-[13px] leading-4.5 transition-colors",
+                    tab === id ? "bg-ink/10 font-medium text-ink" : "text-ink-secondary hover:text-ink",
                   )}
                 >
                   {t(TAB_LABEL[id])}

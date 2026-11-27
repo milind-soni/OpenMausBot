@@ -309,17 +309,19 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
           {t("memory.notesHelp")}
         </p>
         {overview && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink-secondary" title={overview.workspacePath}>
+          <div className="mt-3 flex flex-col gap-2">
+            <span className="min-w-0 truncate font-mono text-[12px] text-ink-secondary" title={overview.workspacePath}>
               {shortPath(overview.workspacePath, home)}
             </span>
-            <button type="button" className={buttonCls} onClick={() => void openLocation("obsidian")}>
-              {t("memory.openObsidian")}
-            </button>
-            <button type="button" className={cn(buttonCls, "inline-flex items-center gap-1.5")} onClick={() => void openLocation("folder")}>
-              <FolderOpen size={14} />
-              {t("memory.showFileManager")}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className={buttonCls} onClick={() => void openLocation("obsidian")}>
+                {t("memory.openObsidian")}
+              </button>
+              <button type="button" className={cn(buttonCls, "inline-flex items-center gap-1.5")} onClick={() => void openLocation("folder")}>
+                <FolderOpen size={14} />
+                {t("memory.showFileManager")}
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -379,7 +381,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
             />
           )}
           <textarea
-            className={cn(inputCls, "mt-2 min-h-[200px] resize-y font-mono text-[13px] leading-relaxed")}
+            className={cn(inputCls, "mt-2 min-h-50 resize-y font-mono text-[13px] leading-relaxed")}
             value={editing.text}
             readOnly={editing.readOnly}
             placeholder={
@@ -407,7 +409,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
           {savedDraft !== null && (
             <div className="mt-3">
               <div className="mb-1 text-[12px] text-ink-secondary">{t("memory.unsavedDraft")}</div>
-              <pre className="max-h-[160px] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-hairline/40 bg-inset p-3 font-mono text-[12px] leading-relaxed text-ink">
                 {savedDraft}
               </pre>
               <button type="button" className={cn(quietButtonCls, "mt-1")} onClick={() => setSavedDraft(null)}>
@@ -568,10 +570,10 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
 function GaugeBar({ label, share, fill }: { label: string; share: number; fill: string }) {
   const width = `${Math.min(100, Math.round(share * 100))}%`;
   return (
-    <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-secondary">
-      <span className="w-10 shrink-0">{label}</span>
+    <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 text-[12px] text-ink-secondary">
+      <span className="min-w-0">{label}</span>
       <div
-        className="h-1.5 flex-1 overflow-hidden rounded-full bg-inset"
+        className="h-1.5 min-w-0 overflow-hidden rounded-full bg-inset"
         role="meter"
         aria-label={t("memory.capacity.used", { label })}
         aria-valuemin={0}
@@ -724,7 +726,7 @@ export function MemoryJournalList({
                 <summary className="cursor-pointer text-[12px] text-ink-secondary">
                   +{row.added} −{row.removed} · {t("memory.showChanged")}
                 </summary>
-                <pre className="mt-1 max-h-[240px] overflow-auto whitespace-pre-wrap rounded-md bg-card p-2 font-mono text-[12px] leading-relaxed text-ink">
+                <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap rounded-md bg-card p-2 font-mono text-[12px] leading-relaxed text-ink">
                   {row.diff}
                 </pre>
               </details>

@@ -11,7 +11,7 @@ import { BotConversations } from "./Conversations";
 import { BotKeeps } from "./Keeps";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { CardLabel, RowIcon, rowCls, RowText } from "./rows";
+import { CardLabel, panelTabStackCls, RowIcon, rowCls, RowText } from "./rows";
 import { useStoreSelector } from "@/state/store-select";
 import { newChatBot } from "@/state/new-chat";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -33,7 +33,7 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       title={item.title}
       aria-pressed={item.active || undefined}
       onClick={item.onSelect}
-      className={cn(rowCls, "w-full rounded-[8px] text-left enabled:hover:bg-ink/[0.04] disabled:cursor-default disabled:opacity-45")}
+      className={cn(rowCls, "w-full rounded-lg text-left enabled:hover:bg-ink/4 disabled:cursor-default disabled:opacity-45")}
     >
       <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary [&_svg]:size-4" aria-hidden="true">
         {item.icon}
@@ -66,10 +66,10 @@ export function DetailsTab({ bot, derived, onOpen }: {
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));
 
   return (
-    <div data-panel-tabpanel="details">
+    <div data-panel-tabpanel="details" className={panelTabStackCls}>
       {/* One row style down the whole tab: flat rows under quiet labels, no cards. */}
-      <section data-panel-card="model" className="pt-2">
-        <div data-panel-row="model" className={cn(rowCls, "rounded-[8px]")}>
+      <section data-panel-card="model">
+        <div data-panel-row="model" className={cn(rowCls, "rounded-lg")}>
           <ModelPicker
             key={thread.threadId}
             bot={thread}
@@ -84,7 +84,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
           threadId={thread.threadId}
           updateBotDefault={reasoningSetsDefault}
           compact
-          className={cn(rowCls, "min-w-0 flex-1 rounded-[8px]")}
+          className={cn(rowCls, "min-w-0 flex-1 rounded-lg")}
           label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.reasoning")} /></span>}
         />
       </section>

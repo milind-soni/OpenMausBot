@@ -55,9 +55,14 @@ function filesHolding(secret: string): string[] {
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
       const path = join(dir, name);
-      const stat = statSync(path);
-      if (stat.isDirectory()) walk(path);
-      else if (stat.isFile() && stat.size < 20_000_000 && path !== fixture.fixtureDumpPath && !name.startsWith(CONFIG_BACKUP_PREFIX) && readFileSync(path).includes(secret)) found.push(relative(fixture.info.dataDir, path));
+      // The live server writes its files by temp file and rename while this walks: a path that vanished in between is not a holder.
+      try {
+        const stat = statSync(path);
+        if (stat.isDirectory()) walk(path);
+        else if (stat.isFile() && stat.size < 20_000_000 && path !== fixture.fixtureDumpPath && !name.startsWith(CONFIG_BACKUP_PREFIX) && readFileSync(path).includes(secret)) found.push(relative(fixture.info.dataDir, path));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
   };
   walk(fixture.info.dataDir);

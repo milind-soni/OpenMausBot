@@ -217,7 +217,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
+    <aside className="relative z-20 flex h-full w-100 shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
       <div {...dragProps} className="flex items-center justify-between border-b border-hairline px-5 py-4">
         <div>
           <div className="text-[14px] font-medium text-ink">{t("remoteDesktop.title", { name: bot.name })}</div>
@@ -256,7 +256,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
       </div>
 
       {view === "browser" ? (
-        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-1">
+        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-4">
           {help?.place === "browser" && <div className="-mt-2 mb-3"><SignInBanner help={help} askerName={asker} onError={setError} /></div>}
           <BrowserPanel bot={bot} signIn={signIn} />
           {error && <div role="alert" className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}

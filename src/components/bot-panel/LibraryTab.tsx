@@ -7,7 +7,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { openBotThread, type Bot } from "@/state/store";
 import { AttachedFileChip } from "../AttachmentPreview";
-import { Card, CardLabel, NavRow } from "./rows";
+import { Card, CardLabel, NavRow, panelTabStackCls } from "./rows";
 import { useStoreDispatch } from "@/state/store-select";
 import { allLibraryItems, libraryItems, threadLabel } from "./library-items";
 import { useBotLibrary } from "./use-bot-library";
@@ -47,15 +47,15 @@ export function LibraryTab({ bot }: { bot: Bot }) {
 
   if (pages.length + apps.length + shared.length + unshared.length === 0) {
     return (
-      <div data-panel-tabpanel="library">
-        <p data-panel-empty="library" className="px-3 py-7 text-center text-[13px] leading-[18px] text-ink-tertiary">
+      <div data-panel-tabpanel="library" className={panelTabStackCls}>
+        <p data-panel-empty="library" className="px-3 py-7 text-center text-[13px] leading-4.5 text-ink-tertiary">
           {t("botPanel.library.empty")}
         </p>
       </div>
     );
   }
   return (
-    <div data-panel-tabpanel="library">
+    <div data-panel-tabpanel="library" className={panelTabStackCls}>
       {pages.length > 0 && (
         <Card label={t("botPanel.library.pages")} anchor="pages">
           {shown("pages", pages).map((page) => (
