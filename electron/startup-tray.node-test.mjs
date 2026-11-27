@@ -268,7 +268,7 @@ test("on Linux the lending indicator borrows the one tray icon and hands Open an
 
   lending.update({ clouds: ["My Cloud"], using: [], paused: false });
   assert.equal(made.length, 1, "no second tray icon");
-  assert.match(made[0].tooltip, /^OpenMausBot: My Cloud/);
+  assert.match(made[0].tooltip, new RegExp(`^${productJson.appName}: My Cloud`));
   assert.ok(labels().includes("Pause"));
   tray.relabel();
   assert.ok(labels().includes("Pause"), "a language change does not put Open and Quit over the lending menu");
@@ -277,7 +277,7 @@ test("on Linux the lending indicator borrows the one tray icon and hands Open an
 
   lending.update({ clouds: [], using: [], paused: false });
   assert.equal(made[0].isDestroyed(), false);
-  assert.equal(made[0].tooltip, "OpenMausBot");
+  assert.equal(made[0].tooltip, productJson.appName);
   assert.deepEqual(labels(), openQuit);
 
   lending.update({ clouds: ["My Cloud"], using: [], paused: false });

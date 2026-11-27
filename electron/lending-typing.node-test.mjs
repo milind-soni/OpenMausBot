@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import productJson from "../product.json" with { type: "json" };
 import { createLendingIndicator } from "./lending-indicator.mjs";
 
 const ready = { ready: true, reason: null };
@@ -19,7 +20,7 @@ test("a computer a Cloud can use now says its bots use it while the person types
   tray.update({ clouds: ["My Cloud"], screen: ready, typing: true });
   assert.deepEqual(tray.labels().slice(0, 2), ["My Cloud can use this PC", TYPING]);
   assert.equal(tray.item(TYPING).enabled, false, "a plain line, not an action");
-  assert.equal(tray.tip(), "OpenMausBot: My Cloud can use this PC", "the tooltip stays short");
+  assert.equal(tray.tip(), `${productJson.appName}: My Cloud can use this PC`, "the tooltip stays short");
 
   tray.update({ clouds: ["My Cloud"], screen: { ready: false, reason: "desktop-host-stopped", fix: "start" }, typing: true });
   assert.equal(tray.labels().indexOf(TYPING), tray.labels().indexOf("Pause") - 1, "after the screen line and its fix, so those stay together");
