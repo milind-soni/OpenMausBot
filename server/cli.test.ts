@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { applyStartupPreferences, parseArgs, runAccess, runLogin, runOnboardingCommand, serverEntry, type CliOptions, verifyPhoneEndpoint } from "./cli.ts";
+import { serveReadyTimeoutMs } from "./headless/args.ts";
 import { browserSignInLines, formatSessions, pairingBlock, qrToString, untilText } from "./cli-pairing.ts";
 import { reachableAddresses } from "./lan-address.ts";
 import { readAdminActivityRange } from "./admin-activity.ts";
@@ -695,4 +696,16 @@ describe.skipIf(process.platform === "win32")("serve --domain", () => {
       await removeTempDir(home);
     }
   }, 120_000);
+});
+
+describe("serve readiness wait", () => {
+  it("defaults to a minute, honors OMB_SERVE_READY_TIMEOUT_MS, and keeps the default on a bad value", () => {
+    expect(serveReadyTimeoutMs({})).toBe(60_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "10m" })).toBe(600_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "nonsense" })).toBe(60_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "1s" })).toBe(60_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "  5m " })).toBe(300_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "120000" })).toBe(120_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "90" })).toBe(60_000);
+  });
 });

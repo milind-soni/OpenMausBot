@@ -51,3 +51,13 @@ it("on a server's own page in Simple mode, its lend switch sits under its row, a
   expect(host.querySelector("[data-lend-switch]")?.textContent).toContain("Let hetzner-1’s bots use this computer");
   expect(host.querySelector("[data-settings-block=\"environments\"]"), "the inert environments group stays Advanced").toBeNull();
 });
+
+it("on a server's own page, once lent, Choose what it can use opens This computer's Settings for that server's folders and terminal", async () => {
+  const lendComputer = { state: vi.fn(async () => ({ name: "hetzner-1", lendable: true, on: true, connected: true, paused: false })), set: vi.fn(), allowScreen: vi.fn(), choose: vi.fn(async () => true) };
+  Object.assign(window, { ogb: { workspaces: { add: vi.fn() }, lendComputer } });
+  await mount();
+  const choose = [...host.querySelectorAll("[data-lend-switch] button")].find(button => button.textContent === "Choose what it can use");
+  expect(choose, "the server page's switch offers Choose once on").toBeTruthy();
+  await act(async () => { (choose as HTMLButtonElement).click(); });
+  expect(lendComputer.choose).toHaveBeenCalledWith(null);
+});

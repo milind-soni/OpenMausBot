@@ -188,6 +188,28 @@ describe("Devin ACP driver", () => {
     expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS.split(",")]);
   });
 
+  it("authenticates with the API key before model discovery's session/new", async () => {
+    const dump = join(scratch, "discovery-auth.json");
+    const rpc = join(scratch, "discovery-auth-rpc.json");
+    const catalog = await resolveDevinModels({
+      ...process.env, FAKE_ACP_MODELS: MODELS, FAKE_ACP_MODE: "auth-required-api-key", FAKE_ACP_AUTH_METHOD: "devin-browser",
+      FAKE_ACP_EXPECTED_API_KEY: "engine-fixture-key", WINDSURF_API_KEY: "engine-fixture-key", FAKE_ACP_DUMP: dump, FAKE_ACP_RPC_DUMP: rpc,
+    }, { cli: FAKE_CLI });
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS.split(",")]);
+    expect(JSON.parse(readFileSync(`${dump}.authenticate.json`, "utf8"))).toEqual({ methodId: "devin-browser", _meta: { api_key: "engine-fixture-key" } });
+    const methods = JSON.parse(readFileSync(rpc, "utf8")) as string[];
+    expect(methods.indexOf("authenticate")).toBeLessThan(methods.indexOf("session/new"));
+  });
+
+  it("fails discovery without calling authenticate when the CLI requires a key and none is available", async () => {
+    const dump = join(scratch, "discovery-no-key.json");
+    await expect(resolveDevinModels({
+      ...process.env, WINDSURF_API_KEY: "", FAKE_ACP_MODELS: MODELS, FAKE_ACP_MODE: "auth-required-api-key", FAKE_ACP_AUTH_METHOD: "devin-browser",
+      FAKE_ACP_EXPECTED_API_KEY: "engine-fixture-key", FAKE_ACP_DUMP: dump,
+    }, { cli: FAKE_CLI })).rejects.toThrow(/ACP model discovery/);
+    expect(existsSync(`${dump}.authenticate.json`)).toBe(false);
+  });
+
   it("lists a catalog of more than 128 models (a Devin Pro account has 145) without switching to each one", async () => {
     const models = Array.from({ length: 145 }, (_, index) => `fixture-model-${index}`);
     const rpc = join(scratch, "discovery-rpc.json");
@@ -219,6 +241,20 @@ describe("Devin ACP driver", () => {
     expect(launch.env.WINDSURF_API_KEY).toBe("engine-fixture-key");
     expect(modeCalls()).toEqual(["accept-edits"]);
     expect(prompts().at(-1)).toMatchObject({ model: "claude-sonnet-5-5" });
+  });
+
+  it("authenticates the turn session before prompting and keeps the key out of argv and events", async () => {
+    const { instance, recorder } = await create({
+      FAKE_ACP_MODE: "auth-required-api-key", FAKE_ACP_AUTH_METHOD: "devin-browser", FAKE_ACP_EXPECTED_API_KEY: "engine-fixture-key",
+    });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "devin-auth", text: "hello", model: "claude-sonnet-5-5", approvalMode: "ask" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    expect(JSON.parse(readFileSync(join(scratch, "launch.json.authenticate.json"), "utf8"))).toEqual({
+      methodId: "devin-browser", _meta: { api_key: "engine-fixture-key" },
+    });
+    const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
+    expect(JSON.stringify(launch.argv)).not.toContain("engine-fixture-key");
+    expect(JSON.stringify(recorder.events)).not.toContain("engine-fixture-key");
   });
 
   it("leaves Devin on its own default model, and bypasses permissions only under Full access", async () => {

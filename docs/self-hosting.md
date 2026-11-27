@@ -135,6 +135,28 @@ Add `--check` to only check the server. Running it again repairs;
 writes and what it contacts are in
 [Deploy on a VPS](deploy-vps.md#quick-start-one-command-on-your-own-domain).
 
+A licence goes in with the install, as `OMB_LICENSE_KEY` after `sudo` (it is
+kept in `/opt/openmausbot/.env`). Save the licence in a file first, so it does
+not end up in your shell history; the installer says whether it was accepted:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo OMB_LICENSE_KEY="$(cat licence.txt)" sh -s -- --domain maus.example.com
+```
+
+Or put it in later, with no restart: the server also reads `license.key` in
+its data folder, checks it once a minute and takes a newer licence at once:
+
+```sh
+cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'umask 077; cat > "$OMB_DATA_DIR/license.key"' < licence.txt
+```
+
+When several licences are on offer (`license.key`, `OMB_LICENSE_KEY`, and the
+copy the server keeps of the last one it accepted, `license.last-good`), the
+one issued last wins. A file that is broken, missing or older never takes away
+the licence in force, not even across a restart: it is logged once, and the
+licence stays until its 14-day grace ends. To remove a licence, delete
+`license.key` and `license.last-good`, unset `OMB_LICENSE_KEY`, and restart.
+
 By hand, on any system with Docker:
 
 ```sh

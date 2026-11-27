@@ -1,4 +1,4 @@
-import { boatCapableEngine } from "@/lib/remote-desktop";
+import { boatCapableEngine } from "@/lib/remote-desktop"; import { isPlaceId } from "@/lib/place-chat";
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
@@ -233,7 +233,7 @@ function BotPicker({
   onChange: (ids: string[]) => void;
 }) {
   const [query, setQuery] = useState("");
-  const filtered = bots.filter((bot) => `${bot.name} ${bot.title}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = bots.filter((bot) => !isPlaceId(bot.id) && `${bot.name} ${bot.title}`.toLowerCase().includes(query.toLowerCase())); // a My Cloud bot open in place has no routines here
   return (
     <div className="rounded-xl border border-hairline/50 bg-inset/60 p-2">
       {!locked && bots.length > 5 && (

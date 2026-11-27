@@ -57,6 +57,11 @@ const reloaded = (patch: object, cfg: AppConfig = {}) =>
   changedInstanceIds(engineLaunches(instanceConfigs(cfg), {}), engineLaunches(instanceConfigs({ ...cfg, ...patch } as AppConfig), {}));
 
 describe("configuration boundaries", () => {
+  it("loads and takes a retired features.teamBoard without keeping it: the Team Board has no switch", () => {
+    expect(parseStoredConfig({ features: { teamBoard: true, threadTabs: true } }).features).toEqual({ threadTabs: true });
+    expect(parseConfigPatch({ features: { teamBoard: false } }).features).toEqual({});
+  });
+
   it("requires an explicit backup to opt into automatic recovery without reloading engines", () => {
     expect(parseStoredConfig({}).automaticRecovery).toBeUndefined();
     expect(parseConfigPatch({ automaticRecovery: { enabled: false } })).toEqual({ automaticRecovery: { enabled: false } });
@@ -1310,6 +1315,21 @@ describe("Instance CLI override", () => {
     expect(instances.injectedOnly.environment).toBeUndefined();
     instances.ownKey.environment!.MY_FLAG = "changed";
     expect(cfg.instances!.ownKey.environment!.MY_FLAG).toBe("1");
+  });
+
+  it("an added server at its own address keeps its own model list, not the workspace model", () => {
+    const cfg: AppConfig = {
+      openaiCompat: { url: "https://first.example.test/v1", model: "fugu", provider: "first-provider" },
+      instances: {
+        "openai-compat-added": { driver: "openai-compat", config: { url: "http://127.0.0.1:1234/v1", key: "fixture-added", catalog: "lmstudio" } },
+        sameHost: { driver: "openai-compat", config: { url: "https://first.example.test/v1/", key: "fixture-same" } },
+        inherited: { driver: "openai-compat" },
+      },
+    };
+    const instances = instanceConfigs(cfg);
+    expect(instances["openai-compat-added"].config).toEqual({ url: "http://127.0.0.1:1234/v1", key: "fixture-added", catalog: "lmstudio" });
+    expect(instances.sameHost.config).toEqual({ url: "https://first.example.test/v1/", key: "fixture-same", model: "fugu", provider: "first-provider" });
+    expect(instances.inherited.config).toEqual({ url: "https://first.example.test/v1", model: "fugu", provider: "first-provider" });
   });
 
   it("saving another engine's CLI does not freeze inherited API endpoint or model settings", () => {

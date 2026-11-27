@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { useAppPreview } from "@/lib/app-preview";
 import { cn } from "@/lib/cn";
-import { closeFilePreview, useFilePreview, type FilePreview } from "@/lib/file-preview";
+import { closeFilePreview, forgetFilePreviews, moveFilePreview, useFilePreview, type FilePreview } from "@/lib/file-preview";
 import { t } from "@/lib/i18n";
 import { useRoomPanel } from "@/lib/room-panel";
 import { useStore } from "@/state/store";
@@ -12,7 +12,8 @@ import { PANEL_MIN_WIDTH, useComputerPanelResize } from "./computer-panel-resize
 import { FilePreviewContent } from "./HtmlFilePreview";
 
 /** A file from a message, beside the conversation where the Computer panel sits, so the transcript and the message box
- * stay in reach while it is open. It gives way when another panel takes that side, and closes when the chat changes. */
+ * stay in reach while it is open. It gives way when another panel takes that side, and when the chat changes it goes with
+ * its conversation, back on screen when the person returns there. */
 export function FilePreviewPanel({ threadId }: { threadId: string | undefined }) {
   const preview = useFilePreview();
   const appPreview = useAppPreview();
@@ -24,7 +25,13 @@ export function FilePreviewPanel({ threadId }: { threadId: string | undefined })
     if (otherPanel && !hadOtherPanel.current) closeFilePreview();
     hadOtherPanel.current = otherPanel;
   }, [otherPanel]);
-  useEffect(() => closeFilePreview, [threadId]);
+  const shownThread = useRef(threadId);
+  useEffect(() => {
+    if (shownThread.current === threadId) return;
+    moveFilePreview(shownThread.current, threadId, !hadOtherPanel.current);
+    shownThread.current = threadId;
+  }, [threadId]);
+  useEffect(() => forgetFilePreviews, []);
   if (!preview || otherPanel || state.activeView !== "chat") return null;
   return <FilePane key={`${preview.message.threadId}:${preview.message.messageId}:${preview.path}`} preview={preview} />;
 }
@@ -34,7 +41,8 @@ function FilePane({ preview }: { preview: FilePreview }) {
   const { panelWidth, maxWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd } = useComputerPanelResize();
   const closeButton = useRef<HTMLButtonElement>(null);
   const [dragging, setDragging] = useState(false);
-  useEffect(() => closeButton.current?.focus({ preventScroll: true }), []);
+  // Only a file the person just opened takes the focus; one coming back with its conversation leaves it where it is.
+  useEffect(() => { if (preview.opener) closeButton.current?.focus({ preventScroll: true }); }, [preview.opener]);
   // Taking focus back must not scroll the transcript away from where the person left it.
   const dismiss = () => {
     closeFilePreview();

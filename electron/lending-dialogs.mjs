@@ -7,7 +7,7 @@ import nativeText from "./native-text.cjs";
 export function serverAccessDetail(env, { folders, terminal, computer }, t = nativeText.englishText.t) {
   return [
     t("native.lend.server", { origin: env.origin }),
-    ...folders.map(folder => `${t(folder.write ? "native.lend.readWrite" : "native.lend.readOnly", { path: folder.path })}${folder.home ? ` ${t("native.lend.wholeHome")}` : ""}`),
+    ...folders.map(folder => `${t(folder.write ? "native.lend.readWrite" : "native.lend.readOnly", { path: folder.path })}${folder.home ? ` ${t("native.lend.wholeHome")}` : folder.system ? ` ${t("native.lend.systemDrive")}` : ""}`),
     t(terminal === true ? "native.lend.terminalOn" : "native.lend.terminalOff"),
     t(computer === true ? "native.lend.computerOn" : "native.lend.computerOff"),
     t("native.lend.footer"),
@@ -18,12 +18,13 @@ export function serverAccessDetail(env, { folders, terminal, computer }, t = nat
  * @param {{
  *   dialog: { showOpenDialog: Function, showMessageBox: Function },
  *   window: () => ({ isDestroyed(): boolean } | null),
- *   validate: (folders: Array<{ id: string, path: string, write: boolean, home?: boolean }>) => Promise<Array<{ id: string, path: string, name: string, write: boolean, home?: boolean }>>,
+ *   validate: (folders: Array<{ id: string, path: string, write: boolean, home?: boolean, system?: boolean }>, options?: { homeEdits?: boolean }) => Promise<Array<{ id: string, path: string, name: string, write: boolean, home?: boolean, system?: boolean }>>,
  *   isHome?: (path: string) => Promise<boolean>,
+ *   isSystemDrive?: (path: string) => Promise<boolean>,
  *   t?: (key: string, params?: Record<string, string | number>) => string,
  * }} deps
  */
-export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, t = nativeText.englishText.t }) {
+export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, isSystemDrive = async () => false, t = nativeText.englishText.t }) {
   let askingTerminal = false;
   return {
     /** Turning the terminal on runs `lend` only once the person confirms, one question at a time; turning it off never asks.
@@ -45,7 +46,8 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       return true;
     },
     /** The folder or drive the person picks, read only and checked as every lent folder is; null when they cancel. The
-     * home folder is lent only when it is picked here and confirmed here: the folders above it and the system disk never are. */
+     * home folder and the Windows system drive are lent only when picked here and confirmed here: the other folders above
+     * home never are. */
     async chooseFolder(title) {
       const picked = await dialog.showOpenDialog(window(), { title, properties: ["openDirectory"] });
       if (picked.canceled || !picked.filePaths[0]) return null;
@@ -58,10 +60,24 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
           buttons: [t("native.lend.home.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1 });
         if (response !== 0) return null;
         folder.home = true;
+      } else if (await isSystemDrive(folder.path)) {
+        const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.drive.title", { path: folder.path }),
+          detail: t("native.lend.drive.detail"),
+          buttons: [t("native.lend.drive.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1 });
+        if (response !== 0) return null;
+        folder.system = true;
       }
       return (await validate([folder]))[0];
     },
+    /** Edits on the whole home folder or system drive get their own warning first; Cancel on either lends nothing. */
     async confirmServerAccess(env, grant) {
+      const whole = grant.folders.filter(folder => folder.write && (folder.home || folder.system));
+      if (whole.length) {
+        const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.wholeEdits.title", { name: env.name }),
+          detail: t("native.lend.wholeEdits.detail", { paths: whole.map(folder => folder.path).join(", ") }),
+          buttons: [t("native.lend.wholeEdits.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1 });
+        if (response !== 0) return false;
+      }
       const { response } = await dialog.showMessageBox(window(), { type: "warning", message: t("native.lend.allow.title", { name: env.name }), detail: serverAccessDetail(env, grant, t),
         buttons: [t("native.lend.allow.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1 });
       return response === 0;

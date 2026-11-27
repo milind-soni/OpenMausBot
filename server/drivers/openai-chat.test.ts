@@ -17,22 +17,29 @@ import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
+// A stream cut now retries; real backoff would only slow these tests (retry.ts's own suite covers the schedule).
+vi.mock("./retry.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./retry.ts")>();
+  return { ...actual, computeBackoff: () => 0 };
+});
+
 const sse = (body: string) => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 
 /** `body` is every request's stream, or a factory per chat completion (the catalog fetch then gets a 404). */
-async function runTurn(body: string | (() => Response), driver: "openai-compat" | "minimax" = "openai-compat") {
+async function runTurn(body: string | (() => Response), driver: "openai-compat" | "minimax" = "openai-compat",
+  environment: Record<string, string> = { MINIMAX_API_KEY: "secret" }) {
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => typeof body === "string" ? sse(body)
     : String(url).endsWith("/chat/completions") ? body() : new Response("", { status: 404 })));
   const instance = driver === "minimax"
     ? await MinimaxDriver.create({
         instanceId: "minimax", displayName: "MiniMax", enabled: true,
         config: MinimaxDriver.defaultConfig(),
-        environment: { MINIMAX_API_KEY: "secret" },
+        environment,
       })
     : await OpenAICompatDriver.create({
         instanceId: "minimax", displayName: "MiniMax", enabled: true,
         config: OpenAICompatDriver.decodeConfig({ url: "https://api.minimax.io/v1", apiKeyEnv: "MINIMAX_API_KEY", model: "MiniMax-M3" }),
-        environment: { MINIMAX_API_KEY: "secret" },
+        environment,
       });
   const events: RuntimeEvent[] = [];
   instance.adapter.onEvent((event) => events.push(event));
@@ -1157,4 +1164,223 @@ describe("createOpenAIChatRuntime transient retries", () => {
     expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("HTTP 429") });
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
   }, 20_000);
+});
+
+describe("createOpenAIChatRuntime output-limit continuation", () => {
+  const LENGTH_CONTINUATION = "[OpenMausBot: your reply was cut at the output limit. Continue exactly where you stopped.]";
+  const stream = (delta: Record<string, unknown>, finishReason: string) =>
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 4 } })}\n\n`;
+  const text = (value: string, finishReason: string) => stream({ content: value }, finishReason);
+  const two = (first: Record<string, unknown>, second: Record<string, unknown>, finishReason: string) =>
+    `data: ${JSON.stringify({ choices: [{ index: 0, delta: first }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [{ index: 0, delta: second }] })}\n\n`
+    + `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: finishReason }], usage: { prompt_tokens: 10, completion_tokens: 4 } })}\n\n`;
+  const json = (value: string, finishReason: string) => new Response(JSON.stringify({
+    choices: [{ index: 0, message: { role: "assistant", content: value }, finish_reason: finishReason }],
+    usage: { prompt_tokens: 10, completion_tokens: 4 },
+  }), { headers: { "content-type": "application/json" } });
+  const textOf = (events: RuntimeEvent[]) =>
+    events.filter((event) => event.type === "item.completed" && event.itemType === "assistant_text").map((event) => event.text);
+
+  it("continues a reply cut at the output limit and returns the whole answer", async () => {
+    let requests = 0;
+    const events = await runTurn(() => ++requests === 1 ? sse(text("The report is", "length")) : sse(text(" written.", "stop")));
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["The report is written."]);
+    expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+
+    const bodies = vi.mocked(fetch).mock.calls
+      .filter(([url]) => String(url).endsWith("/chat/completions"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: unknown }> });
+    expect(bodies[1]!.messages.slice(-2)).toEqual([
+      { role: "assistant", content: "The report is" },
+      { role: "user", content: LENGTH_CONTINUATION },
+    ]);
+  });
+
+  it("never shows either half of a credential split at a continuation boundary", async () => {
+    const secret = "abcdefgh12345678";
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1 ? sse(text("before abcdefgh", "length")) : sse(text("12345678 after", "stop")),
+      "openai-compat",
+      { MINIMAX_API_KEY: secret },
+    );
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["before [redacted] after"]);
+    const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
+      : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
+    expect(shown.join("")).not.toContain("abcdefgh");
+    expect(shown.join("")).not.toContain("12345678");
+  });
+
+  it("carries the held suffix of a reply that arrived as JSON, not a stream", async () => {
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1 ? json("This is", "length") : json(" complete.", "stop"),
+      "openai-compat",
+      { MINIMAX_API_KEY: "secret12345678" },
+    );
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["This is complete."]);
+    const bodies = vi.mocked(fetch).mock.calls
+      .filter(([url]) => String(url).endsWith("/chat/completions"))
+      .map(([, init]) => JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: unknown }> });
+    expect(bodies[1]!.messages.slice(-2)).toEqual([
+      { role: "assistant", content: "This is" },
+      { role: "user", content: LENGTH_CONTINUATION },
+    ]);
+  });
+
+  it("keeps a credential split across the reasoning of a continuation masked", async () => {
+    const secret = "abcdefgh12345678";
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1
+        ? sse(two({ reasoning_content: "checking abcdefgh" }, { content: "before" }, "length"))
+        : sse(two({ reasoning_content: "12345678 again" }, { content: " after" }, "stop")),
+      "openai-compat",
+      { MINIMAX_API_KEY: secret },
+    );
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["before after"]);
+    const reasoning = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "reasoning_text" ? [event.delta] : []).join("");
+    expect(reasoning).toContain("[redacted]");
+    expect(reasoning).not.toContain("abcdefgh");
+    expect(reasoning).not.toContain("12345678");
+  });
+
+  it("releases a held prefix in the deltas and the item alike when the continuation ends in a tool call", async () => {
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1
+        ? sse(text("before abcdefgh", "length"))
+        : sse(stream({ tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "no_such_tool", arguments: "{}" } }] }, "tool_calls")),
+      "openai-compat",
+      { MINIMAX_API_KEY: "abcdefgh12345678" },
+    );
+    const deltas = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta] : []).join("");
+    expect(textOf(events)[0]).toBe("before abcdefgh");
+    expect(deltas.startsWith("before abcdefgh")).toBe(true);
+  });
+
+  it("keeps a reply's last characters in its own message when a queued aside follows", async () => {
+    // Each reply is its own message: a tail that could start the key is not carried into the next one.
+    const bodies: string[] = [];
+    let release!: (response: Response) => void;
+    const gate = new Promise<Response>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(String(init?.body));
+      return bodies.length === 1 ? await gate : sse(text("Done.", "stop"));
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.minimax.io/v1", apiKeyEnv: "MINIMAX_API_KEY", model: "MiniMax-M3" }),
+      environment: { MINIMAX_API_KEY: "sabcdefgh12345678" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "t", text: "hi" });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1), { timeout: 10_000 });
+    await expect(instance.adapter.steer!("t", "one more thing")).resolves.toBe("steered");
+    release(sse(text("I read the logs", "stop")));
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await instance.dispose();
+    expect(bodies).toHaveLength(2);
+    expect(textOf(events)).toEqual(["I read the logs", "Done."]);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
+  it("keeps the last characters before a tool call in that message", async () => {
+    // The text before a tool call ends on what could start the key; it stays in that message, not the next one.
+    const remote = await startFakeHttpMcp({ tools: [{ name: "read_notes", description: "Read notes", inputSchema: { type: "object", properties: {}, additionalProperties: false } }] });
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      requests += 1;
+      return sse(requests === 1
+        ? two({ content: "Let me check the logs" }, { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "fx_read_notes", arguments: "{}" } }] }, "tool_calls")
+        : text("All clear.", "stop"));
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.minimax.io/v1", apiKeyEnv: "MINIMAX_API_KEY", model: "MiniMax-M3" }),
+      environment: { MINIMAX_API_KEY: "sabcdefgh12345678" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "thread", text: "hi", approvalMode: "full",
+        integrations: { custom: { fx: { type: "http", url: remote.url, headers: {} } } },
+      });
+      await vi.waitFor(() => {
+        if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+      }, { timeout: 15_000 });
+    } finally {
+      await instance.dispose();
+      await remote.close();
+    }
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["Let me check the logs", "All clear."]);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 30_000);
+
+  it("keeps a released prefix in both the deltas and the item when a tool call follows", async () => {
+    let requests = 0;
+    const events = await runTurn(
+      () => ++requests === 1
+        ? sse(text("before abcdefgh", "length"))
+        : requests === 2
+          ? sse(two({ content: "Let me check." }, { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "no_such_tool", arguments: "{}" } }] }, "tool_calls"))
+          : new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400, headers: { "content-type": "application/json" } }),
+      "openai-compat",
+      { MINIMAX_API_KEY: "abcdefgh12345678" },
+    );
+    const deltas = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta] : []).join("");
+    expect(textOf(events)).toEqual(["before abcdefghLet me check."]);
+    expect(deltas).toBe("before abcdefghLet me check.");
+  });
+
+  it("keeps the partial answer when the continuation request fails", async () => {
+    let requests = 0;
+    const events = await runTurn(() => ++requests === 1
+      ? sse(text("The report is", "length"))
+      : new Response(JSON.stringify({ error: { message: "bad request" } }), { status: 400, headers: { "content-type": "application/json" } }));
+    expect(requests).toBe(2);
+    expect(textOf(events)).toEqual(["The report is"]);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("still fails a length finish with no text", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(text("", "length"))));
+    expect(requests).toBe(1);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: "provider returned an empty response" });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("still fails a reasoning-only length finish", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(stream({ reasoning_content: "thinking" }, "length"))));
+    expect(requests).toBe(1);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("provider did not finish the response (length)") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
+
+  it("stops at the continuation cap instead of looping forever", async () => {
+    let requests = 0;
+    const events = await runTurn(() => (requests++, sse(text(`part ${requests}`, "length"))));
+    expect(requests).toBe(9);
+    expect(textOf(events)).toHaveLength(1);
+    expect(textOf(events)[0]).toContain("part 1");
+    expect(textOf(events)[0]).toContain("part 9");
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining("output limit") });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+  });
 });

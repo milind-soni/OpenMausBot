@@ -67,6 +67,12 @@ export function operatorEnvKey(name: string, env: NodeJS.ProcessEnv = process.en
   return env.OMB_DESKTOP_PARENT === "1" && DESKTOP_STORE_KEY_ENV.has(name) ? undefined : env[name];
 }
 
+/** A connection inherits the workspace OPENAI_COMPAT_MODEL and _PROVIDER only at the workspace server's address (or none): another server can't serve them. */
+export function onWorkspaceServer(url: unknown, workspaceUrl: string | undefined): boolean {
+  const bare = (value: string) => value.trim().replace(/\/+$/u, "");
+  return typeof url !== "string" || !url.trim() || bare(url) === bare(workspaceUrl || "https://openrouter.ai/api/v1");
+}
+
 /** Env a provider CLI may read as its billing identity; a foreign key must never move a subscription CLI onto API billing. */
 export const PROVIDER_CREDENTIAL_ENV = [
   "CLINE_API_KEY",

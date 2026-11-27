@@ -34,11 +34,17 @@ export const GROK_PROMPT_COMPLETION: AcpPromptCompletion = {
   },
 };
 
+/** A provider the Grok CLI serves (say an OpenAI-compatible router) can throttle for a moment on its own; these words say
+ * so, where the Grok plan's quota would not. */
+const TRANSIENT_RATE_LIMIT = /\brate_limit_error\b|\bsemaphore timeout\b|\btoo many requests\b/i;
+
 /** A prompt Grok ended for a rate limit, after its own retries: the account's usage limit, unless its words name another
- * cause (a server error, an overload, no credit), which then keeps its own words. */
+ * cause (a server error, an overload, no credit), which keeps its own words — or a provider's own transient throttle, which
+ * stays a rate limit a retry can clear, not a quota to wait out. */
 function grokLimitFailure(said: string): AcpReportedFailure | undefined {
   const kind = engineFailureKind(said);
   if (kind !== null && kind !== "usage_limit" && kind !== "rate_limit") return undefined;
+  if (kind !== "usage_limit" && TRANSIENT_RATE_LIMIT.test(said)) return new AcpReportedFailure(engineFailure("Grok", said, { kind: "rate_limit", status: null })!, false);
   return new AcpReportedFailure(engineFailure("Grok", said, { kind: "usage_limit", status: null })!, true);
 }
 

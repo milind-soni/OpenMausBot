@@ -254,12 +254,12 @@ Tests never download the live file: `server/testing/setup.ts` and the verificati
 (`scripts/control-omb.ts`, which the renderer previews and UI tests run on) set `OMB_DISABLE_ANNOUNCEMENTS=1`, so their
 pages get no cards whatever `main` holds. The server's tests hand the store a fake fetch.
 
-## Moving the built-in sponsor slide into the feed later
+## Moving the built-in sponsor offer into the feed later
 
-The sponsor's offer (`MODELGO_OFFER_NOTICE`) is now What's new's last slide. To move it to the feed instead: publish a
-`sponsor` card with the same words, its mark and `MODELGO_URL` as its `open_url`, and drop the slide from
-`whatsNewCarousel` in a release whose app treats the old seen ids as the card's (mark `announcement:<id>` seen when
-`modelgo-offer-2026-11` or `whats-new-2026-11b` is).
+The sponsor's offer (`MODELGO_OFFER_NOTICE`) was What's new's last slide in `whats-new-2026-11b`; `whats-new-2026-11c`
+has no sponsor slide, and the offer stays listed in Announcements. To bring it back as a card: publish a `sponsor` card
+with the same words, its mark and `MODELGO_URL` as its `open_url`, in a release whose app treats the old seen ids as the
+card's (mark `announcement:<id>` seen when `modelgo-offer-2026-11` or `whats-new-2026-11b` is).
 
 ## Design notes
 

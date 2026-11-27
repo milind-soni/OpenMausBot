@@ -84,12 +84,13 @@ function Preview() {
   const state = params.get("state") ?? "choose";
   const asked = POPUPS[state];
   const plans = asked?.account ? whatsNewView(asked.account, asked.offer) : "none";
-  const popup = asked ? whatsNewCarousel({ plans, modelgo: true, addKey: true,
+  const popup = asked ? whatsNewCarousel({ plans, cloud: !asked.account || (typeof plans === "object" && plans.audience === "own"),
+    apps: { place: asked.account ? "computer" : "cloud", install: Boolean(asked.account) },
     team: asked.account ? { kind: "start", inApp: typeof plans === "object" && plans.audience === "own", url: "" } : INVITE }) : null;
   if (popup && typeof popup === "object") {
     return <div className="relative h-screen overflow-hidden">
       <MockApp />
-      <WhatsNewPopup view={popup} report={noop} onBuy={noop} onAddKey={noop} onDone={noop} />
+      <WhatsNewPopup view={popup} report={noop} onBuy={noop} onOpenApps={noop} onDone={noop} />
     </div>;
   }
   const view = VIEWS[state] ?? VIEWS.choose!;

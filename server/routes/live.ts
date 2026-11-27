@@ -26,6 +26,8 @@ const sessionBody = z.object({
   // Not trimmed: the SDP offer goes to OpenAI byte for byte. Absent on a relayed call, which has no offer.
   sdp: z.string().min(1).refine((sdp) => Buffer.byteLength(sdp) <= MAX_SDP_BYTES).optional(),
   client: z.enum(["desktop", "web", "ios", "android"]),
+  // The relayed sessions a phone app runs itself (Gemini Live); a phone that sends none keeps being sent to the desktop app.
+  relays: z.array(z.enum(["gemini"])).max(4).optional(),
 }).strict();
 const endBody = z.object({ callId: z.string().min(1).max(120) }).strict();
 const relayMs = z.number().finite().min(0).max(86_400_000);
@@ -88,7 +90,8 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       if (!target) return json(res, 404, { error: "That bot or chat does not exist." });
       try {
         const device = companionDevice(req);
-        const started = await deps.calls.start({ auth, ...(device ? { device } : {}), ...target, client: parsed.data.client, ...(parsed.data.sdp ? { sdp: parsed.data.sdp } : {}) });
+        const started = await deps.calls.start({ auth, ...(device ? { device } : {}), ...target, client: parsed.data.client, ...(parsed.data.sdp ? { sdp: parsed.data.sdp } : {}),
+          ...(parsed.data.relays ? { relays: parsed.data.relays } : {}) });
         return json(res, 201, { call: started.call, transport: started.fish ?? started.gemini ?? started.elevenlabs ?? { type: "webrtc", sdp: started.sdp } });
       } catch (error) {
         if (error instanceof LiveCallBusyError) return json(res, 409, { error: error.message, activeCall: error.call });

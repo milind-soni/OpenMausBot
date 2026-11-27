@@ -535,7 +535,9 @@ export class McpOAuthManager {
    * public; a server that issues a secret anyway (Supabase) gets it back on every token request. */
   private async register(meta: McpAuthMetadata, redirectUri: string): Promise<ClientAuth> {
     if (!meta.registrationEndpoint) {
-      throw new McpOAuthError("no-registration", "This server only signs in apps registered with it in advance. Edit the server and add that app's client ID under Sign-in app.");
+      throw new McpOAuthError("no-registration", meta.clientIdMetadataDocument
+        ? "This server signs in apps by a published app ID (a client ID metadata document), which OpenMausBot doesn't support yet."
+        : "This server only signs in apps registered with it in advance. Edit the server and add that app's client ID under Sign-in app.");
     }
     const response = await fetch(meta.registrationEndpoint, {
       method: "POST",

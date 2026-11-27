@@ -76,6 +76,16 @@ describe("classifyError", () => {
     });
   });
 
+  it("calls a provider stream cut transient with reason stream_cut", () => {
+    // undici ends a cut stream read with the bare word "terminated"; the provider's SSE error chunk wraps the same word.
+    expect(classifyError(new Error("terminated"))).toEqual({ transient: true, reason: "stream_cut" });
+    expect(classifyError(new Error("terminated", { cause: new Error("other side closed") })))
+      .toEqual({ transient: true, reason: "stream_cut" });
+    expect(classifyError({ text: "provider returned a streaming completion error: terminated" }))
+      .toEqual({ transient: true, reason: "stream_cut" });
+    expect(classifyError(new Error("Stream ended before completion"))).toEqual({ transient: true, reason: "stream_cut" });
+  });
+
   it.each([
     ["Internal error: Internal service failure (session/new, ServiceUnavailableError)", "server_error"],
     ["ServiceUnavailableError: upstream unavailable", "server_error"],

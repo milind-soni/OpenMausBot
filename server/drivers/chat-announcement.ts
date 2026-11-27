@@ -25,7 +25,7 @@ function endsWithAnnouncingSentence(reply: string): boolean {
 }
 
 export function announcesAction(text: string): boolean {
-  const reply = text.trim();
+  const reply = text.trim().replace(/’/g, "'");
   if (!reply || reply.length > 4_000 || reply.includes("?")) return false;
   if (/[？\p{Script=Han}]/u.test(reply)) {
     const prose = blankCode(text);

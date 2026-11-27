@@ -139,6 +139,9 @@ mac:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
     NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
+    NSRemindersFullAccessUsageDescription: OpenMausBot lets your bots read and create Reminders on this Mac with your approval.
+    # macOS 13 and older still read the legacy Reminders key.
+    NSRemindersUsageDescription: OpenMausBot lets your bots read and create Reminders on this Mac with your approval.
     NSLocalNetworkUsageDescription: OpenMausBot connects to your phones and your other computers on this network and on Tailscale.
     NSBonjourServices:
       - _openmausbot._tcp
