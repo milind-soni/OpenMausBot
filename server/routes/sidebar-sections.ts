@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import type { WireBot } from "../../shared/wire.ts";
+import type { VisibleSet } from "../bot-visibility.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { TeamComputers } from "../team-computers.ts";
 import { USER_ERROR, userError, type UserErrorKey } from "../user-errors.ts";
@@ -8,6 +10,8 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 const STORE_REFUSALS: readonly UserErrorKey[] = ["serverError.department.notFound", "serverError.department.nameRule",
   "serverError.department.duplicate", "serverError.department.renameBusy", "serverError.department.emptyFirst", "serverError.department.deleteBusy", "serverError.department.generalChief"];
+
+const ORDER_INVALID = "sections must be a non-empty array of distinct department names";
 
 export function storeRefusal(error: string): { error: string; errorKey?: UserErrorKey } {
   const key = STORE_REFUSALS.find((candidate) => USER_ERROR[candidate] === error);
@@ -20,6 +24,8 @@ export interface SidebarSectionRouteDeps {
   maxBots: number;
   assertTeamComputerChangeIdle(before: BotRecord, after: BotRecord): void;
   wireBot(bot: BotRecord): WireBot;
+  /** The same filter the live department list (the `sections` frame) applies to this caller. */
+  visibleFor(auth: RequestAuth): Pick<VisibleSet, "sections">;
   /** A department was renamed (`to`) or deleted (null): what is kept about it by name follows. */
   renamed?(from: string, to: string | null): void;
 }
@@ -32,9 +38,24 @@ export function createSidebarSectionRoutes(deps: SidebarSectionRouteDeps): Route
     botIds: z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS).default([]),
   }).strict();
 
-  return async ({ req, res, url, path, method, json, readBody }) => {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     if (path === "/api/sidebar-sections" && method === "GET") {
       return json(res, 200, { sections: store.sections });
+    }
+    // The department order is one list every client shows (the desktop sidebar, a phone). A reorder names only the
+    // departments it moves; the rest keep their places. `first` is a device offering the order it showed before the
+    // order was shared: it applies only while nobody has set one.
+    if (path === "/api/sidebar-sections/order" && method === "PUT") {
+      const parsed = z.object({ sections: z.array(z.string().min(1)).min(1), first: z.boolean().optional() }).strict().safeParse(await readBody(req));
+      if (!parsed.success || new Set(parsed.data.sections).size !== parsed.data.sections.length) return json(res, 400, { error: ORDER_INVALID });
+      // A hidden department gets the same answer as a missing one, so the list cannot probe the workspace.
+      const visible = deps.visibleFor(auth);
+      const shown = new Set(visible.sections(store.sections));
+      const unknown = parsed.data.sections.find((name) => !shown.has(name));
+      if (unknown !== undefined) return json(res, 400, { error: `unknown department: ${unknown}` });
+      const sections = store.reorderSections(parsed.data.sections, parsed.data.first);
+      if (!sections) return json(res, 400, { error: ORDER_INVALID });
+      return json(res, 200, { sections: visible.sections(sections) });
     }
     if (path === "/api/sidebar-sections" && (method === "PATCH" || method === "DELETE")) {
       const section = url.searchParams.get("section")?.trim();

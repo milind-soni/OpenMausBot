@@ -46,11 +46,14 @@ export function world({ clean = null, journal = done(), marker = null, state = c
   w.contents = contents;
   w.window = { isDestroyed: () => false, webContents: contents };
   const account = {
-    state: () => w.state,
+    state: () => { w.stateReads = (w.stateReads ?? 0) + 1; return w.state; },
     /** The session read again (cloud-account.mjs `refresh`): `w.refreshed`, when set, is what the Admin says then. */
     refresh: async () => { w.refreshes++; if (w.refreshed) w.state = w.refreshed; return w.state; },
     /** While the Admin's session read keeps failing (`w.failingUntil`), when the account tries it again by itself. */
     failingUntil: () => w.failingUntil ?? 0,
+    /** When the last session read began (`w.lastAttemptAt`); `freshen`, as the account's: read when that is a minute old. */
+    lastAttemptAt: () => w.lastAttemptAt ?? 0,
+    freshen: () => { w.freshens = (w.freshens ?? 0) + 1; return w.freshRead ?? null; },
     power: () => w.power,
     powerOf: (origin) => (origin === CLOUD ? w.power : (w.state?.clouds ?? []).find((cloud) => cloud.origin === origin)?.power ?? null),
     async wakeHome() { w.wakes++; await w.cloud.wakeGate; if (w.cloud.wakes) w.power = { ...w.power, state: "awake" }; return "awake"; },

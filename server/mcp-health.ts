@@ -1,7 +1,9 @@
 // Whether each command MCP server starts, started the way a bot's AI would start it. One that does not start is left
 // out of turns (an engine that mounts it anyway fails it on every session, and Claude Code then repeats the failure
-// under every tool search), the person hears about it once, and it is tried again on its own. A bot's own server is
-// checked for that bot; any other server starts the same for every bot on this computer, so one check stands for all.
+// under every tool search), the person hears about it once, and it is tried again on its own. A check that only ran out
+// of time is no verdict: the server stays in turns, nothing is said, and the check is tried again soon. A bot's own
+// server is checked for that bot; any other server starts the same for every bot on this computer, so one check stands
+// for all.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -9,14 +11,18 @@ import { isAbsolute } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 import type { McpServerSpec, StdioMcpSpec } from "./contracts.ts";
 
-/** A server that did not start is tried again after this long; one that started is trusted this long. */
+/** A server that did not start is tried again after this long; one that started is trusted this long; a check that ran
+ * out of time is tried again after this long. */
 export const RECHECK_FAILED_MS = 30 * 60_000;
 export const RECHECK_STARTED_MS = 6 * 60 * 60_000;
+export const RECHECK_TIMEOUT_MS = 60_000;
+/** Checks that ran out of time in a row before the server counts as not starting: one that hangs is not tried for ever. */
+export const TIMEOUTS_FOR_A_VERDICT = 3;
 const CHECKS_AT_ONCE = 2;
 /** The check of a server that is no bot's own. */
 const EVERY_BOT = "*";
 
-export interface McpStartCheck { ok: boolean; at: number; error?: string }
+export interface McpStartCheck { ok: boolean; at: number; error?: string; timeout?: true; timeouts?: number }
 interface ServerHealth { key: string; checks: Record<string, McpStartCheck>; told?: string }
 type Bot = { id: string; name: string };
 type CommandServer = StdioMcpSpec & { bot?: string };
@@ -27,8 +33,9 @@ export interface McpHealthDeps {
   servers(): Record<string, CommandServer>;
   /** The bots whose turns start `name`. */
   users(name: string): Bot[];
-  /** Starts the server as `botId`'s AI would and lists its tools. */
-  start(name: string, server: StdioMcpSpec, botId: string): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Starts the server as `botId`'s AI would and lists its tools. `timeout: true`: the check ran out of time, which is
+   * no verdict about the server. */
+  start(name: string, server: StdioMcpSpec, botId: string): Promise<{ ok: true } | { ok: false; error: string; timeout?: true }>;
   /** Says it to the person, once. */
   tell(text: string, about: Bot): void;
   now?(): number;
@@ -71,14 +78,22 @@ export function createMcpHealth(deps: McpHealthDeps) {
     const health = state[name];
     return health && health.key === startKey(server) ? health.checks?.[standsFor(server, botId)] : undefined;
   };
-  const due = (check: McpStartCheck | undefined) => !check || now() - check.at >= (check.ok ? RECHECK_STARTED_MS : RECHECK_FAILED_MS);
+  /** A check that ran out of time proves nothing, until it has done so TIMEOUTS_FOR_A_VERDICT times in a row: till then
+   * the server is not said to be off and is not left out of turns. */
+  const provenFailure = (check: McpStartCheck | undefined): boolean =>
+    !!check && !check.ok && (check.timeout !== true || (check.timeouts ?? 1) >= TIMEOUTS_FOR_A_VERDICT);
+  const due = (check: McpStartCheck | undefined) =>
+    !check || now() - check.at >= (check.ok ? RECHECK_STARTED_MS : check.timeout && !provenFailure(check) ? RECHECK_TIMEOUT_MS : RECHECK_FAILED_MS);
 
-  const record = (name: string, server: CommandServer, botId: string, key: string, generation: number, result: { ok: true } | { ok: false; error: string }) => {
+  const record = (name: string, server: CommandServer, botId: string, key: string, generation: number, result: { ok: true } | { ok: false; error: string; timeout?: true }) => {
     const current = deps.servers()[name];
     if (!current || (generations.get(name) ?? 0) !== generation || current.bot !== server.bot || startKey(current) !== key) return;
     const health = state[name]?.key === key && state[name]!.checks ? state[name]! : (state[name] = { key, checks: {} });
-    health.checks[standsFor(server, botId)] = result.ok ? { ok: true, at: now() } : { ok: false, at: now(), error: result.error };
-    const tell = !result.ok && health.told !== key;
+    const prior = health.checks[standsFor(server, botId)];
+    const timeouts = (prior?.timeout ? prior.timeouts ?? 1 : 0) + 1;
+    health.checks[standsFor(server, botId)] = result.ok ? { ok: true, at: now() }
+      : { ok: false, at: now(), error: result.error, ...(result.timeout ? { timeout: true, timeouts } : {}) };
+    const tell = provenFailure(health.checks[standsFor(server, botId)]) && health.told !== key;
     if (tell) health.told = key;
     save();
     if (!tell) return;
@@ -126,20 +141,20 @@ export function createMcpHealth(deps: McpHealthDeps) {
     /** `mounted` without the command servers that did not start. */
     usable<T extends McpServerSpec>(botId: string, mounted: Record<string, T>): Record<string, T> {
       const servers = deps.servers();
-      return Object.fromEntries(Object.entries(mounted).filter(([name]) => !servers[name] || checkOf(name, servers[name], botId)?.ok !== false));
+      return Object.fromEntries(Object.entries(mounted).filter(([name]) => !servers[name] || !provenFailure(checkOf(name, servers[name], botId))));
     },
     /** Which of `names` are left out of this bot's turns, with why. */
     off(botId: string, names: readonly string[]): Array<{ name: string; error: string }> {
       const servers = deps.servers();
       return names.flatMap((name) => {
         const last = servers[name] ? checkOf(name, servers[name], botId) : undefined;
-        return last && !last.ok ? [{ name, error: last.error ?? "It did not start." }] : [];
+        return provenFailure(last) ? [{ name, error: last!.error ?? "It did not start." }] : [];
       });
     },
     /** Who a server is off for, by bot id. */
     offFor(name: string): string[] {
       const server = deps.servers()[name];
-      return server ? deps.users(name).filter((bot) => checkOf(name, server, bot.id)?.ok === false).map((bot) => bot.id) : [];
+      return server ? deps.users(name).filter((bot) => provenFailure(checkOf(name, server, bot.id))).map((bot) => bot.id) : [];
     },
     /** The bot's AI reported these did not connect: each is checked again now. */
     engineFailed(botId: string, names: readonly string[]): void {

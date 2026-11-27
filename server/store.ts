@@ -6,7 +6,7 @@ import { commitRegistryChange, deferrablePatch, keptRevocation, saveRegistryFor,
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts"; import { dropRetiredApps } from "./retired-apps.ts";
 import { reorderInPlace } from "../shared/bot-order.ts"; import { trimOutboundPolicy } from "../shared/outbound.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts"; import { reshowWhenMoved } from "../shared/default-bot.ts";
-import { ensureSections, readSections, changeEmptySection } from "./section-context.ts"; import { grantNewDepartments } from "./department-grants.ts";
+import { ensureSections, readSections, changeEmptySection, reorderSectionNames } from "./section-context.ts"; import { grantNewDepartments } from "./department-grants.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
@@ -40,7 +40,7 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
-import { lastMessageId, messagesBefore } from "./thread-history.ts";
+import { lastMessageId, messagesBefore, newestMessageId } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, unreadTargetTask, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
 import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
@@ -653,8 +653,8 @@ export class Store {
     this.registry.writeGroups(groups);
   }
 
-  get sections(): string[] { return readSections(); }
-
+  get sections(): string[] { return readSections(); } /** A stable partial reorder of the departments (reorderSectionNames); null, and nothing changes, for a refused list. */
+  reorderSections(names: readonly string[], first = false): string[] | null { const changed = reorderSectionNames(names, first); if (changed === null) return null; if (changed) this.emit({ type: "sections" }); return this.sections; }
   private rememberSections(names: (string | undefined)[]) {
     try {
       const added = ensureSections(names); // a name an older save left unregistered at startup is not a new department
@@ -1069,9 +1069,8 @@ export class Store {
     return busy;
   }
 
-  messagesFor(threadId: string): Message[] {
-    return this.thread(threadId).messages;
-  }
+  messagesFor(threadId: string): Message[] { return this.thread(threadId).messages; }
+  newestMessageId(threadId: string): string | undefined { return newestMessageId(threadId, this.threads.get(threadId)); }
 
   messagesBefore(threadId: string, before: string, limit: number) {
     return messagesBefore(threadId, before, limit, this.threads.get(threadId), () => this.thread(threadId));

@@ -16,7 +16,7 @@ A bot or a whole department can be shared as a **template**: a small folder anyo
 ```
 <name>/
   bot.md or team.md          the bots, their instructions, group chats, the Chief, routines and apps by name
-  skills/<name>/SKILL.md     every skill, as standard Agent Skills
+  skills/<name>/SKILL.md     every switched-on skill, as standard Agent Skills
   skills/<name>/<path>       the scripts and other text files beside a skill, named in bot.md's skillFiles
   avatars/<key>.webp         pictures, at most 64 KB each
 ```
@@ -26,8 +26,9 @@ agent can follow when the file is pasted in. Older files (BotMRR v1 Markdown, `t
 import.
 
 Never in a template: chats, memory, keys, passwords, tokens, connection addresses, models, approval levels, folders,
-computers or who may see a bot. Every text is checked for key- and password-shaped values, which are replaced; the card
-says how many. Routines always arrive paused, and each app is connected with the new owner's own account.
+computers or who may see a bot. A switched-off skill stays on its bot, named on the card under "Left out". Every text
+is checked for key- and password-shaped values, which are replaced; the card says how many. Routines always arrive
+paused, and each app is connected with the new owner's own account.
 
 **A skill's scripts travel with it** (`shared/skill-files.ts`): the files that came in with the skill, only those its
 record lists and only while they are unchanged, never anything a run left beside it. Text files only, at most 30 per

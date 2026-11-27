@@ -9,7 +9,7 @@ export const CRASH_AREAS = [
   "LiveDesktop", "LocalVmWorkspace", "MacLocalControl", "MarkdownFilePreview", "MenuMotion", "NewBotDialog",
   "PhoneAppDialog", "PlacesRail", "PluginsPanel", "ProIntroduction", "PublishedAppsPage",
   "RemoteAgentSettingsPanel", "RoomPanel", "RoutinesPage", "SavedWorkflowsCard", "ServerPairingCard",
-  "SettingsModal", "ShareBotDialog", "ShareDepartmentDialog", "SignedInSites", "SkillBurgersPage",
+  "SettingsModal", "ShareBotDialog", "ShareTemplateDialog", "SignedInSites", "SkillBurgersPage",
   "TailnetComputers", "TeamDialog", "TeamFilesPage", "TeamLibraryPanel", "TeamMapPage", "TeamSettingsDialog",
   "ToolPageShell", "TraceView", "TriggersPage", "VisibilitySection", "VoiceSettings", "VoiceSetupDialog",
   "WebhookTrigger", "WhatChangedView", "WorksOnGrid",

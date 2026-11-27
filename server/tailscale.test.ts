@@ -57,9 +57,11 @@ describe("serve --tailscale", () => {
   const status: TailscaleStatus = { cli: "/usr/bin/tailscale", dnsName: "mini.tail1234.ts.net", addresses: [], backendState: "Running", httpsEnabled: true };
   const fakeServe = (exitCode: number | null, stderr = "") => {
     const calls: string[][] = [];
+    const options: Array<Record<string, unknown>> = [];
     const children: Array<EventEmitter & { kill(signal: string): void; killed: string[] }> = [];
-    const spawnImpl = ((_cli: string, args: string[]) => {
+    const spawnImpl = ((_cli: string, args: string[], spawnOptions: Record<string, unknown>) => {
       calls.push(args);
+      options.push(spawnOptions);
       const child: EventEmitter & { stderr: EventEmitter; killed: string[]; kill(signal: string): void } = Object.assign(new EventEmitter(), {
         stderr: new EventEmitter(), killed: [] as string[], kill(signal: string) { child.killed.push(signal); setImmediate(() => child.emit("exit", null)); },
       });
@@ -67,7 +69,7 @@ describe("serve --tailscale", () => {
       if (exitCode !== null) setImmediate(() => { child.stderr.emit("data", Buffer.from(stderr)); child.emit("exit", exitCode); });
       return child;
     }) as never;
-    return { calls, children, spawnImpl };
+    return { calls, options, children, spawnImpl };
   };
 
   it("serves in the foreground, notes it, and turns it off when serve stops", async () => {
@@ -79,6 +81,8 @@ describe("serve --tailscale", () => {
       expect(served.origin).toBe("https://mini.tail1234.ts.net");
       expect(fake.calls).toEqual([["serve", "--https=443", "http://127.0.0.1:8799"]]);
       expect(fake.calls[0]).not.toContain("--bg");
+      // a console child spawned from the desktop shell flashes a visible terminal window on Windows otherwise
+      expect(fake.options[0]?.windowsHide).toBe(true);
       expect(existsSync(tailscaleMarker(dir))).toBe(true);
       await served.stop();
       expect(fake.children[0]!.killed).toEqual(["SIGTERM"]);

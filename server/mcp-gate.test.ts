@@ -159,6 +159,16 @@ describe("mcp-gate", () => {
     expect(JSON.parse(await nextLine())).toEqual({ jsonrpc: "2.0", id: 7, result: { echoed: "tools/list", params: null } });
   });
 
+  it("replaces an image in a tool's result with a note when the model reads text only", async () => {
+    const result = { content: [{ type: "text", text: "here is the design:" }, { type: "image", data: "QUJD", mimeType: "image/png" }] };
+    start(result, { OMB_MCP_TEXT_ONLY: "1" });
+    const answer = (await call("preview")).result;
+    expect(answer.content[0]).toEqual({ type: "text", text: "here is the design:" });
+    expect(answer.content[1]).toEqual({ type: "text", text: expect.stringContaining("[Image from this tool's result not shown: this model reads text only (image/png, ~1 kB).]") });
+    start(result);
+    expect((await call("preview")).result).toEqual(result);
+  });
+
   it.each([undefined, "not-json", "{}", '{"OMB_GATE_NAME":"notes","OMB_GATE_TOOL_SCOPE":"{}"}'])("refuses missing or corrupt private gate settings before spawning upstream: %s", value => {
     const key = `OMB_GATE_CONFIG_${"a".repeat(64)}`;
     start({}, value === undefined ? {} : { [key]: value }, SCOPED_UPSTREAM, ["--config-env", key]);

@@ -8,6 +8,7 @@ describe("announcesAction", () => {
     "I'm in the VM and I will check the files.",
     "I’m in the VM and will launch XFCE Terminal first.",
     "I'll open the browser.",
+    "I’ll check the service health.",
     "Opening the page now:",
     "Got the structure. Now I'll pull the actual content from each — inbox, tasks, unread messages, and today's calendar.",
     "Yes, I'm here. Let me pull from all four MCP servers now.",

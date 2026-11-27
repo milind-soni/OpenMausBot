@@ -212,9 +212,9 @@ describe("one-on-one goal runs (a room of one)", () => {
       detailParams: { name: "Patient" },
     });
     writeFileSync(patientGate, "observed the waiting goal");
-    // The fixture's goal turn ends without a marker, so the run stops after exactly the one turn it waited for.
+    // The fixture's goal turn ends without a marker, so the run asks again twice, then stops blocked.
     await expect.poll(() => cardIn(bot.threadId), { timeout: hostTimeout(15_000) })
-      .toMatchObject({ status: "blocked", turnCount: 1, detail: "Patient did not provide a valid next-step decision." });
+      .toMatchObject({ status: "blocked", turnCount: 3, detail: "Patient did not provide a valid next-step decision after 3 replies." });
     expect((await messagesIn(bot.threadId)).filter((message) => message.kind === "goal.run")).toHaveLength(1);
   });
 
