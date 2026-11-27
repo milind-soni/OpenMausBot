@@ -57,6 +57,8 @@ const NO_CARD: Reply = { status: 404, body: { error: "no such connection request
  * replaced, set aside, or refused before the browser opened. */
 const ENDED: Partial<Record<McpSignInPhase, ServerLineKey>> = { expired: "server.mcp.signIn.expired", failed: "server.mcp.signIn.failed" };
 
+const failedText = (slug: string, reason: string): string => `OpenMausBot MCP sign-in for ${slug}: ${reason} Nothing was signed in.`;
+
 export const isMcpSignInCard = (message: Message | undefined): message is McpCard =>
   message?.kind === "connector" && message.connector?.source === "mcp";
 
@@ -168,7 +170,13 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
       started = await manager.start(name, server.url, undefined, owner, browser);
     } catch (error) {
       if (error instanceof McpSignInError) return { status: error.status, body: { error: error.message } };
-      if (error instanceof McpOAuthError) return { status: 400, body: { error: error.message, code: error.code } };
+      if (error instanceof McpOAuthError) {
+        // Only a server that registers no apps stays refused until it is set up differently. "not-oauth" also covers a
+        // discovery request that failed for now, and a busy port frees up: those leave the card for another tap.
+        const now = find(threadId, card.id);
+        if (error.code !== "no-registration" || !now || now.connector.dismissed) return { status: 400, body: { error: error.message, code: error.code } };
+        return unreachable(threadId, now, { status: 400, reason: () => error.message }, { code: error.code });
+      }
       return { status: 502, body: { error: error instanceof Error ? error.message : "Sign-in could not start." } };
     }
     // The provider refused to register this home's https address.
@@ -181,14 +189,14 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     return { status: 200, body: { url: started.authorizationUrl } };
   }
 
-  /** A card whose server went away (removed, or no longer one a sign-in reaches) can never finish: it says why, and the
-   * bot hears it once. */
-  function unreachable(threadId: string, card: McpCard, server: Unreachable): Reply {
+  /** A card whose server went away (removed, or no longer one a sign-in reaches) or can't sign in as it is set up can
+   * never finish: it says why, and the bot hears it once. */
+  function unreachable(threadId: string, card: McpCard, server: Unreachable, extra: Record<string, unknown> = {}): Reply {
     const error = server.reason(deps.language(threadId));
     patch(threadId, card.id, { status: "failed", error });
-    const said = `OpenMausBot MCP sign-in for ${card.connector.slug}: ${server.reason(undefined)} Nothing was signed in.`;
+    const said = failedText(card.connector.slug, server.reason(undefined));
     if (!find(threadId, card.id)!.connector.resumed && deps.answer(threadId, card.id, said)) patch(threadId, card.id, { resumed: true });
-    return { status: server.status, body: { error } };
+    return { status: server.status, body: { error, ...extra } };
   }
 
   /** Idempotent: a card already resumed, or one no turn waits on yet, is left as it is. False: nothing to resume. */
@@ -285,6 +293,7 @@ export function createMcpSignInCards(deps: McpSignInCardDeps) {
     parkedAnswer(card: ConnectorCardData): string | null {
       if (card.superseded || card.resumed) return null;
       if (card.status === "connected") return signedInTextNow(card.slug);
+      if (card.status === "failed" && card.error) return failedText(card.slug, card.error);
       return card.dismissed ? notSignedInText(card.slug) : null;
     },
   };

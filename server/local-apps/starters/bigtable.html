@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rowfall · orders</title>
+<style>
+:root{
+  --ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --bg:#0e0f11; --panel:#121316; --raise:#17181c; --line:#222429; --line2:#2c2f35;
+  --text:#e3e5e9; --dim:#8b9099; --faint:#5b6068; --ghost:#3a3d44;
+  --lime:#c6f432; --lime-d:rgba(198,244,50,.12);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overflow:hidden}
+body{font-family:var(--ui);font-size:13px;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono)}
+#app{display:grid;height:100vh;grid-template-columns:1fr auto;grid-template-rows:52px 64px 1fr 34px}
+.top{grid-column:1;grid-row:1;display:flex;align-items:center;gap:18px;padding:0 0 0 22px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px}
+.wm{font-weight:600;font-size:15px;letter-spacing:-.01em}
+.crumb{color:var(--dim);font-size:13px;display:flex;gap:7px;align-items:center}
+.crumb b{color:var(--text);font-weight:500}
+.crumb i{color:var(--ghost);font-style:normal}
+.tag{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line2);border-radius:4px;padding:3px 7px;letter-spacing:.02em}
+.tabs{display:flex;gap:2px;margin-left:16px}
+.tabs span{font-size:12.5px;color:var(--faint);padding:6px 10px;border-radius:5px}
+.tabs span.on{color:var(--text);background:var(--raise)}
+.sample{margin-left:auto;margin-right:22px;font-size:12px;color:var(--faint);display:flex;align-items:center;gap:8px}
+.sample:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ghost)}
+.qbar{grid-column:1;grid-row:2;display:flex;align-items:center;gap:10px;padding:0 22px;border-bottom:1px solid var(--line);min-width:0}
+.tb{font:500 12.5px var(--ui);color:var(--dim);background:transparent;border:1px solid var(--line2);border-radius:6px;height:30px;padding:0 11px;display:flex;align-items:center;gap:7px;cursor:pointer}
+.tb:hover{color:var(--text);border-color:#3a3e45}
+.tb svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5}
+.q{font-family:var(--mono);font-size:13px;color:#b9bdc5;display:flex;align-items:center;gap:8px;margin-left:8px;white-space:nowrap;min-width:0;overflow:hidden;height:36px;padding:0 12px;border-radius:6px;background:#121316;border:1px solid var(--line);flex:1}
+.q .kw{color:#6f7580}
+.q .id{color:#e3e5e9}
+.q .str{color:var(--lime)}
+.chip{display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 6px 0 9px;border-radius:5px;background:var(--lime-d);border:1px solid rgba(198,244,50,.35);color:#e9f8b8;font-size:12px;
+  transform-origin:left center;animation:chipIn .45s cubic-bezier(.2,.9,.25,1.15) both}
+.chip .x{width:14px;height:14px;border-radius:3px;display:grid;place-items:center;color:#9fb35c;cursor:pointer;font-size:12px;line-height:1}
+@keyframes chipIn{from{opacity:0;transform:translateY(6px) scale(.85)}to{opacity:1;transform:none}}
+.counter{grid-column:2;grid-row:1/3;border-left:1px solid var(--line);border-bottom:1px solid var(--line);width:470px;padding:16px 24px 0 26px;display:flex;flex-direction:column;justify-content:center;gap:4px;background:linear-gradient(180deg,#121316,#0f1012)}
+.c-top{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase}
+.c-top .speed{letter-spacing:.02em;text-transform:none;color:var(--dim)}
+.c-main{display:flex;align-items:baseline;gap:12px;justify-content:flex-start}
+.c-main .num{font-family:var(--mono);font-weight:500;font-size:50px;letter-spacing:-.035em;color:var(--lime);line-height:1;min-width:262px;text-align:right}
+.c-main .of{font-family:var(--mono);font-size:15px;color:var(--dim);white-space:nowrap}
+main{grid-column:1/3;grid-row:3;position:relative;display:grid;grid-template-columns:1fr 132px;min-height:0}
+#grid{display:block;width:100%;height:100%;cursor:default}
+#rail{display:block;width:100%;height:100%;border-left:1px solid var(--line);cursor:pointer;touch-action:none}
+.wrap{position:relative;min-width:0;min-height:0}
+footer{grid-column:1/3;grid-row:4;border-top:1px solid var(--line);display:flex;align-items:center;gap:22px;padding:0 22px;font-family:var(--mono);font-size:11.5px;color:var(--faint);white-space:nowrap;overflow:hidden}
+footer b{color:var(--dim);font-weight:400}
+footer .scan{color:var(--dim)}
+footer .scan em{font-style:normal;color:var(--text)}
+footer .r{margin-left:auto;display:flex;gap:18px}
+footer .sep{color:var(--ghost)}
+@media (max-width:1600px){
+  .counter{width:380px;padding:14px 20px 0 20px}
+  .c-main .num{font-size:40px;min-width:210px}
+  .c-main .of{font-size:13px}
+  main{grid-template-columns:1fr 112px}
+  .tabs{display:none}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect x="1" y="2" width="20" height="3" rx="1" fill="#c6f432"/><rect x="1" y="7.5" width="20" height="2" rx="1" fill="#e3e5e9" opacity=".85"/><rect x="1" y="12" width="20" height="2" rx="1" fill="#e3e5e9" opacity=".5"/><rect x="1" y="16.5" width="20" height="2" rx="1" fill="#e3e5e9" opacity=".25"/></svg>
+      <span class="wm">rowfall</span>
+    </div>
+    <div class="crumb"><span>marketplace</span><i>/</i><span>sales</span><i>/</i><b>orders</b></div>
+    <span class="tag">12 cols · derived · 0 B stored</span>
+    <div class="tabs"><span class="on">Rows</span><span>Schema</span><span>Profile</span></div>
+    <div class="sample">Sample data · generated in this page</div>
+  </header>
+  <div class="qbar">
+    <button class="tb" id="btnFilter" title="Filter status = delivered"><svg viewBox="0 0 16 16"><path d="M2 3h12l-4.6 5.4V13l-2.8 1.2V8.4z"/></svg>Filter</button>
+    <button class="tb" id="btnGroup" title="Group by region, category"><svg viewBox="0 0 16 16"><rect x="2" y="2" width="5" height="5"/><rect x="9" y="2" width="5" height="5"/><rect x="2" y="9" width="5" height="5"/><rect x="9" y="9" width="5" height="5"/></svg>Group by</button>
+    <div class="q" id="q"><span class="kw">SELECT</span><span class="id">*</span><span class="kw">FROM</span><span class="id">orders</span><span id="chips" style="display:flex;gap:8px;align-items:center"></span><span class="kw" id="ordkw">ORDER BY</span><span class="id" id="ordcol">order_id</span><span class="kw" id="orddir">ASC</span></div>
+  </div>
+  <div class="counter">
+    <div class="c-top"><span id="clbl">row</span><span class="speed" id="cspeed">at rest</span></div>
+    <div class="c-main"><span class="num" id="cnum">1</span><span class="of" id="cof">of 12,000,000</span></div>
+  </div>
+  <main>
+    <div class="wrap"><canvas id="grid"></canvas></div>
+    <div class="wrap"><canvas id="rail"></canvas></div>
+  </main>
+  <footer>
+    <span><b>12,000,000</b> rows <span class="sep">·</span> every row derived from its index by a hash <span class="sep">·</span> nothing stored</span>
+    <span class="scan" id="scan">profiling…</span>
+    <span class="r"><span id="sortnote"></span></span>
+  </footer>
+</div>
+
+<script>
+// ============================================================================================
+// Generator. Every row is a pure function of its index. The same source runs in the scan workers.
+// ============================================================================================
+function makeGen(){
+  const N = 12000000, DAYS = 731, EPOCH = Date.UTC(2024,0,1);
+  const REGIONS = ["Northmark","Calder Reach","Vellmoor","Orrin Isles","Southfold","Hale Plains"];
+  const CATS = ["Home","Electronics","Apparel","Garden","Books","Toys","Grocery","Beauty"];
+  const NOUNS = [
+    ["Linen throw","Stoneware mug","Walnut tray","Wool rug","Glass carafe","Oak stool","Table lamp","Cotton duvet","Ceramic vase","Wall clock","Bath towel","Candle set"],
+    ["Wireless earbuds","Wall charger","USB-C hub","Smart plug","Pocket speaker","E-reader sleeve","Webcam","Keyboard","Power bank","Display cable","LED strip","Tablet stand"],
+    ["Rain shell","Merino tee","Denim jacket","Wool beanie","Canvas sneaker","Linen shirt","Fleece vest","Chino","Rib socks","Knit scarf","Leather belt","Hoodie"],
+    ["Seed tray","Pruning shears","Hose reel","Clay planter","Compost bin","Trowel","Bird feeder","Raised bed","Watering can","Grow light","Garden gloves","Solar lantern"],
+    ["Field guide","Cookbook","Sketchbook","Atlas","Poetry reader","Novel","Puzzle book","Journal","Travel guide","Comic box set","History primer","Notebook set"],
+    ["Wooden blocks","Kite","Jigsaw 1000","Plush fox","Train set","Marble run","Card game","Yo-yo","Balsa glider","Stacking rings","Dollhouse","Building kit"],
+    ["Olive oil","Green tea","Oat milk","Coffee beans","Rye bread","Honey jar","Sea salt","Pasta","Dark chocolate","Rice","Granola","Hot sauce"],
+    ["Face serum","Lip balm","Hand cream","Shampoo","Clay mask","Sunscreen","Body wash","Eye cream","Nail kit","Hair oil","Toner","Soap bar"]];
+  const COL = ["sage","charcoal","oat","slate","ember","fern","dune","ink","moss","pearl"];
+  const VAR = [COL,COL,COL,COL,["hardcover","paperback","vol. 1","vol. 2","vol. 3","pocket","large print","2nd ed.","boxed","annotated"],COL,
+    ["250 g","500 g","1 kg","2 kg","organic","6-pack","12-pack","family","single","sampler"],["15 ml","30 ml","50 ml","100 ml","travel","refill","duo","trio","unscented","sensitive"]];
+  const CAT_PRICE = [38,129,46,31,17,27,8.5,23];
+  const CAT_MARGIN = [31,8,38,27,22,26,13,44];
+  const CAT_W = [.16,.13,.18,.08,.10,.08,.17,.10];
+  const REG_W = [.25,.21,.18,.14,.12,.10];
+
+  function h32(x){ x|=0; x^=x>>>16; x=Math.imul(x,0x7feb352d); x^=x>>>15; x=Math.imul(x,0x846ca68b); x^=x>>>16; return x>>>0; }
+  const U = 1/4294967296;
+  const di = (y,m,d) => Math.round((Date.UTC(y,m-1,d)-EPOCH)/864e5);
+
+  // ---- per-day tables: order density, promotions, mix ----
+  const doy = new Uint16Array(DAYS), month = new Uint8Array(DAYS), dow = new Uint8Array(DAYS);
+  for (let d=0; d<DAYS; d++){ const t = new Date(EPOCH + d*864e5); dow[d]=t.getUTCDay(); month[d]=t.getUTCMonth();
+    doy[d] = Math.round((t - Date.UTC(t.getUTCFullYear(),0,1))/864e5); }
+  const ev = new Float64Array(DAYS).fill(1), promo = new Uint8Array(DAYS);
+  const setEv = (d, m, p) => { ev[d]=m; promo[d]=p; };
+  [[2024,11,28,[2.6,2.15,1.8,1.5]],[2025,11,27,[2.95,2.4,1.95,1.6]],[2024,7,16,[1.8,1.45]],[2025,7,15,[2.05,1.6]]]
+    .forEach(([y,m,d,ms]) => ms.forEach((k,j) => setEv(di(y,m,d)+j, k, 1)));
+  const OUTAGE = di(2025,3,18); setEv(OUTAGE, 0.42, 0);
+  const ORRIN_OPEN = di(2024,6,3);
+  const w = new Float64Array(DAYS); let tot = 0;
+  const WEEK = [1.13,0.93,0.95,0.97,1.0,1.05,1.17];
+  for (let d=0; d<DAYS; d++){
+    const y = doy[d];
+    const season = 1 + 0.24*Math.exp(-(((y-348)/20)**2)) + 0.07*Math.cos(2*Math.PI*(y-200)/365) - 0.12*Math.exp(-(((y-22)/12)**2));
+    const trend = 1 + 0.62*d/DAYS + (d>ORRIN_OPEN ? 0.09*Math.min(1,(d-ORRIN_OPEN)/120) : 0);
+    const noise = 1 + 0.05*((h32(d*977+3)*U)-0.5);
+    w[d] = trend*WEEK[dow[d]]*season*ev[d]*noise; tot += w[d];
+  }
+  const C = new Int32Array(DAYS+1); let acc=0;
+  for (let d=0; d<DAYS; d++){ acc += w[d]; C[d+1] = Math.round(N*acc/tot); }
+  C[DAYS] = N;
+  const catCum = new Float64Array(DAYS*8), regCum = new Float64Array(DAYS*6);
+  for (let d=0; d<DAYS; d++){
+    const m = month[d], y = doy[d];
+    const cw = CAT_W.slice();
+    const xmas = Math.exp(-(((y-345)/25)**2));
+    cw[5] *= 1 + 1.5*xmas; cw[1] *= 1 + 0.75*xmas + (promo[d]?0.6:0);
+    cw[3] *= 1 + 1.3*Math.exp(-(((y-130)/38)**2));
+    cw[7] *= 1 + 0.25*xmas;
+    let s=0; for (let k=0;k<8;k++) s+=cw[k]; let a=0; for (let k=0;k<8;k++){ a+=cw[k]/s; catCum[d*8+k]=a; }
+    const rw = REG_W.slice(); rw[3] = d < ORRIN_OPEN ? 0 : REG_W[3]*Math.min(1, 0.25 + 0.75*(d-ORRIN_OPEN)/150);
+    s=0; for (let k=0;k<6;k++) s+=rw[k]; a=0; for (let k=0;k<6;k++){ a+=rw[k]/s; regCum[d*6+k]=a; }
+  }
+  // ---- items ----
+  const itemBase = new Float64Array(96*10), itemMg = new Float64Array(960), itemPh = new Float64Array(960);
+  for (let g=0; g<960; g++){
+    const c = (g/120)|0, h1=h32(g*7919+13)*U, h2=h32(g*104729+7)*U, h3=h32(g*1299709+5)*U;
+    const z = (h1+h2+h3-1.5)*2;
+    itemBase[g] = CAT_PRICE[c]*Math.exp(0.48*z);
+    itemMg[g] = (h32(g*31+1)*U-0.5)*10; itemPh[g] = h3*6.283;
+  }
+  function dayOf(i){ let lo=0, hi=DAYS-1; while (lo<hi){ const mid=(lo+hi+1)>>1; if (C[mid] <= i) lo=mid; else hi=mid-1; } return lo; }
+
+  // row(i, o): fills o with the fields of row i. Money is in integer cents.
+  function row(i, o){
+    const b = h32(i ^ 0x5bd1e995) ^ 0x2545f491;
+    const r = k => h32(b + Math.imul(k, 0x9e3779b9)) * U;
+    const d = dayOf(i); o.day = d;
+    const f = (i - C[d]) / (C[d+1] - C[d]);
+    let s = Math.floor(86400*(f + 0.45*Math.sin(6.283185307*f)/6.283185307)); o.sec = s<0?0:s>86399?86399:s;
+    let u = r(1), k = 0; const ro = d*6; while (k<5 && u > regCum[ro+k]) k++; o.region = k;
+    u = r(2); k = 0; const co = d*8; while (k<7 && u > catCum[co+k]) k++; const cat = k; o.cat = cat;
+    const it = Math.floor(120*Math.pow(r(3),1.7)); const g = cat*120 + it; o.item = g;
+    const pr = promo[d] && r(4) < 0.62;
+    let price = Math.max(1, Math.round(itemBase[g]*(1 + 0.045*d/DAYS)))*100 - 1;
+    if (pr) price = Math.round(price*0.8);
+    o.price = price; o.promo = pr ? 1 : 0;
+    const u5 = r(5);
+    let q = cat===6 ? 1 + Math.floor(-Math.log(1-u5)*2.4) : 1 + Math.floor(-Math.log(1-u5)*0.52); if (q>24) q=24;
+    o.qty = q; o.amount = q*price;
+    o.margin = Math.round((CAT_MARGIN[cat] + itemMg[g] + (r(6)-0.5)*18 - (pr?12:0))*10)/10;
+    const age = DAYS-1-d, u7 = r(7);
+    let st;
+    if (age === 0) st = u7<0.68 ? 2 : u7<0.95 ? 1 : 4;
+    else if (age <= 1) st = u7<0.3 ? 2 : u7<0.96 ? 1 : 4;
+    else if (age <= 5) st = u7<0.78 ? 1 : u7<0.975 ? 0 : 4;
+    else {
+      const ret = cat===2 ? 0.11 : cat===1 ? 0.05 : cat===6 ? 0.008 : 0.025;
+      const can = d === OUTAGE ? 0.21 : 0.022;
+      st = u7 < can ? 4 : u7 < can+ret ? 3 : 0;
+    }
+    o.status = st; o.u8 = r(8);
+    return o;
+  }
+  function itemName(g){ const c=(g/120)|0, k=g%120; return [NOUNS[c][k%12], VAR[c][(k/12)|0]]; }
+  return { N, DAYS, EPOCH, C, REGIONS, CATS, OUTAGE, row, dayOf, itemName, itemBase, itemPh, h32, promo, ev };
+}
+
+// Worker body (runs inside a Blob worker; makeGen is prepended to it).
+function workerMain(){
+  const G = makeGen(); const o = {};
+  self.onmessage = (e) => {
+    const m = e.data;
+    if (m.kind === "scan"){
+      const { a, b, B } = m, N = G.N;
+      const cube = new Float64Array(5*6*8*3), bk = new Float64Array(B*6);
+      const qh = new Float64Array(25), ph = new Float64Array(40), ah = new Float64Array(40), mh = new Float64Array(50);
+      const seen = new Uint8Array(960);
+      for (let i=a; i<b; i++){
+        G.row(i, o);
+        const c3 = ((o.status*6 + o.region)*8 + o.cat)*3;
+        cube[c3]++; cube[c3+1] += o.amount; cube[c3+2] += o.amount*o.margin;
+        const bi = Math.floor(i*B/N); bk[bi*6+o.status]++; bk[bi*6+5] += o.amount;
+        qh[o.qty]++;
+        let x = Math.floor(Math.log10(o.price/100)/3.4*40); ph[x<0?0:x>39?39:x]++;
+        x = Math.floor(Math.log10(o.amount/100)/4.4*40); ah[x<0?0:x>39?39:x]++;
+        x = Math.floor((o.margin+30)/2); mh[x<0?0:x>49?49:x]++;
+        seen[o.item] = 1;
+        if (((i-a) & 262143) === 262143) self.postMessage({ kind:"progress", id:m.id, done:i-a+1 });
+      }
+      self.postMessage({ kind:"scan", id:m.id, cube, bk, qh, ph, ah, mh, seen, rows:b-a }, [cube.buffer, bk.buffer, qh.buffer, ph.buffer, ah.buffer, mh.buffer, seen.buffer]);
+    } else if (m.kind === "sort"){
+      const { a, b, col, K } = m; const n = b-a;
+      const keys = new Uint8Array(n), counts = new Uint32Array(K);
+      for (let i=a; i<b; i++){ G.row(i, o); const k = o[col]; keys[i-a] = k; counts[k]++; }
+      const off = new Uint32Array(K); for (let k=1;k<K;k++) off[k] = off[k-1] + counts[k-1];
+      const out = new Uint32Array(n);
+      for (let j=0; j<n; j++) out[off[keys[j]]++] = a + j;
+      self.postMessage({ kind:"sort", id:m.id, out, counts }, [out.buffer, counts.buffer]);
+    }
+  };
+}
+</script>
+<script>
+(() => {
+"use strict";
+const G = makeGen();
+const N = G.N;
+const STATUS = ["delivered","shipped","processing","returned","cancelled"];
+const ST_COL = [ // pill bg, pill text, rail colour
+  ["#1d2a1f","#9cc39b","#3c4a3e"], ["#1b2533","#8fb0d9","#38506e"], ["#2f2717","#d8b36a","#7d6431"],
+  ["#272033","#b39ad9","#5e4a80"], ["#33201e","#d98a7e","#8a463d"]];
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (id) => document.getElementById(id);
+const grid = $("grid"), rail = $("rail");
+const ctx = grid.getContext("2d"), rctx = rail.getContext("2d");
+const buf = document.createElement("canvas"), bctx = buf.getContext("2d");
+const UI = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif", MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+const LIME = "#c6f432";
+
+// ---------- formatting (hand-rolled, no toLocaleString in the frame loop) ----------
+function fmtInt(n){ n = Math.floor(n); const s = String(n); let out = ""; for (let i=0;i<s.length;i++){ if (i && (s.length-i)%3===0) out += ","; out += s[i]; } return out; }
+function fmtCents(c){ const d = Math.floor(c/100), r = c%100; return "$" + fmtInt(d) + "." + (r<10?"0":"") + r; }
+function fmtM(cents){ const v = cents/1e8; return v >= 100 ? "$" + v.toFixed(1) + "M" : "$" + v.toFixed(2) + "M"; }
+function fmtK(n){ return n >= 1e6 ? (n/1e6).toFixed(2) + "M" : n >= 1e3 ? (n/1e3).toFixed(1) + "k" : String(n); }
+const p2 = (n) => (n<10?"0":"") + n;
+const DAYSTR = []; const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+for (let d=0; d<G.DAYS; d++){ const t = new Date(G.EPOCH + d*864e5); DAYSTR.push(t.getUTCFullYear() + "-" + p2(t.getUTCMonth()+1) + "-" + p2(t.getUTCDate())); }
+function fmtTs(d, s){ return DAYSTR[d] + " " + p2((s/3600)|0) + ":" + p2(((s/60)|0)%60) + ":" + p2(s%60); }
+function pad8(n){ const s = String(n); return "00000000".slice(s.length) + s; }
+
+// ---------- columns ----------
+const COLS = [
+  { key:"order_id",  name:"order_id",   type:"varchar",   w:122, min:110, sort:"index", pri:9 },
+  { key:"ordered_at",name:"ordered_at", type:"timestamp", w:170, min:156, sort:"index", pri:9 },
+  { key:"buyer",     name:"buyer",      type:"varchar",   w:96,  min:90,  pri:1 },
+  { key:"region",    name:"region",     type:"enum(6)",   w:126, min:104, sort:"key", K:6, pri:8 },
+  { key:"category",  name:"category",   type:"enum(8)",   w:116, min:96,  sort:"key", K:8, field:"cat", pri:8 },
+  { key:"item",      name:"item",       type:"varchar",   w:236, min:184, grow:3, pri:7 },
+  { key:"qty",       name:"qty",        type:"int32",     w:58,  min:50,  align:"r", pri:6 },
+  { key:"unit_price",name:"unit_price", type:"decimal",   w:100, min:88,  align:"r", pri:4 },
+  { key:"amount",    name:"amount",     type:"decimal",   w:116, min:102, align:"r", pri:8 },
+  { key:"margin",    name:"margin",     type:"float · %", w:164, min:128, grow:2, pri:7 },
+  { key:"status",    name:"status",     type:"enum(5)",   w:118, min:108, sort:"key", K:5, pri:9 },
+  { key:"price_12w", name:"price_12w",  type:"list<f64>", w:132, min:104, grow:1, pri:3 }];
+const RH = 26, GW = 74, HH = 82;
+
+let W = 0, H = 0, DPR = 1, RW = 0, visCols = [], bodyH = 0, visRows = 0;
+function layout(){
+  DPR = window.devicePixelRatio || 1;
+  const r = grid.parentElement.getBoundingClientRect(), rr = rail.parentElement.getBoundingClientRect();
+  W = Math.round(r.width); H = Math.round(r.height); RW = Math.round(rr.width);
+  for (const [c, x, w, h] of [[grid, ctx, W, H], [rail, rctx, RW, H]]){ c.width = Math.round(w*DPR); c.height = Math.round(h*DPR); }
+  bodyH = H - HH; visRows = Math.ceil(bodyH/RH) + 1;
+  buf.width = Math.round(W*DPR); buf.height = Math.round(bodyH*DPR);
+  // fit columns
+  const avail = W - GW - 16;
+  let cols = COLS.slice();
+  for (;;){
+    const sw = cols.reduce((s,c)=>s+c.w,0), smin = cols.reduce((s,c)=>s+c.min,0);
+    if (smin <= avail || cols.length < 4) {
+      if (sw <= avail){ const extra = avail - sw, gs = cols.reduce((s,c)=>s+(c.grow||0),0);
+        cols = cols.map(c => ({...c, cw: c.w + (gs ? extra*(c.grow||0)/gs : 0)})); }
+      else { const k = (sw-avail)/(sw-smin); cols = cols.map(c => ({...c, cw: c.w - (c.w-c.min)*k})); }
+      break;
+    }
+    let lo = 0; for (let i=1;i<cols.length;i++) if (cols[i].pri < cols[lo].pri) lo = i;
+    cols.splice(lo, 1);
+  }
+  let x = GW; for (const c of cols){ c.x = Math.round(x); c.cw = Math.round(c.cw); x += c.cw; }
+  visCols = cols;
+  railStatic = null;
+  dirty = true;
+}
+
+// ---------- state ----------
+const S = { pos:0, target:0, prevPos:0, vel:0, focus:-1, hover:-1, sortCol:"order_id", dir:1, perm:null, permCol:null,
+  mode:"table", glide:null, agg:null, speedRows:0, filterOnly:false };
+let dirty = true;
+const maxPos = () => Math.max(0, N - Math.floor(bodyH/RH));
+function rowAt(r){ // display position -> generator index
+  if (S.perm) return S.dir > 0 ? S.perm[r] : S.perm[N-1-r];
+  return S.dir > 0 ? r : N-1-r;
+}
+
+// ---------- scan (Web Workers over all 12M rows) ----------
+const SCAN = { done:false, ms:0, workers:0, progress:0, cube:null, bk:null, qh:null, ph:null, ah:null, mh:null, distinctItems:0, B:2048 };
+let workerURL = null, pool = [];
+function makeWorkers(n){
+  try {
+    const src = makeGen.toString() + "\n(" + workerMain.toString() + ")();";
+    workerURL = URL.createObjectURL(new Blob([src], { type:"text/javascript" }));
+    for (let i=0;i<n;i++) pool.push(new Worker(workerURL));
+    return true;
+  } catch (e) { pool = []; return false; }
+}
+function runScan(){
+  const n = Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4) - 1));
+  const B = SCAN.B;
+  const t0 = performance.now();
+  const merge = (res) => {
+    if (!SCAN.cube){ SCAN.cube = new Float64Array(res.cube.length); SCAN.bk = new Float64Array(res.bk.length);
+      SCAN.qh = new Float64Array(25); SCAN.ph = new Float64Array(40); SCAN.ah = new Float64Array(40); SCAN.mh = new Float64Array(50); SCAN.seen = new Uint8Array(960); }
+    for (const k of ["cube","bk","qh","ph","ah","mh"]) { const A = SCAN[k], R = res[k]; for (let i=0;i<A.length;i++) A[i] += R[i]; }
+    for (let i=0;i<960;i++) SCAN.seen[i] |= res.seen[i];
+  };
+  const finish = () => {
+    SCAN.ms = performance.now() - t0; SCAN.done = true;
+    SCAN.distinctItems = SCAN.seen.reduce((s,v)=>s+v,0);
+    railStatic = null; dirty = true; updateFooter(); scanResolve();
+  };
+  if (makeWorkers(n)){
+    SCAN.workers = n;
+    const prog = new Array(n).fill(0); let left = n;
+    pool.forEach((wk, id) => {
+      const a = Math.floor(N*id/n), b = Math.floor(N*(id+1)/n);
+      wk.onmessage = (e) => { const m = e.data;
+        if (m.kind === "progress"){ prog[id] = m.done; SCAN.progress = prog.reduce((s,v)=>s+v,0)/N; updateFooter(); }
+        else if (m.kind === "scan"){ prog[id] = m.rows; merge(m); if (--left === 0) finish(); } };
+      wk.postMessage({ kind:"scan", id, a, b, B });
+    });
+  } else { // main-thread fallback in slices
+    SCAN.workers = 0; const o = {}; let i = 0; const CH = 400000;
+    const res = { cube:new Float64Array(720), bk:new Float64Array(B*6), qh:new Float64Array(25), ph:new Float64Array(40), ah:new Float64Array(40), mh:new Float64Array(50), seen:new Uint8Array(960) };
+    const step = () => { const end = Math.min(N, i+CH);
+      for (; i<end; i++){ G.row(i,o); const c3=((o.status*6+o.region)*8+o.cat)*3; res.cube[c3]++; res.cube[c3+1]+=o.amount; res.cube[c3+2]+=o.amount*o.margin;
+        const bi=Math.floor(i*B/N); res.bk[bi*6+o.status]++; res.bk[bi*6+5]+=o.amount; res.qh[o.qty]++;
+        let x=Math.floor(Math.log10(o.price/100)/3.4*40); res.ph[x<0?0:x>39?39:x]++; x=Math.floor(Math.log10(o.amount/100)/4.4*40); res.ah[x<0?0:x>39?39:x]++;
+        x=Math.floor((o.margin+30)/2); res.mh[x<0?0:x>49?49:x]++; res.seen[o.item]=1; }
+      SCAN.progress = i/N; updateFooter();
+      if (i < N) setTimeout(step, 0); else { merge(res); finish(); } };
+    setTimeout(step, 0);
+  }
+}
+let scanResolve; const scanReady = new Promise((ok) => { scanResolve = ok; });
+
+function sortBy(col){ // returns a promise; real counting sort over all rows in the workers
+  const field = col.field || col.key, K = col.K;
+  if (!pool.length) return Promise.reject(new Error("no workers"));
+  const t0 = performance.now(), n = pool.length;
+  return new Promise((ok) => {
+    const parts = new Array(n); let left = n;
+    pool.forEach((wk, id) => {
+      const a = Math.floor(N*id/n), b = Math.floor(N*(id+1)/n);
+      wk.onmessage = (e) => { if (e.data.kind !== "sort") return; parts[id] = e.data; if (--left === 0) {
+        const perm = new Uint32Array(N); let p = 0;
+        for (let k=0;k<K;k++) for (let w=0; w<n; w++){ const pt = parts[w]; let off = 0; for (let j=0;j<k;j++) off += pt.counts[j];
+          perm.set(pt.out.subarray(off, off+pt.counts[k]), p); p += pt.counts[k]; }
+        ok({ perm, ms: performance.now()-t0, workers:n });
+      } };
+      wk.postMessage({ kind:"sort", id, a, b, col:field, K });
+    });
+  });
+}
+
+// ---------- row data for drawing ----------
+const tmp = {};
+function rowData(r){
+  const i = rowAt(r); G.row(i, tmp);
+  const nm = G.itemName(tmp.item);
+  return { r, i, id: "MK-" + pad8(i+1), ts: fmtTs(tmp.day, tmp.sec), buyer: "c_" + (Math.floor(tmp.u8*60466176)).toString(36).padStart(5,"0"),
+    region: tmp.region, cat: tmp.cat, item: nm[0], variant: nm[1], g: tmp.item, day: tmp.day,
+    qty: String(tmp.qty), price: fmtCents(tmp.price), amount: fmtCents(tmp.amount), amountC: tmp.amount, margin: tmp.margin, status: tmp.status, promo: tmp.promo };
+}
+function spark(g, day){
+  const wk = (day/7)|0, base = G.itemBase[g], ph = G.itemPh[g], out = new Array(12);
+  for (let j=0;j<12;j++){ const w = wk - 11 + j; out[j] = base*(1 + 0.06*Math.sin(w*0.55 + ph) + 0.05*((G.h32(g*131 + w*7 + 3)/4294967296) - 0.5) + 0.03*w/104); }
+  return out;
+}
+
+// ---------- pill sprites ----------
+const pills = [];
+function makePills(){
+  pills.length = 0;
+  for (let s=0;s<5;s++){
+    const c = document.createElement("canvas"), g = c.getContext("2d");
+    g.font = `500 11.5px ${UI}`; const tw = Math.ceil(g.measureText(STATUS[s]).width);
+    const w = tw + 26, h = 19; c.width = w*DPR; c.height = h*DPR; g.scale(DPR, DPR);
+    g.fillStyle = ST_COL[s][0]; g.beginPath(); g.roundRect(0.5, 0.5, w-1, h-1, 9.5); g.fill();
+    g.fillStyle = ST_COL[s][1]; g.beginPath(); g.arc(10, h/2, 2.6, 0, 6.283); g.fill();
+    g.font = `500 11.5px ${UI}`; g.textBaseline = "middle"; g.fillText(STATUS[s], 17, h/2 + 0.5);
+    pills.push({ c, w, h });
+  }
+}
+
+// ---------- drawing: table ----------
+function drawHeader(g, alpha){
+  if (alpha <= 0) return;
+  g.save(); g.globalAlpha = alpha;
+  g.fillStyle = "#121316"; g.fillRect(0, 0, W, HH);
+  g.fillStyle = "#222429"; g.fillRect(0, HH-1, W, 1);
+  // gutter label
+  g.font = `10.5px ${MONO}`; g.fillStyle = "#4b5058"; g.textAlign = "right"; g.textBaseline = "alphabetic";
+  g.fillText("#", GW-14, 25);
+  for (const c of visCols){
+    const x = c.x, w = c.cw, right = c.align === "r";
+    const sorted = S.sortCol === c.key;
+    g.textAlign = right ? "right" : "left";
+    const tx = right ? x + w - 12 : x + 12;
+    g.font = `500 13px ${UI}`; g.fillStyle = sorted ? "#f1f3f5" : "#d3d6db"; g.fillText(c.name, tx, 25);
+    g.font = `10.5px ${MONO}`; g.fillStyle = "#5b6068"; g.fillText(c.type, tx, 41);
+    // sort / filter affordances
+    const nameW = (g.font = `500 13px ${UI}`, g.measureText(c.name).width);
+    const ax = right ? tx - nameW - 14 : tx + nameW + 7;
+    if (c.sort){
+      g.fillStyle = sorted ? LIME : "#41454c";
+      g.beginPath();
+      if (!sorted || S.dir > 0){ g.moveTo(ax, 18); g.lineTo(ax+7, 18); g.lineTo(ax+3.5, 13.5); }
+      if (!sorted || S.dir < 0){ g.moveTo(ax, 20.5); g.lineTo(ax+7, 20.5); g.lineTo(ax+3.5, 25); }
+      g.fill();
+    }
+    if (c.key === "status" || c.key === "region" || c.key === "category"){
+      const fx = right ? x + 10 : x + w - 22, fy = 15;
+      g.strokeStyle = (c.key === "status" && S.agg) ? LIME : "#4b4f57"; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx+10, fy); g.lineTo(fx+6.2, fy+4.6); g.lineTo(fx+6.2, fy+8.5); g.lineTo(fx+3.8, fy+9.6); g.lineTo(fx+3.8, fy+4.6); g.closePath(); g.stroke();
+    }
+    // column profile
+    drawProfile(g, c, x + 12, 50, w - 24, 22);
+    // resize handle
+    g.fillStyle = "#26292e"; g.fillRect(x + w - 1, 10, 1, HH - 20);
+    g.fillStyle = "#3a3e45"; g.fillRect(x + w - 2.5, HH/2 - 6, 1, 12); g.fillRect(x + w + 0.5, HH/2 - 6, 1, 12);
+  }
+  g.restore();
+}
+
+function histBars(g, arr, x, y, w, h, from, to, color, logY){
+  let mx = 0; for (let i=from;i<to;i++) mx = Math.max(mx, logY ? Math.log1p(arr[i]) : arr[i]);
+  const n = to-from, bw = w/n;
+  g.fillStyle = color;
+  for (let i=from;i<to;i++){ const v = logY ? Math.log1p(arr[i]) : arr[i]; const bh = mx ? Math.max(v>0?1:0, v/mx*h) : 0;
+    g.fillRect(x + (i-from)*bw, y + h - bh, Math.max(1, bw - 1), bh); }
+}
+function drawProfile(g, c, x, y, w, h){
+  g.textAlign = "left";
+  const done = SCAN.done;
+  if (!done){
+    g.fillStyle = "#1a1b1f"; g.fillRect(x, y + h - 3, w, 3);
+    g.fillStyle = "#3a3d44"; g.fillRect(x, y + h - 3, w*SCAN.progress, 3);
+    return;
+  }
+  const grow = PROFILE_T;
+  g.save(); g.beginPath(); g.rect(x, y - 2, w*grow + 1, h + 4); g.clip();
+  const cube = SCAN.cube;
+  const label = (t) => { g.font = `10.5px ${MONO}`; g.fillStyle = "#6a6f78"; g.textBaseline = "middle"; g.fillText(t, x, y + h/2 + 1); g.textBaseline = "alphabetic"; };
+  switch (c.key){
+    case "order_id": label("12M unique"); break;
+    case "buyer": label("hashed id"); break;
+    case "item": label(fmtInt(SCAN.distinctItems) + " distinct"); break;
+    case "price_12w": label("12 weeks"); break;
+    case "ordered_at": { // orders per day, all 731 days (from the day table)
+      const C = G.C; let mx = 0; for (let d=0; d<G.DAYS; d++) mx = Math.max(mx, C[d+1]-C[d]);
+      g.fillStyle = "#4a4f57"; const bw = w/G.DAYS;
+      for (let d=0; d<G.DAYS; d++){ const v = (C[d+1]-C[d])/mx*h; g.fillRect(x + d*bw, y + h - v, Math.max(0.8, bw), v); }
+      break; }
+    case "region": case "category": case "status": {
+      const K = c.key === "region" ? 6 : c.key === "category" ? 8 : 5, cnt = new Float64Array(K);
+      for (let s=0;s<5;s++) for (let r=0;r<6;r++) for (let k=0;k<8;k++){ const v = cube[((s*6+r)*8+k)*3]; cnt[c.key==="region"?r:c.key==="category"?k:s] += v; }
+      let mx = 0; for (const v of cnt) mx = Math.max(mx, v);
+      const bw = w/K;
+      for (let k=0;k<K;k++){ const bh = Math.max(2, cnt[k]/mx*h);
+        g.fillStyle = c.key === "status" ? ST_COL[k][2] : "#4a4f57"; g.fillRect(x + k*bw, y + h - bh, bw - 2, bh); }
+      break; }
+    case "qty": histBars(g, SCAN.qh, x, y, w, h, 1, 25, "#4a4f57", true); break;
+    case "unit_price": histBars(g, SCAN.ph, x, y, w, h, 0, 40, "#4a4f57"); break;
+    case "amount": histBars(g, SCAN.ah, x, y, w, h, 0, 40, "#4a4f57"); break;
+    case "margin": {
+      let mx = 0; for (const v of SCAN.mh) mx = Math.max(mx, v); const bw = w/50;
+      for (let i=0;i<50;i++){ const bh = SCAN.mh[i]/mx*h; g.fillStyle = i < 15 ? "#6b3a33" : "#4a4f57"; g.fillRect(x + i*bw, y + h - bh, Math.max(1, bw-1), bh); }
+      g.fillStyle = "#8b9099"; g.fillRect(x + 15*bw - 0.5, y - 1, 1, h + 2);
+      break; }
+  }
+  g.restore();
+}
+
+// Draws the rows into g, body coordinates (0 = first row under the header).
+function drawRows(g, list, opts){
+  const fast = opts && opts.fast;
+  const top = Math.floor(S.pos), frac = S.pos - top;
+  // zebra + highlight backgrounds
+  for (const it of list){
+    const y = it.y, h = it.h; if (h <= 0.3) continue;
+    g.globalAlpha = it.a;
+    g.fillStyle = (it.d.r & 1) ? "#131417" : "#0f1012"; g.fillRect(0, y, W, h);
+    if (it.d.r === S.focus){ g.fillStyle = "rgba(198,244,50,0.075)"; g.fillRect(0, y, W, h); g.fillStyle = LIME; g.fillRect(0, y, 3, h); }
+    else if (it.d.r === S.hover && !fast){ g.fillStyle = "rgba(255,255,255,0.03)"; g.fillRect(0, y, W, h); }
+  }
+  g.globalAlpha = 1;
+  // gutter separator
+  g.fillStyle = "#1c1e22"; g.fillRect(GW - 1, 0, 1, bodyH);
+  g.textBaseline = "middle";
+  // gutter numbers
+  g.font = `11px ${MONO}`; g.textAlign = "right";
+  for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a;
+    g.fillStyle = it.d.r === S.focus ? LIME : "#4d5259"; g.fillText(fmtInt(it.d.r + 1), GW - 14, it.y + it.h/2 + 0.5); }
+  for (const c of visCols){
+    const x = c.x, w = c.cw, k = c.key;
+    if (k === "order_id" || k === "ordered_at" || k === "buyer"){
+      g.font = `12px ${MONO}`; g.textAlign = "left";
+      for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a; const d = it.d;
+        g.fillStyle = k === "ordered_at" ? "#aeb3bb" : k === "buyer" ? "#7d838c" : (d.r === S.focus ? "#f4f6f8" : "#c9ccd2");
+        g.fillText(k === "order_id" ? d.id : k === "buyer" ? d.buyer : d.ts, x + 12, it.y + it.h/2 + 0.5); }
+    } else if (k === "region" || k === "category"){
+      g.font = `13px ${UI}`; g.textAlign = "left"; g.fillStyle = "#d5d8dd";
+      for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a;
+        g.fillText(k === "region" ? G.REGIONS[it.d.region] : G.CATS[it.d.cat], x + 12, it.y + it.h/2 + 0.5); }
+    } else if (k === "item"){
+      g.textAlign = "left";
+      for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a; const d = it.d;
+        g.font = `13px ${UI}`; g.fillStyle = "#eceef1"; g.fillText(d.item, x + 12, it.y + it.h/2 + 0.5);
+        const tw = g.measureText(d.item).width;
+        g.font = `12px ${UI}`; g.fillStyle = "#6c717a"; if (12 + tw + 8 + 40 < w) g.fillText(d.variant, x + 12 + tw + 7, it.y + it.h/2 + 0.5);
+        if (d.promo && w > 200){ g.font = `10px ${MONO}`; g.fillStyle = "#8f9a6a"; g.textAlign = "right"; g.fillText("promo", x + w - 10, it.y + it.h/2 + 0.5); g.textAlign = "left"; }
+      }
+    } else if (k === "qty" || k === "unit_price" || k === "amount"){
+      g.font = k === "amount" ? `500 12.5px ${MONO}` : `12px ${MONO}`; g.textAlign = "right";
+      for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a; const d = it.d;
+        g.fillStyle = k === "amount" ? "#f0f2f4" : k === "qty" ? "#aeb3bb" : "#aeb3bb";
+        g.fillText(k === "qty" ? d.qty : k === "unit_price" ? d.price : d.amount, x + w - 12, it.y + it.h/2 + 0.5); }
+    } else if (k === "margin"){
+      const bx = x + 12, bw = w - 12 - 62, z = bx + bw*0.3;
+      g.font = `12px ${MONO}`; g.textAlign = "right";
+      for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a; const d = it.d, m = d.margin, cy = it.y + it.h/2;
+        g.fillStyle = "#24262b"; g.fillRect(bx, cy - 0.5, bw, 1);
+        g.fillStyle = "#3a3d44"; g.fillRect(z - 0.5, cy - 6, 1, 12);
+        if (m >= 0){ const L = Math.min(bw*0.7, m/60*bw*0.7); g.fillStyle = LIME; g.globalAlpha = it.a*0.82; g.fillRect(z, cy - 3.5, L, 7); }
+        else { const L = Math.min(bw*0.3, -m/30*bw*0.3); g.fillStyle = "#d9634f"; g.globalAlpha = it.a*0.82; g.fillRect(z - L, cy - 3.5, L, 7); }
+        g.globalAlpha = it.a; g.fillStyle = m < 0 ? "#e38b7c" : "#b6bac1"; g.fillText(m.toFixed(1) + "%", x + w - 12, cy + 0.5); }
+    } else if (k === "status"){
+      for (const it of list){ if (it.h < 6) continue; g.globalAlpha = it.a; const p = pills[it.d.status];
+        g.drawImage(p.c, x + 10, it.y + (it.h - p.h)/2, p.w, p.h); }
+    } else if (k === "price_12w"){
+      g.lineWidth = 1.25; g.lineJoin = "round";
+      for (const it of list){ if (it.h < 14) continue; g.globalAlpha = it.a; const d = it.d; const v = spark(d.g, d.day);
+        let lo = Infinity, hi = -Infinity; for (const q of v){ lo = Math.min(lo,q); hi = Math.max(hi,q); }
+        const sx = x + 12, sw = w - 34, sy = it.y + 6, sh = it.h - 12, rng = (hi - lo) || 1;
+        g.strokeStyle = "#727881"; g.beginPath();
+        for (let j=0;j<12;j++){ const px = sx + j*sw/11, py = sy + sh - (v[j]-lo)/rng*sh; j ? g.lineTo(px,py) : g.moveTo(px,py); }
+        g.stroke();
+        const up = v[11] >= v[0], ly = sy + sh - (v[11]-lo)/rng*sh;
+        g.fillStyle = up ? "#d5d8dd" : "#e38b7c"; g.beginPath(); g.arc(sx + sw, ly, 2, 0, 6.283); g.fill();
+        g.font = `10px ${MONO}`; g.textAlign = "left"; g.fillStyle = "#5b6068";
+        g.fillText((up?"+":"−") + Math.abs((v[11]/v[0]-1)*100).toFixed(0), sx + sw + 5, it.y + it.h/2 + 0.5);
+      }
+    }
+  }
+  g.globalAlpha = 1; g.textBaseline = "alphabetic";
+  // row hairlines every row (very faint)
+  g.fillStyle = "rgba(255,255,255,0.025)";
+  for (const it of list){ if (it.h > 2) g.fillRect(GW, it.y + it.h - 1, W - GW, 1); }
+}
+function tableList(){
+  const top = Math.floor(S.pos), frac = S.pos - top, out = [];
+  for (let k=0; k<visRows; k++){ const r = top + k; if (r >= N) break; out.push({ d: rowData(r), y: (k - frac)*RH, h: RH, a: 1 }); }
+  return out;
+}
+
+// ---------- aggregate (pivot) ----------
+function pivotData(){
+  const cube = SCAN.cube, cell = [], rowT = [], colT = new Array(8).fill(null).map(()=>({n:0,amt:0,gm:0}));
+  let grand = { n:0, amt:0, gm:0 };
+  for (let r=0;r<6;r++){ const row = []; const rt = { n:0, amt:0, gm:0 };
+    for (let c=0;c<8;c++){ const o = ((0*6 + r)*8 + c)*3; const v = { n:cube[o], amt:cube[o+1], gm:cube[o+2] };
+      row.push(v); rt.n += v.n; rt.amt += v.amt; rt.gm += v.gm; colT[c].n += v.n; colT[c].amt += v.amt; colT[c].gm += v.gm; }
+    cell.push(row); rowT.push(rt); grand.n += rt.n; grand.amt += rt.amt; grand.gm += rt.gm; }
+  let maxCell = 0; for (const row of cell) for (const v of row) maxCell = Math.max(maxCell, v.amt);
+  const order = [0,1,2,3,4,5].sort((a,b) => rowT[b].amt - rowT[a].amt);
+  return { cell, rowT, colT, grand, maxCell, order, maxRow: Math.max(...rowT.map(r=>r.amt)), maxCol: Math.max(...colT.map(c=>c.amt)) };
+}
+function pivotLayout(){
+  const L = {}; L.x0 = 28; L.x1 = W - 28; L.top = 92; // body coords
+  L.labW = W > 1500 ? 214 : 170; L.totW = W > 1500 ? 236 : 186;
+  L.cellW = (L.x1 - L.x0 - L.labW - L.totW)/8;
+  L.headH = 46; const avail = bodyH - L.top - L.headH - 24;
+  L.rowH = Math.min(104, Math.floor(avail/7)); L.y0 = L.top + L.headH;
+  return L;
+}
+const ease = (t) => t<=0?0:t>=1?1:t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const easeOut = (t) => t<=0?0:t>=1?1:1-Math.pow(1-t,3);
+const clamp01 = (t) => t<0?0:t>1?1:t;
+
+function drawPivot(g, P, L, t){ // t: time in s since group start; P/L data/layout
+  const appear = easeOut(clamp01(t/0.6));
+  g.save(); g.globalAlpha = appear;
+  // title block
+  g.textBaseline = "alphabetic"; g.textAlign = "left";
+  g.font = `500 22px ${UI}`; g.fillStyle = "#eef0f3"; g.fillText("Σ amount by region × category", L.x0, 42);
+  g.font = `12px ${MONO}`; g.fillStyle = "#7d838c";
+  g.fillText(`status = 'delivered' · ${fmtInt(P.grand.n)} of 12,000,000 rows → 48 groups · cell: Σ amount, orders, gross margin`, L.x0, 66);
+  // grand total
+  const gt = easeOut(clamp01((t - 1.6)/1.4));
+  g.textAlign = "right"; g.font = `500 34px ${MONO}`; g.fillStyle = LIME;
+  g.fillText(fmtM(P.grand.amt*gt), L.x1, 44);
+  g.font = `12px ${MONO}`; g.fillStyle = "#7d838c";
+  g.fillText(`total · ${(P.grand.gm/P.grand.amt).toFixed(1)}% gross margin · avg ${fmtCents(Math.round(P.grand.amt/P.grand.n))}`, L.x1, 66);
+  // header row
+  const hy = L.top;
+  g.fillStyle = "#1e2024"; g.fillRect(L.x0, hy + L.headH - 1, L.x1 - L.x0, 1);
+  g.font = `10.5px ${MONO}`; g.fillStyle = "#5b6068"; g.textAlign = "left"; g.fillText("REGION ↓ Σ", L.x0, hy + 28);
+  for (let c=0;c<8;c++){ const x = L.x0 + L.labW + c*L.cellW;
+    g.font = `500 13px ${UI}`; g.fillStyle = "#d3d6db"; g.textAlign = "left"; g.fillText(G.CATS[c], x + 12, hy + 22);
+    g.font = `10.5px ${MONO}`; g.fillStyle = "#5b6068"; g.fillText((P.colT[c].amt/P.grand.amt*100).toFixed(1) + "% of Σ", x + 12, hy + 37); }
+  g.font = `500 13px ${UI}`; g.fillStyle = "#eef0f3"; g.textAlign = "right"; g.fillText("Region total", L.x1 - 12, hy + 22);
+  g.font = `10.5px ${MONO}`; g.fillStyle = "#5b6068"; g.fillText("Σ amount · share", L.x1 - 12, hy + 37);
+  // rows
+  for (let ri=0; ri<6; ri++){
+    const r = P.order[ri], y = L.y0 + ri*L.rowH, RT = P.rowT[r];
+    g.fillStyle = (ri & 1) ? "#121316" : "#0f1012"; g.fillRect(L.x0, y, L.x1 - L.x0, L.rowH);
+    g.fillStyle = "#1c1e22"; g.fillRect(L.x0, y + L.rowH - 1, L.x1 - L.x0, 1);
+    g.textAlign = "left"; g.font = `500 16px ${UI}`; g.fillStyle = "#eef0f3"; g.fillText(G.REGIONS[r], L.x0 + 4, y + 34);
+    g.font = `11px ${MONO}`; g.fillStyle = "#6c717a"; g.fillText(fmtInt(RT.n) + " orders", L.x0 + 4, y + 54);
+    g.fillText((RT.gm/RT.amt).toFixed(1) + "% margin", L.x0 + 4, y + 70);
+    for (let c=0;c<8;c++){
+      const v = P.cell[r][c], x = L.x0 + L.labW + c*L.cellW;
+      const p = easeOut(clamp01((t - 0.9 - c*0.07 - ri*0.05)/1.3));
+      const heat = v.amt / P.maxCell;
+      g.fillStyle = `rgba(198,244,50,${(0.015 + 0.11*heat*heat)*p})`; g.fillRect(x + 1, y + 1, L.cellW - 2, L.rowH - 3);
+      g.fillStyle = "#1c1e22"; g.fillRect(x, y + 8, 1, L.rowH - 16);
+      g.textAlign = "left"; g.font = `500 15px ${MONO}`; g.fillStyle = heat > 0.75 ? "#f6ffd6" : "#e3e5e9";
+      g.fillText(fmtM(v.amt*p), x + 12, y + 30);
+      g.font = `11px ${MONO}`; g.fillStyle = "#6c717a";
+      g.fillText(fmtK(Math.round(v.n*p)), x + 12, y + 48);
+      const mg = v.gm/v.amt; g.textAlign = "right"; g.fillStyle = mg < 15 ? "#c98a7f" : "#8b9099"; g.fillText(mg.toFixed(1) + "%", x + L.cellW - 12, y + 48);
+      const bw = (L.cellW - 24) * (v.amt/P.maxCell) * p;
+      g.fillStyle = "#1f2125"; g.fillRect(x + 12, y + L.rowH - 22, L.cellW - 24, 5);
+      g.fillStyle = LIME; g.fillRect(x + 12, y + L.rowH - 22, bw, 5);
+    }
+    const p = easeOut(clamp01((t - 1.3 - ri*0.06)/1.4)), tx = L.x1 - L.totW;
+    g.fillStyle = "#26292e"; g.fillRect(tx, y + 8, 1, L.rowH - 16);
+    g.textAlign = "right"; g.font = `500 19px ${MONO}`; g.fillStyle = "#f4f6f8"; g.fillText(fmtM(RT.amt*p), L.x1 - 12, y + 32);
+    g.font = `11px ${MONO}`; g.fillStyle = "#8b9099"; g.fillText((RT.amt/P.grand.amt*100*p).toFixed(1) + "%", L.x1 - 12, y + 50);
+    g.fillStyle = "#1f2125"; g.fillRect(tx + 16, y + L.rowH - 24, L.totW - 28, 8);
+    g.fillStyle = LIME; g.fillRect(tx + 16, y + L.rowH - 24, (L.totW - 28)*RT.amt/P.maxRow*p, 8);
+  }
+  // column totals row
+  const ty = L.y0 + 6*L.rowH, th = L.rowH*0.9;
+  g.fillStyle = "#17181c"; g.fillRect(L.x0, ty, L.x1 - L.x0, th);
+  g.fillStyle = "#3a3d44"; g.fillRect(L.x0, ty, L.x1 - L.x0, 1);
+  g.textAlign = "left"; g.font = `500 14px ${UI}`; g.fillStyle = "#eef0f3"; g.fillText("Category total", L.x0 + 4, ty + 30);
+  g.font = `11px ${MONO}`; g.fillStyle = "#6c717a"; g.fillText(fmtInt(P.grand.n) + " orders", L.x0 + 4, ty + 50);
+  for (let c=0;c<8;c++){ const v = P.colT[c], x = L.x0 + L.labW + c*L.cellW;
+    const p = easeOut(clamp01((t - 1.5 - c*0.06)/1.3));
+    g.textAlign = "left"; g.font = `500 15px ${MONO}`; g.fillStyle = "#f0f2f4"; g.fillText(fmtM(v.amt*p), x + 12, ty + 30);
+    g.font = `11px ${MONO}`; g.fillStyle = "#8b9099"; g.fillText((v.gm/v.amt).toFixed(1) + "% margin", x + 12, ty + 48);
+    const bh = (th - 62) * v.amt/P.maxCol * p;
+    const bw = (L.cellW - 24) * v.amt/P.maxCol * p; g.fillStyle = "#2a2d33"; g.fillRect(x + 12, ty + th - 14, L.cellW - 24, 4); g.fillStyle = LIME; g.globalAlpha = appear*0.9; g.fillRect(x + 12, ty + th - 14, bw, 4); g.globalAlpha = appear;
+  }
+  const tx = L.x1 - L.totW; const pp = gt;
+  g.textAlign = "right"; g.font = `600 21px ${MONO}`; g.fillStyle = LIME; g.fillText(fmtM(P.grand.amt*pp), L.x1 - 12, ty + 33);
+  g.font = `11px ${MONO}`; g.fillStyle = "#8b9099"; g.fillText("grand total · 100%", L.x1 - 12, ty + 51);
+  g.restore();
+}
+
+// aggregate animation state
+function buildAgg(){
+  const top = Math.floor(S.pos); const items = []; let delivered = 0, r = top;
+  const need = visRows + 4;
+  while (delivered < need && r < N){ const d = rowData(r); items.push(d); if (d.status === 0) delivered++; r++; }
+  return { t0: performance.now(), items, P: pivotData(), L: pivotLayout(), done: false, start: top, frac: S.pos - top };
+}
+function aggFrame(){
+  const A = S.agg, t = REDUCED ? 99 : (performance.now() - A.t0)/1000;
+  // phase 1 (0.15–1.0 s): non-matching rows collapse out. phase 2 (1.05–1.85 s): rows fly into their region row.
+  const pf = ease(clamp01((t - 0.15)/0.85)), pg = clamp01((t - 1.05)/0.8);
+  const list = []; let y = -A.frac*RH;
+  const L = A.L, P = A.P; const rowY = new Array(6); P.order.forEach((r, ri) => { rowY[r] = L.y0 + ri*L.rowH; });
+  let j = 0;
+  for (const d of A.items){
+    const keep = d.status === 0, h = keep ? RH : RH*(1 - pf);
+    let yy = y, hh = h, a = keep ? 1 : 1 - pf;
+    if (keep && pg > 0){ const e = ease(clamp01(pg*1.25 - j*0.012)); yy = y + (rowY[d.region] + L.rowH/2 - RH/2 - y)*e; a = 1 - e; hh = RH*(1 - 0.6*e); }
+    if (a > 0.01 && yy < bodyH && yy + hh > -RH) list.push({ d, y: yy, h: hh, a });
+    y += h; if (keep) j++;
+  }
+  return { list, t, pf, pg };
+}
+
+// ---------- rail (minimap + scrollbar) ----------
+let railStatic = null;
+function buildRailStatic(){
+  const c = document.createElement("canvas"); c.width = Math.round(RW*DPR); c.height = Math.round(H*DPR);
+  const g = c.getContext("2d"); g.scale(DPR, DPR);
+  g.fillStyle = "#101114"; g.fillRect(0, 0, RW, H);
+  const top = HH, h = H - HH - 8, lab = RW > 120 ? 50 : 44, bx = lab + 6, bw = RW - bx - 10;
+  // header part
+  g.font = `10.5px ${MONO}`; g.fillStyle = "#5b6068"; g.textAlign = "left";
+  g.fillText("OVERVIEW", 12, 25); g.fillText("orders / hour", 12, 41);
+  g.fillStyle = "#222429"; g.fillRect(0, HH - 1, RW, 1);
+  // per-pixel buckets by row index: width = order rate (rows per hour of that slice), colour = status mix (scan)
+  const C = G.C; const rate = new Float64Array(h); let mx = 0;
+  for (let p=0;p<h;p++){
+    const i0 = Math.floor(p*N/h), i1 = Math.min(N-1, Math.floor((p+1)*N/h) - 1);
+    const d0 = G.dayOf(i0), d1 = G.dayOf(i1);
+    // rows per day at the middle of the slice
+    const dm = G.dayOf((i0+i1)>>1); rate[p] = (C[dm+1]-C[dm])/24; mx = Math.max(mx, rate[p]);
+  }
+  for (let p=0;p<h;p++){
+    const L = rate[p]/mx*bw, y = top + 4 + p;
+    if (SCAN.done){
+      const b0 = Math.floor(p*SCAN.B/h), b1 = Math.max(b0+1, Math.floor((p+1)*SCAN.B/h)); const st = [0,0,0,0,0]; let tot = 0;
+      for (let b=b0;b<b1;b++) for (let s=0;s<5;s++){ st[s] += SCAN.bk[b*6+s]; tot += SCAN.bk[b*6+s]; }
+      let x = bx; for (const s of [0,1,2,3,4]){ const sw = L*st[s]/tot; g.fillStyle = s === 0 ? "#3b3e45" : ST_COL[s][2]; g.fillRect(x, y, sw, 1); x += sw; }
+    } else { g.fillStyle = "#26282d"; g.fillRect(bx, y, L, 1); }
+  }
+  // month ticks
+  g.textAlign = "right"; g.font = `9.5px ${MONO}`;
+  for (let y=2024; y<=2025; y++) for (let m=0;m<12;m++){
+    const d = Math.round((Date.UTC(y,m,1) - G.EPOCH)/864e5); const py = top + 4 + C[d]/N*h;
+    g.fillStyle = "#2a2c31"; g.fillRect(lab, py, bw + 6, 1);
+    if (m % 3 === 0 || (RW > 120 && m % 2 === 0)){ g.fillStyle = m === 0 ? "#9aa0a8" : "#555a62"; g.fillText(m === 0 ? String(y) : MONTHS[m], lab - 2, py + 3.5); }
+  }
+  // annotations: outage + peak
+  const ann = (d, t) => { const py = top + 4 + (C[d] + C[d+1])/2/N*h; g.fillStyle = "#d9634f"; g.fillRect(RW - 8, py - 0.5, 4, 1); };
+  ann(G.OUTAGE);
+  return { c, top: top + 4, h };
+}
+function drawRail(){
+  if (!railStatic) railStatic = buildRailStatic();
+  const g = rctx; g.setTransform(1,0,0,1,0,0); g.drawImage(railStatic.c, 0, 0); g.setTransform(DPR,0,0,DPR,0,0);
+  const { top, h } = railStatic, lab = RW > 120 ? 50 : 44;
+  const span = Math.floor(bodyH/RH);
+  const y0 = top + S.pos/N*h, th = Math.max(4, span/N*h);
+  // trail during fast scrolls
+  if (Math.abs(S.speedRows) > 2000){ const len = Math.min(140, Math.abs(S.speedRows)/N*h*6), dir = Math.sign(S.speedRows);
+    const gr = g.createLinearGradient(0, y0 - dir*len, 0, y0); gr.addColorStop(0, "rgba(198,244,50,0)"); gr.addColorStop(1, "rgba(198,244,50,0.35)");
+    g.fillStyle = gr; g.fillRect(lab + 4, dir > 0 ? y0 - len : y0, RW - lab - 10, len); }
+  g.fillStyle = "rgba(198,244,50,0.16)"; g.fillRect(2, y0 - 6, RW - 4, th + 12);
+  g.fillStyle = LIME; g.fillRect(2, y0 - 6, 2, th + 12); g.fillRect(2, y0 + th/2 - 0.5, RW - 4, 1);
+  g.font = `500 10px ${MONO}`; g.textAlign = "left"; g.fillStyle = LIME;
+  const dd = DAYSTR[G.dayOf(rowAt(Math.min(N-1, Math.floor(S.pos))))].slice(2);
+  if (!S.perm && S.dir > 0) g.fillText(dd, 8, y0 - 10 < top + 10 ? y0 + th + 18 : y0 - 10);
+}
+
+// ---------- main render ----------
+let PROFILE_T = 0, profT0 = 0;
+function render(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  let list, aggInfo = null;
+  if (S.agg){ aggInfo = aggFrame(); list = aggInfo.list; } else list = tableList();
+  const speed = Math.abs(S.speedRows);
+  const blur = !S.agg && speed > 1.5;
+  const g = blur ? bctx : ctx;
+  if (blur){ bctx.setTransform(DPR,0,0,DPR,0,0); bctx.fillStyle = "#0f1012"; bctx.fillRect(0, 0, W, bodyH); }
+  else { ctx.fillStyle = "#0f1012"; ctx.fillRect(0, HH, W, bodyH); }
+  if (!blur){ ctx.save(); ctx.beginPath(); ctx.rect(0, HH, W, bodyH); ctx.clip(); ctx.translate(0, HH); }
+  drawRows(g, list, { fast: blur });
+  if (aggInfo && aggInfo.pg > 0) drawPivot(g, S.agg.P, S.agg.L, aggInfo.t - 1.05);
+  if (!blur) ctx.restore();
+  if (blur){
+    // vertical motion smear: average of n shifted copies, length tied to velocity
+    const L = Math.min(110, speed*RH*0.55), n = speed > 40 ? 7 : 5;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, HH, W, bodyH); ctx.clip();
+    ctx.setTransform(1,0,0,1,0,0);
+    for (let k=0;k<n;k++){ ctx.globalAlpha = 1/(k+1); ctx.drawImage(buf, 0, Math.round((HH + (k/(n-1) - 0.5)*L)*DPR)); }
+    ctx.globalAlpha = 1; ctx.restore(); ctx.setTransform(DPR,0,0,DPR,0,0);
+    // keep the gutter separator crisp
+    ctx.fillStyle = "#1c1e22"; ctx.fillRect(GW - 1, HH, 1, bodyH);
+  }
+  const hdrA = aggInfo ? 1 - clamp01(aggInfo.pg*1.6) : 1;
+  ctx.fillStyle = "#0f1012"; ctx.fillRect(0, 0, W, HH);
+  drawHeader(ctx, hdrA);
+  if (aggInfo && hdrA < 1){ // pivot heading area replaces the column header
+    ctx.save(); ctx.globalAlpha = 1 - hdrA; ctx.fillStyle = "#222429"; ctx.fillRect(0, HH - 1, W, 1); ctx.restore(); }
+  drawRail();
+  updateCounter(aggInfo);
+}
+
+// ---------- counter / footer ----------
+const cnum = $("cnum"), cof = $("cof"), clbl = $("clbl"), cspeed = $("cspeed");
+let lastNum = "", lastSpeed = "";
+function updateCounter(ai){
+  let num, lbl = "row", of = "of 12,000,000", sp;
+  if (ai){
+    const P = S.agg.P; const v = N - (N - P.grand.n)*ai.pf;
+    num = fmtInt(v); lbl = ai.pg > 0.3 ? "matching rows · 48 groups" : "matching rows"; of = "of 12,000,000";
+    sp = "where status = 'delivered'";
+  } else {
+    num = fmtInt(Math.min(N, Math.floor(S.pos + 0.5) + 1));
+    const rps = Math.abs(S.speedRows)*60;
+    sp = rps < 1 ? "at rest" : (S.speedRows > 0 ? "▼ " : "▲ ") + (rps >= 1e6 ? (rps/1e6).toFixed(2) + "M" : rps >= 1e3 ? (rps/1e3).toFixed(1) + "k" : Math.round(rps)) + " rows/s";
+  }
+  if (num !== lastNum){ cnum.textContent = num; lastNum = num; }
+  if (sp !== lastSpeed){ cspeed.textContent = sp; lastSpeed = sp; }
+  if (clbl.textContent !== lbl) clbl.textContent = lbl;
+  if (cof.textContent !== of) cof.textContent = of;
+}
+function updateFooter(){
+  const el = $("scan");
+  if (!SCAN.done) el.innerHTML = `profiling all rows in ${SCAN.workers || "main-thread"} workers… <em>${Math.round(SCAN.progress*100)}%</em>`;
+  else el.innerHTML = `full scan <em>${fmtInt(N)}</em> rows in <em>${(SCAN.ms/1000).toFixed(2)} s</em> · ${SCAN.workers ? SCAN.workers + " workers" : "main thread"} · measured in this page`;
+}
+
+// ---------- frame loop ----------
+function frame(t){
+  if (S.glide) S.glide(t);
+  else if (!S.agg){ // wheel smoothing
+    const d = S.target - S.pos; if (Math.abs(d) > 0.002){ S.pos += Math.abs(d) < 0.02 ? d : d*0.22; dirty = true; }
+  }
+  if (SCAN.done && PROFILE_T < 1){ if (!profT0) profT0 = t; PROFILE_T = REDUCED ? 1 : easeOut(clamp01((t - profT0)/900)); dirty = true; }
+  const v = S.pos - S.prevPos; S.prevPos = S.pos;
+  S.speedRows = v; if (Math.abs(v) > 0.001) dirty = true;
+  if (S.agg && !S.agg.done){ dirty = true; if ((performance.now() - S.agg.t0) > 4200) S.agg.done = true; }
+  if (dirty){ dirty = false; render(); }
+  requestAnimationFrame(frame);
+}
+
+// ---------- glides ----------
+function glideTo(to, totalS){
+  return new Promise((ok) => {
+    S.target = S.pos; S.focus = -1;
+    const from = S.pos, D = to - from;
+    if (REDUCED || Math.abs(D) < 1){ S.pos = S.target = S.prevPos = to; S.focus = to; dirty = true; ok(); return; }
+    // velocity profile: smoothstep ramp (Ta), cruise (Tc), exponential settle (Td) that lands exactly on `to`.
+    const T = totalS, Ta = T*0.26, Tc = T*0.2, Td = T - Ta - Tc, eps = 0.35, AD = Math.abs(D);
+    let lo = 0.5, hi = 40, k = 5, V = 0, R0 = 0;
+    for (let it=0; it<60; it++){ k = (lo+hi)/2; V = AD/(Ta/2 + Tc + 1/k); R0 = V/k; if (Math.log(Math.max(1.0001, R0/eps)) - k*Td > 0) lo = k; else hi = k; }
+    if (R0 < 2){ k = 3/Td; V = AD/(Ta/2 + Tc + 1/k); R0 = V/k; }
+    const eT = Math.exp(-k*Td), sgn = Math.sign(D);
+    const posAt = (s) => {
+      if (s < Ta){ const u = s/Ta; return V*Ta*(u*u*u - 0.5*u*u*u*u); } // ∫ smoothstep-ish ramp: v = V(3u²-2u³)
+      const dA = V*Ta*0.5;
+      if (s < Ta + Tc) return dA + V*(s - Ta);
+      const tau = Math.min(Td, s - Ta - Tc); const R = R0*(Math.exp(-k*tau) - eT)/(1 - eT);
+      return AD - R;
+    };
+    // correct ramp integral so distance matches exactly
+    const scale = AD / (V*Ta*0.5 + V*Tc + R0);
+    const t0 = performance.now();
+    S.glide = (now) => {
+      const s = (now - t0)/1000;
+      if (s >= T){ S.pos = S.target = to; S.glide = null; S.focus = to; dirty = true; setTimeout(ok, 260); return; }
+      let p = posAt(s); if (s >= Ta + Tc) p = AD - (AD - p); else p *= scale;
+      S.pos = from + sgn*Math.min(AD, p); S.target = S.pos; dirty = true;
+    };
+  });
+}
+function setChips(list){
+  const el = $("chips"); el.innerHTML = "";
+  for (const c of list){
+    const s = document.createElement("span"); s.className = "chip"; s.innerHTML = c.html + '<span class="x" title="Remove">×</span>';
+    s.querySelector(".x").addEventListener("click", () => clearAgg());
+    el.appendChild(s);
+  }
+}
+async function aggregate(){
+  await scanReady;
+  if (S.glide){ S.glide = null; }
+  S.target = S.pos; S.speedRows = 0;
+  setChips([{ html: '<span class="kw" style="color:#9fb35c">WHERE</span> status = <span class="str">\'delivered\'</span>' }]);
+  S.agg = buildAgg(); dirty = true;
+  $("ordkw").style.display = $("ordcol").style.display = $("orddir").style.display = "none";
+  if (REDUCED){ S.agg.t0 -= 10000; }
+  await new Promise((ok) => setTimeout(ok, REDUCED ? 30 : 1000));
+  const el = $("chips"); const s = document.createElement("span"); s.className = "chip";
+  s.innerHTML = '<span class="kw" style="color:#9fb35c">GROUP BY</span> region, category<span class="x" title="Remove">×</span>'; s.querySelector(".x").addEventListener("click", () => clearAgg());
+  el.appendChild(s);
+  await new Promise((ok) => setTimeout(ok, REDUCED ? 30 : 3200));
+}
+function clearAgg(){
+  S.agg = null; $("chips").innerHTML = "";
+  $("ordkw").style.display = $("ordcol").style.display = $("orddir").style.display = "";
+  dirty = true;
+}
+// ---------- input ----------
+function syncOrder(){ $("ordcol").textContent = S.sortCol; $("orddir").textContent = S.dir > 0 ? "ASC" : "DESC"; }
+grid.addEventListener("wheel", (e) => {
+  e.preventDefault(); if (S.glide || S.agg) return;
+  let dy = e.deltaY * (e.deltaMode === 1 ? RH*3 : e.deltaMode === 2 ? bodyH : 1);
+  let rows = dy/RH; if (e.shiftKey || e.altKey) rows *= 2500;
+  S.target = Math.max(0, Math.min(maxPos(), S.target + rows));
+}, { passive:false });
+let sorting = false;
+grid.addEventListener("click", async (e) => {
+  const r = grid.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (S.agg) return;
+  if (y < HH){
+    const c = visCols.find((c) => x >= c.x && x < c.x + c.cw); if (!c || !c.sort || sorting) return;
+    const same = S.sortCol === c.key;
+    if (c.sort === "index"){ S.perm = null; S.dir = same ? -S.dir : 1; S.sortCol = c.key; $("sortnote").textContent = ""; }
+    else if (same){ S.dir = -S.dir; }
+    else {
+      sorting = true; $("sortnote").textContent = `sorting ${fmtInt(N)} rows by ${c.key}…`;
+      try { const res = await sortBy(c); S.perm = res.perm; S.dir = 1; S.sortCol = c.key;
+        $("sortnote").textContent = `sorted ${fmtInt(N)} rows by ${c.key} in ${(res.ms/1000).toFixed(2)} s · ${res.workers} workers`; }
+      catch (err) { $("sortnote").textContent = "sort needs workers"; }
+      sorting = false;
+    }
+    syncOrder(); S.focus = -1; dirty = true; railStatic = railStatic; return;
+  }
+  const row = Math.floor(S.pos + (y - HH)/RH); if (row >= 0 && row < N){ S.focus = row === S.focus ? -1 : row; dirty = true; }
+});
+grid.addEventListener("mousemove", (e) => {
+  const r = grid.getBoundingClientRect(), y = e.clientY - r.top;
+  const row = y < HH ? -1 : Math.floor(S.pos + (y - HH)/RH); if (row !== S.hover){ S.hover = row; dirty = true; }
+});
+grid.addEventListener("mouseleave", () => { S.hover = -1; dirty = true; });
+let railDrag = false;
+function railTo(e){
+  const r = rail.getBoundingClientRect(), y = e.clientY - r.top; const rs = railStatic || buildRailStatic();
+  const span = Math.floor(bodyH/RH);
+  const p = Math.max(0, Math.min(maxPos(), (y - rs.top)/rs.h*N - span/2));
+  S.pos = S.target = p; dirty = true;
+}
+rail.addEventListener("pointerdown", (e) => { if (S.glide) return; if (S.agg) clearAgg(); railDrag = true; rail.setPointerCapture(e.pointerId); S.focus = -1; railTo(e); });
+rail.addEventListener("pointermove", (e) => { if (railDrag) railTo(e); });
+rail.addEventListener("pointerup", () => { railDrag = false; });
+$("btnGroup").addEventListener("click", () => { if (!S.agg) aggregate(); });
+$("btnFilter").addEventListener("click", () => { if (!S.agg) aggregate(); });
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && S.agg) clearAgg();
+  if (S.agg || S.glide) return;
+  const page = Math.floor(bodyH/RH) - 1;
+  if (e.key === "PageDown") S.target = Math.min(maxPos(), S.target + page);
+  if (e.key === "PageUp") S.target = Math.max(0, S.target - page);
+  if (e.key === "ArrowDown") S.target = Math.min(maxPos(), S.target + 1);
+  if (e.key === "ArrowUp") S.target = Math.max(0, S.target - 1);
+  if (e.key === "End") glideTo(maxPos(), 2.4);
+  if (e.key === "Home") glideTo(0, 2.4);
+});
+let rz; addEventListener("resize", () => { cancelAnimationFrame(rz); rz = requestAnimationFrame(() => { layout(); makePills(); }); });
+
+// ---------- boot ----------
+(async () => {
+  await document.fonts.ready;
+  layout(); makePills(); updateFooter();
+  // A card picture is 880 px wide and never gets input: the 12M-row scan waits there for a first sign of a person.
+  const FIRST = ["pointermove","pointerdown","keydown","wheel","resize"];
+  const scanOnce = () => { for (const type of FIRST) removeEventListener(type, scanOnce, true); runScan(); };
+  if (innerWidth > 900) runScan(); else for (const type of FIRST) addEventListener(type, scanOnce, true);
+  render();
+  requestAnimationFrame(() => { document.documentElement.dataset.ready = "1"; });
+  requestAnimationFrame(frame);
+})();
+})();
+</script>
+</body>
+</html>

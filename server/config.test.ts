@@ -1317,6 +1317,21 @@ describe("Instance CLI override", () => {
     expect(cfg.instances!.ownKey.environment!.MY_FLAG).toBe("1");
   });
 
+  it("an added server at its own address keeps its own model list, not the workspace model", () => {
+    const cfg: AppConfig = {
+      openaiCompat: { url: "https://first.example.test/v1", model: "fugu", provider: "first-provider" },
+      instances: {
+        "openai-compat-added": { driver: "openai-compat", config: { url: "http://127.0.0.1:1234/v1", key: "fixture-added", catalog: "lmstudio" } },
+        sameHost: { driver: "openai-compat", config: { url: "https://first.example.test/v1/", key: "fixture-same" } },
+        inherited: { driver: "openai-compat" },
+      },
+    };
+    const instances = instanceConfigs(cfg);
+    expect(instances["openai-compat-added"].config).toEqual({ url: "http://127.0.0.1:1234/v1", key: "fixture-added", catalog: "lmstudio" });
+    expect(instances.sameHost.config).toEqual({ url: "https://first.example.test/v1/", key: "fixture-same", model: "fugu", provider: "first-provider" });
+    expect(instances.inherited.config).toEqual({ url: "https://first.example.test/v1", model: "fugu", provider: "first-provider" });
+  });
+
   it("saving another engine's CLI does not freeze inherited API endpoint or model settings", () => {
     const cfg: AppConfig = {
       openaiCompat: { url: "https://first.example.test/v1", model: "first-model", provider: "first-provider" },

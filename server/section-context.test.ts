@@ -6,6 +6,7 @@ import {
   readSections,
   ensureSections,
   changeEmptySection,
+  reorderSectionNames,
   sectionContextKey,
   sectionContextLabel,
   sectionContextSystemPrompt,
@@ -82,5 +83,24 @@ describe("section context", () => {
     changeEmptySection("__proto__", null);
     expect(readSections()).toEqual(["Other"]);
     expect(readSectionContext("Other")?.text).toBe("Keep this");
+  });
+
+  it("saves a new department order: the named ones swap the places they hold, the rest stay put", () => {
+    ensureSections(["Sales", "Ops", "Design", "Legal"]);
+    expect(reorderSectionNames(["Legal", "Ops"])).toBe(true);
+    expect(readSections()).toEqual(["Sales", "Legal", "Design", "Ops"]);
+    for (const refused of [[], ["Sales", "Sales"], ["Sales", "Nowhere"]]) expect(reorderSectionNames(refused), refused.join()).toBeNull();
+    // An order that is already shown changes nothing.
+    expect(reorderSectionNames(["Sales", "Legal"])).toBe(false);
+    expect(readSections()).toEqual(["Sales", "Legal", "Design", "Ops"]);
+  });
+
+  it("takes a device's first offer of its own department order only while nobody has set one", () => {
+    ensureSections(["Sales", "Ops"]);
+    expect(reorderSectionNames(["Ops", "Sales"], true)).toBe(true);
+    expect(reorderSectionNames(["Sales", "Ops"], true)).toBe(false);
+    expect(readSections()).toEqual(["Ops", "Sales"]);
+    expect(reorderSectionNames(["Sales", "Ops"])).toBe(true);
+    expect(readSections()).toEqual(["Sales", "Ops"]);
   });
 });

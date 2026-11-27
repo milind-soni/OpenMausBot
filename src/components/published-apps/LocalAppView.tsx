@@ -106,7 +106,8 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
       <div className="flex min-w-0 flex-1 basis-0 items-center gap-2.5">
         {app && <LocalAppMark app={app} bot={app ? botOf?.(app.botId) : undefined} size="sm" />}
         <h1 dir="auto" className={cn(TOOL_PAGE_TITLE, "min-w-0 truncate")} title={title}>{title}</h1>
-        {maker?.name && <span dir="auto" className="shrink-0 truncate text-[13px] text-ink-tertiary max-sm:hidden">{t("localApps.view.by", { bot: maker.name })}</span>}
+        {app?.sample ? <span className="shrink-0 truncate text-[13px] text-ink-tertiary max-sm:hidden">{t("localApps.card.sample")}</span>
+          : maker?.name && <span dir="auto" className="shrink-0 truncate text-[13px] text-ink-tertiary max-sm:hidden">{t("localApps.view.by", { bot: maker.name })}</span>}
         {installed && <span className="max-sm:hidden"><InstalledMark /></span>}
       </div>
       {app && (
@@ -118,7 +119,7 @@ export function LocalAppView({ id, botOf, onBack, onGoToChat, onOpenWindow }: {
                 <MessageSquare size={14} aria-hidden="true" /><span className="max-sm:sr-only">{t("localApps.card.goToChat")}</span>
               </button>
             )}
-            {!goToChat && !app.chat && <span className="sr-only">{t("localApps.view.chatGone")}</span>}
+            {!goToChat && !app.chat && !app.sample && <span className="sr-only">{t("localApps.view.chatGone")}</span>}
             {onOpenWindow && (
               <button type="button" className="ui-icon-button hover:bg-ink/[0.06] hover:text-ink" onClick={onOpenWindow}
                 aria-label={t("localApps.card.openWindow")} title={t("localApps.card.openWindow")}><AppWindowMac size={16} /></button>

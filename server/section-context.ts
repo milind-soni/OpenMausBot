@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { reorderNamesIfMoved } from "../shared/bot-order.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { renamePublishedTeam } from "./published-teams.ts";
@@ -23,6 +24,8 @@ interface SectionContextFile {
   contexts: Record<string, SectionContextRecord>;
   /** Stable memory ownership survives renames; deleting a label retires its key. */
   memoryKeys: Record<string, string>;
+  /** Someone has set the department order, so a device's first offer of its own order no longer applies. */
+  ordered?: true;
 }
 
 const sectionContextRecordSchema = z.object({ text: z.string(), updatedAt: z.number().finite() });
@@ -30,6 +33,7 @@ const sectionContextFileSchema = z.object({
   version: z.literal(1),
   sections: z.array(z.string()).optional(),
   memoryKeys: z.record(z.string(), z.string().min(1)).optional(),
+  ordered: z.literal(true).optional(),
   contexts: z.record(
     z.string(),
     sectionContextRecordSchema,
@@ -64,7 +68,7 @@ function loadFile(forWrite = false): SectionContextFile {
     }
     const memoryKeys: Record<string, string> = Object.create(null);
     for (const [name, key] of Object.entries((input as { memoryKeys?: Record<string, string> }).memoryKeys ?? {})) memoryKeys[name] = key;
-    return { version: 1, memoryKeys, sections: [...new Set([
+    return { version: 1, memoryKeys, ...(candidate.data.ordered ? { ordered: true } : {}), sections: [...new Set([
       ...(candidate.data.sections ?? []), ...Object.keys(contexts),
     ].map(sectionContextKey).filter(Boolean))], contexts };
   } catch {
@@ -104,6 +108,19 @@ export function ensureSections(names: (string | undefined)[]): string[] {
   for (const name of added) data.memoryKeys[name] = `team:${randomUUID()}`;
   saveFile({ ...data, sections: [...data.sections, ...added] });
   return added;
+}
+
+/** Saves a new department order, the same on every device: the named departments take, in the order given, the places
+ * they already hold together, and every other one keeps its place. With `first`, only a workspace whose order nobody
+ * has set yet takes it. Whether the order changed; null, and nothing changes, for an empty list, a repeated name or a
+ * name that is not a department. */
+export function reorderSectionNames(names: readonly string[], first = false): boolean | null {
+  const data = loadFile(true);
+  if (!names.length || new Set(names).size !== names.length || names.some((name) => !data.sections.includes(name))) return null;
+  const sections = reorderNamesIfMoved(data.sections, names);
+  if ((first && data.ordered) || !sections) return false;
+  saveFile({ ...data, sections, ordered: true });
+  return true;
 }
 
 export function changeEmptySection(name: string, nextName: string | null): void {

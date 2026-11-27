@@ -16,7 +16,7 @@ import { GrokAgentDriver } from "./grok.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
-const ENV_KEYS = ["FAKE_ACP_MODE", "FAKE_ACP_DUMP", "FAKE_ACP_TEXT_REPLY", "FAKE_ACP_MODELS", "FAKE_ACP_SESSION_MODELS", "FAKE_ACP_MODEL_STICKS"];
+const ENV_KEYS = ["FAKE_ACP_MODE", "FAKE_ACP_DUMP", "FAKE_ACP_TEXT_REPLY", "FAKE_ACP_MODELS", "FAKE_ACP_SESSION_MODELS", "FAKE_ACP_MODEL_STICKS", "FAKE_ACP_AUTH_METHOD", "FAKE_ACP_EXPECTED_API_KEY"];
 
 describe("ACP memory one-shot (generateMemoryText)", () => {
   let instance: ProviderInstance | undefined;
@@ -156,6 +156,19 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
       const engine = await create(createAcpDriver(support));
       await expect(engine.generateMemoryText!("prompt", { fallback: { model: "m-bot", refused: new Set<string>(), onRefused: () => {} } })).rejects.toThrow("did not switch to m-bot (still m-default)");
       expect(existsSync(`${process.env.FAKE_ACP_DUMP}.prompts.jsonl`)).toBe(false);
+    });
+
+    it("sends authenticate with its _meta before the one-shot session/new", async () => {
+      process.env.FAKE_ACP_MODE = "auth-required-api-key";
+      process.env.FAKE_ACP_AUTH_METHOD = "devin-browser";
+      process.env.FAKE_ACP_EXPECTED_API_KEY = "fixture-key";
+      const engine = await create(createAcpDriver({
+        ...support, pickAuthMethod: () => "devin-browser", authMeta: () => ({ api_key: "fixture-key" }),
+      }));
+      expect(await engine.generateMemoryText!("prompt")).toBe("[]");
+      expect(JSON.parse(readFileSync(`${process.env.FAKE_ACP_DUMP}.authenticate.json`, "utf8"))).toEqual({
+        methodId: "devin-browser", _meta: { api_key: "fixture-key" },
+      });
     });
 
     it("keeps the session's default when the engine can no longer route the bot's model", async () => {

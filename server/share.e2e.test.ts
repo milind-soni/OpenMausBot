@@ -84,6 +84,8 @@ describe("templates on a throwaway server", () => {
     });
     expect(seeded.status, JSON.stringify(seeded.body)).toBe(201);
     const bot = seeded.body.bots[0];
+    // Skills from a template arrive switched off, and a template carries only switched-on ones.
+    expect((await api("PATCH", `/api/bots/${bot.id}/skills/pricing`, { enabled: true })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { soul: `Quote from the list. The billing key is ${KEY}.\n${PRIVATE_LINE}\n` })).status).toBe(200);
     expect((await api("PUT", `/api/bots/${bot.id}/memory`, { text: `# Memory\n- ${MEMORY_MARKER}\n` })).status).toBe(200);
     const mcp = await api("POST", "/api/mcp/servers", { name: "crm", type: "http", url: `https://crm.example.com/mcp/${MCP_TOKEN}` });

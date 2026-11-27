@@ -19,6 +19,7 @@ import type { AcpPromptSteer } from "./steer.ts";
 import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
 import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
+import { REMOTE_MCP_STARTUP_MS } from "../../mcp-http.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { OWN_APPS_SERVER } from "../../../shared/own-apps.ts";
@@ -497,7 +498,7 @@ export function grokPermissionRequest(params: Record<string, any>): Record<strin
   };
 }
 
-const support: AcpSupport = {
+export const GROK_SUPPORT: AcpSupport = {
   driverKind: "grokAgent",
   questionRequests: {
     "_x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
@@ -556,7 +557,7 @@ const support: AcpSupport = {
     const resolved = ensureGrokInjectSlug(model, env);
     return resolved !== "default" && SLUG.test(resolved) ? resolved : undefined;
   },
-  spawnContractArgs: (config, turn) => grokContractArgs(support.spawnArgs(config, turn), turn),
+  spawnContractArgs: (config, turn) => grokContractArgs(GROK_SUPPORT.spawnArgs(config, turn), turn),
   loadReplayQuietMs: (turn) => narrowsNativeTools(turn.toolScope) ? undefined : GROK_LOAD_REPLAY_QUIET_MS,
   permissionRequest: grokPermissionRequest,
 
@@ -578,7 +579,9 @@ const support: AcpSupport = {
         ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.email ? ["email"] : []), ...(turn.integrations?.device ? ["device"] : []),
         ...Object.keys(turn.integrations?.custom ?? {}),
       ].filter((name) => canUseMcpServer(turn.toolScope, name)));
-      const deadline = Date.now() + 10_000;
+      // Grok bounds a server that never comes up with its own startup_timeout_sec; this only bounds the confirmation, no
+      // shorter than the wait a remote MCP server gets elsewhere.
+      const deadline = Date.now() + REMOTE_MCP_STARTUP_MS;
       for (;;) {
         const reply = await request("_x.ai/mcp/list", { sessionId, cache: true }, 10_000);
         const catalog = reply?.result;
@@ -653,4 +656,4 @@ const support: AcpSupport = {
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
-export const GrokAgentDriver = createAcpDriver(support);
+export const GrokAgentDriver = createAcpDriver(GROK_SUPPORT);

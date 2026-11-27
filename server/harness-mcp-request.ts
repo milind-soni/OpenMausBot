@@ -6,6 +6,7 @@ import { PHONE_INSTRUCTIONS, PHONE_RECOVERY } from "./phones/instructions.ts";
 import { HARNESS_PROXY_TIMEOUT_MS, HARNESS_PROXY_TIMEOUTS_MS } from "./harness-budget.ts";
 import { capToolListResult } from "./tool-count-limit.ts";
 import { toolsListResultForShareProfile } from "./tool-list-budget.ts";
+import { withoutResultImages } from "./mcp-text-only.ts";
 
 export const MAX_INPUT_BYTES = 1_048_576;
 export const MAX_OUTPUT_BYTES = 16_777_216;
@@ -64,7 +65,7 @@ async function boundedJson(response: Response, name: string): Promise<unknown> {
 
 export async function harnessMcpRequest(
   frame: unknown,
-  connection: { url: string; token: string; kind: HarnessMcpKind; toolLimit?: number; schemaProfile?: unknown },
+  connection: { url: string; token: string; kind: HarnessMcpKind; toolLimit?: number; schemaProfile?: unknown; textOnly?: boolean },
 ): Promise<unknown | undefined> {
   if (!frame || typeof frame !== "object" || Array.isArray(frame)) return failure(null, null, "Invalid request.", -32600);
   const message = frame as { id?: RpcId; jsonrpc?: unknown; method?: unknown; params?: unknown };
@@ -100,6 +101,9 @@ export async function harnessMcpRequest(
     const log = (line: string) => console.warn(`[${connection.kind}] ${line}`);
     const result = message.method === "tools/list"
       ? toolsListResultForShareProfile(capToolListResult(payload.result, connection.toolLimit, log), connection.schemaProfile, log) : payload.result;
+    if (message.method === "tools/call" && connection.textOnly === true && withoutResultImages(result)) {
+      log("replaced an image in a tool's result with a note: this model reads text only");
+    }
     return { jsonrpc: "2.0", id, result };
   } catch (error) {
     return failure(id, message.method, unansweredText(error, name, HARNESS_PROXY_TIMEOUTS_MS[connection.kind] ?? HARNESS_PROXY_TIMEOUT_MS) + RECOVERY[connection.kind]);

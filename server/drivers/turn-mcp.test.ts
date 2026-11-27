@@ -4,6 +4,7 @@ import type { SendTurnInput } from "../contracts.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { AGENTS_ENV_HEADER } from "../routes/own-mcp-http-path.ts";
 import { TOOL_LIMIT_ENV, TOOL_LIMIT_HEADER } from "../tool-count-limit.ts";
+import { TEXT_ONLY_TOOLS_ENV } from "../mcp-text-only.ts";
 import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
 import { agentsToolList } from "./agents-mcp.ts";
 import { acpMcpServers, ownMcpOverHttp } from "./turn-mcp.ts";
@@ -120,6 +121,23 @@ describe("the MCP servers of a turn whose model takes a limited number of tools"
     for (const server of acpMcpServers(turn(), { http: true })) {
       expect(env(server)[TOOL_LIMIT_ENV]).toBeUndefined();
       expect(header(server, TOOL_LIMIT_HEADER)).toBeUndefined();
+    }
+  });
+});
+
+describe("the MCP servers of a turn whose model reads text only", () => {
+  const env = (server: ReturnType<typeof acpMcpServers>[number]) =>
+    Object.fromEntries(("env" in server ? server.env : []).map(({ name, value }) => [name, value]));
+
+  it("carry the flag on every server, own proxies kept as processes so the flag reaches them", () => {
+    const servers = acpMcpServers(turn(), { http: true, textOnlyTools: true });
+    expect(servers.every((server) => "command" in server)).toBe(true);
+    for (const server of servers) expect([server.name, env(server)[TEXT_ONLY_TOOLS_ENV]]).toEqual([server.name, "1"]);
+  });
+
+  it("sets no flag on any server otherwise", () => {
+    for (const server of acpMcpServers(turn(), { http: true })) {
+      expect(env(server)[TEXT_ONLY_TOOLS_ENV]).toBeUndefined();
     }
   });
 });

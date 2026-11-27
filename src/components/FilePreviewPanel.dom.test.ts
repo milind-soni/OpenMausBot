@@ -99,6 +99,66 @@ describe("a file opened from the chat on a wide window", () => {
     expect(pane()).toBeNull();
   });
 
+  it("comes back when the person returns to that conversation, without taking the focus", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    const box = host.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message']")!;
+    box.focus();
+    await render({ threadId: "t1" });
+    expect(pane()?.getAttribute("data-file-preview")).toBe(PLAN.path);
+    await vi.waitFor(() => expect(pane()?.textContent).toContain("Bring a red flashlight."));
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("stays closed in a conversation where the person closed it", async () => {
+    await render();
+    await openFile();
+    await act(async () => pane()!.querySelector<HTMLButtonElement>("button[aria-label='Close preview']")!.click());
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+  });
+
+  it("stays away on a return while another panel holds that side, and comes back on a later one", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    fixture.state = { ...fixture.state, computerOpen: true };
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    fixture.state = { ...fixture.state, computerOpen: false };
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()?.getAttribute("data-file-preview")).toBe(PLAN.path);
+  });
+
+  it("stays closed on a return after the person opened and closed another file there while the first waited", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    fixture.state = { ...fixture.state, computerOpen: true };
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    fixture.state = { ...fixture.state, computerOpen: false };
+    await render({ threadId: "t1" });
+    await openFile();
+    await act(async () => pane()!.querySelector<HTMLButtonElement>("button[aria-label='Close preview']")!.click());
+    await render({ threadId: "t2" });
+    await render({ threadId: "t1" });
+    expect(pane()).toBeNull();
+  });
+
+  it("stays closed in a conversation where it was never open", async () => {
+    await render();
+    await openFile();
+    await render({ threadId: "t2" });
+    await render({ threadId: "t3" });
+    expect(pane()).toBeNull();
+  });
+
   it("shows a linked file outside the chat in its folder by its real path, asking for it by the link as written", async () => {
     const fetch = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } }));
     const revealInFolder = vi.fn(async () => "shown");

@@ -1144,6 +1144,12 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (process.env.FAKE_CLAUDE_CONNECT_APPS) connectApps(process.env.FAKE_CLAUDE_CONNECT_APPS.split(",").filter(Boolean));
 
   let replyParts = replyForPrompt(prompt) ?? nextScriptedReply();
+  if (process.env.FAKE_CLAUDE_PROMPT_STATE) {
+    const path = join(process.env.FAKE_CLAUDE_PROMPT_STATE, `${sessionId}.txt`);
+    launchFiles ??= readLaunchFiles();
+    if (!argv.includes("--resume")) writeFileSync(path, String(launchFiles.systemPrompt ?? ""));
+    replyParts = [readFileSync(path, "utf8")];
+  }
   const defaultToolId = `tu-${process.pid}-${++toolUseCount}`;
   if (process.env.FAKE_CLAUDE_TURN_STATE) {
     let n = 0;

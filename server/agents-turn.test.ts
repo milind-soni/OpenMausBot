@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { agentsMcp } from "./drivers/agents-mcp.ts";
-import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, roomSkillsRefusal, type AgentsConversation, type AgentsTurn } from "./agents-turn.ts";
+import { agentsServerEnv, botDrivenConversation, COMPUTER_OFF_REFUSAL, computerPickRefusal, directTurnKind, handRoomSkills, roomSkillsRefusal, roomSkillsTurn, roomTurnMayWriteSkills, takeRoomSkills, type AgentsConversation, type AgentsTurn, type RoomSkillsClaim } from "./agents-turn.ts";
 
 const HOST: AgentsConversation["host"] = { skillAuthoring: true, sharedComputers: true, cloudHome: false, team: false, voiceNotes: true, x: true, research: true, imageGeneration: false, localVm: true };
 const CHAT: AgentsConversation = { threadId: "thread-1", bot: { id: "bot-1", chiefOfStaff: true }, room: false, teamComputer: false, host: HOST };
@@ -20,9 +20,10 @@ const CHAT_TURNS: Record<string, AgentsTurn> = {
   "the continuation on a newly picked computer": { generation: "picked", depth: 0, skillAuthoring: true },
   "a turn that delivers files saved outside its folders": { generation: "files", depth: 0, skillAuthoring: true, deliversSavedFiles: true },
 };
-/** And a room: only the first answer to a person's message may list or write skills. */
+/** And a room: only the first answer to a person's message, and the bots it @mentions, may list or write skills. */
 const ROOM_TURNS: Record<string, AgentsTurn> = {
   "the first answer to a person, holding the skill claim": { generation: "first", depth: 0, skillAuthoring: true },
+  "a bot that first answer @mentioned": { generation: "mentioned", depth: 1, skillAuthoring: true },
   "a follow-up once the claim is spent": { generation: "follow-up", depth: 1, skillAuthoring: false },
   "a hand-off into the room": { generation: "room-handoff", depth: 1, skillAuthoring: false, roomHandoffId: "node-2" },
   "a goal step": { generation: "goal", depth: 0, skillAuthoring: false },
@@ -134,7 +135,94 @@ describe("what a turn that may not use a listed tool is told", () => {
   });
 
   it("says which room turn may change skills", () => {
-    expect(roomSkillsRefusal(false)).toBe("In a room, only the first bot answering a person's message can list or write skills. This turn is a follow-up, so carry on without changing skills.");
+    expect(roomSkillsRefusal(false)).toBe("In a room, only the first bot answering a person's message, and a bot it @mentions in that answer, can list or write skills. This turn is a follow-up, so carry on without changing skills.");
     expect(roomSkillsRefusal(true)).toMatch(/This turn is a teammate's hand-off, so carry on without changing skills\.$/);
+  });
+
+  describe("on one person's message in a room", () => {
+    it("lets the first bot answering change skills once, and no other first answer", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      expect(roomTurnMayWriteSkills(claim, 0, "writer")).toBe(true);
+      takeRoomSkills(claim, 0, "writer", true);
+      expect(roomTurnMayWriteSkills(claim, 0, "writer")).toBe(false);
+      expect(roomTurnMayWriteSkills(claim, 0, "editor")).toBe(false);
+    });
+
+    it("lets a bot that first answer @mentions change its own skills once, and only that bot", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
+      handRoomSkills(claim, ["video"]);
+      expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(true);
+      expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
+      takeRoomSkills(claim, 1, "video", true);
+      expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
+    });
+
+    it("lets a bot that first answer @mentions use its share even when another mentioned bot reaches it first", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      handRoomSkills(claim, ["video", "editor"]);
+      expect(roomTurnMayWriteSkills(claim, 2, "editor")).toBe(true);
+      takeRoomSkills(claim, 2, "editor", true);
+      expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
+    });
+
+    it("never lets a bot only a later answer mentions change skills", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      handRoomSkills(claim, ["video"]);
+      expect(roomTurnMayWriteSkills(claim, 2, "editor")).toBe(false);
+    });
+
+    it("withdraws the shares still unused once the first answer's mentions are done", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      const withdraw = handRoomSkills(claim, ["video", "editor"]);
+      takeRoomSkills(claim, 1, "video", true);
+      withdraw();
+      expect(roomTurnMayWriteSkills(claim, 1, "editor")).toBe(false);
+      expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(false);
+    });
+
+    it("lets the first answer hand shares to the bots it @mentions even when its own engine can't write skills", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false, personStarted: true })).toEqual({ writes: false, hands: true, claims: true });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: true, personStarted: true })).toEqual({ writes: true, hands: true, claims: true });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: false, canWrite: true, personStarted: true })).toEqual({ writes: false, hands: false, claims: false });
+      handRoomSkills(claim, ["video"]);
+      expect(roomSkillsTurn(claim, 1, "video", { allowed: true, canWrite: true, personStarted: true })).toEqual({ writes: true, hands: false, claims: true });
+      takeRoomSkills(claim, 0, "editor", true);
+      expect(roomSkillsTurn(claim, 0, "other", { allowed: true, canWrite: true, personStarted: true })).toEqual({ writes: false, hands: false, claims: false });
+    });
+
+    it("hands no shares when no person started the room turn (the team board starts it with a bot trigger)", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false, personStarted: false })).toEqual({ writes: false, hands: false, claims: false });
+      expect(roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: true, personStarted: false })).toEqual({ writes: true, hands: false, claims: true });
+    });
+
+    it("keeps the claim with a first answer that can't write skills, so a later top-level answer hands no shares", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      const first = roomSkillsTurn(claim, 0, "writer", { allowed: true, canWrite: false, personStarted: true });
+      expect(first.claims).toBe(true);
+      takeRoomSkills(claim, 0, "writer", true);
+      handRoomSkills(claim, ["video"])();
+      expect(roomSkillsTurn(claim, 0, "editor", { allowed: true, canWrite: true, personStarted: true })).toEqual({ writes: false, hands: false, claims: false });
+      takeRoomSkills(claim, 0, "writer", false);
+      expect(roomSkillsTurn(claim, 0, "editor", { allowed: true, canWrite: true, personStarted: true }).hands).toBe(true);
+      expect(roomSkillsTurn(claim, 1, "video", { allowed: true, canWrite: true, personStarted: true }).claims).toBe(false);
+    });
+
+    it("gives the share back to a turn that never ran", () => {
+      const claim: RoomSkillsClaim = { claimed: false };
+      takeRoomSkills(claim, 0, "writer", true);
+      handRoomSkills(claim, ["video"]);
+      takeRoomSkills(claim, 1, "video", true);
+      takeRoomSkills(claim, 1, "video", false);
+      expect(roomTurnMayWriteSkills(claim, 1, "video")).toBe(true);
+      takeRoomSkills(claim, 0, "writer", false);
+      expect(roomTurnMayWriteSkills(claim, 0, "editor")).toBe(true);
+    });
   });
 });

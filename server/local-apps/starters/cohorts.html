@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cohorts · Q3 activation review</title>
+<style>
+:root{--bg:#fff;--rail:#fafafb;--ink:#111318;--ink2:#4b5160;--ink3:#8a90a0;--line:#eceef2;--line2:#e2e5eb;--acc:#5b5bd6;--acc2:#e9e9fb;--cmp:#b4b0a6;
+  --ui:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);overflow:hidden}
+body{font:14px/1.5 var(--ui);font-feature-settings:"tnum","cv11";-webkit-font-smoothing:antialiased;display:grid;grid-template-columns:clamp(220px,13.5vw,260px) 1fr}
+.rail{background:var(--rail);border-right:1px solid var(--line);padding:22px 18px;display:flex;flex-direction:column;gap:22px}
+.logo{display:flex;align-items:center;gap:10px;font:600 16px var(--ui);letter-spacing:-.01em}
+.logo svg{width:22px;height:22px}
+.rl h4{margin:0 0 8px;font:500 11px var(--mono);letter-spacing:.04em;color:var(--ink3);text-transform:uppercase}
+.rl a{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin:0 -8px;border-radius:6px;color:var(--ink2);text-decoration:none;font-size:13.5px;cursor:pointer}
+.rl a.on{background:#fff;color:var(--ink);box-shadow:0 0 0 1px var(--line2)}.rl a small{font:11.5px var(--mono);color:var(--ink3)}
+.rl a i{width:7px;height:7px;border-radius:50%;background:var(--acc);margin-right:8px;flex:none}
+.rl .seg{justify-content:flex-start}.rl .seg span{flex:1}
+.rail .note{margin-top:auto;font-size:12px;color:var(--ink3);line-height:1.5}.rail .note b{color:var(--ink2);font-weight:500}
+main{padding:26px clamp(28px,2.6vw,48px) 0;display:flex;flex-direction:column;min-width:0;min-height:0}
+.crumb{font:12.5px var(--mono);color:var(--ink3)}
+h1{margin:6px 0 2px;font:600 clamp(26px,1.75vw,32px)/1.2 var(--ui);letter-spacing:-.022em}
+.meta{font-size:13.5px;color:var(--ink3)}.meta b{color:var(--ink2);font-weight:500}
+.sample{display:inline-block;font:500 10.5px var(--mono);letter-spacing:.06em;color:var(--ink2);border:1px solid var(--line2);border-radius:4px;padding:2px 6px;margin-left:8px;text-transform:uppercase;vertical-align:1px}
+.segbar{display:flex;align-items:center;gap:22px;margin:18px 0 14px;padding:10px 14px;border:1px solid var(--line2);border-radius:10px}
+.segbar .lab{font:500 11px var(--mono);color:var(--ink3);text-transform:uppercase;letter-spacing:.04em}
+.grp{display:flex;align-items:center;gap:4px}.grp>span{font-size:12.5px;color:var(--ink3);margin-right:6px}
+.chip{border:1px solid var(--line2);background:#fff;border-radius:999px;padding:4px 11px;font:500 12.5px var(--ui);color:var(--ink2);cursor:pointer;transition:background .25s,color .25s,border-color .25s,transform .15s}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#fff}.chip.press{transform:scale(.92)}
+.segbar .count{margin-left:auto;text-align:right;font-size:13px;color:var(--ink2)}.segbar .count b{font:600 16px var(--ui);color:var(--ink)}
+.btn{border:1px solid var(--line2);background:#fff;border-radius:7px;padding:6px 11px;font:500 12.5px var(--ui);color:var(--ink);cursor:pointer}
+.grid{flex:1;min-height:0;display:grid;grid-template-columns:1.12fr 1fr;grid-template-rows:1fr auto;gap:0 40px}
+.cellx{min-height:0;display:flex;flex-direction:column;padding:14px 0 16px;border-top:1px solid var(--line)}
+.cap{display:flex;align-items:baseline;gap:10px;font:11.5px var(--mono);color:var(--ink3)}.cap b{color:var(--acc);font-weight:500}
+.cellx h3{margin:4px 0 2px;font:600 16px var(--ui);letter-spacing:-.01em}
+.prose{margin:0 0 8px;font-size:14px;color:var(--ink2);max-width:760px}.prose b{color:var(--ink);font-weight:600}.prose em{font-style:normal;color:var(--acc);font-weight:600}
+.cv{flex:1;min-height:0;position:relative}.cv canvas{position:absolute;inset:0;width:100%;height:100%}
+.col{display:flex;flex-direction:column;min-height:0}
+.funnel{display:flex;flex-direction:column;gap:9px;margin-top:6px}
+.fs{display:grid;grid-template-columns:150px 1fr 120px;align-items:center;gap:12px}
+.fs .nm{font-size:13.5px;color:var(--ink)}.fs .nm small{display:block;font:11px var(--mono);color:var(--ink3)}
+.fs .bar{position:relative;height:28px;background:#f6f6f8;border-radius:5px;overflow:hidden}.fs .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--acc);border-radius:5px}
+.fs .bar u{position:absolute;left:0;top:0;bottom:0;background:var(--acc2);border-radius:5px;text-decoration:none}
+.fs .v{text-align:right;font:500 14px var(--ui)}.fs .v small{display:block;font:11.5px var(--mono);color:#c2410c}
+.fs .v small.ok{color:var(--ink3)}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:#fff;font:12px/1.45 var(--ui);padding:8px 10px;border-radius:7px;white-space:nowrap;transform:translate(-50%,-100%);opacity:0;transition:opacity .2s}
+.tip b{font-weight:600}
+.chip{white-space:nowrap}.segbar .count{white-space:nowrap}.btn{white-space:nowrap}
+@media (max-width:1600px){.chip{padding:3px 8px;font-size:11.5px}.segbar{gap:12px}.grp>span,.segbar .lab{display:none}.segbar .count{font-size:12px}.segbar .count b{font-size:14px}.grid{gap:0 28px}}
+@media (max-height:950px){#p2,.fs .nm small{display:none}.fs{grid-template-columns:140px 1fr 170px}.fs .v{white-space:nowrap}.fs .v small{display:inline;margin-left:6px}.cellx{padding:10px 0 10px}h1{font-size:24px}.segbar{margin:12px 0 8px;padding:8px 12px}.prose{font-size:13px}.fs .bar{height:22px}.funnel{gap:6px}}
+</style>
+</head>
+<body>
+<aside class="rail">
+  <div class="logo"><svg viewBox="0 0 22 22"><rect x="1" y="1" width="20" height="20" rx="6" fill="#5b5bd6"/><path d="M6 15V7M10 15v-5M14 15v-3M18 15v-1" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>Cohorts</div>
+  <div class="rl"><h4>Notebooks</h4><a class="on">Q3 activation review <small>5 cells</small></a><a>Pricing page test <small>8</small></a><a>Mobile onboarding v2 <small>6</small></a><a>Churn reasons, Oct <small>4</small></a></div>
+  <div class="rl"><h4>Saved segments</h4><div id="saved"></div></div>
+  <div class="rl"><h4>In this notebook</h4><a>1 · Retention by cohort</a><a>2 · Retention curves</a><a>3 · Activation funnel</a><a>4 · Session length</a></div>
+  <p class="note"><b>Sample data.</b> 60,000 invented users of an invented product, generated in this page from one seed. Every number is computed from them as you change the segment.</p>
+</aside>
+<main>
+  <div class="crumb">notebooks / q3-activation-review</div>
+  <h1>Did the new onboarding keep people around?</h1>
+  <div class="meta" id="meta"></div>
+  <div class="segbar">
+    <span class="lab">Segment</span>
+    <div class="grp" data-k="plan"><span>Plan</span></div>
+    <div class="grp" data-k="region"><span>Region</span></div>
+    <div class="grp" data-k="device"><span>Device</span></div>
+    <div class="count" id="count"></div>
+    <button class="btn" id="saveSeg">Save segment</button>
+  </div>
+  <div class="grid">
+    <section class="cellx" style="grid-row:1/3">
+      <div class="cap"><b>[1]</b> retention_by_cohort · 20 weekly cohorts × 12 weeks</div>
+      <h3>Retention by signup week</h3>
+      <p class="prose" id="p1"></p>
+      <div class="cv" id="heatBox"><canvas id="heat"></canvas><div class="tip" id="tip"></div></div>
+    </section>
+    <div class="col">
+      <section class="cellx" style="flex:1.1">
+        <div class="cap"><b>[2]</b> retention_curves · share of the cohort active in week n</div>
+        <h3>Before and after the new onboarding</h3>
+        <p class="prose" id="p2"></p>
+        <div class="cv"><canvas id="curves"></canvas></div>
+      </section>
+      <section class="cellx" style="flex:1">
+        <div class="cap"><b>[3]</b> activation_funnel · first 14 days</div>
+        <h3>Where new people stop</h3>
+        <div class="funnel" id="funnel"></div>
+      </section>
+    </div>
+    <section class="cellx">
+      <div class="cap"><b>[4]</b> session_length · log scale · p50 / p90 / p99</div>
+      <h3>How long a session lasts</h3>
+      <div class="cv" style="min-height:150px"><canvas id="hist"></canvas></div>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rnd = mulberry32(915), REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (id) => document.getElementById(id);
+const N = 60000, C = 20, K = 12, CHANGE = 9; // cohorts, weeks, first cohort with the new onboarding
+const DIM = { plan: ["Free", "Plus", "Pro"], region: ["N. America", "Europe", "Asia-Pac", "LatAm"], device: ["Desktop", "Mobile", "Tablet"] };
+const W8 = { plan: [.62, .25, .13], region: [.34, .3, .24, .12], device: [.52, .38, .1] };
+const pickW = (w) => { let r = rnd(), i = 0; while ((r -= w[i]) > 0 && i < w.length - 1) i++; return i; };
+const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(6.283 * v); };
+// Users: cohort, plan, region, device, a 12-week activity mask, funnel steps, a log-session-length histogram bin per session.
+const U = { c: new Uint8Array(N), plan: new Uint8Array(N), region: new Uint8Array(N), device: new Uint8Array(N), mask: new Uint16Array(N), steps: new Uint8Array(N) };
+const HB = 48, SESS = new Uint8Array(N * 4); // four sessions per user, binned on log2 seconds
+const binOf = (sec) => Math.max(0, Math.min(HB - 1, Math.floor((Math.log2(sec) - 3) * 4))); // 8 s … ~ 8 h
+for (let i = 0; i < N; i++) {
+  const c = Math.min(C - 1, Math.floor(Math.pow(rnd(), .85) * C)), plan = pickW(W8.plan), region = pickW(W8.region), device = pickW(W8.device);
+  U.c[i] = C - 1 - c; U.plan[i] = plan; U.region[i] = region; U.device[i] = device;
+  const post = U.c[i] >= CHANGE, eng = Math.exp(.35 * gauss());
+  const base = (.36 + .1 * plan + (device === 0 ? .05 : device === 1 ? -.06 : -.02) + (region === 1 ? .03 : region === 3 ? -.04 : 0)) * eng;
+  let mask = 0, alive = 1;
+  for (let k = 0; k < K; k++) { if (U.c[i] + k >= C) break; const p = k === 0 ? 1 : Math.min(.97, base * (post ? 1.22 : 1) * Math.pow(k + 1, post ? -.33 : -.43) * 1.25);
+    alive = rnd() < p ? 1 : 0; if (alive) mask |= 1 << k; }
+  U.mask[i] = mask;
+  // Funnel: signed up → created a project → invited a teammate → active 3 days in week 1 → started paying.
+  let s = 1; const pf = [.78 + (post ? .06 : 0), .46 + .1 * plan - (device === 1 ? .08 : 0), .55 + (post ? .07 : 0), plan > 0 ? .62 : .07];
+  for (const q of pf) { if (rnd() < q * Math.min(1.25, eng)) s++; else break; } U.steps[i] = s;
+  const med = 240 * (device === 1 ? .55 : device === 2 ? .8 : 1.2) * (1 + .25 * plan) * eng;
+  for (let j = 0; j < 4; j++) SESS[i * 4 + j] = binOf(med * Math.exp(1.05 * gauss()));
+}
+const wk0 = Date.UTC(2026, 6, 1); const wkLabel = (c) => new Date(wk0 + c * 7 * 864e5).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+// ——————————— aggregates for a segment ———————————
+function aggregate(seg){
+  const size = new Float64Array(C), act = new Float64Array(C * K), fun = new Float64Array(6), hist = new Float64Array(HB); let n = 0;
+  for (let i = 0; i < N; i++) {
+    if ((seg.plan >= 0 && U.plan[i] !== seg.plan) || (seg.region >= 0 && U.region[i] !== seg.region) || (seg.device >= 0 && U.device[i] !== seg.device)) continue;
+    n++; const c = U.c[i], m = U.mask[i]; size[c]++; for (let k = 0; k < K; k++) if (m >> k & 1) act[c * K + k]++;
+    for (let s = 1; s <= U.steps[i]; s++) fun[s]++; for (let j = 0; j < 4; j++) hist[SESS[i * 4 + j]]++;
+  }
+  const ret = new Float64Array(C * K).fill(NaN); for (let c = 0; c < C; c++) for (let k = 0; k < K && c + k < C; k++) ret[c * K + k] = size[c] ? act[c * K + k] / size[c] : 0;
+  const curve = (from, to) => { const out = []; for (let k = 0; k < K; k++) { let a = 0, s = 0; for (let c = from; c < to; c++) if (c + k < C) { a += act[c * K + k]; s += size[c]; } out.push(s ? a / s : NaN); } return out; };
+  const pct = (q) => { const tot = hist.reduce((a, b) => a + b, 0); let acc = 0; for (let b = 0; b < HB; b++) { acc += hist[b]; if (acc >= q * tot) return Math.pow(2, b / 4 + 3 + .125); } return 0; };
+  return { n, size, ret, before: curve(0, CHANGE), after: curve(CHANGE, C), fun: [...fun.slice(1)], hist, p50: pct(.5), p90: pct(.9), p99: pct(.99) };
+}
+const ALL = aggregate({ plan: -1, region: -1, device: -1 });
+let seg = { plan: -1, region: -1, device: -1 }, A = ALL, shown = ALL, hl = -1, hlT = 0;
+const lerp = (a, b, t) => a + (b - a) * t;
+function mix(a, b, t){ const m = (x, y) => (Number.isNaN(x) || Number.isNaN(y) ? y : lerp(x, y, t));
+  return { n: lerp(a.n, b.n, t), size: b.size, ret: b.ret.map((v, i) => m(a.ret[i], v)), before: b.before.map((v, i) => m(a.before[i], v)), after: b.after.map((v, i) => m(a.after[i], v)),
+    fun: b.fun.map((v, i) => lerp(a.fun[i], v, t)), hist: b.hist.map((v, i) => lerp(a.hist[i] / a.n, v / b.n, t) * lerp(a.n, b.n, t)), p50: lerp(a.p50, b.p50, t), p90: lerp(a.p90, b.p90, t), p99: lerp(a.p99, b.p99, t) }; }
+
+// ——————————— drawing ———————————
+const DPR = () => devicePixelRatio || 1;
+function ctxOf(id){ const c = $(id), r = c.getBoundingClientRect(), d = DPR(); if (c.width !== Math.round(r.width * d) || c.height !== Math.round(r.height * d)) { c.width = Math.round(r.width * d); c.height = Math.round(r.height * d); } const g = c.getContext("2d"); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, r.width, r.height); return [g, r.width, r.height]; }
+const RAMP = ["#f4f4fd", "#e3e3fa", "#c9c8f4", "#a6a4ec", "#8482e2", "#6865d8", "#4f4bc4", "#3b36a3", "#2b2780"];
+function rampColor(v){ const x = Math.max(0, Math.min(.999, v / .62)) * (RAMP.length - 1), i = Math.floor(x), f = x - i; const a = RAMP[i], b = RAMP[Math.min(RAMP.length - 1, i + 1)];
+  const h = (s, o) => parseInt(s.slice(o, o + 2), 16); return `rgb(${Math.round(lerp(h(a, 1), h(b, 1), f))},${Math.round(lerp(h(a, 3), h(b, 3), f))},${Math.round(lerp(h(a, 5), h(b, 5), f))})`; }
+let heatGeom = null;
+function drawHeat(S){
+  const [g, w, h] = ctxOf("heat"); const L = 118, T = 26, cw = (w - L - 10) / K, ch = Math.min(34, (h - T - 8) / C); heatGeom = { L, T, cw, ch };
+  g.font = "500 11px ui-monospace, Menlo, Consolas, monospace"; g.fillStyle = "#8a90a0"; g.textAlign = "center";
+  for (let k = 0; k < K; k++) g.fillText(k === 0 ? "wk 0" : String(k), L + k * cw + cw / 2, 14);
+  for (let c = 0; c < C; c++) { const y = T + c * ch, dim = hl >= 0 && c !== hl ? .62 * hlT : 0;
+    g.textAlign = "left"; g.font = "13px system-ui, -apple-system, sans-serif"; g.fillStyle = hl === c ? "#111318" : "#4b5160"; g.fillText(wkLabel(c), 0, y + ch / 2 + 4);
+    g.font = "11px ui-monospace, Menlo, Consolas, monospace"; g.fillStyle = "#a0a5b3"; g.textAlign = "right"; g.fillText(Math.round(S.size[c]).toLocaleString("en-US"), L - 12, y + ch / 2 + 4);
+    for (let k = 0; k < K; k++) { const v = S.ret[c * K + k]; if (Number.isNaN(v)) continue; const x = L + k * cw;
+      g.globalAlpha = 1 - dim; g.fillStyle = k === 0 ? "#efeff3" : rampColor(v); g.beginPath(); g.roundRect(x + 1.5, y + 1.5, cw - 3, ch - 3, 3); g.fill();
+      if (k > 0 && cw > 42) { g.fillStyle = v > .34 ? "#fff" : "#3b3f4a"; g.textAlign = "center"; g.font = "500 11.5px system-ui, -apple-system, sans-serif"; g.fillText(`${Math.round(v * 100)}`, x + cw / 2, y + ch / 2 + 4); } }
+    g.globalAlpha = 1; }
+  // the change, as a rule between cohorts
+  const yc = T + CHANGE * ch; g.strokeStyle = "#111318"; g.lineWidth = 1.2; g.setLineDash([4, 3]); g.beginPath(); g.moveTo(0, yc); g.lineTo(w - 6, yc); g.stroke(); g.setLineDash([]);
+  g.fillStyle = "#111318"; g.font = "600 11px system-ui, -apple-system, sans-serif"; g.textAlign = "right";
+  const lab = "new onboarding ships"; const tw = g.measureText(lab).width; g.fillStyle = "#fff"; g.fillRect(w - 18 - tw - 8, yc - 9, tw + 16, 18); g.fillStyle = "#111318"; g.fillText(lab, w - 18, yc + 4);
+  if (hl >= 0) { const y = T + hl * ch; g.globalAlpha = hlT; g.strokeStyle = "#111318"; g.lineWidth = 2; g.beginPath(); g.roundRect(L - 1, y, (C - hl > K ? K : C - hl) * cw + 2, ch, 5); g.stroke(); g.globalAlpha = 1; }
+}
+function drawCurves(S){
+  const [g, w, h] = ctxOf("curves"); const L = 40, B = h - 24, T = 10, X = (k) => L + k / (K - 1) * (w - L - 90), Y = (v) => B - v / .8 * (B - T);
+  g.font = "11px ui-monospace, Menlo, Consolas, monospace"; g.fillStyle = "#a0a5b3"; g.textAlign = "right"; g.strokeStyle = "#eceef2"; g.lineWidth = 1;
+  for (const v of [0, .2, .4, .6, .8]) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - 90, Y(v)); g.stroke(); g.fillText(`${v * 100}%`, L - 8, Y(v) + 4); }
+  g.textAlign = "center"; for (let k = 0; k < K; k += 2) g.fillText(`wk ${k}`, X(k), h - 6);
+  for (let c = 0; c < C; c++) { g.strokeStyle = hl === c ? "rgba(17,19,24,.9)" : c >= CHANGE ? "rgba(91,91,214,.14)" : "rgba(160,155,145,.2)"; g.lineWidth = hl === c ? 2 : 1; g.beginPath(); let on = false;
+    for (let k = 1; k < K && c + k < C; k++) { const v = S.ret[c * K + k]; if (Number.isNaN(v)) continue; on ? g.lineTo(X(k), Y(v)) : g.moveTo(X(k), Y(v)); on = true; } g.stroke(); }
+  const line = (arr, col, wd, name) => { g.strokeStyle = col; g.lineWidth = wd; g.beginPath(); let last = null; arr.forEach((v, k) => { if (k === 0 || Number.isNaN(v)) return; k === 1 ? g.moveTo(X(k), Y(v)) : g.lineTo(X(k), Y(v)); last = [X(k), Y(v), v]; }); g.stroke();
+    if (last) { g.fillStyle = col; g.beginPath(); g.arc(last[0], last[1], 3.5, 0, 6.283); g.fill(); g.font = "600 12px system-ui, -apple-system, sans-serif"; g.textAlign = "left"; g.fillText(`${name} ${Math.round(last[2] * 100)}%`, last[0] + 8, last[1] + 4); } };
+  line(S.before, "#a39e93", 2.2, "before"); line(S.after, "#5b5bd6", 2.8, "after");
+}
+function drawFunnel(S){
+  const names = [["Signed up", "account created"], ["Created a project", "within 3 days"], ["Invited a teammate", "within 7 days"], ["Activated", "3 active days, week 1"], ["Started paying", "within 14 days"]];
+  if (!$("funnel").children.length) $("funnel").innerHTML = names.map(([a, b]) => `<div class="fs"><span class="nm">${a}<small>${b}</small></span><span class="bar"><u></u><i></i></span><span class="v"></span></div>`).join("");
+  [...$("funnel").children].forEach((row, i) => { const v = S.fun[i] / S.fun[0], prev = i ? S.fun[i - 1] / S.fun[0] : 1, allv = ALL.fun[i] / ALL.fun[0];
+    row.querySelector("i").style.width = `${v * 100}%`; row.querySelector("u").style.width = `${allv * 100}%`;
+    row.querySelector(".v").innerHTML = `${(v * 100).toFixed(1)}%${i ? `<small class="${1 - v / prev > .4 ? "" : "ok"}">−${Math.round((1 - v / prev) * 100)}% from step ${i}</small>` : `<small class="ok">${Math.round(S.fun[0]).toLocaleString("en-US")} people</small>`}`; });
+}
+function drawHist(S){
+  const [g, w, h] = ctxOf("hist"); const L = 8, B = h - 22, T = 40, bw = (w - L * 2) / HB, mx = Math.max(...S.hist);
+  for (let b = 0; b < HB; b++) { const v = S.hist[b] / mx, x = L + b * bw; g.fillStyle = "#c9c8f4"; g.fillRect(x + 1, B - v * (B - T), bw - 2, v * (B - T)); }
+  const allMx = Math.max(...ALL.hist); g.strokeStyle = "#a39e93"; g.lineWidth = 1.4; g.setLineDash([3, 3]); g.beginPath();
+  for (let b = 0; b < HB; b++) { const y = B - (ALL.hist[b] / allMx) * (B - T); b ? g.lineTo(L + b * bw + bw / 2, y) : g.moveTo(L + bw / 2, y); } g.stroke(); g.setLineDash([]);
+  const xs = (sec) => L + (Math.log2(sec) - 3) * 4 * bw;
+  g.font = "11px ui-monospace, Menlo, Consolas, monospace"; g.fillStyle = "#a0a5b3"; g.textAlign = "center";
+  for (const [s, l] of [[10, "10 s"], [60, "1 min"], [300, "5 min"], [1800, "30 min"], [7200, "2 h"]]) g.fillText(l, xs(s), h - 4);
+  const fmt = (s) => s < 60 ? `${Math.round(s)} s` : s < 3600 ? `${(s / 60).toFixed(s < 600 ? 1 : 0)} min` : `${(s / 3600).toFixed(1)} h`;
+  for (const [q, v, col] of [["p50", S.p50, "#111318"], ["p90", S.p90, "#5b5bd6"], ["p99", S.p99, "#5b5bd6"]]) { const x = xs(v); g.strokeStyle = col; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, T - 24); g.lineTo(x, B); g.stroke();
+    g.fillStyle = col; g.textAlign = "left"; g.font = "600 12px system-ui, -apple-system, sans-serif"; g.fillText(`${q} ${fmt(v)}`, x + 5, T - 12); }
+  g.fillStyle = "#a39e93"; g.textAlign = "right"; g.font = "11.5px system-ui, -apple-system, sans-serif"; g.fillText("- - all users, same scale", w - 8, 12);
+}
+function prose(S){
+  const wk4 = (arr) => arr[4], b = wk4(S.before), a = wk4(S.after);
+  $("p1").innerHTML = `Each row is the people who signed up that week; each square, the share still active <i>n</i> weeks later. Below the dashed line, week-4 retention is <em>${Math.round(a * 100)}%</em> against <b>${Math.round(b * 100)}%</b> before the change.`;
+  $("p2").innerHTML = `Averaged over cohorts, the new onboarding holds <em>${a > b ? "+" : ""}${Math.round((a - b) * 100)} points</em> more people at week 4${S.n < N ? " in this segment" : ""}; the gap stays open through week ${Math.min(...[8, 9, 10].filter((k) => !Number.isNaN(S.after[k])))}.`;
+  $("count").innerHTML = `<b>${Math.round(S.n).toLocaleString("en-US")}</b> people · ${Math.round(S.n / N * 100)}% of all`;
+}
+function render(S){ drawHeat(S); drawCurves(S); drawFunnel(S); drawHist(S); prose(S); }
+
+// ——————————— segment builder ———————————
+function chips(){ for (const grp of document.querySelectorAll(".grp")) { const k = grp.dataset.k; grp.querySelectorAll(".chip").forEach((c) => c.remove());
+  ["All", ...DIM[k]].forEach((name, i) => { const b = document.createElement("button"); b.className = "chip" + (seg[k] === i - 1 ? " on" : ""); b.textContent = name; b.dataset.v = i - 1; b.onclick = () => setSeg({ ...seg, [k]: i - 1 }); grp.appendChild(b); }); } }
+let anim = 0;
+function setSeg(next, ms = 900){ seg = next; const from = shown, to = aggregate(seg); A = to; chips();
+  return new Promise((ok) => { cancelAnimationFrame(anim); if (REDUCED) { shown = to; render(to); return ok(); } const t0 = performance.now();
+    const step = (now) => { const u = Math.min(1, (now - t0) / ms), e = u < .5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2; shown = mix(from, to, e); render(shown); if (u < 1) anim = requestAnimationFrame(step); else { shown = to; render(to); ok(); } }; anim = requestAnimationFrame(step); }); }
+const segName = (s) => cap1([s.plan >= 0 ? DIM.plan[s.plan] : "", s.region >= 0 ? DIM.region[s.region] : "", s.device >= 0 ? DIM.device[s.device].toLowerCase() : ""].filter(Boolean).join(" · ") || "Everyone");
+const cap1 = (t) => t[0].toUpperCase() + t.slice(1);
+let saved = [{ plan: 2, region: -1, device: 1 }, { plan: 0, region: 1, device: -1 }, { plan: -1, region: -1, device: 2 }];
+function renderSaved(){ $("saved").innerHTML = saved.map((s, i) => `<a class="seg${JSON.stringify(s) === JSON.stringify(seg) ? " on" : ""}" data-i="${i}"><i></i><span>${segName(s)}</span><small>${(aggregate(s).n / 1000).toFixed(1)}k</small></a>`).join("");
+  $("saved").querySelectorAll("a").forEach((a) => a.onclick = async () => { await setSeg(saved[+a.dataset.i]); renderSaved(); }); }
+$("saveSeg").onclick = () => { if (!saved.some((s) => JSON.stringify(s) === JSON.stringify(seg))) saved.unshift({ ...seg }); saved = saved.slice(0, 5); renderSaved(); };
+// hover a heatmap row
+$("heat").addEventListener("pointermove", (e) => { if (!heatGeom) return; const r = $("heat").getBoundingClientRect(), y = e.clientY - r.top, x = e.clientX - r.left, c = Math.floor((y - heatGeom.T) / heatGeom.ch), k = Math.floor((x - heatGeom.L) / heatGeom.cw);
+  if (c >= 0 && c < C) { hl = c; hlT = 1; } else hl = -1; render(shown);
+  const tip = $("tip"); if (c >= 0 && c < C && k >= 0 && k < K && c + k < C) { tip.style.opacity = 1; tip.style.transform = ""; tip.style.left = `${x}px`; tip.style.top = `${y - 10}px`; tip.innerHTML = `<b>Cohort of ${wkLabel(c)}</b> · week ${k}<br>${Math.round(shown.ret[c * K + k] * 100)}% of ${Math.round(shown.size[c]).toLocaleString("en-US")} still active`; } else tip.style.opacity = 0; });
+$("heat").addEventListener("pointerleave", () => { hl = -1; $("tip").style.opacity = 0; render(shown); });
+
+addEventListener("resize", () => render(shown));
+(async () => { await document.fonts.ready;
+  $("meta").innerHTML = `<b>20</b> weekly cohorts, ${wkLabel(0)} – ${wkLabel(C - 1)} 2026 · <b>${N.toLocaleString("en-US")}</b> people · ${(N * 4).toLocaleString("en-US")} sessions <span class="sample">Sample data</span>`;
+  chips(); renderSaved(); render(shown); requestAnimationFrame(() => { document.documentElement.dataset.ready = "1"; }); })();
+</script>
+</body>
+</html>

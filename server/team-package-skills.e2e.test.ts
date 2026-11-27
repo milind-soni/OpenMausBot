@@ -52,12 +52,14 @@ it("a bot template carries its skills, which arrive disabled; originals stay; a 
       method: "PATCH", body: JSON.stringify({ enabled: true }),
     }, url);
     const card = await post("/api/share/export", { botId: source.id });
-    expect(card).toMatchObject({ scope: "bot", status: "draft", counts: { bots: 1, skills: 2 } });
+    expect(card).toMatchObject({ scope: "bot", status: "draft", counts: { bots: 1, skills: 1 } });
+    expect(card.skipped).toContain("skills switched off on the bot (skills[private-notes])");
     const savedTo = mkdtempSync(join(tmpdir(), "omb-skill-template-"));
     let copied;
     try {
       const saved = await post(`/api/share/${card.id}/save`, { path: savedTo });
       expect(readFileSync(join(saved.path, "skills", "source-check", "SKILL.md"), "utf8")).toBe(sharedText);
+      expect(existsSync(join(saved.path, "skills", "private-notes"))).toBe(false);
       copied = await post("/api/share/import", { path: saved.path });
     } finally {
       rmSync(savedTo, { recursive: true, force: true });
@@ -65,7 +67,7 @@ it("a bot template carries its skills, which arrive disabled; originals stay; a 
     const target = copied.bots.find((bot: { name: string }) => bot.name === "Package skill probe 2");
     expect(target).toBeDefined();
     expect((await request(`/api/bots/${target.id}/skills`, {}, url)).skills.map((skill: { name: string; enabled: boolean }) => [skill.name, skill.enabled]).sort())
-      .toEqual([["private-notes", false], ["source-check", false]]);
+      .toEqual([["source-check", false]]);
     await command("send", "--bot", target.id, "--text", "Confirm this isolated copy is ready.");
     expect(await command("wait", "--bot", target.id, "--timeout", "30")).toMatchObject({ status: "settled" });
     const messages = await command("messages", "--bot", target.id, "--limit", "10");

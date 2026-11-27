@@ -227,7 +227,7 @@ test("the menu-bar item keeps its Clouds' terminal switch only while a Cloud is 
 });
 
 /** main's channels and popup, with this desktop's lending and native dialogs stood in for. */
-function mainLending({ response = 1, own = true, flag = false, offer, refusal = "shared", screen = async () => ({ ready: true, lent: true, reason: null, fix: null }), now = () => 1_000 } = {}) {
+function mainLending({ response = 1, own = true, flag = false, offer, refusal = "shared", openSettings = () => {}, screen = async () => ({ ready: true, lent: true, reason: null, fix: null }), now = () => 1_000 } = {}) {
   const handlers = new Map(), calls = { lent: [], declined: [], saved: [], revoked: [], boxes: [] };
   const win = { isDestroyed: () => false, webContents: { getURL: () => `${GARAGE}/` } };
   const info = { sessionId: randomUUID(), environmentId: randomUUID() };
@@ -246,7 +246,7 @@ function mainLending({ response = 1, own = true, flag = false, offer, refusal = 
   const lending = installServerLending({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler, sharing: () => controller,
     dialogs: { chooseFolder: async () => null, confirmServerAccess: async () => true }, validate: async folders => folders ?? [], dialog, window: () => win,
     saved: id => { if (id !== garage.id) throw new Error("unknown"); return garage; }, candidate: env => !env.cloud && !env.team && !env.home, flag: async () => flag,
-    environments: () => [garage, { id: "acme", name: "Acme", origin: "https://omb-t-acme.fly.dev", team: { id: "t" } }], active: () => garage,
+    environments: () => [garage, { id: "acme", name: "Acme", origin: "https://omb-t-acme.fly.dev", team: { id: "t" } }], active: () => garage, openSettings,
     // This app's own page sends an empty event here; the server's own page sends { page: env }.
     local: event => !event?.page && !event?.other, page: event => event?.page ?? null, screen, allowScreen: async () => { calls.allowScreen = (calls.allowScreen ?? 0) + 1; }, now });
   return { handlers, calls, lending, win, info };
@@ -354,6 +354,20 @@ test("the switch: one tap on this app's own page lends and stops at once; a serv
   const notOwn = mainLending({ own: false });
   await assert.rejects(notOwn.handlers.get("lend:set")({}, "garage", true), /Only your own server/);
   assert.deepEqual(notOwn.calls.lent, []);
+});
+
+test("Choose what it can use on a server's own page opens This computer's Settings for that server only, once it is lent", async () => {
+  const opened = [];
+  const page = mainLending({ response: 0, openSettings: id => opened.push(id) });
+  assert.equal(await page.handlers.get("lend:choose")({ page: garage }, "acme"), false, "nothing to choose before it is lent");
+  assert.deepEqual(opened, []);
+  await page.handlers.get("lend:set")({ page: garage }, null, true);
+  assert.equal(await page.handlers.get("lend:choose")({ page: garage }, "acme"), true);
+  assert.deepEqual(opened, ["garage"], "the page's own server, whatever id it sends");
+  await assert.rejects(page.handlers.get("lend:choose")({ page: null, other: true }, "garage"), /main desktop window/);
+  const notOwn = mainLending({ own: false, openSettings: id => opened.push(id) });
+  assert.equal(await notOwn.handlers.get("lend:choose")({ page: garage }, null), false);
+  assert.deepEqual(opened, ["garage"]);
 });
 
 test("a server that can't be lent to says why in one word; a Cloud or team never asks the server", async () => {

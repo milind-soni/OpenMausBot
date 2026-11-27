@@ -107,6 +107,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
+  // Display order only; the harness accepts just the departments the device can see.
+  { method: "PUT", path: /^\/api\/sidebar-sections\/order$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/respond$/ },
@@ -216,6 +218,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/live\/call\/end$/ },
   { method: "GET", path: /^\/api\/live\/call$/ },
   { method: "PATCH", path: /^\/api\/live\/settings$/ },
+  // A Gemini call the phone runs itself reports to the harness here; the harness checks the call's own session token.
+  { method: "POST", path: /^\/api\/live\/relay$/ },
 
   // The phone's own apps as bot tools: it registers, long-polls for jobs, leases and answers them.
   { method: "PUT", path: /^\/api\/phones\/self$/ },
