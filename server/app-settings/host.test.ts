@@ -500,6 +500,34 @@ describe("Simple mode: a bot changes settings in the background and never switch
   });
 });
 
+describe("a provider address whose key is saved", () => {
+  const withSavedKey = () => {
+    const fx = fixture();
+    fx.cfg.anthropic = { ...(fx.cfg.anthropic as object), key: "sk-ant-saved" } as AppConfig["anthropic"];
+    return fx;
+  };
+
+  it("is the person's to change, because it decides where their saved key is sent", async () => {
+    const fx = withSavedKey();
+    const before = JSON.stringify(fx.saved);
+
+    const refused = await fx.set("providers.anthropic.url", "https://elsewhere.example/v1");
+
+    expect(refused).toMatchObject({ status: 409 });
+    expect(String(refused.body.error)).toContain("only by the person");
+    expect(JSON.stringify(fx.saved)).toBe(before);
+  });
+
+  it("can still be cleared while the key is saved, since clearing sends the key nowhere new", async () => {
+    const fx = withSavedKey();
+
+    const cleared = await fx.set("providers.anthropic.url", "");
+
+    expect(cleared.status).toBe(200);
+    expect(fx.saved).toEqual([{ anthropic: { key: "sk-ant-saved", url: "" } }]);
+  });
+});
+
 describe("every other setting applies at once with Undo, Full access or not", () => {
   const written = (fx: ReturnType<typeof fixture>) => JSON.stringify([fx.botPatches, fx.saved, fx.routeCalls, [...fx.windowValues]]);
 
