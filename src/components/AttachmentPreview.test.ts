@@ -365,3 +365,40 @@ describe("image preview copy button", () => {
     }
   });
 });
+
+describe("opening a single outside-workspace file when permitted by owner", () => {
+  it("preserves canOpenOutside on outside_workspace errors and omits listFolder on retry", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: "the linked file is outside this conversation's workspace",
+        code: "outside_workspace",
+        canOpenOutside: true,
+      }), { status: 403, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(new Blob(["hello"], { type: "text/plain" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:test"), revokeObjectURL: vi.fn() });
+    const seen: { current: ReturnType<typeof useLocalFileSave> | null } = { current: null };
+    const Probe = () => {
+      seen.current = useLocalFileSave("/outside/notes.md", "notes.md", { threadId: "t1", messageId: "m1" });
+      return null;
+    };
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => { root.render(createElement(Probe)); });
+      await act(async () => { await seen.current!.save(); });
+      expect(seen.current!.state).toBe("failed");
+      expect(seen.current!.outsideWorkspace).toBe(true);
+      expect(seen.current!.canOpenOutside).toBe(true);
+
+      await act(async () => { await seen.current!.save({ allowOutsideWorkspace: true }); });
+      expect(seen.current!.state).toBe("saved");
+      expect(JSON.parse(String(fetch.mock.calls[1]![1]!.body))).toEqual({
+        path: "/outside/notes.md",
+        allowOutsideWorkspace: true,
+      });
+    } finally {
+      await act(async () => { root.unmount(); });
+      vi.unstubAllGlobals();
+    }
+  });
+});

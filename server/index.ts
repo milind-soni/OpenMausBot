@@ -514,7 +514,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess, releaseOnceAtExit } from "./data-dir-lease.ts"; import { markEngineRunClean, startEngineRecords } from "./engine-records.ts";
-import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, licenseRefreshWanted, loadEnterpriseLayer, refreshLicense, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts"; import { licensePlace, startLicenseRefresh } from "./license-source.ts";
 import { environmentDescriptor, loadEnvironmentId, OWNER_LENDING, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts"; import { doctorAtStart } from "./doctor/start.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl, releaseDataForBackup } from "./workspace-backup-http.ts";
@@ -577,6 +577,7 @@ import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerStore, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts"; import { createBotLibraryRoutes } from "./routes/bot-library.ts";
+import { createCalendarCallRoutes } from "./routes/calendar-calls.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts"; import { privateUntilShared } from "./new-bot-sharing.ts"; import { createShareNotice } from "./host/share-notice.ts"; import { memberDeleteRefusal } from "./host/member-bots.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
@@ -8802,6 +8803,13 @@ calendarCalls = new CalendarCallManager({
   botExists: (botId) => Boolean(store.bot(botId)),
   onDue: deliverCalendarCall,
 });
+ROUTES.push(createCalendarCallRoutes({
+  calls: calendarCalls,
+  audienceConflict: calendarAudienceConflict,
+  ensureRoom: ensureCalendarCallRoom,
+  roomView: (auth, group) => personRooms.groupForAuth(auth, publicGroupState(group)),
+  messages: (threadId) => store.messagesFor(threadId),
+}));
 const checkBacks = createCheckBacks({ dataDir: DATA_DIR, alive: (botId, threadId) => directChatOf(botId, threadId), busy: (botId, threadId) => threadBusy(botId, threadId), line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)), start: async (record, prompt) => { await startTurn(record.botId, prompt, { threadId: record.threadId, cardContinuation: true, origin: record.origin }); }, paused: (error) => [BOT_HELD_CODE, BOT_PAUSED_CODE].includes(String((error as { code?: unknown } | null)?.code)) }); const botWaits = new WaitManager(createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines!.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) })); store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy) botWaits.noteBotBusy(change.botId); });
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
@@ -11952,7 +11960,7 @@ ROUTES.push(createThreadRoutes({
   companionMutationToken: () => companionMutationToken,
   cliOwnerToken: () => cliOwnerToken,
   pageSize, messagePage, messagePageBefore, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
-  botComputerControlSnapshot: sharedVm.botSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, stopRefusal: (auth, threadId) => runOwners.stopRefusal(threadId, runActor(auth)), memberDefaultBot: CLOUD_TEAM ? (email) => { const own = ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name, opened: (made) => void mausbotOwnChat.claim(made) }); if (own) void mausbotOwnChat.claim(own); return own; } : undefined,
+  botComputerControlSnapshot: sharedVm.botSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, stopRefusal: (auth, threadId) => runOwners.stopRefusal(threadId, runActor(auth)), memberDefaultBot: CLOUD_TEAM ? (email) => { const own = ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name, opened: (made) => void mausbotOwnChat.claim(made) }); if (own) void mausbotOwnChat.claim(own); return own; } : undefined, ...(!CLOUD_HOME && !HOSTED_WORKSPACE ? { ownerOutsideFileRefuse: [DATA_DIR, ...(process.env.OMB_USER_DATA ? [process.env.OMB_USER_DATA] : [])] } : {}),
   uploads: uploadsFor(createUploadOwners(DATA_DIR), Boolean(CLOUD_TEAM)),
   attachmentInUse: (name) => threadsReferencing(name).length > 0 || store.bots.some((bot) => bot.avatarUrl === `/api/attachments/${name}`),
   keptAttachments: CLOUD_TEAM ? undefined : keptAttachments,
@@ -12240,7 +12248,7 @@ ROUTES.push(createComputerRoutes({
 ROUTES.push(createStatusRoutes({
   store, cfg,
   staticDir: STATIC_DIR,
-  sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown, records: privateRecords, boxOn: () => botBox.enabled(),
+  sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown, records: privateRecords, boxOn: () => botBox.enabled(), eventLogDrops: () => bus.dropStats(),
   browserEngineInstall: { get: () => browserEngineInstall, set: (install) => { browserEngineInstall = install; } },
   browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
 }));
@@ -14419,47 +14427,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such active run" });
     }
 
-    if (path === "/api/calendar-calls" && method === "GET") {
-      return json(res, 200, { calls: calendarCalls!.list() });
-    }
-    if (path === "/api/calendar-calls" && method === "POST") {
-      try {
-        const body = await readBody(req);
-        const conflict = calendarAudienceConflict(body);
-        if (conflict) return json(res, 400, { error: conflict });
-        return json(res, 201, { call: calendarCalls!.create(body) });
-      } catch (error) {
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
-      }
-    }
-    const calendarCallRoomMatch = path.match(/^\/api\/calendar-calls\/([\w-]+)\/room$/);
-    if (calendarCallRoomMatch && method === "POST") {
-      const call = calendarCalls!.get(calendarCallRoomMatch[1]);
-      if (!call) return json(res, 404, { error: "no such scheduled call" });
-      if (call.botIds.length < 2) {
-        return json(res, 400, { error: "single-bot events open that bot's chat directly" });
-      }
-      const group = ensureCalendarCallRoom(call);
-      return json(res, 200, { group: { ...personRooms.groupForAuth(auth, publicGroupState(group)), messages: store.messagesFor(group.threadId) } });
-    }
-    const calendarCallMatch = path.match(/^\/api\/calendar-calls\/([\w-]+)$/);
-    if (calendarCallMatch && method === "PATCH") {
-      if (!calendarCalls!.get(calendarCallMatch[1])) return json(res, 404, { error: "no such scheduled call" });
-      try {
-        const body = await readBody(req);
-        const conflict = calendarAudienceConflict(body);
-        if (conflict) return json(res, 400, { error: conflict });
-        return json(res, 200, { call: calendarCalls!.update(calendarCallMatch[1], body) });
-      } catch (error) {
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
-      }
-    }
-    if (calendarCallMatch && method === "DELETE") {
-      return calendarCalls!.remove(calendarCallMatch[1])
-        ? json(res, 200, { ok: true })
-        : json(res, 404, { error: "no such scheduled call" });
-    }
-
     if (method === "GET" && path === "/api/events") {
       const pushKey = phoneKey(auth);
       const client: SseClient = {
@@ -15042,8 +15009,8 @@ upgrades.attach(server, handleRequest);
 
 moveFreeze.hold(() => calendarCalls.start(), () => calendarCalls.stop());
 
-// Resolve the edition before accepting requests so /api/edition is never a guess.
-console.log(describeEdition(await loadEnterpriseLayer()));
+// Resolve the edition before accepting requests so /api/edition is never a guess. A desktop, a Cloud home and a hosted workspace (licensed by its operator's environment) read OMB_LICENSE_KEY alone, as before: no licence files, no timers.
+const LICENSE_PLACE = licensePlace({ desktopManaged: DESKTOP_MANAGED, cloudHome: Boolean(CLOUD_HOME), hostedWorkspace: HOSTED_WORKSPACE }); console.log(describeEdition(await loadEnterpriseLayer(LICENSE_PLACE === "none" ? {} : { dataDir: DATA_DIR, serverInstall: LICENSE_PLACE === "server" }))); if (licenseRefreshWanted()) startLicenseRefresh({ dataDir: DATA_DIR, refresh: () => refreshLicense() });
 const startupLicenseWarning = licenseWarning(editionStatus());
 if (startupLicenseWarning) console.warn(startupLicenseWarning);
 console.log(LOOPBACK.trust === "service"
