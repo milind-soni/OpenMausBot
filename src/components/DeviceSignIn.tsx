@@ -21,7 +21,6 @@ export interface DeviceSignInStatus {
   reason?: SignInOutcome;
 }
 
-/** The server's reason code on a status or a refused request, if it sent one. */
 export function signInReason(source: unknown): SignInOutcome | null {
   if (source instanceof ApiError) return signInOutcome(source.body?.reason);
   return source && typeof source === "object" ? signInOutcome((source as { reason?: unknown }).reason) : null;
@@ -100,8 +99,6 @@ function endedFlow(phase: "expired" | "failed", browserPkce = false): DeviceSign
   return { phase, flowId: null, authorizationUrl: null, expiresAt: null, ...(phase === "failed" ? { message: t(browserPkce ? "engineSetup.chatgpt.flowEnded" : "engineSetup.device.flowEnded") } : {}) };
 }
 
-/** A flow the server answers for no more: 404/410 when it lost it (as after the Cloud restarted), 401/403 when this
- * browser lost its pairing. */
 export function unavailableFlow(cause: unknown, browserPkce = false): DeviceSignInStatus {
   return signInInterrupted(cause)
     ? { phase: "failed", flowId: null, authorizationUrl: null, expiresAt: null, reason: "interrupted", message: t("engineSetup.device.interrupted") }
@@ -133,8 +130,7 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
   if (auth.phase !== "waiting") {
     const label = auth.phase === "succeeded" ? t(copy.connected)
       : auth.phase === "cancelled" ? t(browserPkce ? "engineSetup.chatgpt.cancelled" : "engineSetup.device.cancelled")
-      : auth.phase === "expired" ? t(browserPkce ? "engineSetup.chatgpt.expired" : "engineSetup.device.expired")
-      // The server words an interrupted sign-in with its code alone, so the line is in the person's language.
+      : auth.phase === "expired" || signInReason(auth) === "expired" ? t(browserPkce ? "engineSetup.chatgpt.expired" : "engineSetup.device.expired")
       : signInInterrupted(auth) ? t("engineSetup.device.interrupted")
       : auth.message || t(browserPkce ? "engineSetup.chatgpt.failed" : copy.failed);
     return <p role="status" className={auth.phase === "succeeded" ? "text-[12px] text-success" : "text-[12px] text-ink-secondary"}>{label}</p>;

@@ -29,7 +29,7 @@ function ended(phase: "expired" | "failed", message?: string): DeviceSignInStatu
 }
 
 /** Anthropic's code is long (`code#state`); a short or digits-only one is the login code Claude emails, which belongs on
- * Claude's own page. The server refuses it too. */
+ * Claude's own page. */
 export function looksLikeEmailedCode(value: string): boolean {
   const code = value.trim();
   return code.length > 0 && (code.length < 8 || /^\d{1,8}$/.test(code));
@@ -104,7 +104,6 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone, onStart }:
       await succeeded();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : t("engineSetup.device.failed");
-      // The server no longer has this sign-in, as after the Cloud restarted: say so and offer a fresh one.
       if (signInInterrupted(cause)) {
         setAuth(ended("failed", t("engineSetup.device.interrupted")));
         return;

@@ -50,6 +50,8 @@ describe("Codex device sign-in UI", () => {
     const html = render({ phase: "failed", flowId: "fixture-flow", authorizationUrl: null, expiresAt: null, reason: "interrupted" });
     expect(html).toContain("This sign-in was interrupted. Start again.");
     expect(html).not.toContain("could not be completed");
+    expect(render({ phase: "failed", flowId: "fixture-flow", authorizationUrl: null, expiresAt: null, reason: "expired", message: "The ChatGPT sign-in code expired. Start sign-in again for a new code." }))
+      .toContain("This code expired. Request a new code to try again.");
   });
 
   it.each([
