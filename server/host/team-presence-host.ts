@@ -11,12 +11,12 @@ import { audienceMember, type Audience } from "../audience.ts";
 import type { VisibleSet, Viewer } from "../bot-visibility.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import type { SessionRecord } from "../sessions.ts";
-import { deliverSseFrame, type SseFanoutClient } from "../sse-fanout.ts";
+import type { EventWriter } from "../routes/event-feed.ts";
 import type { Store } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { createTeamPresence, realClock, type PresenceClock, type PresenceEvent } from "../team-presence.ts";
 
-export interface PresenceStream extends SseFanoutClient {
+export interface PresenceStream extends Pick<EventWriter, "send"> {
   person?: Pick<SessionRecord, "email" | "membershipAuthority" | "moveIn">;
 }
 
@@ -44,13 +44,6 @@ function teamPerson(session: PresenceStream["person"] | undefined): string | nul
   return session?.membershipAuthority === "team" && session.email && !session.moveIn ? ownerEmail(session.email) : null;
 }
 
-const frameOf = (frame: PresenceFrame) => `data: ${JSON.stringify(frame)}\n\n`;
-
-/** Sends a presence frame, cutting loose a stream that cannot take it, as every other frame does. */
-function send(stream: SseFanoutClient, frame: string): void {
-  if (deliverSseFrame(stream, "presence", frame) === "disconnected") stream.close();
-}
-
 /** `streams` is the server's set of open event streams: adding one counts its person here, deleting it starts their
  * grace. */
 export function createTeamPresenceHost<Stream extends PresenceStream>(deps: TeamPresenceHostDeps) {
@@ -71,10 +64,10 @@ export function createTeamPresenceHost<Stream extends PresenceStream>(deps: Team
   }
 
   function sendTo(emails: ReadonlySet<string> | null, frame: PresenceFrame): void {
-    const text = frameOf(frame);
+    const text = JSON.stringify(frame);
     for (const stream of streams) {
       const email = teamPerson(stream.person);
-      if (email !== null && (emails === null || emails.has(email))) send(stream, text);
+      if (email !== null && (emails === null || emails.has(email))) stream.send(frame.kind, text);
     }
   }
   function emit(event: PresenceEvent): void {

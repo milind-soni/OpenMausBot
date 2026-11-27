@@ -43,9 +43,9 @@ function setup(team = true) {
   const threadBots: Record<string, string> = { shared: "scout", "ada-private": "scout", "ada-own": "mausbot", hidden: "scout" };
   const groups: Record<string, { memberIds: string[] }> = { room: { memberIds: ["scout"] }, "room-own": { memberIds: ["scout", "mausbot"] } };
   const sent: Array<{ to: string; frame: Record<string, unknown> }> = [];
-  /** An open event stream whose writes land in `sent`. */
-  const stream = (name: string, person?: SessionRecord): PresenceStream & { name: string } => ({ name, person, backpressured: false, close: () => {},
-    res: { writableLength: 0, once: () => {}, write: (frame: string) => { sent.push({ to: name, frame: JSON.parse(frame.replace(/^data: /, "")) as Record<string, unknown> }); return true; } } });
+  const stream = (name: string, person?: SessionRecord): PresenceStream & { name: string } => ({
+    name, person, send: (_kind, json) => { sent.push({ to: name, frame: JSON.parse(json) }); return true; },
+  });
   const streams = [stream(ADA, session(ADA)), stream(BEN, session(BEN, { teamRole: "admin", scopes: ["admin", "client"] })),
     stream("move-in", session("mover@acme.test", { moveIn: "b1" })), stream("server")];
   const broadcasts: Array<Record<string, unknown>> = [];

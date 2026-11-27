@@ -568,7 +568,8 @@ import {
   type Viewer,
 } from "./bot-visibility.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
-import { deliverSseFrame, openSseHeartbeat } from "./sse-fanout.ts"; import { createBotFrames, takesFrame, type BotFrameForm } from "./host/bot-frames.ts";
+import { createEventFeed, type EventWriter } from "./routes/event-feed.ts";
+import { createBotFrames, takesFrame, type BotFrameForm } from "./host/bot-frames.ts";
 import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret.ts";
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
@@ -4552,8 +4553,7 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
   store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: !personRequest(owner) });
 }
 
-interface SseClient {
-  res: ServerResponse;
+interface SseClient extends EventWriter {
   admin: boolean;
   /** On a Team Cloud, who the stream is for: its config frames carry that person's own profile. */
   person?: SessionRecord;
@@ -4561,12 +4561,9 @@ interface SseClient {
   appWindow: boolean; /** The phone behind this stream, as routes/phones.ts keys it: while it is open, that phone gets no push. */ pushKey?: string;
   /** Revoking or expiring this session must end the stream, not just future requests. */
   sessionId?: string;
-  backpressured: boolean;
   viewer: Viewer;
   seen: StreamSeen;
   ask: AskViewer;
-  /** Stops the heartbeat and leaves `sseClients` before ending the response; every way a stream ends goes through it. */
-  close: () => void;
 }
 const { streams: sseClients, ...teamPresence } = createTeamPresenceHost<SseClient>({ people: teamOwners.people, broadcast, audienceOf: (threadId) => teamHost.audienceOf(threadId), sharedWithOne: (threadId) => conversationShares.readers(threadId) !== null, store: () => store, visibleTo }); type StreamView = Pick<SseClient, "admin" | "person" | "viewer" | "seen" | "ask">; const phonePush = new PhonePush({ dataDir: DATA_DIR, access: () => phonePushAccess.current(), enabled: () => phonePushEnabled(cfg), live: (key) => [...sseClients].some((client) => client.pushKey === key), room: (notification) => { const group = (notification.groupId ? store.group(notification.groupId) : undefined) ?? store.groupByThread(notification.threadId); return group && !group.dm ? { id: group.id, name: group.name } : undefined; } }); const phoneActivity = new PhoneActivity({ dataDir: DATA_DIR, push: phonePush, available: () => CLOUD_TEAM === null, /* a Team Cloud: a bot's state is everyone's, not one person's */ hasOpenAsk: (botId) => openCardRows().some((row) => row.fromBotId === botId || store.botByThread(row.threadId)?.id === botId), bot: (botId) => { const bot = store.bot(botId); const working = bot ? store.tasks(botId).find((task) => threadBusy(botId, task.threadId)) : undefined; return bot ? { name: bot.name, busy: Boolean(working), threadId: working?.threadId ?? bot.threadId } : undefined; }, botOfThread: (threadId) => store.botByThread(threadId)?.id });
 
@@ -4649,6 +4646,7 @@ const SSE_HEARTBEAT_MS =
   Number.isFinite(configuredSseHeartbeatMs) && configuredSseHeartbeatMs > 0
     ? configuredSseHeartbeatMs
     : 15_000;
+const openEventFeed = createEventFeed(upgrades, SSE_HEARTBEAT_MS, id => sessions.isLive(id));
 let lastSeq = 0;
 const replayBuffer = new ReplayBuffer();
 
@@ -4664,7 +4662,6 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
 }
 
 const numberedJson = (payload: Record<string, unknown>, seq: number) => JSON.stringify({ ...payload, seq });
-const sseMessage = (seq: number, json: string) => `id: ${STREAM_ID}:${seq}\ndata: ${json}\n\n`;
 
 /** `adminOnly` frames are withheld from client sessions, live and on replay; a `person`'s frames reach only their streams. */
 function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string; frames?: BotFrameForm } = {}) {
@@ -4680,9 +4677,10 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   replayBuffer.push(event); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, options));
   const ownGroups: OwnGroupFrames | undefined = kind === "group" && sseClients.size > 1 ? new Map() : undefined;
   const projected = ownGroups && new Map<Record<string, unknown>, string>();
+  const id = `${STREAM_ID}:${seq}`;
   for (const client of Array.from(sseClients)) {
     const out = streamJson(client, event, ownGroups, projected);
-    if (out !== null && deliverSseFrame(client, kind, sseMessage(seq, out)) === "disconnected") client.close();
+    if (out !== null) client.send(kind, out, id);
   }
 }
 
@@ -14470,56 +14468,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     if (method === "GET" && path === "/api/events") {
       const pushKey = phoneKey(auth);
-      const client: SseClient = {
-        res, ...streamView(auth, viewer), ...(pushKey ? { pushKey } : {}),
-        screens: url.searchParams.get("screens") !== "off", threadFrames: url.searchParams.get("frames") === "thread", appWindow: url.searchParams.get("window") === "1",
-        backpressured: false,
-        // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
-        close: openSseHeartbeat(res, {
-          everyMs: SSE_HEARTBEAT_MS,
-          live: () => !client.sessionId || sessions.isLive(client.sessionId),
-          onClose: () => sseClients.delete(client),
-        }),
-      };
-      if (auth.kind === "session") client.sessionId = auth.session.id;
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-        // Honoured by nginx-compatible reverse proxies; harmless elsewhere.
-        "x-accel-buffering": "no",
-      });
-
-      // EventSource reconnects with a newer Last-Event-ID while the URL keeps an older ?since=: prefer the header, or the stale query replays forever.
-      const since =
-        cursorSeq(req.headers["last-event-id"]) ??
-        cursorSeq(url.searchParams.get("since") ?? undefined);
-      // A cursor that fell off the buffer gets no partial replay: it would leave a permanent hole.
-      const resumed =
-        since !== null &&
-        since <= lastSeq &&
-        replayBuffer.covers(since, lastSeq) && botFrames.resumable(since, threadFramesFor(client)) &&
-        // A replay is judged by today's audience and cannot withdraw what an audience change hid: snapshot instead.
-        !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
-      res.write(
-        `data: ${JSON.stringify({
-          kind: "hello",
-          cursor: `${STREAM_ID}:${lastSeq}`,
-          resumed,
-        } satisfies ServerFrame)}\n\n`,
-      );
-      if (resumed) {
-        for (const buffered of replayBuffer) {
-          if (buffered.seq <= since) continue;
-          const json = streamJson(client, buffered);
-          if (json !== null) res.write(sseMessage(buffered.seq, json));
+      let active: SseClient | undefined;
+      return openEventFeed(req, res, auth, writer => {
+        const client: SseClient = {
+          ...writer, ...streamView(auth, viewer), ...(pushKey ? { pushKey } : {}),
+          sessionId: auth.kind === "session" ? auth.session.id : undefined,
+          screens: url.searchParams.get("screens") !== "off", threadFrames: url.searchParams.get("frames") === "thread", appWindow: url.searchParams.get("window") === "1",
+        };
+        active = client;
+        const since = cursorSeq(req.headers["last-event-id"]) ?? cursorSeq(url.searchParams.get("since") ?? undefined);
+        const resumed = since !== null && since <= lastSeq && replayBuffer.covers(since, lastSeq)
+          && botFrames.resumable(since, threadFramesFor(client))
+          && !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
+        if (!client.send("hello", JSON.stringify({ kind: "hello", cursor: `${STREAM_ID}:${lastSeq}`, resumed } satisfies ServerFrame))) return;
+        if (resumed) {
+          for (const buffered of replayBuffer) {
+            if (buffered.seq <= since) continue;
+            const json = streamJson(client, buffered);
+            if (json !== null && !client.send(buffered.kind, json, `${STREAM_ID}:${buffered.seq}`)) return;
+          }
         }
-      }
-
-      sseClients.add(client);
-      req.socket.setTimeout(0);
-      req.on("close", client.close);
-      return;
+        sseClients.add(client);
+      }, () => { if (active) sseClients.delete(active); });
     }
 
     if (method === "GET" && path === "/api/bot-defaults") {

@@ -37,6 +37,8 @@ Rejected approach: run an SSE-to-WebSocket proxy beside OpenMaus. It would add a
 - [ ] **Live gate:** pair a throwaway browser with the isolated fixture. Observe `hello`, a real reply frame, and application heartbeats over a socket. Revoke only the fixture session. The socket closes, receives no subsequent workspace data, and cannot reconnect with that session.
 - [ ] **Cost gate:** use the WS-1 workload with a slow socket and a healthy SSE reader. Stop if the slow socket can queue durable events without a bound, if it stalls the healthy reader, or if a socket adds a second upstream HTTP subscription. Apply the existing 4 MiB disconnect policy and account for a single in-flight frame when checking queue size.
 
+Run `node scripts/verify-websocket-feed.ts` with `OMB_CDP_CHROME` set to a Chromium executable. The check pairs a temporary browser, compares live and replayed replies with SSE, and revokes only the fixture session. It does not change the browser's default transport.
+
 ## WS-3. Prefer WebSocket in the direct web app, then pilot it
 
 - [ ] **Depends on:** WS-2. **Files:** [browser live-event controller](../../src/lib/live-events.ts), a small browser adapter beside it, [live-event tests](../../src/lib/live-events.test.ts), a browser fixture under `scripts/testing/`, and the verification recipe. Retain [the encrypted phone relay](../../src/lib/relay-server.ts) as the first choice when a relay link exists. Leave desktop, CLI, and native phone consumers on their current paths.
