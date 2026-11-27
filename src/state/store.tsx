@@ -1849,13 +1849,8 @@ export { api, ApiError, liveCallFromFrame, nextLiveCallLookup };
 /** Messages per snapshot thread and per scrollback page: the server's own page maximum. */
 export const SWITCH_MESSAGE_COUNT = 80;
 
-type TrustedApprovalBridge = {
-  setMode(
-    botId: string,
-    mode: ApprovalMode,
-    options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean; allThreads?: boolean; refreshPermissions?: boolean },
-  ): Promise<BotAnnouncement>;
-};
+type PreloadApprovals = NonNullable<NonNullable<Window["ogb"]>["approvals"]>;
+type TrustedApprovalBridge = { setMode(...args: Parameters<PreloadApprovals["setMode"]>): Promise<BotAnnouncement> };
 
 export function desktopApprovalBridge(): TrustedApprovalBridge | undefined {
   if (typeof window === "undefined" || !window.ogb?.approvals) return undefined;
