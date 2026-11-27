@@ -88,7 +88,7 @@ import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMess
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
-import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { isPlaceId } from "@/lib/place-chat"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots"; import { ChatActivityControls, chatActivityMessages, useChatActivity } from "./ChatActivity";
+import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { isPlaceId } from "@/lib/place-chat"; import { PlacedModelPill } from "./PlacedBotMenu"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots"; import { ChatActivityControls, chatActivityMessages, useChatActivity } from "./ChatActivity";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated"; import { NewThreadHeaderButton } from "./NewThreadHeaderButton"; import { HeaderThreadTabs, useThreadTabsShown } from "./HeaderThreadTabs";
 import { ModelPicker } from "./ModelPicker"; import { useFailedTurnFix } from "./FailedTurnFix";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine"; import { ownChatStarted } from "@/state/team-chats"; import { isNewChatThread } from "@/state/new-chat";
@@ -951,7 +951,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
                   }
                 }}
                 onActivate={() => dispatch({ type: "toggleSettings", open: true })}
-                showEditButton
+                showEditButton editable={!isPlaceId(bot.id)}
                 className="truncate text-[14px] font-semibold text-ink"
                 editButtonClassName="size-6 rounded-full"
                 inputClassName="max-w-[220px] rounded-full bg-inset px-2 py-0.5 text-[14px] font-semibold"
@@ -1007,13 +1007,13 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* Simple mode keeps the model here and moves only ⋯ into the bot panel; Advanced shows it under the composer's field. */}
-          {!phone && (!advanced || canWrite === false) && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} folded={state.settingsOpen || state.computerOpen} />}
+          {!phone && (!advanced || canWrite === false) && (isPlaceId(bot.id) ? <PlacedModelPill bot={bot} /> : <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} folded={state.settingsOpen || state.computerOpen} />)}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, store.state(), showThreads)} />{!phoneMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
           <PinnedMessagesMenu
             pins={pinnedPreview(messages, bot.pinnedMessageId, bot.name)}
             triggerClassName={cn(ELEVATED_FLOAT, ELEVATED_HOVER)}
             onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })}
-            onUnpin={remoteClient || isPlaceId(bot.id) ? undefined : () => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })}
+            onUnpin={remoteClient ? undefined : () => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })}
           />
           {!phoneMenu && !isPlaceId(bot.id) && <button
             data-tour="computer"

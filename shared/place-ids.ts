@@ -22,55 +22,68 @@ export const ownId = (id: string): string => (isPlaceId(id) ? id.slice(PREFIX.le
 /** The keys whose values are a bot's or a conversation's id, or a list of them: `botId`, `threadId`, `fromThreadId`,
  * `mainThreadId`, `botIds`… Only these are rewritten, never words: a message that starts with "cloud:" stays as written. */
 export const ID_KEY = /^(?:[a-z][a-zA-Z]*(?:Bot|Thread)|bot|thread)Ids?$/;
-const FILE_URL = /^\/api\/attachments\/([\w.-]+)$/;
+/** A picture of My Cloud's this page shows by its address: a bot's own avatar. */
+const FILE_URL_KEYS = new Set(["avatarUrl"]);
+const FILE_URL = /^\/api\/attachments\/([\w-][\w.-]*)$/;
+/** A link My Cloud's file route gives a <video> or <audio> element: on the conversation's own route. */
+const MEDIA_URL = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/file\?media=([\w-]+)$/;
+/** What a bot or a person wrote, or an engine's own words and tool calls: never rewritten, whatever keys they hold. */
+const WRITTEN = new Set(["text", "widget", "app", "tool", "card", "digest", "compaction", "summary", "content", "markdown", "html", "input", "output", "args", "result"]);
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const basename = (path: string): string => path.split(/[\\/]/).pop() ?? "";
 
 type Ids = (id: string) => string;
+type Way = { ids: Ids; path: (path: string) => string; url: (url: string) => string; into: boolean };
 
-function rewrite(value: unknown, ids: Ids, files: (path: string) => string, key: string | null, depth: number): unknown {
+function rewrite(value: unknown, way: Way, key: string | null, depth: number): unknown {
   if (depth > 64) return value;
-  if (typeof value === "string") {
-    if (key !== null && ID_KEY.test(key)) return ids(value);
-    return value;
-  }
+  if (typeof value === "string") return key !== null && ID_KEY.test(key) ? way.ids(value) : value;
   if (Array.isArray(value)) {
     const listOfIds = key !== null && ID_KEY.test(key);
-    return value.map((item) => (listOfIds && typeof item === "string" ? ids(item) : rewrite(item, ids, files, key === "bots" ? "bot" : key === "attachments" ? "attachment" : null, depth + 1)));
+    return value.map((item) => (listOfIds && typeof item === "string" ? way.ids(item) : rewrite(item, way, key === "bots" ? "bot" : key === "attachments" ? "attachment" : null, depth + 1)));
   }
   if (!record(value)) return value;
   const out: Record<string, unknown> = {};
   for (const [name, item] of Object.entries(value)) {
+    if (WRITTEN.has(name)) { out[name] = item; continue; }
     // A bot's own id: the bot under `bot`, and each one under `bots`.
-    if (name === "id" && key === "bot" && typeof item === "string") out[name] = ids(item);
-    else if (name === "path" && key === "attachment" && typeof item === "string") out[name] = files(item);
-    else if (typeof item === "string" && FILE_URL.test(item)) out[name] = files(item);
-    else out[name] = rewrite(item, ids, files, name, depth + 1);
+    if (name === "id" && key === "bot" && typeof item === "string") out[name] = way.ids(item);
+    else if (name === "path" && (key === "attachment" || key === null && depth === 0) && typeof item === "string") out[name] = way.path(item);
+    // Where a file came from on My Cloud's own disk is My Cloud's, never shown on this computer.
+    else if (name === "source" && key === "attachment" && way.into) continue;
+    else if (FILE_URL_KEYS.has(name) && typeof item === "string") out[name] = way.url(item);
+    else if (name === "url" && depth === 0 && typeof item === "string") out[name] = way.url(item);
+    else out[name] = rewrite(item, way, name, depth + 1);
   }
   return out;
 }
 
-/** My Cloud's answer as this page receives it: each bot and conversation id with My Cloud's key in front, and each of
- * its files under a name this page asks for through its own server. `remember(name, path)` keeps the path My Cloud
- * gave a file, so a message sent back that names it names My Cloud's own path again. */
+/** My Cloud's answer as this page receives it: each bot and conversation id with My Cloud's key in front, each of its
+ * files under a name this page asks for through its own server, and a media link on the conversation's place route.
+ * `remember(name, path)` keeps the path My Cloud gave a file, so a request that names it names My Cloud's own path
+ * again. */
 export function intoPlace(value: unknown, remember: (name: string, path: string) => void = () => {}): unknown {
-  const files = (path: string) => {
-    const at = FILE_URL.exec(path);
-    const name = at ? at[1]! : basename(path);
-    if (!name || name.startsWith(PLACE_FILE_PREFIX)) return path;
+  const named = (name: string, path: string) => {
+    if (!name || name.startsWith(PLACE_FILE_PREFIX) || !/^[\w-][\w.-]*$/.test(name)) return null;
     const placed = `${PLACE_FILE_PREFIX}${name}`;
     remember(placed, path);
-    return at ? `/api/attachments/${placed}` : placed;
+    return placed;
   };
-  return rewrite(value, placeId, files, null, 0);
+  return rewrite(value, {
+    ids: placeId, into: true,
+    path: (path) => named(basename(path), path) ?? path,
+    url: (url) => {
+      const file = FILE_URL.exec(url);
+      if (file) { const placed = named(file[1]!, url); return placed ? `/api/attachments/${placed}` : url; }
+      const media = MEDIA_URL.exec(url);
+      return media ? `/api/threads/${encodeURIComponent(placeId(media[1]!))}/messages/${media[2]}/file?media=${media[3]}` : url;
+    },
+  }, null, 0);
 }
 
 /** What this page sends My Cloud, in My Cloud's own ids. `recall(name)` gives back the path a file came with. */
 export function outOfPlace(value: unknown, recall: (name: string) => string | undefined = () => undefined): unknown {
-  const files = (path: string) => {
-    const name = basename(path);
-    return name.startsWith(PLACE_FILE_PREFIX) ? recall(name) ?? path : path;
-  };
-  return rewrite(value, ownId, files, null, 0);
+  const back = (path: string) => { const name = basename(path); return name.startsWith(PLACE_FILE_PREFIX) ? recall(name) ?? path : path; };
+  return rewrite(value, { ids: ownId, into: false, path: back, url: back }, null, 0);
 }

@@ -352,14 +352,14 @@ export function Composer({
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
   const candidates = useMemo(() => {
-    if (!mention || mention.start === dismissedAt) return [];
+    if (!mention || mention.start === dismissedAt || isPlaceId(bot?.id)) return []; // a My Cloud bot's chat names none of this computer's
     const pool: MentionChoice[] = group
       ? [
           ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : bots
-          .filter((member) => member.id !== bot?.id && !member.hidden && !hiddenFromSidebar(member, viewer))
+          .filter((member) => member.id !== bot?.id && !member.hidden && !isPlaceId(member.id) && !hiddenFromSidebar(member, viewer))
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
     return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
   }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);

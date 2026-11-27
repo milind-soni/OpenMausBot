@@ -11591,6 +11591,7 @@
   "together.state.asleep": "O My Cloud está em repouso. Abra um bot para ativá-lo.",
   "together.state.waking": "O My Cloud está sendo ativado…",
   "together.openThere": "Abrir na página do My Cloud",
+  "together.inPlace.model": "O modelo deste bot é alterado na página do My Cloud.",
   "together.inPlace.files": "Para enviar arquivos a um bot do My Cloud, abra-o na página do My Cloud: no menu ⋯ dele na lista.",
   "together.inPlace.panel": "As configurações, os arquivos, o computador e tudo o mais de {name}, além desta conversa, ficam na própria página do My Cloud.",
   "together.state.offlineCloud": "Não é possível acessar o My Cloud agora.",

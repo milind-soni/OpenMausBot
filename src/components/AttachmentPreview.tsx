@@ -38,7 +38,7 @@ import { serverErrorText } from "@/lib/server-error";
 import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
+import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { isPlaceId } from "@/lib/place-chat"; import { serverFetch } from "@/lib/relay-server";
 
 export interface PreviewImage {
   src: string;
@@ -304,7 +304,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
         const listing = await response.json() as MessageFolderListing;
         if (!mounted.current || controller.signal.aborted) return;
         setState("idle");
-        if (!(await openLinkedFolder(filePath)) && !controller.signal.aborted) setFolder(listing); // Security: only a path this message's route just authorized reaches the desktop bridge.
+        if (!(!isPlaceId(message.threadId) && await openLinkedFolder(filePath)) && !controller.signal.aborted) setFolder(listing); // Security: only a path this message's route just authorized reaches the desktop bridge.
         return;
       }
       const blob = await response.blob();

@@ -87,10 +87,11 @@ export function closePlaceBot(key: string): void {
   placeFrame({ kind: "bot.deleted", botId: key });
 }
 
-/** Reads the bot again (the stream started over, or resumed from too far back). */
+/** Reads the bot again (the stream started over, or resumed from too far back): as background work, which My Cloud
+ * never counts as the person using it. */
 async function reread(key: string): Promise<void> {
   try {
-    const { bot } = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(key)}?messages=${OPEN_MESSAGES}`);
+    const { bot } = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(key)}?messages=${OPEN_MESSAGES}`, { background: true });
     if (bot?.id === key && live?.key === key) placeFrame({ kind: "bot", bot: placeBot(bot) } as unknown as ServerFrame);
   } catch {
     // The stream's own retry reads again.
@@ -100,6 +101,8 @@ async function reread(key: string): Promise<void> {
 interface Platform {
   createEventSource(url: string): { onopen: (() => void) | null; onerror: (() => void) | null; onmessage: ((event: { data: string; lastEventId?: string }) => void) | null; close(): void };
   visible(): boolean;
+  /** Main's word that My Cloud is awake now (the Admin's, never a request to My Cloud, which would wake it). */
+  awake(): Promise<boolean>;
   target?: Pick<Window, "addEventListener" | "removeEventListener">;
 }
 
@@ -113,18 +116,25 @@ const browser = (): Platform => ({
     return source;
   },
   visible: () => typeof document === "undefined" || document.visibilityState === "visible",
+  awake: async () => { const page = bridge(); return page?.cloudAwake ? page.cloudAwake().catch(() => false) : true; },
   target: typeof window === "undefined" ? undefined : window,
 });
 
-/** The bot's live stream while it is open here and the page is in sight. My Cloud going to sleep closes it quietly; the
- * person's next click, key or return to the window opens it again, which wakes My Cloud as any use of it does. */
+/** How often the person's input may ask main whether My Cloud is awake, and the one look again after it said no. */
+const AWAKE_LOOK_MS = 10_000;
+const AWAKE_AGAIN_MS = 20_000;
+
+/** The bot's live stream while it is open here and the page is in sight. Nothing here wakes My Cloud: the stream and its
+ * reads are background work, and once it has gone quiet (My Cloud agreed to sleep, the connection dropped, the window was
+ * hidden) it opens again only after main says My Cloud is awake: on a retry, or on the person's next click, key or
+ * return to the window. A person who leaves the bot open never keeps My Cloud awake. Their own sends wake it. */
 export function keepLive(key: string, cannot: () => void, platform: Platform = browser()): () => void {
   live?.stop();
-  let source: ReturnType<Platform["createEventSource"]> | null = null, since: string | null = null, tries = 0, opened = false, stopped = false, asleep = false;
-  let timer: ReturnType<typeof setTimeout> | null = null;
+  let source: ReturnType<Platform["createEventSource"]> | null = null, since: string | null = null, tries = 0, opened = false, stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null, again: ReturnType<typeof setTimeout> | null = null, looking = false, lookedAt = -Infinity;
   const close = () => { if (source) { source.onopen = source.onerror = source.onmessage = null; source.close(); source = null; } };
   const connect = () => {
-    if (stopped || source || asleep || !platform.visible()) return;
+    if (stopped || source || !platform.visible()) return;
     const url = `${PLACE_EVENTS_PATH}?bot=${encodeURIComponent(key)}${since ? `&since=${encodeURIComponent(since)}` : ""}`;
     const current = platform.createEventSource(url);
     source = current;
@@ -134,9 +144,7 @@ export function keepLive(key: string, cannot: () => void, platform: Platform = b
       close();
       tries += 1;
       if (!opened && tries >= FIRST_TRIES) { stop(); cannot(); return; }
-      // This computer's server may have restarted since, without the session: main tells it again.
-      if (opened) void bridge()?.openInPlace?.(ownId(key)).catch(() => {});
-      timer = setTimeout(() => { timer = null; connect(); }, RETRY_MS[Math.min(tries - 1, RETRY_MS.length - 1)]);
+      timer = setTimeout(() => { timer = null; void look(true); }, RETRY_MS[Math.min(tries - 1, RETRY_MS.length - 1)]);
     };
     current.onmessage = (event) => {
       if (source !== current) return;
@@ -146,23 +154,44 @@ export function keepLive(key: string, cannot: () => void, platform: Platform = b
       if (frame.kind === "ping") return;
       if (frame.kind === "hello") { if (frame.resumed !== true) void reread(key); return; }
       if (frame.kind === "power") {
-        if (frame.state === "sleeping") { asleep = true; close(); }
+        if (frame.state === "sleeping") close();
         return;
       }
       placeFrame(frame as ServerFrame);
     };
   };
-  const wake = () => {
+  /** Opens the stream again once main says My Cloud is awake. `retry`: the stream's own retry, not the person. */
+  const look = async (retry: boolean) => {
+    if (stopped || source || looking || !platform.visible()) return;
+    if (!retry && performance.now() - lookedAt < AWAKE_LOOK_MS) return;
+    looking = true;
+    lookedAt = performance.now();
+    let awake = false;
+    try { awake = await platform.awake(); } catch { awake = false; }
+    looking = false;
+    if (stopped || source) return;
+    if (!awake) {
+      // Asleep, as far as main knows: one look again a while after the person's input (a send of theirs wakes it), then
+      // nothing until they do something here again.
+      if (!retry && again === null) again = setTimeout(() => { again = null; lookedAt = -Infinity; void look(true); }, AWAKE_AGAIN_MS);
+      return;
+    }
+    // This computer's server may have restarted since, without the session: main tells it again.
+    if (opened) await bridge()?.openInPlace?.(ownId(key)).catch(() => {});
+    connect();
+  };
+  const input = () => {
     if (!platform.visible()) { close(); return; }
-    if (asleep) { asleep = false; connect(); } else if (!source && timer === null) connect();
+    if (!source && timer === null) void look(false);
   };
   const events = ["pointerdown", "keydown", "focus", "visibilitychange"] as const;
-  for (const name of events) platform.target?.addEventListener(name, wake, { capture: true });
+  for (const name of events) platform.target?.addEventListener(name, input, { capture: true });
   const stop = () => {
     stopped = true;
     if (timer !== null) clearTimeout(timer);
+    if (again !== null) clearTimeout(again);
     close();
-    for (const name of events) platform.target?.removeEventListener(name, wake, { capture: true });
+    for (const name of events) platform.target?.removeEventListener(name, input, { capture: true });
   };
   live = { key, stop };
   connect();

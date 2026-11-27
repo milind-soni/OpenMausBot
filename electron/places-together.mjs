@@ -555,6 +555,14 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       } catch { return { ok: false }; }
       finally { if (mine === epoch) { readying = Math.max(0, readying - 1); tell(); } }
     },
+    /** Whether My Cloud is awake now, as the Admin says it (asked again when its word is old), for a bot open in place
+     * whose stream went quiet: never a request to My Cloud itself, which would wake it. This computer's page only. */
+    async cloudAwake(asking) {
+      sameScope();
+      if (asking !== "computer" || !active() || cloud().asleep) return false;
+      const answered = await powerChecked().catch(() => false);
+      return answered === true && active() && !cloud().asleep;
+    },
     /** The person moved bots in the one list (a drag or Alt+Up/Down, on either page): their entries replace the ones they
      * had. Nothing of either place's own server changes here. What this account has kept now. */
     arrange(asking, entries) {
@@ -642,6 +650,7 @@ export function installPlacesTogether({ ipcMain, asking, together, rail = () => 
     return together.set(page, value === true, { listOnly: from === "notice" });
   });
   ipcMain.handle("places-together:open", (event, botId) => together.open(side(event), String(botId)));
+  ipcMain.handle("places-together:cloud-awake", (event) => together.cloudAwake(side(event)));
   ipcMain.handle("places-together:open-in-place", (event, botId, fresh) => together.openInPlace(side(event), String(botId), { fresh: fresh === true }));
   ipcMain.handle("places-together:arrange", (event, entries) => together.arrange(side(event), entries));
   ipcMain.handle("places-together:new-bot-choice", (event) => together.newBotChoice(side(event)));

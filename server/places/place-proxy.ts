@@ -60,7 +60,9 @@ const ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ["POST", /^\/api\/threads\/[\w-]+\/job\/[\w-]+\/stop$/],
   ["GET", /^\/api\/threads\/[\w-]+\/messages$/],
   ["GET", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/(?:image|file|tool)$/],
-  ["GET", /^\/api\/attachments\/[\w.-]+$/],
+  // A file a message names: its bytes, a folder's list, or a link a <video> or <audio> element can play (`?media=`).
+  ["POST", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/],
+  ["GET", /^\/api\/attachments\/[\w-][\w.-]*$/],
 ];
 
 /** The frames of My Cloud's stream that are about one bot's conversations. Anything else (its other bots, its rooms,
@@ -74,30 +76,36 @@ type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const decoded = (segment: string): string => { try { return decodeURIComponent(segment); } catch { return segment; } };
 
-/** The request names My Cloud's bot, conversation or file in its path: the path in My Cloud's own ids, else null. */
+/** One segment of a path forwarded to My Cloud, decoded: a name of letters, digits, `_`, `-` and dots that never starts
+ * with a dot, so never `.`, `..`, empty, or anything holding a slash, a backslash or a percent sign. */
+const SEGMENT = /^[\w-][\w.-]*$/;
+
+/** The request names My Cloud's bot, conversation or file in its path: the path in My Cloud's own ids, else null. A path
+ * that names one but holds any other segment (`.`, `..`, an encoded slash) is answered here, never forwarded: "" stands
+ * for "placed, and refused". */
 export function placedPath(path: string): string | null {
   const parts = path.split("/");
   if (parts[1] !== "api") return null;
-  if (parts[2] === "attachments" && parts.length === 4) {
+  if (parts[2] === "attachments" && parts.length >= 4) {
     const name = decoded(parts[3]!);
-    return name.startsWith(PLACE_FILE_PREFIX) ? `/api/attachments/${encodeURIComponent(name.slice(PLACE_FILE_PREFIX.length))}` : null;
+    if (!name.startsWith(PLACE_FILE_PREFIX)) return null;
+    const own = name.slice(PLACE_FILE_PREFIX.length);
+    return parts.length === 4 && SEGMENT.test(own) ? `/api/attachments/${own}` : "";
   }
   if ((parts[2] !== "bots" && parts[2] !== "threads") || parts.length < 4) return null;
   const id = decoded(parts[3]!);
   if (!isPlaceId(id)) return null;
-  const rest = parts.slice(4).map((part) => {
-    const value = decoded(part);
-    return encodeURIComponent(isPlaceId(value) ? ownId(value) : value);
-  });
   const own = ownId(id);
-  return OWN_ID.test(own) ? ["", "api", parts[2], own, ...rest].join("/") : null;
+  const rest = parts.slice(4).map((part) => { const value = decoded(part); return isPlaceId(value) ? ownId(value) : value; });
+  return OWN_ID.test(own) && rest.every((part) => SEGMENT.test(part)) ? ["", "api", parts[2], own, ...rest].join("/") : "";
 }
 
 const allowed = (method: string, path: string): boolean => ROUTES.some(([verb, pattern]) => verb === method && pattern.test(path));
 
 function sameToken(given: unknown, expected: string): boolean {
-  if (typeof given !== "string" || given.length !== expected.length) return false;
-  return timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+  if (typeof given !== "string") return false;
+  const a = Buffer.from(given), b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** A message main sends this server over its private port: My Cloud's address and the owner session for it, or none. */
@@ -133,6 +141,43 @@ function learnThreads(bot: Record<string, unknown>, threads: Set<string>): void 
   if (typeof bot.threadId === "string") threads.add(bot.threadId);
   if (typeof bot.mainThreadId === "string") threads.add(bot.mainThreadId);
   if (Array.isArray(bot.tasks)) for (const task of bot.tasks) if (record(task) && typeof task.threadId === "string") threads.add(task.threadId);
+}
+
+/** Image kinds a page may draw inline from My Cloud: raster pictures only, never SVG (it can carry script). */
+const INLINE_IMAGE = /^image\/(?:png|jpeg|gif|webp|avif|bmp)$/i;
+const INLINE_AUDIO = /^audio\//i;
+
+/** The headers My Cloud's bytes are served with on this server's own (trusted) origin: never sniffed, never run, and
+ * anything but a raster picture or a sound is a download, whatever My Cloud said it was. */
+export function servedFileHeaders(upstream: Pick<Response, "headers">): Record<string, string> {
+  const type = (upstream.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase() || "application/octet-stream";
+  const headers: Record<string, string> = {
+    "content-type": type, "cache-control": "private, no-store",
+    "x-content-type-options": "nosniff", "content-security-policy": "sandbox; default-src 'none'",
+  };
+  for (const name of ["content-length", "content-range", "accept-ranges"]) {
+    const value = upstream.headers.get(name);
+    if (value && /^[\w ,=/*-]{1,200}$/.test(value)) headers[name] = value;
+  }
+  if (!INLINE_IMAGE.test(type) && !INLINE_AUDIO.test(type)) {
+    const named = /filename\*?=(?:UTF-8'')?"?([^";]{1,200})"?/i.exec(upstream.headers.get("content-disposition") ?? "")?.[1];
+    const safe = named ? named.replace(/[^\w .()-]/g, "_") : "";
+    headers["content-disposition"] = safe ? `attachment; filename="${safe}"` : "attachment";
+  }
+  return headers;
+}
+
+/** Writes `chunk`, waiting for the page to take what it was sent before more is read from My Cloud. False once the page
+ * has gone. */
+async function written(res: ServerResponse, chunk: string | Uint8Array): Promise<boolean> {
+  if (res.destroyed || res.writableEnded) return false;
+  if (res.write(chunk)) return true;
+  return new Promise((done) => {
+    const drained = () => { res.off("close", closed); done(true); };
+    const closed = () => { res.off("drain", drained); done(false); };
+    res.once("drain", drained);
+    res.once("close", closed);
+  });
 }
 
 /** Events in the text/event-stream format, one at a time as their blank line arrives: never held for more. */
@@ -173,6 +218,8 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerat
  */
 export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch }: { fetch?: Fetch } = {}) {
   let session: PlaceSession | null = null;
+  /** Every live stream open on the session: a new session, or none, ends them all at once. */
+  const streams = new Set<AbortController>();
   let ownerToken: string | null = null;
   const files = new Map<string, string>();
   const remember = (name: string, path: string) => {
@@ -212,18 +259,15 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
         const { code: _code, ...said } = placed;
         return json(res, upstream.status === 403 ? 409 : upstream.status, { ...said, code: "place_refused" });
       }
+      // A folder a message names comes back as its list, marked so the page draws it as one.
+      if (upstream.headers.get("x-openmausbot-folder") === "1") res.setHeader("x-openmausbot-folder", "1");
       return json(res, upstream.status, placed);
     }
-    // A file or an image: its bytes as they come, kept by nobody.
-    const headers: Record<string, string> = { "content-type": type || "application/octet-stream", "cache-control": "private, no-store" };
-    const length = upstream.headers.get("content-length");
-    if (length && /^\d+$/.test(length)) headers["content-length"] = length;
-    const disposition = upstream.headers.get("content-disposition");
-    if (disposition) headers["content-disposition"] = disposition;
-    res.writeHead(upstream.status, headers);
+    // A file or an image: its bytes as they come, kept by nobody, never run on this origin.
+    res.writeHead(upstream.status, servedFileHeaders(upstream));
     if (!upstream.body) { res.end(); return; }
     for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) {
-      if (!res.write(chunk)) await new Promise((done) => res.once("drain", done));
+      if (!(await written(res, chunk))) { await upstream.body.cancel().catch(() => {}); return; }
     }
     res.end();
   }
@@ -253,6 +297,7 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
           accept: String(req.headers.accept ?? "application/json"), authorization: `Bearer ${own.token}`,
           ...(body !== undefined ? { "content-type": "application/json" } : {}),
           ...(req.headers[BACKGROUND_HEADER] ? { [BACKGROUND_HEADER]: "1" } : {}),
+          ...(typeof req.headers.range === "string" && /^bytes=[\d,-]{1,100}$/.test(req.headers.range) ? { range: req.headers.range } : {}),
         },
       });
     } catch {
@@ -271,8 +316,12 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
     const bot = isPlaceId(named) ? ownId(named) : "";
     if (!OWN_ID.test(bot)) return json(res, 400, { error: "name the bot" });
     const stop = new AbortController();
-    req.on("close", () => stop.abort());
-    const headers = { authorization: `Bearer ${own.token}` };
+    streams.add(stop);
+    stop.signal.addEventListener("abort", () => { streams.delete(stop); if (!res.writableEnded) res.end(); }, { once: true });
+    res.on("close", () => stop.abort());
+    // Neither the read nor the stream is the person using My Cloud: a page left open never keeps it awake, and one that
+    // fell asleep answers so rather than being counted as a visit (the person's own sends and clicks wake it).
+    const headers = { authorization: `Bearer ${own.token}`, [BACKGROUND_HEADER]: "1" };
     const threads = new Set<string>();
     // The conversations the bot has now, so the frames of each are known before the stream's first word about the bot.
     let seed: Response;
@@ -305,11 +354,12 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
     void (async () => {
       try {
         for await (const event of sseEvents(upstream.body!)) {
+          if (stop.signal.aborted) break;
           let frame: unknown;
           try { frame = JSON.parse(event.data); } catch { continue; }
           const kept = frameForBot(frame, bot, threads);
           if (kept === null) continue;
-          res.write(`${event.id ? `id: ${event.id}\n` : ""}data: ${JSON.stringify(intoPlace(kept, remember))}\n\n`);
+          if (!(await written(res, `${event.id ? `id: ${event.id}\n` : ""}data: ${JSON.stringify(intoPlace(kept, remember))}\n\n`))) break;
         }
       } catch {
         // The end of either side ends the stream; the page reconnects.
@@ -325,6 +375,7 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
     const events = path === PLACE_EVENTS_PATH;
     const placed = events ? null : placedPath(path);
     if (!events && placed === null) return PASS;
+    if (placed === "") { ctx.req.resume(); return refuse(res, json, 404, "serverError.place.unsupported", "place_unsupported"); }
     if (!ownWindow(ctx)) { ctx.req.resume(); return refuse(res, json, 404, "serverError.place.unsupported", "place_unsupported"); }
     if (!session) { ctx.req.resume(); return refuse(res, json, 503, "serverError.place.offline", "place_closed"); }
     if (events) return method === "GET" ? stream(ctx, session) : json(res, 405, { error: "Use GET." });
@@ -334,7 +385,11 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
 
   return {
     route,
-    setSession(next: PlaceSession | null) { session = next; if (!next) files.clear(); },
+    setSession(next: PlaceSession | null) {
+      if (session && (next?.token !== session.token || next?.origin !== session.origin)) for (const stop of streams) stop.abort();
+      session = next;
+      if (!next) files.clear();
+    },
     setOwnerToken(token: string | null) { ownerToken = typeof token === "string" && token ? token : null; },
     hasSession: () => session !== null,
   };

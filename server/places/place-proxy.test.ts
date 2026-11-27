@@ -11,7 +11,7 @@ import { createPlaceProxy, frameForBot, parsePlaceSession, placedPath, type Plac
 const TOKEN = "omb_sess_test-token-0123456789";
 const OWNER = "o".repeat(43);
 
-interface Seen { method: string; url: string; authorization: string | undefined; body: string }
+interface Seen { method: string; url: string; authorization: string | undefined; body: string; background?: string; range?: string }
 
 const codeOf = async (response: Response) => ((await response.json()) as { code?: string }).code;
 let cloud: Server, local: Server, cloudUrl: string, localUrl: string, proxy: PlaceProxy;
@@ -19,6 +19,8 @@ const seen: Seen[] = [];
 /** The stand-in Cloud's answer to each request; the live stream is handled apart. */
 let answerWith: (req: IncomingMessage, res: ServerResponse, body: string) => void;
 let streamTo: ((res: ServerResponse, req: IncomingMessage) => void) | null = null;
+/** How this computer's server says the caller signed in: the app's window, unless a test says a phone or a shared server. */
+let callerAuth: Parameters<PlaceProxy["route"]>[0]["auth"] = { kind: "loopback", scopes: [] };
 
 const scout = {
   id: "scout", name: "Scout", threadId: "t1", mainThreadId: "t1", chiefOfStaff: true,
@@ -31,6 +33,7 @@ const listen = (server: Server) => new Promise<string>((done) => server.listen(0
 beforeEach(async () => {
   seen.length = 0;
   streamTo = null;
+  callerAuth = { kind: "loopback", scopes: [] };
   answerWith = (req, res) => {
     if (req.url?.startsWith("/api/bots/scout")) return void res.writeHead(200, { "content-type": "application/json", "set-cookie": "omb_session=secret" }).end(JSON.stringify({ bot: scout }));
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
@@ -39,7 +42,8 @@ beforeEach(async () => {
     let body = "";
     req.on("data", (chunk) => { body += chunk; });
     req.on("end", () => {
-      seen.push({ method: req.method!, url: req.url!, authorization: req.headers.authorization, body });
+      seen.push({ method: req.method!, url: req.url!, authorization: req.headers.authorization, body,
+        ...(req.headers["x-omb-background"] ? { background: String(req.headers["x-omb-background"]) } : {}), ...(req.headers.range ? { range: String(req.headers.range) } : {}) });
       if (req.url?.startsWith("/api/events") && streamTo) return streamTo(res, req);
       answerWith(req, res, body);
     });
@@ -50,7 +54,7 @@ beforeEach(async () => {
   proxy.setSession({ origin: cloudUrl, token: TOKEN });
   local = createServer((req, res) => {
     const url = new URL(req.url!, "http://127.0.0.1");
-    void proxy.route({ req, res, url, path: url.pathname, method: req.method!, auth: { kind: "loopback", scopes: [] }, json, readBody }).then((out) => {
+    void proxy.route({ req, res, url, path: url.pathname, method: req.method!, auth: callerAuth, json, readBody }).then((out) => {
       if (typeof out === "symbol") res.writeHead(418).end("passed");
     });
   });
@@ -230,7 +234,7 @@ describe("pieces", () => {
     expect(placedPath("/api/threads/cloud:t1/respond")).toBe("/api/threads/t1/respond");
     expect(placedPath("/api/attachments/cloud--a1.png")).toBe("/api/attachments/a1.png");
     expect(placedPath("/api/bots/scout/messages")).toBeNull();
-    expect(placedPath("/api/bots/cloud:../x")).toBeNull();
+    expect(placedPath("/api/bots/cloud:../x")).toBe("");
     expect(placedPath("/api/groups/cloud:g")).toBeNull();
   });
 
@@ -251,5 +255,121 @@ describe("pieces", () => {
     expect(frameForBot({ kind: "bot", bot: { id: "atlas" } }, "scout", threads)).toBeNull();
     expect(frameForBot({ kind: "bot.queued", queues: {} }, "scout", threads)).toBeNull();
     expect(frameForBot({ kind: "power", state: "sleeping" }, "scout", threads)).not.toBeNull();
+  });
+});
+
+describe("what the fix round closed", () => {
+  it("never forwards a path that leaves the route: dot segments and encoded slashes are refused here, and My Cloud is not asked", async () => {
+    for (const path of ["/api/attachments/cloud--..", "/api/attachments/cloud--.", "/api/attachments/cloud--..%2F..%2Fsettings", "/api/attachments/cloud--%2E%2E",
+      "/api/attachments/cloud--a/b", "/api/threads/cloud:t1/messages/..%2Fx/file", "/api/threads/cloud:t1/messages/m1%2F..%2F../file", "/api/bots/cloud:scout/tasks/%2E"]) {
+      const answer = await ask(path);
+      expect(answer.status, path).toBe(404);
+      expect(await codeOf(answer), path).toBe("place_unsupported");
+    }
+    expect(seen).toEqual([]);
+    for (const path of ["/api/attachments/cloud--..", "/api/attachments/cloud--.", "/api/attachments/cloud--%2E%2E", "/api/threads/cloud:t1/messages/..%2Fx/file", "/api/bots/cloud:scout/%2e%2e"]) {
+      expect(placedPath(path), path).toBe("");
+    }
+    expect(placedPath("/api/attachments/cloud--a1.b2-c.png")).toBe("/api/attachments/a1.b2-c.png");
+  });
+
+  it("forwards a message's file, and hands back its media link on the conversation's place route", async () => {
+    await (await ask("/api/bots/cloud%3Ascout?messages=80")).text();
+    seen.length = 0;
+    answerWith = (_req, res) => void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ url: "/api/threads/t1/messages/m1/file?media=abc-123", mime: "video/mp4" }));
+    const linked = await ask("/api/threads/cloud%3At1/messages/m1/file", { method: "POST", body: JSON.stringify({ path: "cloud--aa11-bb22.png", media: true }) });
+    expect(linked.status).toBe(200);
+    expect(await linked.json()).toEqual({ url: "/api/threads/cloud%3At1/messages/m1/file?media=abc-123", mime: "video/mp4" });
+    expect(seen[0]).toMatchObject({ method: "POST", url: "/api/threads/t1/messages/m1/file" });
+    expect(JSON.parse(seen[0]!.body)).toEqual({ path: "/data/attachments/aa11-bb22.png", media: true });
+    answerWith = (_req, res) => void res.writeHead(206, { "content-type": "video/mp4", "content-range": "bytes 0-2/10", "accept-ranges": "bytes", "content-length": "3" }).end(Buffer.from([1, 2, 3]));
+    const played = await ask("/api/threads/cloud%3At1/messages/m1/file?media=abc-123", { headers: { range: "bytes=0-2" } });
+    expect(played.status).toBe(206);
+    expect(played.headers.get("content-range")).toBe("bytes 0-2/10");
+    expect(seen.at(-1)).toMatchObject({ url: "/api/threads/t1/messages/m1/file?media=abc-123", range: "bytes=0-2" });
+    // A folder a message names comes back as its list, still marked as one.
+    answerWith = (_req, res) => void res.writeHead(200, { "content-type": "application/json", "x-openmausbot-folder": "1" }).end(JSON.stringify({ entries: [] }));
+    const folder = await ask("/api/threads/cloud%3At1/messages/m1/file", { method: "POST", body: JSON.stringify({ path: "/data/out", listFolder: true }) });
+    expect(folder.headers.get("x-openmausbot-folder")).toBe("1");
+  });
+
+  it("serves My Cloud's bytes so this origin never runs or sniffs them: only raster pictures and sound are inline", async () => {
+    const served = async (type: string) => {
+      answerWith = (_req, res) => void res.writeHead(200, { "content-type": type, "content-disposition": "inline; filename=\"x\"" }).end("<script>parent.x=1</script>");
+      const answer = await ask("/api/threads/cloud%3At1/messages/m1/file", { method: "POST", body: JSON.stringify({ path: "/data/x" }) });
+      await answer.arrayBuffer();
+      return answer.headers;
+    };
+    for (const type of ["text/html", "image/svg+xml", "application/pdf", "video/mp4", "text/plain; charset=utf-8", "application/xhtml+xml"]) {
+      const headers = await served(type);
+      expect(headers.get("content-disposition"), type).toMatch(/^attachment/);
+      expect(headers.get("x-content-type-options"), type).toBe("nosniff");
+      expect(headers.get("content-security-policy"), type).toBe("sandbox; default-src 'none'");
+    }
+    for (const type of ["image/png", "image/jpeg", "audio/mpeg"]) {
+      const headers = await served(type);
+      expect(headers.get("content-disposition"), type).toBeNull();
+      expect(headers.get("x-content-type-options"), type).toBe("nosniff");
+      expect(headers.get("content-security-policy"), type).toBe("sandbox; default-src 'none'");
+    }
+  });
+
+  it("answers neither a paired phone nor a shared server's loopback, and a header My Cloud's token can't match is a plain refusal", async () => {
+    callerAuth = { kind: "loopback", scopes: [], companionDevice: "phone-1" };
+    expect((await ask("/api/bots/cloud:scout")).status).toBe(404);
+    callerAuth = { kind: "loopback", scopes: [], trust: "service" };
+    expect((await ask("/api/bots/cloud:scout")).status).toBe(404);
+    callerAuth = { kind: "loopback", scopes: [] };
+    // Same character count as the capability, more bytes: compared as bytes, never a crash.
+    const { request } = await import("node:http");
+    const status = await new Promise<number>((done, fail) => {
+      const sent = request(`${localUrl}/api/bots/cloud:scout`, { headers: { "x-openmausbot-desktop-owner": `é${"o".repeat(42)}` } }, (res) => { res.resume(); done(res.statusCode!); });
+      sent.on("error", fail);
+      sent.end();
+    });
+    expect(status).toBe(404);
+    expect(seen).toEqual([]);
+  });
+
+  it("reads and streams as background work, so a page left open never keeps My Cloud awake", async () => {
+    streamTo = (res) => { res.writeHead(200, { "content-type": "text/event-stream" }); res.write(`data: ${JSON.stringify({ kind: "hello", cursor: "s:1", resumed: false })}\n\n`); };
+    const stop = new AbortController();
+    const answer = await ask("/api/places/cloud/events?bot=cloud:scout", { signal: stop.signal });
+    const reader = answer.body!.getReader();
+    await reader.read();
+    expect(seen.map(({ url, background }) => [url.split("?")[0], background])).toEqual([["/api/bots/scout", "1"], ["/api/events", "1"]]);
+    stop.abort();
+  });
+
+  it("ends every live stream the moment the session goes, and passes no frame after it", async () => {
+    let more!: (frame: unknown) => void;
+    streamTo = (res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ kind: "hello", cursor: "s:1", resumed: false })}\n\n`);
+      more = (frame) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(frame)}\n\n`); };
+    };
+    const answer = await ask("/api/places/cloud/events?bot=cloud:scout");
+    const reader = answer.body!.getReader(), decoder = new TextDecoder();
+    let text = decoder.decode((await reader.read()).value);
+    expect(text).toContain("hello");
+    proxy.setSession(null);
+    more({ kind: "message", threadId: "t1", message: { id: "late", role: "bot", text: "after the session went" } });
+    for (;;) { const { value, done } = await reader.read(); if (done) break; text += decoder.decode(value); }
+    expect(text).not.toContain("after the session went");
+  });
+
+  it("drops another bot's live turn", async () => {
+    streamTo = (res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ kind: "runtime", event: { type: "text.delta", threadId: "t9", text: "theirs" } })}\n\n`);
+      res.write(`data: ${JSON.stringify({ kind: "runtime", event: { type: "text.delta", threadId: "t2", text: "ours" } })}\n\n`);
+    };
+    const stop = new AbortController();
+    const answer = await ask("/api/places/cloud/events?bot=cloud:scout", { signal: stop.signal });
+    const reader = answer.body!.getReader(), decoder = new TextDecoder();
+    let text = "";
+    while (!text.includes("ours")) text += decoder.decode((await reader.read()).value);
+    expect(text).not.toContain("theirs");
+    stop.abort();
   });
 });

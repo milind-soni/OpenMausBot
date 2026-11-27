@@ -11618,6 +11618,7 @@
   "together.state.asleep": "My Cloud is asleep. Open a bot to wake it.",
   "together.state.waking": "My Cloud is waking up…",
   "together.openThere": "Open on My Cloud's page",
+  "together.inPlace.model": "This bot's model is changed on My Cloud's page.",
   "together.inPlace.files": "To send files to a My Cloud bot, open it on My Cloud's page: its ⋯ menu in the list.",
   "together.inPlace.panel": "{name}'s settings, files, computer and everything else besides this conversation are on My Cloud's own page.",
   "together.state.offlineCloud": "My Cloud can't be reached right now.",

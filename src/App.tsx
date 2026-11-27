@@ -120,7 +120,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
   const unreadCount =
-    state.bots.filter((bot) => !bot.hidden).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
+    state.bots.filter((bot) => !bot.hidden && !isPlaceId(bot.id)).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);

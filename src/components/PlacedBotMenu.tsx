@@ -13,6 +13,7 @@ import { isPlacedBot, type PlacedBot } from "@/lib/place-rows";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { sidePanelCls } from "./bot-panel/side-panel";
+import { ELEVATED_FLOAT } from "./elevated";
 import type { Bot } from "@/state/store";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 import type { MenuState } from "./Sidebar";
@@ -109,4 +110,18 @@ export function PlacedBotPanel({ bot }: { bot: Bot }) {
       </button>
     </div>
   </aside>;
+}
+
+/** The model a My Cloud bot open in place uses, as My Cloud names it: shown plainly where the model pill is, never
+ * matched to this computer's engines, accounts or usage, and changed only on My Cloud's own page. */
+export function PlacedModelPill({ bot, quiet = false }: { bot: Bot; quiet?: boolean }) {
+  const task = bot.tasks?.find((candidate) => candidate.threadId === bot.threadId);
+  const own = task?.modelSelection?.model;
+  const model = own && own !== "profile-default" ? own : bot.modelSelection?.model ?? "";
+  if (!model) return null;
+  const said = t("together.inPlace.model");
+  return <button type="button" disabled data-placed-model="" title={said} aria-label={`${model}. ${said}`}
+    className={cn("flex h-9 min-w-0 max-w-[16rem] items-center rounded-full px-3 text-[13px] text-ink-secondary disabled:cursor-default", !quiet && ELEVATED_FLOAT)}>
+    <span className="min-w-0 truncate">{model}</span>
+  </button>;
 }

@@ -82,6 +82,20 @@ test("a session My Cloud refused is replaced when asked: the old one let go, a n
   assert.equal(f.grants, 2);
 });
 
+test("a session redeemed after the account changed is signed out, never kept or told to the server", async () => {
+  let release;
+  const f = setup({ pair: () => new Promise((done) => { release = done; }) });
+  const opening = f.chat.ensure();
+  await settle();
+  f.cloud = { ...f.cloud, account: "acct-b" };
+  release(answer(200, { token: TOKEN }));
+  assert.deepEqual(await opening, { ok: false });
+  assert.equal(f.chat.open(), false);
+  assert.deepEqual(f.told, []);
+  await settle();
+  assert.ok(f.asked.some(([url, init]) => url === `${CLOUD}/api/auth/logout` && init.headers.authorization === `Bearer ${TOKEN}`), "signed out at My Cloud");
+});
+
 test("no My Cloud, no session", async () => {
   const f = setup({ cloud: { origin: null, account: null, asleep: false } });
   assert.deepEqual(await f.chat.ensure(), { ok: false });
@@ -103,25 +117,49 @@ function together(inPlace, over = {}) {
   return f;
 }
 
-test("a click on a My Cloud row readies the session for a bot main listed, with the row waking meanwhile; My Cloud's page and unknown bots get nothing", async () => {
-  let release;
-  const calls = { ensure: 0, close: 0 };
-  const inPlace = { ensure: () => { calls.ensure += 1; return new Promise((done) => { release = done; }); }, close: () => { calls.close += 1; } };
-  const f = together(inPlace);
+test("only a bot main listed, and only from this computer's page: neither asks for a session", async () => {
+  const calls = { ensure: 0 };
+  const f = together({ ensure: async () => { calls.ensure += 1; return { ok: true }; }, close: () => {} });
   f.together.state("computer");
   await f.together.refresh("cloud");
   assert.deepEqual(await f.together.openInPlace("computer", "atlas"), { ok: false }, "not a bot main listed");
   assert.deepEqual(await f.together.openInPlace("cloud", "scout"), { ok: false }, "My Cloud's own page has nothing to open in place");
   assert.equal(calls.ensure, 0);
+  assert.deepEqual(await f.together.openInPlace("computer", "scout"), { ok: true }, "a listed bot from this computer's page does");
+  assert.equal(calls.ensure, 1);
+});
+
+test("the row says My Cloud is waking while the click readies it, and the session goes with the lists", async () => {
+  let release;
+  const calls = { close: 0 };
+  const f = together({ ensure: () => new Promise((done) => { release = done; }), close: () => { calls.close += 1; } });
+  f.together.state("computer");
+  await f.together.refresh("cloud");
   f.cloud = { ...f.cloud, asleep: true };
   const opening = f.together.openInPlace("computer", "scout");
-  assert.equal(f.together.state("computer").other.state, "waking", "the row says My Cloud is waking");
+  assert.equal(f.together.state("computer").other.state, "waking");
   release({ ok: true });
   assert.deepEqual(await opening, { ok: true });
   assert.equal(f.together.state("computer").other.state, "asleep");
-  // Switched off: the lists go, and the session with them.
+  const before = calls.close;
   f.together.set("computer", false);
-  assert.ok(calls.close >= 1);
+  assert.equal(calls.close, before + 1, "switched off: the session is let go");
+});
+
+test("whether My Cloud is awake comes from the Admin's word, never from My Cloud, and only for this computer's page", async () => {
+  let checks = 0, admin = true;
+  const f = together({ ensure: async () => ({ ok: true }), close: () => {} }, { powerChecked: async () => { checks += 1; return admin; } });
+  f.together.state("computer");
+  await f.together.refresh("cloud");
+  const before = checks;
+  assert.equal(await f.together.cloudAwake("cloud"), false);
+  assert.equal(checks, before, "My Cloud's own page is never answered");
+  assert.equal(await f.together.cloudAwake("computer"), true);
+  f.cloud = { ...f.cloud, asleep: true };
+  assert.equal(await f.together.cloudAwake("computer"), false, "the Admin says it sleeps: not asked again");
+  f.cloud = { ...f.cloud, asleep: false };
+  admin = false;
+  assert.equal(await f.together.cloudAwake("computer"), false, "the Admin could not be asked just now");
 });
 
 test("the page asks to open in place over its own channel, and main answers for its own page only", async () => {
@@ -133,4 +171,5 @@ test("the page asks to open in place over its own channel, and main answers for 
   await handlers.get("places-together:open-in-place")({ page: "local" }, "scout", true);
   assert.deepEqual(asked, [["computer", "scout", { fresh: false }], ["computer", "scout", { fresh: true }]]);
   await assert.rejects(async () => handlers.get("places-together:open-in-place")({ page: null }, "scout"));
+  assert.equal(asked.length, 2, "another page never reaches main's side");
 });
