@@ -1,4 +1,5 @@
 import type { SendKey } from "./send-key";
+import { START_FRESH_KEYS } from "./start-fresh";
 import { t } from "@/lib/i18n";
 import { en, type LocaleKey } from "@/locales";
 
@@ -94,6 +95,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         description: "Edit last message (when composer is empty)",
         macKeys: ["↑"],
         winKeys: ["↑"],
+      },
+      {
+        id: "start-fresh",
+        description: "Start fresh in this conversation (keeps the messages)",
+        macKeys: [...START_FRESH_KEYS.mac],
+        winKeys: [...START_FRESH_KEYS.win],
       },
       {
         id: "dictation-toggle",

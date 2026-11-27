@@ -35,6 +35,7 @@ export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
     | "groupTaskByThread" | "patchGroup" | "groupByThread">;
   node(id: string): HandoffView | undefined;
+  runningIn(threadId: string): HandoffView[];
   /** The conversation that handed this one its work, while that work is live. */
   delegatorOf(threadId: string): { threadId: string; botId?: string } | undefined;
   notify(notification: Notification | null): void;
@@ -184,14 +185,16 @@ export function createAskCards(deps: AskCardsDeps) {
   function questionCard(node: HandoffView, question: string, card: Partial<OptionCardData> = {}): boolean {
     const requestId = `${OPEN_QUESTION}${node.id}-${node.executions}`;
     if (store.messagesFor(node.threadId).some((message) => message.card?.requestId === requestId)) return false;
-    const asked = withDefault(question);
+    const since = node.startedAt ?? node.createdAt;
+    const reply = askersLines(node).findLast((message) => message.role === "bot" && message.kind === "text" && message.at >= since);
+    const asking = reply && needsInputQuestion(reply.text ?? "") !== undefined ? reply : undefined;
+    const parent = node.parentId && !node.groupId ? deps.node(node.parentId) : undefined;
+    const localQuestion = asking && parent && deps.keptPrivate(node.threadId, parent.threadId) ? needsInputQuestion(asking.text!) : undefined;
+    const asked = withDefault(localQuestion ?? question);
     const bot = store.bot(node.botId);
     const options = asked.default && !card.answeredBy ? [asked.default] : [];
     const full: OptionCardData = { title: "Your bot has a question", subtitle: asked.question, options, requestId, requestType: "question", ...card };
     const from = node.groupId && bot ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {};
-    const since = node.startedAt ?? node.createdAt;
-    const asking = askersLines(node).findLast((message) => message.role === "bot" && message.kind === "text" && message.at >= since
-      && needsInputQuestion(message.text ?? "") !== undefined);
     const before = asking ? beforeQuestion(asking.text!) : "";
     if (asking && !before) {
       store.patchMessage(node.threadId, asking.id, { kind: "options", text: asked.question, card: full });
@@ -381,6 +384,7 @@ export function createAskCards(deps: AskCardsDeps) {
   /** A bot's own reply in its own chat ended on a NEEDS INPUT line: the line becomes a question card the person taps or
    * answers in words, as their next message there. */
   function ownQuestion(botId: string, threadId: string, turnId: string): void {
+    if (deps.runningIn(threadId).some((node) => node.parentId && !node.groupId && node.botId === botId)) return;
     const reply = store.activePath(threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
     const question = reply ? needsInputQuestion(reply.text ?? "") : undefined;
     if (!reply || question === undefined) return;

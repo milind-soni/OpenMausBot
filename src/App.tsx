@@ -78,6 +78,7 @@ import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { t } from "@/lib/i18n";
 import { botCycleStep, shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
+import { isStartFreshShortcut, startFreshRefusal } from "@/lib/start-fresh";
 import { useThreadCycleKeys } from "@/components/thread-cycle";
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
@@ -104,6 +105,7 @@ import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 import { serverFetch } from "@/lib/relay-server";
 import { replaceUrl } from "@/lib/replace-url";
+import { api } from "@/state/api";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -181,6 +183,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
+  const freshPending = useRef(new Set<string>());
   const calendarOriginRef = useRef<"chat" | "team-map" | "web-panel">("chat");
   const loading = loadingLine({ connected: state.connected, hydrated: state.hydrated === true, developer: import.meta.env.DEV });
   const group = state.groups.find((g) => g.id === state.selectedId);
@@ -259,6 +262,24 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       const bots = shortcutBots(state.bots.filter((b) => !b.hidden), shownBotIds(document.querySelector("[data-sidebar-root]")));
       const step = e.shiftKey ? botCycleStep(e) : null;
       const newThreadKey = e.key.toLowerCase() === "t" && !e.shiftKey && !e.altKey;
+      if (isStartFreshShortcut(e)) {
+        const selected = state.bots.find((bot) => bot.id === state.selectedId && !bot.hidden);
+        if (
+          !e.repeat && selected && chatBot && state.activeView === "chat"
+          && selected.yourAccess !== "view" && !chatBot.switchingTo && startFreshRefusal(chatBot) === null
+          && !freshPending.current.has(selected.id)
+        ) {
+          e.preventDefault();
+          freshPending.current.add(selected.id);
+          void api(`/api/bots/${selected.id}/start-fresh`, {
+            method: "POST",
+            body: JSON.stringify({ threadId: chatBot.threadId }),
+          })
+            .catch((cause: unknown) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }))
+            .finally(() => freshPending.current.delete(selected.id));
+        }
+        return;
+      }
       if ((e.key.toLowerCase() === "n" || newThreadKey) && !e.altKey) {
         e.preventDefault();
         if (e.shiftKey || newThreadKey) {
@@ -283,7 +304,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.bots, state.selectedId, state.shortcutsOpen, showThreads, dispatch]);
+  }, [state.bots, state.selectedId, state.activeView, state.shortcutsOpen, chatBot, showThreads, dispatch]);
 
   useThreadCycleKeys();
   useReadShownChatOnFocus();

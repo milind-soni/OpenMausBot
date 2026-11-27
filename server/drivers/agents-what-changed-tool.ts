@@ -13,7 +13,7 @@ export const WHAT_CHANGED_INLINE_REFUSAL = "Text passed directly may be about 90
 
 export async function callWhatChangedTool(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const body = JSON.stringify(args);
-  if (body.length > WHAT_CHANGED_INLINE_MAX) return { text: WHAT_CHANGED_INLINE_REFUSAL, isError: true };
+  if (Buffer.byteLength(body, "utf8") > WHAT_CHANGED_INLINE_MAX) return { text: WHAT_CHANGED_INLINE_REFUSAL, isError: true };
   const { ok, body: answer } = await context.client.apiResponse("/api/internal/what-changed", { method: "POST", body });
   return ok ? { text: String(answer.text ?? "") } : { text: String(answer.error ?? "The comparison could not finish. Try again."), isError: true };
 }

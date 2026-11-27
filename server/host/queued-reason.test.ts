@@ -7,7 +7,7 @@ const node = (over: Partial<HandoffView> = {}) => ({ id: "h-1", rootId: "h-0", p
 const busy = [{ threadId: "t-a", title: "Weekly report" }, { threadId: "t-b", title: "Fix login" }];
 const reason = (over: Partial<QueuedReasonDeps> = {}) => createQueuedReason({
   botName: () => "Ops", waitsForComputer: () => false, threadBusy: () => false,
-  slots: () => ({ busy, limit: 2 }), groupTurn: () => false, behindPerson: () => undefined, ...over,
+  slots: () => ({ busy, limit: 2 }), groupTurn: () => false, behindPerson: () => undefined, roomReason: () => undefined, ...over,
 });
 const full = "waiting for a free thread slot: Ops is already running 2 of 2 threads at once";
 
@@ -28,6 +28,13 @@ describe("why a queued handoff has not started", () => {
     expect(reason({ waitsForComputer: () => true })(node())).toBe("waiting for the computer it needs, which another turn or a person is using");
     expect(reason({ threadBusy: (_bot, threadId) => threadId === "t-new" })(node())).toBe("waiting for an earlier turn in that thread to finish");
     expect(reason({ slots: () => ({ busy: [], limit: 2 }), groupTurn: () => true })(node())).toBe("waiting for Ops to finish its turn in a room");
+  });
+
+  it("names the turn that holds a room, and keeps the plain line when the room cannot", () => {
+    const room = node({ groupId: "room-1" });
+    expect(reason({ roomReason: () => "waiting for Ada to finish its turn in this room" })(room)).toBe("waiting for Ada to finish its turn in this room");
+    expect(reason()(room)).toBe("waiting for that teammate to be free");
+    expect(reason({ roomReason: () => "waiting for Ada to finish its turn in this room" })(node())).toBe(full);
   });
 
   it("falls back to the plain line when nothing explains it, and for a room's handoff", () => {
