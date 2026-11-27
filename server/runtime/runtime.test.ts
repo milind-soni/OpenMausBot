@@ -1739,4 +1739,27 @@ describe("Runtime: a settlement the store refused is retried, not lost", () => {
     w.runtime.tick();
     expect(w.store.get(root.id)).toMatchObject({ status: "completed", outcome: "done", result: "Handed off" });
   });
+
+  it("gives up a settlement the store keeps refusing after a few ticks, so the tree's own expiry ends it", async () => {
+    const w = world(() => "hold", { turnStallMs: 10_000_000, stallMs: 10_000 });
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const real = w.store.transaction.bind(w.store);
+    let refuse = true;
+    (w.store as { transaction: (fn: () => unknown) => unknown }).transaction = fn => {
+      if (refuse) throw new Error("disk full");
+      return real(fn);
+    };
+    await w.runner.release(child.id, { kind: "completed", text: "all done" });
+    // The refusing store fails the tick's other writes too; each tick still retries the settlement first.
+    for (let at = 0; at < 5; at += 1) { try { w.runtime.tick(); } catch { /* the same refusal */ } }
+    expect(w.logs.some(l => l.includes(`settling ${child.id}`) && l.includes("giving up after 5 retries"))).toBe(true);
+    refuse = false;
+    w.clock.advance(60_000);
+    w.runtime.tick();
+    expect(w.store.events(root.id).some(e => e.kind === "stalled")).toBe(true);
+    expect(w.store.get(child.id)?.status).not.toBe("running");
+    expect(w.store.get(child.id)?.result).not.toBe("all done");
+  });
 });

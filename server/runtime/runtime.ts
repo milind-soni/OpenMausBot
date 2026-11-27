@@ -55,6 +55,8 @@ const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
 const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
+/** Ticks a settlement the store refused is retried on; past them it is dropped, so the tree's own expiry ends it. */
+const SETTLE_RETRIES = 5;
 /** progress() runs once per runtime event; lastActivityAt catches up at this cadence, not per event. */
 export const PROGRESS_WRITE_MS = 10_000;
 
@@ -86,7 +88,7 @@ export class Runtime {
   private readonly heldFor = new Map<string, string>();
   private readonly reportDue = new Set<string>();
   /** Results whose SQLite settlement threw: retried each tick, deleted only once the transition commits. */
-  private readonly pendingSettlements = new Map<string, { live: LiveTurn | undefined; result: RunResult }>();
+  private readonly pendingSettlements = new Map<string, { live: LiveTurn | undefined; result: RunResult; executions: number; attempts: number }>();
   private batch: Map<string, Assignment> | null = null;
   private lastThrew = false;
   private readonly rerunGapMs: number;
@@ -199,7 +201,7 @@ export class Runtime {
       this.withBatch(() => this.finishTurn(n, outcome, live));
     } catch (error) {
       // The same loss as turnEnded: keep the outcome and settle it on a later tick.
-      this.pendingSettlements.set(rootId, { live, result: outcome });
+      this.pendingSettlements.set(rootId, { live, result: outcome, executions: n.executions, attempts: 0 });
       this.log(`end(${rootId}) failed, will retry: ${String(error)}`);
     }
   }
@@ -516,17 +518,19 @@ export class Runtime {
 
   /** Only the live handle's result settles the node: an ended, cancelled or stalled turn has no handle. */
   private turnEnded(id: string, live: LiveTurn, result: RunResult): void {
-    if (this.turns.get(id) !== live) return;
-    const n = this.store.get(id);
-    if (!n || n.status !== "running") return;
-    if (this.closing && result.kind === "failed") return;
+    let executions: number | undefined;
     try {
+      if (this.turns.get(id) !== live) return;
+      const n = this.store.get(id);
+      if (!n || n.status !== "running") return;
+      if (this.closing && result.kind === "failed") return;
+      executions = n.executions;
       this.withBatch(() => this.finishTurn(n, result, live));
     } catch (error) {
       // The completed result exists only here: keep it and settle from it on a later tick, instead of
       // leaving the node running with no live turn and nothing left to settle it.
-      this.pendingSettlements.set(id, { live, result });
-      this.log(`settling ${id} failed, will retry: ${String(error)}`);
+      if (executions !== undefined) this.pendingSettlements.set(id, { live, result, executions, attempts: 0 });
+      this.log(`settling ${id} failed${executions !== undefined ? ", will retry" : ""}: ${String(error)}`);
     }
   }
 
@@ -539,7 +543,8 @@ export class Runtime {
       // Only a still-running node may take the stored result: a node that left
       // running some other way (needs_input, cancelled tree) must not have a
       // stale settlement replayed onto it.
-      if (!n || isTerminal(n) || n.status !== "running") {
+      // A node dispatched again since is running another turn: the stored result is not that turn's.
+      if (!n || isTerminal(n) || n.status !== "running" || n.executions !== pending.executions) {
         this.pendingSettlements.delete(id);
         continue;
       }
@@ -547,7 +552,10 @@ export class Runtime {
         this.withBatch(() => this.finishTurn(n, pending.result, pending.live));
         this.pendingSettlements.delete(id);
       } catch (error) {
-        this.log(`settling ${id} failed again, still pending: ${String(error)}`);
+        pending.attempts += 1;
+        const giveUp = pending.attempts >= SETTLE_RETRIES;
+        if (giveUp) this.pendingSettlements.delete(id);
+        this.log(`settling ${id} failed again, ${giveUp ? `giving up after ${SETTLE_RETRIES} retries` : "still pending"}: ${String(error)}`);
       }
     }
   }
