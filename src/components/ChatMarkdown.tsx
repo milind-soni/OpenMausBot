@@ -35,7 +35,7 @@ import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
-import { useRevealOriginalMenu } from "./RevealOriginalMenu";
+import { useRevealOriginalMenu } from "./RevealOriginalMenu"; import { isPlaceId } from "@/lib/place-chat";
 
 const mermaidCache = new Map<string, string>();
 const MERMAID_CACHE_MAX = 50;
@@ -365,7 +365,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const save = useLocalFileSave(filePath, name, message);
   const revealMenu = useRevealOriginalMenu();
   const fileOutsideWorkspace = useMessageFileOutsideWorkspace(filePath, message);
-  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active;
+  const revealHere = typeof window !== "undefined" && Boolean(window.ogb?.revealInFolder) && !window.ogb?.remoteClient?.active && !isPlaceId(message?.threadId); // a My Cloud path is never one on this computer
   // A text file outside the chat's folder keeps Show in folder, so where the desktop app checks, the preview waits for it.
   const preview = useHtmlPreview(filePath, shownName, message, shownPath, fileOutsideWorkspace === false || !(revealHere && canRevealHostPath(filePath)));
   const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
@@ -399,7 +399,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const pathTitle = preview.opens ? preview.label : revealOnClick ? t("attach.showInFolder") : t("chat.file.saveCopy");
 
   return (
-    <span dir="ltr" className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
+    <span dir="ltr" className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(isPlaceId(message?.threadId) ? undefined : source)}>
       {revealMenu.menu}
       {preview.opens
         ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />

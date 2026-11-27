@@ -116,6 +116,7 @@
   "server.problem.routineFailed": "{bot} gặp vấn đề: tác vụ định kỳ {where} đã thất bại",
   "server.problem.routineFailedWhy": "{bot} gặp vấn đề: tác vụ định kỳ {where} đã thất bại: “{detail}”",
   "server.incidents.where.thread": "trong luồng #{title}",
+  "server.chief.retryQueued": "Đã xếp hàng thử lại luồng #{title} của {name}",
   "server.incidents.where.main": "trong cuộc trò chuyện chính",
   "server.connect.signIn": "Bạn cần đăng nhập vào {site}.",
   "server.connect.signInWhy": "Bạn cần đăng nhập vào {site}: {reason}",

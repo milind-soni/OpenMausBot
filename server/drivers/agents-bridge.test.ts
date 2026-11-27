@@ -167,14 +167,14 @@ describe("what a bridged turn is listed", () => {
     for (const { name, profile: turn } of everyProfile()) {
       const tools = availableTools(turn) as BridgeTool[];
       const bridge = createToolBridge(tools);
-      const outward = names(tools).filter((tool) => reportedAs(tool).some(isOutboundTool));
+      const outward = names(tools).filter((tool) => reportedAs(tool).some((name) => isOutboundTool(name)));
       expect(names(bridge.listed), name).toEqual(expect.arrayContaining(outward));
       for (const hidden of bridge.hidden) {
         for (const spelling of reportedAs(hidden.name)) expect(isOutboundTool(spelling), `${name}: ${spelling}`).toBe(false);
       }
     }
     // today that is publish_page and share, listed for themselves, and the two the hot list names anyway
-    expect(names(availableTools(profile({ ...FULL_CHIEF }))).filter((tool) => reportedAs(tool).some(isOutboundTool))).toEqual(["publish_page", "post_to_room", "post_to_thread", "send_voice_note", "share"]);
+    expect(names(availableTools(profile({ ...FULL_CHIEF }))).filter((tool) => reportedAs(tool).some((name) => isOutboundTool(name)))).toEqual(["publish_page", "post_to_room", "post_to_thread", "send_voice_note", "share"]);
     // and the bridge's own two names are not outward either
     for (const spelling of [...reportedAs(USE_TOOL), ...reportedAs(FIND_TOOL)]) expect(isOutboundTool(spelling), spelling).toBe(false);
     // derived, not listed by hand: a future tool named like a send is kept,

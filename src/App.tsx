@@ -89,7 +89,7 @@ import { usePhoneBack } from "@/hooks/use-phone-back";
 import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
 import { closeSidePanels } from "@/lib/page-open";
 import { phoneBackStep, phoneBackSteps } from "@/lib/phone-back";
-import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
+import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together"; import { isPlaceId } from "@/lib/place-chat"; import { PlaceChatKeeper, PlacedBotPanel } from "@/components/PlacedBotMenu";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence"; import { useFeature } from "@/lib/use-feature";
@@ -123,7 +123,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
   const unreadCount =
-    state.bots.filter((bot) => !bot.hidden).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
+    state.bots.filter((bot) => !bot.hidden && !isPlaceId(bot.id)).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
@@ -513,12 +513,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         </main>
       )}
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
-      {state.settingsOpen && bot && (
+      <PlaceChatKeeper />{(state.settingsOpen || state.computerOpen) && bot && isPlaceId(bot.id) && <PlacedBotPanel key={`placed:${bot.id}`} bot={bot} />}{state.settingsOpen && bot && !isPlaceId(bot.id) && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
           : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
       )}
-      {state.computerOpen && bot && (
+      {state.computerOpen && bot && !isPlaceId(bot.id) && (
         remoteClient ? (
           <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} />
         ) : (
@@ -535,8 +535,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!state.forkPanel && roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
       )}
-      {!remoteClient && !state.forkPanel && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
-      {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
+      {!remoteClient && !state.forkPanel && state.inspectorOpen && bot && !isPlaceId(bot.id) && <InspectorPanel key={bot.threadId} bot={bot} />}
+      {!remoteClient && state.activityOpen && bot && !isPlaceId(bot.id) && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
       {inboxShown && <InboxPanel />}
       {notificationTray && state.notificationsOpen && <NotificationsPanel />}
       {notificationTray && !framed && <NotificationRail />}

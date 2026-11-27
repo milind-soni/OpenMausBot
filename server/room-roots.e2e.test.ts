@@ -526,8 +526,10 @@ it("R7 does not rerun a cut goal step after a restart: its run ended with the re
 it("R7 a goal step the watchdog stops after it posted a credential card fails as stalled and stops the card", () => scenario(async (f) => {
   const mira = await f.bot("Mira", "Engineering");
   const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
-  f.script(f.clive.id, { key: "C-STEP", match: ["R7S-GOAL"], steps: [{ tool: "request_credential", arguments: { credential_id: "xaiApiKey", reason: "R7S fixture model" } }],
-    gateFile: f.gate("step"), reply: "R7S-LATE: never shown." });
+  f.script(f.clive.id,
+    { key: "C-STEP", match: ["R7S-GOAL"], steps: [{ tool: "request_credential", arguments: { credential_id: "xaiApiKey", reason: "R7S fixture model" } }],
+      gateFile: f.gate("step"), reply: "R7S-LATE: never shown." },
+    { key: "C-RETRY", repeat: true, match: ["R7S-GOAL"], reply: "R7S-RETRY: still no decision." });
   await f.post(room, "R7S-GOAL: set up the Grok model; ask me for the key you need.", { mode: "goal" });
   const messages = (): Promise<Array<{ id: string; kind: string; secret?: { stopped?: boolean }; goalRun?: { status: string } }>> => f.messages(room.threadId);
   await expect.poll(async () => (await messages()).find((message) => message.kind === "secret")?.id, { timeout: 30_000 }).toBeTruthy();
@@ -539,7 +541,7 @@ it("R7 a goal step the watchdog stops after it posted a credential card fails as
   expect(f.roomRoots(room.threadId)[0]).toMatchObject({ id: step.id, status: "failed", outcome: "stalled", executions: 1 });
   expect(f.roomRoots(room.threadId)[0].cards).toBeUndefined();
   expect((await messages()).find((message) => message.id === card.id)?.secret).toMatchObject({ stopped: true });
-  // The run retries a stalled step once: that attempt ends without a decision, and so does the run.
+  // The retry and the two re-asks each reply without a control envelope, so the third miss blocks the run.
   f.open("step");
   await expect.poll(async () => (await messages()).find((message) => message.kind === "goal.run")?.goalRun?.status, { timeout: 30_000 }).not.toBe("working");
   expect(nothingLive(f)).toEqual([]);
