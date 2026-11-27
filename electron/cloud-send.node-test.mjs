@@ -717,3 +717,123 @@ test("closing the move's done line closes the move's own send result with it, so
     assert.equal(after.last.seen, true, "the move's own result is not said again after the done line");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("refused bot settings stay pending in the next comparison while accepted parts advance their baseline", async () => {
+  const cloudParts = { soul: "old", title: "t1" };
+  let refuseSoul = true;
+  const store = stored();
+  store.write({ v: 1, clouds: { [CLOUD]: { sent: { "bot:ember": { soul: ["old", "old"], title: ["t1", "t1"] } } } } });
+  const localItem = bot("ember", { soul: "new", title: "t2" });
+  const cloudSummary = () => summary([bot("ember", { ...cloudParts })]);
+  const reply = (status, body) => ({ status, ok: status < 400, body });
+  const patched = [];
+  const session = {
+    call: async (method, route, body) => {
+      if (route === "/api/cloud-send" || route.startsWith("/api/cloud-send?item=")) return reply(200, cloudSummary());
+      if (method === "PATCH" && route === "/api/bots/ember") {
+        patched.push(body);
+        if (refuseSoul && "soul" in body) return reply(503, { error: "busy" });
+        if ("soul" in body) cloudParts.soul = "new";
+        if ("title" in body) cloudParts.title = "t2";
+        return reply(200, {});
+      }
+      return reply(200, {});
+    },
+    upload: async () => reply(201, {}),
+    close: async () => {},
+  };
+  const json = (value) => new Response(JSON.stringify(value), { status: 200 });
+  const send = createCloudSend({
+    local: async (route) => {
+      if (route === "/api/cloud-send") return json(summary([localItem]));
+      if (route === "/api/bots?messages=0") return json({ bots: [{ id: "ember", threadId: "t-ember", name: "Ember", soul: "New soul", title: "New title" }] });
+      return new Response("{}", { status: 404 });
+    },
+    cloud: { origin: () => CLOUD, asleep: () => false, read: async () => json(cloudSummary()), open: async () => session },
+    handoff: async () => ({}),
+    store,
+  });
+
+  const before = await send.compare();
+  assert.deepEqual(before.rows[0], { key: "bot:ember", kind: "bot", label: "ember", id: "ember", state: "to-update", parts: ["soul", "title"] });
+
+  const partial = await send.send();
+  assert.deepEqual(partial.result.updatedBots, ["Ember"]);
+  assert.deepEqual(partial.result.notes, [{ kind: "settings", bot: "Ember" }]);
+  assert.deepEqual(store.value.clouds[CLOUD].sent["bot:ember"], { soul: ["old", "old"], title: ["t2", "t2"] });
+
+  const afterPartial = await send.compare();
+  assert.deepEqual(afterPartial.rows[0], { key: "bot:ember", kind: "bot", label: "ember", id: "ember", state: "to-update", parts: ["soul"] });
+
+  // When every pending part is refused, nothing advances and the part remains pending.
+  patched.length = 0;
+  const allRefused = await send.send();
+  assert.deepEqual(allRefused.result.updatedBots, []);
+  assert.deepEqual(allRefused.result.notes, [{ kind: "settings", bot: "Ember" }]);
+  assert.deepEqual(store.value.clouds[CLOUD].sent["bot:ember"], { soul: ["old", "old"], title: ["t2", "t2"] });
+  assert.deepEqual((await send.compare()).rows[0], { key: "bot:ember", kind: "bot", label: "ember", id: "ember", state: "to-update", parts: ["soul"] });
+
+  // Once My Cloud accepts the retry, the baseline advances and the next comparison is synchronized.
+  refuseSoul = false;
+  patched.length = 0;
+  const retried = await send.send();
+  assert.deepEqual(retried.result.updatedBots, ["Ember"]);
+  assert.deepEqual(retried.result.notes, []);
+  assert.deepEqual(patched, [{ soul: "New soul" }]);
+  assert.deepEqual(store.value.clouds[CLOUD].sent["bot:ember"], { soul: ["new", "new"], title: ["t2", "t2"] });
+  assert.deepEqual((await send.compare()).rows[0], { key: "bot:ember", kind: "bot", label: "ember", id: "ember", state: "on-both" });
+});
+
+test("refused settings when adding a new bot stay pending until My Cloud accepts them", async () => {
+  let cloudItem = null;
+  let refuseSoul = true;
+  const store = stored();
+  const localItem = bot("ember", { name: "n1", soul: "new", title: "t2" });
+  const cloudSummary = () => summary(cloudItem ? [{ ...cloudItem, parts: { ...cloudItem.parts } }] : []);
+  const reply = (status, body) => ({ status, ok: status < 400, body });
+  const session = {
+    call: async (method, route, body) => {
+      if (route === "/api/cloud-send" || route.startsWith("/api/cloud-send?item=")) return reply(200, cloudSummary());
+      if (method === "POST" && route === "/api/bots") {
+        cloudItem = bot("ember", { name: "n1", soul: "starter", title: "-" });
+        return reply(201, { bot: { id: "ember" } });
+      }
+      if (method === "PATCH" && route === "/api/bots/ember") {
+        if (refuseSoul && "soul" in body) return reply(503, { error: "busy" });
+        if ("soul" in body) cloudItem.parts.soul = "new";
+        if ("title" in body) cloudItem.parts.title = "t2";
+        return reply(200, {});
+      }
+      return reply(200, {});
+    },
+    upload: async () => reply(201, {}),
+    close: async () => {},
+  };
+  const json = (value) => new Response(JSON.stringify(value), { status: 200 });
+  const send = createCloudSend({
+    local: async (route) => {
+      if (route === "/api/cloud-send") return json(summary([localItem]));
+      if (route === "/api/bots?messages=0") return json({ bots: [{ id: "ember", threadId: "t-ember", name: "Ember", soul: "New soul", title: "New title" }] });
+      if (route === "/api/bots/ember/memory") return json({ topics: [] });
+      if (route.startsWith("/api/bots/ember/memory/file")) return json({ exists: false, text: "" });
+      return new Response("{}", { status: 404 });
+    },
+    cloud: { origin: () => CLOUD, asleep: () => false, read: async () => json(cloudSummary()), open: async () => session },
+    handoff: async () => ({}),
+    store,
+  });
+
+  const first = await send.send();
+  assert.deepEqual(first.result.bots, ["Ember"]);
+  assert.deepEqual(first.result.notes, [{ kind: "settings", bot: "Ember" }]);
+  assert.equal(store.value.clouds[CLOUD].created["bot:ember"], true);
+  assert.deepEqual(store.value.clouds[CLOUD].sent["bot:ember"], { name: ["n1", "n1"], title: ["t2", "t2"] });
+  assert.deepEqual((await send.compare()).rows[0], { key: "bot:ember", kind: "bot", label: "ember", id: "ember", state: "to-update", parts: ["soul"] });
+
+  refuseSoul = false;
+  const second = await send.send();
+  assert.deepEqual(second.result.updatedBots, ["Ember"]);
+  assert.equal(store.value.clouds[CLOUD].created["bot:ember"], undefined);
+  assert.deepEqual(store.value.clouds[CLOUD].sent["bot:ember"], { name: ["n1", "n1"], title: ["t2", "t2"], soul: ["new", "new"] });
+  assert.deepEqual((await send.compare()).rows[0], { key: "bot:ember", kind: "bot", label: "ember", id: "ember", state: "on-both" });
+});
