@@ -296,7 +296,10 @@ export class RuntimeCoordinator implements Coordinator {
     const assignee: Assignee = { botId: target.botId, destination: { kind: target.groupId ? "room_thread" : thread === "standing" ? "standing_thread" : "work_thread",
       threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } };
     const own = ownThread(lineage, assignee, options.ownThread);
-    if (!answersSender(parent, mode, target) && (own ? lineage.slice(0, -1) : lineage).some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
+    const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
+    // Same rule as the runtime's admit: only a reply that would wait on the ancestor's completion closes a wait cycle.
+    if (!answersSender(parent, mode, target) && reply === "resume" && (own ? lineage.slice(0, -1) : lineage).some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
     if (this.stoppedFor(root, target.botId)) throw new Error(STOPPED_AGAIN);
     const siblings = this.store.children(parent.id);
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode
@@ -310,8 +313,6 @@ export class RuntimeCoordinator implements Coordinator {
     // A bot's own threads wait on it by design and can never ask it back (the ancestor rule above), so no two bots can cross.
     const waiting = own || mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source.botId, target.botId);
     if (waiting) throw new Error(crossed(this.host.names(this.project(waiting.request), this.project(waiting.parent)).requester, waiting.request));
-    const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
-    const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
     const level = this.host.levelOf(target, this.project(parent));
