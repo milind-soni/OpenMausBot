@@ -11590,6 +11590,7 @@
   "settings.browser.proxyInactive": "Salvo, mas só funciona com o navegador integrado em hosts compatíveis.",
   "settings.browser.proxySave": "Salvar",
   "settings.browser.proxyClear": "Remover",
+  "settings.browser.proxySavedPlaceholder": "Proxy salvo. Digite um novo endereço para substituí-lo.",
   "remote.tailscale.needsApproval": "Este computador está aguardando aprovação na sua rede Tailscale. Aprove-o no console de administração do Tailscale, depois tente novamente.",
   "connect.otherComputerDevices": "Para outro computador com o app {app}: nesse computador, abra Configurações → Dispositivos → Rede privada → Seus outros computadores.",
   "phone.intro.detail": "Veja conversas, responda às solicitações de aprovação e envie novas tarefas pelo celular.",
