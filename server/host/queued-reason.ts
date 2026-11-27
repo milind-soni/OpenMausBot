@@ -10,6 +10,8 @@ export interface QueuedReasonDeps {
   slots(botId: string): { busy: { threadId: string; title: string }[]; limit: number };
   groupTurn(botId: string): boolean;
   behindPerson(node: HandoffView): { kind: PersonWaitKind; title: string } | undefined;
+  /** Why a room's hand-off waits, when the room can name the turn that holds it. */
+  roomReason(node: HandoffView): string | undefined;
 }
 
 /** `showTitle`: name the busy threads it allows; only for the receiver itself, whose own threads they are. Otherwise just the count. */
@@ -18,7 +20,7 @@ export function createQueuedReason(deps: QueuedReasonDeps) {
     const card = deps.behindPerson(node);
     if (card) return `waiting for a free slot: that teammate is waiting on the person's ${card.kind === "question" ? "answer" : card.kind} in its thread ${JSON.stringify(card.title)}; tell the person to open it`;
     // A room's handoff waits on the room, not on these.
-    if (node.groupId) return "waiting for that teammate to be free";
+    if (node.groupId) return deps.roomReason(node) ?? "waiting for that teammate to be free";
     const name = deps.botName(node.botId) ?? "that teammate";
     if (deps.waitsForComputer(node)) return "waiting for the computer it needs, which another turn or a person is using";
     if (deps.threadBusy(node.botId, node.threadId)) return "waiting for an earlier turn in that thread to finish";

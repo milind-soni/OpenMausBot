@@ -166,3 +166,10 @@ describe("every agents call is held to its full schema", () => {
       .toBe("coordinate_bots was not run: message takes at most 12000 characters (it has 12001). Fix these and call it again.");
   });
 });
+
+describe("coordinate_bots rework", () => {
+  it("covers the follow-up work the 'already completed' refusal sends the bot to it for", () => {
+    const coordinate = LISTED.find((tool) => tool.name === "coordinate_bots")!.inputSchema.properties as Record<string, Json>;
+    expect(coordinate.rework!.description).toMatch(/follow-up/);
+  });
+});

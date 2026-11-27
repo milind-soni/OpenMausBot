@@ -28,6 +28,7 @@ function changed(): void {
 export async function saveBurger(input: { botId: string; threadId: string; summary?: string; name?: string } & DraftChoices): Promise<SavedWorkflow> {
   const { skill } = await api<{ skill: SavedWorkflow }>("/api/skill-burgers", { method: "POST", body: JSON.stringify(input) });
   changed();
+  try { globalThis.localStorage?.removeItem("omb-skill-burger-closes"); } catch {}
   return skill;
 }
 

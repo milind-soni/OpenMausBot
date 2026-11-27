@@ -3845,6 +3845,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "session.started").map((e) => (e as { mcpFailed?: string[] }).mcpFailed)).toEqual([["blender"]]);
   });
 
+  it("starts the next turn in a new process after a configured server did not connect, so it reconnects", async () => {
+    await create(undefined, { FAKE_CLAUDE_MCP_FAILED: "blender" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const custom = { blender: { command: "/usr/bin/python3", args: ["/srv/blender.py"], env: {} } };
+    const first = await instance.adapter.sendTurn({ threadId: "t-custom-reconnect", text: "one", integrations: { custom } });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const failedLaunch = dumpedPid(dump);
+    const second = await instance.adapter.sendTurn({ threadId: "t-custom-reconnect", text: "two", integrations: { custom } });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(dumpedPid(dump)).not.toBe(failedLaunch);
+  });
+
   it("books each turn of a retained process at its own cost, not the process's running total", async () => {
     await create();
     const dump = join(scratch, "dump.json");

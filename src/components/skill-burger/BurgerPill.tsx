@@ -40,7 +40,7 @@ const SHEEN_PERIOD_MS = 2000;
 export function Sheen({ children, text }: { children: ReactNode; text: string }) {
   const [delay] = useState(() => `-${Date.now() % SHEEN_PERIOD_MS}ms`);
   return (
-    <span className="thinking-shimmer min-w-0 truncate" style={{ "--sheen-period": `${SHEEN_PERIOD_MS}ms`, "--sheen-delay": delay } as CSSProperties}>
+    <span className="thinking-shimmer block min-w-0 truncate tabular-nums" style={{ "--sheen-period": `${SHEEN_PERIOD_MS}ms`, "--sheen-delay": delay } as CSSProperties}>
       {children}
       <span aria-hidden="true" className="thinking-sheen"><span data-text={text} /></span>
     </span>

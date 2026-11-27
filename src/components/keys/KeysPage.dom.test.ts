@@ -620,6 +620,20 @@ describe("Your own servers (SSH)", () => {
     expect(host.querySelector<HTMLElement>("[data-idle-time-link]")!.textContent).toBe("Idle desktops stop after 480 minutes. Change in Desktop details");
   });
 
+  it("keeps the 5-minute override on screen after a live config broadcast changes another setting", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    const { configStatusFromFrame } = await import("@/lib/config-status-frame");
+    const override = "Desktops on your own servers stop after 5 minutes instead, set by vpsIdle.timeoutMinutes in config.json.";
+    setConfig({ ...fx.config, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 480 }, vpsIdle: { timeoutMinutes: 5 } });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    expect(host.querySelector<HTMLElement>("[data-idle-time-link]")!.textContent).toBe(override);
+    // The server's frame after someone changes the shared idle time: it carries vpsIdle, as configStatus() emits it.
+    const frame = { ...fx.config, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 30 }, vpsIdle: { timeoutMinutes: 5 } };
+    flushSync(() => setConfig(configStatusFromFrame(frame as never, fx.config as never) as unknown as Record<string, unknown>));
+    expect((fx.config as { localVm: { idleTimeoutMinutes: number } }).localVm.idleTimeoutMinutes).toBe(30);
+    expect(host.querySelector<HTMLElement>("[data-idle-time-link]")!.textContent).toBe(override);
+  });
+
   it("leaves out the Desktop details link on a Cloud home, which has no idle-time editor", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     setConfig({ ...fx.config, cloudHome: true, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 480 } });

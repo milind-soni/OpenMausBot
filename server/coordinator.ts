@@ -94,6 +94,7 @@ export interface BeginTurnRequest {
 export interface HostTurnResult {
   ok: boolean;
   text: string;
+  question?: string | null;
   evidence?: TurnEvidence;
   cap?: { note: string; handoffPath?: string };
   cards?: { question: string; ids: string[] };

@@ -393,20 +393,22 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     await w.host.release(node.id, { ok: true, text: "done" });
   });
 
-  it("lets work handed on with reply none answer its requester's conversation with a one-way notice, and nothing more", async () => {
+  it("lets work handed on with reply none answer its requester's conversation with a one-way notice, and reach an ancestor only as a notice", async () => {
     const w = world(hold);
     begun(w, chief, "gen-1");
     const { node } = w.coordinator.enqueue(chief, "gen-1", undefined, builder, "Ask the person, then tell me", { mode: "notify", reply: "none" });
     w.coordinator.tick();
     expect(() => send(w, builder, "gen-1", node.id, chief, "They said yes")).toThrow(/back to an ancestor/);
-    expect(() => w.coordinator.enqueue(builder, "gen-1", node.id, { ...chief, threadId: "chief-other" }, "They said yes", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    expect(w.coordinator.enqueue(builder, "gen-1", node.id, { ...chief, threadId: "chief-other" }, "For your other chat", { mode: "notify", reply: "none" }))
+      .toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-other", status: "queued" } });
     const answer = w.coordinator.enqueue(builder, "gen-1", node.id, chief, "They said yes", { mode: "notify", reply: "none" });
     expect(answer).toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-chat", status: "queued" } });
     expect(w.coordinator.answersTo(node.id)).toEqual({ botId: "chief", threadId: "chief-chat" });
     await w.host.release(node.id, { ok: true, text: "done" });
     const awaited = send(w, chief, "gen-2", undefined, builder, "Build it");
     w.coordinator.tick();
-    expect(() => w.coordinator.enqueue(builder, "gen-2", awaited.node.id, chief, "Done", { mode: "notify", reply: "none" })).toThrow(/back to an ancestor/);
+    expect(w.coordinator.enqueue(builder, "gen-2", awaited.node.id, chief, "Done", { mode: "notify", reply: "none" }))
+      .toMatchObject({ duplicate: false, node: { botId: "chief", threadId: "chief-chat", status: "queued" } });
     expect(w.coordinator.answersTo(awaited.node.id)).toBeUndefined();
     await w.host.release(awaited.node.id, { ok: true, text: "done" });
   });

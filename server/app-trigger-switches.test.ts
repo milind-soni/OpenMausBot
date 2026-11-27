@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 
 import type { AppTriggerBroker } from "./app-trigger-broker.ts";
 import { AppTriggerManager } from "./app-triggers.ts";
+import { AppTriggerRequestService, type AppTriggerRequestCard } from "./app-trigger-requests.ts";
 
 const folders: string[] = [];
 afterEach(() => { for (const dir of folders.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -82,4 +83,36 @@ it("switches a retained service copy off as soon as its last active automation i
   await h.manager.remove(active.id);
   expect(h.manager.get(paused.id)?.remote.triggerId).toBe("shared-copy");
   expect(h.remoteEnabled()).toBe(false);
+});
+
+it.each([
+  ["pause", false, false], ["pause", true, false], ["resume", false, false], ["resume", true, false],
+  ["pause", true, true], ["resume", false, true],
+] as const)("restores local and service state after undoing %s from %s (legacy: %s)", async (action, enabled, legacy) => {
+  const h = harness();
+  const config = { channel: "fixture-config-private" };
+  const filter = { text: "important" };
+  const prompt = "Use token=fixture-private-value.";
+  const saved = await h.manager.create({ botId: "first", name: "Status fixture", prompt, config, filter, app: "slack", event: "SLACK_CHANNEL_MESSAGE_RECEIVED", enabled });
+  const messages: Array<{ id: string; card: AppTriggerRequestCard }> = [];
+  const store = {
+    messagesFor: () => messages,
+    appendMessage: (_threadId: string, message: { card: AppTriggerRequestCard }) => {
+      const stored = { id: "receipt", card: message.card };
+      messages.push(stored);
+      return stored;
+    },
+    patchMessage: (_threadId: string, _messageId: string, patch: { card: AppTriggerRequestCard }) => { messages[0]!.card = patch.card; },
+  };
+  const service = new AppTriggerRequestService({ store, triggers: h.manager, botName: () => "First" });
+  const applied = await service.submit({ botId: "first", threadId: "thread", operation: { action, triggerId: saved.id } });
+  expect(h.manager.get(saved.id)?.enabled).toBe(action === "resume");
+  expect(JSON.stringify(messages[0]!.card)).not.toContain("fixture-private-value");
+  expect(JSON.stringify(messages[0]!.card)).not.toContain("fixture-config-private");
+  expect(messages[0]!.card.appTriggerRequest?.undo?.before?.filter).toBeUndefined();
+  if (legacy) delete messages[0]!.card.appTriggerRequest!.undo!.before;
+  expect(await service.undo({ botId: "first", threadId: "thread", requestId: applied.requestId })).toMatchObject({ state: "undone" });
+  expect(h.manager.get(saved.id)?.enabled).toBe(enabled);
+  expect(h.remoteEnabled()).toBe(enabled);
+  expect(h.reopened().get(saved.id)).toMatchObject({ enabled, prompt, config, filter });
 });
