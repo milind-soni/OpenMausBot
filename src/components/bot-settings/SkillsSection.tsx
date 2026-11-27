@@ -20,7 +20,7 @@ export interface ManagedSkill {
   enabled: boolean;
   source: string;
   warnings: string[];
-  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
+  /** "imported": one copy brought in from this computer for every bot, switched per bot and removable from one bot.
    * "native": loaded by the bot's engine from a skills folder of its own; changed only there.
    * "project": shipped in the folder the bot works in; used while the owner trusts project skills, changed only there. */
   origin?: "private" | "library" | "all-bots" | "imported" | "native" | "project";
@@ -29,6 +29,8 @@ export interface ManagedSkill {
   canUseOnAllBots?: boolean;
   /** An imported skill that is on but not in this bot's list: the bot finds it when a task needs it. */
   listed?: boolean;
+  /** An imported copy whose source folder is gone: removing it clears OpenMausBot's copy for every bot. */
+  sourceGone?: boolean;
 }
 
 /** On all of the person's bots, with this bot's own switch. */
@@ -367,6 +369,21 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   const remove = async (skill: ManagedSkill) => {
+    if (skill.origin === "imported") {
+      const stale = skill.sourceGone === true;
+      if (!window.confirm(t(stale ? "skills.imported.removeStaleConfirm" : "skills.imported.removeConfirm", { name: skill.name }))) return;
+      setWorking(skill.name);
+      setError("");
+      try {
+        await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}${stale ? "?scope=all-bots" : ""}`, { method: "DELETE" });
+        await refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : t("skills.error.remove"));
+      } finally {
+        setWorking("");
+      }
+      return;
+    }
     if (skill.origin === "library") {
       if (assignmentBusy.current) return;
       if (!window.confirm(t("skills.unassignConfirm", { name: skill.name }))) return;
@@ -544,7 +561,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                       <Users size={15} />
                     </button>
                   )}
-                  {skill.origin !== "imported" && !inFolder(skill) && (
+                  {!inFolder(skill) && (
                     <button
                       aria-label={t("skills.removeName", { name: skill.name })}
                       title={t("skills.remove")}
@@ -557,6 +574,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                   )}
                 </div>
                 <div className="mt-1 truncate text-[11px] text-ink-secondary" title={skill.source}>{t("skills.source", { source: skill.source })}</div>
+                {skill.sourceGone && <div className="mt-1 text-[11px] text-ink-secondary">{t("skills.imported.sourceGone")}</div>}
                 {skill.warnings.length > 0 && (
                   <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                 )}

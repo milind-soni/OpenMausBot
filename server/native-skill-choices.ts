@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
-import { importedSkillsSwitchedOff, readImportedSkills, switchImportedSkillBackOn } from "./imported-skills.ts";
+import { importedSkillsSwitchedOff, readImportedSkills, removedImportedSkills, switchImportedSkillBackOn } from "./imported-skills.ts";
 import { isSkillName } from "../shared/skill-md.ts";
 
 const choicesPath = (botId: string) => join(DATA_DIR, "skill-state", botId, "native-skills.json");
@@ -33,11 +33,11 @@ function readChoices(botId: string): string[] {
   return [];
 }
 
-/** Native skills this bot has off: its own switches, plus each skill from this computer it switched off, with the
- * SKILL.md it was brought in from, which an engine loading that folder would still read. */
+/** Native skills this bot has off: its own switches, plus each skill from this computer it switched off or removed, with
+ * the SKILL.md it was brought in from, which an engine loading that folder would still read. */
 export function deniedNativeSkills(botId: string): { names: string[]; origins: string[] } {
   const own = readChoices(botId);
-  const imported = importedSkillsSwitchedOff(botId);
+  const imported = [...new Set([...importedSkillsSwitchedOff(botId), ...removedImportedSkills(botId)])];
   const index = readImportedSkills();
   const origins = imported.flatMap((name) => (index[name] ? [join(index[name].origin, "SKILL.md")] : []));
   return { names: [...new Set([...own, ...imported])].sort(), origins };

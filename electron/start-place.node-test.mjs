@@ -44,9 +44,22 @@ test("one that can't open now falls back to My Cloud and is forgotten: a removed
     assert.equal(w.steps.at(-1), "show", "My Cloud, as ever");
     assert.equal(w.remembered, null, "the next launch doesn't try it again");
   }
-  const local = launch({ remembered: { server: "env-1" }, kind: "computer", servers: ["env-1"] });
-  assert.equal(await local.run(), "cloud", "with this computer as home, a saved server is the Server menu's own as ever");
-  assert.deepEqual(local.steps, ["refresh", "show"]);
+});
+
+test("a server saved by hand reopens whether or not Cloud is home or anyone is signed in", async () => {
+  for (const extra of [{}, { kind: "computer" }, { opens: { cloud: null } }]) {
+    const w = launch({ remembered: { server: "env-1" }, servers: ["env-1"], ...extra });
+    assert.equal(await w.run(), "remembered", JSON.stringify(extra));
+    assert.deepEqual(w.steps, ["refresh", "server:env-1"]);
+    assert.deepEqual(w.remembered, { server: "env-1" });
+  }
+});
+
+test("a saved server that doesn't answer still waits when nobody is signed in", async () => {
+  const w = launch({ remembered: { server: "env-9" }, opens: { cloud: null } });
+  assert.equal(await w.run(), "home");
+  assert.deepEqual(w.steps, ["refresh", "server:env-9", "show"]);
+  assert.deepEqual(w.remembered, { server: "env-9" });
 });
 
 test("then This Mac, when My Cloud doesn't run either; neither when This Mac can't open, nor when this computer is home", async () => {

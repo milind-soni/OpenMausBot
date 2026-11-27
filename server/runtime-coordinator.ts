@@ -94,6 +94,14 @@ export function needsInputQuestion(text: string): string | undefined {
   return question || undefined;
 }
 
+export function handoffReply(text: string): Pick<HostTurnResult, "text" | "question"> {
+  return { text: text.slice(0, BRIEF_MAX), question: needsInputQuestion(text) ?? null };
+}
+
+export function handoffQuestion(result: Pick<HostTurnResult, "text" | "question">): string | undefined {
+  return result.question === undefined ? needsInputQuestion(result.text) : result.question ?? undefined;
+}
+
 export function view(a: Assignment, parent?: Assignment): HandoffView {
   const groupId = a.assignee.destination.groupId;
   const status: HandoffView["status"] = hostFirstTurn(a) ? "source" : a.status === "needs_input" ? "waiting" : a.status;
@@ -712,7 +720,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
-    const question = root ? undefined : needsInputQuestion(result.text);
+    const question = root ? undefined : handoffQuestion(result);
     if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
