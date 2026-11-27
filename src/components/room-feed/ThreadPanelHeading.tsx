@@ -17,7 +17,7 @@ const ITEM = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left te
 /** The title of a room thread open beside its feed, and its menu: what the feed row's menu offers, and what the room's
  * header and menu offered for its one thread before the feed: find, the export (its lines are loaded here) and its
  * time per turn. */
-export function ThreadPanelHeading({ group, task, messages, working }: { group: Group; task: GroupTask; messages: readonly Message[]; working: boolean }) {
+export function ThreadPanelHeading({ group, task, messages, working, onClose }: { group: Group; task: GroupTask; messages: readonly Message[]; working: boolean; onClose: () => void }) {
   const store = useStoreRef();
   const dispatch = store.dispatch;
   const [menu, setMenu] = useState<ThreadMenuAt | null>(null);
@@ -29,7 +29,6 @@ export function ThreadPanelHeading({ group, task, messages, working }: { group: 
     [task.threadId, task.title, task.pinned, task.archivedAt, working, closer]);
   const now = useRelativeNow();
   const actions = useMemo(() => roomThreadRowActions(group.id, dispatch), [group.id, dispatch]);
-  const close = () => dispatch({ type: "closeForkPanel" });
   const markdown = () => formatTranscriptMarkdown({ title: task.title, messages, isGroup: true });
   const limit = useConversationTurnLimit({ ...group, threadId: task.threadId });
   const limits: Array<{ key: string; minutes: number | null; label: string }> = [
@@ -40,10 +39,10 @@ export function ThreadPanelHeading({ group, task, messages, working }: { group: 
   const menuSheet = useThreadRowMenu({
     task: row, displayTitle: title, ownerId: group.id, menu, setMenu, actionRef: moreRef,
     onStartRename: () => { setMenu(null); setRenaming(true); },
-    onDelete: (thread) => { close(); actions.onDelete(thread); },
+    onDelete: (thread) => { onClose(); actions.onDelete(thread); },
     onPin: actions.onPin,
     onSetClosed: actions.onSetClosed,
-    onArchive: (thread, archivedAt) => { if (archivedAt !== null) close(); actions.onArchive(thread, archivedAt); },
+    onArchive: (thread, archivedAt) => { if (archivedAt !== null) onClose(); actions.onArchive(thread, archivedAt); },
     deletable: (group.tasks?.length ?? 1) > 1,
     extra: (done) => <>
       <button type="button" data-thread-find="" className={ITEM} onClick={() => { done(); requestChatFind(task.threadId); }}>
