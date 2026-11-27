@@ -13717,17 +13717,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!task || (CLOUD_TEAM && !teamHost.readableFrom(fromThreadId)(threadId))) return json(res, 404, { error: "no such thread on that bot" });
         if (!outsideLineage.mayReach(fromThreadId, threadId)) return json(res, 403, { error: OUTSIDE_STAYS_HERE });
         requireActiveInternalCapability();
+        let queued: { queued: true } | undefined;
         try {
-          await retryThread({ chief: from, bot: target, threadId, note, unattended: isUnattended(from.id, fromThreadId) });
+          queued = await retryThread({ chief: from, bot: target, threadId, note, unattended: isUnattended(from.id, fromThreadId) });
         } catch (error) {
           return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
         }
-        store.appendMessage(fromThreadId, {
-          role: "bot",
-          kind: "activity",
-          tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true },
-          threadRef: { botId: target.id, threadId, title: task.title },
-        });
+        if (queued) {
+          store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: `Queued a retry of ${target.name}'s thread #${task.title}`, ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });
+          return json(res, 200, { queued: true, message: `${target.name} is busy right now, so the retry of thread #${task.title} is queued and starts by itself when ${target.name} frees up. Its result stays in that thread; you are not woken for it — do not report this hand-off as failed and do not retry again.` });
+        }
+        store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });
         return json(res, 200, { started: true, message: `${target.name}'s thread #${task.title} is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.` });
       }
       // post_to_room appends role "bot", never "user" (which would start a round of real turns), starts no turn, and takes membership from the record.
