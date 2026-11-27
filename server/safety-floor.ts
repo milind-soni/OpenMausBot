@@ -354,12 +354,13 @@ function lex(source: string, windows: boolean): Reading {
 }
 
 /** Commands that run the command after them. `values`/`named`: options taking a value; `asks`: options that only
- * report on the command; `split`: the option whose value is more arguments (`env -S`). */
-const PREFIXES: Record<string, { values?: string; named?: string[]; operands?: number; asks?: string; asksNamed?: string[]; split?: { letter: string; named: string } }> = {
+ * report on the command; `split`: the option whose value is more arguments (`env -S`); `loneDash`: a `-` after the
+ * options is one more option (env's `-` is `-i`); `assigns`: every operand holding `=` is set, whatever its name. */
+const PREFIXES: Record<string, { values?: string; named?: string[]; operands?: number; asks?: string; asksNamed?: string[]; split?: { letter: string; named: string }; loneDash?: boolean; assigns?: boolean }> = {
   // `sudo -l rm` lists whether rm may be run; it runs nothing.
   sudo: { values: "CDghpRrtTUu", named: ["user", "group", "host", "prompt", "chdir", "chroot", "role", "type", "other-user", "close-from", "command-timeout"], asks: "l", asksNamed: ["list"] },
   doas: { values: "Cu" },
-  env: { values: "uCS", named: ["unset", "chdir", "split-string"], split: { letter: "S", named: "split-string" } },
+  env: { values: "uCS", named: ["unset", "chdir", "split-string"], split: { letter: "S", named: "split-string" }, loneDash: true, assigns: true },
   nice: { values: "n", named: ["adjustment"] },
   timeout: { values: "ks", named: ["kill-after", "signal"], operands: 1 },
   exec: { values: "a" },
@@ -459,6 +460,8 @@ function commandIndex(words: string[], unread: () => void): number {
       }
       words.splice(--index, spliced, ...parts);
     }
+    if (prefix.loneDash && words[index] === "-") index++;
+    if (prefix.assigns) while (index < words.length && words[index].includes("=")) index++;
     index += prefix.operands ?? 0;
   }
   return -1;
