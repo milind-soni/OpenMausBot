@@ -487,6 +487,8 @@ describe("OpenCode catalog", () => {
     ['AI_APICallError: Free usage limit reached. Free models work in OpenCode (https://opencode.ai); subscribe to OpenCode Go to keep going: https://opencode.ai/go', "model"],
     ["Internal error: FreeUsageLimitError: free models are limited today", "model"],
     ['OpenCode reached a usage limit (“Free usage limit reached. Free models work in OpenCode”) and is waiting it out without replying, so this turn was stopped.', "model"],
+    // A limit that names no provider reaches the whole account; a Go refusal does too when no catalog lists its models
+    // (the Go-scoped reads are covered with a catalog below).
     ["Internal error: Monthly usage limit reached for this key", "engine"],
     ["Internal error: GoUsageLimitError: the Go allowance is used up", "engine"],
     ["GoUsageLimitError: usage limit reached", "engine"],
@@ -522,8 +524,37 @@ describe("OpenCode catalog", () => {
       expect(facts.limitModels).toEqual(expect.arrayContaining(["opencode-go/minimax-m3", "opencode-go/glm-5.3"]));
       expect(facts.limitModels).not.toContain("opencode/deepseek-v4.1-flash-free");
     }
-    expect(openCodeLimitFacts("OpenCode Go weekly usage limit reached", "opencode/big-pickle", catalog), "a limit met by another model still holds the account")
-      .toEqual({ limit: "engine" });
+    // The refusal names Go even when the session's selected model says otherwise (a session-level fallback ran a Go
+    // model): the Go subscription's models are held, and Zen's keep working.
+    const misread = openCodeLimitFacts("OpenCode Go weekly usage limit reached", "opencode/big-pickle", catalog);
+    expect(misread).toEqual({ limit: "model", limitModels: expect.arrayContaining(["opencode-go/glm-5.3", "opencode-go/minimax-m3"]) });
+    expect(misread.limitModels).not.toContain("opencode/big-pickle");
+    // A Go refusal seen with no model selected still holds just the Go models the catalog lists.
+    expect(openCodeLimitFacts("Internal error: GoUsageLimitError: the Go allowance is used up", undefined, catalog))
+      .toEqual({ limit: "model", limitModels: ["opencode-go/glm-5.3", "opencode-go/minimax-m3"] });
+  });
+
+  // A usage limit on one provider's key holds that provider's models: Zen, OpenRouter and the other providers the
+  // instance serves share nothing with it.
+  it("holds a limit on one provider's key to that provider's models", () => {
+    const catalog = parseOpenCodeModelsOutput([
+      "opencode/big-pickle", JSON.stringify({ cost: { input: 1, output: 2 } }),
+      "openrouter/anthropic/claude-sonnet-5", JSON.stringify({ cost: { input: 1, output: 2 } }),
+      "openrouter/openai/gpt-6", JSON.stringify({ cost: { input: 1, output: 2 } }),
+      "opencode-go/minimax-m3", JSON.stringify({ cost: { input: 1, output: 2 } }),
+      "ollama_cloud/qwen3-coder", JSON.stringify({}),
+    ].join("\n"))!;
+    const facts = openCodeLimitFacts("Internal error: Monthly usage limit reached for this key", "openrouter/openai/gpt-6", catalog);
+    expect(facts.limit).toBe("model");
+    expect(facts.limitModels).toEqual(expect.arrayContaining(["openrouter/openai/gpt-6", "openrouter/anthropic/claude-sonnet-5"]));
+    expect(facts.limitModels).not.toContain("opencode/big-pickle");
+    expect(facts.limitModels).not.toContain("opencode-go/minimax-m3");
+    // A lowercase "go" in another provider's refusal is not the Go subscription's limit.
+    expect(openCodeLimitFacts("Internal error: go to your dashboard, monthly usage limit reached", "openrouter/openai/gpt-6", catalog).limitModels)
+      .toEqual(expect.arrayContaining(["openrouter/openai/gpt-6", "openrouter/anthropic/claude-sonnet-5"]));
+    // A limit met on a model of an unknown provider still holds just that model, never the account.
+    expect(openCodeLimitFacts("Internal error: Monthly usage limit reached for this key", "unlisted/one-off", catalog))
+      .toEqual({ limit: "model", limitModels: ["unlisted/one-off"] });
   });
 
   it("classifies OpenCode 2's authentication refusal and leaves real internal errors alone", () => {
@@ -1029,7 +1060,8 @@ describe("OpenCode turns without a sign-in gate", () => {
     try {
       const { done, events } = await f.run("t-go-limit", "opencode/big-pickle");
       expect(done).toMatchObject({ ok: false, stopReason: "quota" });
-      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine", message: expect.stringMatching(/usage limit/i) });
+      // The failed call's log row names opencode-go/kimi-k3, so the hold is that provider's, not the account's.
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "model", message: expect.stringMatching(/usage limit/i) });
     } finally {
       vi.unstubAllEnvs();
       vi.restoreAllMocks();
@@ -1058,14 +1090,14 @@ describe("OpenCode turns without a sign-in gate", () => {
     }
   });
 
-  it("marks OpenCode's own usage-limit refusal as the account's limit, so another AI can carry on", async () => {
+  it("marks OpenCode's own usage-limit refusal as its provider's models, so another AI can carry on", async () => {
     const f = await open("opencode-gave-up", (scratch) => ({ FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_FAILURE_FILE: join(scratch, "failure.json") }));
     writeFileSync(join(f.scratch, "failure.json"), JSON.stringify({
       code: -32603, message: "Internal error: Monthly usage limit reached for this key", data: { service: "session", errorName: "APIError" },
     }));
     const { done, events } = await f.run("t-gave-up", "opencode/big-pickle");
     expect(done).toMatchObject({ ok: false });
-    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine" });
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "model", limitModels: ["opencode/big-pickle"] });
   });
 
   it("stops an engine with no open request, no CPU use and nothing logged after a few minutes, not the full silence guard", async () => {

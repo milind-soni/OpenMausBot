@@ -57,6 +57,9 @@ export interface LimitTakeoverDeps {
   context: DefaultSelectionContext;
   /** Until when this engine refuses work, or null. */
   blockedUntil(instanceId: string, model?: string): number | null;
+  /** What holds this engine for a model now: the account ("engine"), only some of its models ("model", OpenCode's Go
+   * subscription's meter), or null. Asked whenever `blockedUntil` holds one, to decide who may carry on. */
+  holdScope?(instanceId: string, model?: string): "engine" | "model" | null;
   /** When this engine's limit resets, when that is known. */
   resetAt?(instanceId: string, model?: string): number | null;
   /** Only the usage meter holds this engine, with no refusal of its own. */
@@ -275,9 +278,12 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   function holdOn(selection: ModelSelection): { scope: TakeoverScope; resetsAt?: number } | null {
     const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
     const model = engineUntil === null ? modelHeld(selection) : null;
-    const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
+    const scope: TakeoverScope | null = engineUntil !== null ? deps.holdScope?.(selection.instanceId, selection.model) ?? "engine"
+      : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
     if (!scope) return null;
-    const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
+    const resetsAt = scope === "signed-out" ? undefined
+      : scope === "engine" || !model ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined
+      : model.resetsAt;
     return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
   }
 
