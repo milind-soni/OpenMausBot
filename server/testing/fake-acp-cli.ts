@@ -81,6 +81,9 @@
 //     (Copilot CLI 1.0.105 does this for auto)
 //   FAKE_ACP_EXIT_ON_MODEL  the process exits when set_config_option selects this model
 //   FAKE_ACP_EXIT_AFTER_WAKE=1  the process exits once it has answered a hand-off result's wake turn
+//   FAKE_ACP_CLI_TOOL_LIMIT=<bytes>  as the native Antigravity CLI does (antigravity-cli#1530): on every session/new and
+//                    session/resume, list each server's tools and leave out the largest, whichever server, until the rest
+//                    fit; delegate-peer then refuses a call to a tool left out with `unknown tool: "mcp_<server>_<tool>"`
 //   FAKE_ACP_HANG_ON_MODEL  set_config_option never answers a switch to this model, as a stuck account can; other requests
 //     are still answered
 //   FAKE_ACP_VARIANTS  JSON map model -> {id?, currentValue?, options} of ACP select values
@@ -651,8 +654,38 @@ function holdSessionMcp(): void {
 }
 
 async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false): Promise<string[]> {
-  const names = (result: any) => (result?.tools ?? []).map((tool: { name: string; inputSchema?: unknown }) =>
+  return (await listMcpToolDefinitions(entry, handshake, hold)).map((tool) =>
     process.env.FAKE_ACP_MCP_SCHEMA_BYTES === "1" ? `${tool.name}=${JSON.stringify(tool.inputSchema ?? {}).length}` : tool.name);
+}
+
+type ListedDefinition = { name: string; description?: string; inputSchema?: unknown };
+/** FAKE_ACP_CLI_TOOL_LIMIT: the `<server>/<tool>` names this session's CLI shows the model, settled once the setup's lists are in. */
+let cliShown: Promise<Set<string> | null> = Promise.resolve(null);
+/** A definition's size as the CLI counts it (tool-schema-profile.ts schemaBytes, copied: this fake imports nothing). */
+const cliDefinitionBytes = (tool: ListedDefinition) => {
+  const text = JSON.stringify({ name: tool.name, description: tool.description ?? "", parameters: tool.inputSchema ?? { type: "object" } }) ?? "";
+  return Buffer.byteLength(text) + 5 * (text.match(/[<>&]/g)?.length ?? 0) + 3 * (text.match(/[\u2028\u2029]/g)?.length ?? 0);
+};
+function fitSessionToCliLimit(): void {
+  const limit = Number(process.env.FAKE_ACP_CLI_TOOL_LIMIT);
+  if (!limit) return;
+  const servers = sessionMcp;
+  cliShown = Promise.all(servers.map(async (entry) => (await listMcpToolDefinitions(entry, GROK_MCP_HANDSHAKE).catch(() => []))
+    .map((tool) => ({ key: `${entry.name}/${tool.name}`, bytes: cliDefinitionBytes(tool) })))).then((lists) => {
+    const sized = lists.flat().sort((a, b) => b.bytes - a.bytes);
+    let total = sized.reduce((sum, tool) => sum + tool.bytes, 0);
+    const shown = new Set(sized.map((tool) => tool.key));
+    for (const tool of sized) {
+      if (total <= limit) break;
+      total -= tool.bytes;
+      shown.delete(tool.key);
+    }
+    return shown;
+  });
+}
+
+async function listMcpToolDefinitions(entry: AnyMcpEntry, handshake: unknown, hold = false): Promise<ListedDefinition[]> {
+  const names = (result: any): ListedDefinition[] => result?.tools ?? [];
   if (typeof entry.url === "string") {
     const post = await httpMcp(entry, handshake);
     return names(await post({ id: 2, method: "tools/list", params: {} }));
@@ -662,7 +695,7 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false
     for (const { name, value } of entry.env ?? []) env[name] = value;
     const child = spawn(entry.command!, entry.args ?? [], { env, stdio: ["pipe", "pipe", "ignore"] });
     if (hold) heldMcp.add(child);
-    const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); if (!hold || error) child.kill(); if (error) reject(error); else resolve(tools!); };
+    const finish = (error: Error | null, tools?: ListedDefinition[]) => { clearTimeout(timer); if (!hold || error) child.kill(); if (error) reject(error); else resolve(tools!); };
     const timer = setTimeout(() => finish(new Error("mcp timeout")), 20_000);
     child.on("error", (error) => finish(error));
     const write = (frame: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`);
@@ -1115,6 +1148,7 @@ function handle(msg: any) {
       agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
       sessionMcp = acceptedMcp(servers);
       holdSessionMcp();
+      fitSessionToCliLimit();
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -1228,6 +1262,7 @@ function handle(msg: any) {
         const offered = offeredAgents(msg.params.mcpServers);
         agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
         sessionMcp = acceptedMcp(msg.params.mcpServers);
+        fitSessionToCliLimit();
       }
       const opts = configOptions();
       const mdls = sessionModels();
@@ -1847,13 +1882,25 @@ function handle(msg: any) {
         finish();
         return;
       }
-      if (mode === "delegate-peer" && agentsMcp) {
+      const agentsUrl = sessionMcp.find((server) => server.name === "agents" && typeof server.url === "string");
+      if (mode === "delegate-peer" && (agentsMcp || agentsUrl)) {
         // A turn whose text names BRIEF_<word> hands on that task, so two of the person's requests are two briefs.
         const named = [...promptText.matchAll(/\bBRIEF_\w+/g)].at(-1)?.[0];
-        void driveMcp(agentsMcp, [
+        const calls = [
           { name: "list_bots", args: () => ({}) },
           handoffCall(named ? `delegated task ${named}` : "delegated task", { reason: "followup", doneWhen: "the export opens in Numbers" }),
-        ])
+        ];
+        const drive = agentsMcp;
+        void cliShown.then(async (shown) => {
+          // The model can call only what the CLI showed it: a tool left out is unknown, as on the native CLI.
+          const missing = shown && calls.map((call) => String(call.name)).find((name) => !shown.has(`agents/${name}`));
+          if (missing) throw new Error(`unknown tool: "mcp_agents_${missing}"`);
+          if (drive) return driveMcp(drive, calls);
+          // The native CLI takes the agents server by URL.
+          let last = "";
+          for (const call of calls) last = await httpMcpCall(agentsUrl!, String(call.name), call.args(last) as Record<string, unknown>);
+          return last;
+        })
           .then((reply) => {
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegated: ${reply}` } } } });
             complete();

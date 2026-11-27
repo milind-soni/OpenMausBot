@@ -207,6 +207,12 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       chmodSync(antigravityCli, 0o755);
       chmodSync(antigravityHarness, 0o755);
     }
+    // The native Antigravity CLI (agy), as the Shopify bot ran it: its own name in initialize, no harness beside it, and
+    // the session's servers by URL. A script, so the fake runs under the name the driver looks for.
+    const nativeAgy = join(home, "fake-agy-native", "antigravity");
+    mkdirSync(dirname(nativeAgy), { recursive: true });
+    writeFileSync(nativeAgy, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_CLI)} "$@"\n`);
+    chmodSync(nativeAgy, 0o755);
     for (const instanceId of ["geminiAsker", "geminiDelegate"]) {
       const antigravityProfile = join(home, ".openmausbot", "providers", "antigravity", createHash("sha256").update(instanceId).digest("hex"), "antigravity-acp");
       mkdirSync(antigravityProfile, { recursive: true });
@@ -272,8 +278,8 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
             },
             config: { cli: antigravityCli, fullAuto: true },
           },
-          // The Antigravity asker that hands work on with coordinate_bots, its process gone after each result's wake, so the
-          // person's next turn resumes the session in a new one (session/resume), as after a restart.
+          // The native Antigravity asker that hands work on with coordinate_bots, its process gone after each result's wake,
+          // so the person's next turn resumes the session in a new one (session/resume), as after a restart.
           geminiDelegate: {
             driver: "antigravityAgent",
             environment: {
@@ -283,8 +289,13 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
               FAKE_ACP_MODES: "default,yolo",
               FAKE_ACP_EXIT_AFTER_WAKE: "1",
               FAKE_ACP_RPC_APPEND_FILE: join(home, "gemini-delegate-rpc.jsonl"),
+              // Past this the CLI leaves out the session's largest tools, as the native Antigravity CLI does
+              // (ANTIGRAVITY_CLI_TOOL_LIMIT, written out so the test reads the same on a build without it).
+              FAKE_ACP_CLI_TOOL_LIMIT: "56600",
+              FAKE_ACP_AGENT_NAME: "Antigravity ACP Server",
+              FAKE_ACP_VERSION: "1.5.18",
             },
-            config: { cli: antigravityCli, fullAuto: true },
+            config: { cli: nativeAgy, fullAuto: true },
           },
           // Hermes shape: keeps the first agents proxy it is offered for the life of the process
           poolLister: {
@@ -637,15 +648,37 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     async () => {
       await hideAll();
       const helper = await named("Helper", { modelSelection: HELPER });
-      const shop = await named("Shop", { modelSelection: { instanceId: "geminiDelegate", model: "gemini-4-neon" } });
-      const settled = (count: number) => waitUntil(async () => {
-        const current = await bot(shop.id);
-        const woke = current.messages.filter((m: any) => m.kind === "text" && m.role === "bot" && m.text === WOKE_WITH_RESULT).length;
-        return woke >= count && !current.busy && !(await bot(helper.id)).busy;
-      }, 45_000, `hand-off ${count} never settled`);
+      // The person's own MCP server, as the Shopify bot's connectors were: many small tools whose schemas cannot be made
+      // shorter. It starts small, so the first session fits; by the person's next message it lists 150 (as a connector
+      // does once more apps are connected), and the resumed session is past the CLI's limit even at its shortest. Left to
+      // choose, the CLI leaves out the largest tools, coordinate_bots among them.
+      const shopTools = join(home, "shop-mcp-tools.json");
+      const listShopTools = (count: number) => writeFileSync(shopTools, JSON.stringify(Array.from({ length: count }, (_, index) => ({
+        name: `shop_tool_${index}`,
+        description: `Store operation ${index}.`,
+        inputSchema: { type: "object", properties: Object.fromEntries(Array.from({ length: 8 }, (_, field) => [`store_record_field_${field}`, { type: "string" }])) },
+      }))));
+      listShopTools(40);
+      const fakeMcp = { command: process.execPath, args: ["--experimental-strip-types", fileURLToPath(new URL("./testing/fake-mcp-server.ts", import.meta.url))] };
+      const imported = await api("POST", "/api/mcp/servers/import", { json: JSON.stringify({ mcpServers: { shopmcp: { ...fakeMcp, env: { FAKE_MCP_TOOLS_FILE: shopTools } } } }) });
+      expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+      expect((await api("PATCH", "/api/mcp/servers/shopmcp", { enabled: true })).status).toBe(200);
+      const shop = await named("Shop", { modelSelection: { instanceId: "geminiDelegate", model: "gemini-4-neon" }, mcpServers: ["shopmcp"] });
+      const unknownTool = (messages: any[]) => messages.filter((m: any) => m.kind === "text" && /unknown tool/i.test(m.text ?? "")).map((m: any) => m.text);
+      // Settled once the hand-off's result has woken Shop, or as soon as a call is refused as an unknown tool (the bug).
+      const settled = async (count: number) => {
+        await waitUntil(async () => {
+          const current = await bot(shop.id);
+          if (unknownTool(current.messages).length && !current.busy) return true;
+          const woke = current.messages.filter((m: any) => m.kind === "text" && m.role === "bot" && m.text === WOKE_WITH_RESULT).length;
+          return woke >= count && !current.busy && !(await bot(helper.id)).busy;
+        }, 45_000, `hand-off ${count} never settled`);
+        expect(unknownTool((await bot(shop.id)).messages), `coordinate_bots on hand-off ${count}`).toEqual([]);
+      };
 
       expect((await api("POST", `/api/bots/${shop.id}/messages`, { text: "have @Helper do BRIEF_FIRST" })).status).toBe(202);
       await settled(1);
+      listShopTools(150);
       // The person switches the conversation's model; the process that answered the wake is gone.
       expect((await api("PATCH", `/api/bots/${shop.id}`, { modelSelection: { instanceId: "geminiDelegate", model: "gemini-4-pro" } })).status).toBe(200);
       expect((await api("POST", `/api/bots/${shop.id}/messages`, { text: "now have @Helper do BRIEF_SECOND" })).status).toBe(202);
@@ -665,7 +698,6 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const requestIds = delegated.map((m: any) => /"requestId":"([\w-]+)"/.exec(m.text)?.[1]);
       expect(requestIds.every(Boolean)).toBe(true);
       expect(new Set(requestIds).size).toBe(2);
-      expect(current.messages.some((m: any) => /unknown tool/i.test(m.text ?? ""))).toBe(false);
 
       const works = assignments(helper.id, shop.id);
       expect(works.map((work) => work.id).sort()).toEqual([...requestIds].sort());
