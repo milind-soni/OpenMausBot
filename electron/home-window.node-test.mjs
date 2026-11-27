@@ -435,6 +435,7 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
   w.home.retry = (input) => { asked.push(input?.pressed ?? false); return retry(input); };
   for (const pressed of [true, "true", 1, undefined]) { w.url = `${LOCAL}${HOME_SCREEN_PATH}`; await handlers.get("home:retry")(page, pressed); }
   assert.deepEqual(asked, [true, false, false, false]);
+  assert.equal(w.freshens, 1, "only a press reads the sign-in again first (when its last read began a minute ago)");
   w.home.retry = retry; w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.throws(() => handlers.get("home:repair")(page), /only available/);
   w.state = { status: "signed-out" };
