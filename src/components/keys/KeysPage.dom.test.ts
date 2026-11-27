@@ -610,6 +610,23 @@ describe("Your own servers (SSH)", () => {
     expect(line.textContent).toBe("Desktops on your own servers stop after 5 minutes instead, set by vpsIdle.timeoutMinutes in config.json.");
   });
 
+  it("switches between the override and the shared link while mounted", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig({ ...fx.config, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 480 }, vpsIdle: { timeoutMinutes: 5 } });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    expect(host.querySelector<HTMLElement>("[data-idle-time-link]")!.textContent).toBe("Desktops on your own servers stop after 5 minutes instead, set by vpsIdle.timeoutMinutes in config.json.");
+    setConfig({ ...fx.config, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 480 }, vpsIdle: undefined });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    expect(host.querySelector<HTMLElement>("[data-idle-time-link]")!.textContent).toBe("Idle desktops stop after 480 minutes. Change in Desktop details");
+  });
+
+  it("leaves out the Desktop details link on a Cloud home, which has no idle-time editor", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig({ ...fx.config, cloudHome: true, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 480 } });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    expect(host.querySelector("[data-idle-time-link]")).toBeNull();
+  });
+
   it("saves the first alias as the default server, then shows it with its limits", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     fx.api.mockImplementation(echo({}));

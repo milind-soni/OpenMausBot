@@ -17,9 +17,12 @@ export function useServerIdleOverride(): number | null {
 export function IdleTimeLink({ servers = false }: { servers?: boolean }) {
   const minutes = useStoreSelector((s) => s.config?.localVm?.idleTimeoutMinutes ?? DEFAULT_IDLE_MINUTES);
   const override = useServerIdleOverride();
-  if (servers && override !== null) return <p data-idle-time-link="" className="text-[12px] leading-4 text-ink-secondary">{t("vm.idle.serverOverride", { minutes: override })}</p>;
+  const cloudHome = useStoreSelector((s) => s.config?.cloudHome === true);
   const shell = useContext(SettingsShellContext);
   const dispatch = useStoreDispatch();
+  if (servers && override !== null) return <p data-idle-time-link="" className="text-[12px] leading-4 text-ink-secondary">{t("vm.idle.serverOverride", { minutes: override })}</p>;
+  // A Cloud home's Desktop details has no idle-time editor, so there is nothing to link to.
+  if (cloudHome) return null;
   const open = () => (shell ? shell.go("desktops", DESKTOP_DETAILS_ANCHOR) : dispatch({ type: "toggleAppSettings", open: true, section: "desktops" }));
   return (
     <p data-idle-time-link="" className="text-[12px] leading-4 text-ink-secondary">

@@ -614,4 +614,14 @@ describe("Local VM idle timeout setting", () => {
     expect(markup).toContain('value="30"');
     expect(markup).toContain("minutes");
   });
+
+  it("adds the server-only override from config.json to the help text", () => {
+    storeFixture.config = { vpsIdle: { timeoutMinutes: 15 } };
+    try {
+      const markup = renderToStaticMarkup(createElement(LocalVmIdleTimeoutSetting, { minutes: 30, disabled: false, onSave: async () => {} }));
+      expect(markup).toContain("Desktops on your own servers stop after 15 minutes instead, set by vpsIdle.timeoutMinutes in config.json.");
+    } finally {
+      storeFixture.config = null;
+    }
+  });
 });

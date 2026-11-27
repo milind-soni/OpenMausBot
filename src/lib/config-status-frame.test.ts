@@ -22,3 +22,8 @@ it("leaves older servers' missing pause fields absent and keeps plan pauses sepa
   expect(config).not.toHaveProperty("heldBots");
   expect(config).toMatchObject({ awakeLimit: 3, pausedBots: ["plan-limited"] });
 });
+
+it("keeps the server desktops' idle override through a config broadcast, and leaves it absent when unset", () => {
+  expect(configStatusFromFrame({ ...baseFrame, vpsIdle: { timeoutMinutes: 60 } })).toMatchObject({ vpsIdle: { timeoutMinutes: 60 } });
+  expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("vpsIdle");
+});
