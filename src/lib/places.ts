@@ -48,6 +48,19 @@ export function usePlaces(): RailState {
   return state;
 }
 
+/** Show bots together, from a circle's menu on the window's rail: what main says it is now, or null when it could not change. */
+export async function setTogetherFromRail(on: boolean): Promise<boolean | null> {
+  const turn = bridge()?.together;
+  if (!turn) return null;
+  try {
+    const now = await turn(on);
+    void refreshPlaces();
+    return now;
+  } catch {
+    return null;
+  }
+}
+
 /** A place's colour, chosen in its menu on the window's rail: main saves it (on the Admin for a Cloud) whatever that
  * place's server runs, and the circle shows it once the list is read again. */
 export async function recolorPlace(id: string, swatch: CloudSwatch | null): Promise<PlaceColorOutcome> {

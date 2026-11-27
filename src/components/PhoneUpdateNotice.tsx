@@ -40,7 +40,7 @@ export function PhoneUpdateCard({ phones, onOpen, onDismiss }: { phones: PhoneDe
   return <NoticeCard titleId="phone-update-title" notice="phone-update" icon={Smartphone} title={t("phoneUpdate.title")} onDismiss={onDismiss}>
     <p className="mb-3 mt-1 text-[13px] leading-[18px] text-ink-secondary">{body}</p>
     <div className="flex flex-wrap items-center gap-3">
-      <button type="button" className={PRIMARY_BUTTON} onClick={onOpen}>{t("phoneUpdate.open")}</button>
+      <button type="button" className={PRIMARY_BUTTON} onClick={onOpen}>{t("phoneUpdate.openDevices")}</button>
       <NotNowButton onClick={onDismiss} />
     </div>
   </NoticeCard>;

@@ -153,5 +153,5 @@ export function WorkspacePanes({ primary, title, children }: { primary: string; 
     draw(layout.second, second, path + "1");
   }
   draw(panes?.layout ?? MAIN_PANE, { x: 0, y: 0, w: 100, h: 100 }, "");
-  return <div ref={root} className={desktop ? "relative min-h-0 min-w-0 flex-1" : "contents"}>{leaves}{dividers}</div>;
+  return <div ref={root} data-workspace-area={desktop ? "" : undefined} className={desktop ? "relative min-h-0 min-w-0 flex-1" : "contents"}>{leaves}{dividers}</div>;
 }

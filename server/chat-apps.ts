@@ -2,12 +2,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   APP_LIMITS, APP_PAGE_VERSIONS, appBlockedText, htmlFallbackText, oneLine, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes,
-  type AppCan, type AppDocument, type AppPayload,
+  type AppCan, type AppConnectorUse, type AppDocument, type AppPayload, type AppUse,
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml, ROOM_CAN } from "../shared/app-frame/document.ts";
 import { jsxPublishedHtml } from "../shared/app-frame/jsx-page.ts";
 import { APP_DOCS_SWEEP_GRACE_MS, AppDocs, type AppDocData, type AppDocPut } from "./app-docs.ts";
+import { AppStates } from "./app-state.ts";
 import { speakerIn, type AgentCardResult, type AgentCardStore } from "./chat-widgets.ts";
 import { compileJsxPage } from "./jsx-compile.ts";
 import { appDocRefs } from "./message-db.ts";
@@ -24,6 +25,7 @@ const NOT_A_PAGE = "That app came from an MCP server, not from show_html; it can
 
 export interface ChatAppsStore extends AgentCardStore {
   onChange?(listener: (change: StoreChange) => void): () => void;
+  botByThread?(threadId: string): unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -47,7 +49,8 @@ function scrubbed(html: string, title: string): { html: string; title: string; m
 }
 
 /** A folder page also carries the files beside its index.html and where they were read. */
-type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"] };
+type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"]; uses?: AppUse[];
+  connectors?: AppConnectorUse[] };
 type MadePage = { ok: true; page: PageText; title: string; masked: boolean; leftOut?: string };
 
 /** The page's text, scrubbed; a jsx page is transpiled first, so one that cannot run is refused with where. */
@@ -87,7 +90,8 @@ async function folderPage(path: string, title: string, folders: BotFolders): Pro
 }
 
 function storePage(docs: AppDocs, page: PageText): AppDocPut {
-  const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}), ...(page.videos ? { videos: page.videos } : {}) };
+  const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}), ...(page.videos ? { videos: page.videos } : {}),
+    ...(page.uses?.length ? { uses: page.uses } : {}), ...(page.connectors?.length ? { connectors: page.connectors } : {}) };
   return docs.put({ source: "html", html: page.html, ...(Object.keys(data).length ? { data } : {}), ...(page.files ? { files: page.files } : {}) });
 }
 
@@ -127,10 +131,11 @@ export function createAppCard(args: {
 
 function placePage(
   args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: MausColor }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean },
-  made: MadePage,
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean; uses?: AppUse[]; connectors?: AppConnectorUse[] },
+  given: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
+  const made = value.uses === undefined ? given : { ...given, page: { ...given.page, uses: value.uses, connectors: value.connectors ?? [] } };
   const { page } = made;
   if (value.appId === undefined) {
     const stored = storePage(docs, page);
@@ -162,7 +167,9 @@ function replacePage(
   store: Pick<AgentCardStore, "patchMessage">, docs: AppDocs, threadId: string, existing: Message & { app: AppPayload }, made: MadePage,
   options: { frameless?: boolean; live?: boolean } = {},
 ): Message | null {
-  const { page } = made;
+  // A version that says nothing about `uses` (a live folder's reload, a replacement without it) keeps what the page declared.
+  const before = made.page.uses !== undefined ? undefined : docs.read(existing.app.doc)?.data;
+  const page = before === undefined ? made.page : { ...made.page, uses: before?.uses, connectors: before?.connectors };
   const stored = storePage(docs, page);
   const border = options.frameless === undefined ? existing.app.border : !options.frameless;
   // Only a page from a folder can stay live; a page sent as html or jsx stops being live.
@@ -230,7 +237,8 @@ export function appDocument(args: {
     const files = stored.data?.folder && args.files
       ? `${args.files.origin}${args.files.folder({ threadId: args.threadId, messageId: row.id, doc: version.doc })}` : undefined;
     return botHtmlDocument({ messageId: row.id, rev, html: stored.html, title: row.app.title,
-      ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}), ...(room ? { room } : {}) });
+      ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}), ...(room ? { room } : {}),
+      ...(stored.data?.uses?.length ? { uses: stored.data.uses } : {}), ...(stored.data?.connectors?.length ? { connectors: stored.data.connectors } : {}) });
   }
   if (!stored.data?.tool) return null;
   const access: ReturnType<McpAppAccess> = room ? { can: ROOM_CAN } : (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
@@ -453,6 +461,14 @@ export function rowRate(limit: number, windowMs: number): { take(key: string, no
 
 export interface ChatApps {
   readonly docs: AppDocs;
+  /** Each bot page's own small store (mausbot.state), by conversation and row: every version of a page shares it. */
+  readonly states: AppStates;
+  /** What the current version of a bot's page declared it uses; none for an MCP app or a missing row. */
+  declaredUses(threadId: string, messageId: string): AppUse[];
+  /** The connector tools the current version of a bot's page declared; none for an MCP app or a missing row. */
+  declaredConnectors(threadId: string, messageId: string): AppConnectorUse[];
+  /** True while the workspace is being backed up or restored: a page's state waits. */
+  paused(): boolean;
   createAppCard(args: {
     bot: { id: string; name: string; color: MausColor }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
   }): AgentCardResult | Promise<AgentCardResult>;
@@ -495,12 +511,19 @@ export function createChatApps(deps: {
   liveRoots?(threadId: string, botId: string | undefined): readonly string[] | null;
 }): ChatApps {
   const docs = new AppDocs(`${deps.dataDir}/app-docs`, deps.maxBytes ? { maxBytes: deps.maxBytes } : {});
+  const states = new AppStates(`${deps.dataDir}/app-state`);
   const references = deps.references ?? appDocRefs;
   const sweep = () => {
-    try { return docs.sweep(references()); } catch (error) {
+    let removed = 0;
+    try { removed += docs.sweep(references()); } catch (error) {
       console.error("chat apps: document sweep failed", error);
-      return 0;
     }
+    // A conversation that is gone is never read: reading one would bring it back into the store.
+    const known = (threadId: string) => Boolean(deps.store.groupByThread(threadId) || deps.store.botByThread?.(threadId));
+    try { removed += states.sweep((threadId, messageId) => known(threadId) && Boolean(appRow(deps.store, threadId, messageId))); } catch (error) {
+      console.error("chat apps: page state sweep failed", error);
+    }
+    return removed;
   };
   let pending: ReturnType<typeof setTimeout> | null = null;
   let pendingAt = Infinity;
@@ -600,6 +623,16 @@ export function createChatApps(deps: {
   liveTimer?.unref?.();
   const apps: ChatApps = {
     docs,
+    states,
+    declaredUses: (threadId, messageId) => {
+      const row = appRow(deps.store, threadId, messageId);
+      return row?.app.source === "html" && row.app.doc ? docs.read(row.app.doc)?.data?.uses ?? [] : [];
+    },
+    declaredConnectors: (threadId, messageId) => {
+      const row = appRow(deps.store, threadId, messageId);
+      return row?.app.source === "html" && row.app.doc ? docs.read(row.app.doc)?.data?.connectors ?? [] : [];
+    },
+    paused: () => deps.paused?.() ?? false,
     createAppCard: (args) => {
       const result = createAppCard({ ...args, store: deps.store, docs });
       return result instanceof Promise ? result.then((done) => watchIfLive(args.threadId, done)) : watchIfLive(args.threadId, result);

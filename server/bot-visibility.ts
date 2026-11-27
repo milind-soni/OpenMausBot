@@ -619,6 +619,8 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       const { help: _help, ...rest } = payload;
       return { ...rest, helpReason: null };
     }
+    case "board.item":
+      return visible.group(str(payload.groupId)) && visible.thread(str(payload.threadId)) ? payload : undefined;
     case "config":
     case "routine.deleted":
     case "webhook.deleted":

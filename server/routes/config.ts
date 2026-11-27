@@ -17,6 +17,7 @@ import {
   builtInBrowserEnabled,
   changedInstanceIds,
   engineLaunches,
+  isValidSshAlias,
   loadConfig,
   localVmMode,
   mergeOpenCodeProviderKeys,
@@ -39,7 +40,7 @@ import type { SessionRegistry } from "../sessions.ts";
 import type { SharedComputerControl } from "../shared-computer-control.ts";
 import type { SharedComputers } from "../shared-computers.ts";
 import { parseSkillMd } from "../skills.ts";
-import type { Store } from "../store.ts";
+import type { BotRecord, Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import { DEFAULT_DEEPSEEK_VOICE } from "../../shared/deepseek-voice.ts";
 import * as vps from "../vps-computer.ts";
@@ -84,6 +85,9 @@ export interface ConfigRouteDeps {
   sharedMembership: () => boolean;
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
+  vpsIdleMs(): number;
+  vpsIdles: ConfigRouteDeps["localVmIdles"];
+  vpsServerSwitched?(bot: BotRecord): void;
   localVmIdleMs(): number;
   localVmIdles: { values(): Iterable<Pick<ComputerIdleTimer, "setIdleMs">> };
   localVmActiveThreads: { readonly size: number };
@@ -127,7 +131,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
     closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, sharedMembership, lendingEnabled, providerConfigs,
-    localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
+    vpsIdleMs, vpsIdles, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
     configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, ownHints, postiz,
@@ -637,6 +641,14 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
       if (patchMayChangeEngineStatus(patch)) registry.forgetSnapshots();
+      if (changingVpsAlias) {
+        for (const bot of store.bots) {
+          if (!isValidSshAlias(bot.vpsAlias)) deps.vpsServerSwitched?.(bot);
+        }
+      }
+      if (patch.vpsIdle?.timeoutMinutes !== undefined) {
+        for (const idle of vpsIdles.values()) idle.setIdleMs(vpsIdleMs());
+      }
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }

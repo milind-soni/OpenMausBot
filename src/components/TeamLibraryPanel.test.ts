@@ -15,4 +15,12 @@ describe("TeamLibraryPanel", () => {
     expect(source).not.toMatch(/role="tab(list)?"/);
     expect(source).not.toMatch(/teams\/scout|team-library\/github|ShareTeamDialog|openmaus\.backup|type="file"/);
   });
+
+  it("shows community templates as cards with every bot's face, and adds a template folder through Import", () => {
+    expect(source).toContain("<TeamCatalogCard");
+    expect(source).not.toContain("TeamGlyph");
+    // Import keeps a one-bot template out of a department; an older team's file still goes through the team import.
+    expect(source).toMatch(/previewImport\(\{ url: link \}\)/);
+    expect(source).toMatch(/addImport\(\{ url: from\.link \}, dispatch\)/);
+  });
 });

@@ -277,6 +277,16 @@ describe("quota switch", () => {
       }
     });
 
+    it("carries the backup model's configured reasoning effort or variant on automatic failover", async () => {
+      const backupWithEffort: ModelSelection = { instanceId: "codex", model: "codex-default", effort: "medium" };
+      backups = [backupWithEffort];
+      const turn = begin(bot.threadId, { messageId: said("use backup reasoning") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      expect(await ranOut(turn)).toBeNull();
+      expect(thread().modelSelection).toEqual(backupWithEffort);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
     it("moves a request whose turn had already run something to the backup without sending it again", async () => {
       for (const ran of ["tool", "reply"] as const) {
         const turn = begin(bot.threadId, { messageId: said(`file the ticket (${ran})`) });
@@ -508,9 +518,13 @@ describe("quota switch", () => {
 
       it("with no backup chosen moves nothing, and a second refusal adds no notice", async () => {
         backups = [];
+        const shown: Array<{ threadId: string; instanceId: string; id: string }> = [];
+        quota = createQuotaSwitch({ ...deps, signedOutNotice: (threadId, instanceId, row) => shown.push({ threadId, instanceId, id: row.id }) });
         await signedOut({ messageId: said("hi") });
         await signedOut({ messageId: said("hi again") });
         expect(notices()).toEqual([{ name: `notice: ${NOTICE}`, ok: true, setup: true }]);
+        const notice = store.messagesFor(bot.threadId).find((message) => message.tool?.name === `notice: ${NOTICE}`)!;
+        expect(shown, "the notice is handed on, to say the AI is signed in again later").toEqual([{ threadId: bot.threadId, instanceId: defaultSelection().instanceId, id: notice.id }]);
         expect(thread().modelSelection).toEqual(defaultSelection());
         expect(resend).not.toHaveBeenCalled();
       });

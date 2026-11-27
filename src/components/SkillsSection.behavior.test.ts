@@ -111,8 +111,8 @@ describe("Skills library review and assignment controls", () => {
   });
 
   it("requires the same source review before enabling a per-bot library skill", async () => {
-    // Hook call order: useManagedSkills owns 0-8 and the assignment guard ref (9); the section owns 10-13.
-    fixture.values = [[{ ...skill(), origin: "library" }], ["order-audit"], [], "", [], false, "", "", null, { current: false }, null, "", false, ""];
+    // Hook call order: useManagedSkills owns 0-8, the assignment guard ref (9) and its note (10); the section owns 11-14.
+    fixture.values = [[{ ...skill(), origin: "library" }], ["order-audit"], [], "", [], false, "", "", null, { current: false }, "", null, "", false, ""];
     fixture.request.mockImplementation(async (_url, options) => options?.method ? {} : { text: source });
     named(render(true), "Enable order-audit").props.onClick!();
     await flush();
@@ -127,7 +127,7 @@ describe("Skills library review and assignment controls", () => {
 
   it("shows a skill from this computer with this bot's switch, and no way to delete the one copy every bot shares", async () => {
     const imported = { name: "pdf", description: "Works with PDFs", enabled: true, source: "~/.claude/skills/pdf", warnings: [], origin: "imported" };
-    fixture.values = [[imported], [], [], "", [], false, "", "", null, { current: false }, null, "", false, ""];
+    fixture.values = [[imported], [], [], "", [], false, "", "", null, { current: false }, "", null, "", false, ""];
     fixture.request.mockImplementation(async (_url, options) => options?.method ? {} : { text: source });
     const tree = render(true);
     expect(tree.find((node) => node.props["aria-label"] === "Remove pdf")).toBeUndefined();
@@ -135,5 +135,31 @@ describe("Skills library review and assignment controls", () => {
     named(tree, "Disable pdf").props.onClick!();
     await flush();
     expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/pdf", expect.objectContaining({ method: "PATCH", body: '{"enabled":false}' }));
+  });
+  it("puts one of the bot's own skills on all bots, and marks one already there with this bot's own switch", async () => {
+    const own = { name: "invoice-check", description: "Checks invoices", enabled: true, source: "learned:conversation", warnings: [], canUseOnAllBots: true };
+    const shared = { name: "client-onboarding", description: "Onboards clients", enabled: true, source: "learned:conversation", warnings: [], allBots: true };
+    fixture.values = [[own, shared], [], [], "", [], false, "", "", null, { current: false }, "", null, "", false, ""];
+    fixture.request.mockImplementation(async (url: string) => (url.endsWith("/all-bots") ? { kept: ["Keeper"] } : { skills: [own, shared] }));
+    const tree = render(true);
+    expect(tree.find((node) => node.props["aria-label"] === "Use client-onboarding on all your bots")).toBeUndefined();
+    expect(tree.filter((node) => node.props.children === "All bots")).toHaveLength(1);
+    named(tree, "Use invoice-check on all your bots").props.onClick!();
+    await flush();
+    expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/invoice-check/all-bots", { method: "POST" });
+    expect(fixture.values[10]).toBe("These bots keep their own different copy: Keeper");
+    named(render(true), "Disable client-onboarding").props.onClick!();
+    await flush();
+    expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/client-onboarding", expect.objectContaining({ method: "PATCH", body: '{"enabled":false}' }));
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("window", { confirm });
+    named(render(true), "Remove client-onboarding").props.onClick!();
+    expect(confirm).toHaveBeenCalledWith("Remove “client-onboarding” from all your bots?");
+    expect(fixture.request).not.toHaveBeenCalledWith("/api/bots/bot/skills/client-onboarding", expect.objectContaining({ method: "DELETE" }));
+    vi.stubGlobal("window", { confirm: vi.fn(() => true) });
+    named(render(true), "Remove client-onboarding").props.onClick!();
+    await flush();
+    expect(fixture.request).toHaveBeenCalledWith("/api/bots/bot/skills/client-onboarding/all-bots", { method: "DELETE" });
+    vi.unstubAllGlobals();
   });
 });

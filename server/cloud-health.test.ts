@@ -8,7 +8,9 @@ import { failedTurnTool } from "../shared/failed-turn.ts";
 import type { PlaceRow } from "../shared/place-view.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, CLOUD_PAIRING_SKEW_S, cloudPairingSignature, cloudRequestSignature } from "./cloud-home.ts";
-import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, createCloudHealth, createCloudHealthLedger, type CloudHealthDeps } from "./cloud-health.ts";
+import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, START_CODES, createCloudHealth, createCloudHealthLedger, type CloudHealthDeps } from "./cloud-health.ts";
+import { createCloudSpeed } from "./cloud-speed.ts";
+import { noteStartFailure } from "./engine-start-failures.ts";
 import { DATA_DIR, EVENTS_DIR } from "./config.ts";
 import { memoryStallText, memoryStopText } from "./engine-memory.ts";
 import type { RuntimeEvent } from "./contracts.ts";
@@ -100,7 +102,7 @@ describe("a Cloud home's speed in its health report", () => {
     w.emit(w.bot.threadId, { type: "turn.started" });
     const { speed } = w.health.report(undefined);
     expect(speed).toMatchObject({ bootMs: null, wakeMs: null, turnStarts: [0, 1, 0, 0, 0, 0] });
-    expect(Object.keys(speed).sort()).toEqual(["bootMs", "psi", "steal", "turnStarts", "wakeMs", "windowS"]);
+    expect(Object.keys(speed).sort()).toEqual(["bootMs", "loop", "psi", "steal", "turnStarts", "wakeMs", "windowS"]);
     expect(JSON.stringify(speed)).not.toMatch(/Tallyspoon|inbox/);
     expect(JSON.stringify(speed).length).toBeLessThan(200);
   });
@@ -240,9 +242,69 @@ describe("the ledger", () => {
     w.advance(20 * 60_000);
     w.emit(w.bot.threadId, { type: "turn.started" });
     w.fail("no activity for 20 minutes — the turn was stopped");
-    expect(w.health.report(null).turns).toEqual({ started15m: 1, failed15m: 1, started24h: 5, failed24h: 2 });
+    expect(w.health.report(null).turns).toEqual({ started15m: 1, failed15m: 1, started24h: 5, failed24h: 2, boot: 5 });
     w.advance(24 * 3600_000);
-    expect(w.health.report(null).turns).toEqual({ started15m: 0, failed15m: 0, started24h: 0, failed24h: 0 });
+    // The rolling windows empty out; the count since boot never falls (the Admin keeps each hour's increase).
+    expect(w.health.report(null).turns).toEqual({ started15m: 0, failed15m: 0, started24h: 0, failed24h: 0, boot: 5 });
+  });
+
+  it("files an engine that did not start under why, not as the provider-looking code its words would get; a sign-in keeps its auth code", () => {
+    const w = world(), thread = (name: string) => w.store.createBot({ name }).threadId;
+    const opencode = "Internal error: Internal service failure (session/new, ServiceUnavailableError)";
+    // Too busy: the plain line busy-start.ts shows (its notice key), and the process limit's.
+    const busy = thread("busy"), cpu = thread("cpu"), processes = thread("processes"), missing = thread("missing"), provider = thread("provider"), signedOut = thread("signed-out"), other = thread("other");
+    for (const id of [busy, cpu, processes, missing, provider, signedOut, other]) w.emit(id, { type: "turn.started" }, "opencodeGo");
+    w.fail(opencode, { text: { key: "chat.notice.cloudBusyStart" } }, busy);
+    w.fail(opencode, { text: { key: "chat.notice.cloudOutOfCpu" } }, cpu);
+    w.fail("There is no room to start another program (EAGAIN)", { text: { key: "chat.notice.outOfProcesses", params: { code: "EAGAIN" } } }, processes);
+    w.fail("`opencode` isn't installed, or isn't on this app's PATH", { setup: true }, missing);
+    // The engine's or its provider's own refusal of session/new, noted by the start (busy-start.ts) for this thread.
+    noteStartFailure(provider, "provider", w.now());
+    w.fail("500 internal server error", {}, provider);
+    w.fail("Authentication required: not logged in", { setup: true }, signedOut);
+    w.fail("500 internal server error", {}, other);
+    w.emit(signedOut, { type: "turn.completed", ok: false, stopReason: "auth_required" }, "opencodeGo");
+    w.emit(other, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).map(({ code, count }) => [code, count]).sort()).toEqual([["auth_required", 1], ["server_error", 1], ["start_not_installed", 1], ["start_overloaded", 3], ["start_provider", 1]]);
+    // A note is the next row's only: a later failure on the thread is filed by its words again.
+    w.emit(provider, { type: "turn.started" }, "opencodeGo");
+    w.fail("500 internal server error", {}, provider);
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "server_error")).toMatchObject({ count: 2 });
+    // A start that failed without a row of its own (its turn just ended) leaves nothing for the thread's next turn.
+    noteStartFailure(provider, "provider", w.now());
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    w.emit(provider, { type: "turn.started" }, "opencodeGo");
+    w.fail("500 internal server error", {}, provider);
+    w.emit(provider, { type: "turn.completed", ok: false, stopReason: "rpc_error" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "server_error")).toMatchObject({ count: 3 });
+    // Too busy, noted by the start, though the row came without the plain line (startup recovery words it as the engine did).
+    const recovered = thread("recovered");
+    w.emit(recovered, { type: "turn.started" }, "opencodeGo");
+    noteStartFailure(recovered, "overloaded", w.now());
+    w.fail(opencode, {}, recovered);
+    expect(incidents(w).find((incident) => incident.code === "start_overloaded")).toMatchObject({ count: 4 });
+    // A provider refusal noted, then the backup AI's start on the same thread refused for sign-in: the row stays an auth failure.
+    const backup = thread("backup");
+    w.emit(backup, { type: "turn.started" }, "opencodeGo");
+    noteStartFailure(backup, "provider", w.now());
+    w.fail("Authentication required: not logged in", { setup: true }, backup);
+    w.emit(backup, { type: "turn.completed", ok: false, stopReason: "auth_required" }, "opencodeGo");
+    expect(incidents(w).find((incident) => incident.code === "auth_required")).toMatchObject({ count: 2 });
+    expect(incidents(w).find((incident) => incident.code === "start_provider")).toMatchObject({ count: 1 });
+    expect(Object.values(START_CODES).every((code) => /^[a-z0-9][a-z0-9_-]{0,47}$/.test(code))).toBe(true);
+  });
+
+  it("carries the event loop's stalls and the counts since boot in a few dozen bytes, codes and counts only", () => {
+    const room = { waits: 3, waitMs: 360_000, stopped: 1, killed: 2, stallMinutes: 4 };
+    const plain = world({ room: () => room, speed: createCloudSpeed({ read: () => null, loop: () => null }) }).health.report(null);
+    const report = world({ room: () => ({ ...room, boot: { waits: 7, stopped: 2, killed: 2, stallMinutes: 9 } }),
+      speed: createCloudSpeed({ read: () => null, loop: () => ({ n: 12, worstMs: 11_234 }) }) }).health.report(null);
+    expect(report.speed.loop).toEqual({ n: 12, worstMs: 11_234 });
+    expect(report.room).toMatchObject({ boot: { waits: 7, stopped: 2, killed: 2, stallMinutes: 9 } });
+    expect(report.turns.boot).toBe(0);
+    const added = JSON.stringify(report).length - JSON.stringify(plain).length;
+    expect(added).toBeLessThanOrEqual(100);
   });
 
   it("reports each routine's last outcome and failures in a row as the saved run rows give them, so a restart hides none", () => {

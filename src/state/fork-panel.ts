@@ -2,6 +2,7 @@ import { emptyPane, paneIds, placePane, presetLayout, type PaneEdge, type PanePr
 import { api } from "./api";
 import { loadFullThread } from "./message-history";
 import { optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
+import type { ReadReason } from "./read-visible";
 import type { Action, AppState, BotAnnouncement, Group, Message } from "./store";
 
 export interface ForkPanelState {
@@ -201,7 +202,7 @@ export function removeForkOptimistic(state: AppState, action: Extract<Action, { 
 
 type ForkEffect = Extract<Action, { type: "forkMessage" | "openForkPanel" }>;
 export function runForkEffect(action: ForkEffect, dispatch: (action: Action) => void,
-  rawDispatch: (action: Action) => void, showError: (error: unknown) => void): void {
+  rawDispatch: (action: Action) => void, showError: (error: unknown) => void, reason: ReadReason = "open"): void {
   if (action.type === "forkMessage") {
     const owner = action.kind === "bot" ? "bots" : "groups";
     const latest = action.messageId === undefined;
@@ -222,7 +223,7 @@ export function runForkEffect(action: ForkEffect, dispatch: (action: Action) => 
     return;
   }
   const owner = action.kind === "bot" ? "bots" : "groups";
-  void api(`/api/${owner}/${action.ownerId}/read`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) }).catch(() => {});
+  void api(`/api/${owner}/${action.ownerId}/read`, { method: "POST", body: JSON.stringify({ threadId: action.threadId, reason }) }).catch(() => {});
   const loadId = action.loadId ?? "";
   void loadFullThread(action.threadId).then(({ messages, activeLeafId }) => {
     rawDispatch({ type: "forkPanelLoaded", threadId: action.threadId, loadId, messages, activeLeafId });

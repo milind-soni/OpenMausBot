@@ -37,7 +37,7 @@ describe("who is told a bot was shared with them", () => {
     const bot = { id: "quotes", name: "Quotes" } as BotRecord;
     notice({ kind: "session", session: { email: "Ada@Acme.test" } } as unknown as RequestAuth, bot, only(), only({ [MARTA]: "chat", [RUI]: "chat" }));
     expect(delivered.map(([person]) => person).sort()).toEqual([personKey({ id: "", email: MARTA }), personKey({ id: "", email: RUI })].sort());
-    expect(delivered[0]![1]).toEqual({ kind: "notice", from: { name: "Ada", email: ADA }, origin: { botId: "quotes", threadId: "main" },
+    expect(delivered[0]![1]).toEqual({ kind: "notice", reason: "shared", from: { name: "Ada", email: ADA }, origin: { botId: "quotes", threadId: "main" },
       text: "Ada shared Quotes with you.", title: "Quotes is shared with you", notify: "done" });
 
     delivered.length = 0;

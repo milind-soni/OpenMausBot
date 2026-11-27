@@ -76,8 +76,9 @@ const READ_PROGRAM = new Set([
   "md5", "shasum", "sha256sum", "jq", "yq", "column",
   "export", "unset", "alias", "true", "false", ":", "sleep", "exit",
 ]);
-const GIT_READ = new Set(["status", "log", "diff", "show", "blame", "branch", "tag", "ls-files", "rev-parse", "remote", "describe", "shortlog", "reflog"]);
+const GIT_READ = new Set(["status", "log", "diff", "show", "blame", "ls-files", "rev-parse", "describe", "shortlog"]);
 const GIT_VALUE_FLAG = new Set(["-C", "-c"]);
+const GIT_REF_VALUE_FLAG = new Set(["--sort", "--format"]);
 const GH_READ = new Set(["pr view", "pr list", "pr checks", "pr diff", "issue view", "issue list", "run view", "run list"]);
 const GH_VALUE_FLAG = new Set(["-R", "--repo"]);
 const NO_VALUE_FLAG = new Set<string>();
@@ -97,6 +98,40 @@ function words(rest: string[], valueFlags: ReadonlySet<string>): string[] {
     else found.push(token);
   }
   return found;
+}
+
+function isGitRead(rest: string[]): boolean {
+  let i = 0;
+  while (i < rest.length && unquote(rest[i]).startsWith("-")) {
+    i += GIT_VALUE_FLAG.has(unquote(rest[i])) ? 2 : 1;
+  }
+  const subcommand = rest[i] && unquote(rest[i]);
+  const args = rest.slice(i + 1).map(unquote);
+  const flags: string[] = [];
+  for (let j = 0; j < args.length; j += 1) {
+    if (GIT_REF_VALUE_FLAG.has(args[j])) j += 1;
+    else if (args[j].startsWith("-")) flags.push(args[j]);
+  }
+  switch (subcommand) {
+    case "branch":
+      if (flags.some((arg) => /^-[^-]*[dDmMcCfu]/.test(arg) || /^--(?:delete|delete-merged|move|copy|force|set-upstream-to|unset-upstream|edit-description)(?:=|$)/.test(arg))) return false;
+      if (flags.some((arg) => /^-[^-]*[lar]/.test(arg) || /^--(?:list|all|remotes|show-current|contains|no-contains|merged|no-merged|points-at|forked)(?:=|$)/.test(arg))) return true;
+      return words(args, GIT_REF_VALUE_FLAG).length === 0;
+    case "tag":
+      if (flags.some((arg) => /^-[^-]*[adfFsmue]/.test(arg) || /^--(?:delete|annotate|sign|force|message|file|local-user|edit|trailer|cleanup)(?:=|$)/.test(arg))) return false;
+      if (flags.some((arg) => /^-[^-]*[lnv]/.test(arg) || /^--(?:list|verify|contains|no-contains|merged|no-merged|points-at)(?:=|$)/.test(arg))) return true;
+      return words(args, GIT_REF_VALUE_FLAG).length === 0;
+    case "remote": {
+      const [verb] = words(args, NO_VALUE_FLAG);
+      return verb === undefined || verb === "show" || verb === "get-url";
+    }
+    case "reflog": {
+      const [verb] = words(args, NO_VALUE_FLAG);
+      return !/^(?:expire|delete|drop|write)$/.test(verb ?? "");
+    }
+    default:
+      return subcommand === undefined || GIT_READ.has(subcommand);
+  }
 }
 
 function mutatesOverHttp(rest: string[]): boolean {
@@ -123,10 +158,7 @@ function isRead(argv: string[]): boolean {
   switch (program) {
     case "sed":
       return !rest.some((token) => SED_IN_PLACE.test(unquote(token)));
-    case "git": {
-      const [subcommand] = words(rest, GIT_VALUE_FLAG);
-      return subcommand === undefined || GIT_READ.has(subcommand);
-    }
+    case "git": return isGitRead(rest);
     case "gh": {
       const [group, verb] = words(rest, GH_VALUE_FLAG);
       if (group === "api") return !mutatesOverHttp(rest) && !rest.some((token) => GH_FIELD_FLAG.test(unquote(token)));

@@ -7,7 +7,7 @@ import { Check, CornerUpLeft, Inbox } from "lucide-react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { openInbox, readInboxRow, useInboxView } from "@/state/inbox";
+import { openInbox, useInboxView } from "@/state/inbox";
 import { pendingApprovals, PendingApprovalActions } from "../PendingApproval";
 import { ASK_QUIET_ANSWER, ASK_QUIET_BUTTON, AskChoices, AskError } from "../AskCard";
 import { ELEVATED_CARD } from "../elevated";
@@ -33,7 +33,7 @@ function Answers({ row, view }: { row: InboxRow; view: InboxView }) {
   const [failed, setFailed] = useState(false);
   const ask = askOf(row);
   const choices = choicesOf(row);
-  const reading = () => { readInboxRow(row); openInbox({ reading: row.id }); };
+  const reading = () => openInbox({ reading: row.id });
   if (ask === "approval") {
     const pending = view.threadId ? pendingApprovals([asMessage(row)])[0] : undefined;
     return pending ? (
@@ -69,7 +69,7 @@ export function InboxCard({ view }: { view: InboxView }) {
   }, []);
   const counts = tabCounts(view);
   const rows = rowsIn(view, "needs-you").slice(0, CARD_ROWS);
-  const openRow = (row: InboxRow) => { readInboxRow(row); openInbox({ reading: row.id }); };
+  const openRow = (row: InboxRow) => openInbox({ reading: row.id });
   const openAll = () => openInbox();
   const shell = cn("my-1 w-full max-w-[560px] rounded-[18px]", ELEVATED_CARD);
   if (!rows.length) {

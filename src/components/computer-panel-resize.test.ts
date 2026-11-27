@@ -23,8 +23,9 @@ function Panel() {
   return createElement("aside", { style: { width: panelWidth } }, createElement("div", { ref: separatorRef, role: "separator", tabIndex: 0, onKeyDown: onSeparatorKeyDown }));
 }
 
-function ChatAndPanel({ view = "chat" }: { view?: string }) {
-  return createElement("div", null, createElement("main", { key: view }), createElement(Panel));
+function ChatAndPanel({ view = "chat", workspace = false }: { view?: string; workspace?: boolean }) {
+  const main = createElement("main", { key: view });
+  return createElement("div", null, workspace ? createElement("div", { "data-workspace-area": "" }, main) : main, createElement(Panel));
 }
 
 const press = (key: string) => act(() => {
@@ -65,7 +66,7 @@ beforeEach(() => {
     const panel = this.tagName === "ASIDE" ? this : this.parentElement?.querySelector<HTMLElement>(":scope > aside");
     const panelWidth = Number.parseFloat(panel?.style.width ?? "") || 0;
     if (this.tagName === "ASIDE") return panelWidth;
-    if (this.tagName === "MAIN") return Math.max(0, room - panelWidth);
+    if (this.tagName === "MAIN" || this.hasAttribute("data-workspace-area")) return Math.max(0, room - panelWidth);
     return 0;
   });
   host = document.createElement("div");
@@ -98,10 +99,10 @@ describe("the computer panel's resize edge", () => {
     expect(width).toBe(400);
   });
 
-  it("grows past 960 px on a wide window, as far as the chat keeping its minimum width allows", () => {
+  it.each([false, true])("leaves the chat its minimum width on a wide window (workspace area: %s)", (workspace) => {
     room = 2000;
     localStorage.setItem("omb-computer-panel-width", "1560");
-    act(() => root.render(createElement(ChatAndPanel)));
+    act(() => root.render(createElement(ChatAndPanel, { workspace })));
     expect(width).toBe(1560);
     expect(maxWidth).toBe(2000 - CHAT_MIN_WIDTH);
     press("ArrowLeft");

@@ -18,6 +18,11 @@ import { groupUsageSummary } from "./GroupUsageChip";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
+import { useRoomFeed } from "./room-feed/use-room-feed";
+
+/** What acts on the room's current thread. With the feed that thread is one row among many, so these live in the menu
+ * of the thread open beside the feed instead. */
+const THREAD_ITEMS = new Set(["find", "copy", "download", "turn-limit"]);
 
 function turnLimitLabel(minutes: number): string {
   if (minutes === 60) return t("room.panel.hour");
@@ -36,6 +41,7 @@ function useRoomMoreItems(group: Group): { items: SidebarMenuItem[]; on: boolean
   const transcript = () => conversationTranscript({ threadId: group.threadId, hasMore: group.hasMore, title: group.name, messages, isGroup: true });
   const threads = showThreads ? [] : orderedThreadList(group.tasks ?? []);
   const usage = groupUsageSummary(group.usage);
+  const feed = useRoomFeed(group);
   const items: SidebarMenuItem[] = [
     {
       key: "find",
@@ -120,7 +126,7 @@ function useRoomMoreItems(group: Group): { items: SidebarMenuItem[]; on: boolean
       onSelect: () => {},
     } satisfies SidebarMenuItem] : []),
   ];
-  return { items, on: findOpen };
+  return { items: feed ? items.filter((item) => !THREAD_ITEMS.has(item.key)) : items, on: findOpen && !feed };
 }
 
 function RoundRoomMoreMenu({ group }: { group: Group }) {

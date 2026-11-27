@@ -12,6 +12,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
 import { isToolGroup } from "./tool-groups.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
+import { readWeekdays } from "./package-weekdays.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
 import { skillFilesSchema } from "./skill-files.ts";
 
@@ -120,7 +121,7 @@ export const packageRoutineScheduleSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("daily"),
     time: requiredText(5).regex(CLOCK_TIME, { message: "must use HH:MM" }),
-    weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+    weekdays: z.preprocess(readWeekdays, z.array(z.number().int().min(0).max(6)).min(1).max(7)),
   }),
   z.object({
     type: z.literal("interval"),

@@ -36,7 +36,7 @@ import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
-import { announcesAction } from "./chat-announcement.ts";
+import { announcesAction } from "./chat-announcement.ts"; import { shellOff } from "./shell-off.ts";
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[] | null;
@@ -552,7 +552,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (sessionGrants.size > MAX_DELIVERED_THREADS) sessionGrants.delete(sessionGrants.keys().next().value!);
     const approval = createChatToolApproval({
       signal: abort.signal,
-      granted: turn.guestConfined ? undefined : granted,
+      granted: shellOff(turn) ? undefined : granted,
       open: (ask) => emit({
         ...base(turn.threadId, turnId), type: "request.opened", requestType: "permission",
         requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: ask.grant !== undefined,
@@ -588,7 +588,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let stopReason: string | null = null;
       let failure: string | undefined;
       let failureText: ReturnType<typeof runtimeErrorText>;
-      let toolFailed = false;
+      let toolFailed = false, spoke = false, unfloored = 0, blockedAfterReply = false; // unfloored: failed calls the safety floor did not block after the bot spoke
       let correctiveRounds = 0;
       const denials: string[] = [], failedCalls: string[] = [];
       const seenCalls = new Set<string>();
@@ -744,7 +744,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
-          if (reply.trim()) emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: safeText(reply) });
+          if (reply.trim()) { spoke = true; emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: safeText(reply) }); }
           abort.signal.throwIfAborted();
           if (unreadable) {
             askedAgain = true;
@@ -763,7 +763,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 messages.push({ role: "user", content: CORRECTIVE_ROUND });
                 continue;
               }
-              stopReason = "tool_error";
+              stopReason = "tool_error"; blockedAfterReply = failedCalls.length > 0 && unfloored === 0;
               throw new ChatProtocolError(toolFailureMessage(failedCalls, denials.filter((name) => name !== ASK_USER_TOOL)));
             }
             if (options.nudgeAnnouncedAction && tools.definitions.length && announcesAction(completion.text)) {
@@ -798,13 +798,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           // A failure stays pending only until the bot runs tools again: one that went on to use more tools has read the error
           // and reacted (a wrong guess, a bad query, then the right call), so its turn is not failed for it, on any model. The
           // failed step still shows as failed; a failure in the last calls before the answer, or a person's no, still ends it.
-          if (!denials.length) { toolFailed = false; failedCalls.length = 0; }
+          if (!denials.length) { toolFailed = false; failedCalls.length = 0; unfloored = 0; }
           const screenshotParts: ChatContentPart[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();
             let result: ChatToolResult;
             let started = false;
-            let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
+            let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false, flooredAfterReply = false;
             try {
               const args = toolArguments(call.function.arguments, safeText);
               const inputPreview = preview(args);
@@ -860,7 +860,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                     }
                   }
                 } else {
-                  denials.push(shown.title);
+                  denials.push(shown.title); flooredAfterReply = Boolean(floored) && spoke;
                   result = { ok: false, text: refusal(floored, (message) => emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message })) };
                 }
               }
@@ -875,7 +875,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             const text = safeText(result.text);
             const output = preview({ ok: result.ok, result: text });
             emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "tool", itemId: call.id, ok: result.ok, output });
-            if (!result.ok) { toolFailed = true; failedCalls.push(title); }
+            if (!result.ok) { toolFailed = true; failedCalls.push(title); if (!flooredAfterReply) unfloored += 1; }
             messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ ok: result.ok, result: repeatNote ? `${text}\n\n${repeatNote}` : text }) });
             screenshotParts.push(...chatToolImages(call.id, result.images));
             abort.signal.throwIfAborted();
@@ -905,7 +905,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           // "upstream" (an OpenAI-compatible URL) names no provider, and the Cloud trial credit reads its raw line.
           const words = options.httpErrorLabel === "upstream" ? { message: failure } : plainFailure(options.httpErrorLabel, failure);
           const replyShownFirst = stopReason === "tool_error";
-          emit({ ...base(turn.threadId, turnId), type: "runtime.error", ...words, ...(!cleanupFailed && failureText ? { text: failureText } : {}), terminal: !abort.signal.aborted, ...(replyShownFirst ? { partial: true } : {}) });
+          emit({ ...base(turn.threadId, turnId), type: "runtime.error", ...words, ...(!cleanupFailed && failureText ? { text: failureText } : {}), terminal: !abort.signal.aborted, ...(replyShownFirst ? { partial: true, ...(blockedAfterReply ? { blockedAfterReply: true } : {}) } : {}) });
         }
         if (!ok && !abort.signal.aborted) {
           const continuable = classifyContinuable(stopReason, failure);

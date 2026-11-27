@@ -2,14 +2,11 @@ import { Plus } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { useStoreDispatch } from "@/state/store-select";
-import { useAdvancedMode } from "@/lib/interface-mode";
-import { useBotHasThreads, useThreadTabsShown } from "./HeaderThreadTabs";
+import { useBotHasThreads } from "./HeaderThreadTabs";
 
-export function NewThreadHeaderButton({ botId }: { botId: string }) {
+export function NewThreadHeaderButton({ botId, tabs, switcher }: { botId: string; tabs: boolean; switcher: boolean }) {
   const dispatch = useStoreDispatch();
-  const tabs = useThreadTabsShown(botId);
-  const simplePill = !useAdvancedMode() && window.ogb?.remoteClient?.active !== true;
-  const pillHasIt = useBotHasThreads(botId) && simplePill;
+  const pillHasIt = useBotHasThreads(botId) && switcher;
   if (pillHasIt) return null;
   return (
     <button

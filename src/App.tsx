@@ -10,7 +10,7 @@ import { MausBotWelcome } from "@/components/MausBotWelcome";
 import { NewBotNameHost } from "@/components/NewBotName";
 import { MemberApps } from "@/components/MemberApps";
 import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
-import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
+import { cloudSignInDue, noEnginesDue, spotlightsQuiet, workedEarlier, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { LiveCallHost } from "@/components/LiveCallHost";
@@ -28,6 +28,9 @@ import { WorkspaceLayoutContext, FocusedWorkspaceThread, WorkspaceChatContext } 
 import { useResponsiveWorkspace } from "@/hooks/use-responsive-workspace";
 import { WorkspacePanes } from "@/components/WorkspacePanes";
 import { ForkPanel } from "@/components/ForkPanel";
+import { RoomFeedView } from "@/components/room-feed/RoomFeedView";
+import { useRoomFeed } from "@/components/room-feed/use-room-feed";
+import { useFeedThreadFull } from "@/components/room-feed/feed-fit";
 import { PHONE_LAYOUT, SIDEBAR_AND_BOT_PANEL_FIT, SIDEBAR_AND_NARROW_PANEL_FIT, SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel, type OpenSidePanels } from "@/lib/sidebar-fold";
 import { preloadConnectedApps } from "@/lib/connected-apps";
@@ -193,7 +196,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
-  const advanced = useAdvancedMode(), skillBurger = useFeature("skillBurger");
+  const advanced = useAdvancedMode(), skillBurger = useFeature("skillBurger"), roomFeed = useRoomFeed(group);
+  // A thread opened from a room's feed sits beside it while both fit, and takes the feed's place when they don't.
+  const feedThreadFull = useFeedThreadFull(group && roomFeed && sidebarInline && state.forkPanel?.kind === "group" && state.forkPanel.ownerId === group.id ? state.forkPanel.threadId : null);
   const roomPanelOpen = useRoomPanelShown({ group, state, simple: !advanced && !remoteClient });
   const sidePanels: OpenSidePanels = {
     simple: !advanced, remoteClient, bot: Boolean(settingsBot) && state.settingsOpen, room: roomPanelOpen, inbox: inboxShown, inboxWide: inboxPanel.wide === true,
@@ -227,11 +232,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const sidebarBesidePanel = anySidePanel(panelsMovingSidebar(sidePanels)) && !sidebarAndPanelFit;
   const notificationTray = notificationFeed && !calendarFocus;
 
-  const noEngines =
-    state.connected &&
-    state.instances.length > 0 &&
-    !state.instances.some((i) => i.snapshot.state === "available");
-  const cloudSignIn = cloudSignInDue(viewer, state, engineReady);
+  // Only engines truly absent, never status checks that could not finish on a busy machine (onboarding.ts).
+  const noEngines = noEnginesDue(state);
+  const cloudSignIn = cloudSignInDue(viewer, state, (instance) => engineReady(instance) || instance.snapshot.busy === true || (workedEarlier(instance) && instance.snapshot.authenticated !== false));
   const cloudIntent = useCloudIntent();
   const cloudAsk = cloudIntentShown(cloudIntentDue({
     viewer, connected: state.connected, enginesKnown: state.instances.length > 0,
@@ -483,8 +486,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : chiefStep ? (
         <EmptyChatShell />
       ) : primary ? (
-        <WorkspacePanes primary={primary.threadId} title={primary.tasks?.find((task) => task.threadId === primary.threadId)?.title ?? primary.name}>
-          {group ? <GroupView key={group.id} group={group} /> : bot && <HandoffExchangeHost bot={chatBot ?? bot}><ChatView bot={chatBot ?? bot} /></HandoffExchangeHost>}
+        <WorkspacePanes primary={primary.threadId} title={roomFeed ? primary.name : primary.tasks?.find((task) => task.threadId === primary.threadId)?.title ?? primary.name}>
+          {group && roomFeed ? (feedThreadFull ? <ForkPanel full /> : <RoomFeedView key={group.id} group={group} />)
+            : group ? <GroupView key={group.id} group={group} />
+              : bot && <HandoffExchangeHost bot={chatBot ?? bot}><ChatView bot={chatBot ?? bot} /></HandoffExchangeHost>}
         </WorkspacePanes>
       ) : noEngines ? (
         <NoEngines />
@@ -520,7 +525,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       )}
       <AppPreviewPanel />
       <FilePreviewPanel threadId={group?.threadId ?? bot?.threadId} />
-      {state.forkPanel && sidebarInline && <ForkPanel />}
+      {state.forkPanel && sidebarInline && !feedThreadFull && <ForkPanel />}
       {!state.forkPanel && roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
       )}

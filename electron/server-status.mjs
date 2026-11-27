@@ -115,6 +115,10 @@ export function createServerStatus({ entries, check, appVersion, onChange = () =
       lastRefocus = now();
       for (const row of rows.values()) if (failing(row)) void look(row);
     },
+    /** The saved servers it checks, `{ id, origin }`, whether or not they were looked at yet. */
+    saved() {
+      return entries().filter((entry) => entry.origin).map(({ id, origin }) => ({ id, origin }));
+    },
     list() {
       return [...rows.values()].map((row) => ({ id: row.id, state: row.state, since: row.since, version: row.version, behind: versionBehind(row.version, appVersion), install: row.install }));
     },

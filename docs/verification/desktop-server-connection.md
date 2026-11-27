@@ -68,11 +68,11 @@ smoke as an authenticated connection to a customer's server.
 
 ## User flow
 
-Choose **Connect to a server** from the server menu, or open **Settings →
-This app → Your computers** in Advanced mode. Enter the server's HTTPS address
-and pairing code, or paste the full pairing link. Check the server name on the
-Connect button, select it, and complete pairing or email sign-in on the server.
-To generate an owner link without the CLI's
+Choose **Connect to another computer…** from the desktop's Server menu, or
+open **Settings → This app → Your computers** in Simple or Advanced mode.
+Enter the server's HTTPS address and pairing code, or paste the full pairing
+link. Check the server name on the Connect button, select it, and complete
+pairing or email sign-in on the server. To generate an owner link without the CLI's
 phone wizard, run `npx openmausbot pair --label "My desktop"` on the server.
 Treat this link as a secret. Existing limited-access links retain their limits.
 
@@ -80,6 +80,9 @@ Select **This computer** or a saved hosted workspace to switch. Each origin
 keeps its own session, bots, chats, provider credentials and settings. **Remove**
 signs this desktop out and removes its saved connection, not the server's bots
 or data. The server must remain running independently.
+
+To keep the current place open, use **Open in new window** from the rail menu
+for a local workspace or a manually saved server instead of switching places.
 
 The dropdown renders in the server's own UI, so both desktop and hosted UI
 need the update for the in-page control. When connecting to an older hosted
@@ -103,7 +106,7 @@ remembered for that workspace identity and paired session, not repeated on
 every switch. A different sign-in or server identity requires a new review.
 Older servers need updating before they advertise this capability.
 
-**Choose access**, or **Settings → Servers → Computer access**:
+**Choose access**, or **Settings → This app → Your computers → Computer access**:
 
 - Pick specific folders. They start read-only; **Allow edits** permits create
   and hash-guarded overwrite, not delete. Paths stay inside the chosen folder;

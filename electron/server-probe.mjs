@@ -12,7 +12,7 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   empty: "native.connect.empty",
   codeOnly: "native.connect.codeOnly",
   emailCode: "native.connect.emailCode",
-  oldCode: "native.connect.oldCode",
+  oldCode: "native.connect.oldCodeDevices",
   scriptKey: "native.connect.scriptKey",
   notACode: "native.connect.notACode",
   publicHttp: "native.connect.publicHttp",
@@ -22,14 +22,14 @@ export const CONNECT_PROBLEM_KEYS = Object.freeze({
   dns: "native.connect.dns",
   certificate: "native.connect.certificate",
   notMausBot: "native.connect.notMausBot",
-  desktopApp: "native.connect.desktopApp",
-  desktopAppTailnet: "native.connect.desktopAppTailnet",
+  desktopApp: "native.connect.desktopAppDevices",
+  desktopAppTailnet: "native.connect.desktopAppTailnetDevices",
   loopback: "native.connect.loopback",
   localNetwork: "native.connect.localNetwork",
   tailscaleOff: "native.connect.tailscaleOff",
   otherTailnet: "native.connect.otherTailnet",
   tailnetBlocked: "native.connect.tailnetBlocked",
-  tailnetSilent: "native.connect.tailnetSilent",
+  tailnetSilent: "native.connect.tailnetSilentDevices",
 });
 
 /**

@@ -22,7 +22,7 @@ describe("named links into a bot's settings", () => {
 
   it("lands the access callers on the Simple page that holds what they are about, else on the Computer tab", () => {
     expect(linkTarget("access", link({ section: "access", page: "apps" }))).toEqual({ tab: "details", page: "apps" });
-    expect(linkTarget("access", link({ section: "access", page: "folder" }))).toEqual({ tab: "library", page: "folder" });
+    expect(linkTarget("access", link({ section: "access", page: "folder" }))).toEqual({ tab: "details", page: "folder" });
     // MCP servers are listed on the apps page; Simple mode has no tool-selection page, so that link opens the Computer tab.
     expect(linkTarget("access", link({ section: "access", page: "mcp" }))).toEqual({ tab: "details", page: "apps" });
     expect(linkTarget("access", link({ section: "access", page: "tools" }))).toEqual({ tab: "computer" });

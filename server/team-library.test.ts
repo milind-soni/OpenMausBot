@@ -65,6 +65,35 @@ describe("team library", () => {
     expect(() => parseTeamCatalog(unsafe)).toThrow("safe catalog path");
   });
 
+  it("keeps who published an entry as one line, and drops a credit it can't show", () => {
+    const entry = catalog.teams[0]!;
+    const credited = (author: unknown) => parseTeamCatalog({ ...catalog, teams: [{ ...entry, author }] }).teams[0]!.author;
+    expect(credited("Jane Doe")).toBe("Jane Doe");
+    expect(credited({ name: " Jane\n Doe " })).toBe("Jane Doe");
+    expect(credited("x".repeat(101))).toBeUndefined();
+    expect(credited(42)).toBeUndefined();
+    expect(parseTeamCatalog(catalog).teams[0]).not.toHaveProperty("author");
+  });
+
+  it("keeps a template's kind and each bot's face, leaving out faces it can't trust", () => {
+    const entry = {
+      ...catalog.teams[0]!, kind: "bot",
+      avatars: [
+        { key: "lead", name: "Ada", color: "chrome", mascotBody: "cursor", mascotExpression: "happy", picture: "teams/engineering/avatars/lead.webp" },
+        { key: "other", name: "Bo", color: "blue", picture: "teams/elsewhere/avatars/x.webp" },
+        { key: "Bad Key", name: "Cy", color: "red" },
+        { key: "nocolor", name: "Di" },
+      ],
+    };
+    const [parsed] = parseTeamCatalog({ ...catalog, teams: [entry] }).teams;
+    expect(parsed!.kind).toBe("bot");
+    expect(parsed!.avatars).toEqual([
+      { key: "lead", name: "Ada", color: "chrome", mascotBody: "cursor", mascotExpression: "happy", picture: "teams/engineering/avatars/lead.webp" },
+      { key: "other", name: "Bo", color: "blue" },
+    ]);
+    expect(parseTeamCatalog(catalog).teams[0]!.avatars).toBeUndefined();
+  });
+
   it("accepts a catalog of hundreds of published templates", () => {
     const entry = catalog.teams[0]!;
     const teams = Array.from({ length: 500 }, (_, index) => {

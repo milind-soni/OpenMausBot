@@ -5,6 +5,7 @@ import { itemSeen, rememberNoticeSeen, withDownloadedUpdate, type HistoryAction,
 import { appVersion, desktopAppVersion } from "@/lib/app-links";
 import { openEmailDraft, openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
+import { EARLIER_WHATS_NEW_NOTICE } from "@/lib/notices";
 import { activeLocale, t } from "@/lib/i18n";
 import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
 import { installUpdate, useUpdaterState } from "@/lib/updater";
@@ -142,7 +143,7 @@ function Replay({ modal, found, whatsNew, onClose }: { modal: HistoryModal; foun
   }
   if (modal === "whats-new") {
     if (!whatsNew) return null;
-    return <WhatsNewPopup view={whatsNew} report={(action, slide) => reportWhatsNew(action, slide, whatsNew)} onDone={done}
+    return <WhatsNewPopup view={whatsNew} report={(action, slide) => reportWhatsNew(action, slide, whatsNew, EARLIER_WHATS_NEW_NOTICE)} onDone={done}
       onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })} />;
   }
   if (moving) return <GrokMoveDialog onClose={onClose} />;

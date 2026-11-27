@@ -2,6 +2,7 @@ import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
+import { TiledPaneTitle } from "@/state/workspace-chat-context";
 import type { ModelPicker } from "./ModelPicker";
 import { CODEX_USAGE_LIMIT_REACHED, CODEX_USAGE_URL } from "../../shared/codex-usage-limit";
 import { failedTurnTool } from "../../shared/failed-turn";
@@ -11,15 +12,16 @@ import { en } from "@/locales";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: MenuRow[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  const headerFeatures = { threadTabs: false };
+  return { headerFeatures, showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: MenuRow[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
   };
 });
 type MenuRow = { key: string; disabled?: boolean; heading?: string; active?: boolean; note?: string; submenu?: MenuRow[]; onSelect?: () => void };
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
-    state: { ...original.initialState, config: fixture.showToolCalls ? { features: { showToolCalls: true } } : null,
-      instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
+    state: { ...original.initialState, config: fixture.showToolCalls || fixture.headerFeatures.threadTabs ? { features: { showToolCalls: fixture.showToolCalls, ...fixture.headerFeatures } } : null,
+      instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", models: { options: [] } } as unknown as InstanceInfo] },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -73,6 +75,21 @@ describe("the header's right side", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot: of }));
     return { markup, controls: markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf("role=\"log\"")) };
   };
+
+  it("keeps New thread in the primary tile when the normal desktop header would put it in the tab strip", () => {
+    fixture.headerFeatures.threadTabs = true;
+    try {
+      const standalone = header().markup;
+      expect(standalone).toContain('data-chathead-tabs="advanced"');
+      const tiled = renderToStaticMarkup(createElement(TiledPaneTitle.Provider, { value: "Selected" }, createElement(ChatView, { bot })));
+      expect(tiled).not.toContain("data-chathead-tabs");
+      const button = tiled.match(/<button[^>]*data-new-thread[^>]*>/)?.[0];
+      expect(button).toBeDefined();
+      expect(button).not.toContain("md:hidden");
+    } finally {
+      fixture.headerFeatures.threadTabs = false;
+    }
+  });
 
   it("keeps the model picker and the bot's computer in view in Simple mode, with ⋯ left to the bot panel", () => {
     fixture.advanced = false;

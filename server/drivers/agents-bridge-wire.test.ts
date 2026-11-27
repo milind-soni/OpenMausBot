@@ -72,6 +72,8 @@ function profiles(): Record<string, Record<string, string>> {
   all["default+images"] = { ...all.default!, OMB_IMAGE_GENERATION: "1" };
   all["skills+shared+voice+x+team+images+hosting"] = { ...all["skills+shared+voice+x+team+images"]!, OMB_APP_HOSTING: "1" };
   all["default+hosting"] = { ...all.default!, OMB_APP_HOSTING: "1" };
+  all["skills+shared+voice+x+team+board"] = { ...all["skills+shared+voice+x+team"]!, OMB_TEAM_BOARD: "1" };
+  all["default+room+board"] = { ...all["default+room"]!, OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1" };
   all["default+tools-off"] = { ...all.default!, OMB_TOOLS_OFF: "pages,meetings" };
   return all;
 }
@@ -118,6 +120,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "skills+shared+voice+x+team+images+hosting": 20215,
   "default+hosting": 19278,
   "default+tools-off": 16419,
+  "skills+shared+voice+x+team+board": 19047,
+  "default+room+board": 16855,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };

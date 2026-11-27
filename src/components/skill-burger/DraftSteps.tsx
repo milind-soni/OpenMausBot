@@ -5,7 +5,7 @@
 import { Check, ChevronRight, Users } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 
-import { dependents, type DraftStepView, type DraftView } from "../../../shared/skill-burger/draft-view";
+import { composedFor, dependents, type DraftStepView, type DraftView } from "../../../shared/skill-burger/draft-view";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { LayerIcon } from "./SkillBurger";
@@ -105,8 +105,7 @@ export function DraftSteps({ steps, skipped, onSkip, disabled }: {
   disabled: boolean;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  // A write step the AI composes and the file step it feeds read as one step on the card.
-  const shown = steps.filter((step) => !step.id.endsWith("_write") || !steps.some((other) => `${other.id}_write` === step.id));
+  const shown = steps.filter((step) => !steps.some((other) => other.id === composedFor(step.id)));
   const toggle = (step: DraftStepView) => {
     const next = new Set(skipped);
     const linked = [step.id, ...dependents(steps, step.id)];
@@ -119,7 +118,7 @@ export function DraftSteps({ steps, skipped, onSkip, disabled }: {
         const line = draftLine(step);
         const kept = !skipped.has(step.id);
         const expanded = open.has(step.id);
-        const judged = !step.exact || steps.some((other) => other.id === `${step.id}_write` && !other.exact);
+        const judged = !step.exact || steps.some((other) => composedFor(other.id) === step.id && !other.exact);
         return (
           <li key={step.id} data-burger-layer={step.kind} data-kept={kept ? "true" : "false"}
             className={cn("burger-layer burger-open flex min-w-0 shrink-0 flex-col rounded-[8px] bg-card px-2 py-1.5 text-[13px] shadow-sm", !kept && "opacity-50")}>
@@ -160,8 +159,8 @@ export function DraftSteps({ steps, skipped, onSkip, disabled }: {
 
 /** One honest line: how much of it repeats exactly, and how much the bot redoes with judgement. */
 export function replayLine(steps: DraftStepView[], skipped: ReadonlySet<string>): string {
-  const kept = steps.filter((step) => !skipped.has(step.id) && !(step.id.endsWith("_write") && steps.some((other) => `${other.id}_write` === step.id)));
-  const judged = kept.filter((step) => !step.exact || steps.some((other) => other.id === `${step.id}_write` && !other.exact)).length;
+  const kept = steps.filter((step) => !skipped.has(step.id) && !steps.some((other) => other.id === composedFor(step.id)));
+  const judged = kept.filter((step) => !step.exact || steps.some((other) => composedFor(other.id) === step.id && !other.exact)).length;
   if (!judged) return t("skillBurger.draft.allExact");
   if (judged === kept.length) return t("skillBurger.draft.allJudgement");
   return t("skillBurger.draft.mix", { exact: kept.length - judged, judgement: judged });

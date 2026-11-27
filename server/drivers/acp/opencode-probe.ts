@@ -173,7 +173,7 @@ export async function probeOpenCodeSession(
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(cli, ["acp"], { cwd, env: environment, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv } });
+      child = spawnCli(cli, ["acp"], { cwd, env: environment, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv, engine: "opencodeGo" } });
     } catch (error) {
       reject(error);
       return;

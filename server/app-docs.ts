@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AppNetwork, AppSource, AppToolDefinition, AppToolResult } from "../shared/app.ts";
+import type { AppConnectorUse, AppNetwork, AppSource, AppToolDefinition, AppToolResult, AppUse } from "../shared/app.ts";
 import type { PageVideo } from "./pages/bundle.ts";
 
 export const APP_DOCS_MAX_BYTES = 512 * 1024 * 1024;
@@ -24,6 +24,10 @@ export interface AppDocData {
   files?: Record<string, string>;
   /** Videos that stay on disk, by path in the folder. They take no room in this store. */
   videos?: Record<string, PageVideo>;
+  /** What a bot's page declared it uses (show_html `uses`). */
+  uses?: AppUse[];
+  /** The connector tools a bot's page declared it calls (show_html `uses`). */
+  connectors?: AppConnectorUse[];
   tool?: AppToolDefinition;
   toolInput?: Record<string, unknown>;
   toolResult?: AppToolResult;

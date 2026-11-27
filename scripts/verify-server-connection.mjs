@@ -283,7 +283,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     // fake-engine server. Opening the page must not require local AI setup.
     win.setSize(1180, 850);
     await win.loadURL(`${url}?app=1&desktop-settings=workspaces&share-computer=cloud`);
-    await until(() => evaluate("Boolean(document.querySelector('[role=dialog] [data-server-connect]'))"), "app opens workspace connection settings");
+    await until(() => evaluate("document.querySelector('[role=dialog] [data-server-connect]')?.textContent.includes('Connect to another computer')"), "app opens workspace connection settings");
     assert.equal(await evaluate("location.search.includes('desktop-settings')"), false, "Settings deep link consumed");
     await until(() => evaluate("document.body.textContent.includes('My cloud team')"), "app Settings loaded connections");
     await until(() => evaluate("document.body.textContent.includes('Computer access · My cloud team')"), "post-pair target opens its access controls");
@@ -293,17 +293,17 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await evaluate("document.querySelector('[data-server-connect]').scrollIntoView({ block: 'center', behavior: 'instant' })");
     await screenshot("workspace-settings-in-app.png");
     await evaluate("window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
-    await until(() => evaluate("!document.body.textContent.includes('Connect to a server')"), "Settings closes normally");
+    await until(() => evaluate("!document.querySelector('[data-look=\"settings\"]')"), "Settings closes normally");
     win.webContents.send("workspaces:open-settings");
     await until(() => evaluate("Boolean(document.querySelector('[role=dialog] [data-server-connect]'))"), "native request reopens workspace Settings");
     await evaluate("(() => { const el = document.querySelector('input[data-settings-search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'appearance'); el.dispatchEvent(new Event('input', { bubbles: true })); })()");
     await until(() => evaluate("Boolean(document.querySelector('[data-settings-hit]'))"), "Settings search shows matching destinations");
     win.webContents.send("workspaces:open-settings");
-    await until(() => evaluate("document.body.textContent.includes('Connect to a server') && document.querySelector('input[data-settings-search]').value === ''"), "native connection request clears Settings search");
+    await until(() => evaluate("document.querySelector('[data-server-connect]')?.textContent.includes('Connect to another computer') && document.querySelector('input[data-settings-search]').value === ''"), "native connection request clears Settings search");
 
     const remote = await open(false);
     assert.deepEqual(await remote.webContents.executeJavaScript("({ server: typeof window.ogb?.environments, companion: typeof window.ogb?.remoteClient, sharing: typeof window.ogb?.computerSharing, node: typeof window.require, workspaceMethods: Object.keys(window.ogb?.workspaces ?? {}).sort() })"),
-      { server: "undefined", companion: "undefined", sharing: "undefined", node: "undefined", workspaceMethods: ["add", "color", "homeOffers", "line", "local", "look", "makeHome", "menu", "onChanged", "onNewLocal", "open", "places", "probe", "recolor", "remove", "rename", "state"] });
+      { server: "undefined", companion: "undefined", sharing: "undefined", node: "undefined", workspaceMethods: ["add", "color", "homeOffers", "line", "local", "look", "makeHome", "menu", "onChanged", "onNewLocal", "open", "places", "probe", "recolor", "remove", "rename", "state", "together"] });
     // Exercise Chromium's actual HttpOnly cookie jar and main-process fetch.
     // The server is the isolated fake-engine fixture, never the user's app.
     const opened = await fetch(`${serverUrl}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ label: "Electron fixture", scopes: ["client"] }) }).then(response => response.json());

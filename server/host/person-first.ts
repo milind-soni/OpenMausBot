@@ -162,6 +162,9 @@ export function createPersonFirst(deps: PersonFirstDeps) {
           if (event.itemType !== "tool" || !watch) return;
           if (event.itemId) watch.tools.delete(event.itemId);
           watch.read = true;
+          // The engine's next step reads a steered message with this result, so queueing it again would run it twice:
+          // a long call after this one may still be stopped for the person, but nothing is put back in the queue.
+          watch.waits = watch.waits.map((wait): PersonWait => (wait.requeue ? {} : wait));
           check(threadId);
           return;
         }

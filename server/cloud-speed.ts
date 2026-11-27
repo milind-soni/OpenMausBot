@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import { uptime } from "node:os";
 import type { RuntimeEvent } from "./contracts.ts";
+import { loopStallCounts, type LoopStallCounts } from "./perf/loop-stalls.ts";
 import type { Message } from "./store.ts";
 
 /** Upper bounds of the turn-start buckets (ms); one more bucket counts everything slower. The Admin reads the same edges. */
@@ -39,6 +40,9 @@ export interface SpeedReport {
   /** People's messages since this boot by how long they waited from being stored to their engine's turn starting, in
    * TURN_START_BUCKETS_MS order. */
   turnStarts: number[];
+  /** Event-loop stalls of a second or more since this process started, and the worst delay of the last 15 minutes, ms
+   * (perf/loop-stalls.ts); null where no recorder runs. Read from the recorder's own minutes: nothing is measured here. */
+  loop: LoopStallCounts | null;
 }
 
 /** `/proc/stat`'s first line: all CPU time and the stolen part, in USER_HZ ticks. Guest time is inside user time already. */
@@ -81,6 +85,8 @@ export function createCloudSpeed(options: {
   /** Seconds since the kernel booted, and since this process started. */
   machineUptime?: () => number;
   processUptime?: () => number;
+  /** The event loop's stalls (perf/loop-stalls.ts `loopStallCounts`). */
+  loop?: () => LoopStallCounts | null;
 } = {}) {
   const read = options.read ?? readText, now = options.now ?? Date.now, monotonic = options.monotonic ?? (() => performance.now());
   const machineUptime = options.machineUptime ?? uptime, processUptime = options.processUptime ?? (() => process.uptime());
@@ -148,7 +154,7 @@ export function createCloudSpeed(options: {
       turnStarts[bucket === -1 ? TURN_START_BUCKETS_MS.length : bucket]! += 1;
     },
     report(): SpeedReport {
-      return { ...cpuFigures(), bootMs, wakeMs, turnStarts: [...turnStarts] };
+      return { ...cpuFigures(), bootMs, wakeMs, turnStarts: [...turnStarts], loop: (options.loop ?? loopStallCounts)() };
     },
   };
 }

@@ -21,7 +21,7 @@ import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./t
 import { toggleBotSettings } from "./bot-settings";
 import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThread, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits"; import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
-import type { EngineInstall } from "./engine-install";
+import type { EngineInstall } from "./engine-install"; import { holdRestoredUnread, launchNavigation } from "./read-visible";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
@@ -53,7 +53,7 @@ import {
 import type { Routine, RoutineInput, RoutineRun, RoutineRunLimits, RoutineRunStatusFilter } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
 import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
-import { holdMarkedUnread, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible";
+import { holdMarkedUnread, launchTagged, markVisibleBotThreadsRead, markVisibleGroupThreadsRead, type ReadReason } from "./read-visible"; import { feedThreadAction, roomFeedShows } from "@/lib/room-feed";
 import { applyWindowPref } from "@/lib/window-prefs"; import { applyThemeFrame } from "@/lib/theme/runtime"; import { appCatalogAnnounced } from "@/lib/app-catalog-signal";
 import { placeUnreadDivider, threadOpensUnread, threadReadCursor, unreadDividerFor, type UnreadDivider } from "@/lib/unread-divider";
 import type { ComputerStart } from "@/lib/computer-start";
@@ -118,7 +118,7 @@ export type SecretRequestCardData = Omit<import("../../shared/wire").SecretReque
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "automated" | "waitId" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "template" | "sender" | "setupSuggestion" | "settingsCard" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "checkBack" | "handoff" | "bugReport" | "engineCompaction" | "stoppedBy"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "automated" | "waitId" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "template" | "sender" | "setupSuggestion" | "settingsCard" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "checkBack" | "checkRound" | "handoff" | "bugReport" | "engineCompaction" | "stoppedBy" | "askedBy"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -206,7 +206,7 @@ export interface GroupTask {
   pinned?: boolean;
   updatedAt?: number;
   turnTimeoutMinutes?: number;
-  archivedAt?: number; activity?: "waiting-on-you";
+  archivedAt?: number; activity?: "waiting-on-you"; closedAt?: number; closedBy?: import("../../shared/room-threads").RoomThreadCloser;
   lastThreadOrderAt?: number;
   working?: boolean;
   busyBotId?: string | null;
@@ -327,7 +327,7 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
   connectorTools?: Record<string, ConnectorToolGrant>;
   connectorScopes?: { apps: Record<string, "read" | "write"> }; phoneApps?: import("../../shared/phone-apps").PhoneApps;
   outbound?: { policy: "ask" | "allow" };
-  fallback?: Array<{ instanceId: string; model: string }>;
+  fallback?: ModelSelection[];
   browser?: boolean;
   recordBrowserSteps?: boolean;
   memoryUpkeep?: boolean;
@@ -426,7 +426,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   snapshot: {
     state: "available" | "unavailable";
     reason?: string;
-    authenticated?: boolean; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true; /** Runs Google's native Antigravity CLI. */ nativeCli?: true; /** Its runtime is being installed now. */ installing?: true;
+    authenticated?: boolean; /** Its status check could not finish (a busy machine): not a sign that it is missing. */ busy?: true; /** Installed, not yet confirmed. */ unverified?: true; /** The CLI path runs another program, not this engine's CLI. */ notEngineCli?: true; /** Runs Google's native Antigravity CLI. */ nativeCli?: true; /** Its runtime is being installed now. */ installing?: true;
     chatgptPlan?: boolean;
     /** Ready only through OpenCode's free no-login models: a backup, never "an AI already works". */
     freeFallback?: boolean;
@@ -471,8 +471,8 @@ export interface InstanceInfo extends InstanceEndpointInfo {
 export type AppSettingsSection = SettingsPageId
   | "desktopWorkspaces" | "organization" | "cloudAccount" | "experimental" | "connections" | "decisionModel" | "imageGeneration"
   | "engines" | "companion" | "remote" | "computer" | "logins" | "botAccess" | "activity" | "backups" | "workspaces"
-  | "skills" | "import" | "updates";
-export type SettingsPageId = "overview" | "devices" | "phone" | "ai" | "bots" | "desktops" | "vault" | "usage" | "transfer" | "storage" | "data" | "people"
+  | "skills" | "import" | "updates" | "phone";
+export type SettingsPageId = "overview" | "devices" | "ai" | "bots" | "desktops" | "vault" | "usage" | "transfer" | "storage" | "data" | "people"
   | "installations" | "account" | "plan" | "app" | "general" | "appearance" | "features";
 
 export type BotSettingsSection =
@@ -628,7 +628,7 @@ export type Action =
       heldAtStart: readonly Message[];
     }
   | { type: "groupDeleted"; groupId: string }
-  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string }
+  | { type: "createGroup"; memberIds: string[]; name?: string; section?: string; setup?: { bulletin: string; defaultResponder: GroupDefaultResponder } }
   | {
       type: "sendGroup";
       groupId: string;
@@ -700,7 +700,7 @@ export type Action =
       onError?: (message: string) => void;
     }
   | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void; blankChat?: number }
-  | { type: "switchTask"; botId: string; threadId: string; whole?: true; selectWhenReady?: true }
+  | { type: "switchTask"; botId: string; threadId: string; whole?: true; auto?: true; selectWhenReady?: true }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -1029,15 +1029,16 @@ function reduceApp(state: AppState, action: Action): AppState {
     case "select": {
       const room = state.groups.find((g) => g.id === action.id);
       if (room) {
+        const feed = roomFeedShows(state, room);
         return {
           ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
-          unreadDivider: openedUnreadDivider(state, room.threadId,
+          unreadDivider: feed ? null : openedUnreadDivider(state, room.threadId,
             room.tasks?.find((task) => task.threadId === room.threadId)?.unread ?? room.unread,
             room.messages, room.lastReadMessageId, room.hasMore),
           activeView: "chat",
           selectedId: action.id,
           forkPanel: null,
-          groups: state.groups.map((g) => {
+          groups: feed ? state.groups : state.groups.map((g) => {
             if (g.id !== action.id) return g;
             const tasks = g.tasks?.map((task) => task.threadId === g.threadId ? { ...task, unread: false } : task);
             return { ...g, tasks, unread: tasks ? tasks.some((task) => task.unread) : false };
@@ -2176,7 +2177,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const wrapped: React.Dispatch<Action> = (action) => {
       store.flushFrames(); if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles", "showWebPanel", "showPublishedApps", "showSkillBurgers", "showTeamFiles", "showAnnouncements"].includes(action.type)) selectionRevision.current++;
       // Pin before any await or optimistic state change.
-      action = pinBotThreadAction(action, stateRef.current.bots); holdMarkedUnread(action, stateRef.current);
+      const beforeAction = store.getState();
+      action = launchTagged(pinBotThreadAction(action, beforeAction.bots));
+      const fed = feedThreadAction(action, beforeAction);
+      // A requested tile may not fit. Only count it as opened once the reducer accepted it.
+      if (fed?.type !== "openForkPanel") holdMarkedUnread(action, beforeAction);
+      if (!fed) return;
+      action = fed;
       if (runNewChat(action)) return;
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
@@ -2527,11 +2534,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "openDataResult":
         case "select": {
           const id = action.type === "select" ? action.id : action.botId;
-          const bot = stateRef.current.bots.find((b) => b.id === id);
-          const group = stateRef.current.groups.find((g) => g.id === id);
+          const bot = beforeAction.bots.find((b) => b.id === id);
+          const group = beforeAction.groups.find((g) => g.id === id);
           if (bot?.unread) {
             api(`/api/bots/${id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
-          } else if (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread) {
+          } else if (!roomFeedShows(beforeAction, group) && (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread)) {
             api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
           }
           break;
@@ -2543,9 +2550,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               memberIds: action.memberIds,
               name: action.name,
               section: action.section,
-              ...(window.ogb?.remoteClient?.active
-                ? { setup: { bulletin: "", defaultResponder: { kind: "mentions" } } }
-                : {}),
+              setup: action.setup,
             }),
           })
             .then(({ group }) => {
@@ -2712,7 +2717,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : Promise.resolve();
           void ready.then(() => api<{ bot: Bot }>(action.type === "newTask"
             ? `/api/bots/${action.botId}/tasks`
-            : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${SWITCH_MESSAGE_COUNT}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
+            : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? (action.auto ? "?seen=0" : "") : `?messages=${SWITCH_MESSAGE_COUNT}${action.auto ? "&seen=0" : ""}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
               if (action.type === "newTask") { settle(null); action.onCreated?.(); }
               if (navigation.get(action.botId) !== revision) return;
@@ -2731,15 +2736,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               const message = error instanceof Error ? error.message : String(error);
               settle(message);
               if (action.type === "newTask" && action.onError) action.onError(message);
-              else showError(error);
+              else if (action.type === "switchTask" && error instanceof ApiError && error.status === 404) rawDispatch({ type: "notice", notice: { kind: "thread-gone", botName: null } }); else showError(error);
             });
           break;
         }
         case "restorePaneLayout":
-          for (const panel of Object.values(action.panes.panels)) runForkEffect({ type: "openForkPanel", ...panel }, dispatch, rawDispatch, showError);
+          for (const panel of Object.values(action.panes.panels)) runForkEffect({ type: "openForkPanel", ...panel }, dispatch, rawDispatch, showError, "seen");
           break;
         case "forkMessage": case "openForkPanel": {
-          if (action.type === "openForkPanel" && threadPanel(store.getState(), action.threadId)?.loadId !== action.loadId) break;
+          if (action.type === "openForkPanel") {
+            if (threadPanel(store.getState(), action.threadId)?.loadId !== action.loadId) break;
+            holdMarkedUnread(action, beforeAction);
+          }
           runForkEffect(action, dispatch, rawDispatch, showError);
           break;
         }
@@ -2767,7 +2775,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "switchGroupTask":
           api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${SWITCH_MESSAGE_COUNT}`, { method: "POST" })
             .then(roomAnswer(action.groupId, true))
-            .catch(showError).finally(action.onSettled);
+            .catch((error) => (error instanceof ApiError && error.status === 404 ? rawDispatch({ type: "notice", notice: { kind: "thread-gone", botName: null } }) : showError(error)))
+            .finally(action.onSettled);
           break;
         case "renameGroupTask":
         case "pinGroupTask":
@@ -2821,7 +2830,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!state.hydrated || !state.config || launched.current) return;
     launched.current = true;
     const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
-    if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) openBot(dispatch, bot, showThreads);
+    if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) launchNavigation(() => openBot(dispatch, bot, showThreads));
   }, [state.hydrated, state.config, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
 
   useEffect(() => {
@@ -2988,7 +2997,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           loaded = await loadAll();
         } while (alive && rehydrateRequested);
         if (!alive || !loaded) return false;
-        hydrated = true;
+        holdRestoredUnread(store.getState()); hydrated = true;
         for (const frame of pendingFrames.splice(0)) store.enqueueFrame(frame);
         store.flushFrames();
         return true;

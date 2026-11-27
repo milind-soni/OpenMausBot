@@ -19,11 +19,11 @@ function computer(t, { home = "cloud", frozen = home === "cloud" } = {}) {
   const w = { dataDir, running: dataDir, swaps: [], localPages: [], home, shown: null, onScreen: "cloud", busy: [], trashed: [], trashFails: false, changes: 0, logs: [], waits: 0, remembered: [] };
   w.now = () => clock;
   w.clean = createCleanWorkspace({ dataDir: () => dataDir, running: () => w.running,
-    swap: async (dir, { showLocal = true } = {}) => {
+    swap: async (dir, { background = false } = {}) => {
       w.swaps.push(dir);
       await new Promise((resolve) => setImmediate(resolve));
       w.running = dir;
-      if (showLocal) { w.localPages.push(dir); w.onScreen = "local"; }
+      if (!background) { w.localPages.push(dir); w.onScreen = "local"; }
       return { ok: true };
     } });
   w.registry = createProfileRegistry({ dataDir: () => dataDir, now: w.now, random: () => "abc123" });

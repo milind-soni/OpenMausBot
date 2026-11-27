@@ -438,7 +438,7 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
     runningDataDir: null,
     serverProc: null,
     SERVER_PORT: 8799,
-    workspaceWindows: { holds: () => false },
+    workspaceWindows: { holds: () => false, viewingPrimary: () => false },
     serverSupervisor: {
       calls: [],
       pause() { this.calls.push("pause"); },
@@ -529,6 +529,19 @@ test("a successful switch moves a live main window to the new server", async (t)
   const result = await context.switchLocalEnvironmentTo(targetDir, "l1");
   assert.deepEqual(plain(result), { ok: true });
   assert.deepEqual(navigated, ["http://127.0.0.1:8799"]);
+});
+
+test("a background swap leaves the foreground place selected and never takes a server from an independent window", async (t) => {
+  const { context, forks, navigated, targetDir } = switchFixture(t, { mainWindow: { isDestroyed: () => false } });
+  context.runningDataDir = context.desktopDataDir();
+  const viewedDir = context.runningDataDir;
+  context.workspaceWindows.viewingPrimary = dir => dir === viewedDir;
+  assert.deepEqual(plain(await context.switchLocalEnvironmentTo(targetDir, "l1", true, true)), { ok: false, error: "busy" });
+  assert.equal(forks.length, 0);
+  context.workspaceWindows.viewingPrimary = () => false;
+  assert.deepEqual(plain(await context.switchLocalEnvironmentTo(targetDir, "l1", true, true)), { ok: true });
+  assert.equal(context.environmentsState.activeId, "local");
+  assert.deepEqual(navigated, []);
 });
 
 test("a child that will not stop aborts the switch before its lease is handed away", async (t) => {

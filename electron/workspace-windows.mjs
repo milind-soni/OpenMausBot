@@ -155,6 +155,10 @@ export function installWorkspaceWindows({ primary, canOpenPlace, places, savedOr
 
   return {
     holds: dir => servers.has(dir),
+    viewingPrimary(dir) {
+      for (const { context } of views.values()) if (!context.owner && context.dir === dir) return true;
+      return false;
+    },
     focus(dir) {
       const view = [...views.values()].find(entry => entry.context.dir === dir && entry.context.owner);
       if (!view) return false;

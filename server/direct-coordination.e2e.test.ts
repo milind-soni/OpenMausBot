@@ -18,6 +18,10 @@ const told = (turn: any): string => {
   return `${turn.system}\n${typeof content === "string" ? content : JSON.stringify(content ?? "")}`;
 };
 
+/** A helper's main chat after a hand-off: what it held before, and one quiet line that opens the thread the work ran in. */
+const withHandedLine = (before: any[], botId: string, threadId: string) => [...before,
+  expect.objectContaining({ role: "bot", kind: "activity", threadRef: expect.objectContaining({ botId, threadId }), tool: expect.objectContaining({ nameCode: "chat.notice.askedMe" }) })];
+
 /** With OMB_TEST_DESKTOP_OWNER_TOKEN it runs as the desktop app runs it, every change carrying the app's owner capability. */
 async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
   const desktopOwner = fakeEnv.OMB_TEST_DESKTOP_OWNER_TOKEN;
@@ -191,8 +195,9 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.lead.id, f.specialist.id, f.lead.id, f.chief.id]);
   expect(f.nodes().every((node: any) => !node.groupId && node.status === "completed")).toBe(true);
   expect((await f.api("/api/bots")).groups).toEqual([]);
-  expect(await f.messages(f.lead.activeTaskId)).toEqual(originalLead);
-  expect(await f.messages(f.specialist.activeTaskId)).toEqual(originalSpecialist);
+  const workThread = (botId: string) => f.nodes().find((node: any) => node.botId === botId).threadId;
+  expect(await f.messages(f.lead.activeTaskId)).toEqual(withHandedLine(originalLead, f.lead.id, workThread(f.lead.id)));
+  expect(await f.messages(f.specialist.activeTaskId)).toEqual(withHandedLine(originalSpecialist, f.specialist.id, workThread(f.specialist.id)));
   const receipt = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name === "Sent to Engineering lead");
   expect(receipt.threadRef).toMatchObject({ botId: f.lead.id, threadId: f.nodes().find((node: any) => node.botId === f.lead.id).threadId });
   expect(receipt.threadRef.threadId).not.toBe(f.lead.activeTaskId);
@@ -368,7 +373,7 @@ it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and g
   const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
   expect(lead.tasks.find((task: any) => task.threadId === child.threadId)).toMatchObject({ title: "NEW_THREAD_BRIEF verify the CSV export yourself", openedBy: { botId: f.chief.id, name: "Clive" } });
   expect(child.threadId).not.toBe(f.lead.activeTaskId);
-  expect(await f.messages(f.lead.activeTaskId)).toEqual(originalLead);
+  expect(await f.messages(f.lead.activeTaskId)).toEqual(withHandedLine(originalLead, f.lead.id, child.threadId));
   expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.lead.id, f.chief.id]);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
 }), 45_000);
@@ -410,6 +415,39 @@ it("closes a thread \"new\" opened once its result is back, and opens it again f
   expect((await leadTask(child.threadId)).archivedAt).toBeGreaterThan(closed.archivedAt);
 }), 90_000);
 
+it("leaves one quiet line in the teammate's main chat for a hand-off, which opens its thread and is no turn and no context", () => fixture(async f => {
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], message: "OCTOPUS_BRIEF find three octopus facts", thread: "new", title: "Octopus facts" } }], reply: "Asked the lead" },
+    { reply: "The lead reported back" },
+  ] };
+  f.plan[f.lead.id] = { turns: [{ reply: "OCTOPUS_RESULT three facts" }, { reply: "MAIN_CHAT_REPLY hello" }] };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const [child] = f.nodes().filter((node: any) => node.botId === f.lead.id);
+  expect(child.threadId).not.toBe(f.lead.activeTaskId);
+  const lines = (await f.messages(f.lead.activeTaskId)).filter((message: any) => message.threadRef?.threadId === child.threadId);
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toMatchObject({ role: "bot", kind: "activity", threadRef: { botId: f.lead.id, threadId: child.threadId, title: "Octopus facts" },
+    tool: { name: "Clive asked me: Octopus facts", ok: true, nameCode: "chat.notice.askedMe", nameParams: { bot: "Clive", title: "Octopus facts" } },
+    askedBy: { botId: f.chief.id, name: "Clive", threadIds: [child.threadId] } });
+  expect(lines[0].tool).not.toHaveProperty("itemId");
+  // A record, not an announcement: the lead's main chat is not marked unread for it.
+  const leadBot = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+  expect(leadBot.tasks.find((task: any) => task.threadId === f.lead.activeTaskId).unread).toBeFalsy();
+  // The hand-off ran in its own thread; the main chat took no turn for the line.
+  expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => turn.threadId)).toEqual([child.threadId]);
+  // The hand-off's own turn, which started after the line was written, does not read it either.
+  expect(told(f.evidence().find((turn: any) => turn.botId === f.lead.id))).not.toContain("asked me");
+
+  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Hello there");
+  expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
+  const mainTurn = f.evidence().filter((turn: any) => turn.botId === f.lead.id).at(-1);
+  expect(mainTurn.threadId).toBe(f.lead.activeTaskId);
+  expect(told(mainTurn)).toContain("Hello there");
+  // The line itself never reaches the model (the thread's title may, through the bot's own recent-work notes).
+  expect(told(mainTurn)).not.toContain("asked me");
+}), 60_000);
+
 it("reruns an identical brief with rework=true in the archived thread \"new\" opened, which leaves the archive while it runs", () => fixture(async f => {
   const brief = "REWORK_BRIEF run the export check";
   const gate = join(f.session.info.dataDir, "rework.gate");
@@ -432,6 +470,8 @@ it("reruns an identical brief with rework=true in the archived thread \"new\" op
   f.save();
   await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Have them run it once more in that thread.");
   await expect.poll(() => f.nodes().filter((node: any) => node.botId === f.lead.id).at(-1)?.status, { timeout: 15_000 }).toBe("running");
+  // The sender's turn records its call once that turn is written down, which can land just after the work starts.
+  await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1)?.evidence?.some((entry: any) => entry.step?.arguments?.rework === true), { timeout: 15_000 }).toBe(true);
   const [sent] = f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).evidence.filter((entry: any) => entry.step).map((entry: any) => entry.response.result);
   expect(sent.isError).toBeFalsy();
   expect(JSON.parse(sent.content[0].text).receipts[0]).toMatchObject({ outcome: "queued", threadId: child.threadId });
@@ -548,6 +588,30 @@ it("lets a bot rename only the thread it is working in", () => fixture(async f =
   const renamed = chief.tasks.find((task: any) => task.threadId === f.chief.activeTaskId);
   expect(renamed.title).toBe("Acme: carousel design");
   expect(renamed.title).not.toBe(before);
+}), 45_000);
+
+it("lets a bot make one of its own threads its main thread, never a teammate's", () => fixture(async f => {
+  const mainOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).mainThreadId;
+  const leadMain = await mainOf(f.lead.id);
+  const daily = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Daily brief 25 Nov" })).task.threadId;
+  expect(await mainOf(f.chief.id)).not.toBe(daily);
+  f.plan[f.chief.id] = {
+    steps: [
+      { tool: "set_main_thread", arguments: { thread_id: f.lead.activeTaskId }, expectError: true },
+      { tool: "set_main_thread", arguments: { thread_id: daily } },
+    ],
+    reply: "Today's brief is the main thread",
+  };
+  f.save();
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Make today's brief thread your main thread.");
+  expect((await f.wait()).status).toBe("settled");
+  const steps = f.evidence().at(-1).evidence.filter((entry: any) => entry.step?.tool === "set_main_thread");
+  expect(steps).toHaveLength(2);
+  expect(steps[0].response.result.isError).toBe(true);
+  expect(steps[1].response.result.isError).toBeFalsy();
+  expect(steps[1].response.result.content[0].text).toContain("#Daily brief 25 Nov is now your main thread");
+  expect(await mainOf(f.chief.id)).toBe(daily);
+  expect(await mainOf(f.lead.id)).toBe(leadMain);
 }), 45_000);
 
 it("does not treat self-opened work or an abandoned human branch as new human authority", () => fixture(async f => {

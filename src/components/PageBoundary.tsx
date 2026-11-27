@@ -1,6 +1,7 @@
-import { Component, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { initAnalytics, track } from "@/lib/analytics";
+import { crashArea } from "@/lib/crash-area";
 import { t } from "@/lib/i18n";
 
 // React unmounts everything below a root that has no error boundary when a render or an effect throws (react.dev,
@@ -12,9 +13,10 @@ export class PageBoundary extends Component<{ children: ReactNode }, { error: Er
     return { error: error instanceof Error ? error : new Error(String(error)) };
   }
 
-  componentDidCatch() {
+  componentDidCatch(_error: unknown, info: ErrorInfo) {
     void initAnalytics();
-    track("app_load", { stage: "error" });
+    // The area the failing component came from, from a fixed list (crash-area.ts); never the error's text.
+    track("app_load", { stage: "error", component: crashArea(info.componentStack) });
   }
 
   render() {

@@ -16,7 +16,7 @@ import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
+import { CALL_ENDPOINT_MS, callSpeechEndNote, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
@@ -321,13 +321,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
       if (code === 1) {
         setNote(
-          message ?? t(reason === "helper-build-failed"
-            ? "call.turns.helperBuildFailed"
-            : reason === "dictation-disabled"
-              ? "composer.dictation.disabled"
-              : reason === "speech-not-authorized"
-                ? "call.turns.speechNotAuthorized"
-                : "composer.dictation.failed"),
+          message ?? t(callSpeechEndNote(reason)),
         );
         return;
       }

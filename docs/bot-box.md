@@ -10,7 +10,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 | Inside the box | What it is |
 |---|---|
 | `/usr`, `/etc`, `/opt`, the server's own code folder, read-only | The image: engine CLIs, node, python, git, the bots' browser |
-| `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
+| `HOME`, read-write | What bots and engines keep there: settings, tools, caches, git config. Of the engines' sign-in files (`~/.claude/.credentials.json`, `~/.codex/auth.json`, `~/.grok/auth.json`, the rest of `ENGINE_FOLDERS` in `server/engine-homes/layout.ts`) only the one of the engine account the process runs is there, bound over itself so a refresh writes in place; every other engine's and account's is an empty read-only file; every folder between HOME and those files is bound over itself, so a bot cannot rename one away; and a process that names no engine (a shell step, an MCP server) has none (`server/bot-box/sign-in-masks.ts`). The edge's certificate folder (`~/.omb-edge`) is an empty private folder. On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
 | the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills. On a Team Cloud a turn that is not the team's has the bot's own folder read-only, and its own memory layer read-write ([team-cloud.md](team-cloud.md#the-audience-rule)) |
 | put back: this turn's permission socket (the engine's question and approval helper reaches the server through it), and, read-only, the conversation's own hook token folder (the hook helper's bearer, renewed each turn) and the files its command line names (MCP config, system prompt) | What the driver made for this one process |
@@ -182,8 +182,14 @@ checks it guards.
 
 - **Local VM (Docker) computer use.** The computer MCP talks to the Local VM over the host's Docker socket. The box does not expose that socket (mounting it would be root-equivalent on the host), so with the bot box on a Local VM turn fails early with a clear message instead of "MCP server exited". Use this computer, a Cloud computer, or turn the box off for Local VM work.
 
-- The engines' subscription logins (`~/.claude`, `~/.codex`) are in the box, because the engine needs them. API keys
-  stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
+- The engine's own subscription login is in its box, because the engine runs there and refreshes it; any program the
+  bot runs in that box can read it. API keys stay in the environment until the credential broker (T0b) replaces them
+  with per-turn tokens.
+- Sign-in masks are fixed when a box starts. A sign-in file made after that (an engine signed in for the first time), or
+  one a process outside any box replaces by renaming a new file over it, is readable in a box that was already running
+  until that box's process ends. Engines whose sign-in is not in `ENGINE_FOLDERS` keep theirs in HOME, readable from
+  every box. On a Team Cloud every audience's engine home holds a copy
+  of every engine's team sign-in, so a box there reads all of them.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
   spawn service (T0c notes).
 - On a Team Cloud each Chrome of the bots' browsers runs in a box of its own (`BotBox.browserBox`, written into the
@@ -228,7 +234,7 @@ or files, the base URL is the broker, a call with the token reaches the upstream
 
 | Layer | Where | What it stops | What it does not stop |
 |---|---|---|---|
-| Mount namespace (bubblewrap) | every boxed process | reading the server's data folder, other bots' folders, other turns' files in `/tmp`, `/.fly`; writing anywhere but its own folders | reading HOME's engine logins (the engine's own identity); a path a driver puts back on purpose |
+| Mount namespace (bubblewrap) | every boxed process | reading the server's data folder, other bots' folders, other turns' files in `/tmp`, `/.fly`, other engines' and accounts' sign-ins in HOME; writing anywhere but its own folders | reading the engine's own login in HOME (its identity) and sign-ins of engines outside `ENGINE_FOLDERS`; a path a driver puts back on purpose |
 | PID namespace | every boxed process | seeing, reading the environment of, or signalling another turn's or the server's processes | nothing inside the same box |
 | Network namespace + the two gates | every boxed process with its own network | reaching this machine's other listeners, the local network, link-local, metadata, Fly's private network; any route out except the egress gate; any server route except `/api/internal/*` | what the harness routes allow with a valid per-turn bearer; a public destination |
 | Environment allow-list | every boxed process | `OMB_CLOUD_*`, the server's placement, workspace credentials, any `OMB_*` setting a boxed process does not read, any unlisted name | the engines' own settings |

@@ -50,6 +50,8 @@ export function createLocalProfiles(deps: {
   trash(dir: string): Promise<void>;
   reserved?(): string | null;
   allowed?(): boolean;
+  focusWindow?(dir: string): boolean;
+  holdsWindow?(dir: string): boolean;
   remember?(place: { profile: string } | null): void;
   changed?(): void;
   log?(line: string): void;

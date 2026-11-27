@@ -6,6 +6,8 @@ export interface ArchiveNotice {
   error: boolean;
   text: string;
   restoreBot?: { id: string; name: string };
+  /** Undo for something other than a bot, such as a conversation archived from the composer. */
+  undo?: () => void;
 }
 
 const listeners = new Set<(notice: ArchiveNotice | null) => void>();

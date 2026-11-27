@@ -2,13 +2,13 @@
 // the app telling each of the person's own places which bots their other places have (electron/two-places-main.mjs), and a
 // bot on each side asking for a teammate that lives on the other one. Disposable homes; no network.
 import { randomBytes } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { installTwoPlacesMain } from "../electron/two-places-main.mjs";
 import { launchOwnHomeFixture, type OwnHomeFixture, type OwnServer } from "../scripts/testing/own-home-fixture.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
-import { ONE_PLACE } from "./places-elsewhere.ts";
+import { onePlace } from "./places-elsewhere.ts";
 
 const KEY = randomBytes(16).toString("hex");
 let fx: OwnHomeFixture;
@@ -28,14 +28,19 @@ async function made(side: Side, name: string): Promise<Bot> {
   expect((await side("PATCH", `/api/bots/${bot.id}`, { soul: `You are ${name}.` })).status).toBe(200);
   return bot;
 }
-/** A turn of `bot`'s on the server at `base` asks for a teammate by name, as coordinate_bots does. */
-async function coordinate(base: string, bot: Bot, name: string): Promise<{ status: number; error: string }> {
+/** A turn of `bot`'s on the server at `base` calls one of its internal routes. */
+async function internal(base: string, bot: Bot, path: string, body?: unknown): Promise<{ status: number; body: any }> {
   const minted = await fetch(`${base}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": KEY },
     body: JSON.stringify({ botId: bot.id, threadId: bot.threadId }) });
   const { token } = await minted.json() as { token: string };
-  const asked = await fetch(`${base}/api/internal/coordinate-bots`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ botIds: [name], message: "Check this month's numbers." }) });
-  return { status: asked.status, error: ((await asked.json()) as { error: string }).error };
+  const asked = await fetch(`${base}${path}`, { method: body === undefined ? "GET" : "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return { status: asked.status, body: await asked.json() };
+}
+/** A turn of `bot`'s on the server at `base` asks for a teammate by name, as coordinate_bots does. */
+async function coordinate(base: string, bot: Bot, name: string): Promise<{ status: number; error: string }> {
+  const asked = await internal(base, bot, "/api/internal/coordinate-bots", { botIds: [name], message: "Check this month's numbers." });
+  return { status: asked.status, error: (asked.body as { error: string }).error };
 }
 
 it("a bot asking for a teammate on the person's other place hears where it lives and how to bring them together; never on a server shared with others", async () => {
@@ -47,17 +52,19 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const before = await coordinate(garage.base, ledger, "Scout");
   expect(before.status).toBe(403);
   expect(before.error).toMatch(/^No bot with id or name "Scout" — call list_bots/u);
-  expect(before.error).toContain(ONE_PLACE);
+  expect(before.error).toContain(onePlace("server"));
 
   fx.main.refresh();
   await expect.poll(() => fx.main.owns(garage.place), { timeout: 10_000, interval: 100 }).toBe(true);
   const file = join(fx.root, "two-places.json");
+  const read: { value: unknown } = { value: null };
+  const lastRead = { read: () => read.value, write: (value: unknown) => { read.value = value; } };
   const main = installTwoPlacesMain({
     ipcMain: { handle: () => {} }, guard: (_channel: string, handler: (...args: unknown[]) => unknown) => handler,
     localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": fx.ownerCapability } }),
     fetch: fx.windowFetch, environments: () => [garage.place, family.place], cloud: () => ({ origin: null, asleep: false }),
     oneHome: { journal: () => null, keep: { state: () => ({ shown: false, on: false, moved: false }), set: async () => {} } },
-    ownHome: fx.main, tell: () => {},
+    ownHome: fx.main, tell: () => {}, lastRead,
     dismissed: { read: () => JSON.parse(readFileSync(file, "utf8")), write: (value: unknown) => { writeFileSync(`${file}.tmp`, JSON.stringify(value)); renameSync(`${file}.tmp`, file); } },
   });
   try {
@@ -75,7 +82,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
 
   const onGarage = await coordinate(garage.base, ledger, "scout");
   expect(onGarage).toEqual({ status: 403, error: "Scout lives on Work laptop, the person's computer, not here. Bots work together only within one place, so it can't be reached from here. "
-    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
+    + "Tell the person plainly. Offer to bring their bots together on Garage server: in the desktop app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
   const onComputer = await coordinate(fx.desktopBase, scout, "Ledger");
   expect(onComputer.status).toBe(403);
   expect(onComputer.error).toMatch(/^Ledger lives on Garage server, not here\. .* choose "Make Garage server my home"\.$/u);
@@ -85,10 +92,34 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const shared = await coordinate(family.base, helper, "Scout");
   expect(shared.error, "never told where the person's other bots live").not.toContain("Work laptop");
 
+  // The app opens again while Garage server can't be read: this computer still holds Ledger, never an empty list.
+  const offline = installTwoPlacesMain({
+    ipcMain: { handle: () => {} }, guard: (_channel: string, handler: (...args: unknown[]) => unknown) => handler,
+    localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": fx.ownerCapability } }),
+    fetch: async () => { throw new Error("offline"); }, environments: () => [garage.place], cloud: () => ({ origin: null, asleep: false }),
+    oneHome: { journal: () => null, keep: { state: () => ({ shown: false, on: false, moved: false }), set: async () => {} } },
+    ownHome: fx.main, tell: () => {}, lastRead, dismissed: { read: () => null, write: () => {} },
+  });
+  try { await offline.refresh({ force: true }); } finally { offline.close(); }
+  expect((await fx.local("GET", "/api/places/elsewhere")).body).toMatchObject({ places: [{ name: "Garage server", kind: "server", bots: ["Ledger"] }] });
+  expect((await coordinate(fx.desktopBase, scout, "Ledger")).error).toMatch(/^Ledger lives on Garage server, not here\./u);
+
+  // list_bots names them, so a bot never answers "no such bot" for one.
+  expect((await internal(fx.desktopBase, scout, `/api/internal/agents?self=${scout.id}`)).body.elsewhere)
+    .toBe("The person's bots in their other places, which can't be reached from here: Ledger (on Garage server). If asked for one, say where it lives.");
+  // A bot here named like one elsewhere: the request goes to the one here, and says so.
+  await made(fx.local, "Ledger");
+  const twin = await internal(fx.desktopBase, scout, "/api/internal/coordinate-bots", { botIds: ["Ledger"], message: "Check this month's numbers.", reply: "none" });
+  expect(twin.status, JSON.stringify(twin.body)).toBe(200);
+  expect(twin.body.message).toMatch(/This went to Ledger on this computer; another bot named Ledger is on Garage server\.$/u);
+
   // The person @mentions Scout to Ledger: the turn is told where Scout lives, and a room says it once in plain words.
   expect((await garage.as("POST", `/api/bots/${ledger.id}/messages`, { text: "@Scout can you check this month's numbers?", threadId: ledger.threadId })).status).toBe(202);
   await expect.poll(() => { try { return JSON.parse(readFileSync(join(fx.root, "garage-turn.json"), "utf8")).systemPrompt ?? ""; } catch { return ""; } }, { timeout: 60_000, interval: 200 })
     .toContain("The user named @Scout, a bot of theirs that is not here: Scout lives on Work laptop, the person's computer, not here.");
+  // Named without an @, the team roster in the prompt still says where Scout lives, before any tool is called.
+  expect(JSON.parse(readFileSync(join(fx.root, "garage-turn.json"), "utf8")).systemPrompt)
+    .toMatch(/\n- In the person's other places, not reachable from here \(if asked for one, say where it lives\): Scout \(on Work laptop\)\n\[\/TEAM ROSTER\]/u);
   const idle = async () => ((await garage.as("GET", "/api/bots")).body.bots as Array<{ activity?: string; busy?: boolean }>).every((bot) => bot.activity !== "working" && !bot.busy);
   await expect.poll(idle, { timeout: 60_000, interval: 200 }).toBe(true);
   const room = (await garage.as("POST", "/api/groups", { memberIds: [ledger.id], name: "Books",
@@ -98,6 +129,16 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const said = async () => ((await garage.as("GET", `/api/threads/${room.threadId}/messages?limit=200`)).body?.messages ?? [])
     .filter((row: { kind?: string; tool?: { name?: string } }) => row.kind === "activity" && row.tool?.name?.startsWith("Scout lives on"));
   await expect.poll(async () => (await said()).map((row: { tool: { name: string } }) => row.tool.name), { timeout: 30_000, interval: 200 }).toEqual([
-    "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".",
+    "Scout lives on Work laptop, so that mention didn't reach it: bots work together only within one place. To bring your bots together on Garage server, in the desktop app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".",
   ]);
+
+  // The person's own MausBot, a chief, sees the same line in its roster.
+  await expect.poll(idle, { timeout: 60_000, interval: 200 }).toBe(true);
+  const bots = (await garage.as("GET", "/api/bots")).body.bots as Array<{ id: string; threadId: string; name: string; defaultBot?: boolean; chiefOfStaff?: boolean }>;
+  const chief = bots.find((bot) => bot.defaultBot || bot.chiefOfStaff);
+  expect(chief, JSON.stringify(bots.map(({ name, defaultBot, chiefOfStaff }) => ({ name, defaultBot, chiefOfStaff })))).toBeTruthy();
+  rmSync(join(fx.root, "garage-turn.json"), { force: true });
+  expect((await garage.as("POST", `/api/bots/${chief!.id}/messages`, { text: "Ask Scout to check the numbers.", threadId: chief!.threadId })).status).toBe(202);
+  await expect.poll(() => { try { return JSON.parse(readFileSync(join(fx.root, "garage-turn.json"), "utf8")).systemPrompt ?? ""; } catch { return ""; } }, { timeout: 60_000, interval: 200 })
+    .toMatch(/\[TEAM ROSTER\]\n- In the person's other places, not reachable from here \(if asked for one, say where it lives\): Scout \(on Work laptop\)\n\[\/TEAM ROSTER\]/u);
 }, hostTimeout(180_000));

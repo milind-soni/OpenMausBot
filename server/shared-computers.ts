@@ -132,7 +132,8 @@ export function sharedComputerScopeRefusal(registration: Registration, operation
     case "append_file":
     case "delete_file": {
       const lent = registration.folders.find(entry => entry.id === operation.folder_id);
-      if (!lent) return "This folder has not been shared with this server.";
+      // On the person's own Cloud the bot can say where a folder is lent from; an ask can't lend one.
+      if (!lent) return askTool ? `That folder isn't lent to this Cloud: use a folder_id list_shared_computers gives. If the folder they mean isn't there, say in one sentence that they can share it from the OpenMausBot desktop app, under Files.` : "This folder has not been shared with this server.";
       if (operation.action === "list_files" || operation.action === "read_file") return null;
       if (!lent.write) return "This folder is read-only.";
       return operation.action === "write_file" || registration.fileEdits ? null

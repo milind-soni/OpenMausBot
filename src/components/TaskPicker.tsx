@@ -13,11 +13,12 @@ import { nextRename } from "@/lib/rename";
 import { imeComposing } from "@/lib/send-key";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { attentionJump, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
 import { useSelectThreadPane } from "./OpenPaneActions";
 import { ThreadSearch } from "./ThreadSearch";
 import { Select } from "./Select";
+import { threadRowCloser } from "@/lib/room-thread-close";
 
 export const TASK_PICKER_DISMISS_MS = 500;
 
@@ -441,7 +442,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
       onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
-      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry))}
+      onAttentionJump={(entry) => attentionJump(dispatch, entry, state)}
     />
   );
 }
@@ -453,6 +454,7 @@ export function GroupTaskPicker({ group }: { group: Group }) {
     return (group.tasks ?? []).map((task) => ({
       ...task,
       busy: Boolean(task.working || task.busyBotId),
+      closedBy: threadRowCloser(task),
     }));
   }, [group.tasks]);
   return (

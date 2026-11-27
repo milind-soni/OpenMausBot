@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppState } from "@/state/store";
 import { inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
+import { loadingPanel } from "@/state/fork-panel";
 
 const bot = (id: string, tasks: Array<Record<string, unknown>>) =>
   ({ id, name: id, hidden: false, threadId: `${id}-main`, tasks } as unknown as AppState["bots"][number]);
@@ -56,6 +57,13 @@ describe("inboxOpenThread", () => {
   it("names the open bot thread or room thread so both lists can mark that row", () => {
     expect(inboxOpenThread(open("eli"))).toEqual({ kind: "bot", botId: "eli", threadId: "eli-main" });
     expect(inboxOpenThread(open("room"))).toEqual({ kind: "group", groupId: "room", threadId: "room-thread" });
+  });
+
+  it("marks the focused conversation in a tiled workspace and no conversation for a vacant tile", () => {
+    const panel = loadingPanel({ kind: "group", ownerId: "room", threadId: "other" }, "load");
+    const panes = { layout: { first: "primary", second: "other", direction: "beside" as const, ratio: 0.5 }, focused: "other", panels: { other: panel } };
+    expect(inboxOpenThread({ ...open("eli"), workspacePanes: panes })).toEqual({ kind: "group", groupId: "room", threadId: "other" });
+    expect(inboxOpenThread({ ...open("eli"), workspacePanes: { ...panes, layout: { ...panes.layout, second: "slot:1" }, focused: "slot:1", panels: {} } })).toBeUndefined();
   });
 
   it("names nothing while the chat is not what the window shows", () => {

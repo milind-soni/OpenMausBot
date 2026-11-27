@@ -30,6 +30,20 @@ function render(state: AppState, dispatch: (action: Action) => void) {
 afterEach(() => { vi.unstubAllGlobals(); fixture.effects = []; fixture.link = null; fixture.showThreads = true; });
 
 describe("useExternalChatLinks", () => {
+  it("opens a saved app's link on the apps page, in that app's view", async () => {
+    const { openLocalApp, openLocalAppId } = await import("@/lib/local-apps");
+    openLocalApp(null);
+    let deliver: ((link: string) => void) | undefined;
+    vi.stubGlobal("window", { ogb: { onChatLink: (cb: (link: string) => void) => { deliver = cb; return () => {}; } } });
+    const dispatch = vi.fn();
+    render(loaded, dispatch);
+    deliver!("openmausbot://app/la_AbCdEfGhIjKlMnOp");
+    render(loaded, dispatch);
+    expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "showPublishedApps" }]);
+    expect(openLocalAppId()).toBe("la_AbCdEfGhIjKlMnOp");
+    openLocalApp(null);
+  });
+
   it("holds a link that arrives at launch until the bots have loaded, then opens it once", () => {
     let deliver: ((link: string) => void) | undefined;
     const unsubscribe = vi.fn();

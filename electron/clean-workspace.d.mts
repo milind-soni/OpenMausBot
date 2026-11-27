@@ -12,8 +12,9 @@ export interface CleanWorkspace {
   ownCopy(): boolean;
   marker(): { frozen: boolean; cloud?: string; place?: string };
   enter(): Promise<boolean>;
-  open(id?: string): Promise<boolean>;
-  leave(options?: { showLocal?: boolean }): Promise<boolean>;
+  prepare(id?: string | null): void;
+  open(id?: string, options?: { background?: boolean }): Promise<boolean>;
+  leave(options?: { background?: boolean }): Promise<boolean>;
   settled(): Promise<unknown>;
   holding<T>(work: () => Promise<T>): Promise<T>;
   realCopy(request: (route: string, init?: RequestInit) => Promise<Response>): (route: string, init?: RequestInit) => Promise<Response>;
@@ -21,7 +22,7 @@ export interface CleanWorkspace {
 export function createCleanWorkspace(deps: {
   dataDir(): string;
   running(): string | null;
-  swap(dir: string, options?: { showLocal?: boolean }): Promise<{ ok: boolean }>;
+  swap(dir: string, how?: { background: true }): Promise<{ ok: boolean }>;
   allowed?(): boolean;
   t?(key: string, params?: Record<string, string | number>): string;
   changed?(): void;

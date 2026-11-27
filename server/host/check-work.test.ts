@@ -31,7 +31,7 @@ function fixture(options: { checkWork?: CheckWorkBot["checkWork"]; checkerReplie
   const timers: Array<{ at: number; run: () => void; off: boolean }> = [];
   const runs: Array<{ botId: string; threadId: string; text: string; kind: "check" | "fix" }> = [];
   const held: Array<(outcome: HostTurnResult) => void> = [];
-  const posted: Array<{ name: string; ok: boolean; input: string; output: string }> = [];
+  const posted: Array<{ name: string; ok: boolean; input: string; output: string; round?: number }> = [];
   const done: string[] = [], interrupted: string[] = [], closed: Array<[string, boolean]> = [], changed: string[] = [];
   let saved = options.saved ?? [];
   const checkerReplies = [...(options.checkerReplies ?? [])], fixes = [...(options.fixes ?? [])];
@@ -163,6 +163,7 @@ describe("check before done", () => {
     expect(f.runs[2]!.text).toContain("<result>\nFixed chapter, dawn, no scar.\n</result>");
     expect(f.runs[2]!.text).toContain(`<earlier-report>\n${report}\n</earlier-report>`);
     expect(f.posted.map((line) => [line.name, line.ok])).toEqual([["Vera found 2 issues · fixing them, round 1 of 3", true], ["Checked by Vera · passed in round 2", true]]);
+    expect(f.posted.map((line) => line.round)).toEqual([1, undefined]);
     expect(f.done).toEqual(["Fixed chapter, dawn, no scar."]);
   });
 
@@ -170,6 +171,7 @@ describe("check before done", () => {
     const f = fixture({ checkerReplies: [{ text: "issues: 2\n1. a\n2. b" }, { text: "issues: 1\n1. b" }, { text: "1 issue\n1. still b" }], fixes: [{ text: "Fix one." }, { text: "Fix two." }] });
     await f.start();
     expect(f.runs.map((run) => run.kind)).toEqual(["check", "fix", "check", "fix", "check"]);
+    expect(f.posted.map((line) => line.round)).toEqual([1, 2, undefined]);
     expect(f.posted.at(-1)).toEqual({ name: "Checked by Vera · 1 issue still open after 3 rounds", ok: false, input: "Vera · round 3 of 3", output: "1 issue\n1. still b", ref: { botId: "v", threadId: "check-1" } });
     expect(f.done).toEqual(["Fix two."]);
   });

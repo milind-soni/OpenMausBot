@@ -171,21 +171,33 @@ describe("openChatLink", () => {
     expect(actions(refused)).toEqual([{ type: "notice", notice: { kind: "bot-gone", botName: null } }]);
   });
 
-  it("refuses a thread that is not the named bot's, showing that bot instead", async () => {
+  it("asks the named bot for a thread its loaded task lists do not know yet, so a cold launch still fills the transcript", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/qa-245?bot=ada", await state(), true)).toBe(false);
+    expect(openChatLink(dispatch, "openmausbot://thread/late-1?bot=scout", await state(), true)).toBe(true);
     expect(actions(dispatch)).toEqual([
-      { type: "select", id: "ada" },
-      { type: "notice", notice: { kind: "thread-gone", botName: "Ada" } },
+      { type: "select", id: "scout" },
+      { type: "switchTask", botId: "scout", threadId: "late-1" },
+      { type: "revealThread", threadId: "late-1" },
     ]);
   });
 
-  it("refuses a room's dead thread, showing that room instead", async () => {
+  it("refuses a thread that is not the named bot's, showing that bot while the server vets the pair", async () => {
     const dispatch = vi.fn();
-    expect(openChatLink(dispatch, "openmausbot://thread/gone?bot=standup", await state(), true)).toBe(false);
+    expect(openChatLink(dispatch, "openmausbot://thread/qa-245?bot=ada", await state(), true)).toBe(true);
+    expect(actions(dispatch)).toEqual([
+      { type: "select", id: "ada" },
+      { type: "switchTask", botId: "ada", threadId: "qa-245" },
+      { type: "revealThread", threadId: "qa-245" },
+    ]);
+  });
+
+  it("asks a room for its thread too", async () => {
+    const dispatch = vi.fn();
+    expect(openChatLink(dispatch, "openmausbot://thread/gone?bot=standup", await state(), true)).toBe(true);
     expect(actions(dispatch)).toEqual([
       { type: "select", id: "standup" },
-      { type: "notice", notice: { kind: "thread-gone", botName: "Standup" } },
+      { type: "switchGroupTask", groupId: "standup", threadId: "gone" },
+      { type: "revealThread", threadId: "gone" },
     ]);
   });
 
@@ -227,10 +239,11 @@ describe("openChatLink", () => {
       { type: "revealThread", threadId: "scout-main" },
     ]);
     const dead = vi.fn();
-    expect(openChatLink(dead, "openmausbot://thread/gone?bot=scout", left, false)).toBe(false);
+    expect(openChatLink(dead, "openmausbot://thread/gone?bot=scout", left, false)).toBe(true);
     expect(actions(dead)).toEqual([
       { type: "switchTask", botId: "scout", threadId: "scout-main" },
-      { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
+      { type: "switchTask", botId: "scout", threadId: "gone" },
+      { type: "revealThread", threadId: "gone" },
     ]);
     const shown = vi.fn();
     expect(openChatLink(shown, "openmausbot://bot/scout", left, true)).toBe(true);
