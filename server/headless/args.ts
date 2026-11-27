@@ -264,10 +264,11 @@ export function oneOf<T extends string>(raw: string | undefined, name: string, a
 }
 
 /** How long `serve` waits for the server's HTTP health before giving up: `OMB_SERVE_READY_TIMEOUT_MS`,
- * else 60s. An unreadable value keeps the default; a machine with a cold start needs this without a rebuild. */
+ * else 60s. A bare number is milliseconds, as the name says; `5m` and the like also read. An unreadable value keeps
+ * the default; a machine with a cold start needs this without a rebuild. */
 export function serveReadyTimeoutMs(env: NodeJS.ProcessEnv): number {
   const raw = env.OMB_SERVE_READY_TIMEOUT_MS?.trim();
   if (!raw) return 60_000;
-  try { return parseDuration(raw, "OMB_SERVE_READY_TIMEOUT_MS", { min: 5_000, max: 3_600_000 }); }
+  try { return parseDuration(/^\d+$/.test(raw) ? `${raw}ms` : raw, "OMB_SERVE_READY_TIMEOUT_MS", { min: 5_000, max: 3_600_000 }); }
   catch { return 60_000; }
 }

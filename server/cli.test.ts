@@ -705,5 +705,7 @@ describe("serve readiness wait", () => {
     expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "nonsense" })).toBe(60_000);
     expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "1s" })).toBe(60_000);
     expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "  5m " })).toBe(300_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "120000" })).toBe(120_000);
+    expect(serveReadyTimeoutMs({ OMB_SERVE_READY_TIMEOUT_MS: "90" })).toBe(60_000);
   });
 });
