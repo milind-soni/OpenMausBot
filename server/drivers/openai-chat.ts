@@ -20,7 +20,8 @@ import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
-import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, CUT_REPLY_NOTE, cutReplyContinues, cutReplyWillContinue, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { anotherRequestFollows, ContinuedReply, MaskedDeltas, maskSecretHalves } from "./cut-reply-text.ts";
 import { ChatHttpError, completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
@@ -218,7 +219,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       ...(completion.protocolReasoning && !reasoningReplayRejected.has(model) ? { [options.reasoningReplayField ?? "reasoning_content"]: completion.protocolReasoning } : {}),
       ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
       ...(toolCalls ? { tool_calls: toolCalls } : {}) };
-    if (completion.responseOutput) responseOutputs.set(reply, completion.responseOutput);
+    if (completion.responseOutput?.length) responseOutputs.set(reply, completion.responseOutput);
     return reply;
   };
   const delivered = new Map<string, DeliveredUserMessage[]>();
@@ -539,6 +540,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       for (const secret of secrets) if (secret) safe = safe.split(secret).join("[redacted]");
       return redactSecretsInText(safe);
     };
+    const maskSecrets = (text: string, flush: boolean) => maskSecretHalves(text, secrets, safeText, flush);
     const preview = (value: unknown) => toolDetailPreview(JSON.parse(JSON.stringify(value, (_key, part) =>
       typeof part === "string" ? safeText(part) : part)));
     const native = (dir: "out" | "in", msg: unknown) => appendNative(turn.threadId, {
@@ -590,6 +592,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let failureText: ReturnType<typeof runtimeErrorText>;
       let toolFailed = false, spoke = false, unfloored = 0, blockedAfterReply = false; // unfloored: failed calls the safety floor did not block after the bot spoke
       let correctiveRounds = 0;
+      const cutReplies = { count: 0 };
+      const answer = new ContinuedReply((text) => emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text }));
+      let carried = "", carriedReasoning = "";
       const denials: string[] = [], failedCalls: string[] = [];
       const seenCalls = new Set<string>();
       let nudges = 0;
@@ -634,27 +639,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
           let resends = 0;
-          let completion: Completion;
+          let completion: Completion, prefix = "", willContinue = false, willRequest = false;
           for (;;) {
             let streamed = false;
             let answerStreamed = false;
             const holdback = options.localModel && tools.definitions.length ? new TextCallHoldback() : undefined;
-            const pending = { assistant_text: "", reasoning_text: "" };
-            const delta = (text: string, streamKind: keyof typeof pending, flush = false) => {
-              let combined = pending[streamKind] + text;
-              // Mask whole matches before holding a suffix, or "abab" could split at its own repeated prefix.
-              for (const secret of secrets) if (secret) combined = combined.split(secret).join("[redacted]");
-              let hold = 0;
-              // A configured credential can straddle chunks: hold any suffix that could be its prefix.
-              if (!flush) for (const secret of secrets) {
-                for (let length = Math.min(secret.length - 1, combined.length); length > hold; length--) {
-                  if (combined.endsWith(secret.slice(0, length))) { hold = length; break; }
-                }
-              }
-              pending[streamKind] = hold ? combined.slice(-hold) : "";
-              const visible = safeText(hold ? combined.slice(0, -hold) : combined);
-              if (visible) emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta: visible });
-            };
+            prefix = carried;
+            const deltas = new MaskedDeltas(secrets, safeText, (delta, streamKind) => emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta }));
+            deltas.seed("assistant_text", prefix); deltas.seed("reasoning_text", carriedReasoning);
+            const delta = deltas.feed.bind(deltas);
             try {
               completion = await complete(messages, model, true, abort.signal, (text, streamKind) => {
                 streamed = true;
@@ -675,8 +668,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const rest = holdback?.rest();
                 if (rest) delta(rest, "assistant_text");
               }
-              delta("", "assistant_text", true);
-              delta("", "reasoning_text", true);
+              willContinue = !completion.toolCalls.length && cutReplyWillContinue(cutReplies, completion, Boolean(options.localModel && tools.definitions.length));
+              // The hold survives a reply another request may answer, so a credential is never shown in halves.
+              willRequest = anotherRequestFollows(completion, { unreadable, cut: willContinue,
+                corrective: toolFailed && !denials.length && correctiveRounds < Math.max(turn.toolErrorCorrectiveRounds ?? 0, options.localModel ? LOCAL_CORRECTIVE_ROUNDS : 0),
+                nudge: Boolean(options.nudgeAnnouncedAction) && tools.definitions.length > 0 && announcesAction(completion.text) && nudges < MAX_ANNOUNCEMENT_NUDGES && callsAtNudge !== seenCalls.size, asides: turnEntry.asides.length > 0 });
+              delta("", "assistant_text", !willRequest); delta("", "reasoning_text", !willRequest);
+              carried = willRequest ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willRequest ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
               break;
             } catch (value) {
               const error = asError(value);
@@ -744,7 +742,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
-          if (reply.trim()) { spoke = true; emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: safeText(reply) }); }
+          const shownReply = prefix || willContinue || completion.text.trim() ? maskSecrets(prefix + completion.text, !willRequest).visible : safeText(reply);
+          if (reply.trim()) { spoke = true; answer.add(shownReply); }
+          if (!willContinue) answer.end();
           abort.signal.throwIfAborted();
           if (unreadable) {
             askedAgain = true;
@@ -753,6 +753,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (!completion.toolCalls.length) {
             if (!reply.trim()) throw new ChatProtocolError("provider returned an empty response");
+            if (cutReplyContinues(cutReplies, completion, Boolean(options.localModel && tools.definitions.length))) {
+              messages.push(assistantReply(model, completion, completion.text), { role: "user", content: CUT_REPLY_NOTE });
+              continue;
+            }
             if (completion.finishReason && completion.finishReason !== "stop") {
               throw new ChatProtocolError(`provider did not finish the response (${completion.finishReason})`);
             }
@@ -891,6 +895,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       } finally {
         turnEntry.ending = true;
         approval.close();
+        answer.end();
         let cleanupFailed = false;
         try { await tools?.close(); }
         catch {
