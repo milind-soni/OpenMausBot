@@ -731,11 +731,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       spare?: boolean; spareMs?: number; spareAt?: number; resumed?: string;
       take?: (turnId: string) => void;
       tools?: ClaudePrestartTools;
-      /** The engine could not start the `agents` MCP server: retired after this turn so the next one reconnects. */
-      teamToolsFailed?: boolean;
-      /** Configured servers the CLI could not connect at startup: the CLI connects them only when a process starts, so
-       * this session is retired after the turn and the next one reconnects them. */
-      customMcpFailed?: string[];
+      /** The engine could not start the `agents` MCP server, or a configured one (the CLI connects them only when a process starts): retired after this turn so the next one reconnects. */ teamToolsFailed?: boolean; customMcpFailed?: boolean;
       stderr: string;
       costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
@@ -1294,8 +1290,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         retryState.delete(threadId);
         // `claude update` cannot change code this child already loaded, and a signed-out child can keep holding the shared OAuth refresh lock: retire both before completing.
         if (stopReason === "update_required" || stopReason === "auth_required") closeSession(threadId, stopReason === "auth_required" ? "authentication required" : "update required");
-        else if (session.teamToolsFailed) closeSession(threadId, "team tools did not connect");
-        else if (session.customMcpFailed?.length) closeSession(threadId, "an MCP server did not connect");
+        else if (session.teamToolsFailed || session.customMcpFailed) closeSession(threadId, session.teamToolsFailed ? "team tools did not connect" : "an MCP server did not connect");
         const cost = turnCostFromRunningTotal(total, session.costTotal ?? null);
         if (total !== null) session.costTotal = total;
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}), ...(unsent ? { unsent } : {}) });
@@ -1377,8 +1372,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 held.continuationSilence.unref?.();
               }
               const currentRetry = retryState.get(threadId) ?? retry;
-              const failedMcp = failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom);
-              if (failedMcp.mcpFailed?.length) session.customMcpFailed = failedMcp.mcpFailed;
+              const failedMcp = failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom); if (failedMcp.mcpFailed?.length) session.customMcpFailed = true;
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(currentRetry.rebuilt ? { rebuilt: true } : {}), ...failedMcp });
               if (currentRetry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
               currentRetry.rebuilt = false;
