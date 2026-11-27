@@ -26,14 +26,14 @@ const at = (iso: string) => new Date(iso).getTime();
 
 describe("register() grace period", () => {
   it("keeps a key that lapsed less than the grace period ago, with its real expiry", () => {
-    expect(register({ licenseKey: key, graceDays: 7, now: at("2027-01-03T12:00:00Z") })).toEqual({
-      customer: "Acme", features: ["budgets"], expiresAt: "2027-01-01",
+    expect(register({ licenseKey: key, graceDays: 14, now: at("2027-01-03T12:00:00Z") })).toEqual({
+      customer: "Acme", features: ["budgets"], expiresAt: "2027-01-01", issued: "2026-01-01",
     });
-    expect(register({ licenseKey: key, graceDays: 7, now: at("2027-01-07T23:59:59Z") })?.customer).toBe("Acme");
+    expect(register({ licenseKey: key, graceDays: 14, now: at("2027-01-14T23:59:59.999Z") })?.customer).toBe("Acme");
   });
 
   it("refuses the key once the grace period is over, and without one at the expiry instant", () => {
-    expect(() => register({ licenseKey: key, graceDays: 7, now: at("2027-01-08T00:00:00Z") })).toThrow(/expired on 2027-01-01; renew it/);
+    expect(() => register({ licenseKey: key, graceDays: 14, now: at("2027-01-15T00:00:00Z") })).toThrow(/expired on 2027-01-01; renew it/);
     expect(() => register({ licenseKey: key, now: at("2027-01-01T00:00:00Z") })).toThrow(/expired on 2027-01-01/);
     expect(register({ licenseKey: key, now: at("2026-12-31T23:59:59Z") })?.expiresAt).toBe("2027-01-01");
   });
@@ -41,5 +41,19 @@ describe("register() grace period", () => {
   it("clamps an oversized grace instead of trusting it", () => {
     expect(() => register({ licenseKey: key, graceDays: 1_000, now: at("2027-01-20T00:00:00Z") })).toThrow(/expired/);
     expect(() => register({ licenseKey: key, graceDays: Number.NaN, now: at("2027-01-02T00:00:00Z") })).toThrow(/expired/);
+  });
+});
+
+describe("register() and the subscription claims", () => {
+  it("hands seats, plan, sub, server and iat to core when the key carries them, the issue date always", () => {
+    const subscription = issueLicenseKey(
+      { v: 1, customer: "Acme", features: ["admin"], issued: "2026-11-27", expires: "2026-12-30", seats: 20, plan: "business-server", sub: "sub_1", server: "srv_1", iat: 1_795_000_000_000 },
+      testKey.privateJwk,
+    );
+    expect(register({ licenseKey: subscription, now: at("2026-12-01T00:00:00Z") })).toEqual({
+      customer: "Acme", features: ["admin"], expiresAt: "2026-12-30", seats: 20, plan: "business-server", sub: "sub_1", server: "srv_1",
+      issued: "2026-11-27", iat: 1_795_000_000_000,
+    });
+    expect(Object.keys(register({ licenseKey: key, now: at("2026-06-01T00:00:00Z") })!)).toEqual(["customer", "features", "expiresAt", "issued"]);
   });
 });
