@@ -47,7 +47,7 @@ export async function licenseRoutes({ req, res, path, method, auth, json }: Rout
   if (match === "in-force") connectorReadAt = Date.now();
   res.setHeader("cache-control", "no-store");
   if (ownerOrAdmin(auth)) return json(res, 200, licenseForSettings(licenseState()));
-  if (match && auth.kind === "loopback") return json(res, 200, licenseForConnector(licenseState()));
+  if (match && auth.kind === "loopback" && licenseFilesUsed()) return json(res, 200, licenseForConnector(licenseState()));
   return json(res, 403, { error: "Only the owner or an admin sees this server's licence." });
 }
 
