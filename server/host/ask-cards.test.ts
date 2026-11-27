@@ -338,7 +338,7 @@ describe("a handed-on turn owns its question", () => {
 describe("questions carried separately from a bounded handoff summary", () => {
   type ReplyCase = {
     label: string; text: string; question?: string; default?: string; full?: boolean; outside?: boolean;
-    legacy?: boolean; privateReply?: boolean; ok?: boolean; approvalAsk?: string;
+    legacy?: boolean; privateReply?: boolean; ok?: boolean; approvalAsk?: string; earlierReply?: string;
   };
   const longQuestion = `${"Q".repeat(12_050)}?`;
   const longDefault = "D".repeat(12_050);
@@ -363,6 +363,14 @@ describe("questions carried separately from a bounded handoff summary", () => {
     { label: "an unanswered approval on a failed turn", text: "The command did not run.", ok: false,
       approvalAsk: "Approve the pending command?", question: "Approve the pending command?" },
     { label: "a failed turn with a textual question", text: `NEEDS INPUT: ${QUESTION}`, ok: false },
+    ...[true, false].flatMap((ok) => [
+      { label: `an approval after an earlier question (ok=${ok})`, text: "The command did not run.", ok,
+        earlierReply: `NEEDS INPUT: ${privateQuestion}\nDefault: Forward it`,
+        approvalAsk: "Approve the pending command?\nDefault: Wait", question: "Approve the pending command?\nDefault: Wait" },
+      { label: `a private approval after an earlier question (ok=${ok})`, text: "The command did not run.", ok, privateReply: true,
+        earlierReply: `NEEDS INPUT: ${privateQuestion}\nDefault: Forward it`,
+        approvalAsk: "Approve the pending command?\nDefault: Wait", question: safeQuestion },
+    ]),
   ];
 
   it.each(cases)("preserves routing for $label", async (fixture) => {
@@ -380,6 +388,7 @@ describe("questions carried separately from a bounded handoff summary", () => {
         const outcome: HostTurnResult = { ok: fixture.ok ?? true, ...(fixture.legacy ? { text: fixture.text } : handoffReply(fixture.text)),
           ...(fixture.approvalAsk ? { approvalAsk: fixture.approvalAsk } : {}) };
         sent = fixture.privateReply ? privateHandBack(outcome, { child: "ada", parent: null, bot: "Ledger", person: "Ada" }) : outcome;
+        if (fixture.earlierReply) w.store.appendMessage(node.threadId, { role: "bot", kind: "text", text: fixture.earlierReply, turnId: "handed-turn" });
         w.store.appendMessage(node.threadId, { role: "bot", kind: "text", text: fixture.text, turnId: "handed-turn" });
         if (sent.ok && !coordinator.assignerOf(node.threadId)) w.cards.ownQuestion(node.botId, node.threadId, "handed-turn");
         return sent;
@@ -411,13 +420,22 @@ describe("questions carried separately from a bounded handoff summary", () => {
         expect(coordinator.node(child.id)?.status).toBe(fixture.default ? "queued" : "waiting");
         if (fixture.default) expect(coordinator.node(child.id)?.answer).toBe(fixture.default.slice(0, 12_000));
       }
+      if (fixture.earlierReply) {
+        expect(w.rows("work").slice(0, 2).map((row) => ({ kind: row.kind, text: row.text, card: row.card }))).toEqual([
+          { kind: "text", text: fixture.earlierReply, card: undefined },
+          { kind: "text", text: fixture.text, card: undefined },
+        ]);
+        if (!fixture.privateReply) expect(cards[0]).toMatchObject({
+          text: "Approve the pending command?", card: { subtitle: "Approve the pending command?", options: ["Wait"] },
+        });
+      }
       if (fixture.privateReply) {
-        expect(sent.question).toBe(safeQuestion);
+        expect(sent.question).toBe(fixture.approvalAsk ? null : safeQuestion);
         expect(sent.privateQuestion).toBe(true);
         expect(JSON.stringify(sent)).not.toContain("salary");
-        expect(cards[0]?.text).toBe(privateQuestion);
-        expect(cards[0]?.card?.subtitle).toBe(privateQuestion);
-        expect(cards[0]?.card?.options).toEqual(["Forward it"]);
+        expect(cards[0]?.text).toBe(fixture.approvalAsk ? safeQuestion : privateQuestion);
+        expect(cards[0]?.card?.subtitle).toBe(fixture.approvalAsk ? safeQuestion : privateQuestion);
+        expect(cards[0]?.card?.options).toEqual(fixture.approvalAsk ? [] : ["Forward it"]);
         expect(JSON.stringify(coordinator.node(child.id))).not.toContain("salary");
         expect(JSON.stringify(w.rows("inbox"))).not.toContain("salary");
         expect(JSON.stringify(w.notified)).not.toContain("salary");
@@ -781,4 +799,3 @@ describe("askToolName", () => {
     expect(askToolName(null, claude)).toBeUndefined();
   });
 });
-

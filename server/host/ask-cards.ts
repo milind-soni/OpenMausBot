@@ -186,8 +186,8 @@ export function createAskCards(deps: AskCardsDeps) {
     const requestId = `${OPEN_QUESTION}${node.id}-${node.executions}`;
     if (store.messagesFor(node.threadId).some((message) => message.card?.requestId === requestId)) return false;
     const since = node.startedAt ?? node.createdAt;
-    const asking = askersLines(node).findLast((message) => message.role === "bot" && message.kind === "text" && message.at >= since
-      && needsInputQuestion(message.text ?? "") !== undefined);
+    const reply = askersLines(node).findLast((message) => message.role === "bot" && message.kind === "text" && message.at >= since);
+    const asking = reply && needsInputQuestion(reply.text ?? "") !== undefined ? reply : undefined;
     const parent = node.parentId && !node.groupId ? deps.node(node.parentId) : undefined;
     const localQuestion = asking && parent && deps.keptPrivate(node.threadId, parent.threadId) ? needsInputQuestion(asking.text!) : undefined;
     const asked = withDefault(localQuestion ?? question);
