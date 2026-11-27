@@ -244,7 +244,7 @@ describe("Qwen route selection", () => {
       const methods = JSON.parse(readFileSync(rpc, "utf8")) as string[];
       expect(methods.includes("session/prompt")).toBe(!rejectSwitch);
       if (!rejectSwitch) expect(methods.indexOf("session/set_config_option")).toBeLessThan(methods.indexOf("session/prompt"));
-      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--acp"]);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--acp", "--approval-mode", "default"]);
       expect(recorder.events.find((event) => event.type === "turn.completed")).toMatchObject({ ok: !rejectSwitch });
     } finally { await instance.dispose(); }
   });

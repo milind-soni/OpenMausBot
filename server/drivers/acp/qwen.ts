@@ -197,12 +197,14 @@ export function qwenDebugLogPath(env: Record<string, string | undefined>, sessio
 }
 
 /** Qwen Code's approval ladder (qwen --help, 0.24): `--approval-mode default` asks, `auto-edit` approves
- * edits, `auto` runs Qwen's LLM classifier, `--yolo` approves everything. Ask sends nothing, for older CLIs. */
+ * edits, `auto` runs Qwen's LLM classifier, `--yolo` approves everything. Ask sends `default` explicitly:
+ * Qwen Code 0.24+ with no flag and no `tools.approvalMode` setting starts in `auto`, where actions its
+ * classifier allows never raise a request. */
 export function qwenApprovalArgs(fullAuto: boolean, approvalMode: string | undefined): string[] {
   if (fullAuto) return ["--yolo"];
   if (approvalMode === "auto") return ["--approval-mode", "auto"];
   if (approvalMode === "edits") return ["--approval-mode", "auto-edit"];
-  return [];
+  return ["--approval-mode", "default"];
 }
 
 const support: AcpSupport = {

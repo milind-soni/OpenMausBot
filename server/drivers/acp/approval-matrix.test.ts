@@ -35,7 +35,7 @@ describe("remaining ACP approval mappings", () => {
   }[] = [
     { driver: OpenCodeDriver, argv: ["acp"] },
     { driver: GeminiAgentDriver, argv: ["--acp"], native: { full: ["--yolo"] } },
-    { driver: QwenAgentDriver, argv: ["--acp"], native: { full: ["--yolo"], auto: ["--approval-mode", "auto"] } },
+    { driver: QwenAgentDriver, argv: ["--acp"], native: { full: ["--yolo"], auto: ["--approval-mode", "auto"], ask: ["--approval-mode", "default"] } },
     { driver: KimiAgentDriver, argv: ["acp"] },
     { driver: HermesAgentDriver, argv: ["acp"] },
     { driver: DroidAgentDriver, argv: ["exec", "-o", "acp"] },
