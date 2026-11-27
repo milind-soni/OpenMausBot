@@ -4,6 +4,11 @@
 // later message. A refusal teaches the model's key here; after that, the turn's MCP servers answer tool calls
 // with the image parts replaced by a text note the model can read.
 
+/** Rides the prompt of a turn on a model that reads text only: the engine's own file tools can still read an image into
+ * the session (an MCP server is stripped, a plain read is not), and the next refusal marks that session for a rebuild
+ * from the recovery text. */
+export const TEXT_ONLY_PROMPT_NOTE = "(Your model for this conversation reads text only. Reading an image file with a file tool, or keeping a picture a tool returned, makes every later reply fail. Say you cannot see it, or attach the file unchanged.)";
+
 /** Set in the environment of every MCP server a turn mounts for a model that reads text only. */
 export const TEXT_ONLY_TOOLS_ENV = "OMB_MCP_TEXT_ONLY";
 

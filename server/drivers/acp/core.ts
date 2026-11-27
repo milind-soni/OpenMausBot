@@ -76,7 +76,7 @@ import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
-import { learnedTextOnlyTools, learnTextOnlyTools } from "../../mcp-text-only.ts";
+import { learnedTextOnlyTools, learnTextOnlyTools, TEXT_ONLY_PROMPT_NOTE } from "../../mcp-text-only.ts"; import { isHermesReasoningReplay } from "./hermes-replay.ts";
 
 /** Failures fixed on the provider account, not by retrying; the reporting process stays pooled. */
 export type AccountErrorCode = Extract<ProviderErrorCode,
@@ -286,13 +286,6 @@ const SHARED_SESSIONS_MAX = 6, SHARED_SESSIONS_LIFETIME = 12;
 const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
 /** ACP agents may compact their history silently; re-send the full prompt after this many bare turns. */
 const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
-
-function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
-  const reply = streamed.trim();
-  const replay = chunk.trim();
-  return reply !== "" && /^(?:> |-# )?💭/.test(replay) && replay.endsWith(reply)
-    && /\n\n[ \t]*$/.test(replay.slice(0, -reply.length));
-}
 
 let unkeyedToolSeq = 0;
 /** A synthetic id for a `tool_call` without `toolCallId`, paired FIFO with the first terminal update. */
@@ -1270,11 +1263,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             emitSessionStarted();
             const { input: promptInput, note: contextNote, split } = turnPrompt(DRIVER_KIND, { threadId, sessionId }, turn, promptTurn, heldSystem(), ACP_PROMPT_RE_ANCHOR_TURNS);
             if (split) { state.usagePeak = split.previous?.peakUsed ?? split.previous?.lastUsed ?? null; pendingSplitReceipt = split; }
-            // The note rides the prompt itself: the engine's own file tools can still read an image into the session
-            // (an MCP server is stripped, a plain read is not), and the next refusal marks that session for a rebuild.
-            const textOnlyNote = textOnlyModel
-              ? "(Your model for this conversation reads text only. Reading an image file with a file tool, or keeping a picture a tool returned, makes every later reply fail. Say you cannot see it, or attach the file unchanged.)"
-              : "";
             const text = support.buildPromptText
               ? support.buildPromptText(promptInput)
               : promptInput.system
@@ -1297,7 +1285,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const quiet = startQuietWatch(threadId, session, current);
             const result = await request(
               "session/prompt",
-              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(textOnlyNote ? [{ type: "text", text: textOnlyNote }] : [])] },
+              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(textOnlyModel ? [{ type: "text", text: TEXT_ONLY_PROMPT_NOTE }] : [])] },
               undefined,
               undefined,
               promptIdleMs,
@@ -1361,14 +1349,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }, failed: (error) => { acknowledge(); emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null }); } })) return;
               const message = e instanceof Error ? e.message : String(e);
-              // A text-only model's image refusal poisons the session it ran in (the image is in its history) and
-              // teaches the model's key: the next turn rebuilds from the recovery text, and its MCP servers answer
-              // tool calls without the images.
-              if (engineFailureKind(message) === "image_content") {
-                learnTextOnlyTools(toolLimitKey);
-                if (session.sessionId) brokenSessions.add(session.sessionId);
-                if (typeof turn.resumeCursor === "string") brokenSessions.add(turn.resumeCursor);
-              }
+              // A text-only model's image refusal poisons its session (the image is in its history) and teaches the model's key (mcp-text-only.ts).
+              if (engineFailureKind(message) === "image_content") { learnTextOnlyTools(toolLimitKey); for (const id of [session.sessionId, turn.resumeCursor]) if (typeof id === "string" && id) brokenSessions.add(id); }
               const code = support.classifyError?.(e) ?? (engineFailureKind(message) === "credits" ? "insufficient_funds" : undefined);
               const needsAuth = code === "invalid_credentials" || code === "inactive_subscription"
                 || code === "insufficient_funds" || message === support.loginNote;
