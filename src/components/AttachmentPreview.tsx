@@ -904,7 +904,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
   return (
     <div
       title={save.state === "saved" && save.savedTo ? t("attach.savedTo", { path: save.savedTo }) : file.name}
-      className={cn("w-full max-w-full sm:max-w-[280px] overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 text-[12px] text-ink-secondary", className)}
+      className={cn("max-w-full sm:max-w-[280px] overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 text-[12px] text-ink-secondary", className)}
     >
       <div className="flex items-center pe-1">
         <button

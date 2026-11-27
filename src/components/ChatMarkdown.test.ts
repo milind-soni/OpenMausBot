@@ -852,7 +852,7 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain("shrink-0");
   });
 
-    it("names a delivered copy by its literal file name, without decoding it", () => {
+  it("names a delivered copy by its literal file name, without decoding it", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "[Report](/old/100%41.html)", message: { threadId: "thread-1", messageId: "message-1" },
       delivered: { "100%41.html": "/store/delivered-100.html" },
