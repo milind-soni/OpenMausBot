@@ -20,6 +20,7 @@ import { DisplayNameSetting } from "../../DisplayNameSetting";
 import { DefaultBotSidebarRow } from "../../DefaultBotControls";
 import { EnginesSettings } from "../../EnginesSettings";
 import { ImageGenerationSettings } from "../../ImageGenerationSettings";
+import { LicenceCard } from "../../LicenceCard";
 import { LocalComputerSection } from "../../LocalComputerSection";
 import { McpCallTimeoutSettings } from "../../McpCallTimeoutSettings";
 import { DefaultBotSettings } from "../../NewBotDialog";
@@ -86,6 +87,7 @@ export function OverviewPage() {
       </SettingsRows>
     )}
     {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
+    {place.kind === "server" && !ctx.client && ctx.admin && <LicenceCard enabled />}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
         {!ctx.client && <SettingsLinkRow title={t("settings.page.devices")} value={phoneValue} onClick={() => go("devices", "phones")} data={{ "data-glance": "devices" }} />}

@@ -151,7 +151,30 @@ export interface Heartbeat {
     paused?: boolean;
     /** Customer-run only: how many people can sign in to the home; null when the home does not say. Never who. */
     seats?: number | null;
+    /** Customer-run only: the server's own id (its `environmentId`, a UUID), so a licence can name the server it is for;
+     * null when the home does not say. */
+    environmentId?: string | null;
+    /** Customer-run only: the licence as the server itself judges it; null when the server does not say. Never the licence. */
+    licence?: LicenceReport | null;
   };
+}
+
+/** Where the licence in force was read from on the server: its data folder's `license.key`, its `OMB_LICENSE_KEY`, or the
+ * copy it keeps of the last licence it accepted. */
+export type LicenceSource = "file" | "env" | "last-good";
+
+/** A customer-run server's licence state, from the server's own read (`GET /api/license` on its loopback). */
+export interface LicenceReport {
+  /** Licensed features work, grace included. */
+  valid: boolean;
+  /** e.g. "business-server". */
+  plan: string | null;
+  seats: number | null;
+  /** YYYY-MM-DD, or null for a licence without an end. */
+  expiresAt: string | null;
+  /** Once expired: whole days until licensed features stop (0 after); null before expiry. */
+  graceDaysLeft: number | null;
+  source: LicenceSource | null;
 }
 
 export interface JobArgs {
@@ -329,6 +352,12 @@ export interface ConfigPayload {
     /** How long members' sessions last past the Admin's last check while it can't be reached. */
     offlineHours: number;
   };
+  /**
+   * Customer-run only: this server's licence (`omb1.<claims>.<signature>`), which the connector saves to the server's
+   * data folder as `license.key` (customer-run.ts, section 5). Absent: nothing is written and nothing is removed. A new
+   * licence comes in a config with a higher `version`, like any other change. An operated connector ignores it.
+   */
+  licence?: string;
 }
 
 /** Admin → connector before it restarts: reconnect after `reconnectInMs` plus a random part of `tryForMs`. */

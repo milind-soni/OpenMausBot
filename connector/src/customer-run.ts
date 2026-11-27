@@ -4,9 +4,11 @@
 //
 // Security invariant: nothing in this file passes through text a person wrote. Every string that leaves is either a
 // constant below, an enumerated code, or matches one of the patterns below (a version, an image reference, an id).
+import { createHash } from "node:crypto";
+
 import {
   checkJob, type CheckId, type ConnectorIdentity, type CopyInfo, type Heartbeat, type HomeHealth, type HomeReport, type HostFacts, type HomeState, type HostHealth,
-  type Job, type JobError, type JobErrorCode, type JobReply, type JobType,
+  type Job, type JobError, type JobErrorCode, type JobReply, type JobType, type LicenceReport, type LicenceSource,
 } from "./protocol.ts";
 
 // 1. JOBS. The only kinds the Admin may run. Not here, so refused: `export-disk` (uploads the data to MausBot) and
@@ -143,17 +145,30 @@ export function answerCustomerRunRequest(request: CustomerRunRequest, facts: Ser
   }
 }
 
-// 3. WHAT THE CONNECTOR READS FROM THE HOME. Three GETs on the home's own loopback, with no body, and from them four
-// fields: that it answers as MausBot and whether its bot box is on or off, its version, and its seat count. Every other field of those answers (the
-// server's name among them) is dropped here and never kept.
+// 3. WHAT THE CONNECTOR READS FROM THE HOME. Four GETs on the home's own loopback, with no body, and from them six
+// fields: that it answers as MausBot and whether its bot box is on or off, its version, its own id, its seat count, and
+// its licence state (section 5). Every other field of those answers (the server's name and the licence's customer among
+// them) is dropped here and never kept. The licence state is the server's own judgement of its licence, never the licence.
 
-export const HOME_READS = ["/api/health", "/.well-known/openmausbot/environment", "/api/seats"] as const;
+export const HOME_READS = ["/api/health", "/.well-known/openmausbot/environment", "/api/seats", "/api/license"] as const;
 const RECORD_END = "\u001e";
-/** Run inside the home's container: curl comes with the image, and the home listens on its own loopback only. */
-export const HOME_READS_COMMAND = [
-  "sh", "-c",
-  `for path in ${HOME_READS.join(" ")}; do curl -s --max-time 5 "http://127.0.0.1:\${OMB_PORT:-8799}$path" || true; printf '\\n\\036\\n'; done`,
-] as const;
+/** The header that lets the licence-state read through on a server where a local request without a session is only a
+ * service (a shared server, where every bot's shell is a local caller too): `licenceProof` of the licence the connector
+ * saved. The server answers it with the six fields above and nothing else, and only while that licence is one it accepted. */
+export const LICENCE_PROOF_HEADER = "x-openmausbot-licence-proof";
+/**
+ * Run inside the home's container: curl comes with the image, and the home listens on its own loopback only. `proof` is
+ * the one argument, after the fixed script: `licenceProof` of the licence the connector saved, or "" when it saved none.
+ */
+export function homeReadsCommand(proof: string | null): string[] {
+  const safe = proof !== null && /^[0-9a-f]{64}$/.test(proof) ? proof : "";
+  return [
+    "sh", "-c",
+    `for path in ${HOME_READS.slice(0, 3).join(" ")}; do curl -s --max-time 5 "http://127.0.0.1:\${OMB_PORT:-8799}$path" || true; printf '\\n\\036\\n'; done; `
+      + `curl -s --max-time 5 -H "${LICENCE_PROOF_HEADER}: $1" "http://127.0.0.1:\${OMB_PORT:-8799}${HOME_READS[3]}" || true; printf '\\n\\036\\n'`,
+    "sh", safe,
+  ];
+}
 
 export interface HomeFacts {
   answers: boolean;
@@ -161,6 +176,10 @@ export interface HomeFacts {
   seats: number | null;
   /** Whether its bots run in the bot box, from the health answer: on, off, or null when it does not say. */
   box: "on" | "off" | null;
+  /** The server's own id, from its environment answer; null when it does not say. */
+  environmentId: string | null;
+  /** The server's licence state; null when it does not say (an older server, or one that refused the read). */
+  licence: LicenceReport | null;
 }
 
 const parsed = (text: string | undefined): Record<string, unknown> => {
@@ -173,9 +192,13 @@ const parsed = (text: string | undefined): Record<string, unknown> => {
 };
 
 export function parseHomeReads(output: string): HomeFacts {
-  const [health, environment, seats] = output.split(RECORD_END);
+  const [health, environment, seats, licence] = output.split(RECORD_END);
   const said = parsed(health);
-  return { answers: said.app === "openmausbot", version: versionOrNull(parsed(environment).version), seats: seatsOrNull(parsed(seats).seats), box: boxOnOff(said.box) };
+  const place = parsed(environment);
+  return {
+    answers: said.app === "openmausbot", version: versionOrNull(place.version), seats: seatsOrNull(parsed(seats).seats), box: boxOnOff(said.box),
+    environmentId: environmentIdOrNull(place.environmentId), licence: licenceReport(parsed(licence)),
+  };
 }
 
 // 4. WHAT LEAVES THE SERVER. The heartbeat (every 30 seconds) and each job's reply, rebuilt here field by field. A
@@ -200,6 +223,28 @@ export const boxReport = (value: unknown): HomeHealth["box"] => {
   return said ? { box: said, checks: null, failed: [] } : null;
 };
 const seatsOrNull = (value: unknown) => (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1_000_000 ? value : null);
+const ENVIRONMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const environmentIdOrNull = (value: unknown) => (typeof value === "string" && ENVIRONMENT_ID.test(value) ? value.toLowerCase() : null);
+const PLAN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const LICENCE_SOURCES: readonly LicenceSource[] = ["file", "env", "last-good"];
+
+/** The server's licence state as it leaves: six fields, each a boolean, a number, a date, an enumerated word or a plan's
+ * short id. Anything that is not the server's licence answer (a refusal, an error page) is null. */
+export function licenceReport(value: unknown): LicenceReport | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const said = value as Record<string, unknown>;
+  if (typeof said.valid !== "boolean") return null;
+  const grace = said.graceDaysLeft;
+  return {
+    valid: said.valid,
+    plan: typeof said.plan === "string" && PLAN.test(said.plan) ? said.plan : null,
+    seats: typeof said.seats === "number" && Number.isInteger(said.seats) && said.seats > 0 && said.seats <= 1_000_000 ? said.seats : null,
+    expiresAt: typeof said.expiresAt === "string" && DAY.test(said.expiresAt) ? said.expiresAt : null,
+    graceDaysLeft: typeof grace === "number" && Number.isInteger(grace) && grace >= 0 && grace <= 366 ? grace : null,
+    source: (LICENCE_SOURCES as readonly unknown[]).includes(said.source) ? said.source as LicenceSource : null,
+  };
+}
 
 /** The server's facts as they leave it, at enrolment and in every heartbeat. */
 export function reducedFacts(host: HostFacts): HostFacts {
@@ -234,11 +279,14 @@ const reducedCopy = (copy: CopyInfo): CopyInfo => ({
   id: COPY_ID.test(copy.id) ? copy.id : "unknown", kind: copy.kind === "snapshot" ? "snapshot" : "backup", createdAt: count(copy.createdAt), image: imageOrNull(copy.image),
 });
 
-export function reducedHeartbeat(facts: { host: HostHealth; home: HomeReport; connector: ConnectorIdentity; paused: boolean; seats: number | null }): Heartbeat {
+export function reducedHeartbeat(facts: {
+  host: HostHealth; home: HomeReport; connector: ConnectorIdentity; paused: boolean; seats: number | null; environmentId?: string | null; licence?: LicenceReport | null;
+}): Heartbeat {
   return {
     heartbeat: {
       host: reducedHost(facts.host), home: reducedHome(facts.home), connector: reducedConnector(facts.connector),
       mode: "customer-run", paused: facts.paused === true, seats: seatsOrNull(facts.seats),
+      environmentId: environmentIdOrNull(facts.environmentId), licence: licenceReport(facts.licence),
     },
   };
 }
@@ -297,4 +345,53 @@ export function reducedReply(reply: JobReply): JobReply {
   if ("previousImage" in result) out.previousImage = imageOrNull(result.previousImage);
   if (typeof result.backupId === "string" && COPY_ID.test(result.backupId)) out.backupId = result.backupId;
   return { id: reply.id, ok: true, result: out } as JobReply;
+}
+
+// 5. WHAT THE CONNECTOR WRITES. One file, in the server's data folder: `license.key`, the server's licence, when MausBot's
+// signed config carries one (protocol.ts `ConfigPayload.licence`). It is written from inside the server's own container,
+// as the user the server runs as, readable by that user only (umask 077), to a temporary file beside it and then renamed
+// over the old one, so the server never reads half a licence. Nothing else in that folder is read or written: the command
+// below compares the file with the licence before writing, and that comparison happens inside the container.
+//
+// - Only a licence of the right shape is written: `omb1`, then two base64url parts, at most a few kilobytes. This shape is
+//   also what makes it safe to hand to the command below as its one argument.
+// - An absent licence removes nothing. A cancelled plan stops new licences; the one on the server runs out by itself.
+// - The connector never decides which of two licences is newer: the server reads every licence it has and keeps the one
+//   issued last (server/enterprise.ts). The connector compares licences as exact strings only, to skip writing one twice.
+// - It is not a job: pausing remote management and the server's policy file do not stop it. A licence changes no bot, no
+//   data and no setting of the server; refusing one would only let a paid server run into its grace period. Every licence
+//   saved is one line in the audit log, with a short fingerprint, never the licence.
+
+export const LICENCE_FILE = "license.key";
+const LICENCE_SHAPE = /^omb1\.[A-Za-z0-9_-]{16,6000}\.[A-Za-z0-9_-]{43,200}$/;
+
+/** The licence, when it has the shape of one; null otherwise. */
+export function checkLicence(value: unknown): string | null {
+  return typeof value === "string" && LICENCE_SHAPE.test(value) ? value : null;
+}
+
+/** What the licence-state read presents (section 3), and what the server compares with each licence it accepted. */
+export function licenceProof(licence: string): string {
+  return createHash("sha256").update(`omb-licence-state\n${licence}`).digest("hex");
+}
+
+/** The first 12 hex digits of the licence's SHA-256: for the audit log, so the owner can tell two licences apart. */
+export function licenceFingerprint(licence: string): string {
+  return createHash("sha256").update(licence).digest("hex").slice(0, 12);
+}
+
+/** Exit codes of `licenceWriteCommand`. */
+export const LICENCE_WRITE_EXIT = { written: 0, failed: 1, same: 3 } as const;
+
+/** Run inside the home's container, as the user it runs as. `licence` has passed `checkLicence`. */
+export function licenceWriteCommand(licence: string): string[] {
+  if (!checkLicence(licence)) throw new Error("not a licence");
+  return [
+    "sh", "-c",
+    `umask 077; dir="\${OMB_DATA_DIR:-/data/.openmausbot}"; file="$dir/${LICENCE_FILE}"; tmp="$dir/.${LICENCE_FILE}.connector.tmp"; `
+      + `if [ -f "$file" ] && [ ! -L "$file" ] && [ "$(cat "$file")" = "$1" ]; then exit ${LICENCE_WRITE_EXIT.same}; fi; `
+      + `[ -d "$dir" ] || exit ${LICENCE_WRITE_EXIT.failed}; rm -f "$tmp"; `
+      + `if printf '%s\\n' "$1" > "$tmp" && mv -f "$tmp" "$file"; then exit ${LICENCE_WRITE_EXIT.written}; fi; rm -f "$tmp"; exit ${LICENCE_WRITE_EXIT.failed}`,
+    "sh", licence,
+  ];
 }

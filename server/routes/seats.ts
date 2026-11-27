@@ -1,10 +1,11 @@
 // GET /api/seats: how many people can sign in to this server. A number and nothing about who: the MausBot connector on
 // a connected server reads it from the server's own loopback and reports it, so a plan's seats can be counted.
 import type { SignInAllowList } from "../account-signin.ts";
+import { registerSeatSources } from "../license-seats.ts";
 import type { PublicSession } from "../sessions.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-type SeatSession = Pick<PublicSession, "email" | "token"> & { scopes?: readonly string[] };
+export type SeatSession = Pick<PublicSession, "email" | "token"> & { scopes?: readonly string[] };
 
 /**
  * People, not devices: each address on the sign-in list, and each address that holds a session (someone let in by an
@@ -32,7 +33,10 @@ export interface SeatsRouteDeps {
   sessions(): readonly SeatSession[];
 }
 
+/** Also hands the count to license-seats.ts, which limits invites on a licensed server: this route is made once, with the
+ * server's one sign-in list and session registry. */
 export function createSeatsRoutes(deps: SeatsRouteDeps): RouteHandler {
+  registerSeatSources({ used: () => seatCount(deps.signInList(), deps.sessions()), usedWith: (list) => seatCount(list, deps.sessions()) });
   return async ({ res, path, method, json }) => {
     if (path !== "/api/seats" || method !== "GET") return PASS;
     return json(res, 200, { seats: seatCount(deps.signInList(), deps.sessions()) });

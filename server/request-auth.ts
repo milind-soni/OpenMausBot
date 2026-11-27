@@ -6,6 +6,7 @@ import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import { BOT_PROFILE_PATCH_FIELDS } from "./bot-profile.ts";
+import { LICENSE_PROOF_HEADER } from "./license-proof.ts";
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
 import { denyReason as companionDenial, isCompanionNotice } from "../companion/src/routes.ts";
 
@@ -58,6 +59,12 @@ export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Re
   { methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/internal\// }, // capability bearer checked in the handler
   { methods: ["POST"], path: /^\/api\/testing\/internal-capability$/ }, // exists only with its private key
 ];
+
+/** `GET /api/license` carrying a licence-state proof (license-source.ts licenseStateProof): passed on to the route, which
+ * checks the proof. Without the header, or with anything but a digest in it, the request is a bot shell's like any other. */
+export function connectorLicenseRead(method: string, path: string, proof: string | undefined): boolean {
+  return method.toUpperCase() === "GET" && path === "/api/license" && typeof proof === "string" && /^[0-9a-f]{64}$/.test(proof.trim());
+}
 
 export function serviceAllowed(method: string, path: string): boolean {
   const upper = method.toUpperCase();
@@ -747,6 +754,11 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
         secureTokenMatch(headerValue(req.headers[CLI_OWNER_HEADER]), options.cliOwnerToken)
       ) {
         return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      }
+      // The MausBot connector's licence-state read: it reaches the route, which answers only a digest of a licence this
+      // server accepted (routes/license.ts), and with six fields of state, never the licence.
+      if (connectorLicenseRead(method, path, headerValue(req.headers[LICENSE_PROOF_HEADER]))) {
+        return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
       }
       // On a shared server "local" includes every bot's shell: default deny outside SERVICE_ALLOW.
       if (!serviceAllowed(method, path)) {

@@ -6,12 +6,14 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { CUSTOMER_HOME_IMAGE, HOME_READS_COMMAND, VERSION_LABEL, boxReport, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource } from "./customer-run.ts";
+import {
+  CUSTOMER_HOME_IMAGE, LICENCE_WRITE_EXIT, VERSION_LABEL, boxReport, homeReadsCommand, licenceWriteCommand, olderVersionRefusal, parseHomeReads, type HomeFacts, type JobSource,
+} from "./customer-run.ts";
 import type { ContainerInfo, Docker, Mount } from "./docker.ts";
 import { JobFailure } from "./failure.ts";
 import { backupId, helperSpec } from "./home.ts";
 import { errorText, type Log } from "./log.ts";
-import type { CopyInfo, HomeHealth, HomeReport, HomeState, JobError, JobReply, JobResults, ServerMode } from "./protocol.ts";
+import type { CopyInfo, HomeHealth, HomeReport, HomeState, JobError, JobReply, JobResults, LicenceReport, ServerMode } from "./protocol.ts";
 import { BACKUPS_KEPT, HOME_STOP_TIMEOUT_S, LABELS, NAMES } from "./settings.ts";
 import type { HomeRecord, Operation, StateStore } from "./state.ts";
 
@@ -102,6 +104,10 @@ export class AdoptedHome {
   private readonly pollMs: number;
   private lastHealth: HomeHealth | null = null;
   private lastSeats: number | null = null;
+  private lastEnvironmentId: string | null = null;
+  private lastLicence: LicenceReport | null = null;
+  /** customer-run.ts `licenceProof` of the licence the connector saved, presented on the licence-state read. */
+  licenceProof: string | null = null;
   private chain: Promise<unknown> = Promise.resolve();
   private active = 0;
 
@@ -124,6 +130,31 @@ export class AdoptedHome {
   /** How many people can sign in, as the home last said; null when it does not say. */
   get seats(): number | null {
     return this.lastSeats;
+  }
+
+  /** The server's own id, as the home last said; null when it does not say. */
+  get environmentId(): string | null {
+    return this.lastEnvironmentId;
+  }
+
+  /** The server's licence state, as the home last said; null when it does not say. */
+  get licence(): LicenceReport | null {
+    return this.lastLicence;
+  }
+
+  /**
+   * Saves `licence` as license.key in the home's data folder, from inside the home's container as the user it runs as
+   * (customer-run.ts, section 5). "same": the file already holds it; "no_home": the home is not running, so nothing was
+   * written and the caller tries again later. Not exclusive with jobs: it touches nothing a job does, and a long update
+   * must not hold up a licence.
+   */
+  async writeLicence(licence: string): Promise<"written" | "same" | "no_home"> {
+    const container = await this.container(SERVICE);
+    if (!container?.State.Running) return "no_home";
+    const { code, output } = await this.docker.exec(container.Id, licenceWriteCommand(licence), 30_000);
+    if (code === LICENCE_WRITE_EXIT.same) return "same";
+    if (code !== LICENCE_WRITE_EXIT.written) throw new Error(`the home could not save its licence (exit ${code}${output.trim() ? `: ${lastLine(output)}` : ""})`);
+    return "written";
   }
 
   get previousImage(): string | null {
@@ -162,6 +193,8 @@ export class AdoptedHome {
     }
     const facts = await this.read(container);
     this.lastSeats = facts.seats;
+    this.lastEnvironmentId = facts.environmentId;
+    this.lastLicence = facts.licence;
     this.lastHealth = { ok: facts.answers, version: facts.version, image: await this.imageOf(container), box: boxReport(facts.box), at: this.now() };
     return this.lastHealth;
   }
@@ -406,9 +439,9 @@ export class AdoptedHome {
 
   private async read(container: ContainerInfo): Promise<HomeFacts> {
     try {
-      return parseHomeReads((await this.docker.exec(container.Id, [...HOME_READS_COMMAND], 30_000)).output);
+      return parseHomeReads((await this.docker.exec(container.Id, homeReadsCommand(this.licenceProof), 30_000)).output);
     } catch {
-      return { answers: false, version: null, seats: null, box: null };
+      return { answers: false, version: null, seats: null, box: null, environmentId: null, licence: null };
     }
   }
 

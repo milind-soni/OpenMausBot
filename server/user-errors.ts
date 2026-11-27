@@ -17,6 +17,7 @@ export const USER_ERROR = {
   "serverError.email.notSetUp": "email sign-in is not set up on this server; use a pairing code",
   "serverError.signIn.tooMany": "too many failed sign-in attempts from your address; try again in {seconds}s",
   "serverError.cloud.personal": "My Cloud is personal: only your own devices can connect.",
+  "serverError.seats.full": "This server's plan has {seats} seats, and {used} people can already sign in. Add seats from your MausBot account, then invite again.",
   "serverError.model.botBusy": "the bot is working — stop it before changing models",
   "serverError.model.accountUpdating": "this provider account is being updated — try again shortly",
   "serverError.chat.busyEdit": "the thread is working — stop it before editing",

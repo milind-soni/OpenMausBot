@@ -10,6 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RequestAuth } from "./request-auth.ts";
 import type { SessionRegistry } from "./sessions.ts";
 
+import { licenseStateProof } from "./license-proof.ts";
 import { LAST_GOOD_FILE, LICENSE_FILE, licenseFilePath, readLicenseFile, writeLastGood, type LicenseFileRead, type LicenseSource } from "./license-source.ts";
 import { SERVER_ROOT } from "./proxy-paths.ts";
 
@@ -67,7 +68,9 @@ type Register = (options: { licenseKey: string; graceDays: number }) => unknown;
 /** What the last load saw, so a re-read uses the same layer, data folder and environment key. */
 let loaded: { entry: string | undefined; dataDir: string | undefined; envKey: string | undefined; keyAtStart: boolean; register?: Register } | null = null;
 /** The licence in force beyond what EditionStatus carries; kept out of /api/edition, which bot shells may read. */
-let held: { source: LicenseSource; layer: Layer } | null = null;
+let held: { source: LicenseSource; layer: Layer; proof: string } | null = null;
+/** licenseStateProof of each licence the last read accepted, and of the one in force: what the connector may present. */
+let acceptedProofs: ReadonlySet<string> = new Set();
 let clockWarned: string | undefined;
 let lastChangeLog = Number.NEGATIVE_INFINITY;
 /** The last licence problem logged, so an hourly re-read of the same bad file logs it once. */
@@ -135,6 +138,7 @@ export function createWorkspaceAccess(options: Omit<WorkspaceAccessOptions, "ent
 function oss(notice?: string): EditionStatus {
   current = notice ? { edition: "oss", features: [], notice } : { edition: "oss", features: [] };
   held = null;
+  acceptedProofs = new Set();
   return current;
 }
 
@@ -253,13 +257,15 @@ async function grant(reads: { file: LicenseFileRead; lastGood: LicenseFileRead }
       problems.push(candidate.source === "env" ? message(error) : `the licence in ${licenseFilePath(dataDir!, candidate.source === "file" ? LICENSE_FILE : LAST_GOOD_FILE)} was refused: ${message(error)}`);
     }
   }
+  const proofsOf = () => new Set([...accepted.map((candidate) => licenseStateProof(candidate.key)), ...(held ? [held.proof] : [])]);
   const best = accepted.reduce<(typeof accepted)[number] | undefined>((top, next) => !top || issuedOrder(next.layer, top.layer) > 0 ? next : top, undefined);
   const file = accepted.find((candidate) => candidate.source === "file");
   if (best && (!active || issuedOrder(best.layer, held!.layer) >= 0)) {
     const { layer } = best;
     const fileGone = active && held!.source === "file" && reads.file.state === "absent";
     current = { edition: "enterprise", customer: layer.customer, features: [...new Set(layer.features)].sort(), expiresAt: layer.expiresAt };
-    held = { source: best.source, layer };
+    held = { source: best.source, layer, proof: licenseStateProof(best.key) };
+    acceptedProofs = proofsOf();
     if (reads.file.state !== "absent" && best.source !== "file") {
       note(`${file ? `the licence in ${licenseFilePath(dataDir!)} was issued before the one in ${sourceName(best.source)}` : problems[0]}; using ${sourceName(best.source)} instead`, log);
     } else if (fileGone) note(`no licence in ${licenseFilePath(dataDir!)} any more; using ${sourceName(best.source)} instead`, log);
@@ -272,6 +278,7 @@ async function grant(reads: { file: LicenseFileRead; lastGood: LicenseFileRead }
     const why = file && issuedOrder(file.layer, held!.layer) < 0 ? `the licence in ${licenseFilePath(dataDir!)} was issued before the one in force`
       : problems[0] ?? `no licence in ${licenseFilePath(dataDir!)} any more`;
     note(`${why}; keeping the licence in force until it expires`, log);
+    acceptedProofs = proofsOf();
     return current;
   }
   if (!problems.length) return current;
@@ -390,6 +397,20 @@ export function licenseState(now: number = Date.now()): LicenseState {
     graceDaysLeft: at === null || graceEnd === null || now < at ? null : Math.max(0, Math.ceil((graceEnd - now) / DAY_MS)),
     notice: status.notice ?? null,
   };
+}
+
+/** Whether this server reads licence files (a server install, or a server run from a checkout or npm), so has a licence
+ * card and soft seats; false on a desktop, a Cloud home and a hosted workspace, which read OMB_LICENSE_KEY alone. */
+export function licenseFilesUsed(): boolean {
+  return Boolean(loaded?.dataDir);
+}
+
+/** Which licence `proof` (licenseStateProof) is of: the one in force, another this server accepted at its last read, or
+ * none it knows. The MausBot connector presents it to read the licence state on a server where loopback is a service. */
+export function licenseProofMatch(proof: string | undefined): "in-force" | "accepted" | null {
+  if (!proof || !/^[0-9a-f]{64}$/.test(proof)) return null;
+  if (held && current.edition === "enterprise" && held.proof === proof) return "in-force";
+  return acceptedProofs.has(proof) ? "accepted" : null;
 }
 
 /** No countdown, grace date or operator notice for a non-admin session. */

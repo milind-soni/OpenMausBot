@@ -18,7 +18,7 @@ The whole list of what the Admin may run, ask and learn in this mode is one file
 - It only calls out: one HTTPS request to enrol, then one WebSocket to the Admin. It opens no port.
 - It makes its own Ed25519 key at enrolment. The private key stays on your server. It pins the Admin's signing keys.
 - It runs with every Linux capability dropped, a read-only file system and no new privileges.
-- It is given Docker's socket, which is root on the server in the hands of any program. What the connector does with it is fixed in its code: it starts and stops the two containers of your install, runs one fixed read inside your server's container (below), runs short helper containers that copy your data folder to and from a Docker volume on the same server, and replaces itself when you tell it to. It never makes a second MausBot and never changes your `.env` or your Compose file.
+- It is given Docker's socket, which is root on the server in the hands of any program. What the connector does with it is fixed in its code: it starts and stops the two containers of your install, runs one fixed read inside your server's container and, when MausBot sends your licence, one fixed write of that licence there (below), runs short helper containers that copy your data folder to and from a Docker volume on the same server, and replaces itself when you tell it to. It never makes a second MausBot and never changes your `.env` or your Compose file.
 - The mode is chosen on your server when it enrols, kept in the connector's own state, and told to the Admin. The Admin cannot change it.
 
 ## It connects the server you installed
@@ -77,6 +77,24 @@ On the same connection the Admin can send HTTP requests. In customer-run mode no
 
 There is no pairing: the Admin cannot open a sign-in on your server, as a member or as anyone. A pairing request, and a request for the team summary, are refused and logged like any other.
 
+## What MausBot can send: your licence
+
+MausBot can send this server its licence, which the connector saves to the server's data folder; nothing else in that folder is read or written.
+
+- The licence comes inside the Admin's signed configuration for your server, never as a job. Only text with the shape of a licence (`omb1.` and two base64url parts, a few kilobytes at most) is saved. Anything else is ignored and logged.
+- The connector writes it from inside your server's container, as the user your server runs as, to `license.key` in the data folder (`/data/.openmausbot` in the container). The file is readable by that user only. It is written to a temporary file beside it and then renamed, so your server never reads half a licence.
+- Before writing, it compares the file with the licence, inside the container, and writes nothing when they are the same. It checks again every hour, so a restore that put an older `license.key` back is corrected.
+- It never removes a licence. When a configuration carries none, for example after a plan is cancelled, the licence on your server stays and runs out by itself.
+- It never decides which licence wins. Your server reads every licence it has (`license.key`, `OMB_LICENSE_KEY` and the copy it keeps of the last one it accepted), checks each signature itself, and keeps the one issued last.
+- It is not a job, so pausing remote management and your policy file do not stop it. A licence changes no bot, no data and no setting; refusing one would only let a paid server run into its grace period. To refuse licences from MausBot, stop the connector.
+- Each licence saved is one line in your audit log, with the first 12 characters of its SHA-256, never the licence itself.
+
+Without a connection, the same file takes a licence you paste: download it from your MausBot account and run, on the server:
+
+```sh
+cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'umask 077; cat > "$OMB_DATA_DIR/license.key"' < licence.txt
+```
+
 ## Signing in does not go through MausBot
 
 People sign in to your server with your server's own sign-in: a pairing code you make on the server, or a code emailed to an address on your sign-in list. Neither passes through the connector or the Admin.
@@ -87,21 +105,21 @@ People sign in to your server with your server's own sign-in: a pairing code you
 
 ## Your log, your rules, your switch
 
-- **The audit log.** Every job, each of its steps, its result, every request and every refusal is one line in `/var/log/mausbot/audit.jsonl` on your server, owned by root. Each line carries the hash of the line before it, so a removed or changed line shows. A job that would change something is refused when the log cannot be written. A failed job's full reason is here; only its code leaves the server.
+- **The audit log.** Every job, each of its steps, its result, every request, every refusal and every licence saved is one line in `/var/log/mausbot/audit.jsonl` on your server, owned by root. Each line carries the hash of the line before it, so a removed or changed line shows. A job that would change something is refused when the log cannot be written. A failed job's full reason is here; only its code leaves the server.
 
   ```sh
   docker exec mausbot-connector mausbot-connector audit --tail 50
   docker exec mausbot-connector mausbot-connector audit --verify
   ```
 
-- **Pause.** One command makes the connector refuse every job and every request from MausBot, and log each one. The server keeps running, people keep signing in, and the heartbeat below still goes out, saying that you paused. A switch in Settings is **planned**.
+- **Pause.** One command makes the connector refuse every job and every request from MausBot, and log each one. The server keeps running, people keep signing in, and the heartbeat below still goes out, saying that you paused. A licence MausBot sends is still saved (see above). A switch in Settings is **planned**.
 
   ```sh
   docker exec mausbot-connector mausbot-connector pause
   docker exec mausbot-connector mausbot-connector resume
   ```
 
-- **Your policy.** `/etc/mausbot/policy.json`, which only root on your server can write, narrows the seven jobs further and can hold updates. The connector reads it before every job and never writes it.
+- **Your policy.** `/etc/mausbot/policy.json`, which only root on your server can write, narrows the seven jobs further and can hold updates. The connector reads it before every job and never writes it. It does not cover the licence.
 
   ```json
   { "jobs": ["status", "host-health", "update", "backup"], "updates": "hold" }
@@ -114,12 +132,14 @@ People sign in to your server with your server's own sign-in: a pairing code you
 | When | What |
 |---|---|
 | Once, at enrolment | The one-time code, the connector's public key, the mode, and the server's facts: operating system, kernel, architecture, CPU count, memory, free disk, Docker version, whether AppArmor and user namespaces are on |
-| Every 30 seconds | Those facts, plus total disk, available memory, load, uptime, clock difference and each server check as an id and a pass or fail; the server's state, image and version, and whether its bots' sandbox is on or off; the connector's version and image; the mode; whether you paused; the seat count |
+| Every 30 seconds | Those facts, plus total disk, available memory, load, uptime, clock difference and each server check as an id and a pass or fail; the server's state, image and version, and whether its bots' sandbox is on or off; the connector's version and image; the mode; whether you paused; the seat count; the server's own id (`environmentId`, a random identifier it made when it was installed); and the licence state as the server judges it: whether it is valid, the plan, the seats, the expiry date, the days of grace left once expired, and whether it was read from `license.key`, `OMB_LICENSE_KEY` or the server's kept copy |
 | After each job | The result: the server's state, image and version, or the id and time of a backup. A failure is a fixed code and a fixed sentence |
 
 The seat count is the number of people who can sign in: the addresses on your sign-in list, plus any other address that has signed in, plus you when you signed in with a pairing code and no admin address is on the list. It is a number. No address, name or role is sent.
 
-To build this the connector reads four things from your server, on the server's own loopback: that it answers, whether its bots' sandbox is on or off (not its checks), its version, and its seat count. It keeps those fields and drops the rest of each answer. It reads no chat, file, key, name or address, and it sends no line of any log.
+The licence state never includes the licence, the name it was issued to, or its feature list. The server's own id lets MausBot issue a licence for this server.
+
+To build this the connector reads six things from your server, on the server's own loopback: that it answers, whether its bots' sandbox is on or off (not its checks), its version, its own id, its seat count, and its licence state. It keeps those fields and drops the rest of each answer. It reads no chat, file, key, name or address, and it sends no line of any log. On a server where a local request without a session is treated as a bot's (`OMB_LOOPBACK_TRUST=service`), the licence-state read carries a SHA-256 digest of the licence the connector saved; the server answers it only for a licence it accepted, so no bot's shell can make the same read.
 
 ## What your server itself still sends
 
@@ -141,6 +161,6 @@ Traffic to the AI providers, engines and apps you set up is between your server 
 - A pause switch in Settings.
 - Signed connector images, checked on your server before a connector is replaced.
 - A floor under `update` at the first release with the hardened profile.
-- Seats and plan features delivered to the server as a signed document. Today the seat count is only reported.
+- Checking a licence's server against the server's own id. Today a licence's `server` field is carried, not checked.
 - Connecting a server built from source or run without Docker.
 - A published list of the network addresses a connected server needs.
