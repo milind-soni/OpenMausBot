@@ -26,3 +26,14 @@ export function reorderIfMoved<T extends { id: string }>(items: readonly T[], id
   const next = reorderStable(items, ids);
   return next.some((item, index) => item !== items[index]) ? next : null;
 }
+
+/** reorderStable for plain names, such as the departments or the sidebar's section ids. */
+export function reorderNamesStable(names: readonly string[], order: readonly string[]): string[] {
+  return reorderStable(names.map((id) => ({ id })), order).map((item) => item.id);
+}
+
+/** reorderIfMoved for plain names: the reordered list, or null when no name moved. */
+export function reorderNamesIfMoved(names: readonly string[], order: readonly string[]): string[] | null {
+  const next = reorderNamesStable(names, order);
+  return next.some((name, index) => name !== names[index]) ? next : null;
+}
