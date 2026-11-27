@@ -56,6 +56,6 @@ describe("routine-waits heldReason propagation", () => {
       behavior: "deny",
       source: "timeout",
     });
-    expect(repeat.heldReason).toBeUndefined();
+    expect((repeat as { heldReason?: string }).heldReason).toBeUndefined();
   });
 });
