@@ -253,6 +253,27 @@ export class RuntimeCoordinator implements Coordinator {
     return this.live().map(row => this.project(row));
   }
 
+  threadActivity(threads: ReadonlyMap<string, ReadonlySet<string>>): {
+    awaitingAnswer: Set<string>; activeDirect: Set<string>; queued: Map<string, Map<string, HandoffView>>;
+  } {
+    this.ready();
+    const awaitingAnswer = new Set<string>();
+    const activeDirect = new Set<string>();
+    const queued = new Map<string, Map<string, HandoffView>>();
+    for (const row of this.live()) {
+      const { threadId, groupId } = row.assignee.destination;
+      const bots = threads.get(threadId);
+      if (!bots) continue;
+      if (row.status === "needs_input") awaitingAnswer.add(threadId);
+      if (groupId === undefined) activeDirect.add(threadId);
+      if (row.status !== "queued" || groupId || !bots.has(row.assignee.botId)) continue;
+      let byBot = queued.get(threadId);
+      if (!byBot) { byBot = new Map(); queued.set(threadId, byBot); }
+      if (!byBot.has(row.assignee.botId)) byBot.set(row.assignee.botId, this.project(row));
+    }
+    return { awaitingAnswer, activeDirect, queued };
+  }
+
   children(id: string): HandoffView[] {
     this.ready();
     const parent = this.store.get(id);

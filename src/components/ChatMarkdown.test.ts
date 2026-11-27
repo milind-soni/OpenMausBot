@@ -919,6 +919,7 @@ describe("ChatMarkdown attachments", () => {
       reason: "",
       savedTo: "",
       outsideWorkspace: false,
+      canOpenOutside: false,
       retryable: false,
       folder: {
         name: "04_post",
@@ -953,6 +954,7 @@ describe("ChatMarkdown attachments", () => {
         reason: outsideWorkspace ? "the linked file is outside this conversation's workspace" : "",
         savedTo: "",
         outsideWorkspace,
+        canOpenOutside: false,
         retryable: !outsideWorkspace,
         folder: null,
         save: vi.fn(async () => undefined),
@@ -1020,7 +1022,7 @@ describe("ChatMarkdown attachments", () => {
       const outsideSave = () => {
         vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(null);
         return vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-          state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
+          state: "failed", reason: "", savedTo: "", outsideWorkspace: true, canOpenOutside: false, retryable: false, folder: null,
           save: vi.fn(async () => undefined),
         });
       };
@@ -1053,7 +1055,7 @@ describe("ChatMarkdown attachments", () => {
         const reveal = vi.fn(async () => "shown" as const);
         (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
         vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
-          state: "idle", reason: "", savedTo: "", outsideWorkspace: false, retryable: false, folder: null,
+          state: "idle", reason: "", savedTo: "", outsideWorkspace: false, canOpenOutside: false, retryable: false, folder: null,
           save: vi.fn(async () => undefined),
         });
         const host = document.createElement("div");
@@ -1082,6 +1084,7 @@ describe("ChatMarkdown attachments", () => {
         reason: "the linked file is outside this conversation's workspace",
         savedTo: "",
         outsideWorkspace: false,
+        canOpenOutside: false,
         retryable: true,
         folder: null,
         save: vi.fn(async () => undefined),
@@ -1093,6 +1096,32 @@ describe("ChatMarkdown attachments", () => {
         expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
         expect(html).not.toContain('title="Show in folder"');
         expect(html).not.toContain(filePath);
+      } finally {
+        vi.unstubAllGlobals();
+        save.mockRestore();
+        probe.mockRestore();
+      }
+    });
+
+    it("keeps Save this file available when revealOnClick is true and the server sets canOpenOutside", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      const probe = vi.spyOn(OutsideWorkspaceProbe, "useMessageFileOutsideWorkspace").mockReturnValue(true);
+      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed",
+        reason: "the linked file is outside this conversation's workspace",
+        savedTo: "",
+        outsideWorkspace: true,
+        canOpenOutside: true,
+        retryable: false,
+        folder: null,
+        save: vi.fn(async () => undefined),
+      });
+      try {
+        const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+          text: "[report.html](C:\\Users\\Maus\\_draft\\report.html)", message: { threadId: "thread-1", messageId: "message-1" },
+        }));
+        expect(html).toContain("Save this file");
+        expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
       } finally {
         vi.unstubAllGlobals();
         save.mockRestore();

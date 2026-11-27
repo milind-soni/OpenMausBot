@@ -67,7 +67,7 @@ export function placeInboxViewer(auth: RequestAuth, cloud: { personal: boolean; 
 
 export interface PlaceInboxDeps {
   dataDir: string;
-  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "activePath" | "onChange">;
+  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "newestMessageId" | "activePath" | "onChange">;
   openCards(): OpenCardRow[];
   /** A running turn waits on this card's answer. */
   live(threadId: string, requestId: string): boolean;
@@ -195,7 +195,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
 
   /** The message a line points at: its own message, or the newest one in the conversation it came from, so a client
    * can put the person at it. */
-  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.messagesFor(line.threadId).at(-1)?.id;
+  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.newestMessageId(line.threadId);
 
   const lineRow = (line: Line): InboxRow => {
     const focus = focusOf(line);

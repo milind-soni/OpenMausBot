@@ -126,13 +126,28 @@ describe("Regenerate title", { timeout: 60_000 }, () => {
   });
 
   it("keeps the current title and says so when the one-shot fails or answers something unusable", async () => {
+    const titleError = { error: "couldn't generate a title — try again, or rename the thread" };
+    const generationLines = (mark: number) => output.slice(mark).split("\n").filter((line) => line.includes("title generation:"));
     writeFileSync(titleFile, "__FAIL__");
+    const failedAt = output.length;
     const failed = await api("POST", `/api/bots/${botId}/tasks/${threadId}/title`);
     expect(failed.status).toBe(502);
-    expect(failed.body.error).toMatch(/couldn't generate a title/);
+    expect(failed.body).toEqual(titleError);
+    await expect.poll(() => generationLines(failedAt), { timeout: 5_000, interval: 50 }).toEqual([
+      expect.stringContaining("title generation: provider-error"),
+    ]);
+    expect(generationLines(failedAt).join("\n")).not.toContain("fake one-shot text failed");
+    expect(generationLines(failedAt).join("\n")).not.toContain("every login hangs");
+
     writeFileSync(titleFile, "This answer rambles on far too long to ever be a thread title");
+    const rejectedAt = output.length;
     const unusable = await api("POST", `/api/bots/${botId}/tasks/${threadId}/title`);
     expect(unusable.status).toBe(502);
+    expect(unusable.body).toEqual(titleError);
+    await expect.poll(() => generationLines(rejectedAt), { timeout: 5_000, interval: 50 }).toEqual([
+      expect.stringContaining("title generation: rejected-output"),
+    ]);
+    expect(generationLines(rejectedAt).join("\n")).not.toContain("This answer rambles");
     expect(await taskTitle(botId, threadId)).toBe("Session expiry login hang");
   });
 
