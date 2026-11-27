@@ -226,9 +226,11 @@ export function deleteAttachment(path: string): void {
   deleteAttachments([path]);
 }
 
-/** deleteAttachment for many files at once. An upload still on disk keeps its box copies; one gone loses them. */
+/** deleteAttachment for many files at once. An upload still on disk keeps its box copies; one gone loses them. A path
+ * outside the attachments folder is not ours to remove, so it is left alone before anything is unlinked. */
 export function deleteAttachments(paths: readonly string[]): void {
-  const gone = paths.filter((path) => unlinkAttachment(path) && resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)).map((path) => basename(path));
+  const ours = paths.filter((path) => resolve(dirname(path)) === resolve(ATTACHMENTS_DIR));
+  const gone = ours.filter((path) => unlinkAttachment(path)).map((path) => basename(path));
   dropBoxUploadCopies(gone);
   dropKeptOriginals(gone);
 }
@@ -571,6 +573,10 @@ export async function saveFile(
  * upload (507 when it is full), written under a partial name cleanup knows, never over a file already here, and never
  * leaving a partial file behind. `stored`: false when the same file was here already. */
 export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Uint8Array>, expectedBytes?: number): Promise<{ stored: boolean }> {
+  // Security: the name arrives from another computer, and this join is the only thing between it and the data folder.
+  if (!name || name === "." || name === ".." || name !== basename(name) || name.includes("/") || name.includes("\\")) {
+    throw statusError(400, "name must be a filename, not a path");
+  }
   if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
   ensureAttachmentsDir();
   const path = join(ATTACHMENTS_DIR, name);

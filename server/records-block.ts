@@ -4,8 +4,9 @@
 import { escapeNotes } from "./peer-provenance.ts";
 
 export const RECORDS_END = "[end of records]";
-// Characters with no width: dropped, so a marker split by one is whole again before it is checked.
-const INVISIBLE = /[\u00ad\u200b-\u200f\u2060-\u2064\ufeff\u061c\u180e\u115f\u3164\u{e0000}-\u{e007f}]|\u034f|[\ufe00-\ufe0f]/gu;
+// Characters with no width: dropped, so a marker split by one is whole again before it is checked. The two joiners
+// (U+200C, U+200D) stay: Persian, Indic and emoji text need them, so marker checks skip them instead of the text losing them.
+const INVISIBLE = /[\u00ad\u200b\u200e\u200f\u2060-\u2064\ufeff\u061c\u180e\u115f\u3164\u{e0000}-\u{e007f}]|\u034f|[\ufe00-\ufe0f]/gu;
 // Line separators and bidi overrides: a space, so they never glue two words together or reorder what is shown.
 const LINE_AND_BIDI = /[\u2028-\u202e\u2066-\u2069]/g;
 const isControl = (code: number): boolean => code < 0x20 || (code >= 0x7f && code <= 0x9f);
@@ -14,12 +15,50 @@ const FORGED_END = /\[\s*end\s+of\s+records\s*\]/gi;
 // instructions block, or one of OpenMausBot's own notes.
 const FORGED_START = /\[(?=\s*\/?\s*(?:records\s+from\b|scheduled\s+routine\b|routine\s+"|untrusted\b|user-configured\b|authenticated\b|default\b|openmausbot\b))/gi;
 
-const defuseMarkers = (text: string): string => text.replace(FORGED_END, "(end of records)").replace(FORGED_START, "(");
+/** The text without its joiners, and where each remaining code unit sits in `text`, with the end at the last index. */
+function withoutJoiners(text: string): { plain: string; at: number[] } {
+  let plain = "";
+  const at: number[] = [];
+  for (let i = 0; i < text.length;) {
+    const code = text.codePointAt(i)!;
+    const char = String.fromCodePoint(code);
+    if (code !== 0x200c && code !== 0x200d) {
+      plain += char;
+      for (let offset = 0; offset < char.length; offset += 1) at.push(i + offset);
+    }
+    i += char.length;
+  }
+  at.push(text.length);
+  return { plain, at };
+}
+
+/** A marker split by a joiner still reads as a marker to a model, so it is found on the joined-out text and cut from the original. */
+function defuseMarkers(text: string): string {
+  const { plain, at } = withoutJoiners(text);
+  const cuts: Array<{ start: number; end: number; text: string }> = [];
+  for (const match of plain.matchAll(FORGED_END)) cuts.push({ start: match.index!, end: match.index! + match[0].length, text: "(end of records)" });
+  for (const match of plain.matchAll(FORGED_START)) cuts.push({ start: match.index!, end: match.index! + match[0].length, text: "(" });
+  let out = text;
+  for (const cut of cuts.sort((a, b) => b.start - a.start)) out = `${out.slice(0, at[cut.start]!)}${cut.text}${out.slice(at[cut.end]!)}`;
+  return out;
+}
+
+/** Note detection has a bounded look-ahead, so a run of joiners before a forged note must not hide it: read the same text without them and map each replacement back. */
+function defuseNotes(text: string): string {
+  const { plain, at } = withoutJoiners(text);
+  const escaped = escapeNotes(plain);
+  if (escaped === plain) return text;
+  const out = text.split("");
+  for (let i = 0; i < escaped.length; i += 1) {
+    if (escaped[i] !== plain[i]) out[at[i]!] = escaped[i]!;
+  }
+  return out.join("");
+}
 
 /** Outside text with its lines kept: no invisible or control characters but newlines and tabs, and none of our markers. */
 export function defuse(text: string): string {
   const visible = Array.from(text.replace(INVISIBLE, ""), (ch) => ch !== "\n" && ch !== "\t" && isControl(ch.codePointAt(0)!) ? " " : ch).join("");
-  return escapeNotes(defuseMarkers(visible.replace(LINE_AND_BIDI, " ")));
+  return defuseNotes(defuseMarkers(visible.replace(LINE_AND_BIDI, " ")));
 }
 
 /** `defuse` on one line of at most `max` code points. */

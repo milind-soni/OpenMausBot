@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ApprovalCard } from "./ApprovalCard";
+import { ApprovalCard, appliedDetails } from "./ApprovalCard";
 import { pendingApprovals, PendingApprovalActions, PendingApprovalPanel, spokenApprovalPrompt, type Pending } from "./PendingApproval";
 import { StoreProvider, type Bot, type Message } from "@/state/store";
 import { skillRequestBehavior } from "../../shared/skill-request";
@@ -723,6 +723,28 @@ describe("ApprovalCard for a change that applied on its own", () => {
       },
     }));
     expect(skill).toContain("Scout added a skill: file-expense");
+    const teammates = render(applied({
+      tool: "stage_skill",
+      skillRequest: {
+        version: 1, requestId: "s2", botId: "bot-1", threadId: "thread-1", stagedId: "teammates-s2", action: "enable",
+        name: "research, lint", gist: "", warnings: [], createdAt: 1,
+        teammates: [{ botId: "b2", botName: "Mira", name: "research", action: "enable" }, { botId: "b3", botName: "Ada", name: "lint", action: "disable" }],
+      },
+    }));
+    expect(teammates).toContain("Scout changed skills on the team: research, lint");
+    expect(teammates).not.toContain("turned on a skill");
+    expect(teammates).toContain(">Undo<");
+  });
+
+  it("lists each teammate's change in an applied teammate skills receipt's details", () => {
+    const skillRequest = {
+      version: 1 as const, requestId: "s2", botId: "bot-1", threadId: "thread-1", stagedId: "teammates-s2", action: "enable" as const,
+      name: "research, lint", gist: "", warnings: [], createdAt: 1, preview: "Mira: turn on research\nAda: turn off lint",
+      teammates: [{ botId: "b2", botName: "Mira", name: "research", action: "enable" as const }, { botId: "b3", botName: "Ada", name: "lint", action: "disable" as const }],
+    };
+    const card = { title: "Changed 2 skills", subtitle: "Turns skills on or off for teammates.", options: [], skillRequest };
+    expect(appliedDetails(card as never, "Scout")).toBe("Mira: turn on research\nAda: turn off lint");
+    expect(appliedDetails({ ...card, skillRequest: { ...skillRequest, teammates: undefined } } as never, "Scout")).toBe(card.subtitle);
   });
 
   it("reads team setup and team memory as one line, with Undo except for a deletion", () => {

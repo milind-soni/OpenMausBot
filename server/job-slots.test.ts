@@ -9,6 +9,35 @@ const later = () => {
 };
 
 describe("a few background jobs at once", () => {
+  it.each([false, true])("keeps the queue usable when a waiting callback throws (interactive: %s)", async (interactive) => {
+    const slots = createJobSlots(1);
+    const gate = later();
+    const first = slots.run(() => gate.done);
+    const abort = new AbortController();
+    const failure = new Error("cannot record waiting state");
+    const started: string[] = [];
+    const failed = slots.run(async () => { started.push("failed"); }, {
+      interactive,
+      signal: abort.signal,
+      urgent: () => false,
+      onWait: () => { throw failure; },
+    });
+    try {
+      await expect(failed).rejects.toBe(failure);
+      expect(slots.waiting).toBe(0);
+      const following = slots.run(async () => { started.push("following"); });
+      gate.finish();
+      await Promise.all([first, following]);
+      expect(started).toEqual(["following"]);
+      expect(slots.running).toBe(0);
+      expect(slots.waiting).toBe(0);
+    } finally {
+      abort.abort();
+      gate.finish();
+      await first;
+    }
+  });
+
   it("runs at most the limit, the rest in arrival order", async () => {
     const slots = createJobSlots(2);
     const started: number[] = [];

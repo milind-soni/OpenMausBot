@@ -21,7 +21,7 @@ export function OutsideWorkspaceFile({
     <button
       type="button"
       onClick={onOpenOutside}
-      className={standalone ? "ui-button touch:min-h-10" : "inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
+      className={standalone ? "ui-button touch:min-h-10" : "inline-flex max-w-full min-w-0 items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
     >
       {openOutsideLabel ?? t("attach.openOutsideFile")}
     </button>
@@ -53,7 +53,7 @@ export function OutsideWorkspaceFile({
         type="button"
         onClick={() => void show()}
         title={filePath}
-        className={standalone ? "ui-button touch:min-h-10" : "inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
+        className={standalone ? "ui-button touch:min-h-10" : "inline-flex max-w-full min-w-0 items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
       >
         <FolderOpen size={standalone ? 14 : 12} className="shrink-0" aria-hidden="true" />
         {t("attach.showInFolder")}

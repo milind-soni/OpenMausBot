@@ -17,6 +17,8 @@ interface McpServerDef {
   /** "local-computer" marks the user's real desktop: every tool on it is gated behind a permission card. */
   scope?: string;
   directory?: boolean;
+  /** How long a command server gets to start; MCP_STARTUP_TIMEOUT_MS when absent. */
+  startupMs?: number;
 }
 
 interface McpConfig {
@@ -97,10 +99,12 @@ export class StdioMcp {
   private disposed = false;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly remote: boolean;
+  private readonly startupMs: number;
   private listDeadline: number | undefined;
 
   constructor(def: McpServerDef) {
     this.remote = def.directory === true;
+    this.startupMs = typeof def.startupMs === "number" && Number.isFinite(def.startupMs) && def.startupMs > 0 ? def.startupMs : MCP_STARTUP_TIMEOUT_MS;
     this.child = spawn(def.command, def.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...def.env },
@@ -223,7 +227,7 @@ export class StdioMcp {
   }
 
   async init(): Promise<void> {
-    const budget = this.remote ? REMOTE_MCP_STARTUP_MS : MCP_STARTUP_TIMEOUT_MS;
+    const budget = this.remote ? REMOTE_MCP_STARTUP_MS : this.startupMs;
     this.listDeadline = this.remote ? Date.now() + budget : undefined;
     await this.call(
       "initialize",
@@ -240,7 +244,7 @@ export class StdioMcp {
   async listTools(): Promise<McpTool[]> {
     const tools: McpTool[] = [];
     const seenCursors = new Set<string>();
-    const deadline = this.listDeadline ?? Date.now() + MCP_STARTUP_TIMEOUT_MS;
+    const deadline = this.listDeadline ?? Date.now() + this.startupMs;
     let cursor: string | undefined;
     for (let page = 0; page < MCP_MAX_LIST_PAGES; page += 1) {
       const remainingMs = Math.max(1, deadline - Date.now());

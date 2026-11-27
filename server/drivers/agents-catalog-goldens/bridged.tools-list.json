@@ -64,7 +64,7 @@
           },
           "rework": {
             "type": "boolean",
-            "description": "True only to resend finished or failed work: a fix, a re-check or a retry."
+            "description": "True only for concrete work after a teammate's work finished or failed: a fix, a re-check, a retry or a follow-up task."
           },
           "thread": {
             "type": "string",
