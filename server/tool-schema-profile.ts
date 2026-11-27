@@ -230,6 +230,20 @@ function placeholder(node: Json, root: Json): Json {
   if (unique.length !== 1) return { type: unique.length ? unique : JSON_TYPES };
   const type = unique[0]!;
   if (type === "object") return { type, additionalProperties: true };
+  if (type === "array") {
+    const result: Json = { type };
+    if (node.items !== undefined) {
+      result.items = Array.isArray(node.items)
+        ? node.items.map((it) => (isObject(it) ? placeholder(it, root) : it))
+        : isObject(node.items)
+          ? placeholder(node.items, root)
+          : node.items;
+    }
+    if (node.prefixItems !== undefined && Array.isArray(node.prefixItems)) {
+      result.prefixItems = node.prefixItems.map((it) => (isObject(it) ? placeholder(it, root) : it));
+    }
+    return result;
+  }
   const choices = Array.isArray(node.enum) ? node.enum : "const" in node ? [node.const] : undefined;
   const sameType = (value: unknown) => valueType(value) === type || (type === "number" && valueType(value) === "integer");
   const keep = type !== "array" && choices && choices.length <= 64 && choices.every(sameType) && schemaBytes(choices) <= 1_024;

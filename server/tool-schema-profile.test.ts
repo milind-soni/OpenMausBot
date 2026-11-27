@@ -140,6 +140,28 @@ describe("fitting a tool schema to Moonshot's per-tool limit", () => {
       properties: { root: { $ref: "#/$defs/node" } } };
     expect(fitToolSchema(tree, MOONSHOT).outcome).toBe("kept");
   });
+
+  it("keeps array item definitions through top-level collapse, so the provider never sees an array without items", () => {
+    const props: Json = {};
+    for (let i = 0; i < 200; i += 1) {
+      props[`field_${String(i).padStart(3, "0")}`] = {
+        type: "object",
+        properties: { a: { type: "string" }, b: { type: "string" } },
+        required: ["a"],
+      };
+    }
+    props["tags"] = {
+      type: "array",
+      items: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    };
+    const schema = { type: "object", properties: props, required: ["field_000"] };
+    const fit = fitToolSchema(schema, MOONSHOT);
+    expect(fit.outcome).toBe("minimal");
+    if (fit.outcome === "minimal") {
+      const tags = (fit.schema.properties as Json).tags;
+      expect(tags).toMatchObject({ type: "array", items: expect.objectContaining({ type: "object" }) });
+    }
+  });
 });
 
 describe("which turns carry a schema profile", () => {
