@@ -2,7 +2,7 @@
 
 The built-in agents tools `list_chat_attachments` and `get_chat_attachment` reverse `attach_file`. They use the existing turn capability and Local VM gate; callers cannot supply a bot, conversation or VM identity.
 
-`list_chat_attachments {}` returns the current conversation's attachment records and current-turn parked generated images, including images not yet posted to the chat. References are the complete stored filenames, with extension. It does not enumerate the global attachment store or accept arbitrary source paths.
+`list_chat_attachments {}` returns the current conversation's structured attachment records, user text attachment tags (including calendar attachments), and current-turn parked generated images, including images not yet posted to the chat. References are the complete stored filenames, with extension. It does not enumerate the global attachment store or accept arbitrary source paths.
 
 ```json
 {"attachment_ref":"<stored-filename>.png","destination_dir":"attachment-work/files"}
@@ -16,7 +16,9 @@ Validation:
 
 ```sh
 pnpm exec vitest run server/chat-attachment-fetch.test.ts server/drivers/agents-tool-groups.test.ts
-pnpm exec vitest run server/image-generation.e2e.test.ts -t 'lists a generated'
+pnpm exec vitest run server/image-generation.e2e.test.ts scripts/testing/verification-docs.test.ts
 ```
 
 The end-to-end test launches an isolated fixture with a fake image provider and fake engine. It verifies the tools are callable while a generated image is still parked, a different conversation cannot list it, and export without a Local VM fails. Filesystem tests cover successful copies, original-file independence, permissions, repeat reuse, edited-copy preservation, traversal, symlinks, size limits and default conversation separation. No user's running desktop or live chat is modified by these checks.
+
+Regression checks include long-name collisions (including a concurrent destination appearing during publication), text-tag PDF/image discovery and export, retained audio/generated attachments, and rejection of files outside the attachment store. The calendar-style text-tag case also runs through the isolated server tool route.

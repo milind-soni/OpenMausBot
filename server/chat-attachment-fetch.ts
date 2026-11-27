@@ -2,6 +2,9 @@ import { constants, closeSync, copyFileSync, fchmodSync, fstatSync, linkSync, ls
 import { basename, dirname, extname, join, posix, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
+import { conversationAttachments } from "./conversation-attachments.ts";
+import { mimeFor } from "./message-file.ts";
+
 export interface ChatAttachment { path: string; mime: string; name?: string }
 export interface AttachmentFetchScope {
   attachmentStore: string;
@@ -15,6 +18,21 @@ export interface AttachmentFetchScope {
 const refusal = (status: number, message: string): never => { throw Object.assign(new Error(message), { status }); };
 const refPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,240}$/;
 const digest = (fd: number) => createHash("sha256").update(readFileSync(fd)).digest("hex");
+
+function collisionName(ref: string): string {
+  const suffix = `-${randomUUID()}`;
+  const extension = extname(ref).slice(0, 255 - suffix.length - 1);
+  return `${basename(ref, extname(ref)).slice(0, 255 - suffix.length - extension.length)}${suffix}${extension}`;
+}
+
+/** Combines structured attachments (including audio), trusted user text tags, and current-turn generated files. */
+export function collectChatAttachments(messages: Parameters<typeof conversationAttachments>[0], parked: readonly ChatAttachment[] = []): ChatAttachment[] {
+  return [
+    ...messages.flatMap((message) => message.attachments ?? []),
+    ...conversationAttachments(messages).map((file) => ({ ...file, mime: mimeFor(file.path) })),
+    ...parked,
+  ];
+}
 
 /** Lists only attachment records supplied by the authenticated conversation, including current-turn generated files. */
 export function listChatAttachments(store: string, attachments: readonly ChatAttachment[]) {
@@ -68,7 +86,7 @@ export function fetchChatAttachment(scope: AttachmentFetchScope, ref: string, de
         return result(name, true);
       }
     }
-    if (lstatSync(target, { throwIfNoEntry: false })) name = `${basename(ref, extname(ref))}-${randomUUID()}${extname(ref)}`;
+    if (lstatSync(target, { throwIfNoEntry: false })) name = collisionName(ref);
     partial = join(base, `.attachment-${randomUUID()}.partial`);
     copyFileSync(`/proc/self/fd/${source}`, partial, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
     const copied = open(partial, constants.O_RDONLY);
@@ -79,7 +97,7 @@ export function fetchChatAttachment(scope: AttachmentFetchScope, ref: string, de
     for (;;) {
       try { linkSync(partial, join(base, name)); break; } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        name = `${basename(ref, extname(ref))}-${randomUUID()}${extname(ref)}`;
+        name = collisionName(ref);
       }
     }
     return result(name, false);

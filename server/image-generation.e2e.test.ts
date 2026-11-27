@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -33,6 +33,7 @@ interface ImageFixture {
   turnOf: (botId: string) => z.infer<typeof evidenceSchema>;
   messages: (threadId: string) => Promise<z.infer<typeof messagesSchema>["messages"]>;
   savedImages: () => string[];
+  stageAttachment: (name: string, content: string) => string;
   api: (path: string, body?: unknown, method?: string) => Promise<unknown>;
   /** As the app in a browser sends it: a person's own line, not a local program's. */
   typed: (path: string, body: unknown) => Promise<unknown>;
@@ -67,6 +68,13 @@ async function withImageFixture(test: (f: ImageFixture) => Promise<void>) {
         return turn;
       },
       messages: async (threadId) => messagesSchema.parse(await api("/api/threads/" + threadId + "/messages")).messages,
+      stageAttachment: (name, content) => {
+        const dir = join(dataDir, "attachments");
+        mkdirSync(dir, { recursive: true });
+        const path = join(dir, name);
+        writeFileSync(path, content);
+        return path;
+      },
       savedImages: () => {
         const dir = join(dataDir, "attachments");
         return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith(".png")) : [];
@@ -181,4 +189,15 @@ it("lists a generated attachment during the same turn and keeps another conversa
   const otherSteps = f.turnOf(other.id).evidence.filter((entry) => entry.step);
   expect(JSON.parse(otherSteps[0]!.response!.result.content[0]!.text).attachments).toEqual([]);
   expect(otherSteps[1]!.response!.result.isError).toBe(true);
+}), 90_000);
+
+it("lists calendar-style text attachments but excludes paths outside the attachment store", async () => withImageFixture(async (f) => {
+  const pdf = f.stageAttachment("calendar.pdf", "%PDF-1.7 fixture");
+  const outside = f.stageAttachment("../outside.pdf", "%PDF-1.7 outside");
+  const bot = await f.newBot("Calendar attachment reader");
+  f.savePlan({ [bot.id]: { steps: [{ tool: "list_chat_attachments", arguments: {} }], reply: "Listed." } });
+  expect(await f.ask(bot, `List the attached agenda.\n<attached-file path="${pdf}" name="agenda.pdf" />\n<attached-file path="${outside}" name="outside.pdf" />`)).toBe("settled");
+  const steps = f.turnOf(bot.id).evidence.filter((entry) => entry.step);
+  const listing = JSON.parse(steps[0]!.response!.result.content[0]!.text);
+  expect(listing.attachments).toEqual([expect.objectContaining({ attachment_ref: "calendar.pdf", name: "agenda.pdf", mime: "application/pdf" })]);
 }), 90_000);

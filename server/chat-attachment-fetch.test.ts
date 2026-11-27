@@ -1,8 +1,12 @@
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, statSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, statSync, rmSync, linkSync } from "node:fs";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, expect, it } from "vitest";
-import { fetchChatAttachment, listChatAttachments, type AttachmentFetchScope } from "./chat-attachment-fetch.ts";
+import { afterEach, expect, it, vi } from "vitest";
+import { collectChatAttachments, fetchChatAttachment, listChatAttachments, type AttachmentFetchScope } from "./chat-attachment-fetch.ts";
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, linkSync: vi.fn(actual.linkSync) };
+});
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 function fixture() {
@@ -42,4 +46,48 @@ it.skipIf(process.platform !== "linux")("checks size and produces isolated defau
   const { scope, ref } = fixture();
   expect(() => fetchChatAttachment({ ...scope, maxBytes: 1 }, ref)).toThrow("size limit");
   expect(fetchChatAttachment({ ...scope, threadId: "other" }, ref).local_path).toContain("/bot-a/other/");
+});
+
+it.skipIf(process.platform !== "linux").each(["a".repeat(237) + ".png", "a." + "x".repeat(239)])("bounds collision filenames for %s", (ref) => {
+  const { scope } = fixture();
+  const path = join(scope.attachmentStore, ref);
+  writeFileSync(path, "original");
+  scope.attachments = [{ path, mime: "image/png" }];
+  const first = fetchChatAttachment(scope, ref);
+  expect(basename(first.local_path)).toBe(ref);
+  expect(fetchChatAttachment(scope, ref).reused).toBe(true);
+  const local = join(scope.workspace, "attachments/inbox/bot-a/thread-a", ref);
+  writeFileSync(local, "edited");
+  vi.mocked(linkSync).mockImplementationOnce((_source, destination) => {
+    writeFileSync(destination, "concurrent file");
+    throw Object.assign(new Error("already exists"), { code: "EEXIST" });
+  });
+  const copy = fetchChatAttachment(scope, ref);
+  const name = basename(copy.local_path);
+  expect(Buffer.byteLength(name)).toBeLessThanOrEqual(255);
+  expect(copy.reused).toBe(false);
+  expect(readFileSync(join(scope.workspace, "attachments/inbox/bot-a/thread-a", name), "utf8")).toBe("original");
+  expect(readFileSync(local, "utf8")).toBe("edited");
+  expect(readFileSync(path, "utf8")).toBe("original");
+});
+
+it.skipIf(process.platform !== "linux")("lists and exports text-tag attachments while retaining audio and parked files", () => {
+  const { scope, root } = fixture();
+  const pdf = join(scope.attachmentStore, "calendar.pdf"), image = join(scope.attachmentStore, "calendar.png");
+  const audio = join(scope.attachmentStore, "voice.mp3"), parked = join(scope.attachmentStore, "generated.png");
+  const outside = join(root, "outside.pdf"), hidden = join(scope.attachmentStore, "hidden.pdf");
+  for (const path of [pdf, image, audio, parked, outside, hidden]) writeFileSync(path, "fixture bytes");
+  scope.attachments = collectChatAttachments([
+    { role: "user", text: `<attached-file path="${pdf}" name="agenda.pdf" />\n<attached-image path="${image}" name="photo.png" />\n<attached-file path="${outside}" name="outside.pdf" />` },
+    { role: "bot", text: "", attachments: [{ kind: "audio", path: audio, mime: "audio/mpeg" }] },
+    { role: "bot", text: `<attached-file path="${hidden}" name="hidden.pdf" />` },
+  ], [{ path: parked, mime: "image/png" }]);
+  const files = listChatAttachments(scope.attachmentStore, scope.attachments);
+  expect(files.map((file) => file.attachment_ref).sort()).toEqual(["calendar.pdf", "calendar.png", "generated.png", "voice.mp3"]);
+  expect(files.find((file) => file.attachment_ref === "calendar.pdf")).toMatchObject({ name: "agenda.pdf", mime: "application/pdf" });
+  expect(files.find((file) => file.attachment_ref === "calendar.png")?.mime).toBe("image/png");
+  expect(files.find((file) => file.attachment_ref === "voice.mp3")?.mime).toBe("audio/mpeg");
+  expect(fetchChatAttachment(scope, "calendar.pdf").local_path).toContain("calendar.pdf");
+  expect(() => fetchChatAttachment(scope, "outside.pdf")).toThrow("not available");
+  expect(() => fetchChatAttachment(scope, "hidden.pdf")).toThrow("not available");
 });

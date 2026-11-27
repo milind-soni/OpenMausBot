@@ -1,5 +1,6 @@
 // Runs one agents tool: check arguments, call the harness, render the model's text. Stateless;
 // per-turn limits are the harness's, since one proxy can serve many turns of a warm engine.
+import { ATTACHMENT_TOOL_NAMES, callAttachmentTool } from "./agents-attachment-tools.ts";
 import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { rankSkills } from "../../shared/skill-fit.ts";
@@ -236,20 +237,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!stdout && !stderr && !body.timedOut) lines.push("(no output)"); if (typeof body.note === "string" && body.note) lines.push("--- note ---", body.note);
     return { text: lines.join("\n"), ...(exitCode !== 0 || body.timedOut ? { isError: true } : {}) };
   }
-  if (name === "list_chat_attachments" || name === "get_chat_attachment") {
-    const { ok, body } = await apiResponse(`/api/internal/chat-attachments/${name === "list_chat_attachments" ? "list" : "get"}`, {
-      method: "POST", body: JSON.stringify(name === "list_chat_attachments" ? {} : { attachment_ref: args.attachment_ref, destination_dir: args.destination_dir }),
-    });
-    return { text: JSON.stringify(body), ...(!ok ? { isError: true } : {}) };
-  }
-  if (name === "attach_file") {
-    const { ok, body } = await apiResponse("/api/internal/attach-file", {
-      method: "POST",
-      body: JSON.stringify({ path: args.path, ...(typeof args.name === "string" ? { name: args.name } : {}) }),
-    });
-    if (!ok) return { text: String(body.error ?? "Could not attach that file."), isError: true };
-    return { text: `Attached ${String(body.name ?? "the file")} (${Number(body.bytes ?? 0)} bytes). It now appears in the chat with a preview.` };
-  }
+  if (ATTACHMENT_TOOL_NAMES.has(name)) return callAttachmentTool(name, args, context);
   if (CARD_TOOL_NAMES.has(name)) return callCardTool(name, args, context);
   if (RESEARCH_TOOL_NAMES.has(name)) return callResearchTool(name, args, context);
   if (HELPER_TOOL_NAMES.has(name)) return callHelperTool(name, args, context);
