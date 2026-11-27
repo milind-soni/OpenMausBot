@@ -200,9 +200,12 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
   };
   const finish = (response: Record<string, unknown> | undefined) => {
     if (Array.isArray(response?.output)) {
+      // Items the stream never finished (a cut message) join from the final output; one without an id only when nothing
+      // finished, so a call already finished under another position can never run twice.
+      const none = !done.size;
       for (const [position, item] of response.output.entries()) {
         const known = object(item) ? (item as ResponseItem).id : undefined;
-        if (object(item) && !done.has(position) && !(typeof known === "string" && finishedItems.has(known))) finishItem(item as ResponseItem, position);
+        if (object(item) && !done.has(position) && (typeof known === "string" ? !finishedItems.has(known) : none)) finishItem(item as ResponseItem, position);
       }
     }
     const used = object(response?.usage);

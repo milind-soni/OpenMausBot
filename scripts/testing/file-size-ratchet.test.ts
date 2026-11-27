@@ -24,7 +24,6 @@ const LINES: Record<string, number> = {
   "server/drivers/claude.ts": 1989,
   "server/drivers/acp/core.ts": 1541,
   "server/drivers/codex.ts": 1583,
-  "server/drivers/openai-chat.ts": 1005, // the turn loop's output-limit continuation; the rule itself lives in openai-chat-protocol.ts
   "server/routines.ts": 1553,
   "src/components/ComputerPanel.tsx": 1782,
   "src/components/RoutineCalendarPage.tsx": 1485,

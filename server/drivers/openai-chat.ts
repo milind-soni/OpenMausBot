@@ -21,7 +21,8 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, CUT_REPLY_NOTE, cutReplyContinues, cutReplyWillContinue, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { anotherRequestFollows, ContinuedReply, MaskedDeltas, maskSecretHalves } from "./cut-reply-text.ts";
+import { ContinuedReply, MaskedDeltas, maskSecretHalves } from "./cut-reply-text.ts";
+import { CORRECTIVE_ROUND, NUDGE_ANNOUNCED_ACTION, TEXT_ONLY_ATTACHMENT_NOTE, TEXT_ONLY_SCREENSHOT_NOTE, UNREADABLE_CALL } from "./openai-chat-prompts.ts";
 import { ChatHttpError, completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
@@ -188,14 +189,7 @@ function replayDelivered(
   return { content, matched: found.map(({ record }) => record), volatile };
 }
 
-const CORRECTIVE_ROUND = "[OpenMausBot: a tool call in this turn failed (its result is marked ok:false). Re-run the failed operations with corrected inputs where possible, check the results, then give your final answer. Do not report results you did not get.]";
-const NUDGE_ANNOUNCED_ACTION = "You said what you would do next but called no tool. Use your tools for only the remaining work, or reply with verified results if nothing is left to do. Never repeat an operation that succeeded, was denied, or may already have taken effect; inspect its state instead. Do not retry a destructive operation.";
-
-const UNREADABLE_CALL = "[OpenMausBot: your last tool call could not be read, so nothing ran. Call the tool again using only the tools you were given, with valid JSON arguments.]";
 const LOCAL_CORRECTIVE_ROUNDS = 2;
-
-const TEXT_ONLY_ATTACHMENT_NOTE = "[The person attached image(s), but this model cannot see images. Say so if the request depends on them.]";
-const TEXT_ONLY_SCREENSHOT_NOTE = "[Screenshot not shown: this model cannot see images. Read the page with a snapshot or a text tool instead.]";
 
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
@@ -639,7 +633,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
           let resends = 0;
-          let completion: Completion, prefix = "", willContinue = false, willRequest = false;
+          let completion: Completion, prefix = "", willContinue = false;
           for (;;) {
             let streamed = false;
             let answerStreamed = false;
@@ -669,12 +663,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 if (rest) delta(rest, "assistant_text");
               }
               willContinue = !completion.toolCalls.length && cutReplyWillContinue(cutReplies, completion, Boolean(options.localModel && tools.definitions.length));
-              // The hold survives a reply another request may answer, so a credential is never shown in halves.
-              willRequest = anotherRequestFollows(completion, { unreadable, cut: willContinue,
-                corrective: toolFailed && !denials.length && correctiveRounds < Math.max(turn.toolErrorCorrectiveRounds ?? 0, options.localModel ? LOCAL_CORRECTIVE_ROUNDS : 0),
-                nudge: Boolean(options.nudgeAnnouncedAction) && tools.definitions.length > 0 && announcesAction(completion.text) && nudges < MAX_ANNOUNCEMENT_NUDGES && callsAtNudge !== seenCalls.size, asides: turnEntry.asides.length > 0 });
-              delta("", "assistant_text", !willRequest); delta("", "reasoning_text", !willRequest);
-              carried = willRequest ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willRequest ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
+              // Only a cut reply's continuation joins this one in a single message, so only there does a held credential prefix carry over.
+              delta("", "assistant_text", !willContinue); delta("", "reasoning_text", !willContinue);
+              carried = willContinue ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willContinue ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
               break;
             } catch (value) {
               const error = asError(value);
@@ -742,8 +733,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
-          const shownReply = prefix || willContinue || completion.text.trim() ? maskSecrets(prefix + completion.text, !willRequest).visible : safeText(reply);
-          if (reply.trim()) { spoke = true; answer.add(shownReply); }
+          const shownReply = prefix || willContinue || completion.text.trim() ? maskSecrets(prefix + completion.text, !willContinue).visible : safeText(reply);
+          if (reply.trim() || prefix) { spoke = true; answer.add(shownReply); }
           if (!willContinue) answer.end();
           abort.signal.throwIfAborted();
           if (unreadable) {

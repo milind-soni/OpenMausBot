@@ -4,31 +4,10 @@ import { maskSecretHalves } from "./secret-halves.ts";
 
 export { maskSecretHalves } from "./secret-halves.ts";
 
-/** The turn loop's checks that can answer a finished reply with another request. */
-export interface ReplyFollowUp {
-  unreadable: boolean;
-  cut: boolean;
-  corrective: boolean;
-  nudge: boolean;
-  asides: boolean;
-}
-
-/** True when another request follows this reply: a tool round, an unreadable call, a cut continuation, a corrective
- * round, an announcement nudge, or a queued aside. The credential hold must survive every one of them. */
-export function anotherRequestFollows(
-  reply: { finishReason: string | null; text: string; reasoning: string; toolCalls: readonly unknown[] },
-  follows: ReplyFollowUp,
-): boolean {
-  if (reply.toolCalls.length > 0 || follows.unreadable || follows.cut) return true;
-  if (!reply.text.trim() && !reply.reasoning.trim()) return false;
-  if (reply.finishReason && reply.finishReason !== "stop") return false;
-  return follows.corrective || follows.nudge || follows.asides;
-}
-
 type StreamKind = "assistant_text" | "reasoning_text";
 
 /** The masked deltas of one reply: a suffix that could start a configured credential is held until the next chunk
- * proves what it is, and the hold survives a continuation so a secret split at the cut is never shown in halves. */
+ * proves what it is, and the hold survives a cut reply's continuation so a secret split at the cut is never shown in halves. */
 export class MaskedDeltas {
   private readonly held: Record<StreamKind, string> = { assistant_text: "", reasoning_text: "" };
   private readonly secrets: readonly string[];

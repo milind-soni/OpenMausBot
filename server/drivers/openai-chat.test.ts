@@ -1246,7 +1246,7 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
     expect(reasoning).not.toContain("12345678");
   });
 
-  it("drops a held prefix when the continuation ends in a tool call", async () => {
+  it("releases a held prefix in the deltas and the item alike when the continuation ends in a tool call", async () => {
     let requests = 0;
     const events = await runTurn(
       () => ++requests === 1
@@ -1255,58 +1255,56 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
       "openai-compat",
       { MINIMAX_API_KEY: "abcdefgh12345678" },
     );
-    const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
-      : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).join("");
-    expect(shown).not.toContain("abcdefgh");
-    expect(shown).toContain("before");
+    const deltas = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta] : []).join("");
+    expect(textOf(events)[0]).toBe("before abcdefgh");
+    expect(deltas.startsWith("before abcdefgh")).toBe(true);
   });
 
-  it("keeps a credential split before a queued aside masked", async () => {
+  it("keeps a reply's last characters in its own message when a queued aside follows", async () => {
+    // Each reply is its own message: a tail that could start the key is not carried into the next one.
     const bodies: string[] = [];
     let release!: (response: Response) => void;
     const gate = new Promise<Response>((resolve) => { release = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
       if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
       bodies.push(String(init?.body));
-      return bodies.length === 1 ? await gate : sse(text("12345678 after", "stop"));
+      return bodies.length === 1 ? await gate : sse(text("Done.", "stop"));
     }));
     const instance = await OpenAICompatDriver.create({
       instanceId: "compat", displayName: "Compat", enabled: true,
       config: OpenAICompatDriver.decodeConfig({ url: "https://api.minimax.io/v1", apiKeyEnv: "MINIMAX_API_KEY", model: "MiniMax-M3" }),
-      environment: { MINIMAX_API_KEY: "abcdefgh12345678" },
+      environment: { MINIMAX_API_KEY: "sabcdefgh12345678" },
     });
     const events: RuntimeEvent[] = [];
     instance.adapter.onEvent((event) => events.push(event));
     await instance.adapter.sendTurn({ threadId: "t", text: "hi" });
     await vi.waitFor(() => expect(bodies).toHaveLength(1), { timeout: 10_000 });
     await expect(instance.adapter.steer!("t", "one more thing")).resolves.toBe("steered");
-    release(sse(text("before abcdefgh", "stop")));
+    release(sse(text("I read the logs", "stop")));
     await vi.waitFor(() => {
       if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
     }, { timeout: 10_000 });
     await instance.dispose();
     expect(bodies).toHaveLength(2);
-    const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
-      : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).join("");
-    expect(shown).not.toContain("abcdefgh");
-    expect(shown).not.toContain("12345678");
+    expect(textOf(events)).toEqual(["I read the logs", "Done."]);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
   }, 20_000);
 
-  it("keeps a credential split between a tool-call reply and the following reply masked", async () => {
+  it("keeps the last characters before a tool call in that message", async () => {
+    // The text before a tool call ends on what could start the key; it stays in that message, not the next one.
     const remote = await startFakeHttpMcp({ tools: [{ name: "read_notes", description: "Read notes", inputSchema: { type: "object", properties: {}, additionalProperties: false } }] });
     let requests = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
       if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
       requests += 1;
       return sse(requests === 1
-        ? two({ content: "before abcdefgh" }, { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "fx_read_notes", arguments: "{}" } }] }, "tool_calls")
-        : text("12345678 after", "stop"));
+        ? two({ content: "Let me check the logs" }, { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "fx_read_notes", arguments: "{}" } }] }, "tool_calls")
+        : text("All clear.", "stop"));
     }));
     const instance = await OpenAICompatDriver.create({
       instanceId: "compat", displayName: "Compat", enabled: true,
       config: OpenAICompatDriver.decodeConfig({ url: "https://api.minimax.io/v1", apiKeyEnv: "MINIMAX_API_KEY", model: "MiniMax-M3" }),
-      environment: { MINIMAX_API_KEY: "abcdefgh12345678" },
+      environment: { MINIMAX_API_KEY: "sabcdefgh12345678" },
     });
     const events: RuntimeEvent[] = [];
     instance.adapter.onEvent((event) => events.push(event));
@@ -1323,10 +1321,7 @@ describe("createOpenAIChatRuntime output-limit continuation", () => {
       await remote.close();
     }
     expect(requests).toBe(2);
-    const shown = events.flatMap((event) => event.type === "content.delta" && event.streamKind === "assistant_text" ? [event.delta]
-      : event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).join("");
-    expect(shown).not.toContain("abcdefgh");
-    expect(shown).not.toContain("12345678");
+    expect(textOf(events)).toEqual(["Let me check the logs", "All clear."]);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
   }, 30_000);
 
