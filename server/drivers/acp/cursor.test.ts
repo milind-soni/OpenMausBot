@@ -1162,7 +1162,7 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
 });
 
 describe("fetchCursorModels", () => {
-  it("gives the discovery session its own request budget, above the shared 8s default (#4371)", async () => {
+  it("gives the discovery session its own request budget, above the shared 8s default", async () => {
     await fetchCursorModels("cursor-agent-does-not-exist", {});
     const options = vi.mocked(discoverAcpModels).mock.calls.at(-1)?.[3] as { requestTimeoutMs?: number } | undefined;
     expect(options?.requestTimeoutMs).toBeGreaterThanOrEqual(15_000);

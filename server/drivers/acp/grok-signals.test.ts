@@ -20,7 +20,7 @@ import { grokReportedFailure } from "./grok-signals.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 const TOKIO = "grok: failed to start tokio runtime: blocking pool pre-warm stalled after 14 of 16 threads";
-// A provider the Grok CLI serves (an OpenAI-compatible router) throttling for a moment, as issue #7635 read it.
+// A provider the Grok CLI serves (an OpenAI-compatible router) throttling for a moment.
 const ROUTER_THROTTLE = "Rate limited: stream error (rate_limit_error): openai/gpt-5.2: rate limit - Semaphore timeout after 2000ms, waiting before retry";
 
 const scratches: string[] = [];
