@@ -1358,6 +1358,11 @@ export class Store {
         const previous = nextBots[at];
         next = { ...previous, ...reshowWhenMoved(previous, operation.fields) };
         if (operation.fields.modelSelection) next.tasks = this.withDefaultModel(previous, operation.fields.modelSelection);
+        const backups = operation.fields.fallback;
+        if (backups !== undefined) {
+          if (backups.length) next.fallback = structuredClone(backups);
+          else delete next.fallback;
+        }
         nextBots[at] = next;
       }
       if (operation.fields.chiefOfStaff === false) delete next.managedSections; if (!Array.isArray(next.mcpServers)) delete next.mcpServers; // Undo's "every enabled server"

@@ -97,13 +97,13 @@ describe("what a Chief of Staff reads about its team", () => {
     const chief = bot("chief", { chiefOfStaff: true, section: "Work" });
     const { get } = await serve(chief, async () => TEAMS, {
       teams: ["", "Work", "Private"],
-      bots: [chief, bot("writer", { section: "Work", title: "Writer" }), bot("gone", { section: "Work", hidden: true }), bot("other", { section: "Private" })],
+      bots: [chief, bot("writer", { section: "Work", title: "Writer", fallback: [{ instanceId: "codex", model: "gpt-fixture" }] }), bot("gone", { section: "Work", hidden: true }), bot("other", { section: "Private" })],
     });
     expect((await get("/api/internal/team-setup-catalog")).body).toMatchObject({
       teams: ["Work"],
       bots: [
         { id: "chief", section: "Work", chiefOfStaff: true },
-        { id: "writer", title: "Writer", section: "Work", chiefOfStaff: false, modelSelection: { instanceId: "claude", model: "sonnet" } },
+        { id: "writer", title: "Writer", section: "Work", chiefOfStaff: false, modelSelection: { instanceId: "claude", model: "sonnet" }, fallback: [{ instanceId: "codex", model: "gpt-fixture" }] },
       ],
       instances: [{ instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", state: "available", effortLevels: ["low", "high"] }],
     });

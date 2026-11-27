@@ -9,6 +9,8 @@ export interface TeamSetupFields {
   cwd?: string;
   section?: string;
   modelSelection?: ModelSelection;
+  /** Update only: ordered backup AIs. Does not change the bot's model or effort. */
+  fallback?: Array<{ instanceId: string; model: string }>;
   chiefOfStaff?: boolean;
   /** Update only: the bot's MCP servers by name. Applies like the plan's other changes. */
   mcpServers?: string[];

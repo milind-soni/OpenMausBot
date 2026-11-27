@@ -1328,6 +1328,25 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.modelSelection.effort).toBe("high");
   });
 
+  it("stores an ordered backup list from team setup and drops it when the list is cleared, leaving the model alone", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Chief" });
+    store.patchBot(chief.id, { chiefOfStaff: true });
+    const member = store.createBot({ name: "Ada", modelSelection: { instanceId: "claude", model: "sonnet", effort: "high" } });
+    const setup = (requestId: string, fallback: Array<{ instanceId: string; model: string }>) => store.applyTeamSetup({
+      version: 1, requestId, botId: chief.id, threadId: chief.threadId, reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [],
+      operations: [{ action: "update", botId: member.id, fields: { fallback } }],
+    });
+    setup("setup-backups", [{ instanceId: "codex", model: "gpt" }, { instanceId: "claude", model: "opus" }]);
+    expect(new Store(selection).bot(member.id)).toMatchObject({
+      fallback: [{ instanceId: "codex", model: "gpt" }, { instanceId: "claude", model: "opus" }],
+      modelSelection: { instanceId: "claude", model: "sonnet", effort: "high" },
+    });
+    setup("setup-backups-cleared", []);
+    expect(new Store(selection).bot(member.id)?.fallback).toBeUndefined();
+    expect(new Store(selection).bot(member.id)?.modelSelection.effort).toBe("high");
+  });
+
   it("completes every new bot's selection with the workspace defaults, whichever path creates it", () => {
     const store = new Store(selection, (chosen) => ({ ...chosen, effort: "medium" }));
     const defaulted = store.createBot();
