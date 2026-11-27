@@ -41,6 +41,10 @@ export const PREVIEW_MAX = 300;
 /** A line another bot sent is stored with this note in front (src/lib/peer-message.ts): never shown as the person's. */
 const PEER_NOTE = /^\[(?:From @|Message from @|Delegated by @|Thread opened by @)/;
 const MAX_BOTS = 500;
+const MAX_SECTIONS = 200;
+const SECTION_MAX = 60;
+/** The most bots whose place in the one list is kept for one account. */
+const MAX_LAID = 2_000;
 const ID = /^[\w-]{1,128}$/;
 const COLOR = /^[\w#(),.% -]{1,64}$/;
 
@@ -135,8 +139,8 @@ export function botRow(bot, home) {
   const name = text(bot.name, 80);
   if (!name) return null;
   const open = Array.isArray(bot.tasks) ? bot.tasks.find((task) => record(task) && task.threadId === bot.threadId) : null;
-  const title = text(bot.title, 80), chat = text(open?.title, 80), preview = previewOf(bot), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
-  return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(chat ? { chat } : {}), ...(color ? { color } : {}),
+  const title = text(bot.title, 80), chat = text(open?.title, 80), section = sectionName(bot.section), preview = previewOf(bot), color = look(bot.color), body = look(bot.mascotBody), face = look(bot.mascotFaceColor), tint = look(bot.mascotBodyColor), fur = look(bot.mascotMaterial);
+  return { home, id: bot.id, threadId: bot.threadId, name, ...(title ? { title } : {}), ...(chat ? { chat } : {}), ...(section ? { section } : {}), ...(color ? { color } : {}),
     ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(tint ? { mascotBodyColor: tint } : {}), ...(fur ? { mascotMaterial: fur } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...(preview ? { preview } : {}), ...rowState(bot) };
 }
 
@@ -153,6 +157,40 @@ export function readyAis(body) {
 
 /** Whether a place's `GET /api/bots` answer says its page makes a new bot when the person's other place asks. */
 export const makesNewBots = (body) => record(body) && record(body.together) && body.together.newBot === true;
+
+/** A department's name as a place's server keeps it (1 to 60 characters, no control character), or "" for none. */
+export function sectionName(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name && name.length <= SECTION_MAX && ![...name].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ? name : "";
+}
+
+/** A place's departments in its own order, from its `GET /api/bots` answer: what the one list draws them by on the
+ * other page too. */
+export function placeSections(body) {
+  const names = record(body) && Array.isArray(body.sections) ? body.sections.map(sectionName).filter(Boolean) : [];
+  return [...new Set(names)].slice(0, MAX_SECTIONS);
+}
+
+/** "The place's own department" as a page sends it (src/lib/one-list.ts LANDING_SECTION): no department name can be it. */
+const LANDING_SECTION = "\u0000landing";
+/** A bot's key in the one list: its place and its own id there. */
+const LAID_KEY = /^(computer|cloud):[\w-]{1,128}$/;
+
+/** Where the person put bots in the one list, as a page sends it: each bot's key, its department ("" for none), and
+ * the key of the bot drawn just above it in that list (null at its top). Anything else is dropped. */
+export function parseArrangement(entries) {
+  if (!Array.isArray(entries)) return [];
+  const parsed = entries.slice(0, MAX_LAID).flatMap((entry) => {
+    if (!record(entry) || typeof entry.key !== "string" || !LAID_KEY.test(entry.key)) return [];
+    const section = entry.section === "" || entry.section === LANDING_SECTION ? entry.section : sectionName(entry.section);
+    if (section === "" && entry.section !== "") return [];
+    const after = entry.after === null ? null : typeof entry.after === "string" && LAID_KEY.test(entry.after) && entry.after !== entry.key ? entry.after : undefined;
+    return after === undefined ? [] : [{ key: entry.key, section, after }];
+  });
+  // One entry per bot, the last one given: a page repeating a key cannot crowd out every other bot's entry.
+  const last = new Map(parsed.map((entry) => [entry.key, entry]));
+  return parsed.filter((entry) => last.get(entry.key) === entry);
+}
 
 /** A place's `GET /api/bots` answer as rows, in that place's own order. */
 export function botRows(body, home) {
@@ -308,8 +346,8 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
   }
 
   async function read(home) {
-    const mine = epoch, last = kept.get(home), said = (entry) => JSON.stringify([entry?.state, entry?.bots, entry?.newBot, entry?.ais]);
-    const held = (state) => ({ ...last, bots: last?.bots ?? [], state });
+    const mine = epoch, last = kept.get(home), said = (entry) => JSON.stringify([entry?.state, entry?.bots, entry?.sections, entry?.newBot, entry?.ais]);
+    const held = (state) => ({ ...last, bots: last?.bots ?? [], sections: last?.sections ?? [], state });
     const signedOut = () => { signIn = true; return { bots: [], state: "signin" }; };
     let next;
     try {
@@ -323,7 +361,7 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
         else if (!response?.ok) { await response?.body?.cancel?.(); next = held("offline"); }
         else {
           const body = await response.json(), ais = await aisOf(home, last);
-          next = ais === "signin" ? signedOut() : { bots: botRows(body, home), state: "ready", newBot: makesNewBots(body), ...ais };
+          next = ais === "signin" ? signedOut() : { bots: botRows(body, home), sections: placeSections(body), state: "ready", newBot: makesNewBots(body), ...ais };
         }
       }
     } catch { next = held("offline"); }
@@ -387,11 +425,19 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     return typeof linked === "string" && linked ? { ...row, address: linked } : row;
   }
 
+  /** Where this account put bots in the one list, kept beside its switch: a bot's key, its department and the bot above it.
+   * Kept through the switch going off, a place asleep or out of reach, and a restart; a bot that is gone keeps its entry
+   * too, which costs nothing and brings it back where it was if it returns. */
+  function arrangedFor(who) {
+    const all = file().kept.arranged;
+    return parseArrangement(record(all) && typeof who === "string" && Array.isArray(all[who]) ? all[who] : []);
+  }
+
   function otherOf(asking) {
     const home = otherHome(asking), known = kept.get(home);
     const state = home === "cloud" && pending?.home === home && (cloud().asleep || known?.state !== "ready") ? "waking"
       : home === "cloud" && cloud().asleep ? "asleep" : known?.state ?? "loading";
-    return { home, state, bots: (known?.bots ?? []).map((row) => addressed(row)), ...(typeof known?.newBot === "boolean" ? { newBot: known.newBot } : {}) };
+    return { home, state, bots: (known?.bots ?? []).map((row) => addressed(row)), ...(known?.sections?.length ? { sections: known.sections } : {}), ...(typeof known?.newBot === "boolean" ? { newBot: known.newBot } : {}) };
   }
 
   return {
@@ -417,7 +463,9 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       if (!active()) return { v: 1, available: available(), on: isOn(), here, other: null, ...notice };
       watch();
       void refresh(otherHome(here));
-      return { v: 1, available: true, on: true, here, other: otherOf(here), ...notice };
+      // The person's home place, the same on both pages: the one list puts its bots first wherever the window is.
+      const home = String(computer()).startsWith("profile:") ? "cloud" : "computer";
+      return { v: 1, available: true, on: true, here, home, other: otherOf(here), arranged: arrangedFor(account()), ...notice };
     },
     /** The switch. Off forgets every list. Turned on from Settings on this computer's page, whose words say so, it also
      * lets My Cloud run commands here (`turnedOn`), so the two places work as one with one switch; the person turns that
@@ -483,6 +531,23 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       if (!row) return false;
       go(home, "desktop-notifications:open", { botId: row.id, threadId: row.threadId }, OPEN_WAIT_MS);
       return true;
+    },
+    /** The person moved bots in the one list (a drag or Alt+Up/Down, on either page): their entries replace the ones they
+     * had. Nothing of either place's own server changes here. What this account has kept now. */
+    arrange(asking, entries) {
+      sameScope();
+      const who = account();
+      if (!active() || !who || untouchable()) return arrangedFor(who);
+      const next = parseArrangement(entries), keys = new Set(next.map((entry) => entry.key));
+      if (!next.length) return arrangedFor(who);
+      const { kept } = file();
+      const had = arrangedFor(who), before = new Map(had.map((entry) => [entry.key, entry]));
+      // The same arrangement again (a drop where the bot already was) writes nothing and tells no page.
+      if (next.every((entry) => before.get(entry.key)?.section === entry.section && before.get(entry.key)?.after === entry.after)) return had;
+      const merged = [...had.filter((entry) => !keys.has(entry.key)), ...next].slice(-MAX_LAID);
+      write({ ...kept, v: 1, arranged: { ...(record(kept.arranged) ? kept.arranged : {}), [who]: merged } });
+      tell();
+      return merged;
     },
     /** What the ＋ shows about the other place before a bot is made there: how it is doing, and the AIs ready there
      * (null while it has not said). The AIs are read with the list's own next read, under the list's rules and its
@@ -554,6 +619,7 @@ export function installPlacesTogether({ ipcMain, asking, together, rail = () => 
     return together.set(page, value === true, { listOnly: from === "notice" });
   });
   ipcMain.handle("places-together:open", (event, botId) => together.open(side(event), String(botId)));
+  ipcMain.handle("places-together:arrange", (event, entries) => together.arrange(side(event), entries));
   ipcMain.handle("places-together:new-bot-choice", (event) => together.newBotChoice(side(event)));
   ipcMain.handle("places-together:new-bot", (event) => together.newBot(side(event)));
   ipcMain.handle("places-together:new-bot-heard", (event) => { side(event); together.newBotHeard(); });

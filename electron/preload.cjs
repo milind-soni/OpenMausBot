@@ -649,6 +649,8 @@ const bridge = {
       ? ipcRenderer.invoke("places-together:set", on === true, ...(from === "notice" ? ["notice"] : [])) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
     open: botId => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
+    // Where the person dragged bots in the one list: main keeps it beside the switch, and checks every entry.
+    arrange: entries => ipcRenderer.invoke("places-together:arrange", Array.isArray(entries) ? entries.slice(0, 2000) : []),
     onChanged: cb => {
       const handler = () => cb();
       ipcRenderer.on("places-together:changed", handler);
