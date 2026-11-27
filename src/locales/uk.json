@@ -85,6 +85,7 @@
   "server.problem.routineFailed": "У бота {bot} проблема: запланована рутина {where} завершилася помилкою",
   "server.problem.routineFailedWhy": "У бота {bot} проблема: запланована рутина {where} завершилася помилкою: «{detail}»",
   "server.incidents.where.thread": "у гілці #{title}",
+  "server.chief.retryQueued": "Повтор у гілці #{title} ({name}) додано в чергу",
   "server.incidents.where.main": "в основній розмові",
   "server.connect.signIn": "Будь ласка, увійдіть на {site}.",
   "server.connect.signInWhy": "Будь ласка, увійдіть на {site}: {reason}",

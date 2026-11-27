@@ -13724,7 +13724,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
         }
         if (queued) {
-          store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: `Queued a retry of ${target.name}'s thread #${task.title}`, ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });
+          store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(fromThreadId), "server.chief.retryQueued", { name: target.name, title: task.title }), ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });
           return json(res, 200, { queued: true, message: `${target.name} is busy right now, so the retry of thread #${task.title} is queued and starts by itself when ${target.name} frees up. Its result stays in that thread; you are not woken for it — do not report this hand-off as failed and do not retry again.` });
         }
         store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });

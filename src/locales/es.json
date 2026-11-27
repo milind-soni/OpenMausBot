@@ -115,6 +115,7 @@
   "server.problem.routineFailed": "{bot} tuvo un problema: su rutina programada {where} falló",
   "server.problem.routineFailedWhy": "{bot} tuvo un problema: su rutina programada {where} falló: «{detail}»",
   "server.incidents.where.thread": "en su hilo #{title}",
+  "server.chief.retryQueued": "Reintento del hilo #{title} de {name} en cola",
   "server.incidents.where.main": "en su conversación principal",
   "server.connect.signIn": "Necesito que inicies sesión en {site}.",
   "server.connect.signInWhy": "Necesito que inicies sesión en {site}: {reason}",

@@ -177,6 +177,7 @@
   "server.problem.routineFailed": "{bot} で問題が発生しました：{where}予定ルーティンが失敗しました",
   "server.problem.routineFailedWhy": "{bot} で問題が発生しました：{where}予定ルーティンが失敗しました：「{detail}」",
   "server.incidents.where.thread": "スレッド #{title} での",
+  "server.chief.retryQueued": "{name} のスレッド #{title} の再試行を順番待ちにしました",
   "server.incidents.where.main": "メインの会話での",
   "server.connect.signIn": "{site} にサインインしてください。",
   "server.connect.signInWhy": "{site} にサインインしてください：{reason}",

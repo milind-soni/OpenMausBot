@@ -216,6 +216,7 @@
   "server.problem.routineFailed": "{bot} 遇到問題：{where}的排程例行工作失敗了",
   "server.problem.routineFailedWhy": "{bot} 遇到問題：{where}的排程例行工作失敗了：「{detail}」",
   "server.incidents.where.thread": "在對話 #{title} 中",
+  "server.chief.retryQueued": "已將 {name} 的對話 #{title} 的重試加入佇列",
   "server.incidents.where.main": "在主對話中",
   "server.connect.signIn": "請登入 {site}。",
   "server.connect.signInWhy": "請登入 {site}：{reason}",

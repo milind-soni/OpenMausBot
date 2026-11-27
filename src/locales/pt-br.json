@@ -217,6 +217,7 @@
   "server.problem.routineFailed": "{bot} encontrou um problema: a rotina agendada {where} falhou",
   "server.problem.routineFailedWhy": "{bot} encontrou um problema: a rotina agendada {where} falhou: \"{detail}\"",
   "server.incidents.where.thread": "na conversa #{title} dele",
+  "server.chief.retryQueued": "Nova tentativa na conversa #{title} de {name} entrou na fila",
   "server.incidents.where.main": "na conversa principal dele",
   "server.incidents.folded": "{chief} só recebe um número limitado de problemas por hora, então outros {count} desta hora não foram enviados para ele. Origem: {list}",
   "server.connect.signIn": "Preciso que você faça login em {site}.",

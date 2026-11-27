@@ -236,6 +236,7 @@
   "server.problem.routineFailed": "{bot} ha avuto un problema: la sua routine pianificata {where} non è riuscita",
   "server.problem.routineFailedWhy": "{bot} ha avuto un problema: la sua routine pianificata {where} non è riuscita: «{detail}»",
   "server.incidents.where.thread": "nel suo thread #{title}",
+  "server.chief.retryQueued": "Nuovo tentativo del thread #{title} di {name} in coda",
   "server.incidents.where.main": "nella sua conversazione principale",
   "server.incidents.folded": "{chief} è chiesto circa solo così tanti problemi all'ora, quindi {count} più questa ora non sono stati inviati ad esso. Da: {list}",
   "server.connect.signIn": "Ho bisogno che tu acceda a {site}.",

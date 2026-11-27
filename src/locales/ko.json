@@ -170,6 +170,7 @@
   "server.problem.routineFailed": "{bot}에 문제가 생겼어요: {where} 예약 루틴이 실패했어요",
   "server.problem.routineFailedWhy": "{bot}에 문제가 생겼어요: {where} 예약 루틴이 실패했어요: “{detail}”",
   "server.incidents.where.thread": "스레드 #{title}에서의",
+  "server.chief.retryQueued": "{name}의 스레드 #{title} 재시도를 대기열에 넣었어요",
   "server.incidents.where.main": "메인 대화에서의",
   "server.connect.signIn": "{site}에 로그인해 주세요.",
   "server.connect.signInWhy": "{site}에 로그인해 주세요: {reason}",

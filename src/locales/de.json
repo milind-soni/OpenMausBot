@@ -97,6 +97,7 @@
   "server.teammates.handedWork": "weitergegebener Arbeit",
   "server.incidents.where.room": "im Raum „{room}“",
   "server.incidents.where.thread": "im Thread #{title}",
+  "server.chief.retryQueued": "Neuer Versuch im Thread #{title} von {name} wartet in der Warteschlange",
   "server.incidents.where.main": "in der Hauptunterhaltung",
   "server.incidents.folded": "{chief} wird nur zu einer begrenzten Zahl von Problemen pro Stunde gefragt, daher wurden {count} weitere in dieser Stunde nicht dorthin geschickt. Aus: {list}",
   "server.connect.signIn": "Bitte melde dich bei {site} an.",
