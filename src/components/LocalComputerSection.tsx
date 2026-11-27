@@ -20,7 +20,7 @@ import { cn } from "@/lib/cn";
 import { localizeComputerProblem } from "@/lib/computer-messages";
 import { computerInventoryRequest, jsonPostRequest, type ComputerApiRequest } from "@/lib/computer-requests";
 import { useStore } from "@/state/store";
-import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink"; import { serverFetch } from "@/lib/relay-server"; import { IdleTimeLink } from "./settings/IdleTimeLink";
+import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink"; import { serverFetch } from "@/lib/relay-server"; import { IdleTimeLink, useServerIdleOverride } from "./settings/IdleTimeLink";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -676,6 +676,7 @@ export function LocalVmIdleTimeoutSetting({
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const serverOverride = useServerIdleOverride();
 
   useEffect(() => {
     if (!dirty) setValue(String(minutes));
@@ -706,7 +707,7 @@ export function LocalVmIdleTimeoutSetting({
       <div className="flex items-center justify-between gap-6">
         <div className="min-w-0">
           <label htmlFor="local-vm-idle-timeout" className="text-[14px] leading-5 text-ink">{t("vm.idle.label")}</label>
-          <div id="local-vm-idle-timeout-help" className="text-[13px] leading-[18px] text-ink-secondary">{t("vm.idle.detailAll")}</div>
+          <div id="local-vm-idle-timeout-help" className="text-[13px] leading-[18px] text-ink-secondary">{t("vm.idle.detailAll")}{serverOverride !== null && <> {t("vm.idle.serverOverride", { minutes: serverOverride })}</>}</div>
         </div>
         <span className="flex shrink-0 items-center gap-2">
           <input

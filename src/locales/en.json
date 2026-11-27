@@ -5302,6 +5302,7 @@
   "vm.idle.label": "Stop idle desktops after",
   "vm.idle.detailAll": "Applies to private desktops and to desktops on your own servers. A desktop with a running turn is never stopped. Idle shutdown keeps its files and installed apps.",
   "vm.idle.shared": "Idle desktops stop after {minutes} minutes.",
+  "vm.idle.serverOverride": "Desktops on your own servers stop after {minutes} minutes instead, set by vpsIdle.timeoutMinutes in config.json.",
   "vm.idle.change": "Change in Desktop details",
   "vm.idle.minutes": "minutes",
   "vm.idle.range": "Enter a whole number from 5 to 1,440.",

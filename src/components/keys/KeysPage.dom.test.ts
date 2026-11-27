@@ -602,6 +602,14 @@ describe("Your own servers (SSH)", () => {
     expect(go).toHaveBeenCalledWith("desktops", "desktop-details");
   });
 
+  it("shows the server-only idle override from config.json instead of the shared time", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    setConfig({ ...fx.config, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 480 }, vpsIdle: { timeoutMinutes: 5 } });
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const line = host.querySelector<HTMLElement>("[data-idle-time-link]")!;
+    expect(line.textContent).toBe("Desktops on your own servers stop after 5 minutes instead, set by vpsIdle.timeoutMinutes in config.json.");
+  });
+
   it("saves the first alias as the default server, then shows it with its limits", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     fx.api.mockImplementation(echo({}));

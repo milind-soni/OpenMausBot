@@ -11607,6 +11607,7 @@ function configStatus() {
       idleTimeoutMinutes: localVmIdleTimeoutMinutes(cfg),
       preserveInstalledApps: localVmPreservesInstalledApps(cfg),
     },
+    ...(cfg.vpsIdle?.timeoutMinutes !== undefined ? { vpsIdle: { timeoutMinutes: cfg.vpsIdle.timeoutMinutes } } : {}),
     features: {
       skillAuthoring: skillAuthoringEnabled(cfg),
       skillReview: cfg.features?.skillReview === true,

@@ -84,6 +84,8 @@ export interface ConfigStatus {
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
   cacheKeepWarm?: { enabled: boolean; windowMinutes: number };
   localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
+  /** Present only when config.json's server-only override is set; it wins over localVm.idleTimeoutMinutes for server desktops. */
+  vpsIdle?: { timeoutMinutes: number };
   /** `providerKeys`: names of the keys saved for OpenCode's other
    * providers, never the keys. */
   opencodeGo?: SavedKey & { providerKeys?: string[] };

@@ -32,7 +32,7 @@ export function VpsConnection() {
       {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
       <VpsServers />
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.limitsHint")}</p>
-      <IdleTimeLink />
+      <IdleTimeLink servers />
     </div>
   );
 }
