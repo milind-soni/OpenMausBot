@@ -22,11 +22,15 @@ export function workThreadFor(store: Pick<Store, "workThread" | "taskByThread">,
   const allowed = task !== undefined && also(task);
   const usable = allowed && task.archivedAt === undefined;
   const reusable = usable || (allowed && archivedOnResult(task));
+  const yours = reusable && task.openedBy?.botId === input.fromBotId && !task.openedBy.roomLane;
   if (input.any) {
     if (usable && !task.closedBy) return task;
+    const send = (to: string, what: string) => `coordinate_bots, e.g. {"bot_ids": [${JSON.stringify(input.botName)}], "thread": ${JSON.stringify(to)}, "message": "${what}"}`;
+    if (yours) throw new Error(`"${thread}" is closed, and post_to_thread reaches only open threads. To carry on its subject with ${input.botName}, send it there with ${send(thread, "<what to carry on>")}: the thread opens again with its history`);
+    if (task && allowed) throw new Error(`"${thread}" is not an open thread of ${input.botName}, and post_to_thread reaches only open threads. To carry on its subject, send it with ${send("standing", "<the subject and what to do>")}, or use a threadId list_threads shows open on them`);
     throw new Error(`"${thread}" is not an open thread of ${input.botName}: use a threadId list_threads shows on them`);
   }
-  if (reusable && task.openedBy?.botId === input.fromBotId && !task.openedBy.roomLane) return task;
+  if (yours) return task;
   const handedWork = usable && input.answering?.botId === botId && input.answering.threadId === thread;
   if (handedWork && input.notice) return task;
   if (handedWork) throw new Error(`"${thread}" handed you work: answer it there with reply "none", a one-way notice; it cannot be given new work`);

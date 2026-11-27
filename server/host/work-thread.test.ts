@@ -70,12 +70,32 @@ describe("workThreadFor", () => {
     const post = (thread: string, more: Partial<TaskRecord> = {}) => workThreadFor({ ...store, taskByThread: () => task(thread, undefined, more) },
       { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat", thread, notice: true, answering: undefined, also: () => true, reach: () => true, any: true });
     expect(post("run-0")?.threadId).toBe("run-0");
-    expect(() => post("closed", { closedBy: {} as TaskRecord["closedBy"] })).toThrow(/is not an open thread of Bugfixer/);
-    expect(() => post("archived", { archivedAt: 1 })).toThrow(/is not an open thread of Bugfixer/);
+    expect(() => post("closed", { closedBy: {} as TaskRecord["closedBy"] })).toThrow(/^"closed" is not an open thread of Bugfixer, and post_to_thread reaches only open threads\. To carry on its subject, send it with coordinate_bots, e\.g\. \{"bot_ids": \["Bugfixer"\], "thread": "standing", "message": "<the subject and what to do>"\}/);
+    expect(() => post("archived", { archivedAt: 1 })).toThrow(/^"archived" is not an open thread of Bugfixer, and post_to_thread reaches only open threads\. To carry on its subject, send it with coordinate_bots/);
     expect(() => workThreadFor({ ...store, taskByThread: () => undefined }, { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat",
       thread: "nope", notice: true, answering: undefined, also: () => true, reach: () => true, any: true })).toThrow(/is not an open thread of Bugfixer/);
     expect(() => workThreadFor({ ...store, taskByThread: () => task("x") }, { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat",
       thread: "x", notice: true, answering: undefined, also: () => true, reach: () => false, any: true })).toThrow(OUTSIDE_STAYS_HERE);
+  });
+});
+
+describe("a closed thread the sender opened", () => {
+  const closedAt = { botId: "bugfixer", name: "Bugfixer", at: 5 };
+  const closed = (oneShot: boolean) => ({ ...store, taskByThread: () => task("audit", { ...by("liaison", "Liaison", "liaison-chat")!, ...(oneShot ? { oneShot: true as const } : {}) },
+    { closedBy: closedAt, ...(oneShot ? { archivedAt: 5, closedBy: { ...closedAt, botId: "liaison" } } : {}) }) });
+  const send = (oneShot: boolean, any: boolean) => workThreadFor(closed(oneShot), { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat",
+    thread: "audit", notice: false, answering: undefined, also: () => true, reach: () => true, ...(any ? { any } : {}) });
+
+  it("carries on with coordinate_bots and that thread id, closed or archived by its own result", () => {
+    expect(send(false, false)?.threadId).toBe("audit");
+    expect(send(true, false)?.threadId).toBe("audit");
+  });
+
+  it("is refused by post_to_thread with the coordinate_bots call that carries it on", () => {
+    for (const oneShot of [false, true]) {
+      expect(() => send(oneShot, true)).toThrow('"audit" is closed, and post_to_thread reaches only open threads. To carry on its subject with Bugfixer, send it there with ' +
+        'coordinate_bots, e.g. {"bot_ids": ["Bugfixer"], "thread": "audit", "message": "<what to carry on>"}: the thread opens again with its history');
+    }
   });
 });
 
