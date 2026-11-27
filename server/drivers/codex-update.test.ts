@@ -1,5 +1,9 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
+import { enginesBinDir } from "../engine-install.ts";
+import { registerPathDir, unregisterPathDir } from "../env-path.ts";
+import { codexAppCopyUpdateCommand, codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 
 const releases = vi.hoisted(() => ({ latest: "0.169.0" as string | null, pinned: "0.167.0" as string | undefined }));
 vi.mock("./codex-release.ts", async (original) => ({
@@ -42,4 +46,30 @@ it("leaves an unpinned installer eligible and ignores an unavailable release loo
   expect((await codexReleaseUpdate("codex-cli 0.167.0", "codex", false))?.serverInstall).not.toBe(false);
   releases.latest = null;
   expect(await codexReleaseUpdate("codex-cli 0.167.0", "codex", false)).toBeUndefined();
+});
+
+it("updates the app's own npm copy in the app's folder, not npm's global copy that `codex update` installs into", async () => {
+  expect((await codexReleaseUpdate("codex-cli 0.167.0", "codex", false))?.command).toBe("codex update");
+  const bin = enginesBinDir();
+  const shim = join(bin, process.platform === "win32" ? "codex.cmd" : "codex");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(shim, "", { mode: 0o755 });
+  registerPathDir(bin);
+  try {
+    const update = await codexReleaseUpdate("codex-cli 0.167.0", "codex", false);
+    expect(update).toMatchObject({ title: "Update Codex to 0.169.0", serverInstall: false, command: codexAppCopyUpdateCommand("0.169.0") });
+    expect(update?.command).toContain("@openai/codex@0.169.0");
+  } finally {
+    unregisterPathDir(bin);
+    rmSync(shim, { force: true });
+  }
+});
+
+it("quotes the app's folder and package for the shell that runs the copied command", () => {
+  expect(codexAppCopyUpdateCommand("0.172.0", "C:\\Users\\O'Neil\\AppData\\Roaming\\OpenMausBot\\tools\\npm", "win32")).toBe(
+    "npm install -g --prefix 'C:\\Users\\O''Neil\\AppData\\Roaming\\OpenMausBot\\tools\\npm' --loglevel=error --include=optional '--allow-scripts=@openai/codex' '@openai/codex@0.172.0'",
+  );
+  expect(codexAppCopyUpdateCommand("0.172.0", "/home/o'neil/My Data/tools/npm", "linux")).toBe(
+    "npm install -g --prefix '/home/o'\\''neil/My Data/tools/npm' --loglevel=error --include=optional '--allow-scripts=@openai/codex' '@openai/codex@0.172.0'",
+  );
 });
