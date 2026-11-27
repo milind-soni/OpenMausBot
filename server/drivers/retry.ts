@@ -13,7 +13,8 @@ export type TransientReason =
   | "overloaded"
   | "server_error"
   | "connection_reset"
-  | "timeout";
+  | "timeout"
+  | "stream_cut";
 
 export type TerminalReason =
   | "auth"
@@ -43,6 +44,8 @@ const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = 
     reason: "connection_reset",
   },
   { pattern: /\btimeout(ed)?\b|\btimed? out\b/i, reason: "timeout" },
+  // A provider stream cut: undici ends the read with the bare word "terminated", the SSE error chunk says "streaming completion error: terminated".
+  { pattern: /\bstreaming completion error: terminated\b|^terminated\b|\bstream ended before completion\b/i, reason: "stream_cut" },
 ];
 
 /** A subscription's usage running out: terminal even when phrased as a rate limit. Claude Code 2.1.295

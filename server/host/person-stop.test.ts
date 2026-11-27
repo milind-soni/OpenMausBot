@@ -58,6 +58,24 @@ describe("a typed stop", () => {
     expect(w.rows).toHaveLength(1);
   });
 
+  it.each(["stop @Todo", "stop @Now", "@Adaplease stop", "@Ada.stop stop", "@Ada+Todo stop", "@all+Please stop", "@everyone stop @Todo"])(
+    "leaves the current turn running when the stop names someone else: %s", async (text) => {
+      const w = world({ working: ["t", "other"] });
+      expect(await w.send(text, { busy: true })).toBeNull();
+      expect(w.stopped).toEqual([]);
+      expect(w.rows).toEqual([]);
+    },
+  );
+
+  it.each(["@aDa stop", "(**@Ada**) STOP!", "@all stop"])(
+    "still stops work addressed to the bot or everyone: %s", async (text) => {
+      const w = world({ working: ["t"] });
+      expect(await w.send(text, { busy: true })).toMatchObject({ ok: true });
+      expect(w.stopped).toEqual(["t"]);
+      expect(w.rows).toHaveLength(1);
+    },
+  );
+
   it("leaves a real sentence, another's tag, an app's message, a routine and a spoken line alone", async () => {
     const quiet = async (text: string, input: Partial<TypedStop> = {}, over = {}) => {
       const w = world({ working: ["t"], ...over });

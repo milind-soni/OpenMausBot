@@ -14,6 +14,7 @@ const EVE = { email: "eve@acme.test", role: "member" as const };
 let fx: CloudSendFixture, team: CloudTeamFixture;
 const token: Record<string, string> = {};
 let room = "", roomThread = "";
+const roomBots: string[] = [];
 
 const as = (who: string, method: string, path: string, body?: unknown) => team.as(token[who]!, method, path, body);
 
@@ -34,14 +35,13 @@ beforeAll(async () => {
     token[who] = paired.token!;
   }
   const levels = { everyone: "none", people: { [BOB.email]: "chat" } };
-  const ids: string[] = [];
   for (const name of ["Kiwi", "Pip"]) {
     const created = await as("ada", "POST", "/api/bots", { name });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
-    ids.push(created.body.bot.id);
+    roomBots.push(created.body.bot.id);
     expect((await as("ada", "PUT", `/api/bots/${created.body.bot.id}/access`, levels)).status).toBe(200);
   }
-  const made = await as("ada", "POST", "/api/groups", { memberIds: ids, name: "Launch", setup: { bulletin: "", defaultResponder: { kind: "everyone" } } });
+  const made = await as("ada", "POST", "/api/groups", { memberIds: roomBots, name: "Launch", setup: { bulletin: "", defaultResponder: { kind: "everyone" } } });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   room = made.body.group.id;
   roomThread = made.body.group.threadId;
@@ -85,6 +85,31 @@ describe("a room's thread summaries", () => {
     const shown = (await as("ada", "GET", `/api/groups/${room}/threads/summary?archived=1`)).body.threads as RoomThreadSummary[];
     expect(shown.find((row) => row.threadId === thread)?.first?.text).toBe("Old idea");
   });
+
+  it("reads several of the room's threads for one person in one request", async () => {
+    const threads: string[] = [];
+    for (const text of ["First question", "Second question"]) {
+      const thread = (await as("bob", "POST", `/api/groups/${room}/tasks`, { activate: false })).body.task.threadId as string;
+      expect((await as("bob", "POST", `/api/groups/${room}/messages`, { text, threadId: thread })).status).toBeLessThan(300);
+      threads.push(thread);
+    }
+    const bobsTasks = async () => ((await as("bob", "GET", "/api/bots")).body.groups as Array<{ id: string; tasks: Array<{ threadId: string; unread?: boolean; working?: boolean }> }>)
+      .find((group) => group.id === room)!.tasks.filter((task) => threads.includes(task.threadId));
+    // Settled before the read: each of the room's bots has answered in both threads and no turn is running, so no reply
+    // lands after the read (one that did would rightly mark its thread unread again).
+    await until(async () => {
+      const rows = ((await as("bob", "GET", `/api/groups/${room}/threads/summary`)).body.threads as RoomThreadSummary[]).filter((row) => threads.includes(row.threadId));
+      const answered = rows.length === 2 && rows.every((row) => roomBots.every((bot) => row.repliers.some((speaker) => "botId" in speaker && speaker.botId === bot)));
+      const tasks = await bobsTasks();
+      return answered && tasks.length === 2 && tasks.every((task) => task.unread && !task.working);
+    });
+    expect((await as("bob", "POST", `/api/groups/${room}/read`, { threadIds: [threads[0], 7] })).status).toBe(400);
+    expect((await as("eve", "POST", `/api/groups/${room}/read`, { threadIds: threads })).status).toBe(404);
+    const read = await as("bob", "POST", `/api/groups/${room}/read`, { threadIds: [...threads, "no-such-thread"] });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(read.body.read).toBe(2);
+    expect((await bobsTasks()).map((task) => task.unread ?? false)).toEqual([false, false]);
+  }, hostTimeout(90_000));
 
   it("answers someone who cannot see the room as if it did not exist", async () => {
     expect((await as("eve", "GET", `/api/groups/${room}/threads/summary`)).status).toBe(404);

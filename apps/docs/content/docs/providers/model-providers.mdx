@@ -95,7 +95,9 @@ OpenCode, `opencode auth login` also keeps its sign-in in OpenCode's own setting
 
 ### Chat engine
 
-The chat engine uses one provider at a time.
+The chat engine uses one provider at a time. A Chat-engine bot has no terminal
+and no workspace files: it gets MausBot's own tools only. To keep a shell while
+routing through a gateway, see [Using a gateway](./gateway.mdx).
 
 1. Open **Settings → Connections → Model providers**.
 2. Paste your key into **OpenAI-compatible API key** and set

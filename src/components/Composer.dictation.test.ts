@@ -184,6 +184,17 @@ describe("native dictation in the real composer", () => {
     await expect.poll(() => input().value).toBe("元スレッドの文章。");
   });
 
+  it("says Windows has no recognizer for the language instead of asking to try again", () => {
+    flushSync(() => end({ code: 1, reason: "speech-language-missing" }));
+    expect(container.textContent).toContain(t("composer.dictation.languageMissing"));
+    expect(container.textContent).not.toContain(t("composer.dictation.failed"));
+  });
+
+  it("still asks to try again for other helper failures", () => {
+    flushSync(() => end({ code: 1, reason: "helper-start-failed" }));
+    expect(container.textContent).toContain(t("composer.dictation.failed"));
+  });
+
   it("retains text when recognition ends in an error", () => {
     hear("失敗しても残す文章。");
     flushSync(() => end({ code: 1, reason: "recognition-error" }));

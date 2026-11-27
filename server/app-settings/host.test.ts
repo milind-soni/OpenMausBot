@@ -135,7 +135,7 @@ describe("reads", () => {
     const none = await host.handle({ action: "find", query: "invoice" }, turn);
     expect(none.body.text).toMatch(/^No setting you can change matches "invoice"\. Where the person finds it in the app: Settings → Plan & billing/);
     expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending$/m);
-    expect((await host.handle({ action: "places", query: "storage" }, turn)).body.text).toMatch(/^Settings → Data.*\(shown in Advanced mode only/m);
+    expect((await host.handle({ action: "places", query: "storage" }, turn)).body.text).toMatch(/^Settings → Data.*\(shown in Advanced mode; the switch is at the bottom of Settings\)$/m);
     const every = String((await host.handle({ action: "places" }, turn)).body.text).split("\n");
     expect(every[0]).toMatch(/^Settings opens from/);
     expect(every).toContain("Settings → AI → Other services");
@@ -447,6 +447,56 @@ describe("pictures from a file the bot names", () => {
     expect(await fx.set("bots.picture", { botId: "kiwi", path: "a.png" })).toEqual({ status: 409, body: { error: "avatarUrl must reference an existing stored image" } });
     expect(fx.pictureFiles.discarded).toEqual(["/api/attachments/stored-1.png"]);
     expect(fx.cards()).toEqual([]);
+  });
+});
+
+describe("Simple mode: a bot changes settings in the background and never switches the mode", () => {
+  const simple = () => { const fx = fixture(); fx.windowValues.set("appearance.advanced", false); return fx; };
+
+  it("changes a setting only Advanced mode shows while the app stays on Simple", async () => {
+    const fx = simple();
+    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "threads.maxConcurrentPerBot" }, fx.turn)).body.text)) as { where: string; inSimple: string };
+    expect(got).toMatchObject({ where: expect.stringMatching(/\(shown in Advanced mode; the switch is at the bottom of Settings\)$/), inSimple: "set it as usual; never switch modes for it" });
+    expect(got.where).not.toContain("appearance.advanced");
+    const found = JSON.parse(String((await fx.host.handle({ action: "find", query: "parallel threads" }, fx.turn)).body.text)) as Array<{ id: string; inSimple?: string }>;
+    expect(found.find((hit) => hit.id === "threads.maxConcurrentPerBot")?.inSimple).toBe("set it as usual; never switch modes for it");
+    const personOnly = JSON.parse(String((await fx.host.handle({ action: "get", id: "remote.httpsAddress" }, fx.turn)).body.text)) as Record<string, unknown>;
+    expect(personOnly).toMatchObject({ change: "only the person, in Settings → Devices → How your phone reaches this computer → HTTPS address (shown in Advanced mode; the switch is at the bottom of Settings; only in the desktop app, on this computer's own page)" });
+    expect(personOnly).not.toHaveProperty("inSimple");
+    expect((await fx.set("threads.maxConcurrentPerBot", "5")).status).toBe(200);
+    expect(fx.cfg.threads?.maxConcurrentPerBot).toBe(5);
+    expect(fx.windowValues.get("appearance.advanced")).toBe(false);
+    expect(fx.cards().map((card) => card.card.appSettingRequest.settingId)).toEqual(["threads.maxConcurrentPerBot"]);
+  });
+
+  it("tells a bot to change the mode only when the person asks for it by name, and still changes it then", async () => {
+    const fx = simple();
+    const got = JSON.parse(String((await fx.host.handle({ action: "get", id: "appearance.advanced" }, fx.turn)).body.text)) as { help: string };
+    expect(got.help).toContain("only when the person asks for Simple or Advanced mode by name, never to reach another setting");
+    expect((await fx.set("appearance.advanced", "true")).status).toBe(200);
+    expect(fx.windowValues.get("appearance.advanced")).toBe(true);
+  });
+
+  it.each([
+    ["appearance.showThreads", "true"], ["appearance.toolsLayout", "toolbar"], ["appearance.pinnedCircles", "true"],
+    ["appearance.pinnedPages", JSON.stringify([{ name: "Docs", url: "https://example.com" }])],
+  ])("refuses %s, which Simple does not show, rather than claim a change nobody sees", async (id, value) => {
+    const fx = simple();
+    const refused = await fx.set(id, value);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/shows only in Advanced mode and this app is on Simple, so nothing changed\. Don't switch modes for it.*the switch at the bottom of Settings, then ask again\.$/);
+    expect(fx.windowValues.has(id)).toBe(false);
+    expect(fx.windowValues.get("appearance.advanced")).toBe(false);
+    expect(fx.cards()).toEqual([]);
+    fx.windowValues.set("appearance.advanced", true);
+    expect((await fx.set(id, value)).status).toBe(200);
+  });
+
+  it("pins pages in Simple while the window frame's bar shows them", async () => {
+    const fx = simple();
+    fx.windowValues.set("appearance.windowFrame", true);
+    expect((await fx.set("appearance.pinnedPages", JSON.stringify([{ name: "Docs", url: "https://example.com" }]))).status).toBe(200);
+    expect(fx.windowValues.get("appearance.advanced")).toBe(false);
   });
 });
 

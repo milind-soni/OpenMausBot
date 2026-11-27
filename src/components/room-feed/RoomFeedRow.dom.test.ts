@@ -22,7 +22,7 @@ const render = (data: FeedRowData, onOpen = vi.fn(), open = false, actions?: Fee
   act(() => root!.render(createElement(RoomFeedRow, { row: data, groupId: "room", bots: BOTS, you: "Sam", now: NOW, open, onOpen, actions })));
   return onOpen;
 };
-const roomActions = (deletable = true): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn(), deletable });
+const roomActions = (deletable = true): FeedRowActions => ({ onRename: vi.fn(), onDelete: vi.fn(), onPin: vi.fn(), onArchive: vi.fn(), onSetClosed: vi.fn(), deletable });
 const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[data-thread-overlay] button")].find((button) => button.textContent?.includes(label));
 const item = () => document.querySelector<HTMLElement>("[data-feed-thread]")!;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
@@ -69,6 +69,27 @@ describe("a room feed row", () => {
     expect(item().querySelector("[data-feed-mark]")?.getAttribute("data-feed-mark")).toBe("unread");
     expect(item().textContent).toContain("Kiwi is working…");
     expect(item().textContent).not.toContain("2 replies");
+  });
+
+  it("shows a work thread's one status beside its time, where Closed would be, and says it to a screen reader", () => {
+    render(row({ work: { kind: "needs", label: "Needs you" }, closedBy: { botId: "kiwi", name: "Kiwi", at: NOW } }));
+    const work = item().querySelector("[data-feed-work]")!;
+    expect([work.getAttribute("data-feed-work"), work.textContent]).toEqual(["needs", "Needs you"]);
+    expect(work.className).toContain("text-ink");
+    expect(item().querySelector("[data-feed-closed]")).toBeNull();
+    expect(item().querySelector("button")!.getAttribute("aria-label")).toBe("Ana, Plan the launch, No replies yet, Needs you");
+    act(() => root!.unmount());
+    render(row({ work: { kind: "next", label: "Up next" } }));
+    expect(item().querySelector("[data-feed-work]")?.className).toContain("text-ink-tertiary");
+  });
+
+  it("says a bot is working on a work thread once: the line under it does while its turn runs", () => {
+    render(row({ work: { kind: "working", label: "Kiwi working" }, working: true, workingBotId: "kiwi" }));
+    expect(item().querySelector("[data-feed-work]")).toBeNull();
+    expect(item().textContent).toContain("Kiwi is working…");
+    act(() => root!.unmount());
+    render(row({ work: { kind: "working", label: "Kiwi working" } }));
+    expect(item().querySelector("[data-feed-work]")?.textContent).toBe("Kiwi working");
   });
 
   it("fades a long line, ends a clipped one with an ellipsis, and names an attachment-only line", () => {

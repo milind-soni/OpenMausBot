@@ -345,3 +345,32 @@ it.each([false, true])("keeps Call for a shared viewer without Stop permission (
   expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
   expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
 });
+
+it("a My Cloud bot open in place has no call here, and a file dropped on it says where files go instead of uploading", async () => {
+  const placed: Bot = { ...bot, id: "cloud:atlas", threadId: "cloud:atlas-thread" };
+  restoreComposerDraft(`bot:${placed.id}:${placed.threadId}`, { text: "", attachments: [] });
+  const uploads = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", uploads);
+  render({ bot: placed });
+  expect(fixture.call).toBeNull();
+  const field = container.querySelector("textarea")!;
+  const file = new File(["png"], "flat.png", { type: "image/png" });
+  const paste = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, "clipboardData", { value: { files: [file], items: [{ kind: "file", type: "image/png", getAsFile: () => file }], types: ["Files"], getData: () => "" } });
+  flushSync(() => field.dispatchEvent(paste));
+  await vi.waitFor(() => expect(container.textContent).toContain("To send files to a My Cloud bot, open it on My Cloud's page"));
+  expect(uploads).not.toHaveBeenCalled();
+});
+
+it("a file picked for a My Cloud bot open in place says where files go and is never uploaded here", async () => {
+  const placed: Bot = { ...bot, id: "cloud:atlas", threadId: "cloud:atlas-thread" };
+  restoreComposerDraft(`bot:${placed.id}:${placed.threadId}`, { text: "", attachments: [] });
+  const uploads = vi.fn(async () => new Response("{}"));
+  vi.stubGlobal("fetch", uploads);
+  render({ bot: placed });
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, "files", { configurable: true, value: [new File(["%PDF"], "lease.pdf", { type: "application/pdf" })] });
+  flushSync(() => input.dispatchEvent(new Event("change", { bubbles: true })));
+  await vi.waitFor(() => expect(container.textContent).toContain("To send files to a My Cloud bot, open it on My Cloud's page"));
+  expect(uploads).not.toHaveBeenCalled();
+});

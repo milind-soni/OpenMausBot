@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare, X } from "lucide-react";
 import { api, ApiError, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -285,14 +285,31 @@ function installsAntigravityCli(instance: InstanceInfo): boolean {
   return instance.driverKind === "antigravityAgent" && !/^agy_acp_server$/iu.test(instance.cli?.trim() ?? "");
 }
 
-function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
+export function AntigravitySignIn({ instance, onDone }: { instance: InstanceInfo; onDone: () => void }) {
+  return instance.install?.managed ? <ManagedEngineSetup instance={instance} signInOnly autoStart onDone={onDone} /> : <EngineSetup instance={instance} unframed />;
+}
+
+type GoogleStart = { auth: { phase: string; flowId?: string; authorizationUrl?: string; kind?: string } };
+type GoogleFlow = { flowId: string; authorizationUrl: string; pastedCode: boolean };
+const googleFlow = (auth: GoogleStart["auth"]): GoogleFlow | null =>
+  auth.flowId && auth.authorizationUrl ? { flowId: auth.flowId, authorizationUrl: auth.authorizationUrl, pastedCode: auth.kind === "pasted-code" } : null;
+
+function ManagedEngineSetup({ instance, signInOnly, autoStart = false, onDone }: {
+  instance: InstanceInfo;
+  signInOnly: boolean;
+  autoStart?: boolean;
+  onDone?: () => void;
+}) {
   const { state, refreshInstances, refreshModels } = useStore();
   const signInStarted = useSignInStarted(instance.instanceId);
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string; pastedCode: boolean } | null>(null);
+  const [flow, setFlow] = useState<GoogleFlow | null>(null);
   const [callbackUrl, setCallbackUrl] = useState("");
   const managed = instance.install!.managed!;
+  const done = useRef(onDone);
+  useEffect(() => { done.current = onDone; }, [onDone]);
 
   const flowId = flow?.flowId;
   useEffect(() => {
@@ -308,6 +325,13 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
         const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/status?flowId=${encodeURIComponent(flowId)}`);
         if (!live || auth.phase === "waiting" || auth.phase === "verifying") return;
         if (auth.phase !== "succeeded") return ended(auth.phase === "expired" ? t("engineSetup.googleExpired") : auth.message ?? t("engineSetup.googleFailed"));
+        if (done.current) {
+          await refreshInstances().catch(() => {});
+          ended(null);
+          done.current?.();
+          void refreshModels(instance.instanceId).catch(() => {});
+          return;
+        }
         await refreshInstances();
         await refreshModels(instance.instanceId);
         ended(null);
@@ -344,18 +368,48 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     else window.open(link, "_blank", "noopener,noreferrer");
   };
 
-  const signIn = () => run("signin", async () => {
-    if (flow) return openLink(flow.authorizationUrl);
-    signInStarted();
-    const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/start`, { method: "POST" });
-    if (auth.phase === "succeeded") {
+  const signedIn = async () => {
+    if (!done.current) {
       await refreshInstances();
       await refreshModels(instance.instanceId);
       return;
     }
-    if (!auth.flowId || !auth.authorizationUrl) throw new Error(t("engineSetup.googleNoLink"));
-    setFlow({ flowId: auth.flowId, authorizationUrl: auth.authorizationUrl, pastedCode: auth.kind === "pasted-code" });
-    await openLink(auth.authorizationUrl);
+    await refreshInstances().catch(() => {});
+    done.current?.();
+    void refreshModels(instance.instanceId).catch(() => {});
+  };
+
+  const starting = useRef<Promise<GoogleStart> | null>(null);
+  const cancelledStart = useRef<Promise<GoogleStart> | null>(null);
+  const cancelFlow = (id: string) => api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/cancel`, { method: "POST", body: JSON.stringify({ flowId: id }) });
+  const cancel = async () => {
+    setCancelling(true);
+    setError(null);
+    cancelledStart.current = starting.current;
+    const started = flow ?? await cancelledStart.current?.then(({ auth }) => googleFlow(auth), () => null) ?? null;
+    try {
+      if (started) await cancelFlow(started.flowId);
+    } catch (cause) {
+      setFlow(started);
+      setCancelling(false);
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return;
+    }
+    done.current?.();
+  };
+
+  const signIn = () => run("signin", async () => {
+    if (flow) return openLink(flow.authorizationUrl);
+    signInStarted();
+    const start: Promise<GoogleStart> = api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/start`, { method: "POST" });
+    starting.current = start;
+    const { auth } = await start.finally(() => { starting.current = null; });
+    if (cancelledStart.current === start) return;
+    if (auth.phase === "succeeded") return signedIn();
+    const started = googleFlow(auth);
+    if (!started) throw new Error(t("engineSetup.googleNoLink"));
+    setFlow(started);
+    await openLink(started.authorizationUrl);
   });
 
   const complete = () => run("complete", async () => {
@@ -365,14 +419,20 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
       body: JSON.stringify({ flowId: flow.flowId, callbackUrl }),
     });
     setCallbackUrl("");
-    await refreshInstances();
-    await refreshModels(instance.instanceId);
+    await signedIn();
   });
 
   const check = () => run("check", async () => {
     await refreshInstances();
     await refreshModels(instance.instanceId);
   });
+
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || !signInOnly || autoStarted.current) return;
+    autoStarted.current = true;
+    void signIn();
+  }, [autoStart, signInOnly, signIn]);
 
   if (!signInOnly) {
     // The server installs it on its own too (the engine updater): the card says so and waits for it.
@@ -400,12 +460,13 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   }
 
   const cloudHome = state.config?.cloudHome === true;
+  const waiting = busy !== null || cancelling;
   return (
     <div className="mt-3 space-y-2">
       {cloudHome && !flow?.pastedCode && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.cloudPasteHint")}</p>}
       <button
         type="button"
-        disabled={busy !== null}
+        disabled={waiting}
         onClick={() => void signIn()}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:cursor-wait disabled:opacity-70"
       >
@@ -423,15 +484,16 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           <input
             value={callbackUrl}
             onChange={(event) => setCallbackUrl(event.target.value)}
+            disabled={cancelling}
             aria-label={t("engineSetup.pasteCodeLabel")}
             placeholder={t("engineSetup.pasteCodePlaceholder")}
             autoComplete="off"
             spellCheck={false}
-            className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
+            className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent disabled:opacity-50"
           />
           <button
             type="button"
-            disabled={!callbackUrl.trim() || busy !== null}
+            disabled={!callbackUrl.trim() || waiting}
             onClick={() => void complete()}
             className="mt-2 w-full rounded-md bg-control px-2 py-1.5 font-medium text-ink disabled:opacity-50"
           >
@@ -441,7 +503,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
       )}
       {flow && !flow.pastedCode && (
         <>
-          <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
+          <button type="button" disabled={waiting} onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover disabled:opacity-50">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
           <div data-redirect-paste className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
@@ -450,13 +512,14 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             <input
               value={callbackUrl}
               onChange={(event) => setCallbackUrl(event.target.value)}
+              disabled={cancelling}
               aria-label={t("engineSetup.otherComputerUrl")}
               placeholder="http://127.0.0.1:…/?code=…"
-              className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
+              className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent disabled:opacity-50"
             />
             <button
               type="button"
-              disabled={!callbackUrl.trim() || busy !== null}
+              disabled={!callbackUrl.trim() || waiting}
               onClick={() => void complete()}
               className="mt-2 w-full rounded-md bg-control px-2 py-1.5 font-medium text-ink disabled:opacity-50"
             >
@@ -465,7 +528,10 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           </div>
         </>
       )}
-      {error && <p className="text-[12px] text-danger">{error}</p>}
+      {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
+      {onDone && <button type="button" aria-disabled={busy === "complete" || cancelling || undefined} aria-busy={cancelling || undefined}
+        onClick={busy === "complete" || cancelling ? undefined : () => void cancel()}
+        className="ui-button ui-button-md aria-disabled:opacity-50">{t("common.cancel")}</button>}
     </div>
   );
 }
@@ -709,7 +775,7 @@ export function EngineSetup({
       ))}
 
       {engineBrowserSignIn ? (
-        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} onStart={signInStarted} />
+        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} name={engineDisplayName(instance)} onStart={signInStarted} />
       ) : deviceSignIn || browserSignIn ? (
         <>
           <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} onStart={signInStarted} />

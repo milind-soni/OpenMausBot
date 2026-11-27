@@ -33,6 +33,8 @@ export interface CloudListEntry {
   removable?: true;
   /** A Ready Cloud whose plan sleeps: whether it is asleep now. */
   power?: import("./cloud-power.mjs").CloudPower;
+  /** An operation of the Admin's own has it down now (cloud-operation.mjs). */
+  operation?: import("./cloud-operation.mjs").CloudOperation;
 }
 /** What this app says of a listed Cloud it doesn't open: ended, its checkout not finished, a payment problem, or being set up. */
 export type CloudState = "ended" | "checkout" | "payment" | "setup";

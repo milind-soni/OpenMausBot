@@ -23,7 +23,10 @@ describe("the Skill Burger switch on the server", () => {
   });
 
   it("is a config.json field Settings can patch, with thread tabs beside it", () => {
-    expect(parseConfigPatch({ features: { skillBurger: false, threadTabs: true, roomFeed: true } })).toMatchObject({ features: { skillBurger: false, threadTabs: true, roomFeed: true } });
+    const patch = parseConfigPatch({ features: { skillBurger: false, threadTabs: true, roomFeed: false } });
+    expect(patch).toMatchObject({ features: { skillBurger: false, threadTabs: true } });
+    // The room feed's retired switch, from an older client, is dropped rather than refused.
+    expect(patch.features).not.toHaveProperty("roomFeed");
   });
 
   it("offers the run and edit tools while on, and neither once off", () => {

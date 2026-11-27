@@ -194,6 +194,10 @@ export interface Coordinator {
    * finished before that time. Reads only that thread's rows. */
   inThread(threadId: string, filter?: { open?: boolean; since?: number }): HandoffView[];
   active(): HandoffView[];
+  /** Live thread facts for a list page, including the first queued handoff per bot and thread. */
+  threadActivity(threads: ReadonlyMap<string, ReadonlySet<string>>): {
+    awaitingAnswer: Set<string>; activeDirect: Set<string>; queued: Map<string, Map<string, HandoffView>>;
+  };
   children(id: string): HandoffView[];
   /** A generation with no root is refused; throws an Error whose message is the typed refusal shown to the model. */
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,

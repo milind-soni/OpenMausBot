@@ -1,0 +1,2761 @@
+{
+  "agents": [
+    {
+      "name": "tool_result_read",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "list_room_targets",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "coordinate_bots",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "bot_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rework": {
+            "type": "boolean"
+          },
+          "thread": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "in_my_folder": {
+            "type": "boolean"
+          },
+          "reply": {
+            "type": "string",
+            "enum": [
+              "resume",
+              "none"
+            ]
+          },
+          "consult": {
+            "type": "boolean"
+          },
+          "done_when": {
+            "type": "string"
+          },
+          "answers": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5
+          }
+        },
+        "required": [
+          "bot_ids",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "assignment_status",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "wait_ms": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "list_bots",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "usage_limits",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "bot"
+            ],
+            "default": "subscription"
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "today",
+              "month"
+            ]
+          },
+          "thread": {
+            "type": "string",
+            "enum": [
+              "this"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_rooms",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "select_computer",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "cloud",
+              "vm",
+              "local",
+              "browser"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_threads",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "close_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "rename_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "set_main_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "clear": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "run_workflow",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "args": {
+            "type": "object"
+          },
+          "resume": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "response": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "workflow_edit",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "add_case",
+              "remove_case",
+              "set_when",
+              "undo"
+            ]
+          },
+          "decide": {},
+          "case": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "steps": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object"
+            }
+          },
+          "step": {
+            "type": "string"
+          },
+          "when": {},
+          "undo": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "name",
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "start_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "folder": {
+            "type": "string"
+          },
+          "model_selection": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instanceId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "effort": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "model"
+            ]
+          },
+          "report_back": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "burst",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          }
+        },
+        "required": [
+          "task",
+          "instructions",
+          "items"
+        ]
+      }
+    },
+    {
+      "name": "list_models",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "search": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "vm_exec",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "attach_file",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "show_widget",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "widget": {
+            "type": "object"
+          },
+          "fallback_text": {
+            "type": "string"
+          },
+          "widget_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "widget"
+        ]
+      }
+    },
+    {
+      "name": "show_html",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "html": {
+            "type": "string"
+          },
+          "jsx": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "height": {
+            "type": "number"
+          },
+          "fallback_text": {
+            "type": "string"
+          },
+          "frameless": {
+            "type": "boolean"
+          },
+          "live": {
+            "type": "boolean"
+          },
+          "uses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "app_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "publish_page",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "page_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]{20,63}$"
+          },
+          "live": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "unpublish_page",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]{20,63}$"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "post_to_room",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "group_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "attach_voice_note": {
+            "type": "boolean"
+          },
+          "mention_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "group_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "post_to_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "thread_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "wake": {
+            "type": "boolean"
+          },
+          "delivery_id": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "thread_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "create_bot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "copy_from_bot_id": {
+            "type": "string"
+          },
+          "modelSelection": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instanceId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "effort": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "model"
+            ]
+          },
+          "cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "list_team_setup",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_team_library",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "propose_team_setup",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "newTeams": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            }
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "create",
+                    "update"
+                  ]
+                },
+                "key": {
+                  "type": "string"
+                },
+                "botId": {
+                  "type": "string"
+                },
+                "fields": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "chiefOfStaff": {
+                      "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "soul": {
+                      "type": "string"
+                    },
+                    "soulAppend": {
+                      "type": "string"
+                    },
+                    "cwd": {
+                      "type": "string"
+                    },
+                    "section": {
+                      "type": "string",
+                      "maxLength": 60
+                    },
+                    "modelSelection": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "instanceId": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "effort": {
+                          "type": "string"
+                        },
+                        "variant": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "instanceId",
+                        "model"
+                      ]
+                    },
+                    "mcpServers": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "required": [
+                "action",
+                "fields"
+              ]
+            }
+          }
+        },
+        "required": [
+          "reason",
+          "operations"
+        ]
+      }
+    },
+    {
+      "name": "propose_bot_deletion",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bot_id": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "manage_room",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "add_members",
+              "remove_members",
+              "set_members",
+              "rename",
+              "set_bulletin",
+              "new_thread"
+            ]
+          },
+          "room_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "member_bot_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bulletin": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "request_credential",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "credential_id": {
+            "type": "string",
+            "enum": [
+              "xaiApiKey",
+              "boxToken",
+              "opencodeGoApiKey",
+              "ttsKey",
+              "geminiTtsKey",
+              "fishAudioKey",
+              "openaiImageApiKey",
+              "onePasswordToken",
+              "composioApiKey",
+              "openaiApiKey",
+              "anthropicApiKey",
+              "openrouterApiKey",
+              "mistralApiKey",
+              "cerebrasApiKey",
+              "groqApiKey",
+              "greenferenceApiKey",
+              "modelgoApiKey",
+              "metaApiKey",
+              "deepseekApiKey",
+              "email"
+            ]
+          },
+          "address": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "ref",
+              "file"
+            ]
+          },
+          "replace": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "request_sign_in",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instruction": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "sign_in",
+              "captcha",
+              "payment",
+              "approval",
+              "other"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "browser",
+              "computer"
+            ]
+          },
+          "site": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instruction",
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "fill_login",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "submit": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "decide",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "state": {
+            "type": "string"
+          },
+          "questions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "state",
+          "questions"
+        ]
+      }
+    },
+    {
+      "name": "extract",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object"
+            }
+          },
+          "text": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fields"
+        ]
+      }
+    },
+    {
+      "name": "what_changed",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "original_file": {
+            "type": "string"
+          },
+          "edited_file": {
+            "type": "string"
+          },
+          "original_text": {
+            "type": "string"
+          },
+          "edited_text": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "message_person",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "report_bug",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "went_wrong": {
+            "type": "string"
+          },
+          "you_saw": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "went_wrong"
+        ]
+      }
+    },
+    {
+      "name": "share",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "export",
+              "publish",
+              "publish_to_repo",
+              "add_to_team_library",
+              "import",
+              "list_team_library",
+              "import_from_team_library"
+            ]
+          },
+          "department": {
+            "type": "boolean"
+          },
+          "url": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "direct": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "memory_update",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "append",
+              "replace",
+              "remove",
+              "supersede",
+              "forget",
+              "prefer"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "old_text": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "thread",
+              "everywhere"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "retry_thread",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "bot_id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bot_id",
+          "thread_id"
+        ]
+      }
+    },
+    {
+      "name": "memory_log",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "session_search",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string"
+          },
+          "until": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "conversations",
+              "memory",
+              "team",
+              "threads"
+            ]
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "trigger_info",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "events"
+            ]
+          },
+          "trigger_id": {
+            "type": "string"
+          },
+          "include_address": {
+            "type": "boolean"
+          },
+          "for_bot_id": {
+            "type": "string"
+          },
+          "app": {
+            "type": "string"
+          },
+          "search": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "trigger",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "pause",
+              "resume",
+              "run_now"
+            ]
+          },
+          "trigger_id": {
+            "type": "string"
+          },
+          "when": {
+            "type": "string",
+            "enum": [
+              "schedule",
+              "app_event",
+              "webhook",
+              "limit_reset"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "schedule": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "once",
+                  "weekly",
+                  "daily",
+                  "interval",
+                  "cron"
+                ]
+              },
+              "expression": {
+                "type": "string"
+              },
+              "timeZone": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "at": {
+                "type": "string"
+              },
+              "time": {
+                "type": "string"
+              },
+              "weekdays": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday"
+                  ]
+                }
+              },
+              "every_minutes": {
+                "type": "integer"
+              },
+              "starts_at": {
+                "type": "string"
+              },
+              "window_start": {
+                "type": "string"
+              },
+              "window_end": {
+                "type": "string"
+              },
+              "ends_at": {
+                "type": "string"
+              },
+              "every_day": {
+                "type": "boolean"
+              },
+              "all_day": {
+                "type": "boolean"
+              },
+              "never_ends": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "webhook_event_types": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string"
+            }
+          },
+          "webhook_payload_filter": {
+            "type": "object",
+            "maxProperties": 10,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "subject_contains": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "contains": {
+                "type": "string"
+              }
+            }
+          },
+          "event_config": {
+            "type": "object"
+          },
+          "run_on": {
+            "type": "string",
+            "enum": [
+              "maus",
+              "box"
+            ]
+          },
+          "timeout_minutes": {
+            "type": "integer"
+          },
+          "clear_timeout": {
+            "type": "boolean"
+          },
+          "same_conversation": {
+            "type": "boolean"
+          },
+          "continuity": {
+            "type": "boolean"
+          },
+          "overlap": {
+            "type": "string",
+            "enum": [
+              "skip",
+              "queue"
+            ]
+          },
+          "run_on_startup": {
+            "type": "boolean"
+          },
+          "app": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "once",
+              "every_reset"
+            ]
+          },
+          "for_bot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "delete_trigger",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "trigger_id": {
+            "type": "string"
+          },
+          "for_bot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id"
+        ]
+      }
+    },
+    {
+      "name": "wait_until",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "url_contains",
+              "url_missing",
+              "file_exists",
+              "file_missing",
+              "file_changed",
+              "process_running",
+              "process_gone",
+              "bot_idle"
+            ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "process": {
+            "type": "string"
+          },
+          "bot": {
+            "type": "string"
+          },
+          "follow_up": {
+            "type": "string"
+          },
+          "hours": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "list_waits",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    {
+      "name": "cancel_wait",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "check_back",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "when": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "if": {
+            "type": "string"
+          },
+          "cancel": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "propose_profile",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "soul": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "notifications": {
+            "type": "boolean"
+          },
+          "speakReplies": {
+            "type": "boolean"
+          },
+          "browserProfile": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "reason": {
+            "type": "string"
+          },
+          "for_bot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "propose_model",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "model_selection": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instanceId": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "effort": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instanceId",
+              "model"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "for_bot_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_selection",
+          "reason"
+        ]
+      }
+    },
+    {
+      "name": "propose_team_memory",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "person",
+              "place",
+              "decision",
+              "term"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "detail": {
+            "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            }
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "detail"
+        ]
+      }
+    },
+    {
+      "name": "mcp_server",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "add",
+              "update",
+              "enable",
+              "disable",
+              "restart",
+              "test",
+              "sign_in",
+              "sign_out",
+              "remove"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "url": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "http",
+              "sse"
+            ]
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "oauth": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "clientId": {
+                "type": "string"
+              },
+              "clientSecret": {
+                "type": "string"
+              },
+              "scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "clientId"
+            ]
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "app_settings",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "find",
+              "get",
+              "set",
+              "show_card",
+              "places",
+              "theme",
+              "set_theme",
+              "add_theme_asset",
+              "theme_history",
+              "undo_theme"
+            ]
+          },
+          "query": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "value": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "card": {
+            "type": "string",
+            "enum": [
+              "other-computers",
+              "ai-sign-in"
+            ]
+          },
+          "theme": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "index": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    }
+  ],
+  "browser": [
+    {
+      "name": "agent_browser_status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_open",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^(?:new|t[1-9]\\d{0,8})$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_navigate",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "back",
+              "forward",
+              "reload"
+            ]
+          },
+          "readiness": {
+            "type": "string",
+            "enum": [
+              "load",
+              "domcontentloaded",
+              "networkidle",
+              "none"
+            ]
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_snapshot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "includeImage": {
+            "type": "boolean"
+          },
+          "save": {
+            "type": "boolean"
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000
+          },
+          "maxChars": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40000
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_screenshot",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fullPage": {
+            "type": "boolean"
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_click",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16384
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16384
+          },
+          "button": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "middle"
+            ]
+          },
+          "clickCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_fill",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 100000
+          },
+          "submit": {
+            "type": "boolean"
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_type",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 100000
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "clear": {
+            "type": "boolean"
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_press",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "modifiers": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "Alt",
+                "Control",
+                "Meta",
+                "Shift",
+                "ControlOrMeta"
+              ]
+            }
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_select",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "values": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_check",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "checked": {
+            "type": "boolean"
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_hover",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16384
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 16384
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_drag",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 16384
+              }
+            },
+            "additionalProperties": false
+          },
+          "to": {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 16384
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 16384
+              }
+            },
+            "additionalProperties": false
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_scroll",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "dx": {
+            "type": "number",
+            "minimum": -100000,
+            "maximum": 100000
+          },
+          "dy": {
+            "type": "number",
+            "minimum": -100000,
+            "maximum": 100000
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_upload",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "minItems": 1,
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_wait",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ms": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60000
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "selector": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "gone": {
+            "type": "boolean"
+          },
+          "urlIncludes": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "load": {
+            "type": "string",
+            "enum": [
+              "load",
+              "domcontentloaded",
+              "networkidle"
+            ]
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60000
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_eval",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "expression": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64000
+          },
+          "world": {
+            "type": "string",
+            "enum": [
+              "isolated",
+              "page"
+            ]
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_dialog",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "accept": {
+            "type": "boolean"
+          },
+          "promptText": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "accept"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_tabs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "list",
+              "new",
+              "switch",
+              "close"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 8192
+          },
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "agent_browser_close",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tab": {
+            "type": "string",
+            "pattern": "^t[1-9]\\d{0,8}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "restart_browser",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    }
+  ],
+  "data": [
+    {
+      "name": "data_load",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "csv",
+              "tsv",
+              "parquet",
+              "json",
+              "xlsx",
+              "sqlite",
+              "folder",
+              "url",
+              "postgres",
+              "mysql",
+              "gsheet"
+            ]
+          },
+          "sheet": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "replace": {
+            "type": "boolean"
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "header": {
+                "type": "boolean"
+              },
+              "delimiter": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4
+              },
+              "union_by_name": {
+                "type": "boolean"
+              },
+              "all_varchar": {
+                "type": "boolean"
+              },
+              "ignore_errors": {
+                "type": "boolean"
+              },
+              "sample_size": {
+                "type": "integer",
+                "minimum": -1,
+                "maximum": 10000000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "data_describe",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^c_[0-9]+$"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "data_sql",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$"
+          }
+        },
+        "required": [
+          "sql"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "data_show",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^c_[0-9]+$"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "table": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "table",
+              "chart"
+            ]
+          },
+          "chart": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "bar",
+                  "line",
+                  "area",
+                  "scatter",
+                  "histogram",
+                  "pie",
+                  "heatmap"
+                ]
+              },
+              "x": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "y": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "color": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "agg": {
+                "type": "string",
+                "enum": [
+                  "count",
+                  "sum",
+                  "avg",
+                  "min",
+                  "max",
+                  "median"
+                ]
+              },
+              "sort": {
+                "type": "string",
+                "enum": [
+                  "x",
+                  "-x",
+                  "y",
+                  "-y"
+                ]
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "stack": {
+                "type": "boolean"
+              },
+              "timeUnit": {
+                "type": "string",
+                "enum": [
+                  "hour",
+                  "day",
+                  "week",
+                  "month",
+                  "quarter",
+                  "year"
+                ]
+              },
+              "bins": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 500
+              },
+              "size": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "type",
+              "x"
+            ],
+            "additionalProperties": false
+          },
+          "vegaLite": {
+            "type": "object"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "data_export",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^c_[0-9]+$"
+          },
+          "table": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sql": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "parquet",
+              "xlsx",
+              "png",
+              "svg"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "format"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

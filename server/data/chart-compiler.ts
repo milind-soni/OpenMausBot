@@ -123,9 +123,10 @@ function binned(x: Resolved, channel: string, bins: number, bars: boolean): Dime
   SELECT min(${v}) AS lo,
          ${width} AS width
   FROM src
+  WHERE isfinite(${v})
 `,
   };
-  const bin = `CASE WHEN ${x.id} IS NULL THEN NULL ELSE least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) END`;
+  const bin = `CASE WHEN isfinite(${v}) THEN least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) ELSE NULL END`;
   const start = `${cte.name}.lo + ${bin} * ${cte.name}.width`;
   const end = `${channel}2`;
   return bars

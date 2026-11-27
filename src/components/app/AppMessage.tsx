@@ -15,6 +15,7 @@ import { appendComposerDraft, appendDraftAttachments } from "@/lib/drafts";
 import { returnFocusToComposer } from "../AskCard";
 import { useCanWriteIn } from "@/lib/cloud-guest";
 import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
+import { useSaveAsApp } from "./SaveAsApp";
 import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
@@ -210,7 +211,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const share = usePageShare(threadId, message.id, message.publishedPage);
   const save = usePageSave(threadId, message.id, payload.title);
   const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
-  const tools = { version, point, share, save, room, pin, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const saveApp = useSaveAsApp({ botId, threadId, messageId: message.id }, room || !page || !payload.doc);
+  const tools = { version, point, share, save, room, pin, saveApp, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);

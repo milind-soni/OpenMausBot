@@ -34,7 +34,7 @@ import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
 import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
-import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
+import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts"; import type { RoomThreadCloser } from "./room-threads.ts";
 import type { CompanionEndpointsSnapshot } from "./responses.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
@@ -585,7 +585,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** On a Team Cloud, a line in its person's inbox: who it is from and where it came from. */
   inbox?: InboxItem;
   /** thread chips: "Opened thread #Title on @X". */
-  threadRef?: { botId: string; threadId: string; title: string };
+  threadRef?: { botId: string; threadId: string; title: string }; /** The quiet line recording hand-offs to this bot ("Mochi asked me: …"): who asked, how many it folds, their threads. */ askedBy?: { botId: string; name: string; count?: number; threadIds?: string[] };
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
@@ -820,7 +820,7 @@ export interface GroupTask {
    * the global group turn limit. Direct chats do not use this limit. */
   turnTimeoutMinutes?: number;
   /** Epoch ms when the person archived this thread; absent while it is in the list. */ archivedAt?: number;
-  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you";
+  /** A card in this thread waits on the person, with no turn running. */ activity?: "waiting-on-you"; /** Epoch ms when someone marked its work finished, with who did; both absent while it is open, and any new person's line or bot reply opens it again. Nothing is hidden from bots or search. */ closedAt?: number; closedBy?: RoomThreadCloser;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   lastThreadOrderAt?: number;

@@ -1,5 +1,6 @@
 // A pairing code lives in main-process memory for one navigation: never persisted, never sent to a renderer, only in a link's hash.
 import environments from "./environments.cjs";
+import { parseCloudOperation } from "./cloud-operation.mjs";
 import nativeText from "./native-text.cjs";
 
 const { englishText } = nativeText;
@@ -77,8 +78,11 @@ export function parseCloudSummary(input) {
   const homecoming = record(input.hold) ? parseHomecoming(input.hold.homecoming) : null;
   const hold = record(input.hold) && moment(input.hold.until) ? { until: input.hold.until, ...(homecoming ? { homecoming } : {}) } : null;
   const formerOrigins = parseFormerOrigins(input.formerOrigins, origin);
+  // Additive: an operation of the Admin's own has it down now (an update, its rollback, a resize, a move, a restore or a start:
+  // cloud-operation.mjs). Never on a failed Cloud, whatever an Admin sends: that keeps its own screen and its Try again.
+  const operation = ["ready", "provisioning"].includes(status) ? parseCloudOperation(input.operation) : null;
   return { status, ...(origin ? { origin } : {}), ...(formerOrigins.length ? { formerOrigins } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}), ...(power ? { power } : {}),
-    ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}) };
+    ...(input.moves === true ? { moves: true } : {}), ...(hold ? { hold } : {}), ...(operation ? { operation } : {}) };
 }
 
 const UNREACHABLE_TEXT = Object.freeze({ host: "native.cloud.unreachable.host", no_answer: "native.cloud.unreachable.noAnswer" });

@@ -35,6 +35,8 @@ export interface BotLinkHostDeps {
   level(bot: BotRecord): Level;
   /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
   titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
+  /** One line in the receiving bot's main chat for each hand-off the other place sends it (server/host/handed-line.ts). */
+  handedLine?(input: { botId: string; threadId: string; from: { botId: string; name: string }; text: string }): void;
   refusal(bot: BotRecord): string | null;
   /** Why this bot cannot take work from the other place now (server/bot-link/far-side.ts), or null. */
   acceptRefusal?(bot: BotRecord): string | null;
@@ -110,6 +112,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
       return threadId;
     },
     hasThread: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
+    ...(deps.handedLine ? { handed: deps.handedLine } : {}),
     personName: deps.personName,
     files: {
       carried: deps.files.carried, crossed: deps.files.crossed,
@@ -171,6 +174,9 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
       if (!link.on() || places.kindOf(name) === "team") return places.explain(name);
       return { hint: link.reachableElsewhere() };
     },
+    /** A kind of the person's other places the link reaches now: its bots are in every roster and list_bots, so nothing
+     * says they can't be reached (places-elsewhere.ts `skip`). A team, which the link never joins, never is. */
+    reaches: (kind: string): boolean => link.on() && kind !== "team",
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
     start(): void {
       // Off: nothing, unless a room here still has a member from another place, which is then found and shown as away.

@@ -86,7 +86,7 @@ function entriesFor(messages: readonly ReviewMessage[], bot: { id: string; name:
     if (message.kind === "text" && message.text?.trim()) {
       if (message.role === "user") entries.push({ role: "person", speaker: "Person", text: message.text });
       else entries.push({ role: mine ? "self" : "other", speaker: mine ? bot.name : message.from?.name ?? "Another bot", text: message.text });
-    } else if (message.kind === "activity" && message.tool?.name && !message.tool.setup && mine) {
+    } else if (message.kind === "activity" && message.tool?.name && !message.tool.setup && !message.tool.nameCode?.startsWith("chat.notice.") && mine) {
       const detail = [message.tool.input, message.tool.summary].filter((part): part is string => Boolean(part?.trim())).map((part) => oneLine(part, 160)).join(" — ");
       entries.push({ role: "tool", speaker: bot.name, text: `${message.tool.name}${message.tool.ok === false ? " (failed)" : ""}${detail ? `: ${detail}` : ""}` });
     } else if (message.kind === "options" && message.card?.skillRequest && (message.card.skillRequest.botId === bot.id)) {

@@ -13,6 +13,7 @@ import { nameFromEmail, ownerEmail } from "../../shared/bot-owner.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { mentionablePeople, teammateMentions } from "../../shared/person-mention.ts";
 import type { InboxView } from "../../shared/inbox.ts";
+import { countsForYou } from "../../shared/inbox-reason.ts";
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { audienceMember, type Audience } from "../audience.ts";
@@ -211,7 +212,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
 
   /** A board item's bot asks a teammate (by name or address, else by person key) in a room thread: the question reaches
    * their inbox, from the bot, and their answer comes back to that thread. No hourly cap: a bot asks once per item turn. */
-  function ask(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): Passed & { person?: string } {
+  function ask(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): Passed & { person?: string; name?: string } {
     const at = where(botId, threadId);
     if (!team || !at?.group) return { status: 403, text: "Only a bot in this room can ask from it." };
     if (deps.confined?.(threadId)) return { status: 403, text: OUTSIDE_REFUSAL };
@@ -220,9 +221,9 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const person = found.person;
     if (!person) return { status: 404, text: "Nobody here was named, and nobody made this item: name the person to ask." };
     if (!deps.sees(person).thread(threadId)) return { status: 403, text: `${person.name} can't see this room, so they can't answer here. Ask someone who can.` };
-    const delivered = inbox.deliver(person.key, { kind: "message", from: { name: at.bot.name, botId: at.bot.id }, to: "bot", origin: originOf(at, threadId), text: question, title, notify: "mention" });
+    const delivered = inbox.deliver(person.key, { kind: "message", reason: "asked", from: { name: at.bot.name, botId: at.bot.id }, to: "bot", origin: originOf(at, threadId), text: question, title, notify: "mention" });
     if (!delivered) return { status: 409, text: `${person.name} has no inbox here yet, so the question waits in this thread for anyone who sees it.` };
-    return { status: 200, text: `Asked ${person.name} in their inbox.`, person: person.key };
+    return { status: 200, text: `Asked ${person.name} in their inbox.`, person: person.key, name: person.name };
   }
 
   const handledTurns = new Set<string>();
@@ -251,7 +252,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       if (!to || to.key === writer?.key) continue;
       const shown = deps.sees(to).thread(threadId);
       inbox.deliver(to.key, {
-        kind: "message", from: writer ? { name: writer.name, email: writer.email } : { name: writerName },
+        kind: "message", reason: "mentioned", from: writer ? { name: writer.name, email: writer.email } : { name: writerName },
         ...(writer ? { to: "person" as const, asker: writer.key } : {}), origin: originOf(at, threadId, line.id), text: hit.excerpt,
         title: shown ? `${writerName} mentioned you in ${at.group?.name ?? at.bot.name}` : `Message from ${writerName}`, notify: "mention", representable: Boolean(writer),
       });
@@ -279,7 +280,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
         if (!to || told.has(to.key) || !deps.sees(to).thread(threadId)) continue;
         told.add(to.key);
         inbox.deliver(to.key, {
-          kind: "message", from: { name: speaker.name, botId: speaker.id }, to: "bot", origin: originOf(at, threadId, text.id), text: hit.excerpt,
+          kind: "message", reason: "mentioned", from: { name: speaker.name, botId: speaker.id }, to: "bot", origin: originOf(at, threadId, text.id), text: hit.excerpt,
           title: group ? `${speaker.name} mentioned you in ${group.name}` : `${speaker.name} mentioned you`, notify: "mention", representable: true,
         });
       }
@@ -400,12 +401,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const me = sessionPerson(auth);
       return team && me ? inbox.view(me.key) : null;
     },
-    /** How many of the viewer's lines wait on them. */
+    /** How many of the viewer's For you lines wait on them, the number the inbox shows; Activity is never counted. */
     count(auth: RequestAuth): number | null {
       if (!team && deps.place) return deps.place.count(auth);
       const me = sessionPerson(auth);
       const view = team && me ? inbox.view(me.key) : null;
-      return view ? view.rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length : null;
+      return view ? view.rows.filter(countsForYou).length : null;
     },
     /** The viewer is done with a line of news in their inbox. */
     markDone(auth: RequestAuth, id: string): ReturnType<PersonInbox["markDone"]> {
@@ -413,11 +414,11 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const me = sessionPerson(auth);
       return team && me ? inbox.markDone(me.key, id) : "unknown";
     },
-    /** The viewer read a line of their inbox. */
-    markRead(auth: RequestAuth, id: string): boolean {
-      if (!team && deps.place) return deps.place.markRead(auth, id);
+    /** The viewer read a line of their inbox, or marked it unread again. */
+    markRead(auth: RequestAuth, id: string, read = true): boolean {
+      if (!team && deps.place) return deps.place.markRead(auth, id, read);
       const me = sessionPerson(auth);
-      return Boolean(team && me && inbox.markRead(me.key, id));
+      return Boolean(team && me && inbox.markRead(me.key, id, read));
     },
     /** The viewer read every line of their inbox; null for someone on a team without one. */
     markAllRead(auth: RequestAuth): number | null {

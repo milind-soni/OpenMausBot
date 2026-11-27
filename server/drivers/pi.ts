@@ -276,6 +276,9 @@ interface PiEvent {
   usage?: PiUsage;
   isTerminal?: boolean;
   willRetry?: boolean;
+  agentInvoked?: boolean;
+  status?: string;
+  error?: { message?: string };
   id?: string;
   method?: string;
   options?: unknown[];
@@ -722,6 +725,13 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             finishRun();
             return;
           }
+          case "prompt_result":
+            // agentInvoked false: omp failed the prompt before the agent ran, so no turn_end or agent_end follows.
+            if (evt.agentInvoked !== false) return;
+            endStopReason = evt.status;
+            endErrorMessage = evt.error?.message;
+            finishRun();
+            return;
           case "agent_settled": {
             // upstream pi's explicit fully-settled guarantee: no retry or queued continuation remains.
             if (agentEndTimer) {

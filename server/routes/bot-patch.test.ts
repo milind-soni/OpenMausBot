@@ -265,6 +265,53 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect(refused.body.error).toBe(VPS_BOT_ALIAS_CHANGE_ERROR);
     expect(scan).toHaveBeenCalledTimes(3);
   });
+
+  it("notifies vpsServerSwitched only when a committed patch changes the resolved SSH alias", async () => {
+    const switched: Array<string | undefined> = [];
+    const { store, bot, patch } = fixture({
+      vpsServerSwitched: (updated) => { switched.push(updated.vpsAlias); },
+    });
+
+    expect((await patch(bot.id, { vpsAlias: "production-vps" })).status).toBe(200);
+    expect((await patch(bot.id, { vpsAlias: null })).status).toBe(200);
+    expect(switched).toEqual([]);
+
+    expect((await patch(bot.id, { vpsAlias: "gamma-vps" })).status).toBe(200);
+    expect(switched).toEqual(["gamma-vps"]);
+
+    scan.mockResolvedValueOnce({
+      ...emptyInventory(),
+      instances: [{
+        name: vps.vpsContainerName(bot.id),
+        state: "running",
+        vpsAlias: "gamma-vps",
+        ownerBotId: bot.id,
+        ownerName: bot.name,
+        orphaned: false,
+        inUse: false,
+      }],
+    });
+    expect((await patch(bot.id, { vpsAlias: "delta-vps" })).status).toBe(409);
+    expect((await patch(bot.id, { vpsAlias: "delta-vps", toolsOff: ["browser"] })).status).toBe(400);
+    store.patchBot(bot.id, { busy: true });
+    expect((await patch(bot.id, { vpsAlias: "delta-vps" })).status).toBe(409);
+    expect(switched).toEqual(["gamma-vps"]);
+
+    store.patchBot(bot.id, { busy: false });
+    expect((await patch(bot.id, { vpsAlias: null })).status).toBe(200);
+    expect(switched).toEqual(["gamma-vps", undefined]);
+  });
+  it("notifies vpsServerSwitched for a committed alias even when the profile save that follows throws", async () => {
+    const switched: Array<string | undefined> = [];
+    const { store, bot, patch } = fixture({
+      vpsServerSwitched: (updated) => { switched.push(updated.vpsAlias); },
+    });
+    vi.spyOn(store, "patchBotProfile").mockImplementation(() => { throw new Error("saveBots failed"); });
+
+    await expect(patch(bot.id, { vpsAlias: "gamma-vps", soul: "New instructions" })).rejects.toThrow("saveBots failed");
+    expect(store.bot(bot.id)?.vpsAlias).toBe("gamma-vps");
+    expect(switched).toEqual(["gamma-vps"]);
+  });
 });
 
 describe("PATCH /api/bots/:id defaultBot: null", () => {
@@ -587,7 +634,7 @@ describe("PATCH /api/bots/:id unread", () => {
 
 describe("PATCH /api/bots/:id fallback", () => {
   it("checks a backup's reasoning as a model choice is checked, saves what that check returns, and passes plain rows as before", async () => {
-    const engine = { instanceId: "codex", driverKind: "codex", enabled: true } as unknown as ProviderInstance;
+    const engine = { instanceId: "codex", driverKind: "codex", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
     const checkedModelSelection = vi.fn((raw: unknown) => {
       const row = raw as ModelSelection;
       return row.effort === ("turbo" as never)
@@ -613,5 +660,37 @@ describe("PATCH /api/bots/:id fallback", () => {
     ]);
     // A row with no reasoning is saved as it was, without the model check a reasoning choice needs.
     expect(checkedModelSelection).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses a new backup that cannot take over the bot's workspace", async () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
+    const openai = { instanceId: "openai", driverKind: "openai-compat", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
+    const { store, bot, patch } = fixture({ registry: { get: (id: string) => id === "claude" ? claude : id === "openai" ? openai : null } } as unknown as Partial<BotPatchRouteDeps>);
+
+    const refused = await patch(bot.id, { fallback: [{ instanceId: "openai", model: "gpt-5" }] });
+    expect(refused).toEqual({ status: 400, body: { error: "The backup cannot use the same workspace." } });
+    expect(store.bot(bot.id)?.fallback).toBeUndefined();
+
+    expect((await patch(bot.id, { fallback: [{ instanceId: "claude", model: "claude-haiku-5" }] })).status).toBe(200);
+  });
+
+  it("refuses a new backup that drops a tool the primary uses", async () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", enabled: true, adapter: { capabilities: { composioMcp: true } } } as unknown as ProviderInstance;
+    const bare = { instanceId: "other-claude", driverKind: "claudeAgent", enabled: true, adapter: { capabilities: { composioMcp: false } } } as unknown as ProviderInstance;
+    const { bot, patch } = fixture({ registry: { get: (id: string) => id === "claude" ? claude : id === "other-claude" ? bare : null } } as unknown as Partial<BotPatchRouteDeps>);
+
+    const refused = await patch(bot.id, { fallback: [{ instanceId: "other-claude", model: "claude-haiku-5" }] });
+    expect(refused).toEqual({ status: 400, body: { error: "The backup does not support all of this AI's tools and attachments." } });
+  });
+
+  it("keeps an already-saved incompatible backup editable", async () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
+    const openai = { instanceId: "openai", driverKind: "openai-compat", enabled: true, adapter: { capabilities: {} } } as unknown as ProviderInstance;
+    const { store, bot, patch } = fixture({ registry: { get: (id: string) => id === "claude" ? claude : id === "openai" ? openai : null } } as unknown as Partial<BotPatchRouteDeps>);
+    store.patchBot(bot.id, { fallback: [{ instanceId: "openai", model: "gpt-5" }] });
+
+    const saved = await patch(bot.id, { fallback: [{ instanceId: "openai", model: "gpt-5" }, { instanceId: "claude", model: "claude-haiku-5" }] });
+    expect(saved.status).toBe(200);
+    expect(store.bot(bot.id)?.fallback).toEqual([{ instanceId: "openai", model: "gpt-5" }, { instanceId: "claude", model: "claude-haiku-5" }]);
   });
 });

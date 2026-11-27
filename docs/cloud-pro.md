@@ -1742,7 +1742,7 @@ not open the browser.
 | Status | Body | Meaning |
 | --- | --- | --- |
 | `401` | `{"error":"invalid_signature"}` | Wrong key, tampered request, or malformed headers. Counts toward the per-source pairing lockout. |
-| `401` | `{"error":"stale_request"}` | Timestamp more than 300 s from the machine's clock. |
+| `401` | `{"error":"stale_request"}` | Timestamp more than 300 s from the machine's clock (or, while the home has measured its clock off, from the measured true time: "The home's clock" below). A health, power or diagnose read's refusal adds `clockErrorMs` when the home has measured its clock. |
 | `401` | `{"error":"replayed_request"}` | Nonce already used in the last 10 minutes. |
 | `429` | `{"error":"rate_limited","retryAfterSeconds":n}` | Too many bad signatures from this source. |
 | `400` | `invalid_body`, `invalid_label`, `invalid_ttl`, `invalid_purpose`, `invalid_owner` | Not a JSON object; label not plain text of 80 characters or fewer; TTL not a positive integer; `purpose` present and not `"browser"`; `owner` missing on a browser sign-in, or not one email address of 254 characters or fewer in printable ASCII with exactly one `@` and no `<` or `>`. |
@@ -1798,9 +1798,40 @@ wait for the next read, `truncated: true`):
   "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2,
     "boot": { "waits": 5, "stopped": 1, "killed": 1, "stallMinutes": 4 } },
   "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
-    "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } }
+    "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } },
+  "clock": { "v": 1, "errorMs": 21660000, "measuredAt": 1790021660000 },
+  "signIns": { "attempts": 3, "open": 0,
+    "engines": [{ "kind": "claudeAgent", "attempts": 3, "completed": 0, "last": { "outcome": "interrupted", "at": 1790000780000 } }],
+    "recent": [{ "kind": "claudeAgent", "method": "paste-code", "outcome": "wrong_code", "at": 1790000420000 },
+               { "kind": "claudeAgent", "method": "paste-code", "outcome": "interrupted", "at": 1790000780000 }] }
 }
 ```
+
+**`signIns`** is the home's engine sign-ins (`server/sign-in-trace.ts`, kept
+in `sign-in-trace.json` so a stop can't wipe it): `attempts` since the first
+one (each press of an engine's sign-in), how many are `open` now, per engine
+kind its attempts, completed ones and the last event, and the last 10 events
+(`started`, or an outcome). An outcome is a fixed code
+(`shared/sign-in-outcome.ts`): `completed`, `wrong_code` (a pasted code that
+is not a code; the sign-in stays open), `refused` (the provider refused it),
+`expired`, `cancelled`, `exited` (the engine's login command ended),
+`interrupted` (the server stopped or restarted under it, which the next boot
+records, or the engine's settings changed), `not_installed`, `timed_out` or
+`failed`. `method` is the provider card's (`paste-code`, `device-code`,
+`browser-pkce`, `browser`, `callback-url`). Never a code, link, account,
+session or flow. Each event is also one log line, such as `sign-in:
+claudeAgent paste-code wrong_code after 1m 12s`. Left out when it can't be
+read; older homes don't send it, and an Admin that doesn't know it drops it.
+The sign-in status the screen polls (`GET /api/instances/<id>/auth/status`)
+carries the same code as `reason` on a finished sign-in, and an error from
+`auth/start`, `auth/complete` or `auth/cancel` carries it as `reason` where
+known: a flow the server's stop cut short reads `{"phase":"failed",
+"reason":"interrupted"}`.
+
+**`clock`** is the home's clock as it last measured it ("The home's clock"
+below): `errorMs` how far it is behind the true time (negative: ahead), and
+`measuredAt` when, in true time; both `null` when nothing measured it in the
+last 10 minutes. Older homes don't send it.
 
 **`speed`** says how fast the machine is for this home (`server/cloud-speed.ts`),
 read from `/proc` when the report is built, with no timer or sampler of its
@@ -1995,6 +2026,66 @@ updates; a cloud computer that fails a turn arrives as its place's code
 A home from before this answers `404`; the Admin then reads `/api/health`
 and shows its health as Unknown.
 
+## The home's clock
+
+A home its provider suspended and resumed is meant to get its clock set on
+resume; once in a while it isn't, and both its wall clock and its monotonic
+clock stopped while it was suspended, so the home can't tell by itself (Nov
+2026: one home ran 6 h behind for 8+ hours, another 40 minutes behind for
+10.5 hours; the Admin's signed reads were all `stale_request`, and routines
+ran late). Measured on the provider's smallest machine (Nov 26 2026): its own
+init holds the host's PTP clock and puts the guest's clock right within about
+2.5 s of any change, and resumes after 5, 20 and 60 minutes came back right; a
+home that stays behind is one whose init stopped keeping its clock, and a
+restart fixes it. The Admin also sets such a clock from outside. `server/cloud-clock.ts`:
+
+- **What starts a look.** A signed request from the Admin with a valid
+  signature whose timestamp is 30 s or more from the home's clock, any wake
+  (`server/cloud-power.ts`: a resume it noticed, a boot from sleep, the clock
+  set forward), and the supervisor's own look every 10 minutes at one host. A
+  request's timestamp is never taken as the time.
+- **What it trusts.** The `Date` header of a fresh `HEAD /` to the home's
+  Admin, the account service and a phone relay. An answer slower than 4 s or
+  with an `Age` header is dropped. The largest group of two or more answers
+  within 3 s of each other gives the time, and it must hold the Admin's own
+  answer (one host with a wrong clock is outvoted; two hosts that aren't the
+  Admin never move the clock); two such groups, or none, and nothing is
+  measured. An error over 14 days (longer than any suspend) is not believed:
+  nothing is set or let through on it. At most one look a minute. A clock
+  20 to 34 days behind can't measure at all: the hosts' certificates aren't
+  valid yet for it.
+- **Who sets it.** Only the root supervisor (`server/cloud-clock-keeper.ts`),
+  which measures again by itself and then runs `date -u -s`, forward only, for
+  an error of 30 s or more. The true time is anchored on the monotonic clock as
+  its measurement starts, and it steps only if the wall clock is still 30 s or
+  more behind at that moment (the platform may set it right meanwhile). The server writes a payload-free `check` line to
+  it on an inherited pipe (`OMB_CLOUD_CLOCK_FD`); whatever is written there
+  can make it look at most once a minute, never pick a time. It needs
+  CAP_SYS_TIME: a home that runs as its own VM has it; a Docker container
+  doesn't (those never suspend), so there it only logs and measures. It logs
+  the clock source, a PTP clock and CAP_SYS_TIME at start.
+- **The Admin's reads meanwhile.** While a measurement in the last 10 minutes
+  says the clock is 30 s or more off, every signed request must fit the
+  measured true time (a request signed hours ago that only fits the wrong
+  clock is refused), and the health, power and diagnose reads (`GET` only)
+  pass on that alone. Pairing, the sleep request and every other signed request still need
+  the home's own clock. Nonces expire on the monotonic clock, so a step never
+  forgets one early.
+- **The home's own calls to the Admin.** Phone notifications, the wake
+  notice, Pages, Slack, the team's rules and roster, and bug report status are
+  signed with the measured true time while a measurement says the clock is
+  30 s or more off (`cloudSignedTimestamp`), so they still pass the Admin's
+  check before the clock is set. The wake notice waits for the measurement
+  the wake starts.
+- **What a step forward does.** Node's timers run on the monotonic clock and
+  carry on. The power loop sees a jump and runs its wake handling (the Admin
+  hears the home woke). Due routines run within a minute (`server/due-timer.ts`),
+  each once: its newest occurrence, the ones before closed on one counted row
+  (`server/routine-catch-up.ts`). A running turn's watchdog takes a jump for a
+  suspend, and the unattended-turn limit counts on the monotonic clock, so no
+  turn is stopped for the hours skipped. What was written while the clock was
+  behind keeps its times.
+
 ## Sleeping homes: the power read and the sleep handshake
 
 A plan may let its home **sleep when idle**: the Admin suspends the machine
@@ -2017,7 +2108,9 @@ judge a pending timer by a wall-clock time stored when it was set.
   send; one parked on a person's answer doesn't count), no Live call, no cloud
   computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
-  engine or browser install, a provider sign-in) and no request in progress;
+  engine or browser install, a provider sign-in until it finishes, fails, is
+  cancelled or reaches its own expiry, at most 15 minutes for every engine) and no
+  request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
   A use is an authenticated request, except the event stream, `/api/health`,
   `/api/sync/…`, `/api/shared-computers/…` and requests the page marks
@@ -2294,30 +2387,53 @@ a later launch, in the list's order. A new notice is one entry in `NOTICES` and
 its fact in AppNotices. So What's new and Boat's credit offer never share a
 launch: What's new comes first, and the Boat card waits for a later one.
 
-1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11`):
-   one centered popup with slides, **Next** and **Back**, its dots and the arrow
-   keys, once per person: a close is kept in the workspace record, in the page's
-   storage and in this desktop's own record (`electron/desktop-prefs.mjs`), so
-   every port the app's page is served on agrees. A new campaign id shows it
-   once more. Only on this computer's page of the installed app (never My
-   Cloud's or a saved server's page, a remote client's window, a branded build
-   or a desktop signed in with an organization), never during setup (the welcome,
-   the tour), a call, another dialog, busy work or an update being offered,
-   never in the launch whose welcome finished or before a new install's first
-   reply, and after MausBot's first-launch card. `lib/whats-new.ts` decides the
-   slides from the account the app already holds (its plan, its trial, its
-   teams and its Clouds list):
-   - **No Cloud plan** (signed out, or signed in with none): **Meet the new
-     MausBot Cloud**, the Cloud website's Home pictured in the skin's light or
-     dark, then **Team**.
-   - **A Cloud plan of one's own**, in no team: the Team slide only.
-   - **In a team** (any role, a Team or Business plan, or a team's Cloud in the
-     Clouds list), a payment being linked or needing attention, a checkout or
-     another Cloud being bought, or a sign-in that can't be checked: nothing
-     (the last ones on a later launch).
+1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11c`):
+   one centered popup with its slides, **Next** and **Back**, its dots
+   and the arrow keys, each slide with a short loop of the app itself (its
+   still where motion is reduced) or a picture drawn from the app's own
+   labels, once per person: a close is kept in the
+   workspace record (on a Team Cloud, the person's own), in the page's storage
+   and in this desktop's own record (`electron/desktop-prefs.mjs`), so every
+   port the app's page is served on agrees. A close also counts as seeing the
+   earlier What's new (`whats-new-2026-11b`, `whats-new-2026-11`), the Teams
+   popup and ModelGo's sponsor card, so nobody sees those again; a new campaign
+   id shows it once more to everyone who closed them. It is the launch's notice,
+   centred, on every page but a branded build's, never during setup (the
+   welcome, the tour), before a new install's first reply, a call, a move,
+   another dialog, busy work or an update being offered, and never in the
+   launch MausBot's first-launch card took. In the launch a new install's
+   welcome finished, it comes once the first chat has had its first reply.
+   `lib/whats-new.ts` decides the slides (`whatsNewCarousel`), in this order:
+   - **Your apps have a home**, for everyone: where the apps the bots build
+     are (Published apps, under the section that page lists them in), and
+     **Open apps**, which opens Published apps. The words about opening an
+     app in its own window and installing it are only on this computer's
+     page of the desktop app, which can do both.
+   - **Publish your bots**, for everyone: Publish in the bot's ⋯ menu, then
+     Publish to community. It only tells; it has no button.
+   - **Meet the new MausBot Cloud**: on this computer's page of a desktop that
+     sells the Cloud and no organization runs, for someone with no Cloud plan
+     (signed out, or signed in with none). Whoever has a Cloud (a plan of
+     their own or a team's, or this page is a Cloud's) gets **What's new in
+     MausBot Cloud** instead, which only tells.
+   - **Team**: for anyone who can start a team (on the website, or in the
+     app's Add a Cloud for a plan of one's own on this desktop) and a Team
+     Cloud's Owner and Admins (**Invite your team**, the team's People page).
+     Someone already in a team, or a Team Cloud's member, gets **What's new
+     for your team** instead, which only tells and sells nothing.
+   - **Your bots are in one list now**, last: the notice of This computer and
+     My Cloud together, with its switches, where its corner notice would show
+     and main calls it due and it was never drawn. Main hears that it was
+     shown, which turns the default on, only once that slide is on screen;
+     someone who closes What's new before it gets the corner notice on a
+     later launch.
 
-   A slide shows only while the Admin's offer sells its plan, with that plan's
-   price from the offer (the Team plan's free trial when it has one). Every
+   A slide that only tells has no **Not now**; the last slide, when it only
+   tells, ends with **Got it**.
+
+   A plan slide shows only while the Admin's offer sells its plan, with that
+   plan's price from the offer (the Team plan's free trial when it has one);
+   where the offer isn't read, Team's listed price. Every
    button carries the slide's tag on the Cloud's funnel (`app_whats_new_pro`,
    `app_whats_new_team`): **Get Pro** opens the Add a Cloud dialog with
    `source: app_whats_new_pro`, which its checkout sends; **See the new Cloud**

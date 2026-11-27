@@ -6,6 +6,7 @@ import { BOTS_SECTION_ID, userSectionName } from "@/lib/sidebar-layout";
 import { BOT_ROW_DRAG_TYPE, botDropPlace, botListOf, planBotDrop, sameBotDrop, savedPlacement, stepBot, unusedName, type BotDrop, type BotDropPlace, type BotMove } from "@/lib/sidebar-bot-drop";
 import type { Action, Bot } from "@/state/store";
 import { moveBotsToSection, renameDepartment, saveBotOrder, useMayMoveBots } from "./bot-sections";
+import type { OneListRoute } from "./one-list-sidebar";
 
 /** The department being named, before it exists. The server trims names and never keeps a control character. */
 export const NEW_DEPARTMENT = "\u0000new";
@@ -22,7 +23,7 @@ export type SectionNaming = { value: string; label: string; onCommit: (name: str
 type Naming = { kind: "new"; botIds: string[]; name: string } | { kind: "rename"; section: string };
 
 /** `lists` hold each list's saved order, `shown` the order drawn (working or waiting bots, `floating`, first). */
-type Arranged = { enabled: boolean; lists: Map<string, string[]>; shown: Map<string, string[]>; floating: Set<string>; bots: Bot[]; taken: string[]; withinList: boolean };
+type Arranged = { enabled: boolean; lists: Map<string, string[]>; shown: Map<string, string[]>; floating: Set<string>; bots: Bot[]; taken: string[]; withinList: boolean; route?: OneListRoute };
 
 /** A list as the sidebar draws it: working or waiting bots first, each part in its saved order. */
 const drawnOrder = (ids: readonly string[], floating: ReadonlySet<string>) => [...ids.filter((id) => floating.has(id)), ...ids.filter((id) => !floating.has(id))];
@@ -73,13 +74,19 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   const startNew = (botIds: string[]) => setNaming({ kind: "new", botIds, name: unusedName(t("sidebar.section.newName"), latest.current.taken) });
   const apply = (botId: string, move: BotMove, keyboard: boolean) => {
     if (move.kind === "group") return startNew(move.botIds);
-    const { lists, shown, bots, floating } = latest.current;
+    const { lists, shown, bots, floating, route } = latest.current;
     const order = savedPlacement(lists.get(move.section) ?? [], move.order, botId, (id) => floating.has(id)), after = drawnOrder(order, floating);
-    const across = botListOf(lists, botId) !== move.section;
+    const from = botListOf(lists, botId), across = from !== move.section;
     // Alt+Up/Down past a bot that floats otherwise changes nothing drawn: no move, so nothing to say.
     if (keyboard && !across && after.every((id, index) => id === shown.get(move.section)?.[index])) return;
-    if (across) moveBotsToSection(actions.current.dispatch, [botId], move.section);
-    saveBotOrder(actions.current.dispatch, bots, order);
+    // With the one list on, this page's server hears only of its own bots; main keeps where the other place's go, and
+    // each list a bot left or joined is written again there, so no bot is kept under one that moved away.
+    if (across && (!route || route.server(botId))) moveBotsToSection(actions.current.dispatch, [botId], move.section);
+    saveBotOrder(actions.current.dispatch, bots, route ? order.filter((id) => route.server(id)) : order);
+    if (route) {
+      if (across && from !== undefined) route.place(from, (lists.get(from) ?? []).filter((id) => id !== botId), botId);
+      route.place(move.section, order, botId);
+    }
     if (!keyboard) return;
     const name = bots.find((bot) => bot.id === botId)?.name ?? "";
     actions.current.announce(t("sidebar.section.moved", { name, position: after.indexOf(botId) + 1, count: after.length }));
@@ -103,7 +110,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   };
   const rowDrop = (event: DragEvent<HTMLElement>, botId: string): BotDrop => {
     const box = event.currentTarget.getBoundingClientRect();
-    const canGroup = !latest.current.withinList && botListOf(latest.current.lists, botId) === "";
+    const canGroup = !latest.current.withinList && botListOf(latest.current.lists, botId) === "" && latest.current.route?.group !== false;
     return { kind: "row", botId, place: botDropPlace(event.clientY - box.top, box.height, canGroup) };
   };
 
@@ -144,13 +151,15 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
   const finishNaming = (current: Naming, draft: string) => {
     setNaming(null);
     if (current.kind === "new") {
-      const name = draft.trim() || current.name;
-      moveBotsToSection(dispatch, current.botIds.filter((id) => latest.current.bots.some((bot) => bot.id === id && !bot.hidden)), name);
+      const name = draft.trim() || current.name, route = latest.current.route;
+      moveBotsToSection(dispatch, current.botIds.filter((id) => (!route || route.server(id)) && latest.current.bots.some((bot) => bot.id === id && !bot.hidden)), name);
+      route?.place(name, current.botIds.filter((id) => route.kept(id)));
       onNamed(name);
       return;
     }
     const to = nextRename(current.section, draft);
-    if (to) renameDepartment(dispatch, current.section, to).then(() => onRenamed(current.section, to), (cause) => onError(failure(cause)));
+    const route = latest.current.route, from = current.section;
+    if (to) (route ? route.rename(from, to, () => renameDepartment(dispatch, from, to)) : renameDepartment(dispatch, from, to)).then(() => onRenamed(from, to), (cause) => onError(failure(cause)));
   };
 
   return {
@@ -160,15 +169,17 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
     startRename: (section: string) => setNaming({ kind: "rename", section }),
     /** `main` and `sectioned` in their saved order; `floats` says which bots the sidebar draws first in their list. A drop
      * or Alt+Up/Down moves a bot among the rows as drawn, and is saved into the saved order (savedPlacement). */
-    arrange({ enabled, withinList = false, main, sectioned, departments, bots, taken, floats }: {
+    arrange({ enabled, withinList = false, main, sectioned, departments, bots, taken, floats, route }: {
       enabled: boolean; withinList?: boolean; main: Bot[]; sectioned: Bot[]; departments: string[]; bots: Bot[]; taken: string[]; floats?: (bot: Bot) => boolean;
+      /** With the one list on: which bots this page's server arranges, which main keeps, and which stay put here. */
+      route?: OneListRoute;
     }) {
       const movable = enabled && mayMove;
       const lists = new Map<string, string[]>([["", main.map((bot) => bot.id)]]);
       for (const name of departments) if (name !== NEW_DEPARTMENT) lists.set(name, sectioned.filter((bot) => bot.section === name).map((bot) => bot.id));
       const floating = new Set(floats ? [...main, ...sectioned].filter(floats).map((bot) => bot.id) : []);
       const drawn = new Map([...lists].map(([name, ids]) => [name, drawnOrder(ids, floating)]));
-      latest.current = { enabled: movable, lists, shown: drawn, floating, bots, taken, withinList };
+      latest.current = { enabled: movable, lists, shown: drawn, floating, bots, taken, withinList, route };
       const listOf = new Map<string, string>();
       for (const [list, ids] of lists) for (const id of ids) listOf.set(id, list);
       const active = movable && dragging !== null && listOf.has(dragging) ? dragging : null;
@@ -186,7 +197,7 @@ export function useSidebarBotDrag({ dispatch, announce, onNamed, onRenamed, onEr
       };
       return {
         row: (botId: string): { botDrag?: BotRowDrag; botDrop?: BotDropPlace | null; botDragging?: boolean } => {
-          if (!movable || !listOf.has(botId)) return {};
+          if (!movable || !listOf.has(botId) || (route && !route.movable(botId))) return {};
           const place = shown?.kind === "row" && shown.botId === botId ? shown.place
             : shown?.kind === "end" && shown.list === "" && botId === mainIds.at(-1) ? "after" : null;
           return { botDrag: controller.current!, botDrop: place, botDragging: active === botId };

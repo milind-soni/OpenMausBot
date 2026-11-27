@@ -10,6 +10,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
 import { linkPlainPaths } from "../shared/markdown-plain-paths.ts";
 import { PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
+import { outsideFileRefused } from "./outside-file-guard.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 import { userErrorThrown } from "./user-errors.ts";
 
@@ -380,6 +381,65 @@ export function mimeFor(path: string): string {
   }
 }
 
+async function openCanonicalMessageFile(
+  candidate: string,
+  canonicalBefore: string,
+  maxBytes: number,
+  isAllowedAfter: (canonicalAfter: string) => boolean,
+): Promise<OpenedMessageFile> {
+  if (inSecretFolder(canonicalBefore)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
+
+  let handle: FileHandle | undefined;
+  try {
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    const nonBlock = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+    handle = await open(canonicalBefore, constants.O_RDONLY | noFollow | nonBlock);
+    const opened = await handle.stat();
+    if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
+    if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
+    if (opened.size > maxBytes) throw fileTooLarge(opened.size, maxBytes, canonicalBefore);
+
+    const canonicalAfter = await realpath(candidate);
+    if (!isAllowedAfter(canonicalAfter)) throw outsideWorkspace();
+    if (inSecretFolder(canonicalAfter)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
+    const after = await stat(canonicalAfter);
+    if (opened.dev !== after.dev || opened.ino !== after.ino) {
+      throw statusError(409, "the linked file changed while it was being opened");
+    }
+
+    return {
+      handle,
+      bytes: opened.size,
+      name: basename(canonicalAfter),
+      mime: mimeFor(canonicalAfter),
+      path: canonicalAfter,
+    };
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function resolveCanonicalRoots(roots: readonly string[], directoriesOnly: boolean): Promise<string[]> {
+  return (await Promise.all(roots.map(async (root) => {
+    if (!root) return null;
+    try {
+      const canonical = await realpath(root);
+      return !directoriesOnly || (await stat(canonical)).isDirectory() ? canonical : null;
+    } catch {
+      return null;
+    }
+  }))).filter((root): root is string => Boolean(root));
+}
+
+function resolveAbsoluteLocalHref(href: string): string {
+  const requested = referencedPath(href, false, false);
+  if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) {
+    throw outsideWorkspace();
+  }
+  return resolve(requested);
+}
+
 /** Canonicalised before and after opening, and the handle compared with the post-open path, to reject symlink escapes and directory swaps. */
 export async function openMessageFile(
   href: string,
@@ -387,14 +447,7 @@ export async function openMessageFile(
   maxBytes = MESSAGE_FILE_MAX_BYTES,
 ): Promise<OpenedMessageFile> {
   const requested = referencedPath(href);
-  const canonicalRoots = (await Promise.all(roots.map(async (root) => {
-    try {
-      const canonical = await realpath(root);
-      return (await stat(canonical)).isDirectory() ? canonical : null;
-    } catch {
-      return null;
-    }
-  }))).filter((root): root is string => Boolean(root));
+  const canonicalRoots = await resolveCanonicalRoots(roots, true);
 
   if (canonicalRoots.length === 0) throw statusError(404, "the linked file is unavailable");
   const candidates = isAbsolute(requested)
@@ -414,35 +467,9 @@ export async function openMessageFile(
       sawOutsideRoot = true;
       continue;
     }
-    if (inSecretFolder(canonicalBefore)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
-
-    let handle: FileHandle | undefined;
     try {
-      const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-      const nonBlock = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
-      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow | nonBlock);
-      const opened = await handle.stat();
-      if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
-      if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");
-      if (opened.size > maxBytes) throw fileTooLarge(opened.size, maxBytes, canonicalBefore);
-
-      const canonicalAfter = await realpath(candidate);
-      if (!containedBy(root, canonicalAfter)) throw outsideWorkspace();
-      if (inSecretFolder(canonicalAfter)) throw statusError(403, SECRET_FILE_REFUSAL, "secret_file");
-      const after = await stat(canonicalAfter);
-      if (opened.dev !== after.dev || opened.ino !== after.ino) {
-        throw statusError(409, "the linked file changed while it was being opened");
-      }
-
-      return {
-        handle,
-        bytes: opened.size,
-        name: basename(canonicalAfter),
-        mime: mimeFor(canonicalAfter),
-        path: canonicalAfter,
-      };
+      return await openCanonicalMessageFile(candidate, canonicalBefore, maxBytes, (canonicalAfter) => containedBy(root, canonicalAfter));
     } catch (error) {
-      await handle?.close().catch(() => undefined);
       if (error && typeof error === "object" && "status" in error) throw error;
       continue;
     }
@@ -450,6 +477,57 @@ export async function openMessageFile(
 
   if (sawOutsideRoot) throw outsideWorkspace();
   throw statusError(404, "the linked file is unavailable");
+}
+
+/** True when an owner's explicit single-file open could succeed without granting any folder, hidden path, secret store,
+ * key-like file or app-data path (server/outside-file-guard.ts). */
+export async function canOpenOutsideWorkspaceMessageFile(href: string, refusedRoots: readonly string[]): Promise<boolean> {
+  let candidate: string;
+  try {
+    candidate = resolveAbsoluteLocalHref(href);
+  } catch {
+    return false;
+  }
+  let canonical: string;
+  try {
+    canonical = await realpath(candidate);
+    if (!(await stat(canonical)).isFile()) return false;
+  } catch {
+    return false;
+  }
+  if (inSecretFolder(canonical) || outsideFileRefused(candidate) || outsideFileRefused(canonical)) return false;
+  const canonicalRefused = await resolveCanonicalRoots(refusedRoots, false);
+  return !canonicalRefused.some((dir) => containedBy(dir, canonical));
+}
+
+/** Opens a single linked regular file outside the workspace for a self-hosted owner, refusing folders, secrets, and app data. */
+export async function openOutsideWorkspaceMessageFile(
+  href: string,
+  refusedRoots: readonly string[],
+  maxBytes = MESSAGE_FILE_MAX_BYTES,
+): Promise<OpenedMessageFile> {
+  const candidate = resolveAbsoluteLocalHref(href);
+  const canonicalRefused = await resolveCanonicalRoots(refusedRoots, false);
+  let canonicalBefore: string;
+  try {
+    canonicalBefore = await realpath(candidate);
+  } catch {
+    throw statusError(404, "the linked file is unavailable");
+  }
+  if (outsideFileRefused(candidate) || outsideFileRefused(canonicalBefore) || canonicalRefused.some((dir) => containedBy(dir, canonicalBefore))) {
+    throw outsideWorkspace();
+  }
+  try {
+    return await openCanonicalMessageFile(
+      candidate,
+      canonicalBefore,
+      maxBytes,
+      (canonicalAfter) => !outsideFileRefused(canonicalAfter) && !canonicalRefused.some((dir) => containedBy(dir, canonicalAfter)),
+    );
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error) throw error;
+    throw statusError(404, "the linked file is unavailable");
+  }
 }
 
 /** HFS+ and FAT keep whole or even seconds, so a file written early in a turn can carry a slightly earlier time. */

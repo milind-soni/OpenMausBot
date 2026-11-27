@@ -1,11 +1,10 @@
 // One list of bots: with "This computer and My Cloud together" on (electron/places-together.mjs), the other place's bots
-// sit among this page's own, in the same list, Unread and order, instead of in a group of their own. A row of the other
-// place becomes a Bot-shaped value the sidebar places and draws like any other. Its id is its place's key and its own id
+// sit among this page's own, in its departments and order (src/lib/one-list.ts lays them out). A row of the other place
+// becomes a Bot-shaped value the sidebar places and draws like any other. Its id is its place's key and its own id
 // (`cloud:scout`), so two bots with one id in two places never meet, and nothing that writes to this place's server is
 // ever handed one: what such a row sends is either "open it", which main does where the bot lives, or dropped.
 //
-// The one list is this computer's page's: the page the rail's first circle opens. My Cloud's page, opened from its own
-// circle, lists My Cloud's bots only, as it does with the switch off, so the rail still shows the Cloud on its own.
+// Both pages draw it, the same way: this computer's page, and My Cloud's own page, which lists this computer's bots.
 //
 // Everything here is keyed by a place, not by "My Cloud": today the places are this computer and My Cloud, and a
 // person's own always-on machine (a server of their own, or a computer at home) is meant to join the same list later
@@ -20,6 +19,7 @@ import { localizedTaskTitle } from "./task-title";
 import { plainPreviewText } from "../../shared/plain-preview";
 import { MAUS_COLOR_NAMES, type MausColor } from "./mascot";
 import { openOtherPlaceBot, usePlacesTogetherPart, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
+import { openPlaceBot } from "./place-chat";
 
 /** How a place is doing, as main last said. Asleep and waking are normal for a Cloud, never an error. */
 export type PlaceHealth = NonNullable<PlacesTogetherState["other"]>["state"];
@@ -78,6 +78,8 @@ export function placedBot(row: PlaceBotRow, health: PlaceHealth, place: Place = 
     // No engine of this place: no model badge, and nothing here runs it.
     modelSelection: { instanceId: "", model: "" },
     messages: [],
+    // Its department there: the one list draws a bot of the home place in it on the other page too.
+    ...(row.section ? { section: row.section } : {}),
     placedFrom: { place, id: row.id, health, ...(row.preview ? { preview: row.preview } : {}), ...(row.chat ? { chat: row.chat } : {}) },
     ...(row.lastAt !== undefined ? { lastAt: row.lastAt } : {}),
   };
@@ -98,8 +100,10 @@ let lastList: readonly PlacedBot[] = NONE;
  * asleep, waking or can't be reached: a read never takes rows away to put them back. */
 let lastRows: { home: BotHome; rows: PlaceBotRow[] } | null = null;
 
-/** The one list is on for this page: the switch is on, main lists the other place, and this is this computer's page. */
-export const oneListOn = (state: PlacesTogetherState | null): boolean => state?.on === true && state.other !== null && state.here === "computer";
+/** The one list is on for this page: the switch is on and main lists the other place. On My Cloud's page only from an
+ * app that says which place is home (and keeps where bots are moved): with an older one, that page lists its own bots
+ * only, as it did before. */
+export const oneListOn = (state: PlacesTogetherState | null): boolean => state?.on === true && state.other !== null && (state.here === "computer" || state.home !== undefined);
 
 function placedList(state: PlacesTogetherState | null): readonly PlacedBot[] {
   if (state === lastState) return lastList;
@@ -134,36 +138,25 @@ export function useOtherPlaceBots(query: string): readonly PlacedBot[] {
 /** The last search's rows, kept while the list and the words stay the same (no hook: the sidebar calls this on every draw). */
 let lastSearch: { all: readonly PlacedBot[]; query: string; found: readonly PlacedBot[] } = { all: NONE, query: "", found: NONE };
 
-// Rows of the other place come in after this page's own and keep their place, like every row: unread and work show as
-// marks on the row as soon as the other place says so, never as a move.
-/** The sidebar's parts with the other place's rows after this place's own in the main list: the busy-first order and
- * Unread then take every row the same way. Departments, pins and tiles stay this place's own. */
-export function withOtherPlace<T extends { unsectionedBots: Bot[] }>(parts: T, placed: readonly PlacedBot[]): T {
-  return placed.length ? { ...parts, unsectionedBots: [...parts.unsectionedBots, ...placed] } : parts;
-}
+const openers = new Map<string, { store: Dispatch<Action> | undefined; opener: Dispatch<Action> }>();
 
-/** This place's own rows only: what a drag or Alt+Up/Down arranges and saves to this place's server. */
-export function ownRows<T extends object>(bots: T[]): T[] {
-  return bots.some(isPlacedBot) ? bots.filter((bot) => !isPlacedBot(bot)) : bots;
-}
-
-const openers = new Map<string, Dispatch<Action>>();
-
-/** What a row of the other place does with what its row would send this place's store: choosing it opens its bot where
- * it lives (main switches the window there, as a row of the old group did), once per click or key; renaming, a new
- * conversation, a folder or anything else is not for this place and is dropped. */
-export function otherPlaceDispatch(bot: PlacedBot): Dispatch<Action> {
+/** What a row of the other place does with what its row would send this place's store: choosing it opens its bot, once
+ * per click or key. A My Cloud bot on this computer's page opens right here, in this window (src/lib/place-chat.ts:
+ * `store` is this page's store); anywhere else, or when that can't be done, main switches the window to the place it
+ * lives in, as before. Renaming, a folder or anything else is not for this place and is dropped. */
+export function otherPlaceDispatch(bot: PlacedBot, store?: Dispatch<Action>): Dispatch<Action> {
   const had = openers.get(bot.id);
-  if (had) return had;
-  const { id } = bot.placedFrom;
+  if (had && had.store === store) return had.opener;
+  const { id, place } = bot.placedFrom;
   let opening = false;
   const opener: Dispatch<Action> = (action) => {
     if ((action.type !== "select" && action.type !== "switchTask") || opening) return;
     opening = true;
     queueMicrotask(() => { opening = false; });
-    openOtherPlaceBot(id);
+    if (store && place.kind === "my-cloud") void openPlaceBot(id, store);
+    else openOtherPlaceBot(id);
   };
-  openers.set(bot.id, opener);
+  openers.set(bot.id, { store, opener });
   return opener;
 }
 
@@ -214,8 +207,7 @@ export function placeMark(place: Place, health: PlaceHealth, working: boolean, n
   return mark(device.icon, kind === "my-cloud" ? t("together.mark.livesCloud") : kind === "this-computer" ? t("together.mark.livesComputer") : t("together.mark.livesOn", { place: place.label }), "hover");
 }
 
-/** This page's place while the one list is on; null while it is off, in a browser, on My Cloud's page and on any other
- * place's page. */
+/** This page's place while the one list is on; null while it is off, in a browser, and on any other place's page. */
 const hereOf = (state: PlacesTogetherState | null): BotHome | null => (oneListOn(state) ? state!.here : null);
 
 /** The mark a row draws, given this page's place while the one list is on (`here`, from useOneListHere once for the

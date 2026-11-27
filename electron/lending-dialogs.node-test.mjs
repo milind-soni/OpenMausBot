@@ -143,3 +143,50 @@ test("main asks in its own dialog before a server gets this computer, and Cancel
   assert.deepEqual({ path: folder.path, write: folder.write }, { path: "/Users/me/Plans", write: false });
   assert.equal(allowed.calls.at(-1)[2].title, "Choose a folder or drive to share");
 });
+
+test("the whole system drive is lent only after its own warning, and is named in the access dialog", async () => {
+  const win = liveWindow(), isSystemDrive = async (path) => path === "C:\\";
+  for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {
+    const { dialog, calls } = fakeDialog({ response, picked: { canceled: false, filePaths: ["C:\\"] } });
+    const folder = await createLendingDialogs({ dialog, window: () => win, validate: named, isSystemDrive }).chooseFolder("Choose");
+    assert.equal(calls[1][2].message, "Share the whole C:\\ drive?");
+    assert.match(calls[1][2].detail, /readable by the bots you allow.*keys, passwords and browser data, and this app's own data, always stay private\./);
+    assert.deepEqual([calls[1][2].type, calls[1][2].defaultId, calls[1][2].cancelId], ["warning", 1, 1]);
+    assert.equal(folder === null, !lent);
+    if (lent) assert.deepEqual({ system: folder.system, home: folder.home, write: folder.write }, { system: true, home: undefined, write: false });
+  }
+  const detail = serverAccessDetail({ name: "S", origin: "https://s.test" }, { folders: [{ path: "C:\\", write: false, system: true }], terminal: false, computer: false });
+  assert.equal(detail.split("\n\n")[1], "Read only: C:\\ (the whole system drive)");
+});
+
+test("edits on the whole home folder or system drive need their own warning before the access dialog", async () => {
+  const env = { name: "VPS", origin: "https://vps.test" };
+  const grant = { folders: [{ path: "/Users/me", write: true, home: true }, { path: "/Users/me/Notes", write: true }], terminal: false, computer: false };
+  for (const [response, allowed, asked] of [[0, true, 2], [1, false, 1], [-1, false, 1]]) {
+    const { dialog, calls } = fakeDialog({ response });
+    assert.equal(await createLendingDialogs({ dialog, window: liveWindow, validate: named }).confirmServerAccess(env, grant), allowed);
+    assert.equal(calls.length, asked, "Cancel on the edit warning asks nothing more");
+    assert.equal(calls[0][2].message, "Let bots on VPS change files anywhere in it?");
+    assert.match(calls[0][2].detail, /add and change files anywhere in \/Users\/me, not just/);
+    assert.deepEqual([calls[0][2].buttons, calls[0][2].defaultId, calls[0][2].cancelId], [["Allow edits", "Cancel"], 1, 1]);
+  }
+  const plain = fakeDialog({ response: 0 });
+  await createLendingDialogs({ dialog: plain.dialog, window: liveWindow, validate: named }).confirmServerAccess(env, { ...grant, folders: [{ path: "/Users/me", write: false, home: true }] });
+  assert.equal(plain.calls.length, 1, "read only asks only the access dialog");
+});
+
+test("a server keeps edits on the home folder only once the person confirmed both dialogs", async () => {
+  const saved = [], handlers = new Map(), win = liveWindow();
+  for (const response of [1, 0]) {
+    const { dialog } = fakeDialog({ response });
+    const team = { id: "vps", name: "VPS", origin: "https://vps.test" };
+    const controller = { state: () => ({}), ownServer: async () => null, identity: async () => ({ id: "info" }), save: async (env, grant, info, options) => { saved.push([grant, options]); } };
+    installServerLending({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (_channel, handler) => handler, sharing: () => controller,
+      dialogs: createLendingDialogs({ dialog, window: () => win, validate: named }), validate: named, dialog, window: () => win,
+      saved: () => team, candidate: () => true, flag: async () => true, environments: () => [team] });
+    await handlers.get("sharing:save")({}, "vps", { folders: [{ path: "/Users/me", write: true, home: true }] });
+  }
+  assert.equal(saved.length, 1, "Cancel saves nothing");
+  assert.deepEqual(saved[0][1], { homeEdits: true });
+  assert.equal(saved[0][0].folders[0].write, true);
+});

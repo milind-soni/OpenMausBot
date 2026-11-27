@@ -258,6 +258,8 @@ export interface RuntimeRouterOptions {
   afterCall?(session: string, spec: BrowserSpawnSpec, result: unknown): unknown;
   /** Where a page action that failed is counted; the server's own log when unset. */
   inputLog?: BrowserInputLog;
+  /** A tool call that failed or threw, awaited before its answer: the session's host may check where its browser runs. */
+  failedCall?(session: string, spec: BrowserSpawnSpec): Promise<void>;
 }
 
 const resultText = (result: unknown): string => {
@@ -278,8 +280,10 @@ export class RuntimeRouter {
   readonly #annotate: RuntimeRouterOptions["annotate"];
   readonly #afterCall: RuntimeRouterOptions["afterCall"];
   readonly #log: BrowserInputLog;
+  readonly #failedCall: RuntimeRouterOptions["failedCall"];
 
   constructor(old: BrowserRuntime, chrome: ChromeEngine, options: RuntimeRouterOptions = {}) {
+    this.#failedCall = options.failedCall;
     this.#log = options.inputLog ?? browserInputLog;
     this.#old = old;
     this.#chrome = chrome;
@@ -317,10 +321,14 @@ export class RuntimeRouter {
       if (error instanceof ClaimRefused) return refuse(error.message);
       const reason = botReason(error instanceof Error ? error.message : "");
       failed(reason === "engine_error" ? "threw" : reason);
+      if (method === "tools/call") await this.#failedCall?.(session, spec).catch(() => undefined);
       throw error;
     }
     if (method !== "tools/call") return result;
-    if ((result as { isError?: unknown } | null)?.isError === true) failed(botReason(resultText(result)));
+    if ((result as { isError?: unknown } | null)?.isError === true) {
+      failed(botReason(resultText(result)));
+      await this.#failedCall?.(session, spec).catch(() => undefined);
+    }
     const annotated = this.#annotate ? this.#annotate(spec, result) : result;
     return this.#afterCall ? this.#afterCall(session, spec, annotated) : annotated;
   }

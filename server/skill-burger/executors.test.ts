@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -29,12 +29,37 @@ describe("where a Skill Burger's steps run", () => {
 
   it("writes a file only inside the conversation's folder", async () => {
     const cwd = folder();
-    const exec = createExecutors({ botId: "b", cwd, internal: async () => ({ ok: false, body: {} }) });
-    expect(await exec.file({ path: "notes/a.md", content: "hi", signal: signal() })).toMatchObject({ ok: true });
-    expect(readFileSync(join(cwd, "notes/a.md"), "utf8")).toBe("hi");
-    expect(await exec.file({ path: "../escape.md", content: "x", signal: signal() })).toMatchObject({ ok: false });
-    symlinkSync(tmpdir(), join(cwd, "out"));
-    expect(await exec.file({ path: "out/escape.md", content: "x", signal: signal() })).toMatchObject({ ok: false });
+    const outside = folder();
+    try {
+      const exec = createExecutors({ botId: "b", cwd, internal: async () => ({ ok: false, body: {} }) });
+      expect(await exec.file({ path: "notes/a.md", content: "hi", signal: signal() })).toMatchObject({ ok: true });
+      expect(readFileSync(join(cwd, "notes/a.md"), "utf8")).toBe("hi");
+      expect(await exec.file({ path: "..leading.md", content: "ok", signal: signal() })).toMatchObject({ ok: true });
+      expect(await exec.file({ path: "../escape.md", content: "x", signal: signal() })).toMatchObject({ ok: false });
+
+      symlinkSync(outside, join(cwd, "out"), process.platform === "win32" ? "junction" : "dir");
+      expect(await exec.file({ path: "out/escape.md", content: "x", signal: signal() })).toMatchObject({ ok: false });
+      expect(existsSync(join(outside, "escape.md"))).toBe(false);
+      expect(await exec.file({ path: "out/nested/escape.md", content: "x", signal: signal() })).toMatchObject({ ok: false });
+      expect(existsSync(join(outside, "nested"))).toBe(false);
+
+      const outsideFile = join(outside, "secret.md");
+      writeFileSync(outsideFile, "keep");
+      let fileLinked = false;
+      try {
+        symlinkSync(outsideFile, join(cwd, "linked.md"), "file");
+        fileLinked = true;
+      } catch (error) {
+        if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      }
+      if (fileLinked) {
+        expect(await exec.file({ path: "linked.md", content: "overwritten", signal: signal() })).toMatchObject({ ok: false });
+        expect(readFileSync(outsideFile, "utf8")).toBe("keep");
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it.skipIf(process.platform === "win32")("runs a command as the bot, reading its inputs from OMB_ARG_ variables, and stops one that says too much", async () => {

@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { createAttachmentReferences } from "../attachment-references.ts";
 import { personKey } from "../person-key.ts";
+import { rowsOfConversations } from "../testing/message-rows-fixture.ts";
 import { TEAM_READER, VaultStore } from "../vault-store.ts";
 import { createUploadOwners } from "./member-uploads.ts";
 import { createTeamMemberLeft, type TeamMemberLeftDeps } from "./team-member-left.ts";
@@ -49,8 +51,8 @@ function fixture() {
       deletedBots.push(botId);
       return true;
     },
-    threadsReferencing: (fragment) => [...messages].filter(([, list]) => JSON.stringify(list).includes(fragment)).map(([threadId]) => threadId),
-    deleteAttachment: (file) => deleted.push(file),
+    references: createAttachmentReferences({ rows: rowsOfConversations(messages) }),
+    deleteAttachments: (files) => { deleted.push(...files); },
     eraseBrowsers: async () => true,
     forgetConnections: () => {},
     forgetSecrets: (person) => { vault.forgetPerson(person); },

@@ -364,6 +364,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
   // Only says whether a line is a stop, so the Team map knows where an @everyone line goes (routes/stop-line.ts).
   { methods: ["POST"], path: /^\/api\/stop-line$/ },
+  // One suggested next line for a conversation the caller reads and may write in (routes/suggested-reply.ts).
+  { methods: ["POST"], path: /^\/api\/suggested-reply$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
@@ -482,10 +484,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/presence\/here$/ },
   // what a bot asks of this person: their own questions and approvals only
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
-  // a person's own inbox: its lines, how many wait, and one of them read or done; the handler serves the session's own alone
+  // a person's own inbox: its lines, how many wait, and one of them read, unread again or done; the handler serves the session's own alone
   { methods: ["GET"], path: /^\/api\/inbox(?:\/count)?$/ },
   { methods: ["POST"], path: /^\/api\/inbox\/read-all$/ },
-  { methods: ["POST"], path: /^\/api\/inbox\/[\w-]+\/(?:read|done)$/ },
+  { methods: ["POST"], path: /^\/api\/inbox\/[\w-]+\/(?:read|unread|done)$/ },
   // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
   { methods: ["GET"], path: /^\/api\/team\/people$/ },
   // the workspace's banner picture: everyone signed in here sees it; changing it (PUT, DELETE) is an admin's
@@ -505,6 +507,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // what the viewer's own bots put online, from conversations they can read; the handler deletes only what is theirs
   { methods: ["GET"], path: /^\/api\/published-apps(?:\/framing)?$/ },
   { methods: ["POST"], path: /^\/api\/published-apps\/delete$/ },
+  // the apps a person saved from bots' pages: the handler shows and changes only their own, from conversations they read
+  { methods: ["GET", "POST"], path: /^\/api\/local-apps$/ },
+  { methods: ["GET", "PATCH", "DELETE"], path: /^\/api\/local-apps\/la_[A-Za-z0-9_-]{16}$/ },
+  { methods: ["GET"], path: /^\/api\/local-apps\/la_[A-Za-z0-9_-]{16}\/app$/ },
   // a Team Cloud's shared folder: every member reads and adds; the handler lets a member delete or rename only what they
   // uploaded (routes/team-files.ts); off a Team Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/team-files(?:\/file)?$/ },

@@ -234,9 +234,18 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     await selectRow(groupRow);
     await waitUntil(() => isCurrentRow(groupRow), 10_000, "the group to become current");
 
-    await ui("type", info.ui, "--name", "Message Timer group", "--text", "hello group");
-    await ui("press", info.ui, "--keys", "Enter");
+    // The room is its feed, whose composer starts a new thread: the line goes to the room's own thread by the room's
+    // route, and that thread opens beside the feed, where its readout is.
     const sentAt = Date.now();
+    await api("POST", `/api/groups/${groupId}/messages`, { text: "hello group", threadId: group.threadId });
+    const openThread = async () => {
+      await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-feed-thread="${group.threadId}"]'))`), 10_000, "the thread's row in the feed");
+      if (!(await evaluate(`Boolean(document.querySelector('[data-thread-panel="${group.threadId}"]'))`))) {
+        await evaluate(`document.querySelector('[data-feed-thread="${group.threadId}"] > button:first-child').click(); true`);
+      }
+      await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-thread-panel="${group.threadId}"]'))`), 10_000, "the thread beside the feed");
+    };
+    await openThread();
 
     const busy = await waitUntil(async () => {
       const claimed = await groupState();
@@ -257,6 +266,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     await new Promise((done) => setTimeout(done, 3_000));
     await selectRow(groupRow);
     await waitUntil(() => isCurrentRow(groupRow), 10_000, "the group to become current again");
+    await openThread();
 
     // A restart would show single digits after a 13+ second turn.
     const resumed = await waitUntil(timerText, 10_000, "the group's thinking readout to appear again");

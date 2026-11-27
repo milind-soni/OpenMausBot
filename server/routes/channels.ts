@@ -17,12 +17,12 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
 import { roomThreadSummaries } from "../message-db-thread-summaries.ts";
-import type { RoomThreadSummariesResponse } from "../../shared/room-threads.ts";
+import type { RoomThreadCloser, RoomThreadSummariesResponse } from "../../shared/room-threads.ts";
 import { messageTextRefusal } from "../message-text.ts";
 import { prepareRoomPointed, roomPickBots, type RoomPick } from "../room-pointed.ts";
 import { refusalBody } from "../user-errors.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
-import { promptWithReply, type PersonName } from "../replies.ts";
+import { personOf, promptWithReply, type PersonName } from "../replies.ts";
 import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
 import type { RoomContextTracker } from "../room-context.ts";
 import { parseConversationTurnTimeout } from "../room-turn-timeout.ts";
@@ -120,6 +120,8 @@ export interface ChannelRouteDeps {
 }
 
 const createGroupTaskRequestSchema = z.object({ title: z.string().optional(), activate: z.boolean().optional() });
+/** The most threads one read request may name. */
+const MAX_READ_THREADS = 500;
 
 type StopAnswer = { status: 200 | 403 | 409; body: { ok: true } | { error: string; code?: "stop_not_yours" } };
 
@@ -154,6 +156,10 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       rejectDeletedThreadSkillStages(stagedSkillCleanups.get(threadId) ?? []);
     }
     return result;
+  };
+  const personCloser = (auth: RequestAuth, threadId: string): RoomThreadCloser => {
+    const sender = messageSender(auth);
+    return { kind: "person", id: sender?.id ?? "owner", name: sender?.name ?? personOf(deps.userName(threadId), {}) };
   };
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
@@ -260,7 +266,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt"]);
+      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt", "closed"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported channel thread setting" });
       const existing = store.groupTaskByThread(group.id, m[2]);
       if (!existing) return json(res, 404, { error: "no such channel task" });
@@ -268,7 +274,9 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const renaming = body.title !== undefined;
       const limiting = Object.prototype.hasOwnProperty.call(body, "turnTimeoutMinutes");
       const archiving = body.archivedAt !== undefined;
-      if (!pinning && !renaming && !limiting && !archiving) return json(res, 400, { error: "unsupported channel thread setting" });
+      const closing = body.closed !== undefined;
+      if (!pinning && !renaming && !limiting && !archiving && !closing) return json(res, 400, { error: "unsupported channel thread setting" });
+      if (closing && typeof body.closed !== "boolean") return json(res, 400, { error: "closed must be true or false" });
       if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
       if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
       if (archiving && body.archivedAt !== null && !(typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0)) {
@@ -288,6 +296,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         ...(pinning ? { pinned: body.pinned === true } : {}),
         ...(archiving ? { archivedAt: body.archivedAt as number | null } : {}),
         ...(titleChange ? { title: body.title } : {}),
+        // Anyone who may post in the room may close or reopen any of its threads; who did comes from the session, never the body.
+        ...(closing && body.closed !== (existing.closedAt !== undefined) ? { closed: body.closed ? { at: Date.now(), by: personCloser(auth, m[2]) } : null } : {}),
       };
       const task = Object.keys(patch).length ? store.patchGroupTask(group.id, m[2], patch) : existing;
       if (!task) return json(res, 404, { error: "no such channel task" });
@@ -330,6 +340,25 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const room = store.group(m[1]);
       if (!room) return json(res, 404, { error: "no such room" });
       const body = await readBody(req);
+      // Several of the room's threads in one request and one frame: the feed reads marks older than itself this way.
+      if (Array.isArray(body?.threadIds)) {
+        const asked: unknown[] = body.threadIds;
+        if (room.dm || asked.length > MAX_READ_THREADS || asked.some((id) => typeof id !== "string")) return json(res, 400, { error: "threadIds must be up to 500 of the room's threads" });
+        const threadIds = [...new Set(asked as string[])].filter((id) => store.groupTaskByThread(room.id, id));
+        let personal: WireGroup | null = null;
+        let shared: GroupRecord | null = null;
+        for (const id of threadIds) {
+          sawThread(id);
+          deps.threadRead?.(auth, id);
+          personal = deps.personMarkRoom?.(auth, room, false, id) ?? null;
+          if (!personal) shared = store.markGroupThreadUnread(room.id, id, false, readCursor(id).lastReadMessageId);
+          readThreadNotifications(id, broadcast, notificationListed(auth));
+        }
+        if (personal) return json(res, 200, { group: personal, read: threadIds.length });
+        const group = shared ?? store.group(room.id)!;
+        if (shared) broadcast({ kind: "group", group: publicGroupState(group) });
+        return json(res, 200, { group: own(publicGroupState(group)), read: threadIds.length });
+      }
       const threadId = body?.threadId ?? room.threadId;
       if (typeof threadId !== "string" || (room.dm
         ? threadId !== room.threadId

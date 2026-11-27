@@ -7,7 +7,8 @@ import { memoryStopText } from "../engine-memory.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
 import { FROZE_BROWSING } from "../memory-freeze-restart.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
-import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
+import { _queuedCount, cancelSteeredMessage, drainSteeredMessages, queuedSteerSnapshot } from "../steer-queue.ts";
+import { createChiefNotices, failedRequester, MEMORY_RETRY_MS, retriedMessage, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   const bots = [
@@ -63,6 +64,74 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
       vi.setSystemTime(2_000);
       f.store.appendMessage("ada-job", { role: "bot", kind: "text", text: "Done.", turnSucceeded: true });
       expect(f.notices.retryRefusal("ada", "ada-job")).toMatch(/^that thread has finished a run since it was reported/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a Chief's retry of a teammate's busy thread", () => {
+  type Drained = { botId: string; threadId: string; prompt: string; unattended: boolean; peerAsk: unknown };
+  function drain(f: ReturnType<typeof fixture>, drained: Drained[]): void {
+    drainSteeredMessages(
+      { bot: (id: string) => f.store.bot(id) ?? null, appendMessage: (threadId: string, row: never) => f.store.appendMessage(threadId, row) } as never,
+      (botId, threadId, prompt, _message, _ids, unattended, head) => { drained.push({ botId, threadId, prompt, unattended, peerAsk: head.peerAsk }); },
+    );
+  }
+
+  it("queues the retry while its bot is mid-turn elsewhere, and the queue starts it when the bot frees up", async () => {
+    const f = fixture({ groupTurnActive: (botId) => botId === "ada" });
+    const queued = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, note: "The service was down." });
+    expect(queued).toBe("queued");
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(_queuedCount("ada-job")).toBe(1);
+    const drained: Drained[] = [];
+    drain(f, drained);
+    expect(drained).toEqual([{ botId: "ada", threadId: "ada-job",
+      prompt: expect.stringContaining("requested by Clive, your Chief of Staff, after this thread's last run stopped. Note from Clive: The service was down."),
+      unattended: true, peerAsk: { botId: "chief", name: "Clive", unattended: true } }]);
+    expect(drained[0]!.prompt).toContain("Continue the request above from where it stopped and finish it.");
+    expect(_queuedCount("ada-job")).toBe(0);
+  });
+
+  it("queues with the capacity reason at its bot's turn limit, answering queued rather than failed", async () => {
+    const f = fixture({ botAtThreadCapacity: () => true });
+    const queued = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false });
+    expect(queued).toBe("queued");
+    const snapshot = queuedSteerSnapshot(() => true);
+    expect(snapshot["ada-job"]?.[0]).toMatchObject({ reason: "capacity", text: expect.stringContaining("requested by Clive") });
+    cancelSteeredMessage("ada", snapshot["ada-job"]![0]!.queueId, "ada-job");
+  });
+
+  it("still refuses a thread that runs, shuts down or already waits, even while its bot is at its turn limit", async () => {
+    for (const [over, refusal] of [
+      [{ threadBusy: () => true }, RETRY_BLOCKED.running],
+      [{ threadBusy: () => true, threadSettling: () => true }, RETRY_BLOCKED.settling],
+      [{ threadQueued: () => true }, RETRY_BLOCKED.queued],
+    ] as const) {
+      const f = fixture({ ...over, botAtThreadCapacity: () => true, groupTurnActive: () => true });
+      await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(refusal);
+      expect(f.startTurn).not.toHaveBeenCalled();
+    }
+    expect(_queuedCount("ada-job")).toBe(0);
+  });
+
+  it("starts OpenMausBot's own retry at once, never from the queue", async () => {
+    const f = fixture({ botAtThreadCapacity: () => true });
+    await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, automatic: true });
+    expect(f.startTurn).toHaveBeenCalledTimes(1);
+    expect(_queuedCount("ada-job")).toBe(0);
+  });
+
+  it("still refuses a thread that finished a run since it was reported, even at its bot's turn limit", async () => {
+    vi.useFakeTimers({ now: 1_000 });
+    try {
+      const f = fixture({ botAtThreadCapacity: () => true });
+      f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity for 20 minutes" });
+      vi.setSystemTime(2_000);
+      f.store.appendMessage("ada-job", { role: "bot", kind: "text", text: "Done.", turnSucceeded: true });
+      await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true })).rejects.toThrow(/finished a run since it was reported/);
+      expect(_queuedCount("ada-job")).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -352,5 +421,68 @@ describe("a run the server had no room to start", () => {
     expect(crash.turnsOf("ada")).toHaveLength(1);
     expect(crash.turnsOf("ada")[0]!.text.startsWith(AUTO_RETRY_LEAD)).toBe(true);
     expect(crash.continued).toEqual([]);
+  });
+});
+
+describe("a Chief's retry of a thread that failed the Chief's own request", () => {
+  const sent = { status: 200, body: { receipts: [{ botId: "ada", botName: "Ada", outcome: "queued", threadId: "ada-job" }] } };
+  const node = (over: Record<string, unknown>) => ({ id: "child", parentId: "chief-turn", threadId: "ada-job", botId: "ada", status: "failed", reply: "resume", mode: "work", ...over });
+  const coordinator = (last: Record<string, unknown> | undefined) => ({
+    inThread: () => (last ? [node({ id: "older", status: "completed" }), last] : []) as never,
+    node: (id: string) => (id === "chief-turn" ? { id, botId: "chief", threadId: "chief-main" } : undefined) as never,
+  });
+  const requester = (last: Record<string, unknown> | undefined) => failedRequester(coordinator(last), "ada-job");
+
+  it("knows which bot asked, with reply resume, for the failed work, and nobody for anything else", () => {
+    expect(requester(node({}))).toEqual({ botId: "chief", consult: false });
+    expect(requester(node({ mode: "consult" }))).toEqual({ botId: "chief", consult: true });
+    expect(requester(node({ status: "completed" }))).toBeUndefined();
+    expect(requester(node({ reply: "none" }))).toBeUndefined();
+    expect(requester(node({ parentId: undefined }))).toBeUndefined();
+    expect(requester(undefined)).toBeUndefined();
+  });
+
+  it("asks again from the Chief's own turn, so the result wakes the Chief, and says so", async () => {
+    const coordinateBots = vi.fn(async () => sent);
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, note: "The service was down.", coordinateBots });
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(coordinateBots).toHaveBeenCalledWith(expect.objectContaining({ botIds: ["ada"], thread: "ada-job", reply: "resume", consult: false }));
+    expect(how).toBe("request");
+    expect(retriedMessage("Ada", "Invoices", "request")).toContain("resumes you");
+  });
+
+  it("asks a failed question again as a question, so the teammate still acts on nothing", async () => {
+    const coordinateBots = vi.fn(async () => sent);
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: true }) });
+    expect(await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false, coordinateBots })).toBe("request");
+    expect(coordinateBots).toHaveBeenCalledWith(expect.objectContaining({ reply: "resume", consult: true }));
+  });
+
+  it("tells the Chief why when that request could not be sent", async () => {
+    const coordinateBots = vi.fn(async () => ({ status: 403, body: { error: "not reachable" } }));
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    await expect(f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, coordinateBots })).rejects.toThrow("not reachable");
+    expect(f.startTurn).not.toHaveBeenCalled();
+  });
+
+  it("retries every other thread as before: another bot's request, the person's own work, or OpenMausBot's automatic retry", async () => {
+    for (const [requested, automatic] of [["someone-else", false], [undefined, false], ["chief", true]] as const) {
+      const coordinateBots = vi.fn(async () => sent);
+      const f = fixture({ failedRequester: () => (requested ? { botId: requested, consult: false } : undefined) });
+      const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: true, coordinateBots, ...(automatic ? { automatic: true as const } : {}) });
+      expect(coordinateBots).not.toHaveBeenCalled();
+      expect(f.turnsOf("ada")).toHaveLength(1);
+      expect(how).toBe("turn");
+    }
+    expect(retriedMessage("Ada", "Invoices", "turn")).toBe("Ada's thread #Invoices is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.");
+  });
+
+  it("from a room, where the server passes no coordinate_bots, retries the Chief's own request in the failed thread as a turn", async () => {
+    const f = fixture({ failedRequester: () => ({ botId: "chief", consult: false }) });
+    const how = await f.notices.retryThread({ chief: f.chief as never, bot: f.ada as never, threadId: "ada-job", unattended: false });
+    expect(f.turnsOf("ada")).toEqual([{ threadId: "ada-job", text: expect.stringContaining("Continue the request above from where it stopped and finish it.") }]);
+    expect(f.turnsOf("chief")).toEqual([]);
+    expect(how).toBe("turn");
   });
 });

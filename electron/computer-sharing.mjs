@@ -16,7 +16,7 @@ import { BACKGROUND_HEADERS, CloudAsleepError, asleepAnswer, createCloudPowerGat
 import { linkUrl, runDeviceLink } from "./device-link.mjs";
 import { createComputerAsks } from "./computer-asks.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
-import { shareableDrive } from "./shared-drives.mjs";
+import { isSystemDrive, shareableDrive } from "./shared-drives.mjs";
 import nativeText from "./native-text.cjs";
 import { actingBot } from "./lending-indicator.mjs";
 
@@ -67,7 +67,7 @@ async function volumeRoot(canonical) {
 }
 
 /** Whether `target` is exactly the person's home folder. Only the home folder itself may be lent on request (see
- * `home` in validateSharedFolders); the folders above it, and the system disk, never can. */
+ * `home` in validateSharedFolders); the folders above it never can, and the system disk only as isSystemDrive says. */
 export async function isHomeFolder(target) {
   try {
     const [home] = homeCandidates();
@@ -87,9 +87,9 @@ export async function existingFolders(folders, validate) {
   return found.filter(Boolean);
 }
 
-/** `homeEdits`: the home folder keeps the editing it asks for, which only the person's own Clouds get (lendAutomatically);
- * any other server gets it read only. */
-export async function validateSharedFolders(folders, { homeEdits = false } = {}) {
+/** `homeEdits`: the home folder and system drive keep the editing they ask for, which the person's own Clouds get
+ * (lendAutomatically) and a server only after its edit warning (confirmServerAccess); else they are lent read only. */
+export async function validateSharedFolders(folders, { homeEdits = false, platform = process.platform } = {}) {
   if (!Array.isArray(folders) || folders.length > 20) throw Object.assign(new Error("Choose at most 20 shared folders"), { code: "TOO_MANY" });
   const result = [];
   const enclosing = await enclosingHomeIdentities();
@@ -97,15 +97,15 @@ export async function validateSharedFolders(folders, { homeEdits = false } = {})
     if (!uuid(folder?.id) || typeof folder.path !== "string" || !path.isAbsolute(folder.path) || typeof folder.write !== "boolean") throw Object.assign(new Error("Choose folders using the desktop folder picker"), { code: "NOT_PICKED" });
     const canonical = await fsp.realpath(folder.path);
     if (!(await fsp.stat(canonical)).isDirectory()) throw Object.assign(new Error("Choose a folder, not a file"), { code: "NOT_FOLDER" });
-    // The home folder, everything above it and the system disk are never shared. A separate drive (an external disk, a data
-    // disk on a server, a drive letter) may be shared whole; any other mount point is still refused.
-    // The home folder itself is lent only when asked for by name (`home: true`); anything above it, and the system disk,
-    // are refused whatever is asked. Security: with editing, a write through it still never reaches its hidden files,
-    // Library or AppData (insideHomeSettings), where shell start-up files and ~/.ssh live.
+    // Nothing above the home folder is shared. A separate drive (an external disk, a data disk on a server, a drive
+    // letter) may be shared whole; any other mount point is refused. The home folder is lent only by name (`home: true`)
+    // and the Windows system drive by `system: true`, both set by main's picker after a warning. Security: with editing,
+    // a write through either never reaches home's hidden files, Library or AppData (insideHomeSettings) or ~/.ssh.
     const home = folder.home === true && await isHomeFolder(canonical);
-    if (!home && (enclosing.has(await identify(canonical)) || ((await volumeRoot(canonical)) && !(await shareableDrive(canonical))))) throw Object.assign(new Error("Choose specific folders or a separate drive, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
+    const system = !home && folder.system === true && await isSystemDrive(canonical, platform);
+    if (!home && !system && (enclosing.has(await identify(canonical)) || ((await volumeRoot(canonical)) && !(await shareableDrive(canonical))))) throw Object.assign(new Error("Choose specific folders or a separate drive, not the entire computer or home folder"), { code: "HOME_OR_ROOT" });
     if (result.some(entry => entry.id === folder.id || entry.path === canonical)) continue;
-    result.push({ id: folder.id, path: canonical, name: path.basename(canonical).slice(0, 120), write: home && !homeEdits ? false : folder.write, ...(home ? { home: true } : {}) });
+    result.push({ id: folder.id, path: canonical, name: path.basename(canonical).slice(0, 120), write: (home || system) && !homeEdits ? false : folder.write, ...(home ? { home: true } : {}), ...(system ? { system: true } : {}) });
   }
   return result;
 }
@@ -851,11 +851,11 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       return info;
     },
     decline(env, info) { changeGrant(env.id); disconnect(env, records[env.id]); store({ ...records, [env.id]: { ...info, enabled: false, folders: [], terminal: false, computer: false } }); },
-    async save(env, input, info) {
+    async save(env, input, info, { homeEdits = false } = {}) {
       const version = changeGrant(env.id);
       const fresh = await identity(env);
       if (!matches(info, fresh)) throw new Error("Server sign-in changed. Review computer access again.");
-      const folders = await validateSharedFolders(input.folders);
+      const folders = await validateSharedFolders(input.folders, { homeEdits });
       await requireEnabled();
       const grant = { ...fresh, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.computer === true };
       if (!folders.length && !grant.terminal && !grant.computer) throw new Error("Choose at least one folder or capability to share");
@@ -876,12 +876,12 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       return info;
     },
     /** The person allowed a server of their own to use this computer: what `input` lends, checked as every grant is, the
-     * home folder read only. Security: only while this desktop is that server's admin now; no folder unless chosen. */
-    async lendOwn(env, input) {
+     * home folder read only unless `homeEdits`. Security: only while this desktop is that server's admin now; no folder unless chosen. */
+    async lendOwn(env, input, { homeEdits = false } = {}) {
       const version = changeGrant(env.id);
       if (closed) throw new Error("Lending is unavailable while the app is closing.");
       const info = await ownIdentity(env);
-      const folders = await validateSharedFolders(input?.folders ?? []);
+      const folders = await validateSharedFolders(input?.folders ?? [], { homeEdits });
       const grant = { ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, own: true, folders, terminal: input?.terminal === true, computer: input?.computer === true };
       if (!folders.length && !grant.terminal && !grant.computer) throw new Error("Choose at least one folder or capability to share");
       if (grantVersions.get(env.id) !== version) return state(env.id);
@@ -932,7 +932,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       wakeAsking();
     },
     resume: () => resumeLending(),
-    /** Whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too. */
+    terminalOn: () => terminalAccount !== null && terminalAccount === signedInAccount(), // lendTerminal(on): whether every Cloud of the signed-in account's own may run commands here as this user, across restarts too.
     lendTerminal(on) {
       const account = on === true ? signedInAccount() : null;
       if (closed || terminalAccount === account) return;

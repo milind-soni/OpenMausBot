@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, BellDot, Check, CheckCheck, ChevronRight, ClipboardCopy, Copy, Crown, FolderMinus, FolderOpen, FolderPlus, Loader2, MessagesSquare, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, SquarePen, Star, Trash2, Users } from "lucide-react";
+import { Archive, BellDot, Check, CheckCheck, ChevronRight, ClipboardCopy, Copy, Crown, FolderMinus, FolderOpen, FolderPlus, Loader2, MessagesSquare, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, SquarePen, Star, Trash2, Upload, Users } from "lucide-react";
 import { isBotHeld, isEveryBotPaused, isPausedHere, setEveryBotPaused, setPaused } from "@/lib/bot-pause";
 import { api, useStore, openBot, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -28,8 +28,9 @@ import { departmentNames, moveBotsToSection, useMayMoveBots } from "./bot-sectio
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShortcutHint } from "./ShortcutHint";
 import { isArchived } from "./SidebarThreadRow";
+import { usePublishChoices } from "./publish-template";
 
-type Flyout = "more" | "move";
+type Flyout = "more" | "move" | "publish";
 
 export function BotContextMenu({
   menu,
@@ -57,6 +58,7 @@ export function BotContextMenu({
   const simpleMenu = !useAdvancedMode();
   const moreRef = useRef<HTMLButtonElement>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
+  const publishRef = useRef<HTMLButtonElement>(null);
   const flyoutRef = useRef<HTMLDivElement>(null);
   const hoveredRow = useRef<Element | null>(null);
   const [flyout, setFlyout] = useState<Flyout | null>(null);
@@ -67,8 +69,9 @@ export function BotContextMenu({
     close: () => { setFlyout(null); setMoreEngaged(false); },
     submenuBox: () => flyoutRef.current?.getBoundingClientRect() ?? null,
   });
-  const flyoutRow = (key: Flyout | null) => (key === "more" ? moreRef.current : key === "move" ? moveRef.current : null);
-  const rowFlyout = (row: Element | null): Flyout | null => (row && row === moreRef.current ? "more" : row && row === moveRef.current ? "move" : null);
+  const flyoutRows = { more: moreRef, move: moveRef, publish: publishRef };
+  const flyoutRow = (key: Flyout | null) => (key ? flyoutRows[key].current : null);
+  const rowFlyout = (row: Element | null): Flyout | null => (row && (Object.keys(flyoutRows) as Flyout[]).find((key) => flyoutRows[key].current === row)) || null;
   const more = moreIntent.current;
   const shown = motion.value;
   const { state, dispatch } = useStore();
@@ -78,6 +81,7 @@ export function BotContextMenu({
   const mayMove = useMayMoveBots();
   const clearThreads = useDeleteAllThreads(simpleMenu), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
   const moveToCloud = useMoveToMyCloud();
+  const publishChoices = usePublishChoices();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const team = useTeamPeople();
@@ -222,11 +226,86 @@ export function BotContextMenu({
 
   const newThreadHint = state.selectedId === bot.id ? <ShortcutHint id="new-thread" /> : undefined;
 
+  const showFlyout = (key: Flyout, focus: boolean) => {
+    more.openNow(key);
+    if (focus) requestAnimationFrame(() => flyoutRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus());
+  };
+  const flyoutButton = (key: Flyout, ref: React.RefObject<HTMLButtonElement | null>, icon: React.ReactNode, label: string) => (
+    <button
+      key={key}
+      ref={ref}
+      type="button"
+      role="menuitem"
+      data-bot-menu-more={key === "more" ? "" : undefined}
+      data-bot-menu-move={key === "move" ? "" : undefined}
+      data-bot-menu-publish={key === "publish" ? "" : undefined}
+      aria-haspopup="menu"
+      aria-expanded={flyout === key}
+      onClick={(event) => (flyout === key ? more.closeNow() : showFlyout(key, event.detail === 0))}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowRight") return;
+        event.preventDefault();
+        showFlyout(key, true);
+      }}
+      className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover", flyout === key && moreEngaged && "bg-menu-active")}
+    >
+      {icon}
+      <span className="flex-1">{label}</span>
+      <ChevronRight size={15} aria-hidden="true" className="text-ink-secondary rtl:-scale-x-100" />
+    </button>
+  );
+  const publishItems = publishChoices(bot).map((choice) => item(<span className="flex text-ink-secondary">{choice.icon}</span>, choice.label, choice.onSelect));
+  const publishRow = publishItems.length ? flyoutButton("publish", publishRef, <Upload size={16} className="text-ink-secondary" />, t("template.publish")) : null;
+  const flyoutPointer = {
+    onPointerOver: (event: React.PointerEvent) => {
+      const row = event.target instanceof Element ? event.target.closest('[role="menuitem"]') : null;
+      if (!row || row === hoveredRow.current) return;
+      const left = rowFlyout(hoveredRow.current);
+      if (left) more.leaveRow(left);
+      hoveredRow.current = row;
+      const key = rowFlyout(row);
+      more.enterRow(key ?? "row", key !== null, { x: event.clientX, y: event.clientY });
+    },
+    onPointerMove: (event: React.PointerEvent) => more.move({ x: event.clientX, y: event.clientY }, flyoutRow(flyout)?.contains(event.target as Node) === true),
+    onPointerLeave: () => {
+      const left = rowFlyout(hoveredRow.current);
+      if (left) more.leaveRow(left);
+      hoveredRow.current = null;
+      more.leaveMenu();
+    },
+  };
+  const flyoutSheet = (rows: Partial<Record<Flyout, React.ReactNode[]>>) => flyout && createPortal(
+    <div
+      ref={flyoutRef}
+      data-bot-menu
+      data-bot-menu-flyout={flyout}
+      data-sidebar
+      role="menu" data-look="menu"
+      aria-label={flyout === "more" ? t("sidebar.bot.more") : flyout === "move" ? t("sidebar.bot.moveToSection") : t("template.publish")}
+      onPointerEnter={() => { more.enterSubmenu(); setMoreEngaged(true); }}
+      onPointerLeave={() => setMoreEngaged(false)}
+      onFocus={() => setMoreEngaged(true)}
+      onBlur={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setMoreEngaged(false); }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft" || event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          const row = flyoutRow(flyout);
+          more.closeNow();
+          row?.focus();
+          return;
+        }
+        navigateThreadMenu(event);
+      }}
+      style={{ top: shown.y, left: shown.x }}
+      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[180px] max-w-[calc(100vw-16px)] animate-pop-in overflow-y-auto overscroll-contain", MENU_SHEET)}
+    >
+      {rows[flyout]}
+    </div>,
+    document.body,
+  );
+
   if (simpleMenu) {
-    const showFlyout = (key: Flyout, focus: boolean) => {
-      more.openNow(key);
-      if (focus) requestAnimationFrame(() => flyoutRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus());
-    };
     const copyId = item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => { void copyText(bot.threadId); });
     const current = bot.section?.trim() ?? "";
     const departments = departmentNames(state);
@@ -239,29 +318,6 @@ export function BotContextMenu({
       ...(onNewSection ? [item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.section.newContext"), () => onNewSection(bot.id))] : []),
       ...(current ? [item(<FolderMinus size={16} className="text-ink-secondary" />, t("sidebar.section.removeFromDepartment"), () => moveBotsToSection(dispatch, [bot.id], ""))] : []),
     ];
-    const flyoutButton = (key: Flyout, ref: React.RefObject<HTMLButtonElement | null>, icon: React.ReactNode, label: string) => (
-      <button
-        key={key}
-        ref={ref}
-        type="button"
-        role="menuitem"
-        data-bot-menu-more={key === "more" ? "" : undefined}
-        data-bot-menu-move={key === "move" ? "" : undefined}
-        aria-haspopup="menu"
-        aria-expanded={flyout === key}
-        onClick={(event) => (flyout === key ? more.closeNow() : showFlyout(key, event.detail === 0))}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowRight") return;
-          event.preventDefault();
-          showFlyout(key, true);
-        }}
-        className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover", flyout === key && moreEngaged && "bg-menu-active")}
-      >
-        {icon}
-        <span className="flex-1">{label}</span>
-        <ChevronRight size={15} aria-hidden="true" className="text-ink-secondary rtl:-scale-x-100" />
-      </button>
-    );
     const moveToSection = mayMove ? flyoutButton("move", moveRef, <FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection")) : null;
     const rename = onRename && (team ? mayRename(bot, team) : !state.config?.team) && item(<SquarePen size={16} className="text-ink-secondary" />, t("sidebar.bot.rename"), () => onRename(bot.id));
     const editProfile = item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.editProfile"), () => {
@@ -320,26 +376,11 @@ export function BotContextMenu({
         role="menu" data-look="menu"
         aria-label={t("sidebar.bot.actions", { name: bot.name })}
         onKeyDown={navigateThreadMenu}
-        onPointerOver={(event) => {
-          const row = event.target instanceof Element ? event.target.closest('[role="menuitem"]') : null;
-          if (!row || row === hoveredRow.current) return;
-          const left = rowFlyout(hoveredRow.current);
-          if (left) more.leaveRow(left);
-          hoveredRow.current = row;
-          const key = rowFlyout(row);
-          more.enterRow(key ?? "row", key !== null, { x: event.clientX, y: event.clientY });
-        }}
-        onPointerMove={(event) => more.move({ x: event.clientX, y: event.clientY }, flyoutRow(flyout)?.contains(event.target as Node) === true)}
-        onPointerLeave={() => {
-          const left = rowFlyout(hoveredRow.current);
-          if (left) more.leaveRow(left);
-          hoveredRow.current = null;
-          more.leaveMenu();
-        }}
+        {...flyoutPointer}
         style={{ top: shown.y, left: shown.x }}
         className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
       >
-        {remoteClient ? [moveToSection, ...threads, ...(rename ? [divider("rename"), rename] : []), divider("copy"), copyId, moreRow] : [
+        {remoteClient ? [moveToSection, ...threads, ...(rename ? [divider("rename"), rename] : []), divider("copy"), publishRow, copyId, moreRow] : [
           item(
             bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
             bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
@@ -350,6 +391,7 @@ export function BotContextMenu({
           ...threads,
           ...(rename ? [divider("rename"), rename] : []),
           divider("copy"),
+          publishRow,
           copyId,
           moreRow,
           ...(leave.length ? [divider("leave"), ...leave] : []),
@@ -357,36 +399,7 @@ export function BotContextMenu({
         {readError?.botId === bot.id && <p role="alert" className="px-2 py-1.5 text-[12px] text-danger">{readError.message}</p>}
       </div>,
       document.body,
-    )}{flyout && createPortal(
-      <div
-        ref={flyoutRef}
-        data-bot-menu
-        data-bot-menu-flyout={flyout}
-        data-sidebar
-        role="menu" data-look="menu"
-        aria-label={flyout === "more" ? t("sidebar.bot.more") : t("sidebar.bot.moveToSection")}
-        onPointerEnter={() => { more.enterSubmenu(); setMoreEngaged(true); }}
-        onPointerLeave={() => setMoreEngaged(false)}
-        onFocus={() => setMoreEngaged(true)}
-        onBlur={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setMoreEngaged(false); }}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowLeft" || event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            const row = flyoutRow(flyout);
-            more.closeNow();
-            row?.focus();
-            return;
-          }
-          navigateThreadMenu(event);
-        }}
-        style={{ top: shown.y, left: shown.x }}
-        className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[180px] max-w-[calc(100vw-16px)] animate-pop-in overflow-y-auto overscroll-contain", MENU_SHEET)}
-      >
-        {flyout === "more" ? moreItems : moveItems}
-      </div>,
-      document.body,
-    )}</>;
+    )}{flyoutSheet({ more: moreItems, move: moveItems, publish: publishItems })}</>;
   }
 
   return <>{clearThreads.dialog}{moveToTeam.dialog}{moveToCloud.dialog}{createPortal(
@@ -397,6 +410,7 @@ export function BotContextMenu({
       role="menu" data-look="menu"
       aria-label={t("sidebar.bot.actions", { name: bot.name })}
       onKeyDown={navigateThreadMenu}
+      {...flyoutPointer}
       style={{ top: shown.y, left: shown.x }}
       className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
@@ -418,6 +432,7 @@ export function BotContextMenu({
           openForSettings();
           if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
         }),
+        publishRow,
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
           void copyText(bot.threadId);
         }),
@@ -452,6 +467,7 @@ export function BotContextMenu({
         pause,
         pauseAll,
         divider("d2"),
+        publishRow,
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
           void copyText(bot.threadId);
         }),
@@ -464,5 +480,5 @@ export function BotContextMenu({
       {readError?.botId === bot.id && <p role="alert" className="px-2 py-1.5 text-[12px] text-danger">{readError.message}</p>}
     </div>,
     document.body,
-  )}</>;
+  )}{flyoutSheet({ publish: publishItems })}</>;
 }

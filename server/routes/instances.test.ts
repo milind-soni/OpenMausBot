@@ -51,11 +51,16 @@ async function serve(extra: Partial<InstanceRouteDeps> = {}, auth: RequestAuth =
   const routes = [createInstanceRoutes(deps)];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const handled = await dispatchRoutes(routes, {
-      req, res, url, path: url.pathname, method: req.method ?? "GET",
-      auth, json, readBody,
-    });
-    if (!handled) json(res, 404, { from: "inline routes" });
+    try {
+      const handled = await dispatchRoutes(routes, {
+        req, res, url, path: url.pathname, method: req.method ?? "GET",
+        auth, json, readBody,
+      });
+      if (!handled) json(res, 404, { from: "inline routes" });
+    } catch (error) {
+      const status = (error as { status?: unknown })?.status;
+      json(res, typeof status === "number" ? status : 500, { error: error instanceof Error ? error.message : String(error) });
+    }
   });
   servers.push(server);
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
@@ -410,5 +415,27 @@ describe("looking for Ollama", () => {
     expect((await fetch(`${shell.base}/api/instances/ollama?url=${encodeURIComponent("http://127.0.0.1:9")}`)).status).toBe(403);
     const hosted = await serve({ hostedModels: true });
     expect((await fetch(`${hosted.base}/api/instances/ollama`)).status).toBe(403);
+  });
+});
+
+describe("the body a route reads", () => {
+  const post = (base: string, path: string, size: number) =>
+    fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: "x".repeat(size) }),
+    });
+
+  it("is capped on the sign-in completion, CLI probe and Claude update routes", async () => {
+    const { base } = await serve();
+    for (const [path, size] of [
+      ["/api/instances/a/auth/complete", 9_000],
+      ["/api/cli-test", 5_000],
+      ["/api/instances/a/claude-update", 5_000],
+    ] as const) {
+      const response = await post(base, path, size);
+      expect(response.status, path).toBe(413);
+      expect(((await response.json()) as { error?: string }).error, path).toBe("body too large");
+    }
   });
 });

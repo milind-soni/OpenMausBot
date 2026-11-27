@@ -33,7 +33,7 @@
 // every message came from the main frame of this page's origin, and the app
 // frame's opaque origin cannot reach this page's globals.
 import type { AppDocument } from "../app.ts";
-import { APP_FRAME_LIMITS, createAppBridge, type AppBridge, type AppContextUpdate, type AppHostContext, type AppRpcMethod } from "./bridge.ts";
+import { APP_FRAME_LIMITS, createAppBridge, type AppBridge, type AppContextUpdate, type AppHostContext, type AppRpcMethod, type PageRpcMethod } from "./bridge.ts";
 
 export const APP_HOST_PROTOCOL_VERSION = 1;
 
@@ -171,7 +171,7 @@ export function startAppHostPage(win: Window, given?: AppHostTransport): AppHost
         source: () => element.contentWindow,
         adapter: {
           post: (message) => element.contentWindow?.postMessage(message, "*"),
-          callRpc: (method: AppRpcMethod, params) => call("rpc", { method, params }),
+          callRpc: (method: AppRpcMethod | PageRpcMethod, params) => call("rpc", { method, params }),
           sendMessage: async (text) => { await call("message", { text }); },
           openLink: async (url) => { await call("open-link", { url }); },
           setContext: async (update: AppContextUpdate) => { await call("context", { ...update }); },

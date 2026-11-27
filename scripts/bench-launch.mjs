@@ -99,7 +99,7 @@ function seed() {
   return seeded;
 }
 
-const STORAGE = { "omb-analytics-opt-out": "1", "omb-email-gate": "skipped", "omb-simple-mode-prompt": "1", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1", "omb-advanced-mode": "0" };
+const STORAGE = { "omb-analytics-opt-out": "1", "omb-email-gate": "skipped", "omb-simple-mode-prompt": "1", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1", "whats-new-2026-11b": "1", "whats-new-2026-11c": "1", "omb-advanced-mode": "0" };
 const electron = require("electron");
 const DEV_PAGE_PORT = BENCH_PORTS[0] - 3600;
 const fixtureEnv = () => ({

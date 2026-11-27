@@ -231,6 +231,8 @@ const __APP_VERSION__: string;
         makeHome?: (id: string) => Promise<{ started: true }>;
         /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
         homeOffers?: () => Promise<string[]>;
+        /** Show bots together (This computer and My Cloud together), from a circle's menu on the rail's own page: whether it is on now. */
+        together?: (on: boolean) => Promise<boolean>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
         /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
@@ -327,6 +329,8 @@ const __APP_VERSION__: string;
         set(id: string | null, on: boolean): Promise<DesktopLendView>;
         /** macOS: asks for Accessibility and Screen Recording, the one step the system itself requires. */
         allowScreen(id: string | null): Promise<DesktopLendView>;
+        /** Opens This computer's Settings with that server's folders and terminal, once it is lent; false when it isn't. */
+        choose?(id: string | null): Promise<boolean>;
         /** The add form's switch (this app's own page only): lend to the server about to be paired at `address` if it
          * turns out to be the person's own. */
         wish?(address: string, on: boolean): Promise<boolean>;
@@ -440,6 +444,12 @@ const __APP_VERSION__: string;
       /** Receives a chat link (openmausbot://thread/… or openmausbot://bot/…)
        * opened from outside the app. */
       onChatLink?(cb: (link: string) => void): () => void;
+      /** A saved app in a window of its own, on the server this window shows; true once it is open. `openChat` brings
+       * the main window to a chat link (openmausbot://thread/…) from an app's own window. */
+      localApps?: {
+        openWindow(id: string): Promise<boolean>;
+        openChat(link: string): Promise<boolean>;
+      };
       /** The desktop shell's app-menu Preferences… item was activated; open
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
@@ -534,6 +544,36 @@ const __APP_VERSION__: string;
         /** The person saw the line that the app updated itself: it is not shown again. */
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
+      };
+      /** Update all on Settings → Devices, this computer's own page only (electron/update-all.mjs). `survey(fresh)`: each
+       * saved server's own answer, `fresh` skipping its hour-long cache. `start` takes saved-server ids; main finds their
+       * addresses and targets itself. Absent in older desktop builds and on any other page. */
+      updateAll?: {
+        survey(fresh?: boolean): Promise<import("../../electron/update-all-run.mjs").UpdateAllSurvey>;
+        start(ids: string[], withApp: boolean): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
+        retry(id: string): Promise<import("../../electron/update-all-run.mjs").UpdateAllView>;
+        onState(cb: (view: import("../../electron/update-all-run.mjs").UpdateAllView) => void): () => void;
+      };
+      /** Saved apps as launchers on this computer (electron/app-install/), this computer's own page only: a bundle in
+       * ~/Applications/MausBot Apps (macOS), a Start menu shortcut (Windows), a desktop entry (Linux), each opening
+       * openmausbot://app/<id>?window=1 (the app in its own window). Installing again replaces the launcher; a new name
+       * replaces the old one. Absent in older desktop builds and on any other page. */
+      appInstall?: {
+        install(input: { id: string; name: string; iconPng?: Uint8Array; desktopShortcut?: boolean }): Promise<
+          | { ok: true; app: { id: string; name: string; path: string | null; desktop?: boolean } }
+          | { ok: false; reason: "unavailable" | "invalid-id" | "taken" | "failed" }>;
+        uninstall(id: string): Promise<{ ok: true; removed: boolean; left?: string[] } | { ok: false; reason: "invalid-id" }>;
+        /** An installed app's icon on the Desktop too (a copy of its launcher); it never makes a missing Desktop folder.
+         * Absent in older desktop builds. */
+        addToDesktop?(id: string): Promise<
+          | { ok: true; app: { id: string; name: string; path: string | null; desktop: boolean } }
+          | { ok: false; reason: "unavailable" | "invalid-id" | "not-installed" | "no-desktop" | "taken" | "failed" }>;
+        /** Removes only that Desktop item; the launcher stays. Absent in older desktop builds. */
+        removeFromDesktop?(id: string): Promise<{ ok: true; removed: boolean; left?: string[] } | { ok: false; reason: "invalid-id" }>;
+        /** `desktop`: its icon is on the Desktop too (absent in older desktop builds). */
+        list(): Promise<{ available: boolean; apps: Array<{ id: string; name: string; path: string | null; desktop?: boolean }> }>;
+        /** `ids`: every saved app's id; launchers of any other app are removed. Absent in older desktop builds. */
+        cleanup?(ids: string[]): Promise<string[]>;
       };
       /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
        * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */

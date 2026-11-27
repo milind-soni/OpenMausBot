@@ -1,6 +1,7 @@
 export type UpdatesConsentStatus = "opted_in" | "declined" | "withdrawn";
 export declare const UPDATES_CONSENT_VERSION: string;
 export declare const UPDATES_CONSENT_STATUSES: readonly UpdatesConsentStatus[];
+export declare const UPDATES_CONSENT_RECHECK_MS: number;
 export interface UpdatesConsentRecord {
   status: UpdatesConsentStatus; version: string; at: number;
   account?: string; email?: string; receipt?: string; replacedReceipts?: string[]; pending?: true;
@@ -40,6 +41,8 @@ export declare function createUpdatesConsent(options: {
   available(): boolean | Promise<boolean>;
   now?: () => number;
   onChange?: () => void;
+  /** Spreads the wait after a failed read (Math.random). */
+  random?: () => number;
 }): UpdatesConsent;
 export declare function registerUpdatesConsent(options: {
   ipcMain: { handle(channel: string, handler: (event: unknown, ...args: unknown[]) => unknown): void };

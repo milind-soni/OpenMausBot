@@ -6,6 +6,7 @@ import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } fro
 import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions, type DecisionRow } from "../decision-log.ts";
 import { doctorSummary } from "../doctor/start.ts";
 import { flushNativeLog } from "../drivers/native.ts";
+import type { EventLogDrops } from "../harness/bus.ts";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
 import { reportableServerVersion } from "../environment.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
@@ -38,6 +39,8 @@ export interface StatusRouteDeps {
   records?: Pick<PrivateRecords, "decisionRow" | "adminActionShown">;
   /** Whether bots run in the bot box: the MausBot connector reads it on a server its owner runs, on or off and nothing more. */
   boxOn?(): boolean;
+  /** Canonical-log events dropped because its queue was full since this server started. */
+  eventLogDrops?(): EventLogDrops;
 }
 
 
@@ -58,7 +61,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       return json(res, 200, { app: "openmausbot", ...(version ? { version } : {}), pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
         guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
-      }, ...(deps.boxOn ? { box: deps.boxOn() ? "on" : "off" } : {}), ...(doctor ? { doctor } : {}) });
+      }, ...(deps.boxOn ? { box: deps.boxOn() ? "on" : "off" } : {}), ...(deps.eventLogDrops ? { eventLogDrops: deps.eventLogDrops() } : {}), ...(doctor ? { doctor } : {}) });
     }
     // JSON-only, so a form posted from another local page cannot start the install. One install at a time.
     if (method === "POST" && path === "/api/browser-engine/install") {

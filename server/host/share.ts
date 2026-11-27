@@ -1,4 +1,6 @@
 // Templates' wiring: the share host, its HTTP routes and the share tool's internal route, from index.ts's records.
+import { userInfo } from "node:os";
+
 import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar.ts";
 import type { TemplateCard } from "../../shared/share-card.ts";
 import type { WireBot, WireGroup } from "../../shared/wire.ts";
@@ -46,11 +48,23 @@ function botPicture(bot: BotRecord): string | undefined {
   return stored ? `data:${stored.mime};base64,${stored.bytes.toString("base64")}` : undefined;
 }
 
+/** This computer's user name; none where the system has no entry for the process's user. */
+function systemUserName(): string | undefined {
+  try {
+    return userInfo().username;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createShareWiring(deps: ShareWiringDeps) {
+  // A Team Cloud's profile is nobody's own, so it neither names the publisher nor is taken out for them.
+  const profileName = () => (deps.team ? undefined : deps.github.cfg().profile?.name?.trim() || undefined);
   const host = createShareHost({
     dataDir: deps.dataDir, bots: deps.bots, groups: deps.groups, routines: deps.routines, brief: deps.brief, botFolder: deps.botFolder,
     collectTeamSkills: deps.collectTeamSkills, skillFiles: deps.skillFiles, picture: botPicture,
     publisher: createCommunityPublisher({ access: deps.access, notOffered: deps.notOffered, selfHosted: deps.selfHosted }),
+    personNames: () => [systemUserName(), profileName()], suggestedCredit: profileName,
     patch: (threadId, messageId, text, template) => deps.patchMessage(threadId, messageId, { text, template }),
   });
   const view = { publicBot: deps.publicBot, publicGroup: deps.publicGroup, broadcast: deps.broadcast };

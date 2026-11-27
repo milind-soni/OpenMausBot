@@ -100,8 +100,8 @@ describe("compileChart: reductions per chart type and column class", () => {
       spec: { type: "bar", x: "amount", y: "qty" },
       method: "bins",
       sql: [
-        'bins_x AS ( SELECT min(CAST(src."amount" AS DOUBLE)) AS lo, CASE WHEN max(CAST(src."amount" AS DOUBLE)) = min(CAST(src."amount" AS DOUBLE)) THEN 1 ELSE (max(CAST(src."amount" AS DOUBLE)) - min(CAST(src."amount" AS DOUBLE))) / 30 END AS width FROM src )',
-        'bins_x.lo + CASE WHEN src."amount" IS NULL THEN NULL ELSE least(floor((CAST(src."amount" AS DOUBLE) - bins_x.lo) / bins_x.width), 29) END * bins_x.width AS x',
+        'bins_x AS ( SELECT min(CAST(src."amount" AS DOUBLE)) AS lo, CASE WHEN max(CAST(src."amount" AS DOUBLE)) = min(CAST(src."amount" AS DOUBLE)) THEN 1 ELSE (max(CAST(src."amount" AS DOUBLE)) - min(CAST(src."amount" AS DOUBLE))) / 30 END AS width FROM src WHERE isfinite(CAST(src."amount" AS DOUBLE)) )',
+        'bins_x.lo + CASE WHEN isfinite(CAST(src."amount" AS DOUBLE)) THEN least(floor((CAST(src."amount" AS DOUBLE) - bins_x.lo) / bins_x.width), 29) ELSE NULL END * bins_x.width AS x',
         "+ 1) * bins_x.width AS x2",
         'sum(src."qty") AS y FROM src, bins_x GROUP BY ALL ORDER BY x',
       ],
@@ -213,7 +213,7 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "histogram counts into 30 equal-width bins",
       spec: { type: "histogram", x: "amount" },
       method: "bins",
-      sql: ["/ 30 END AS width", ", 29) END * bins_x.width AS x", "count(*) AS y"],
+      sql: ["/ 30 END AS width", ", 29) ELSE NULL END * bins_x.width AS x", "count(*) AS y"],
       check: (vl) => {
         expect(mark(vl)).toBe("bar");
         expect(enc(vl).x).toMatchObject({ bin: "binned" });
@@ -224,7 +224,7 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "histogram honours bins and an aggregate",
       spec: { type: "histogram", x: "amount", y: "qty", agg: "avg", bins: 10 },
       method: "bins",
-      sql: ["/ 10 END AS width", ", 9) END * bins_x.width AS x", 'avg(src."qty") AS y'],
+      sql: ["/ 10 END AS width", ", 9) ELSE NULL END * bins_x.width AS x", 'avg(src."qty") AS y'],
       check: (vl) => expect(enc(vl).y.title).toBe("avg(qty)"),
     },
     {

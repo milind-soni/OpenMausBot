@@ -1,4 +1,5 @@
 import type { ConnectorCardData } from "./connector-card.ts";
+import type { InboxSaidReason } from "./inbox-reason.ts";
 import type { OptionCardData, SecretRequestCardData, SignInRequestCardData } from "./wire.ts";
 
 /** On a Team Cloud, a line in a person's inbox: their own conversation with their own Chief of Staff (their own MausBot
@@ -21,6 +22,8 @@ export interface InboxItem {
   assistant?: true;
   /** How it was answered: the person's own words, or their assistant's, which answers facts only. */
   answers?: Array<{ by: "person" | "assistant"; text: string; at: number }>;
+  /** Why it is here, when the line itself can't tell: a mention, a reply to the person, a share, or a bot's question. */
+  reason?: InboxSaidReason;
 }
 
 /** A task's fields on a team's server when it is a person's inbox, sent to that person alone. */
@@ -57,6 +60,7 @@ export interface InboxRow {
   unread: boolean;
   replies?: true;
   answers?: InboxItem["answers"];
+  reason?: InboxItem["reason"];
   /** An ask's card as the inbox holds it: answering it answers the card where it was asked. */
   card?: OptionCardData;
   /** A password the bot asked for, answered with the chat's own card for it. */

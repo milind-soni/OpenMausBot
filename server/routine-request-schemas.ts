@@ -1,19 +1,14 @@
 // The shapes a routine request takes: the tool input a bot sends, and the normalized operation a card stores.
 import { z } from "zod";
 
-import { normalizeCronSchedule } from "../shared/routine-schedule.ts";
+import {
+  ENGINE_ID, MAX_DATE_MS, TIME, intervalWindowMinutes, refineStoredInterval, storedCronScheduleSchema,
+  storedIntervalWindowSchema, storedLimitResetDefinition, storedWeekdaysSchema,
+} from "../shared/routine-schedule-schema.ts";
 import type { JsonValue } from "./schema.ts";
 
-export const TIME = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+export { ENGINE_ID, MAX_DATE_MS, TIME, intervalWindowMinutes, storedCronScheduleSchema, storedIntervalWindowSchema, storedWeekdaysSchema };
 export const ROUTINE_ID = /^[A-Za-z0-9_-]{1,128}$/;
-export const MAX_DATE_MS = 8_640_000_000_000_000;
-export const ENGINE_ID = /^[\w.:-]{1,128}$/;
-
-export function intervalWindowMinutes(window: { start: string; end: string }): number {
-  const [startHour, startMinute] = window.start.split(":").map(Number);
-  const [endHour, endMinute] = window.end.split(":").map(Number);
-  return endHour * 60 + endMinute - (startHour * 60 + startMinute);
-}
 
 export const jsonObjectSchema = z.record(z.string(), z.custom<JsonValue>());
 export const toolIntervalWindowSchema = z.object({
@@ -77,29 +72,9 @@ export const routineProposalSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("delete"), routineId: z.string().max(128), forBot: targetBotSchema.optional() }).strict(),
 ]);
 
-export const storedWeekdaysSchema = z.array(z.number().int().min(0).max(6)).min(1).max(7).refine(
-  (weekdays) => new Set(weekdays).size === weekdays.length,
-  "Stored routine weekdays must be unique",
-);
-export const storedIntervalWindowSchema = z.object({
-  start: z.string().regex(TIME),
-  end: z.string().regex(TIME),
-}).strict().refine(
-  ({ start, end }) => start < end,
-  "Stored interval window must end later on the same day",
-);
-export const storedCronScheduleSchema = z.object({
-  type: z.literal("cron"), expression: z.string().max(256), timeZone: z.string().max(128),
-}).strict().superRefine((schedule, context) => {
-  try {
-    normalizeCronSchedule(schedule);
-  } catch (error) {
-    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid stored cron schedule" });
-  }
-});
 export const storedScheduleSchema = z.discriminatedUnion("type", [
   storedCronScheduleSchema,
-  z.object({ type: z.literal("limit_reset"), engine: z.string().regex(ENGINE_ID), repeat: z.enum(["once", "every_reset"]) }).strict(),
+  z.object({ type: z.literal("limit_reset"), ...storedLimitResetDefinition }).strict(),
   z.object({ type: z.literal("once"), at: z.number().int().nonnegative() }).strict(),
   z.object({
     type: z.literal("daily"),
@@ -114,26 +89,10 @@ export const storedScheduleSchema = z.discriminatedUnion("type", [
     window: storedIntervalWindowSchema.optional(),
     endsAt: z.number().int().nonnegative().max(MAX_DATE_MS).optional(),
   }).strict(),
-]).superRefine((schedule, context) => {
-  if (schedule.type !== "interval") return;
-  if (schedule.window && intervalWindowMinutes(schedule.window) < schedule.everyMinutes) {
-    context.addIssue({
-      code: "custom",
-      message: "Stored interval window must be at least as long as the cadence",
-      path: ["window"],
-    });
-  }
-  if (schedule.endsAt !== undefined && schedule.anchorAt !== undefined && schedule.endsAt < schedule.anchorAt) {
-    context.addIssue({
-      code: "custom",
-      message: "Stored interval end must not be before its anchor",
-      path: ["endsAt"],
-    });
-  }
-});
+]).superRefine((schedule, context) => refineStoredInterval(schedule, context));
 export const storedScheduleChangesSchema = z.discriminatedUnion("type", [
   storedCronScheduleSchema,
-  z.object({ type: z.literal("limit_reset"), engine: z.string().regex(ENGINE_ID), repeat: z.enum(["once", "every_reset"]) }).strict(),
+  z.object({ type: z.literal("limit_reset"), ...storedLimitResetDefinition }).strict(),
   z.object({ type: z.literal("once"), at: z.number().int().nonnegative() }).strict(),
   z.object({
     type: z.literal("daily"),
@@ -148,28 +107,7 @@ export const storedScheduleChangesSchema = z.discriminatedUnion("type", [
     window: storedIntervalWindowSchema.nullable().optional(),
     endsAt: z.number().int().nonnegative().max(MAX_DATE_MS).nullable().optional(),
   }).strict(),
-]).superRefine((schedule, context) => {
-  if (schedule.type !== "interval") return;
-  if (schedule.window && intervalWindowMinutes(schedule.window) < schedule.everyMinutes) {
-    context.addIssue({
-      code: "custom",
-      message: "Stored interval window must be at least as long as the cadence",
-      path: ["window"],
-    });
-  }
-  if (
-    schedule.endsAt !== undefined &&
-    schedule.endsAt !== null &&
-    schedule.anchorAt !== undefined &&
-    schedule.endsAt < schedule.anchorAt
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "Stored interval end must not be before its anchor",
-      path: ["endsAt"],
-    });
-  }
-});
+]).superRefine((schedule, context) => refineStoredInterval(schedule, context));
 export const storedDefinitionSchema = z.object({
   name: z.string().trim().min(1).max(80),
   instructions: z.string().trim().min(1).max(20_000),
