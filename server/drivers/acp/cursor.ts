@@ -523,6 +523,8 @@ const support = (run: typeof execCli): AcpSupport => ({
       : methods.some((m) => m.id === "cursor_login") ? "cursor_login" : null,
   authFailure: "continue",
   isAuthenticated: (env, config) => probeCursorAuth(config.cli || "cursor-agent", env, run),
+  // cursor_login re-run clears the CLI's stored login and opens a browser, so the handshake asks the CLI first.
+  skipAuthenticateWhenAuthenticated: true,
   classifyError: classifyCursorError,
   replyFailure: cursorReplyFailure,
 
