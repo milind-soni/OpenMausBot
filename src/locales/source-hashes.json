@@ -4562,7 +4562,15 @@
       "remote.diagnosis.next.signIn": "cf02186cdb05d8255b79c71fd7b1255637572867842af43afe313e556ebead25",
       "template.download": "d6eafe82359100423c93c5ce53c352c1b51ca1e699215fcec3f5c5dd9bf12d24",
       "template.downloaded": "1f2ca7d9063727ab20c06007004dcd44786ed6889b203ee46efcb96cc378747c",
-      "template.publishTitle": "56ea0de7c3d4152a8c309e55cb0d90b41e97b1de3e326d39dfb792f030b141d4"
+      "template.publishTitle": "56ea0de7c3d4152a8c309e55cb0d90b41e97b1de3e326d39dfb792f030b141d4",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -40152,7 +40160,15 @@
       "template.downloaded": "1f2ca7d9063727ab20c06007004dcd44786ed6889b203ee46efcb96cc378747c",
       "template.publishTitle": "56ea0de7c3d4152a8c309e55cb0d90b41e97b1de3e326d39dfb792f030b141d4",
       "notifications.clearAll": "29a390f9237e3c84e5641785eca25199620e53f7b6f4b9d843b23dcb5c12904f",
-      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7"
+      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -52411,7 +52427,15 @@
       "template.downloaded": "1f2ca7d9063727ab20c06007004dcd44786ed6889b203ee46efcb96cc378747c",
       "template.publishTitle": "56ea0de7c3d4152a8c309e55cb0d90b41e97b1de3e326d39dfb792f030b141d4",
       "notifications.clearAll": "29a390f9237e3c84e5641785eca25199620e53f7b6f4b9d843b23dcb5c12904f",
-      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7"
+      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -62989,7 +63013,15 @@
       "template.downloaded": "1f2ca7d9063727ab20c06007004dcd44786ed6889b203ee46efcb96cc378747c",
       "template.publishTitle": "56ea0de7c3d4152a8c309e55cb0d90b41e97b1de3e326d39dfb792f030b141d4",
       "notifications.clearAll": "29a390f9237e3c84e5641785eca25199620e53f7b6f4b9d843b23dcb5c12904f",
-      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7"
+      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -106825,7 +106857,15 @@
       "template.downloaded": "1f2ca7d9063727ab20c06007004dcd44786ed6889b203ee46efcb96cc378747c",
       "template.publishTitle": "56ea0de7c3d4152a8c309e55cb0d90b41e97b1de3e326d39dfb792f030b141d4",
       "notifications.clearAll": "29a390f9237e3c84e5641785eca25199620e53f7b6f4b9d843b23dcb5c12904f",
-      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7"
+      "notifications.cleared": "1465a1fea515a237e70954fa3b274d32af2b09194f7ad06ec230bd5f56773ba7",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",

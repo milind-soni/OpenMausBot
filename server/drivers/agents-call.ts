@@ -903,6 +903,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
+    if (args.action === "teammates") return completedProposalResult(await api("/api/internal/skills/stage", { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, action: "teammates", changes: args.changes }) }), "the change to your teammates' skills")
+      ?? { text: "A confirmation card is now visible to the user listing every teammate skill to turn on or off. Nothing changes until they approve it. End this turn and wait for the decision." };
     if (isSkillSwitchAction(args.action)) {
       const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
       const verb = skillSwitchVerb(args.action);
@@ -918,7 +920,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
-      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable", "delete" or "teammates". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim() && args.action !== "import") {

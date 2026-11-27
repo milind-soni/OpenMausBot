@@ -39,7 +39,7 @@ import {
 import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
 import { SlashCommandMenu } from "./SlashCommandMenu"; import { ComposerFailedSends } from "./ComposerFailedSends";
 import { MentionTextarea } from "./MentionTextarea"; import { useSuggestedReply } from "./use-suggested-reply"; import { SUGGESTION_HINT_ID, SuggestedReplyGhost } from "./SuggestedReplyGhost";
-import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
+import { ComposerAttachments, localPathForFile, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
 import { openPageFor } from "@/lib/open-page";
@@ -515,6 +515,7 @@ export function Composer({
       const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
         allowImages: engineSupportsImages,
         getPath: pathForFile,
+        localPath: localPathForFile,
         uploadImage,
         imageSlots: imageSlotsLeft(attachments),
         imageBytes: imageBytesLeft(attachments),
