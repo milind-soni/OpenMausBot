@@ -40,7 +40,7 @@ describe("starter apps", () => {
     for (const app of STARTER_APPS) {
       const html = source.html(app)!;
       expect(html.match(/(?:https?:)?\/\/[a-z0-9.-]+\.[a-z]{2,}[^\s"'`)]*/gi)?.filter((url) => url !== "http://www.w3.org/2000/svg") ?? [], app.file).toEqual([]);
-      expect(html, app.file).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|window\.hero|fonts\.googleapis|\bfetch\(|XMLHttpRequest|WebSocket|mausbot\./);
+      expect(html, app.file).not.toMatch(/localStorage|sessionStorage|indexedDB|document\.cookie|window\.hero|window\.__|fonts\.googleapis|\bfetch\(|XMLHttpRequest|WebSocket|mausbot\./);
       expect(html, app.file).toMatch(/sample data/i);
     }
   });
@@ -92,8 +92,13 @@ describe("starter apps", () => {
     expect(readFileSync(localAppsFile(unreadable), "utf8")).toBe(before);
 
     const removals = fresh();
+    open(removals, pages({ "one.html": "<h1>One</h1>" }));
     writeFileSync(removedStartersFile(removals), "{not json");
-    expect(open(removals, pages({ "one.html": "<h1>One</h1>" })).list()).toEqual([]);
+    const broken = open(removals, pages({ "one.html": "<h1>One</h1>", "two.html": "<h1>Two</h1>" }));
+    expect(broken.list().map((app) => app.id)).toEqual([TWO[0]!.id]);
+    expect(() => broken.remove(TWO[0]!.id)).toThrow();
+    expect(readFileSync(removedStartersFile(removals), "utf8")).toBe("{not json");
+    expect(broken.get(TWO[0]!.id)).not.toBeNull();
   });
 
   it("leave out a page that isn't there, and add nothing without a source", () => {

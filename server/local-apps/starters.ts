@@ -60,9 +60,11 @@ export function readRemovedStarters(dataDir: string): Set<string> | null {
   }
 }
 
-/** Throws when it can't be written: a removal that isn't remembered would come back at the next start. */
+/** Throws when it can't be remembered, the removals file unreadable included (writing over it would forget earlier
+ * removals): a removal that isn't remembered would come back at the next start. */
 export function rememberRemovedStarter(dataDir: string, id: string): void {
-  const removed = readRemovedStarters(dataDir) ?? new Set<string>();
+  const removed = readRemovedStarters(dataDir);
+  if (!removed) throw new Error("The removed starter apps can't be read, so this one can't be removed for good.");
   if (removed.has(id)) return;
   mkdirSync(dataDir, { recursive: true });
   writeFileAtomic(removedStartersFile(dataDir), JSON.stringify({ version: 1, ids: [...removed, id] }), { mode: 0o600 });
