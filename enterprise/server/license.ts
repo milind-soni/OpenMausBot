@@ -7,10 +7,19 @@
 import { createPrivateKey, createPublicKey, sign, verify, type JsonWebKeyInput } from "node:crypto";
 import { z } from "zod";
 
-/** Ed25519 public keys (JWK `x`), oldest first. Rotate by appending; never edit or remove
- * an entry while a key signed with it is still in the field. The matching private keys are
- * generated with scripts/issue-license.mjs and stay outside the repo. */
+/** Ed25519 public keys (JWK `x`), oldest first. A key verifies when any entry signed it.
+ *
+ * Adding a signing key:
+ *   1. Whoever holds the new private key runs `node enterprise/scripts/issue-license.mjs keygen --out <path>`.
+ *      It writes the private half to <path> (mode 0600) and prints only the public half.
+ *   2. Append that public half as a new last line below, with a comment saying who signs with it.
+ *   3. Ship a release. Servers older than that release do not trust the new key yet, so keep issuing
+ *      with the old key until the servers that need the new one are updated.
+ *
+ * Never edit or remove an entry while a key signed with it is still in the field. Private keys stay
+ * outside the repo. */
 export const LICENSE_PUBLIC_KEYS: readonly string[] = [
+  // Hand-issued enterprise keys.
   "6CHdwwJzxKJFimRkC79eQ5FR__bX2WaU2BBGNGPQTQU",
 ];
 
@@ -24,6 +33,16 @@ export const claimsSchema = z.object({
   issued: z.iso.date("issued must be a YYYY-MM-DD date"),
   /** ISO date (YYYY-MM-DD) the key stops working, or null for perpetual. */
   expires: z.iso.date("expires must be a YYYY-MM-DD date").nullable(),
+  // Optional, added later in the same `v: 1` format. A server without them ignores them (unknown claims are dropped,
+  // never refused), and a key without them still verifies here, so old servers and old keys keep working.
+  /** How many people may sign in before new invites stop (soft: nobody is locked out). */
+  seats: z.number().int().positive().optional(),
+  /** The plan the key was sold under, e.g. "business-server". */
+  plan: z.string().min(1).optional(),
+  /** The subscription the key renews with. */
+  sub: z.string().min(1).optional(),
+  /** The server the key was issued for. */
+  server: z.string().min(1).optional(),
 });
 
 export type LicenseClaims = z.infer<typeof claimsSchema>;

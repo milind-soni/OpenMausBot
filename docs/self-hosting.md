@@ -135,6 +135,24 @@ Add `--check` to only check the server. Running it again repairs;
 writes and what it contacts are in
 [Deploy on a VPS](deploy-vps.md#quick-start-one-command-on-your-own-domain).
 
+A licence goes in with the install, as `OMB_LICENSE_KEY` after `sudo` (it is
+kept in `/opt/openmausbot/.env`):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo OMB_LICENSE_KEY=omb1… sh -s -- --domain maus.example.com
+```
+
+Or paste it later, with no restart: the server reads `license.key` in its
+data folder before `OMB_LICENSE_KEY`, every hour and, on Linux, within seconds
+of the file changing. Paste the licence, press Enter, then Ctrl-D:
+
+```sh
+cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'cat > "$OMB_DATA_DIR/license.key"'
+```
+
+A file that is not a valid licence never takes away the one in force; it is
+logged once and the server keeps the last good licence until it expires.
+
 By hand, on any system with Docker:
 
 ```sh

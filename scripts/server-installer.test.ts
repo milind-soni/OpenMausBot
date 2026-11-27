@@ -426,6 +426,32 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(existsSync(join(missing.install, "data"))).toBe(true);
   });
 
+  it("passes a licence given as OMB_LICENSE_KEY to the server through .env, never prints it, and keeps it on a re-run", () => {
+    const licence = "omb1.eyJ2IjoxfQ.c2lnbmF0dXJlLW9ubHktZm9yLXRlc3Rz";
+    const first = run(["--domain", "maus.example.com"], { env: { OMB_LICENSE_KEY: licence } });
+    expect(first.status).toBe(0);
+    const env = join(first.install, ".env");
+    expect(readFileSync(env, "utf8")).toContain(`\nOMB_LICENSE_KEY=${licence}\n`);
+    expect(statSync(env).mode & 0o777).toBe(0o600);
+    expect(readFileSync(join(first.install, "compose.yaml"), "utf8")).toMatch(/^ {6}OMB_LICENSE_KEY:$/m);
+    expect(first.all).not.toContain(licence);
+    const second = run([], { env: { FAKE_RELEASE: "v0.1.152" } }, { dir: first.dir });
+    expect(second.status).toBe(0);
+    expect(readFileSync(env, "utf8").split("\n").filter((line) => line.startsWith("OMB_LICENSE_KEY="))).toEqual([`OMB_LICENSE_KEY=${licence}`]);
+    // The paste fallback the installer's header names: license.key in the server's data folder, written as the server's user.
+    expect(script).toContain(`sudo docker compose exec -T omb sh -c 'cat > "$OMB_DATA_DIR/license.key"'`);
+  });
+
+  it("refuses an OMB_LICENSE_KEY that is not a licence before changing anything, without echoing it", () => {
+    for (const bad of ["not-a-licence", "omb1.only-one-part", "omb1.a.b; rm -rf /", "omb1.a.b\nOMB_IMAGE=evil"]) {
+      const result = run(["--domain", "maus.example.com"], { env: { OMB_LICENSE_KEY: bad } });
+      expect(result.status, bad).toBe(1);
+      expect(result.stderr).toContain("OMB_LICENSE_KEY doesn't look like a MausBot licence.");
+      expect(result.all).not.toContain(bad);
+      expect(existsSync(result.install), bad).toBe(false);
+    }
+  });
+
   it("run again, it repairs its own files and keeps the person's settings and data", () => {
     const first = run(["--domain", "maus.example.com"]);
     expect(first.status).toBe(0);
@@ -676,7 +702,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const settings = (text: string) => [...text.matchAll(/^ {6}(OMB_[A-Z_]+:.*)$/gm)].map((match) => match[1]);
     expect(settings(written)).toEqual(settings(manual));
     // The sign-in lists and mail server are passed only when .env sets them: an empty one would still be set.
-    for (const name of ["OMB_SIGNIN_EMAILS", "OMB_SIGNIN_MEMBER_EMAILS", "OMB_SIGNIN_SMTP_URL", "OMB_SIGNIN_SMTP_FROM", "OMB_PHONE_RELAY"]) expect(settings(written)).toContain(`${name}:`);
+    for (const name of ["OMB_SIGNIN_EMAILS", "OMB_SIGNIN_MEMBER_EMAILS", "OMB_SIGNIN_SMTP_URL", "OMB_SIGNIN_SMTP_FROM", "OMB_PHONE_RELAY", "OMB_LICENSE_KEY"]) expect(settings(written)).toContain(`${name}:`);
     for (const line of ['test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]', "init: true", "shm_size: 512m", '- "80:80"', '- "443:443"',
       "- edge:/run/openmausbot", "type: tmpfs"]) {
       expect(written).toContain(line);

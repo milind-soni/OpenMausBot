@@ -24,19 +24,37 @@ expires), signed with an Ed25519 key whose public half is baked into
 `enterprise/server/license.ts`. Verification is offline, and one build serves
 every customer, because the key decides the feature set rather than the code.
 
+The server reads the key from `license.key` in its data folder (`OMB_DATA_DIR`;
+`/data/.openmausbot` in the Docker image) first, then from `OMB_LICENSE_KEY`,
+and reads them again every hour and, on Linux, soon after `license.key`
+changes, so a pasted or renewed licence takes effect without a restart. A
+file that is missing, not a licence, or refused never replaces a licence still
+in force: the server logs it once and keeps the last good one until its grace
+ends. An `OMB_LICENSE_KEY` never replaces a licence that came from the file.
+
+Keys may also carry `seats`, `plan`, `sub` (subscription) and `server` claims,
+in the same `omb1` / `v: 1` format: a server from before them ignores them,
+and a key without them works on every server.
+
 `GET /api/edition` reports the outcome:
 
 ```json
 { "edition": "enterprise", "customer": "Acme", "features": ["budgets", "whitelabel"], "expiresAt": "2027-09-02", "expiresInDays": 12 }
-{ "edition": "enterprise", "customer": "Acme", "features": ["budgets", "whitelabel"], "expiresAt": "2027-09-02", "expiresInDays": -2, "graceEndsAt": "2027-09-09", "notice": "OMB_LICENSE_KEY expired on 2027-09-02; enterprise features keep working until 2027-09-09 while it is renewed" }
+{ "edition": "enterprise", "customer": "Acme", "features": ["budgets", "whitelabel"], "expiresAt": "2027-09-02", "expiresInDays": -2, "graceEndsAt": "2027-09-16", "notice": "OMB_LICENSE_KEY expired on 2027-09-02; enterprise features keep working until 2027-09-16 while it is renewed" }
 { "edition": "oss", "features": [], "notice": "enterprise layer disabled: OMB_LICENSE_KEY expired on 2027-09-02; renew it to keep enterprise features" }
 ```
+
+`GET /api/license`, for the owner or an admin only, reports the licence for
+Settings: `valid`, `source` (`file` or `env`), `customer`, `plan`, `seats`,
+`features`, `expiresAt`, `expiresInDays`, `graceEndsAt`, `graceDaysLeft`
+(once expired: whole days until the features stop, 0 after) and `notice`. It
+never includes the key.
 
 `expiresInDays` is present whenever the key has an expiry; a non-admin
 session's `/api/edition` leaves out `expiresInDays`, `graceEndsAt` and the
 notice. From 30 days
 before it, the server logs a warning at startup and admins see a banner in
-Settings. After the expiry date the features keep working for a 7-day grace
+Settings. After the expiry date the features keep working for a 14-day grace
 period, with the notice above and a banner saying until when; then they stop,
 without a restart. The key format and its signature check do not change: the
 layer simply accepts a key that expired less than the grace period ago.
@@ -68,6 +86,8 @@ ahead of a feature landing.
 ```sh
 node enterprise/scripts/issue-license.mjs keygen          # once; prints the public key to add to license.ts
 node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features whitelabel,sso --expires 2027-09-02
+node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features admin --expires 2027-01-03 \
+  --seats 20 --plan business-server --sub <subscription id> --server <server id>
 ```
 
 The signing key lives outside the repo (default
