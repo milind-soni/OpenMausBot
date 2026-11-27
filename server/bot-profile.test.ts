@@ -155,15 +155,15 @@ describe("mascotBodyColor", () => {
 });
 
 describe("mascotMaterial", () => {
-  it.each(["fluffy", null] as const)("accepts %s at both profile boundaries", (mascotMaterial) => {
+  it.each(["fluffy", "matte", "metallic", null] as const)("accepts %s at both profile boundaries", (mascotMaterial) => {
     for (const strict of [true, false]) {
       expect(parseBotProfilePatch({ mascotMaterial }, strict)).toEqual({ ok: true, patch: { mascotMaterial } });
     }
   });
 
-  it.each(["Fluffy", "fuzzy", "velvet", "", 1, {}])("rejects %j", (mascotMaterial) => {
+  it.each(["Fluffy", "fuzzy", "velvet", "flat", "", 1, {}])("rejects %j", (mascotMaterial) => {
     expect(parseBotProfilePatch({ mascotMaterial } as never, true)).toEqual({
-      ok: false, error: "mascotMaterial must be fluffy, or null",
+      ok: false, error: "mascotMaterial must be fluffy, matte, metallic, or null",
     });
   });
 });

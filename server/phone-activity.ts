@@ -1,7 +1,9 @@
 // A paired phone's Live Activities (iPhone) and ongoing "working" notification (Android) while its app is closed. The
 // phone registers its activity tokens and its own words; when a bot it would see starts needing the person, starts or
 // stops working, and the phone holds no live stream, this asks the push relay to start, update or end that bot's
-// activity. Names, kind and the phone's headline only. It rides phone push's switch, store rules and relay access.
+// activity. Names, kind and the phone's headline only. It rides phone push's switch, store rules and relay access, and
+// its per-phone hourly cap. Not on a Team Cloud: a bot's state there (busy, waiting on an ask) is everyone's, not one
+// person's, so it would show one person another's private work.
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -76,6 +78,8 @@ export interface PhoneActivityOptions {
   bot: (botId: string) => { name: string; busy: boolean; threadId: string } | undefined;
   /** The bot a conversation belongs to. */
   botOfThread: (threadId: string) => string | undefined;
+  /** False where activities are not offered at all (a Team Cloud): nothing is kept and nothing is pushed. */
+  available?: () => boolean;
   now?: () => number;
   log?: (line: string) => void;
   /** Frames for one bot gather this long before its state is read again. */
@@ -156,7 +160,7 @@ export class PhoneActivity {
   /** Replaces this phone's registration. Switched off, nothing is kept. Tokens it no longer lists are unregistered. */
   async register(key: string, input: z.infer<typeof activityRegistrationSchema>): Promise<"off" | "saved"> {
     if (!PUSH_DEVICE_KEY.test(key)) throw new Error("not a phone");
-    if (this.options.push.status() === "off") return "off";
+    if (this.options.push.status() === "off" || this.options.available?.() === false) return "off";
     const previous = this.phones.find((phone) => phone.key === key);
     const others = this.phones.filter((phone) => phone.key !== key);
     if (!previous && others.length >= MAX_ACTIVITY_PHONES) throw Object.assign(new Error("Too many phones"), { status: 409 });
@@ -210,7 +214,7 @@ export class PhoneActivity {
    */
   offer(payload: Record<string, unknown>, reaches: (key: string) => boolean): void {
     try {
-      if (!this.phones.length || this.options.push.status() !== "on") return;
+      if (!this.phones.length || this.options.push.status() !== "on" || this.options.available?.() === false) return;
       const botId = this.botOf(payload);
       if (!botId) return;
       this.reach.set(botId, reaches);
@@ -376,8 +380,9 @@ export class PhoneActivity {
   }
 
   private async post(key: string, botId: string, body: PushRelayActivityRequest, via: "apns" | "fcm"): Promise<ActivityOutcome> {
-    const answer = await this.options.push.call(PHONE_ACTIVITY_RELAY_PATH, body);
+    const answer = await this.options.push.callFor(key, PHONE_ACTIVITY_RELAY_PATH, body);
     const base = { key, botId, event: body.event, via } as const;
+    if (answer === "capped") return { ...base, result: "dropped" };
     if (answer && answer.status < 300) return { ...base, result: "sent" };
     if (answer && (answer.status === 410 || answer.code === PUSH_RELAY_ERRORS.unregistered || answer.code === PUSH_RELAY_ERRORS.unknownDevice)) {
       if (via === "apns") {

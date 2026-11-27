@@ -3,12 +3,13 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
+import { AlertTriangle, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
 import { replyAndCopy, useBotMessageMenu, userMessageMenu } from "@/components/message-menu";
 import { forkMessageItem, ForkLinks, useForkedMessages } from "@/components/ForkMessage";
+import { VersionSwitch } from "@/components/VersionSwitch";
 import { savesToTeamMemory, TEAM_MEMORY_ITEM, TeamMemorySavesContext } from "@/components/conversation-share/conversation-share";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { localSystemVoiceActive } from "@/lib/local-voice";
@@ -51,7 +52,7 @@ import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
-import { peerLine, peerPreview, peerRequest } from "@/lib/peer-message"; import { PeerCompactRow, PeerLabel, PeerMessagesContext, PeerOpenedActions } from "./PeerExchange";
+import { flatPreview, peerLine, peerPreview, peerRequest } from "@/lib/peer-message"; import { PeerCompactRow, PeerLabel, PeerMessagesContext, PeerOpenedActions } from "./PeerExchange"; import { earlierAnswers } from "@/lib/check-rounds";
 import { lastRequests } from "@/lib/automation-note"; import { automationNoteRow } from "./AutomationNoteRow";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { lastNonReceipt } from "@/lib/receipts";
@@ -115,7 +116,7 @@ import { useComposerDockPad } from "@/lib/composer-dock";
 import { ChatBackdrop, GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { PagePaneContext } from "./app/PageTools";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
-import { useUnreadDivider } from "@/hooks/use-unread-divider";
+import { useUnreadDivider } from "@/hooks/use-unread-divider"; import { useTabsFrameOnRoot } from "@/hooks/use-tabs-frame-on-root";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider"; import { UnreadContextOverlay } from "./UnreadContextOverlay";
 import { appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
@@ -275,11 +276,11 @@ const Bubble = memo(function Bubble({
   onRegenerate,
   replyTarget,
   onReply,
-  forked = false,
+  forked = false, earlierRound,
 }: {
   message: Message;
   /** A conversation was forked from this message. */
-  forked?: boolean;
+  forked?: boolean; /** Check before done sent this answer back for fixing in this round: it shows as one line until opened. */ earlierRound?: number;
   emerging?: boolean;
   eagerAttachments?: boolean;
   /** Simple mode: this bubble meets the one above (or below) in its sender's group. */
@@ -297,17 +298,17 @@ const Bubble = memo(function Bubble({
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, localVoice, bots, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle, conversational, simple, canReact, openedAt, speakerViewer, phone } = useChatRows(), busy = use(ChatBusyContext);
+  const { botId, threadId, botName, voiceId, tts, localVoice, bots, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle, conversational, simple, canReact, openedAt, speakerViewer, phone } = useChatRows();
   const message = useLiveRow(threadId, row);
   const forkAction = !phone && message.kind === "text" && !message.id.startsWith("optimistic-")
-    ? [forkMessageItem({ kind: "bot", ownerId: botId, threadId, messageId: message.id }, dispatch, busy)] : [];
+    ? [{ ...forkMessageItem({ kind: "bot", ownerId: botId, threadId, messageId: message.id }, dispatch, false), disabledWhileBusy: true }] : [];
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const peer = peerLine(message) ?? peerRequest(message, botId);
   const user = message.role === "user" && !peer;
   const speaker = user ? otherSpeaker(message, speakerViewer ?? null) : null;
   const ownBubbleStyle = speaker ? undefined : bubbleStyle;
   const [expanded, setExpanded] = useState(false), [folded, setFolded] = useState(false);
-  const focusedSearch = focus?.messageId === message.id && Boolean(focus.matchText);
+  const focusedHere = focus?.messageId === message.id, focusedSearch = focusedHere && Boolean(focus.matchText);
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
@@ -323,7 +324,7 @@ const Bubble = memo(function Bubble({
     canSpeak: message.kind === "text" && !peer,
     viewRaw,
     onToggleRaw: () => setViewRaw((raw) => !raw),
-    onRegenerate: !busy ? onRegenerate : undefined,
+    onRegenerate,
     pin: remoteClient ? undefined : {
       pinned,
       onToggle: () => dispatch({ type: "updateTask", botId, threadId, patch: { pinnedMessageId: pinned ? "" : message.id } }),
@@ -361,8 +362,8 @@ const Bubble = memo(function Bubble({
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
   useEffect(() => {
     setFolded(false);
-    if (focusedSearch && (collapsible || peer)) setExpanded(true);
-  }, [focusedSearch, collapsible, Boolean(peer), focus?.nonce]);
+    if ((focusedSearch && (collapsible || peer)) || (focusedHere && earlierRound !== undefined)) setExpanded(true);
+  }, [focusedSearch, focusedHere, collapsible, Boolean(peer), earlierRound, focus?.nonce]);
 
   if (user && editing && !webhookView && !hasAttachments) {
     return (
@@ -374,11 +375,11 @@ const Bubble = memo(function Bubble({
 
   // A long request from another bot is one line until opened.
   const peerLong = peer ? peerPreview(text) : null;
-  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} bots={bots} /><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} /></div>;
+  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} bots={bots} /><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} /></div>; if (earlierRound && !expanded) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerCompactRow label={t("chat.checkWork.earlierAnswer", { round: earlierRound })} preview={flatPreview(text)} testId="earlier-answer" onOpen={() => setExpanded(true)} /></div>;
   const forks = user && versions ? versions : [message];
   const versionIndex = forks.findIndex((v) => v.id === message.id);
-  const switchTo = (v: Message | undefined) => {
-    if (v && !busy && !v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId, threadId, messageId: v.id });
+  const switchTo = (v: Message) => {
+    if (!v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId, threadId, messageId: v.id });
   };
   const togglePin = () =>
     dispatch({ type: "updateTask", botId, threadId, patch: { pinnedMessageId: pinned ? "" : message.id } });
@@ -537,31 +538,9 @@ const Bubble = memo(function Bubble({
         </span>
       </div>
       {Boolean(message.reactions?.length) && <ReactionChips threadId={threadId} message={message} bots={bots} align={user ? "end" : "start"} canReact={canReact} />}
-      {peer && expanded && peerLong && <PeerOpenedActions peer={peer} bots={bots} botId={botId} botName={botName} onFold={() => { setExpanded(false); setFolded(true); }} />}
+      {peer && expanded && peerLong && <PeerOpenedActions peer={peer} bots={bots} botId={botId} botName={botName} onFold={() => { setExpanded(false); setFolded(true); }} />}{earlierRound !== undefined && expanded && <button type="button" onClick={() => setExpanded(false)} className="mt-1 pl-0.5 text-[13px] text-ink-secondary hover:text-ink">{t("chat.showLess")}</button>}
       {forked && <ForkLinks kind="bot" ownerId={botId} threadId={threadId} messageId={message.id} phone={phone} />}
-      {forks.length > 1 && (
-        <div className="mt-1 flex items-center gap-0.5 pr-1 text-[12px] text-ink-secondary">
-          <button
-            onClick={() => switchTo(forks[versionIndex - 1])}
-            disabled={versionIndex <= 0 || busy}
-            className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
-            title={t("chat.previousVersion")}
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <span className="tabular-nums">
-            {versionIndex + 1}/{forks.length}
-          </span>
-          <button
-            onClick={() => switchTo(forks[versionIndex + 1])}
-            disabled={versionIndex >= forks.length - 1 || busy}
-            className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
-            title={t("chat.nextVersion")}
-          >
-            <ChevronRight size={14} />
-          </button>
-        </div>
-      )}
+      {forks.length > 1 && <VersionSwitch versions={forks} index={versionIndex} onSwitch={switchTo} />}
     </div>
   );
 });
@@ -612,7 +591,7 @@ const MessagesList = memo(function MessagesList({
   const { botId, threadId, botName, botColor, bots, hasMore, focus, showToolCalls, locale, dispatch, canReact, simple = false } = useChatRows(), busy = use(ChatBusyContext);
   const messages = useLiveTranscriptLayout(threadId, saved, transcript), forked = useForkedMessages("bot", botId, threadId);
   // A finished turn keeps the bot's progress lines and folds only its tool steps under "Worked for", in both modes.
-  const items = useMemo(() => groupTranscript(messages), [messages, locale]);
+  const items = useMemo(() => groupTranscript(messages), [messages, locale]), earlier = useMemo(() => earlierAnswers(messages), [messages]);
   const drawnFrom = useMemo(() => drawFrom ? Math.max(0, items.findIndex((item) => item.kind === "message" ? item.message.id === drawFrom : item.messages.some((row) => row.id === drawFrom))) : 0, [items, drawFrom]);
   const newestMessageId = messages.at(-1)?.id;
   let newestUserMessageId: string | undefined;
@@ -723,7 +702,7 @@ const MessagesList = memo(function MessagesList({
                   onSubmitEdit={onSubmitEdit}
                   onRegenerate={m.id === lastBotTextId && !m.automation && canRetryLast ? onRegenerate : undefined}
                   replyTarget={lookups.replyTarget(m)}
-                  onReply={onReply} forked={forked.has(m.id)}
+                  onReply={onReply} forked={forked.has(m.id)} earlierRound={earlier.get(m.id)}
                 />
               );
             }
@@ -758,7 +737,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const advanced = useAdvancedMode(), activity = useChatActivity(), skillBurger = useFeature("skillBurger");
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
-  const simpleHead = !advanced && !remoteClient, headTabs = useThreadTabsShown(bot.id) && !inForkPanel;
+  const simpleHead = !advanced && !remoteClient, headTabs = useThreadTabsShown() && !inForkPanel; useTabsFrameOnRoot(headTabs ? (simpleHead ? "simple" : "advanced") : undefined);
   const canWrite = useCanWriteIn(bot.threadId, bot.yourAccess), mayWrite = canWrite !== false;
 
   const computerStarting = computerStartLine(state.computerStart, bot.name); useScreensWhile(Boolean(computerStarting));

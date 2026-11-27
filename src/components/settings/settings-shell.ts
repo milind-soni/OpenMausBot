@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import type { SettingsPlace } from "./settings-context";
 import type { SettingsContext, SettingsPageId } from "./settings-index";
 
@@ -13,6 +13,8 @@ export interface SettingsShell {
   narrow?: boolean;
   /** A step inside the page (Add a device's), named in the narrow header with its own way back; null gives the page back. */
   setSub?: (sub: SettingsSub | null) => void;
+  /** The page's one action beside its title (Devices' Add a device); null takes it away. */
+  setHeaderAction?: (action: ReactNode | null) => void;
 }
 
 export interface SettingsSub {

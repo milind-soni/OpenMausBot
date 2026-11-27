@@ -1,7 +1,7 @@
 // The agents tools that put something in front of the person: the Watcher's options card, the widget tools and the
 // page tools.
 import { agentsCallMember } from "../../shared/agents-tool-names.ts";
-import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
+import { appUsesList, parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
 
@@ -21,14 +21,16 @@ async function callAppTool(name: "show_html" | "update_html", args: Json, contex
   const page = parsed.value.jsx !== undefined ? { jsx: args.jsx } : parsed.value.path !== undefined ? { path: args.path } : { html: args.html };
   const frameless = parsed.value.frameless !== undefined ? { frameless: parsed.value.frameless } : {};
   const live = parsed.value.live !== undefined ? { live: parsed.value.live } : {};
+  const uses = parsed.value.uses !== undefined ? { uses: appUsesList(parsed.value.uses, parsed.value.connectors) } : {};
   const body = updating
-    ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}), ...frameless, ...live }
+    ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}), ...frameless, ...live, ...uses }
     : {
         tool: name, ...page, title: args.title,
         ...(typeof args.height === "number" ? { height: args.height } : {}),
         ...(typeof args.fallback_text === "string" ? { fallback_text: args.fallback_text } : {}),
         ...frameless,
         ...live,
+        ...uses,
       };
   const answer = await context.client.apiResponse(CARD_ROUTE, { method: "POST", body: JSON.stringify(body) });
   if (!answer.ok) return { text: String(answer.body.error ?? (updating ? "Could not update that page." : "Could not show that page.")), isError: true };

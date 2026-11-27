@@ -64,8 +64,11 @@ export interface AvatarMotionBlend {
   t: number;
 }
 
-/** A body's finish: a flat fill, or a coat of fluffy fur (live avatars on a canvas, see AvatarOptions). */
-export type AvatarMaterial = 'flat' | 'fluffy';
+/**
+ * A body's finish: a flat fill, a coat of fluffy fur, or (MausBot) the bare surface lit as matte
+ * clay or polished metal (all but flat on a canvas, see AvatarOptions).
+ */
+export type AvatarMaterial = 'flat' | 'fluffy' | 'matte' | 'metallic';
 
 export interface RenderOptions {
   /** Body color as #rgb or #rrggbb. Invalid values fall back to the default. */

@@ -181,6 +181,7 @@ describe("following a notification", () => {
     server = { ...server, tasks: server.tasks!.filter((task) => task.threadId !== "finished") };
     await followNotification();
     expect(scoutNow().threadId).toBe("left-behind");
+    expect(state.notice).toEqual({ kind: "thread-gone", botName: null });
     expect(reads()).toEqual([]);
     stream().send({ kind: "bot", bot: structuredClone(server) });
     await settle();

@@ -164,7 +164,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
       <span className="flex flex-col gap-1 text-[12px] font-normal text-ink-secondary">{t("connect.noCode")}<CommandLine command={PAIR_COMMAND} inline={inline} /></span>
     </label>}
     {/* The question after pairing lives here: on, a server of the person's own may use this computer once paired. */}
-    {!start?.locked && address.trim() && <AddFormLendSwitch address={address} />}
+    {!start?.locked && address.trim() && (!inline || !canProbe || found) && <AddFormLendSwitch address={address} />}
     {shownProblem && !inline && <p role="alert" data-connect-problem className="text-[13px] text-danger">{shownProblem}</p>}
     {canProbe && probing && !found && !shownProblem && <p data-connect-checking className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary">
       <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("connect.checking")}

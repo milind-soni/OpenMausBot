@@ -544,18 +544,19 @@ describe("Boat's credit offer on the Boat card", () => {
   });
 });
 
-describe("Self-hosted VPS servers", () => {
+describe("Your own servers (SSH)", () => {
   it("labels the add row's fields the way the editor above it does", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     render(() => createElement(VpsConnection, { key: "vps" }));
     const labels = [...host.querySelectorAll("[data-vps-add] label")].map((label) => label.textContent);
-    expect(labels).toEqual(["Name", "SSH name", "Memory for each bot (GB)", "Processor cores for each bot"]);
+    expect(labels).toEqual(["Name", "Name in your SSH settings", "Memory for each bot (GB)", "Processor cores for each bot"]);
     for (const label of host.querySelectorAll<HTMLLabelElement>("[data-vps-add] label")) expect(document.getElementById(label.htmlFor)?.tagName).toBe("INPUT");
   });
 
   const status = (vps: Record<string, unknown>) => ({ ...fx.config, vps: { configured: true, memoryGb: 4, cpus: 2, servers: [], ...vps } });
   const rowFor = (alias: string) => host.querySelector<HTMLElement>(`[data-vps-server="${alias}"]`)!;
   const aliases = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server]")].map((element) => element.dataset.vpsServer);
+  const links = () => [...host.querySelectorAll<HTMLElement>("[data-vps-server-link]")].map((element) => element.dataset.vpsServerLink);
   // An editor's fields carry their own visible labels inside a group named for the server; the add row's carry aria-labels.
   const labelled = (scope: ParentNode | null, text: string) => {
     const label = [...(scope?.querySelectorAll("label") ?? [])].find((one) => one.textContent === text);
@@ -568,9 +569,10 @@ describe("Self-hosted VPS servers", () => {
     const name = /^(.+) server name$/.exec(label);
     if (name) return labelled(rowFor(name[1]!), "Name");
     const adding = host.querySelector("[data-vps-add]");
-    const ADD: Record<string, string> = { "Server name": "Name", "Server SSH config alias": "SSH name", "Memory (GB)": "Memory for each bot (GB)", "CPU cores": "Processor cores for each bot" };
+    const ADD: Record<string, string> = { "Server name": "Name", "Server SSH config alias": "Name in your SSH settings", "Memory (GB)": "Memory for each bot (GB)", "CPU cores": "Processor cores for each bot" };
     if (ADD[label]) return labelled(adding, ADD[label]!);
-    return host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`) ?? labelled(host.querySelector("[data-vps-server]"), label === "Self-hosted VPS SSH config alias" ? "SSH name" : label);
+    const aria = label === "Self-hosted VPS SSH config alias" ? "Name in your SSH settings" : label;
+    return host.querySelector<HTMLInputElement>(`input[aria-label="${aria}"]`) ?? labelled(host.querySelector("[data-vps-server]"), aria);
   };
   const button = (scope: ParentNode, text: string) => [...scope.querySelectorAll<HTMLButtonElement>("button")].find((candidate) => candidate.textContent === text)!;
   const lastBody = () => JSON.parse((fx.api.mock.lastCall![1] as RequestInit).body as string);
@@ -579,12 +581,13 @@ describe("Self-hosted VPS servers", () => {
     return status({ ...base, ...(body.vps ? { ...body.vps, configured: Boolean(body.vps.sshAlias) } : {}), ...(body.vpsServers ? { servers: body.vpsServers } : {}) });
   };
 
-  it("says any Linux machine with Docker over SSH works, including one on a Tailscale network", async () => {
+  it("says in plain words that a Linux computer with Docker you sign in to with SSH works, one on Tailscale too", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     render(() => createElement(VpsConnection, { key: "vps" }));
     const text = host.querySelector("[data-vps-connection]")!.textContent!;
-    expect(text).toContain("Any Linux machine with Docker that you reach over SSH works");
-    expect(text).toContain("Tailscale name as the alias's HostName");
+    expect(text).toContain("A Linux computer with Docker that you sign in to with SSH.");
+    expect(text).toContain("use its Tailscale name as the HostName in your SSH settings");
+    expect(text).not.toMatch(/\bVPS\b|\balias\b|config/);
   });
 
   it("saves the first alias as the default server, then shows it with its limits", async () => {
@@ -600,33 +603,48 @@ describe("Self-hosted VPS servers", () => {
     expect(field("production-vps CPU cores").value).toBe("2");
   });
 
-  it("adds and removes named servers as one list, leaving the default alias alone", async () => {
+  it("adds named servers as one list, leaving the default alias alone, and lists each as a link to its row on Devices", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
+    const { SettingsShellContext } = await import("../settings/settings-shell");
+    const go = vi.fn();
     setConfig(status({ sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps" }] }));
     fx.api.mockImplementation(echo({ sshAlias: "production-vps" }));
-    render(() => createElement(VpsConnection, { key: "vps" }));
-    expect(aliases()).toEqual(["production-vps", "office-vps"]);
+    render(() => createElement(SettingsShellContext.Provider, { value: { go } as never }, createElement(VpsConnection, { key: "vps" })));
+    expect(aliases(), "only the default is edited here").toEqual(["production-vps"]);
+    expect(links()).toEqual(["office-vps"]);
+    const office = host.querySelector<HTMLElement>("[data-vps-server-link=office-vps]")!;
+    expect(office.textContent).toBe("OfficeName in your SSH settings: office-vpsDevices");
+    expect(office.getAttribute("aria-label")).toBe("Edit Office in Devices");
     type(field("Server name"), " Home lab ");
     type(field("Server SSH config alias"), "home-lab");
     await answered(() => button(host, "Add").click());
     expect(lastBody()).toEqual({ vpsServers: [{ name: "Office", sshAlias: "office-vps" }, { name: "Home lab", sshAlias: "home-lab" }] });
-    expect(aliases()).toEqual(["production-vps", "office-vps", "home-lab"]);
+    expect(links()).toEqual(["office-vps", "home-lab"]);
     expect(field("Server name").value).toBe("");
-    await answered(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove Office"]')!.click());
-    expect(lastBody()).toEqual({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
-    expect(aliases()).toEqual(["production-vps", "home-lab"]);
     expect(field("Self-hosted VPS SSH config alias").value).toBe("production-vps");
+    office.click();
+    expect(go).toHaveBeenCalledWith("devices", "ssh:office-vps");
   });
 
-  it("renames a named server and saves its own limits, an empty one using the default's", async () => {
-    const { VpsConnection } = await import("./VpsServersPanel");
+  it("removes a named server from its editor as one list", async () => {
+    const { VpsServerEditor } = await import("./VpsServerEditor");
+    setConfig(status({ sshAlias: "production-vps", servers: [{ name: "Office", sshAlias: "office-vps" }, { name: "Home lab", sshAlias: "home-lab" }] }));
+    fx.api.mockImplementation(echo({ sshAlias: "production-vps" }));
+    render(() => createElement(VpsServerEditor, { key: "office", alias: "office-vps" }));
+    await answered(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove Office"]')!.click());
+    expect(lastBody()).toEqual({ vpsServers: [{ name: "Home lab", sshAlias: "home-lab" }] });
+    expect(aliases()).toEqual([]);
+  });
+
+  it("renames a named server and saves its own limits, an empty one showing and using the default's", async () => {
+    const { VpsServerEditor } = await import("./VpsServerEditor");
     setConfig(status({ sshAlias: "production-vps", memoryGb: 6, cpus: 3, servers: [{ name: "Office", sshAlias: "office-vps", cpus: 4 }] }));
     fx.api.mockImplementation(echo({ sshAlias: "production-vps", memoryGb: 6, cpus: 3 }));
-    render(() => createElement(VpsConnection, { key: "vps" }));
+    render(() => createElement(VpsServerEditor, { key: "office", alias: "office-vps" }));
     const office = rowFor("office-vps");
     expect(office.textContent).toContain("office-vps");
     expect(field("Office memory (GB)").value).toBe("");
-    expect(field("Office memory (GB)").placeholder).toBe("6");
+    expect(field("Office memory (GB)").placeholder).toBe("6 (default)");
     expect(field("Office CPU cores").value).toBe("4");
     expect(button(office, "Save").disabled).toBe(true);
     type(field("office-vps server name"), "HQ");
@@ -672,7 +690,8 @@ describe("Self-hosted VPS servers", () => {
     render(() => createElement(VpsConnection, { key: "vps" }));
     await answered(() => host.querySelector<HTMLButtonElement>('button[aria-label="Remove production-vps"]')!.click());
     expect(lastBody()).toEqual({ vps: { sshAlias: "" } });
-    expect(aliases()).toEqual(["office-vps"]);
+    expect(aliases()).toEqual([]);
+    expect(links()).toEqual(["office-vps"]);
     expect(host.querySelector("[data-vps-connection] [role=status]")!.textContent).toContain("could not be reached");
     expect(field("Self-hosted VPS SSH config alias").value).toBe("");
   });
@@ -705,7 +724,7 @@ describe("Self-hosted VPS servers", () => {
     setConfig(status({ sshAlias: "production-vps", memoryGb: 16 }));
     fx.api.mockRejectedValueOnce(new Error("spare has about 8 GB of memory. Choose 8 GB or less."));
     render(() => createElement(VpsConnection, { key: "vps" }));
-    expect(field("Memory (GB)").placeholder).toBe("16");
+    expect(field("Memory (GB)").placeholder).toBe("16 (default)");
     type(field("Server name"), "Spare");
     type(field("Server SSH config alias"), "spare");
     await answered(() => button(host, "Add").click());
@@ -715,7 +734,8 @@ describe("Self-hosted VPS servers", () => {
     type(field("Memory (GB)"), "8");
     await answered(() => button(host, "Add").click());
     expect(lastBody()).toEqual({ vpsServers: [{ name: "Spare", sshAlias: "spare", memoryGb: 8 }] });
-    expect(aliases()).toEqual(["production-vps", "spare"]);
+    expect(aliases()).toEqual(["production-vps"]);
+    expect(links()).toEqual(["spare"]);
     expect(field("Memory (GB)").value).toBe("");
   });
 
@@ -749,5 +769,33 @@ describe("Self-hosted VPS servers", () => {
     await answered(() => button(host, "Add").click());
     expect(host.querySelector("[data-vps-servers] [role=alert]")!.textContent).toContain("own SSH alias");
     expect(field("Server name").value).toBe("Lab");
+  });
+});
+
+describe("Voice server address in Other services", () => {
+  const voiceInput = () => host.querySelector<HTMLInputElement>('input[aria-label="Chatterbox server address"]')!;
+  const voiceAction = (label: string) =>
+    [...host.querySelectorAll<HTMLButtonElement>("[data-voice-server-url] button")].find((button) => button.textContent === label)!;
+
+  it("shows, validates, updates, and clears a stale voice server address even when another voice provider is active", async () => {
+    setConfig({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "http://127.0.0.1:4123", model: "" } });
+    page();
+    expect(expanded("voice")).toBe("true");
+    expect(voiceInput().value).toBe("http://127.0.0.1:4123");
+
+    type(voiceInput(), "not-a-url");
+    flushSync(() => voiceAction("Save").click());
+    expect(host.querySelector("[data-voice-server-url] [role=alert]")!.textContent).toContain("http:// or https://");
+    expect(fx.api).not.toHaveBeenCalled();
+
+    fx.api.mockResolvedValueOnce({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "http://127.0.0.1:4124", model: "" } });
+    type(voiceInput(), "http://127.0.0.1:4124");
+    await answered(() => voiceAction("Save").click());
+    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "http://127.0.0.1:4124" } }) });
+
+    fx.api.mockResolvedValueOnce({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "", model: "" } });
+    await answered(() => voiceAction("Remove").click());
+    expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "" } }) });
+    expect(voiceInput().value).toBe("");
   });
 });

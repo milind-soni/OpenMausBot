@@ -47,6 +47,8 @@ export interface ModelMenu {
   engines: MenuRow[];
   /** Engines that can't run anything now (not set up, turned off, unreachable), by why and how to connect. */
   unavailable?: UnavailableGroup[];
+  /** Where the local models listed under the Other engine also run (Claude, Codex), once instead of a copy each. */
+  localAlso?: string;
 }
 
 const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");

@@ -1,4 +1,4 @@
-import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
+import { ChevronRight, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -8,17 +8,18 @@ import { EffortRow, ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { BotConversations } from "./Conversations";
+import { BotKeeps } from "./Keeps";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
-import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
-import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { CardLabel, RowIcon, rowCls, RowText } from "./rows";
+import { useStoreSelector } from "@/state/store-select";
 import { newChatBot } from "@/state/new-chat";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../../shared/approval-mode";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
-export const CONVERSATION_ITEMS = ["find", "start-fresh", "share-team", "share-person", "usage", "activity", "inspector"];
+export const CONVERSATION_ITEMS = ["find", "start-fresh", "set-main", "share-team", "share-person", "usage", "activity", "inspector"];
 
 /** A ⋯ menu item drawn as a panel row: the same label, icon, value and handler. */
 export function ItemRow({ item }: { item: SidebarMenuItem }) {
@@ -39,7 +40,7 @@ export function ItemRow({ item }: { item: SidebarMenuItem }) {
       </span>
       <span className={cn("min-w-0 truncate text-[14px] font-medium", !wrapsValue && "flex-1", item.active ? "text-accent-text" : "text-ink")}>{item.label}</span>
       {item.trailing && <span className={cn("flex items-center", wrapsValue ? "min-w-0 flex-1 justify-end text-right" : "shrink-0")}>{item.trailing}</span>}
-      {item.key !== "find" && item.key !== "start-fresh" && <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
+      {!["find", "start-fresh", "set-main"].includes(item.key) && <ChevronRight size={15} aria-hidden="true" className="shrink-0 text-ink-tertiary rtl:-scale-x-100" />}
     </button>
   );
 }
@@ -50,7 +51,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
   onOpen: (page: SimplePageId) => void;
 }) {
   const { items } = useChatMoreItems(bot);
-  const dispatch = useStoreDispatch();
   // While a blank chat is open the chat shows it, not the conversation it covers: the Model and Reasoning rows show and
   // set the blank chat's choices, which the first send applies to the conversation it makes.
   const newChat = useStoreSelector((state) => state.newChat);
@@ -63,7 +63,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
   const driverOf = (instanceId: string) => instances.find((instance) => instance.instanceId === instanceId)?.driverKind;
   const reasoningSetsDefault = ownerOrAdmin === true
     && !modelSwitchNeedsAsk(approvalModeFor(bot), driverOf(bot.modelSelection.instanceId), driverOf(thread.modelSelection.instanceId));
-  const routinesOn = derived.botRoutines.filter((routine) => routine.enabled).length;
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));
 
   return (
@@ -90,6 +89,8 @@ export function DetailsTab({ bot, derived, onOpen }: {
         />
       </section>
 
+      <BotKeeps bot={bot} routines={derived.botRoutines} onOpen={onOpen} />
+
       <BotConversations bot={bot} />
 
       <TryAsking bot={bot} />
@@ -99,34 +100,6 @@ export function DetailsTab({ bot, derived, onOpen }: {
           <CardLabel>{t("botPanel.section.conversation")}</CardLabel>
           {conversationItems.map((item) => <ItemRow key={item.key} item={item} />)}
         </section>
-      )}
-
-      {derived.botRoutines.length === 0 ? (
-        <section data-panel-empty="routines">
-          <CardLabel action={<LabelAction data-panel-automations="" onClick={() => dispatch({ type: "showRoutines", view: "list" })}>{t("sidebar.nav.automations")}</LabelAction>}>
-            {t("botSettings.simple.routines")}
-          </CardLabel>
-          <button
-            type="button"
-            data-panel-page="routines"
-            title={t("botPanel.routines.emptyHint")}
-            onClick={() => onOpen("routines")}
-            className={cn(panelActionCls, "w-full")}
-          >
-            <CalendarPlus size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-            <span className="truncate">{t("botPanel.routines.add")}</span>
-          </button>
-        </section>
-      ) : (
-        <Card label={t("botSettings.simple.routines")} anchor="routines">
-          <NavRow
-            data-panel-page="routines"
-            icon={Calendar}
-            title={t("botSettings.simple.routines")}
-            value={routinesOn > 0 ? t("botPanel.routinesOn", { count: routinesOn }) : t("botPanel.none")}
-            onClick={() => onOpen("routines")}
-          />
-        </Card>
       )}
     </div>
   );

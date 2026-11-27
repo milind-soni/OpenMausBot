@@ -6,6 +6,8 @@ import { CLOUD_TIER } from "../host/cloud-plan-tier.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BoxReport } from "../bot-box/box.ts";
 import { boxSummary } from "../cloud-health.ts";
+import { CLOUD_DIAGNOSE_PATH, type CloudDiagnose } from "../cloud-diagnose.ts";
+import type { CloudClockGate, CloudClockReport } from "../cloud-clock.ts";
 import { CLOUD_HEALTH_PATH, CLOUD_PAIRING_PATH, createCloudPairing, createCloudRequestVerifier, readSignedBody } from "../cloud-home.ts";
 import { teamMemberEmail, type CloudTeam } from "../cloud-team.ts";
 import { CLOUD_TEAM_ADMIN_PATH, type TeamAdminSummary } from "../cloud-team-admin.ts";
@@ -53,17 +55,30 @@ export function createCloudSignedRoutes(deps: {
   plan?: ((cancelled: boolean) => void) | null;
   /** Which plan this Cloud is on now; absent on a server that is not a Cloud home. */
   planTier?: ((tier: string) => void) | null;
+  /** The home's clock watch (server/cloud-clock.ts); absent on a server that is not a Cloud home. */
+  clock?: (CloudClockGate & { report(): CloudClockReport }) | null;
+  /** The diagnose read (cloud-diagnose.ts); absent on a server that is not a Cloud home. */
+  diagnose?: Pick<CloudDiagnose, "read"> | null;
   now?: () => number;
 }) {
-  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, ...(deps.invited ? { invited: deps.invited } : {}), ...(deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}), now: deps.now });
-  const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const boxReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const teamAdminReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const planRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
-  const policyNudges = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
+  const clock = deps.clock ?? null;
+  const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, ...(deps.invited ? { invited: deps.invited } : {}), ...(deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}), clock, now: deps.now });
+  // Only the read-only reads the Admin manages a home by (health, power, and the diagnose read it sends when one looks wrong)
+  // are tolerant of a clock measured behind (cloud-home.ts).
+  const healthRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock, tolerant: true });
+  const powerReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock, tolerant: true });
+  const sleepRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const boxReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const teamAdminReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const planRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const policyNudges = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock });
+  const diagnoseReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now, clock, tolerant: true });
+  /** A refusal's body; a stale one also says this clock's measured error, when known, so the Admin can tell a clock from an attack. */
+  const refusal = (error: string) => {
+    const measured = error === "stale_request" ? clock?.report().errorMs ?? null : null;
+    return measured === null ? { error } : { error, clockErrorMs: measured };
+  };
   /** True when the request was one of these and has been answered. */
   return async ({ req, res, url, path, method }: CloudSignedRequest): Promise<boolean> => {
     const power = path === CLOUD_POWER_PATH || path === CLOUD_POWER_SLEEP_PATH ? deps.power?.() ?? null : null;
@@ -71,7 +86,8 @@ export function createCloudSignedRoutes(deps: {
     const memberLeft = path === CLOUD_TEAM_MEMBER_LEFT_PATH && deps.team ? deps.memberLeft ?? null : null;
     const plan = path === CLOUD_PLAN_PATH && (deps.plan || deps.planTier) ? true : null;
     const policyChanged = path === CLOUD_TEAM_POLICY_CHANGED_PATH && deps.team ? deps.policyChanged ?? null : null;
-    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan && !policyChanged) return false;
+    const diagnose = path === CLOUD_DIAGNOSE_PATH ? deps.diagnose ?? null : null;
+    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan && !policyChanged && !diagnose) return false;
     res.setHeader("cache-control", "no-store");
     const source = requestSource(req);
     const header = (name: string) => { const value = req.headers[name]; return typeof value === "string" ? value : undefined; };
@@ -79,7 +95,7 @@ export function createCloudSignedRoutes(deps: {
     if (power && path === CLOUD_POWER_PATH) {
       if (method !== "GET") { json(res, 405, { error: "method_not_allowed" }); return true; }
       const verdict = powerReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
-      if (!verdict.ok) { console.warn(`cloud power read refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
+      if (!verdict.ok) { console.warn(`cloud power read refused from ${source}: ${verdict.error}`); json(res, verdict.status, refusal(verdict.error)); return true; }
       const minutes = url.searchParams.get("idleMinutes");
       const window = minutes !== null && /^\d{1,4}$/.test(minutes) && Number(minutes) >= 1 && Number(minutes) <= 24 * 60 ? Number(minutes) * 60_000 : CLOUD_IDLE_ACTIVITY_MS;
       json(res, 200, power.report(window));
@@ -143,6 +159,13 @@ export function createCloudSignedRoutes(deps: {
       json(res, 200, { ok: true });
       return true;
     }
+    if (diagnose) {
+      if (method !== "GET") { json(res, 405, { error: "method_not_allowed" }); return true; }
+      const verdict = diagnoseReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
+      if (!verdict.ok) { console.warn(`cloud diagnose read refused from ${source}: ${verdict.error}`); json(res, verdict.status, refusal(verdict.error)); return true; }
+      json(res, 200, await diagnose.read());
+      return true;
+    }
     if (path === CLOUD_BOX_PATH) {
       if (method !== "GET") { json(res, 405, { error: "method_not_allowed" }); return true; }
       const verdict = boxReads.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
@@ -155,10 +178,11 @@ export function createCloudSignedRoutes(deps: {
       const verdict = healthRequests.verify({ ...signed, method, target: `${path}${url.search}`, body: "" });
       if (!verdict.ok) {
         console.warn(`cloud health refused from ${source}: ${verdict.error}`);
-        json(res, verdict.status, { error: verdict.error });
+        json(res, verdict.status, refusal(verdict.error));
         return true;
       }
-      json(res, 200, deps.health.report(url.searchParams.get("after")));
+      const report = deps.health.report(url.searchParams.get("after"));
+      json(res, 200, clock ? { ...report, clock: clock.report() } : report);
       return true;
     }
     if (method !== "POST") { json(res, 405, { error: "method_not_allowed" }); return true; }

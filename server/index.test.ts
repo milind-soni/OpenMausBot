@@ -2067,38 +2067,30 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("persists room setup and blocks the first message until it is finished", async () => {
+  it("makes a room ready to chat at once, named after its bots, and still takes an older client's setup", async () => {
     const bot = (await api("GET", "/api/bots")).body.bots[0];
-    const created = await api("POST", "/api/groups", { name: "Setup probe", memberIds: [bot.id] });
+    const created = await api("POST", "/api/groups", { memberIds: [bot.id] });
     expect(created.status).toBe(201);
     const group = created.body.group;
     try {
-      expect(group).toMatchObject({ setupCompletedAt: null, setupSkippedAt: null, messages: [] });
-      const blocked = await api("POST", `/api/groups/${group.id}/messages`, { text: "before setup" });
-      expect(blocked.status).toBe(409);
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id).messages).toHaveLength(0);
+      expect(group).toMatchObject({ name: bot.name, bulletin: "", defaultResponder: { kind: "member", botId: bot.id }, setupSkippedAt: null, messages: [] });
+      expect(group.setupCompletedAt).toEqual(expect.any(Number));
+      const again = await api("POST", "/api/groups", { memberIds: [bot.id] });
+      expect(again.body.group.name).toBe(`${bot.name} 2`);
+      await api("DELETE", `/api/groups/${again.body.group.id}`);
 
-      const invalid = await api("PATCH", `/api/groups/${group.id}/setup`, {
-        action: "complete",
-        cwd: null,
-        bulletin: "",
-        defaultResponder: { kind: "member", botId: "missing" },
-      });
-      expect(invalid.status).toBe(400);
-
-      const completed = await api("PATCH", `/api/groups/${group.id}/setup`, {
+      const older = await api("PATCH", `/api/groups/${group.id}/setup`, {
         action: "complete",
         cwd: null,
         bulletin: "shared brief",
         defaultResponder: { kind: "member", botId: bot.id },
       });
-      expect(completed.status).toBe(200);
-      expect(completed.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: expect.any(Number) });
-      expect((await api("GET", "/api/bots")).body.groups.find((candidate: { id: string }) => candidate.id === group.id)).toMatchObject({
-        bulletin: "shared brief",
-        setupSkippedAt: null,
-      });
+      expect(older.status).toBe(200);
+      expect(older.body.group).toMatchObject({ bulletin: "shared brief", setupCompletedAt: group.setupCompletedAt });
+
+      expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "first words" })).status).toBe(202);
     } finally {
+      await api("POST", `/api/groups/${group.id}/interrupt`, {});
       await api("DELETE", `/api/groups/${group.id}`);
     }
   });
@@ -9970,7 +9962,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, usbPhoneTakeover: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9980,20 +9972,25 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, usbPhoneTakeover: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
     expect(disk.features).toEqual({ ...untouched.features, skillAuthoring: false });
 
-    const burger = await api("PATCH", "/api/config", { features: { skillBurger: false, threadTabs: true } });
-    expect(burger.body.features).toMatchObject({ skillBurger: false, threadTabs: true });
-    expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).features).toMatchObject({ skillBurger: false, threadTabs: true });
-    await api("PATCH", "/api/config", { features: { skillBurger: true, threadTabs: false } });
+    // The room feed has no switch: an older client's roomFeed is dropped, never saved, and the feed stays reported.
+    const burger = await api("PATCH", "/api/config", { features: { skillBurger: false, threadTabs: true, roomFeed: false } });
+    expect(burger.body.features).toMatchObject({ skillBurger: false, threadTabs: true, roomFeed: true });
+    const kept = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).features;
+    expect(kept).toMatchObject({ skillBurger: false, threadTabs: true });
+    expect(kept.roomFeed).toBeUndefined();
+    const quiet = await api("PATCH", "/api/config", { features: { suggestedReplies: false } });
+    expect(quiet.body.features).toMatchObject({ suggestedReplies: false });
+    await api("PATCH", "/api/config", { features: { skillBurger: true, threadTabs: false, suggestedReplies: true } });
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, usbPhoneTakeover: false });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", skillBurger: true, threadTabs: false, suggestedReplies: true, roomFeed: true, roomFeedSince: expect.any(Number), usbPhoneTakeover: false });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -11024,6 +11021,25 @@ describe("harness HTTP API", () => {
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, preserveInstalledApps: false });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
+  });
+
+  it("keeps the config-file VPS desktop idle timeout apart from the private desktop's and out of the app's settings", async () => {
+    const get = async () => (await api("GET", "/api/config")).body;
+    expect((await get()).vpsIdle).toBeUndefined();
+    try {
+      for (const timeoutMinutes of [4, 1441, 5.5, "5", null]) {
+        expect((await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes } })).status).toBe(400);
+      }
+      const saved = await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 5 } });
+      expect(saved.status).toBe(200);
+      expect(saved.body).toMatchObject({ localVm: { idleTimeoutMinutes: 480 } });
+      expect(saved.body.vpsIdle).toBeUndefined();
+      await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
+      expect(await get()).toMatchObject({ localVm: { idleTimeoutMinutes: 30 } });
+      expect(JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8")).vpsIdle).toEqual({ timeoutMinutes: 5 });
+    } finally {
+      await api("PATCH", "/api/config", { vpsIdle: { timeoutMinutes: 480 }, localVm: { idleTimeoutMinutes: 480 } });
+    }
   });
 
   it("validates, persists and applies the Local VM idle timeout in shared and per-bot modes", async () => {
@@ -13447,7 +13463,7 @@ describe("bot memory API", () => {
         body: JSON.stringify({ command: "ls" }),
       });
       expect(exec.status).toBe(409);
-      expect(((await exec.json()) as { error: string }).error).toContain("no Local VM or Self-hosted VPS desktop");
+      expect(await exec.json()).toMatchObject({ code: "no_vm_for_turn", error: expect.stringContaining("no Local VM or Self-hosted VPS desktop") });
 
       for (let count = 2; count < 10; count += 1) expect((await attach({ path: "song.mp3" })).status).toBe(200);
       const flooded = await attach({ path: "song.mp3" });

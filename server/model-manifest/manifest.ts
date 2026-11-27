@@ -8,6 +8,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import { parseVersionTriple, versionAtLeast, type VersionTriple } from "../drivers/acp/version-probe.ts";
+import { afterLaunchSettles } from "../perf/launch-probe.ts";
 import { BUNDLED_MODEL_MANIFEST, bundledEngineCatalog, engineCatalogFrom } from "./bundled.ts";
 import { parseModelManifest, type ManifestEngine, type ManifestPrice, type ModelManifestData } from "./schema.ts";
 
@@ -231,7 +232,7 @@ let backgroundTimer: ReturnType<typeof setInterval> | undefined;
 /** A sleeping machine's timers pause; the on-demand refresh covers the picker when it wakes. */
 export function startModelManifestRefresh(): void {
   if (backgroundTimer) return;
-  modelManifest().refreshInBackground();
+  afterLaunchSettles(() => modelManifest().refreshInBackground()); // a download, after the desktop window is in use
   backgroundTimer = setInterval(() => modelManifest().refreshInBackground(), MANIFEST_TTL_MS);
   backgroundTimer.unref();
 }

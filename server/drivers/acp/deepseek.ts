@@ -20,19 +20,28 @@
 //     it downloaded the dependency tree, so the catalog is only probed on an
 //     explicit Refresh, never at app startup).
 //
+// Approve for me requires dsh 0.2.2-rc.2 to register the bot's memory directory
+// with the workspace-write sandbox. The session model reviews sandbox escalations.
+// Verified with dsh 0.2.2-rc.2, 0.2.2-rc.5 and 0.2.3-alpha.2 on 2026-11-24.
+//
 // Picker ids are `<provider>/<model>` so bot settings, badges and config.json
 // stay readable; resolveTurnModel turns them into dsh's wire pair just before
 // the core selects the model.
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { join, resolve } from "node:path";
+import { parse as parseYaml, stringify } from "yaml";
 
+import { writeFileAtomicIfChanged } from "../../atomic.ts";
+import { cliVersionProbe } from "../../cli-version-probe.ts";
+import { DATA_DIR } from "../../config.ts";
 import type { ModelCatalog } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { acpVariantOption } from "./config-options.ts";
+import { DSH_APPROVAL_PLUGIN } from "./dsh-approval-plugin.ts";
+import { semVerAtLeast } from "./version-probe.ts";
 
 export const DEEPSEEK_MODELS: ModelCatalog = {
   default: "deepseek-official/deepseek-v4-flash",
@@ -201,7 +210,7 @@ export function fetchDeepSeekCatalog(
     try {
       // Security: while the bot box is on, dsh runs in it, as a bot's turn does: it reads ~/.dsh, which a bot can write.
       const resolved = resolveCli(cli, ["--profile", "acp"], env as NodeJS.ProcessEnv);
-      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: { ...env, ...resolved.env }, box: { allowEnv } });
+      child = spawnCli(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: { ...env, ...resolved.env }, box: { allowEnv, engine: "deepseekAgent" } });
     } catch (error) {
       return reject(error instanceof Error ? error : new Error(String(error)));
     }
@@ -303,6 +312,30 @@ export function fetchDeepSeekCatalog(
   });
 }
 
+// dsh first exposes ctx.sandboxPolicy.registerWritableRoot in 0.2.2-rc.2.
+const MIN_APPROVAL_VERSION = "0.2.2-rc.2";
+const versionProbes = new Map<string, ReturnType<typeof cliVersionProbe>>();
+const clisWithApprovalPatch = new Set<string>();
+const approvalDir = resolve(DATA_DIR, "engines", "dsh");
+const approvalPlugin = join(approvalDir, "approval-preset.mjs");
+const reviewPatch = join(approvalDir, "approval-review.patch.yml");
+const sandboxPatch = join(approvalDir, "approval-sandbox.patch.yml");
+
+/** The data folder as a conversation's folder is named (its real path), so the plugin finds the bot's memory from it. */
+function approvalDataDir(): string {
+  try { return realpathSync(DATA_DIR); } catch { return DATA_DIR; }
+}
+
+function approvalPatch(review: boolean): string {
+  const patch = review ? reviewPatch : sandboxPatch;
+  mkdirSync(approvalDir, { recursive: true });
+  writeFileAtomicIfChanged(approvalPlugin, DSH_APPROVAL_PLUGIN);
+  writeFileAtomicIfChanged(patch, stringify([{ insert: [
+    { id: "openmausbot-approval-preset", name: approvalPlugin, config: { review, dataDir: approvalDataDir() } },
+  ] }]));
+  return patch;
+}
+
 export const deepseekSupport: AcpSupport = {
   driverKind: "deepseekAgent",
   displayName: "DeepSeek Harness",
@@ -325,7 +358,45 @@ export const deepseekSupport: AcpSupport = {
     settings: "connections",
   },
 
-  spawnArgs: () => ["--profile", "acp"],
+  resolveCommand: async (env, { cli }) => {
+    let probe = versionProbes.get(cli);
+    if (!probe) {
+      probe = cliVersionProbe(cli);
+      versionProbes.set(cli, probe);
+    }
+    const result = await probe(env);
+    if ("version" in result && semVerAtLeast(result.version, MIN_APPROVAL_VERSION)) {
+      clisWithApprovalPatch.add(cli);
+      return { command: cli, ro: [approvalPlugin, reviewPatch, sandboxPatch] };
+    }
+    clisWithApprovalPatch.delete(cli);
+    return { command: cli };
+  },
+  spawnArgs: ({ cli }, turn) => {
+    const args = ["--profile", "acp"];
+    if (clisWithApprovalPatch.has(cli)) args.push("--patch", approvalPatch(turn.approvalMode === "auto"));
+    return args;
+  },
+  updateFilter: (calls) => (update) => {
+    const { sessionUpdate, toolCallId, status } = update;
+    if ((sessionUpdate === "tool_call" || sessionUpdate === "tool_call_update") && toolCallId) {
+      if (status === "completed" || status === "failed") calls.delete(toolCallId);
+      else calls.set(toolCallId, { ...calls.get(toolCallId), ...update });
+    }
+    return update;
+  },
+  permissionRequest: (params, calls) => {
+    // dsh sends the call details in session/update and only its ID in session/request_permission.
+    const call = calls.get(params.toolCall.toolCallId);
+    if (!call) return params;
+    const { title, kind, rawInput, locations } = call;
+    const isCommand = typeof rawInput?.command === "string";
+    const path = rawInput?.path ?? rawInput?.file_path;
+    return { ...params, toolCall: {
+      title: !isCommand && typeof path === "string" ? `${title} ${path}` : title,
+      kind: isCommand ? "execute" : kind, rawInput, locations, ...params.toolCall,
+    } };
+  },
   credentialEnv: ["DEEPSEEK_API_KEY"],
   // Model and reasoning effort are session config options (see header).
   selectModel: { configId: "model" },

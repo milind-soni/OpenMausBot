@@ -20,6 +20,8 @@ import { acpVendorMessage } from "./acp/rpc-error.ts";
 import { classifyError } from "./retry.ts";
 import {
   antigravityCliSessionMode,
+  antigravityCliTakesHttpMcp,
+  antigravityCliToolBudget,
   antigravityClientInfo,
   antigravityLaunchArgs,
   antigravityProfileAuthenticated,
@@ -38,7 +40,7 @@ import {
   validateAntigravityRuntime,
   verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
-import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
+import { antigravityHarnessLimit, antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { AntigravityCliLogin, type LoginProcesses } from "./antigravity-native-login.ts";
@@ -57,7 +59,7 @@ import {
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
 import { acpFileEditWithin } from "./permission-command.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
-import { AntigravityProcesses } from "./antigravity-processes.ts";
+import { AntigravityProcesses, stopOrphanedAntigravityRuntimesOnce } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
 import { augmentedPath } from "../env-path.ts";
 import { killCliTree } from "../procs.ts";
@@ -205,8 +207,14 @@ const support: AcpSupport = {
   stderrFailure: {
     line: ANTIGRAVITY_HARNESS_FAILURE_LOG,
     message: "Antigravity's local agent connection failed. Send the message again to continue in a fresh Antigravity process.",
+    // A run that failed on an exhausted quota is a usage limit, so the bot's fallback model can carry on.
+    failure: (line) => antigravityHarnessLimit(support.displayName, line),
   },
   clientFileSystem: true,
+  // Only the native CLI takes them; agy_acp_server keeps its stdio proxies.
+  ownMcpOverHttp: "advertised",
+  takesUnadvertisedHttpMcp: antigravityCliTakesHttpMcp,
+  sessionToolBudget: antigravityCliToolBudget,
   clientReadRoots: (turn) => (turn.skillFiles ?? []).map(dirname),
   sanitizeToolPayload: true,
   updateFilter: antigravityUpdateFilter,
@@ -341,6 +349,12 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    // A stopped runtime's unpacked folder can be removed only once it has ended.
+    void stopOrphanedAntigravityRuntimesOnce().then((stopped) => {
+      if (!stopped) return;
+      scheduleAntigravityTempSweep(input.instanceId);
+      scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    });
     const auth = new AntigravityAuthController(() => {
       noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
       void base.refreshModels?.();

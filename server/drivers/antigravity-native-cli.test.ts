@@ -485,6 +485,42 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(JSON.parse(readFileSync(`${fake.dump}.initialize.json`, "utf8")).clientInfo).toEqual({ name: "openmausbot", version: "0.0.0" });
   }, 90_000);
 
+  it.each([
+    { name: "Antigravity ACP Server", own: "url" },
+    { name: "antigravity-acp", own: "stdio" },
+    { name: "Google Antigravity", own: "stdio" },
+  ])("gives the native CLI OpenMausBot's own servers by URL in session/new, where its ~5 s MCP preload cannot miss them ($name: $own)", async ({ name, own }) => {
+    const fake = cli();
+    const instance = await create(`antigravity-cli-mcp-${own}-${name.length}`, fake.executable, { FAKE_ACP_MODES: "default,plan", FAKE_ACP_DUMP: fake.dump, FAKE_ACP_AGENT_NAME: name });
+    const recorder = recordEvents(instance.adapter);
+    const harness = "http://127.0.0.1:8799";
+    const agents = { command: process.execPath, args: ["/app/dist-server/agents-proxy.js"], env: { OMB_HARNESS_URL: harness, OMB_COMMS_TOKEN: "synthetic-comms", OMB_BOT_ID: "b1", OMB_THREAD_ID: "t1" } };
+    const browser = { command: process.execPath, args: ["/app/dist-server/harness-mcp-proxy.js", "browser"], env: { OMB_HARNESS_URL: harness, OMB_MCP_TOKEN_BROWSER: "synthetic-browser-capability" } };
+    const composio = { command: process.execPath, args: ["/app/dist-server/connector-proxy.js"], env: { OMB_CONNECTOR_UPSTREAM_URL: "https://connectors.invalid/mcp" } };
+    const notes = { command: process.execPath, args: ["/tmp/notes-mcp.js"], env: {} };
+    const { turnId } = await instance.adapter.sendTurn({ threadId: `cli-mcp-${own}-${name.length}`, text: "hello", cwd: fake.directory, integrations: { agents, composio, browser, custom: { notes } } });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+    // Under a schema profile (the native CLI carries the Gemini engine's) the person's stdio server goes through the MCP gate.
+    const sent = JSON.parse(readFileSync(`${fake.dump}.mcp.json`, "utf8")) as Array<{ name: string; type?: string; url?: string; command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
+    expect(sent.map((server) => server.name)).toEqual(["agents", "composio", "browser", "notes"]);
+    const byName = Object.fromEntries(sent.map((server) => [server.name, server])) as Record<string, { command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
+    if (own === "url") {
+      expect(byName.agents).toMatchObject({ type: "http", url: `${harness}/api/internal/mcp-http/agents` });
+      // With its share of the CLI's session-wide tool budget.
+      expect(byName.browser).toEqual({ type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`,
+        headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }, { name: "x-omb-tool-share", value: expect.stringMatching(/^listShare:\d+$/) }] });
+    } else {
+      expect(byName.agents).toMatchObject({ command: process.execPath, args: agents.args });
+      expect(byName.browser).toMatchObject({ command: process.execPath, args: browser.args });
+      expect(JSON.stringify([byName.agents, byName.browser])).not.toContain("listShare:");
+    }
+    expect(byName.composio).toMatchObject({ command: process.execPath, args: composio.args });
+    expect(byName.notes!.command).toBe(process.execPath);
+    expect(byName.notes!.args![0]).toContain("mcp-gate");
+    const upstream = JSON.parse(byName.notes!.env!.find((entry) => entry.name === "OMB_GATE_UPSTREAM")!.value) as { command: string; args: string[]; env: Record<string, string> };
+    expect(upstream).toEqual({ command: process.execPath, args: notes.args, env: {} });
+  }, 90_000);
+
   it("fails closed when the CLI does not confirm default mode", async () => {
     const fake = cli();
     const instance = await create("antigravity-cli-unconfirmed", fake.executable, { FAKE_ACP_MODES: "default,plan", FAKE_ACP_EMPTY_MODE_ACK: "1" });

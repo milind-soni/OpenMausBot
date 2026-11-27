@@ -21,8 +21,8 @@ import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.t
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callWhatChangedTool, WHAT_CHANGED_TOOL } from "./agents-what-changed-tool.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
-import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, closedThreadText, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callSetMainThreadTool, SET_MAIN_THREAD_TOOL } from "./agents-main-thread-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts"; import { callWorkflowTool, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
+import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { callCheckBackTool, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts"; import { BOARD_TOOL_NAMES, callBoardTool } from "./agents-board-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
 import { callImageTool, IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
@@ -257,7 +257,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
-  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context); if (CHECK_BACK_TOOL_NAMES.has(name)) return callCheckBackTool(args, context);
+  if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context); if (CHECK_BACK_TOOL_NAMES.has(name)) return callCheckBackTool(args, context); if (BOARD_TOOL_NAMES.has(name)) return callBoardTool(name, args, context);
   if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context, args);
   if (COMPUTER_ASK_TOOL_NAMES.has(name)) return callComputerAskTool(args, context);
   // Second lock: with sharing off the catalog already omits these tools.
@@ -357,8 +357,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
-    const bots = (r.bots as Array<Json>) ?? [];
-    if (!bots.length) return { text: "No other bots you can reach yet." };
+    // `elsewhere`: the person's bots in their other places, which can't be reached from here, so none is "no such bot".
+    const bots = (r.bots as Array<Json>) ?? [], elsewhere = typeof r.elsewhere === "string" && r.elsewhere ? `\n\n${r.elsewhere}` : "";
+    if (!bots.length) return { text: `No other bots you can reach yet.${elsewhere}` };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
@@ -369,7 +370,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${team}${state ? `, ${state}` : ""}]`;
     });
     return {
-      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.`,
+      text: `Bots you can reach (every department; you can contact any of them):\n${lines.join("\n")}\n\nUse coordinate_bots for concrete work or, with consult: true, for advice, then end your turn. Busy teammates queue and results resume you automatically.${elsewhere}`,
     };
   }
   if (name === "list_rooms") {
@@ -411,6 +412,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
   if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
+  if (name === SET_MAIN_THREAD_TOOL) return callSetMainThreadTool(args, context);
   if (WORKFLOW_TOOL_NAMES.has(name)) return callWorkflowTool(name, args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
@@ -431,8 +433,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === LIST_THREADS_TOOL) return callListThreadsTool(args, context);
   if (name === "close_thread") {
-    const threadId = String(args.thread_id ?? "").trim();
-    if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
+    const threadId = String(args.thread_id ?? "").trim() || THREAD_ID;
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
     return { text: closedThreadText(r) };
@@ -888,7 +889,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         // Unreviewed imports: a hostile description is still prompt content, so only names and status.
         const revision = typeof row.revision === "string" ? `, shared with your team, revision ${row.revision}` : "";
         const unlisted = row.enabled && row.listed === false ? ", not in your prompt: search to read it" : "";
-        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${row.editable === true ? "learned/editable" : "imported"}${revision}${unlisted})`;
+        const kind = row.allBots === true ? "on all your bots: update/delete changes all" : row.editable === true ? "learned/editable" : "imported";
+        return `- ${row.name} (${row.enabled ? "enabled" : "disabled"}, ${kind}${revision}${unlisted})`;
       }).join("\n")
       : "(none)";
     const pending = staged.length
@@ -940,7 +942,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         ...(Array.isArray(args.references) ? { references: args.references } : {}),
         gist: typeof args.gist === "string" ? args.gist : undefined,
         base_revision: typeof args.base_revision === "string" ? args.base_revision : undefined,
-        source,
+        source, ...(args.all_bots === true ? { all_bots: true } : {}),
       }),
     });
     const nameLabel = typeof r.name === "string" ? r.name : "the skill";

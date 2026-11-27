@@ -1,6 +1,7 @@
 // The verified session's `clouds` (contract v1, additive): every Cloud this person owns and every team's Cloud they are
 // in, the account's primary Cloud first. Only the Admin lists a Cloud; a page never names one.
 import { CLOUD_SETUP_STEPS, homeOrigin, parseCloudPower, parseFormerOrigins } from "./cloud-home.mjs";
+import { parseCloudOperation } from "./cloud-operation.mjs";
 import environments from "./environments.cjs";
 
 export const MAX_CLOUDS = 20;
@@ -64,10 +65,12 @@ function parseCloudEntry(input) {
   const deleteAfter = DEAD.includes(input.status) && Number.isSafeInteger(input.deleteAfter) && input.deleteAfter > 0 ? input.deleteAfter : null;
   const removable = input.removable === true && DEAD.includes(input.status) && managed && input.role === "owner" && teamId === null;
   const formerOrigins = parseFormerOrigins(input.formerOrigins, origin);
+  // Additive: an operation of the Admin's own has it down now (cloud-operation.mjs), as the session's `cloud.operation`.
+  const operation = managed && ["ready", "setting_up"].includes(input.status) ? parseCloudOperation(input.operation) : null;
   return { id: input.id, name, color: Object.hasOwn(CLOUD_SWATCH_COLORS, input.color) ? input.color : null, role: input.role,
     tier: typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null, runsOn: input.runsOn, status: input.status, origin, teamId,
     primary: input.primary, managed, ...(formerOrigins.length ? { formerOrigins } : {}), ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}), ...(power ? { power } : {}),
-    ...(deleteAfter ? { deleteAfter } : {}), ...(removable ? { removable: true } : {}) };
+    ...(deleteAfter ? { deleteAfter } : {}), ...(removable ? { removable: true } : {}), ...(operation ? { operation } : {}) };
 }
 
 /** What this app says of a listed Cloud it doesn't open, on this computer's own screen (never by its address): it has ended
@@ -170,7 +173,8 @@ export function otherOwnClouds(clouds) {
 export function cloudMachine(cloud) {
   const status = cloud ? MACHINE_STATUS[cloud.status] : undefined;
   if (!status) return null;
-  return { status, ...(cloud.origin ? { origin: cloud.origin } : {}), ...(status === "provisioning" && cloud.setup?.step ? { setup: { step: cloud.setup.step } } : {}) };
+  return { status, ...(cloud.origin ? { origin: cloud.origin } : {}), ...(status === "provisioning" && cloud.setup?.step ? { setup: { step: cloud.setup.step } } : {}),
+    ...(cloud.operation ? { operation: cloud.operation } : {}) };
 }
 
 /** How far along a setup step is (0 to 1). */

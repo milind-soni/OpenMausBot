@@ -5,6 +5,7 @@ import { productName } from "@/lib/brand";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { codeUntil } from "@/lib/pairing-time";
+import { HostFirewallNote, wifiOnlyCode } from "../HostFirewallNote";
 import { reachLine } from "../PhoneDevicesSection";
 import type { PhoneSetupController } from "../PhoneSetupFlow";
 import { PhoneSetupFlowView } from "../PhoneSetupFlow";
@@ -37,9 +38,11 @@ export function CopyPhoneLink({ link }: { link: string }) {
   </button>;
 }
 
-/** A phone's code: the QR on its white plate, with what to do, the code to type instead (or, with none, until when the
- * QR works) and the wait beside it. */
-export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { link: string; code: string | null; expiresAt: number | null; connected: string | null; children?: ReactNode }) {
+/** A phone's code: the QR on its white plate, with what to do, the code to type instead (or, with none, why there is
+ * none and until when the QR works) and the wait beside it. */
+export function PhoneCodeCard({ link, code, expiresAt, connected, noCode, children }: {
+  link: string; code: string | null; expiresAt: number | null; connected: string | null; noCode?: ReactNode; children?: ReactNode;
+}) {
   return (
     <div data-pair-panel="phone" className="flex flex-wrap items-start gap-4">
       <div data-pair-qr="" aria-label={t("phone.code.qrAria")} role="img" className="shrink-0 rounded-xl bg-white p-2.5 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
@@ -48,7 +51,10 @@ export function PhoneCodeCard({ link, code, expiresAt, connected, children }: { 
       <div className="flex min-w-[min(100%,13rem)] flex-1 flex-col gap-3">
         <p className="text-[13px] leading-[18px] text-ink">{t("phone.code.installAndScan", { app: productName() })}</p>
         {code && expiresAt ? <TypedCode label={t("devicesPage.addFlow.orType")} code={code} expiresAt={expiresAt} />
-          : expiresAt && <span data-pair-until="" className="text-[12px] leading-4 text-ink-tertiary">{codeUntil(expiresAt)}</span>}
+          : <span className="flex flex-col gap-0.5 empty:hidden">
+            {noCode}
+            {expiresAt && <span data-pair-until="" className="text-[12px] leading-4 text-ink-tertiary">{codeUntil(expiresAt)}</span>}
+          </span>}
         <Waiting connected={connected} waiting={t("devicesPage.addFlow.waitingPhone")} />
         {children}
       </div>
@@ -79,12 +85,12 @@ export function PhoneCodeInline({ c, started: asked = false }: { c: PhoneSetupCo
   }
   if (c.phase === "qr" && c.pairingLink && c.state) {
     const code = c.state.e2e?.enabled ? null : pairing?.code ?? null;
-    return <PhoneCodeCard link={c.pairingLink} code={code} expiresAt={pairing?.expiresAt ?? null} connected={null}>
-      <span className="flex flex-col items-start gap-1.5">
-        {!code && <span data-pair-cant-scan="" className="text-[12px] leading-4 text-ink-secondary">{t("devicesPage.addFlow.cantScan")}</span>}
-        <CopyPhoneLink link={c.pairingLink} />
-      </span>
-      <p className="text-[12px] leading-4 text-ink-tertiary">{reachLine(c.state)}</p>
+    return <PhoneCodeCard link={c.pairingLink} code={code} expiresAt={pairing?.expiresAt ?? null} connected={null}
+      noCode={<span data-pair-encrypted="" className="text-[13px] leading-[18px] text-ink-secondary">{t("devicesPage.addFlow.encryptedNoType")}</span>}>
+      <CopyPhoneLink link={c.pairingLink} />
+      <p data-pair-reach="" className="text-[12px] leading-4 text-ink-secondary">{reachLine(c.state)}</p>
+      {/* With the relay or an HTTPS address in the code the phone pairs through it whatever a firewall says. */}
+      {wifiOnlyCode(c.state) && <HostFirewallNote state={c.state} className="" />}
     </PhoneCodeCard>;
   }
   return <PhoneSetupFlowView controller={c} />;

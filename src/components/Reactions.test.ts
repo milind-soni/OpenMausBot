@@ -54,7 +54,7 @@ describe("the react button on a bot's message", () => {
     expect(toolbar()?.getAttribute("aria-label")).toBe("Reactions");
     expect(choices().map((choice) => [choice.textContent, choice.getAttribute("aria-label"), choice.getAttribute("aria-pressed")])).toEqual([
       ["👍", "Thumbs up: yes, go ahead", "false"],
-      ["👎", "Thumbs down: no, not that", "false"],
+      ["👎", "Thumbs down", "false"],
       ["❤️", "Heart", "false"],
       ["😂", "Laughing", "false"],
       ["🎉", "Celebrate", "false"],
@@ -211,6 +211,26 @@ describe("reaction chips under a message", () => {
     const message: Message = { ...ASKED, reactions: [{ emoji: "👍", by: "p_bob", at: Date.now() }, { emoji: "❤️", by: "p_ada", at: 1 }, { emoji: "🎉", by: "p_cy" }] };
     await render(createElement(ReactionChips, { threadId: "t1", message }));
     expect(chips().map((chip) => chip.classList.contains("animate-pop-in"))).toEqual([true, false, false]);
+  });
+
+  it("counts 👍 and 👎 side by side, and takes the viewer's own 👎 back with a tap", async () => {
+    fixture.api.mockResolvedValue({ delivery: "none" });
+    const split: Message = { ...ASKED, reactions: [
+      { emoji: "👎", by: "user", at: 1 },
+      { emoji: "👍", by: "p_bob", name: "Bob", at: 2 },
+      { emoji: "👎", by: "p_ada", name: "Ada", at: 3 },
+    ] };
+    await render(createElement(ReactionChips, { threadId: "t1", message: split }));
+    expect(chips().map((chip) => [chip.textContent, chip.getAttribute("aria-label"), chip.getAttribute("aria-pressed")])).toEqual([
+      ["👍", "Thumbs up: yes, go ahead: Bob", "false"],
+      ["👎2", "Thumbs down: You, Ada", "true"],
+    ]);
+    await click(chips()[1]!);
+    expect(fixture.api.mock.calls[0]).toEqual(["/api/threads/t1/messages/m1/reactions", { method: "POST", body: JSON.stringify({ emoji: "👎", on: false }) }]);
+    expect(patched()[0]?.message.reactions).toEqual([
+      { emoji: "👍", by: "p_bob", name: "Bob", at: 2 },
+      { emoji: "👎", by: "p_ada", name: "Ada", at: 3 },
+    ]);
   });
 
   it("draws nothing for a message nobody reacted to", async () => {

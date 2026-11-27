@@ -425,10 +425,13 @@ it.each(["Stop", "new message"])("does not recover a superseded turn after %s", 
 
 it("carries an OpenCode bot at its usage limit on with the bot's own backup, and its next message stays there", async () => {
   await withRecoveryFixture({ enabled: false, method: "session/prompt", error: { code: -32603, message: "Free usage limit reached" } },
-    async ({ api, control, calls, backupPrompts, serverLog, evidence }) => {
+    async ({ api, control, calls, backupPrompts, backupReceipt, serverLog, evidence }) => {
       const { bot } = await control("new-bot", "--name", "Researcher");
       const threadId = bot.activeTaskId;
-      await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: primary, fallback: [backup] });
+      const selectedBackup = { ...backup, effort: "medium" };
+      await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: primary, fallback: [selectedBackup] });
+      const saved = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+      expect(saved.fallback).toEqual([selectedBackup]);
       const send = (text: string) => control("send", "--bot", bot.id, "--task", threadId, "--text", text);
       const wait = () => control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
       const prompts = () => calls().filter((call) => call.method === "session/prompt").length;
@@ -442,9 +445,11 @@ it("carries an OpenCode bot at its usage limit on with the bot's own backup, and
       expect(prompts(), "OpenCode refused it once").toBe(1);
       expect(backupPrompts(), "the backup answered the same message").toHaveLength(1);
       expect(JSON.stringify(backupPrompts()[0])).toContain("FIND_REEF_PAPERS_9W");
+      const { argv } = backupReceipt();
+      expect(argv.slice(argv.indexOf("--effort"), argv.indexOf("--effort") + 2)).toEqual(["--effort", "medium"]);
       expect((await messages()).filter((message) => message.tool?.name?.startsWith("notice: continuing on"))).toHaveLength(1);
       const task = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId);
-      expect(task.modelSelection).toEqual(backup);
+      expect(task.modelSelection).toEqual(selectedBackup);
 
       await send("try again");
       expect((await wait()).status).toBe("settled");

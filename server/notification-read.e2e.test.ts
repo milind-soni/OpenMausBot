@@ -40,6 +40,13 @@ it("opening a conversation reads its notifications in the feed and tells every o
     await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.name === "Sales desk", 10_000);
     expect(stream.frames.filter((candidate) => candidate.kind === "notifications.read")).toHaveLength(1);
 
+    // the page showing it by itself at launch is not the person opening it
+    await api("POST", `/api/bots/${other.botId}/tasks/${other.threadId}?messages=0&seen=0`);
+    await api("PATCH", `/api/bots/${other.botId}`, { name: "Sales team" });
+    await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.name === "Sales team", 10_000);
+    expect(stream.frames.filter((candidate) => candidate.kind === "notifications.read")).toHaveLength(1);
+    expect((await notifications()).filter((entry) => entry.threadId === other.threadId).some((entry) => !entry.read)).toBe(true);
+
     // switching to a conversation opens it too
     await api("POST", `/api/bots/${other.botId}/tasks/${other.threadId}?messages=0`);
     await stream.until((candidate) => candidate.kind === "notifications.read" && candidate.threadId === other.threadId, 10_000);

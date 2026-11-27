@@ -1,7 +1,7 @@
 // A skill folder brought in from outside: SKILL.md and every file beside it, written once into a fresh folder and
 // checked by hash whenever it is used, never read or written through a link.
 import { createHash } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { z } from "zod";
 
@@ -173,7 +173,10 @@ export function writeSkillFolder(
   files: ReadonlyArray<{ path: string; content: string | Uint8Array; executable?: boolean }>,
 ): void {
   mkdirSync(folder, { mode: 0o700 });
-  writeFileSync(join(folder, "SKILL.md"), skillMd, { mode: 0o600, flag: "wx" });
+  // A directory default ACL can ignore the mode passed to writeFileSync and leave the owner-execute bit set.
+  const skillMdPath = join(folder, "SKILL.md");
+  writeFileSync(skillMdPath, skillMd, { mode: 0o600, flag: "wx" });
+  chmodSync(skillMdPath, 0o600);
   for (const file of files) {
     const target = resolve(folder, file.path);
     // Security: refused here too, whatever the caller checked, so no path can leave the folder.
@@ -187,7 +190,9 @@ export function writeSkillFolder(
       if (directoryEntryState(at) === "missing") mkdirSync(at, { mode: 0o700 });
       if (directoryEntryState(at) !== "directory") throw new Error(`${file.path} has no real folder to go in`);
     }
-    writeFileSync(target, file.content, { mode: file.executable ? 0o700 : 0o600, flag: "wx" });
+    const mode = file.executable ? 0o700 : 0o600;
+    writeFileSync(target, file.content, { mode, flag: "wx" });
+    chmodSync(target, mode);
   }
 }
 

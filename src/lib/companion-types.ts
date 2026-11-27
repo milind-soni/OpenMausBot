@@ -45,7 +45,7 @@ export interface CompanionState {
   /** Routes the update kept on that the person has not been told about yet. */
   notices?: CompanionRoute[];
   /** Why Tailscale could not be turned on or checked just now. */
-  tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "needs-approval" | "signed-out";
+  tailscaleProblem?: "not-installed" | "no-cli" | "not-running" | "needs-permission" | "needs-approval" | "signed-out" | "magicdns" | "custom-name";
   /** This computer's own server on the tailnet, for the person's other computers. Absent on older builds. */
   tailnetShare?: TailnetShareState;
   lan?: string | null;
@@ -55,6 +55,8 @@ export interface CompanionState {
   discovery?: { advertising: boolean; name: string };
   /** Windows has that network down as Public, where its firewall drops a phone's connection. */
   publicNetwork?: string;
+  /** Linux, while pairing: ufw is on, its rules are readable, and none lets the device port in. */
+  hostFirewall?: "ufw";
   /** The end-to-end connection; absent or `enabled: false` until this computer serves it. */
   e2e?: {
     enabled: boolean;

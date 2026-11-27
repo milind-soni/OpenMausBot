@@ -21,7 +21,7 @@ export const deviceMapShown = () => shownOverride ?? SHOW_DEVICE_MAP;
 const LINE = "border-ink-secondary/35";
 const away = (devices: readonly Device[]) => devices.length > 0 && devices.every((device) => device.status === "offline");
 
-const GROUP: Record<DeviceGroup, LocaleKey> = { phones: "devicesPage.group.phones", computers: "devicesPage.group.computers", servers: "devicesPage.group.servers" };
+const GROUP: Record<DeviceGroup, LocaleKey> = { phones: "devicesPage.group.phones", computers: "devicesPage.group.computers", servers: "devicesPage.map.servers" };
 const COUNT: Record<DeviceGroup, [LocaleKey, LocaleKey]> = {
   phones: ["devicesPage.map.phonesOne", "devicesPage.map.phonesMany"],
   computers: ["devicesPage.map.computersOne", "devicesPage.map.computersMany"],
@@ -50,8 +50,8 @@ function Hub({ device, mark, network, onOpen }: { device: Device; mark: ReactNod
   );
 }
 
-/** One device on the map: a status mark, its name cut short if it must be (the row below has it whole) and the bots on it.
- * Its edge is solid while it is reachable and dashed while it is away. */
+/** One device on the map: a status mark, its whole name (wrapping) and the bots on it. Its edge is solid while it is
+ * reachable and dashed while it is away. */
 function Node({ device, now, onOpen }: { device: Device; now: number; onOpen: (id: string) => void }) {
   const bots = useBotsOn(device);
   const mark = markOf(device);
@@ -59,9 +59,9 @@ function Node({ device, now, onOpen }: { device: Device; now: number; onOpen: (i
   return (
     <li className="min-w-0 max-w-full">
       <button type="button" data-map-node={device.id} data-map-line={device.status === "offline" ? "away" : "on"} aria-label={label} title={device.name}
-        onClick={() => onOpen(device.id)} className={cn(NODE, "h-7 border ps-2.5 pe-2", LINE, device.status === "offline" && "border-dashed")}>
+        onClick={() => onOpen(device.id)} className={cn(NODE, "min-h-7 rounded-[14px] border py-[4px] ps-2.5 pe-2", LINE, device.status === "offline" && "border-dashed")}>
         {mark !== "unknown" && <StatusMark status={mark} />}
-        <span className="min-w-0 truncate text-[13px] leading-[18px] text-ink">{device.name}</span>
+        <span className="min-w-0 break-words text-[13px] leading-[18px] text-ink [overflow-wrap:anywhere]">{device.name}</span>
         <BotFaces bots={bots} size={14} />
       </button>
     </li>
@@ -119,6 +119,7 @@ export function DeviceMap({ devices, mark, network, loaded, onOpen, now = Date.n
           </div>
         </>}
         {groups.length === 0 && loaded && <p data-map-empty="" className="ps-11 pt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("devicesPage.map.nothingYet")}</p>}
+        {groups.length > 0 && <p data-map-legend="" className="pt-3 text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.map.legend")}</p>}
       </div>
       {loaded && <p data-map-summary="" className="hidden px-4 text-[13px] leading-[18px] text-ink-secondary @max-[519px]/map:block">{mapSummary(devices)}</p>}
     </div>

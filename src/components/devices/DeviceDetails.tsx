@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { BotAvatar } from "@/components/Avatar";
 import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
@@ -11,7 +11,7 @@ import { OwnServerLink } from "../PlaceAddSheet";
 import { updateCommand } from "../ServerList";
 import { needOf, useBotsOn } from "./device-parts";
 import { CommandRow } from "./PairCodePanel";
-import { kindLabel, routeLabel } from "./device-words";
+import { kindLabel, routeList } from "./device-words";
 
 export function actionLabel(action: DeviceAction, device?: Device): string {
   switch (action.type) {
@@ -23,16 +23,9 @@ export function actionLabel(action: DeviceAction, device?: Device): string {
     case "manage": return t("devicesPage.action.manage");
     case "turn-on-way": return t("devicesPage.action.turnOnWay");
     case "remove":
-      if (device && device.kind !== "phone" && signsIn(device)) {
-        if (action.source.type === "session") return t("devicesPage.action.signOut");
-        if (action.source.type === "place") return t("devicesPage.action.removeHere");
-      }
-      return t("remote.devices.removeShort");
+      return device && signOutOf(device) === action ? t("devicesPage.action.signOut") : t("remote.devices.removeShort");
   }
 }
-
-/** A saved server that is also signed in to this computer: its Remove and its Sign it out undo different things. */
-const signsIn = (device: Device) => device.sources.some((source) => source.type === "session") && device.sources.some((source) => source.type === "place");
 
 export interface DeviceExtra {
   facts?: ReactNode;
@@ -60,15 +53,42 @@ export function Detail({ label, children }: { label: string; children: ReactNode
 export function ActionButton({ device, action, onAction, main = false }: { device: Device; action: DeviceAction; onAction: (device: Device, action: DeviceAction) => void; main?: boolean }) {
   return (
     <button type="button" data-device-action={action.type} data-danger={action.type === "remove" ? "" : undefined} onClick={() => onAction(device, action)}
-      aria-label={`${actionLabel(action, device)}: ${device.name}`} className={action.type === "remove" ? "ui-button shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
+      aria-label={`${actionLabel(action, device)}: ${device.name}`}
+      className={action.type === "remove" ? "ui-button ms-auto shrink-0 text-danger!" : main ? "ui-button ui-button-primary shrink-0" : "ui-button shrink-0"}>{actionLabel(action, device)}</button>
   );
 }
-/** What it needs first, then the harmless actions; apart from them, Remove (one for a phone, which takes its pairing and its app). */
-function orderActions(device: Device): { lead: DeviceAction[]; removes: DeviceAction[] } {
+
+/** "Over the internet", then the sign-in this computer also holds for it, with the quiet way to end it and what that does. */
+function ConnectedBy({ device, signOut, onAction }: { device: Device; signOut: RemoveAction | undefined; onAction: (device: Device, action: DeviceAction) => void }) {
+  const hint = useId();
+  return (
+    <Detail label={t("devicesPage.detail.connectedBy")}>
+      {device.routes.length > 0 && <span className="block">{routeList(device.routes)}</span>}
+      {signOut && <span data-device-signed-in="" className="block">
+        {t("devicesPage.detail.alsoSignedIn")}
+        <span aria-hidden="true" className="text-ink-tertiary">{" ·"}</span>
+        <button type="button" data-device-sign-out="" data-danger="" aria-describedby={hint} aria-label={`${t("devicesPage.action.signOut")}: ${device.name}`}
+          onClick={() => onAction(device, signOut)} className="settings-quiet cursor-pointer">{t("devicesPage.action.signOut")}</button>
+        <span id={hint} data-device-sign-out-line="" className="block text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.detail.signOutLine")}</span>
+      </span>}
+    </Detail>
+  );
+}
+type RemoveAction = Extract<DeviceAction, { type: "remove" }>;
+const removesOf = (device: Device) => device.actions.filter((action): action is RemoveAction => action.type === "remove");
+
+/** A saved server that is also signed in to this computer: Remove forgets the server here, and this ends its sign-in. */
+function signOutOf(device: Device): RemoveAction | undefined {
+  if (device.kind === "phone" || !device.sources.some((source) => source.type === "place")) return undefined;
+  return removesOf(device).find((action) => action.source.type === "session");
+}
+
+/** What it needs first, then the harmless actions, then one Remove (a phone's takes its pairing and its app). */
+function orderActions(device: Device): { lead: DeviceAction[]; remove: RemoveAction | undefined } {
   const need = needOf(device);
-  const removes = device.actions.filter((action) => action.type === "remove");
+  const signOut = signOutOf(device);
   const rest = device.actions.filter((action) => action.type !== "remove" && action !== need);
-  return { lead: [...(need ? [need] : []), ...rest], removes: device.kind === "phone" ? removes.slice(0, 1) : removes };
+  return { lead: [...(need ? [need] : []), ...rest], remove: removesOf(device).find((action) => action !== signOut) };
 }
 
 const actionKey = (action: DeviceAction) => `${action.type}:${"source" in action ? action.source.id : ""}`;
@@ -81,7 +101,7 @@ function BotsDetail({ device }: { device: Device }) {
       {bots.map((bot) => <li key={bot.id} className="flex min-w-0 items-baseline gap-1.5 text-ink"><span className="self-center"><BotAvatar bot={bot} size={16} /></span><span className="break-words">{bot.name}</span></li>)}
     </ul>;
   }
-  return <>{device.canRunBots ? t("devicesPage.detail.runsBots") : device.canHostComputer ? t("devicesPage.detail.hostsComputer") : t("devicesPage.detail.reachesBots")}</>;
+  return <>{device.canRunBots ? t("devicesPage.detail.runsOwnBots") : device.canHostComputer ? t("devicesPage.detail.botsWorkOnIt") : t("devicesPage.detail.usesBots")}</>;
 }
 
 /**
@@ -99,7 +119,8 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   const need = needOf(device);
   const update = device.actions.find((action) => action.type === "copy-update");
   const pairAgain = device.actions.find((action) => action.type === "pair-again");
-  const { lead, removes } = orderActions(device);
+  const { lead, remove } = orderActions(device);
+  const signOut = signOutOf(device);
   const actions = lead.filter((action) => action.type !== "copy-update");
   const act = (chosen: Device, action: DeviceAction) => (action.type === "pair-again" ? onPairing(true) : onAction(chosen, action));
   const vps = vpsOf(device);
@@ -111,8 +132,8 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
   return (
     <div className="flex flex-col gap-4">
       <dl className="flex flex-col gap-2">
-        <Detail label={t("devicesPage.detail.type")}>{kindLabel(device.kind)}</Detail>
-        {!device.here && device.routes.length > 0 && <Detail label={t("devicesPage.detail.connectedBy")}>{device.routes.map(routeLabel).join(", ")}</Detail>}
+        <Detail label={t("devicesPage.detail.type")}>{vps ? t("keys.vps.ownServer") : kindLabel(device.kind)}</Detail>
+        {!device.here && (device.routes.length > 0 || signOut) && <ConnectedBy device={device} signOut={signOut} onAction={onAction} />}
         {device.address && <Detail label={t("devicesPage.detail.address")}><span className="select-text break-all font-mono text-[12px]">{device.address}</span></Detail>}
         {device.version && <Detail label={t("devicesPage.detail.version")}>{device.version}</Detail>}
         {device.lastSeen && device.status !== "online" && <Detail label={t("devicesPage.detail.lastSeen")}>{lastSeen(device.lastSeen, now)}</Detail>}
@@ -138,14 +159,9 @@ export function DeviceDetails({ device, onAction, onRemoved, now, pairing, onPai
           <OwnServerLink inline onBack={null} onConnected={() => onPairing(false, true)} start={{ address: pairAgain.address, locked: true, title: "" }} expect={device.name}
             aside={<button type="button" className="ui-button" data-pair-again-cancel="" onClick={() => onPairing(false)}>{t("common.cancel")}</button>} />
         </div>
-        : (actions.length > 0 || removes.length > 0) && <div className="flex flex-col gap-2">
-          <div data-device-actions="" className="flex flex-wrap items-center gap-2">
-            {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} main={action === need} onAction={act} />)}
-            {removes.length > 0 && <span data-device-removes="" className="ms-auto flex flex-wrap justify-end gap-2">
-              {removes.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} onAction={act} />)}
-            </span>}
-          </div>
-          {removes.length > 1 && device.kind !== "phone" && signsIn(device) && <p data-device-remove-hint="" className="text-end text-[12px] leading-4 text-ink-tertiary">{t("devicesPage.action.signOutHint")}</p>}
+        : (actions.length > 0 || remove) && <div data-device-actions="" className="flex flex-wrap items-center gap-2">
+          {actions.map((action) => <ActionButton key={actionKey(action)} device={device} action={action} main={action === need} onAction={act} />)}
+          {remove && <ActionButton device={device} action={remove} onAction={act} />}
         </div>}
     </div>
   );

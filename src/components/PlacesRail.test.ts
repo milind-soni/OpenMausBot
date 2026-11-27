@@ -924,3 +924,34 @@ it("a server saved by hand: its menu offers Rename, saved by main on this comput
   expect(rename.mock.calls, "by the circle's own id, which main listed").toEqual([["vps", "家里的服务器"], ["vps", "家里的服务器"]]);
   expect(host.querySelector("[data-rail-menu]"), "saved: the menu closes").toBeNull();
 });
+
+it("Show bots together: one checkable row in the menu of This computer, the workspace of its own that runs, and My Cloud, for the same switch; no other circle has it", async () => {
+  const expand = vi.fn();
+  let on = true;
+  const together = vi.fn(async (next: boolean) => { on = next; return on; });
+  rail = { places: [
+    place("local", "This Mac", { kind: "computer", profile: "default", active: true, paint: { swatch: null }, together: true }),
+    place("work", "Work", { kind: "computer", profile: "work", named: true, paint: { swatch: null } }),
+    place("home", "My Cloud", { paint: { swatch: null }, together: true }),
+    place("acme", "Acme", { kind: "team", paint: { swatch: null } }),
+  ], add: { cloud: false, link: true, address: false } };
+  Object.assign(window, { ogb: { workspaces: { ...workspaces, together }, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const menuOf = async (id: string) => {
+    await act(async () => { host.querySelector(`[data-rail-place="${id}"]`)!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    return host.querySelector(`[data-rail-menu="${id}"]`);
+  };
+  const mine = await menuOf("local");
+  const row = mine!.querySelector<HTMLButtonElement>("[data-rail-together-row]")!;
+  expect([row.textContent, row.getAttribute("role"), row.getAttribute("aria-checked")]).toEqual(["Show bots together", "checkbox", "true"]);
+  await click(row);
+  await act(async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); });
+  expect(together).toHaveBeenCalledWith(false);
+  expect(host.querySelector("[data-rail-menu='local'] [data-rail-together-row]")?.getAttribute("aria-checked"), "the menu stays open and shows main's answer").toBe("false");
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect((await menuOf("home"))?.querySelector("[data-rail-together-row]")).not.toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect((await menuOf("work"))?.querySelector("[data-rail-together-row]")).toBeNull();
+  await act(async () => { host.querySelector("[data-rail-menu]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  expect((await menuOf("acme"))?.querySelector("[data-rail-together-row]")).toBeNull();
+});

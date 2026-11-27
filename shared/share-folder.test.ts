@@ -90,6 +90,19 @@ describe("template folders", () => {
     expect(() => readShareFolder({ ...team, "avatars/lead.png": new Uint8Array(70 * 1024) })).toThrow(/larger than 64 KB/);
   });
 
+  it("reads a folder that leaves out its id, release or department name, as its format allows", () => {
+    const manifest = ["---", "botmrr: 2", "name: Clip Crew", "tagline: Turn recordings into clips.", "summary: Clips.", "category: Creative",
+      "author:", "  name: Someone", "license: MIT", "outcomes:", "  - Clips", "setupMinutes: 5", "requirements:", "  apps: []", "  capabilities: []",
+      "team:", "  leader: lead", "agents:", "  - key: lead", "    name: Lead", "    appearance:", "      color: red",
+      "routines:", "  - key: daily", "    name: Daily", "    agent: lead", "    prompt: Go", "    runOn: maus", "    durationMinutes: 15",
+      "    enabledAfterInstall: false", "    schedule:", "      type: daily", "      time: \"09:00\"", "      weekdays: [mon, 7]", "---", "", "Body."].join("\n");
+    const folder = readShareFolder({ "team.md": manifest }, "clip-crew");
+    if (folder.kind !== "package") throw new Error("expected a package");
+    expect(folder.document.package).toMatchObject({ id: "clip-crew", release: "1.0.0", team: { name: "Clip Crew", leader: "lead" } });
+    expect(folder.document.package.routines?.[0]?.schedule).toMatchObject({ type: "daily", weekdays: [1, 0] });
+    expect(() => readShareFolder({ "team.md": manifest })).toThrow("package.id");
+  });
+
   it("refuses two manifests, no manifest and a newer version", () => {
     const files = writeShareFolder(oneBot(), "bot");
     expect(() => readShareFolder({ ...files, "team.md": files["bot.md"]! })).toThrow(/not both/);

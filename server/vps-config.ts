@@ -3,6 +3,12 @@ import { z } from "zod";
 
 import { DEFAULT_DESKTOP_RESOURCES, MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB, type DesktopResources } from "./container-limits.ts";
 
+export const vpsIdleConfigSchema = z.object({ timeoutMinutes: z.number().int().min(5).max(1_440).optional() }).strict();
+
+export function vpsIdleTimeoutMinutes(cfg: { vpsIdle?: z.infer<typeof vpsIdleConfigSchema> }): number {
+  return cfg.vpsIdle?.timeoutMinutes ?? 480;
+}
+
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 
 /** What each bot's VPS desktop may use on the default server. */

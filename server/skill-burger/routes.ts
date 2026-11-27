@@ -2,6 +2,7 @@
 // every bot, built here from the stored messages (their full inputs and outputs, already scrubbed of held secrets); GET
 // lists every saved one; PATCH renames one or undoes a change to its steps; DELETE with the sha256 it was saved with is its
 // Undo. Whoever can chat with the bot that made a run may add it; only whoever saved it, or an admin, changes it.
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { draftFromLayers, draftWorkflow } from "../../shared/skill-burger/draft.ts";
@@ -98,17 +99,23 @@ function outputOf(layer: { output?: string } | undefined): unknown {
   try { return JSON.parse(layer.output); } catch { return layer.output.slice(0, 40); }
 }
 
+function decisionRunKey(threadId: string, messages: readonly RunMessage[]): string {
+  const start = messages.findLastIndex((message) => message.role === "user" && message.kind === "text" && message.text?.trim());
+  const run = messages.slice(Math.max(0, start)).map(({ id, role, kind, text, tool }) => ({ id, role, kind, text, tool }));
+  return `${threadId}:${createHash("sha256").update(JSON.stringify(run)).digest("hex")}`;
+}
+
 /** Decisions the summary pass read in a run, kept until it is saved; a run whose steps changed since finds none. */
 function createDecisionCache(limit = 200) {
   const kept = new Map<string, Decisions>();
-  const key = (threadId: string, workflow: Workflow) => `${threadId}:${workflow.steps.map((step) => `${step.id}=${step.label}`).join("|")}`;
+  const key = (run: string, workflow: Workflow) => `${run}:${workflow.steps.map((step) => `${step.id}=${step.label}`).join("|")}`;
   return {
-    remember(threadId: string, workflow: Workflow, decisions: Decisions) {
-      kept.delete(key(threadId, workflow));
-      kept.set(key(threadId, workflow), decisions);
+    remember(run: string, workflow: Workflow, decisions: Decisions) {
+      kept.delete(key(run, workflow));
+      kept.set(key(run, workflow), decisions);
       while (kept.size > limit) kept.delete(kept.keys().next().value!);
     },
-    find: (threadId: string, workflow: Workflow) => kept.get(key(threadId, workflow)) ?? null,
+    find: (run: string, workflow: Workflow) => kept.get(key(run, workflow)) ?? null,
   };
 }
 
@@ -148,13 +155,14 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       const ask = askOf(messages);
       if (!burgerWorthy(layers) || !ask || !deps.summarize) return json(res, 200, { summary: null });
       const draft = drafted(messages);
+      const run = decisionRunKey(threadId, messages);
       const words = botWords(messages);
       const [reply, decided] = await Promise.all([
         deps.summarize(botId, summaryPrompt(ask, layers)).catch(() => null),
         draft && words ? deps.summarize(botId, decisionsPrompt(ask, draft.workflow.steps.map((step, index) => ({ id: step.id, label: step.label, output: outputOf(draft.layers[index]) })), words)).catch(() => null) : null,
       ]);
       const decisions = parseDecisions(decided);
-      if (draft && decisions) decisionsFor.remember(threadId, draft.workflow, decisions);
+      if (draft && decisions) decisionsFor.remember(run, draft.workflow, decisions);
       return json(res, 200, { summary: cleanSummary(reply) });
     }
     if (path !== SKILL_BURGERS_PATH && !path.startsWith(`${SKILL_BURGERS_PATH}/`)) return PASS;
@@ -175,9 +183,10 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
         const { botId, threadId, summary, name, skip, inputs } = body.data;
         if (!deps.owns(botId, threadId) || !deps.sees(auth, threadId)) return json(res, 404, { error: "No such conversation." });
         if (!mayAdd(auth, botId)) return json(res, 403, { error: CANT_ADD });
-        const draft = drafted(deps.messages(threadId), summary);
+        const messages = deps.messages(threadId);
+        const draft = drafted(messages, summary);
         if (!draft) return json(res, 422, { error: "This run has nothing to save yet." });
-        const chosen = applyChoices(applyDecisions(draft.workflow, decisionsFor.find(threadId, draft.workflow)), { ...(skip ? { skip } : {}), ...(inputs ? { inputs } : {}) });
+        const chosen = applyChoices(applyDecisions(draft.workflow, decisionsFor.find(decisionRunKey(threadId, messages), draft.workflow)), { ...(skip ? { skip } : {}), ...(inputs ? { inputs } : {}) });
         if ("error" in chosen) return json(res, 422, { error: chosen.error });
         saved = saveWorkflowSkill({ workflow: chosen, name, origin: botId, savedBy, botIds, root: deps.root });
       }
@@ -198,8 +207,8 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       if (!found || !sha256) return json(res, 404, { error: "No such skill." });
       const layers = fixLayers(deps.messages(threadId), run);
       if (!layers.length) return json(res, 422, { error: "The bot did nothing to fix it that could be saved." });
-      const fix = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, deps.teammate ? { teammate: deps.teammate } : {}).steps;
-      const next = insertFix(found.workflow, step, fix);
+      const fix = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, { existingArgs: found.workflow.args, ...(deps.teammate ? { teammate: deps.teammate } : {}) });
+      const next = insertFix({ ...found.workflow, args: fix.args }, step, fix.steps);
       if ("error" in next) return json(res, 422, next);
       const saved = replaceWorkflowSkill({ name: burger, workflow: next, sha256, root: deps.root });
       if ("stale" in saved) return stale();
@@ -218,8 +227,8 @@ export function createSkillBurgerRoutes(deps: SkillBurgerRouteDeps): RouteHandle
       if (!found || !sha256) return json(res, 404, { error: "No such skill." });
       const layers = judgementLayers(deps.messages(threadId), run);
       if (!layers.length) return json(res, 422, { error: "The bot did nothing for this case that could be saved." });
-      const steps = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary).steps;
-      const next = applyEdit(found.workflow, { action: "add_case", decide: { id: decide }, case: chosen, steps });
+      const recorded = draftFromLayers(layers, askOf(deps.messages(threadId)) ?? "", found.workflow.summary, { existingArgs: found.workflow.args });
+      const next = applyEdit({ ...found.workflow, args: recorded.args }, { action: "add_case", decide: { id: decide }, case: chosen, steps: recorded.steps });
       if ("error" in next) return json(res, 422, next);
       const saved = replaceWorkflowSkill({ name: burger, workflow: next, sha256, root: deps.root });
       if ("stale" in saved) return stale();

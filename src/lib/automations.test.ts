@@ -254,6 +254,9 @@ describe("order and the grey line", () => {
     expect(statusLine(automation([partly]), NOW)).toBe("On · last ran today 9:02 AM ! · next: Monday 9:00 AM");
     expect(runLine(run("failed", at(0, 9, 2), { error: "Stopped because the tool call failed." }), NOW)).toMatchObject({ mark: "✗" });
     expect(statusLine(automation([run("failed", at(0, 9, 2))]), NOW)).toBe("On · last ran today 9:02 AM ✗ · next: Monday 9:00 AM");
+    const completedPartly = run("completed", at(0, 9, 2), { error: "Stopped because the tool call failed.\nmore", output: "Here is the summary.", partial: true });
+    expect(runLine(completedPartly, NOW)).toEqual({ when: "Today 9:02 AM", mark: "!", text: "Partly done: Stopped because the tool call failed." });
+    expect(statusLine(automation([completedPartly]), NOW)).toBe("On · last ran today 9:02 AM ! · next: Monday 9:00 AM");
   });
 
   it("says a run that found nothing to tell found nothing new, whatever its last words were", () => {

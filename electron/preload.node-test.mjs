@@ -89,6 +89,33 @@ test("the talk bridge asks main over its own channels with only what it understa
   assert.deepEqual(invocations.slice(before), [["talk-shortcut:state"], ["talk-shortcut:set", { enabled: false, key: "ctrl-shift-space" }], ["call:active", true], ["call:active", false]]);
 });
 
+test("appInstall asks main over its own channels with only the fields it understands, and stays off remote pages", async () => {
+  const before = invocations.length;
+  const icon = new Uint8Array([1, 2, 3]);
+  await exposed.api.appInstall.install({ id: "notes", name: "Notes", iconPng: icon, desktopShortcut: "yes", path: "/etc" });
+  await exposed.api.appInstall.install({ id: "notes", name: "Notes", iconPng: "not bytes" });
+  const view = new DataView(new Uint8Array([9, 8]).buffer);
+  await exposed.api.appInstall.install({ id: "notes", name: "Notes", iconPng: view });
+  await exposed.api.appInstall.uninstall("notes");
+  await exposed.api.appInstall.addToDesktop("notes");
+  await exposed.api.appInstall.removeFromDesktop("notes");
+  await exposed.api.appInstall.list();
+  assert.deepEqual(invocations.slice(before), [
+    ["app-install:install", { id: "notes", name: "Notes", iconPng: icon, desktopShortcut: false }],
+    ["app-install:install", { id: "notes", name: "Notes", iconPng: undefined, desktopShortcut: false }],
+    ["app-install:install", { id: "notes", name: "Notes", iconPng: new Uint8Array([9, 8]), desktopShortcut: false }],
+    ["app-install:uninstall", "notes"],
+    ["app-install:add-to-desktop", "notes"],
+    ["app-install:remove-from-desktop", "notes"],
+    ["app-install:list"],
+  ]);
+  const source = (await import("node:fs")).readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
+  for (const list of ["REMOTE_SAFE", "HOME_PAGE"]) {
+    const listed = new RegExp(`const ${list} = (?:new Set\\()?\\[([^\\]]*)\\]`).exec(source)?.[1] ?? "";
+    assert.equal(listed.includes('"appInstall"'), false, `appInstall must stay out of ${list}`);
+  }
+});
+
 test("account prepare asks for the secure address over its own channel and sends nothing from the page", async () => {
   const before = invocations.length;
   await exposed.api.companionAccount.prepare({ endpoint: "https://evil.example.test" });

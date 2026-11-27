@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Laptop, Loader2 } from "lucide-react";
 import { deviceGroup, privateNetwork, groupByKind, type Device, type DeviceAction, type DeviceGroup, type PrivateNetwork } from "@/lib/devices";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { showTunnelRetiredNotice } from "@/lib/phone-link";
+import { olderAppPhones, showTunnelRetiredNotice } from "@/lib/phone-link";
 import { revealPhonePairing, takePairOnOpen } from "@/lib/phone-pairing";
 import { phoneRemovePath } from "@/lib/phones";
 import { useDevices } from "@/lib/use-devices";
@@ -11,12 +11,14 @@ import type { CompanionState } from "@/lib/companion-types";
 import { api } from "@/state/api";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { AddDevicePanel, lastInputWasKeys, withinPage, type AddKind } from "../../devices/AddDevicePanel";
-import { DevicesNotice, GroupSection, HereSection, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
+import { DevicesAttention, DevicesNotice, GroupSection, HereSection, networkNeedsPerson, type NetworkAction, type NetworkShare, type Opened } from "../../devices/DeviceRows";
 import { PhoneCodeInline } from "../../devices/CodeCard";
 import { DeviceMap, deviceMapShown } from "../../devices/DeviceMap";
 import { usePairAccess } from "../../devices/PairCodePanel";
 import { ComputerNameMore, OtherPlacesSection, PairWithCloudRow, PhoneAppFacts, ServerPhoneNotes } from "../../devices/PhoneSections";
-import { networkLine } from "../../devices/device-words";
+import { needsFirst, needsPerson } from "../../devices/device-parts";
+import { useUpdateAllOnPage } from "../../devices/UpdateAll";
+import { networkLine, sshAliasOfAnchor } from "../../devices/device-words";
 import { AlwaysOnHomeSection } from "../../AlwaysOnHomeSection";
 import { PhoneControls } from "../../PairedPhones";
 import { OpenCodeRow, PairPhoneSteps, ReachSection, RouteNotices, setCompanionTailscale, shouldResumePausedAddress, type PairAsk } from "../../PhoneDevicesSection";
@@ -25,6 +27,7 @@ import { canPairDevices, pairingBlockedReason } from "../../ServerPairingCard";
 import { SettingsGroup, SettingsMark } from "../../SettingsPrimitives";
 import { PlaceBadge } from "../SettingsNav";
 import { SettingsSkeletonCard } from "../SettingsStates";
+import { devicesPlaceKey, setDevicesSignal } from "../devices-signal";
 import { useSettingsShell } from "../settings-shell";
 
 /** Tailscale's download page for this computer's system. */
@@ -58,10 +61,12 @@ const ADD_LABEL: Record<DeviceGroup, Parameters<typeof t>[0]> = { phones: "devic
 const ADD_KIND: Record<DeviceGroup, AddKind | null> = { phones: "phone", computers: "computer", servers: null };
 const PHONES_ADD = "[data-add-group=phones]";
 
+const NO_PHONES: readonly string[] = [];
+
 type Adding = { start: AddKind | null; from: string; keys: boolean; ask?: PairAsk };
 
 export function DevicesPage() {
-  const { ctx, place, go, setSub, anchor } = useSettingsShell();
+  const { ctx, place, go, setSub, setHeaderAction, anchor } = useSettingsShell();
   const dispatch = useStoreDispatch();
   const config = useStoreSelector((state) => state.config);
   const focus = useStoreSelector((state) => state.appSettingsPhonePairing);
@@ -140,8 +145,53 @@ export function DevicesPage() {
     pairAsked.current = false;
     if (anchor && !kept) setAdding(null);
   }, [anchor]);
+  const openRow = (id: string) => {
+    setNotice(null);
+    setPairing(false);
+    setOpen(id);
+    window.requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>(`[data-device-row="${CSS.escape(id)}"]`);
+      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      row?.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
+      row?.querySelector<HTMLElement>("[data-device-node]")?.focus({ preventScroll: true });
+    });
+  };
+  // A named server's row asked for from another page (its link on AI) opens once, when the server is listed.
+  const openedFor = useRef<string | null>(null);
+  const openRowNow = useRef(openRow);
+  openRowNow.current = openRow;
+  useEffect(() => {
+    const alias = sshAliasOfAnchor(anchor);
+    if (!alias) { openedFor.current = null; return; }
+    if (openedFor.current === anchor) return;
+    const server = devices.find((device) => device.sources.some((source) => source.type === "vps" && source.id === alias));
+    if (!server) return;
+    openedFor.current = anchor;
+    openRowNow.current(server.id);
+  }, [anchor, devices]);
   const networkAction = nextNetworkStep(network, { check: () => void check() },
     { busy: c.busy, blocked: Boolean(blocked), platform: window.ogb?.platform });
+  const groups = groupByKind(devices, { all: true }).map((entry) => ({ ...entry, devices: needsFirst(entry.devices) }));
+  const needing = groups.flatMap((entry) => entry.devices.filter(needsPerson));
+  const networkNeeding = blocked ? null : network;
+  const signalPlace = devicesPlaceKey(place);
+  const needsYou = needing.length > 0 || networkNeedsPerson(networkNeeding);
+  const phoneConnected = devices.some((device) => device.kind === "phone" && device.status === "online");
+  useEffect(() => { if (loaded) setDevicesSignal({ place: signalPlace, needsYou, phoneConnected }); }, [loaded, signalPlace, needsYou, phoneConnected]);
+
+  const olderPhones = ctx.here && c.state && showTunnelRetiredNotice(c.account, c.state) ? olderAppPhones(c.state).map((phone) => phone.id) : NO_PHONES;
+  const updateAll = useUpdateAllOnPage({ enabled: ctx.here, devices, olderPhones });
+  const updateButton = updateAll.button;
+  const isAdding = adding !== null;
+  const addButton = useMemo(() => <span data-settings-block="add" className="flex scroll-mt-4 items-center gap-2">
+    {updateButton}
+    <button type="button" data-add-device="" onClick={() => startAdding(null, "[data-add-device]")} className="ui-button ui-button-primary ui-button-sm shrink-0">{t("devicesPage.add")}</button>
+  </span>, [startAdding, updateButton]);
+  useLayoutEffect(() => {
+    if (!setHeaderAction) return;
+    setHeaderAction(isAdding ? null : addButton);
+    return () => setHeaderAction(null);
+  }, [setHeaderAction, isAdding, addButton]);
 
   const environments = ctx.here ? window.ogb?.environments : undefined;
   const workspaces = ctx.here ? window.ogb?.workspaces : undefined;
@@ -216,6 +266,7 @@ export function DevicesPage() {
     onPairing: (device, on, connected) => { setPairing(on); if (connected) { setNotice({ text: t("devicesPage.pairedAgain", { name: device.name }), group: deviceGroup(device) }); refresh(); } },
     onRemoved: (text, device) => { setOpen(null); setNotice(text ? { text, group: deviceGroup(device) } : null); refresh(); },
     extra: phoneExtra,
+    progress: updateAll.progress,
   };
 
   if (adding) {
@@ -238,20 +289,14 @@ export function DevicesPage() {
 
   const here = devices.find((device) => device.here)!;
   const mark = place.kind === "computer" ? <SettingsMark><Laptop /></SettingsMark> : <PlaceBadge place={place} size={28} />;
-  const groups = groupByKind(devices, { all: true });
   const now = Date.now();
   const onAction = (device: Device, action: DeviceAction) => void act(device, action);
-  const openFromMap = (id: string) => {
-    setNotice(null);
-    setPairing(false);
-    setOpen(id);
-    window.requestAnimationFrame(() => {
-      const row = document.querySelector<HTMLElement>(`[data-device-row="${CSS.escape(id)}"]`);
-      const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      row?.scrollIntoView?.({ block: "start", behavior: still ? "auto" : "smooth" });
-      row?.querySelector<HTMLElement>("[data-device-node]")?.focus({ preventScroll: true });
-    });
-  };
+  const openNetwork = () => window.requestAnimationFrame(() => {
+    const row = document.querySelector<HTMLElement>("[data-private-network]");
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    row?.scrollIntoView?.({ block: "center", behavior: still ? "auto" : "smooth" });
+    (row?.querySelector<HTMLElement>("a[href], button:not([disabled])") ?? row)?.focus({ preventScroll: true });
+  });
   // Beside the next step, at most one quiet button: ask again after installing or approving.
   const secondary = network && !blocked && networkAction?.href
     ? <button type="button" className="settings-quiet cursor-pointer" disabled={c.busy} onClick={() => void check()}>{c.busy ? t("common.checking") : t("remote.checkAgain")}</button> : null;
@@ -274,13 +319,16 @@ export function DevicesPage() {
   const startPhone = (ask: PairAsk) => startAdding("phone", PHONES_ADD, ask);
   const error = failure ?? (ctx.here ? c.error ?? state?.error ?? null : null);
   const noticeLine = notice && <DevicesNotice text={notice.text} onDismiss={() => setNotice(null)} />;
+  const mapShown = deviceMapShown();
   return <>
     {state && <RouteNotices c={c} notices={state.notices ?? []} />}
     {error && <p role="alert" className="px-4 text-[13px] leading-[18px] text-danger">{error}</p>}
     {notice && !notice.group && noticeLine}
-    {deviceMapShown() && <DeviceMap devices={devices} mark={mark} network={network} loaded={loaded} onOpen={openFromMap} now={now} />}
-    <HereSection device={here} mark={mark} opened={opened} onAction={onAction} onAdd={() => startAdding(null, "[data-add-device]")} now={now}
-      network={network && { network, line: blocked ?? networkLine(network), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}
+    {!setHeaderAction && addButton}
+    <DevicesAttention needing={needing} network={networkNeeding} now={now} onOpen={openRow} onNetwork={openNetwork} />
+    {mapShown && <DeviceMap devices={devices} mark={mark} network={network} loaded={loaded} onOpen={openRow} now={now} />}
+    <HereSection device={here} mark={mark} opened={opened} onAction={onAction} now={now} titled={!mapShown}
+      network={network && { network, line: blocked ?? (network.state === "ready" && !network.shared ? null : networkLine(network)), action: network.state === "ready" ? null : networkAction, secondary, share }} pending={ctx.here}
       more={!ctx.here && ctx.advanced && !ctx.cloud && access.pairingCodes === true && canPairDevices(access.session) ? <ComputerNameMore /> : null} />
     {groups.map((entry) => {
       const phones = entry.group === "phones";
@@ -299,6 +347,7 @@ export function DevicesPage() {
       ? <AlwaysOnHomeSection c={c} state={state} blocked={blocked} onAddPhone={() => startPhone(null)}
         onAddComputer={() => startAdding("computer", "[data-always-on-add-computer]")} onConnect={() => startAdding("server", "[data-always-on-connect]")} />
       : <span data-settings-block="always-on" className="contents" />)}
-    <OtherPlacesSection />
+    <OtherPlacesSection devices={devices} />
+    {updateAll.dialog}
   </>;
 }

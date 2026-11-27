@@ -34,6 +34,8 @@ import { EmailCard } from "./EmailCard";
 import { PostizCard } from "./PostizCard";
 import { POSTIZ_CATALOG_CARD, POSTIZ_SEARCH } from "@/lib/postiz";
 import { X_CARD_SEARCH, XCard } from "./XCard";
+import { GITHUB_CARD_CATEGORIES, GITHUB_CARD_SEARCH, GithubAppCard } from "./github/GithubAppCard";
+import { useGithubConnected, useGithubShown } from "@/lib/github-sign-in";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { openKeySettings } from "./keys/key-focus";
@@ -147,6 +149,7 @@ export function PluginsPanel() {
   const [postizConnected, setPostizConnected] = useState<boolean | null>(null);
   const [emailConnected, setEmailConnected] = useState<boolean | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServerListing[]>([]);
+  const githubSignedIn = useGithubConnected(); const githubShown = useGithubShown();
 
   const disconnectingRef = useRef<{ slug: string; label: string; account: ConnectorAccount } | null>(null);
   const polls = useRef(new Map<string, () => void>());
@@ -408,6 +411,7 @@ export function PluginsPanel() {
   const shownHosted = new Set(HOSTED_MCP_APPS.filter((app) => hostedShown(app, search, listing, hostedConnected)).map((app) => app.id));
   const showEmail = (!search || `email mail imap smtp mailbox ${t("email.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && emailConnected !== false));
   const showX = (!search || `${X_CARD_SEARCH} ${t("apps.x.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && xConnected !== false));
+  const showGithub = githubShown && (!search || `${GITHUB_CARD_SEARCH} ${t("githubSignIn.pitch")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && githubSignedIn === true));
   const showPostiz = (!search || `${POSTIZ_SEARCH} ${t("postiz.description")}`.toLowerCase().includes(search.toLowerCase().trim())) && (listing === "all" || (listing === "connected" && postizConnected !== false));
   const visible = useMemo(() => (listing === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
     .map((card, index) => ({ card, index }))
@@ -416,7 +420,7 @@ export function PluginsPanel() {
   const connectedHosted = HOSTED_MCP_APPS.filter((app) => hostedConnected?.[app.id]);
   const ownServers = mcpServers.filter((server) => ownMcpServer(server));
   const ownServerShown = (server: McpServerListing) => matchesCatalogSearch(`${server.name} ${isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}`, search);
-  const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + ownServers.filter(mcpServerConnected).length + Number(emailConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + ownServers.filter(mcpServerConnected).length + Number(emailConnected === true) + Number(githubSignedIn === true) + Number(xConnected === true) + Number(postizConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
@@ -435,11 +439,16 @@ export function PluginsPanel() {
   const categoryInMore = category !== null && moreCategories.includes(category);
   const inCategoryView = filter === "all" && category !== null && !searching;
   const postizHere = showPostiz && (!inCategoryView || inCategory(POSTIZ_CATALOG_CARD, category));
-  const nativeCardsShown = (!inCategoryView && (shownHosted.size > 0 || showEmail || showX)) || postizHere || (filter === "connected" && ownServers.some((server) => server.enabled && ownServerShown(server)));
+  const githubHere = showGithub && (!inCategoryView || inCategory({ slug: "github", categories: GITHUB_CARD_CATEGORIES }, category));
+  const nativeCardsShown = (!inCategoryView && (shownHosted.size > 0 || showEmail || showX)) || postizHere || githubHere || (filter === "connected" && ownServers.some((server) => server.enabled && ownServerShown(server)));
   const categoryCards = useMemo(() => inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible, [inCategoryView, visible, category]);
   const sectioned = filter === "all" && !searching && category === null;
   const sections = useMemo(() => sectioned ? catalogSections(visible, isConnected, ranked.inline) : [], [sectioned, visible, isConnected, ranked]);
   const allSection = sections.find((section) => section.kind === "all");
+  /** In the sectioned view the GitHub sign-in row sits just before the GitHub app's tile, in that tile's section. */
+  const githubBeside = (section: (typeof sections)[number]) => showGithub && section.kind !== "all" && (section.kind === "category" || githubSignedIn === true)
+    && section.cards.slice(0, CATEGORY_SECTION_SIZE).some((card) => card.slug === "github");
+  const githubSectioned = sections.some(githubBeside);
   const allCards = sectioned ? allSection?.cards ?? [] : categoryCards;
   const allCapped = sectioned && !showAllApps && allCards.length > APPS_PREVIEW_COUNT;
   const allShown = allCapped ? allCards.slice(0, APPS_PREVIEW_COUNT) : allCards;
@@ -663,7 +672,7 @@ export function PluginsPanel() {
                     title={t("apps.section.connected")}
                     viewAll={section.cards.length > CATEGORY_SECTION_SIZE ? { label: t("apps.viewAll"), onClick: () => chooseFilter("connected") } : undefined}
                   >
-                    {section.cards.slice(0, CATEGORY_SECTION_SIZE).map((card) => renderTile(card))}
+                    {section.cards.slice(0, CATEGORY_SECTION_SIZE).map((card) => githubBeside(section) && card.slug === "github" ? githubPair(card) : renderTile(card))}
                   </AppsSection>
                   {renderSuggested()}
                 </Fragment>
@@ -674,7 +683,7 @@ export function PluginsPanel() {
                   title={appCategoryLabel(section.category)}
                   viewAll={section.more ? { label: t("apps.viewAll"), onClick: () => pickCategory(section.category) } : undefined}
                 >
-                  {section.cards.map((card) => renderTile(card))}
+                  {section.cards.map((card) => githubBeside(section) && card.slug === "github" ? githubPair(card) : renderTile(card))}
                 </AppsSection>
               ))}
               <AppsSection
@@ -736,6 +745,7 @@ export function PluginsPanel() {
                 )}
               >
                 <McpServersPanel hostedCards={{ shown: (id) => !inCategoryView && shownHosted.has(id), onConnections: setHostedConnected, onServers: setMcpServers, ...(filter === "connected" ? { ownServers: { shown: ownServerShown, manage: () => chooseFilter("mcp") } } : {}) }} refreshKey={cardsRefresh} />
+                <div data-native-card="github" className={githubHere && !githubSectioned ? "contents" : "hidden"}><GithubAppCard refreshKey={cardsRefresh} /></div>
                 <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={cardsRefresh} onConnection={setXConnected} /></div>
                 <div data-native-card="email" className={showEmail && !inCategoryView ? "contents" : "hidden"}><EmailCard refreshKey={cardsRefresh} onConnection={setEmailConnected} /></div>
                 <div data-native-card="postiz" className={postizHere ? "contents" : "hidden"}><PostizCard refreshKey={cardsRefresh} onConnection={setPostizConnected} /></div>
@@ -780,6 +790,10 @@ export function PluginsPanel() {
         {shown.map((card) => renderTile(card))}
       </AppsSection>
     );
+  }
+
+  function githubPair(card: ToolkitCard) {
+    return <Fragment key="github-pair"><div data-native-card="github" className="contents"><GithubAppCard /></div>{renderTile(card)}</Fragment>;
   }
 
   function renderTile(card: ToolkitCard) {

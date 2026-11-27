@@ -45,8 +45,9 @@ const runStatus = (cli) =>
   });
 
 /** What one `tailscale status --json` says, in the row's words: ready (with this computer's MagicDNS name, its tailnet
- * addresses and whether the tailnet hands out HTTPS certificates), signed out, not running, waiting for the tailnet's
- * admin to approve this computer, or not allowed to ask. */
+ * addresses and whether the tailnet hands out HTTPS certificates), connected but without a MagicDNS name, connected
+ * under a name outside .ts.net (a Headscale tailnet's own suffix, which phones and the tailnet share cannot use yet),
+ * signed out, not running, waiting for the tailnet's admin to approve this computer, or not allowed to ask. */
 export function readTailscaleStatus(stdout, stderr = "") {
   const read = readTailscaleStatusJson(stdout);
   if (!read) {
@@ -55,7 +56,9 @@ export function readTailscaleStatus(stdout, stderr = "") {
     return { state: "not-running" };
   }
   if (read.state === "not-running" || read.state === "needs-approval") return { state: read.state };
-  if (read.state !== "ready" || !read.name) return { state: "signed-out" };
+  if (read.state !== "ready") return { state: "signed-out" };
+  if (!read.name) return { state: "magicdns" };
+  if (!isTailnetName(read.name)) return { state: "custom-name" };
   return { state: "ready", name: read.name, addresses: read.addresses, https: read.https };
 }
 

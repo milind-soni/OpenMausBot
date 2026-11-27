@@ -151,6 +151,30 @@ describe("bundled data-dashboards skill", () => {
   });
 });
 
+describe("bundled connected-app-pages skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const guide = skills.find((skill) => skill.manifest.id === "connected-app-pages")?.instructions ?? "";
+  const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
+
+  it("mounts for a page or mini app over the person's own apps, and stays out of other turns", () => {
+    for (const text of ["Make me a mini app for my inbox", "build a page that lists my open GitHub issues", "an app that shows my calendar this week"]) {
+      expect(ids(text), text).toContain("connected-app-pages");
+    }
+    for (const text of ["summarize this email", "book a call for Friday", "Build me a sales dashboard", "fix the typo in my biography"]) {
+      expect(ids(text), text).not.toContain("connected-app-pages");
+    }
+  });
+
+  it("teaches the declaration and the page calls, with one worked example that reads and one button that changes", () => {
+    expect(guide).toContain('"gmail:GMAIL_FETCH_EMAILS"');
+    expect(guide).toContain('"mcp:notes:search"');
+    expect(guide).toContain("mausbot.connectors.list()");
+    expect(guide).toContain("mausbot.connectors.call(");
+    expect(guide).toContain("a page someone shares never\ncarries an account");
+    expect(guide.match(/```html/g)).toHaveLength(1);
+  });
+});
+
 describe("bundled phone-connection skill", () => {
   const skills = loadBundledSkills(join(process.cwd(), "skills"));
   const guide = skills.find((skill) => skill.manifest.id === "phone-connection")?.instructions ?? "";

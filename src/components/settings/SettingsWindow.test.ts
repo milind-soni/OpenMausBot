@@ -284,14 +284,15 @@ describe("the outer menu", () => {
 describe("Settings → Features", () => {
   const featureSwitches = () => Object.fromEntries(fixture.switches.map((props) => [(props as { "data-feature-switch"?: string })["data-feature-switch"], props.checked]).filter(([name]) => name));
 
-  it("is in Simple mode's list, with Skill Burger on and thread tabs off by default", () => {
-    fixture.config = { features: { skillBurger: true, threadTabs: false } };
+  it("is in Simple mode's list, with Skill Burger on and thread tabs off by default, and no switch for the room feed", () => {
+    fixture.config = { features: { skillBurger: true, threadTabs: false, roomFeed: true } };
     const html = render("features");
     expect(navPages(html)).toContain("features");
     expect(html).toContain("Skill Burger");
     expect(html).toContain("Save a bot&#x27;s run as steps you can run again");
     expect(html).not.toContain("Saved in");
     expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false });
+    expect(html).not.toContain("Room feed");
   });
 
   it("saves Skill Burger off in the place's config.json", async () => {
@@ -300,6 +301,26 @@ describe("Settings → Features", () => {
     render("features");
     fixture.switches.find((props) => (props as { "data-feature-switch"?: string })["data-feature-switch"] === "skillBurger")!.onClick!({} as never);
     expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { skillBurger: false } }) });
+  });
+
+  it("shows Suggested replies on by default, says it uses a little of the plan, and saves it off", async () => {
+    const { api } = await import("@/state/store");
+    fixture.config = { features: { skillBurger: true, threadTabs: false, suggestedReplies: true } };
+    const html = render("features");
+    expect(html).toContain("Suggested replies");
+    expect(html).toContain("uses a little of your plan or API credit");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, suggestedReplies: true });
+    fixture.switches.find((props) => (props as { "data-feature-switch"?: string })["data-feature-switch"] === "suggestedReplies")!.onClick!({} as never);
+    expect(api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { suggestedReplies: false } }) });
+    fixture.config = { features: { skillBurger: true, threadTabs: false, suggestedReplies: false } };
+    render("features");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, suggestedReplies: false });
+  });
+
+  it("shows the Board switch only where the server reports it (a Team Cloud)", () => {
+    fixture.config = { cloudHome: true, team: { name: "Acme" }, features: { skillBurger: true, threadTabs: false, teamBoard: false } };
+    expect(render("features")).toContain("Board");
+    expect(featureSwitches()).toEqual({ skillBurger: true, threadTabs: false, teamBoard: false });
   });
 
   it("shows no switch its server doesn't know, and isn't offered to a team's member", () => {

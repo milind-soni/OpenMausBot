@@ -8,6 +8,7 @@ import { TEMPLATE_SHARE_MESSAGE } from "../shared/share-card.ts";
 
 const KEY = "sk-ant-api03-SHAREFIXTUREKEY000000000000000000";
 const MEMORY_MARKER = "MEMORY_FIXTURE_Acme_contact_jane";
+const PRIVATE_LINE = "Quotes live in /Users/danarivera/Clients/quotes and /Users/danarivera/.openmausbot/workspaces/7c9e6679-7425-40de-944b-e07fc1f90ae7/out.md; ask dana@rivera-sales.com or +1 (415) 555-0132.";
 const CHAT_MARKER = "CHAT_FIXTURE_the_Acme_renewal";
 const MCP_TOKEN = "MCPFIXTURETOKEN0123456789";
 const skill = (name: string) => `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n\nQuote the list price.\n`;
@@ -83,7 +84,7 @@ describe("templates on a throwaway server", () => {
     });
     expect(seeded.status, JSON.stringify(seeded.body)).toBe(201);
     const bot = seeded.body.bots[0];
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { soul: `Quote from the list. The billing key is ${KEY}.\n` })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { soul: `Quote from the list. The billing key is ${KEY}.\n${PRIVATE_LINE}\n` })).status).toBe(200);
     expect((await api("PUT", `/api/bots/${bot.id}/memory`, { text: `# Memory\n- ${MEMORY_MARKER}\n` })).status).toBe(200);
     const mcp = await api("POST", "/api/mcp/servers", { name: "crm", type: "http", url: `https://crm.example.com/mcp/${MCP_TOKEN}` });
     expect(mcp.status, JSON.stringify(mcp.body)).toBeLessThan(300);
@@ -103,6 +104,7 @@ describe("templates on a throwaway server", () => {
     const card = cards[0].template;
     expect(card).toMatchObject({ scope: "bot", name: "Sales helper", status: "draft", counts: { bots: 1, skills: 1, routines: 1, apps: 1 }, fallback: "unavailable" });
     expect(card.redacted).toBeGreaterThan(0);
+    expect(card).toMatchObject({ secret: true, scrubbed: { paths: 2, emails: 1, phones: 1, names: 0 } });
 
     const shown = await api("GET", `/api/share/${card.id}`);
     expect(shown.status).toBe(200);
@@ -116,7 +118,8 @@ describe("templates on a throwaway server", () => {
     const files = readTree(saved.body.path);
     expect(Object.keys(files).sort()).toEqual(["bot.md", "skills/pricing/SKILL.md"]);
     const everything = Object.values(files).join("\n");
-    for (const kept of [KEY, MEMORY_MARKER, CHAT_MARKER, MCP_TOKEN, "crm.example.com", "modelSelection", "approval"]) expect(everything).not.toContain(kept);
+    for (const kept of [KEY, MEMORY_MARKER, CHAT_MARKER, MCP_TOKEN, "crm.example.com", "modelSelection", "approval", "/Users/", "dana@", "555-0132"]) expect(everything).not.toContain(kept);
+    expect(files["bot.md"]).toContain("Quotes live in ~/Clients/quotes and <workspace>/out.md; ask <email> or <phone>.");
     expect(files["bot.md"]).toContain("enabledAfterInstall: false");
     const zip = await fetch(`${fixture.info.url}/api/share/${card.id}/download`, { headers: { origin: fixture.info.url } });
     expect(zip.headers.get("content-type")).toBe("application/zip");

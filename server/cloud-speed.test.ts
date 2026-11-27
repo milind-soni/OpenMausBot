@@ -158,6 +158,9 @@ describe("turn starts", () => {
     m.pass(1_500);
     m.speed.noteEvent(started("a"));
     expect(m.speed.report().turnStarts).toEqual(buckets({ 2: 1 }));
+    // The event loop's stalls come from its recorder (perf/loop-stalls.ts): none runs here.
+    expect(m.speed.report().loop).toBeNull();
+    expect(createCloudSpeed({ read: () => null, loop: () => ({ n: 2, worstMs: 1_500 }) }).report().loop).toEqual({ n: 2, worstMs: 1_500 });
   });
 
   it("drops a message whose turn never started", () => {

@@ -49,7 +49,9 @@ describe("vitest shard balance", () => {
   });
 
   it.each(CI_PLATFORMS)("gives no $os shard much more recorded time than the others", ({ platform, count, files }) => {
-    const { loads } = planShards(files, loadShardWeights(ROOT, platform), count, NODE_TESTS_SECONDS[platform] ?? 0);
+    const nodeTests = NODE_TESTS_SECONDS[platform];
+    expect(nodeTests, `node:test runs on ${platform} shard 1`).toBeGreaterThan(0);
+    const { loads } = planShards(files, loadShardWeights(ROOT, platform), count, nodeTests);
     const mean = loads.reduce((sum, load) => sum + load, 0) / loads.length;
     // equal file counts put three of the four slowest e2e files in one shard: ~1.4x the mean
     expect(Math.max(...loads) / mean, `recorded seconds per shard: ${loads.join(", ")}`).toBeLessThan(1.05);

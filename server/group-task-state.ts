@@ -1,4 +1,5 @@
 import type { GroupTask } from "../shared/wire.ts";
+import { settleRoomThreadClose } from "./room-thread-close.ts";
 import type { GroupRecord, Store } from "./store.ts";
 
 export function groupTasks(group: GroupRecord | undefined): GroupTask[] {
@@ -54,8 +55,10 @@ export function refreshGroupUnread(group: GroupRecord): void {
   group.unread = Boolean(group.tasks?.some((task) => task.unread));
 }
 
-export function markGroupThreadUnreadAfterTurn(store: Pick<Store, "patchGroup" | "markGroupThreadUnread">,
+/** A turn's end, however it ended: a close its bot asked for takes effect now, and the thread stays unread until read. */
+export function markGroupThreadUnreadAfterTurn(store: Pick<Store, "patchGroup" | "markGroupThreadUnread" | "groupTaskByThread" | "patchGroupTask">,
   groupId: string, threadId: string, busyBotId: string | null): void {
   store.patchGroup(groupId, { busyBotId });
   store.markGroupThreadUnread(groupId, threadId, true);
+  settleRoomThreadClose(store, groupId, threadId);
 }

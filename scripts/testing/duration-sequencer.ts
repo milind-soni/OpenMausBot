@@ -48,9 +48,8 @@ function unlistedE2eSeconds(weights: ShardWeights): number {
 }
 
 // Shard 1 of a platform's run also runs the node:test suites after vitest
-// (ci.yml's matrix.node_tests): about two minutes on the macOS and Windows
-// runners in November 2026, against a 30-minute job cap.
-export const NODE_TESTS_SECONDS: Readonly<Partial<Record<NodeJS.Platform, number>>> = { darwin: 120, win32: 105 };
+// (ci.yml's matrix.node_tests). These are measured on each platform's runners.
+export const NODE_TESTS_SECONDS: Readonly<Partial<Record<NodeJS.Platform, number>>> = { darwin: 120, linux: 90, win32: 105 };
 
 // Longest-processing-time first: sort by seconds (ties by key, so the result
 // never depends on the order vitest found the files), then give each file to

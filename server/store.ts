@@ -47,7 +47,7 @@ import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { branchLeafFrom } from "../shared/conversation-branch.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
-import { endHeldUnread } from "./held-unread.ts";
+import { afterNewLine } from "./room-thread-close.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -118,7 +118,7 @@ const TASK_PATCH_FIELDS = [
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null; closed?: { at: number; by: NonNullable<GroupTaskRecord["closedBy"]> } | null };
 
 
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
@@ -994,20 +994,20 @@ export class Store {
     if (!group || !task) return null;
     this.commitGroupChange(group, "the thread change", () => {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
-      if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned;
-      if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
+      if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned; if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
       for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
+      if (patch.closed) Object.assign(task, { closedAt: patch.closed.at, closedBy: structuredClone(patch.closed.by) }); else if (patch.closed === null) { delete task.closedAt; delete task.closedBy; }
     });
     this.emit({ type: "group", groupId });
     return task;
   }
 
   titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string): GroupTaskRecord | null {
-    const group = this.group(groupId);
+    const group = this.group(groupId), title = titleFromMessage(text);
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
-    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
+    if (!group || !task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK || title === UNTITLED_TASK) return null;
     this.commitGroupChange(group, "the thread's title", () => {
-      task.title = titleFromMessage(text);
+      task.title = title;
       task.titleFromFirstMessage = true;
     });
     this.emit({ type: "group", groupId });
@@ -1146,7 +1146,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
+    this.emit({ type: "message", threadId, message: full }); afterNewLine(this, threadId, full);
     if (full.role === "user" && full.kind === "text") this.dismissOnboardingCard(threadId);
     return full;
   }
@@ -1166,7 +1166,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
+    this.emit({ type: "message", threadId, message: full }); afterNewLine(this, threadId, full);
     // After the insert, so no client ever sees two siblings claiming the same parent.
     for (const child of children) this.patchMessage(threadId, child.id, { parentId: full.id });
     return full;
@@ -1214,10 +1214,9 @@ export class Store {
       ...(dataContext ? { dataContext } : {}), ...from,
     };
     t.messages.push(full); this.threads.grew(threadId, full);
-    t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
+    t.activeLeafId = full.id; mdb.appendMessage(threadId, full);
     this.noteThreadActivity(threadId, full.at, true);
-    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message", threadId, message: full }); afterNewLine(this, threadId, full);
     // A client adopts a new message as its leaf only when it chains onto its leaf; a sibling needs this pointer.
     this.emit({ type: "thread", threadId, activeLeafId: full.id });
     return full;
@@ -2201,11 +2200,11 @@ export class Store {
   }
 
   titleTaskFromFirstMessage(botId: string, text: string, threadId?: string): TaskRecord | null {
-    const bot = this.own(botId);
+    const bot = this.own(botId), title = titleFromMessage(text);
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (!bot || !task || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD)) return null;
+    if (!bot || !task || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD) || title === UNTITLED_TASK) return null;
     this.commitBotChange(bot, "the thread's title", () => {
-      task.title = titleFromMessage(text);
+      task.title = title;
       task.titleFromFirstMessage = true;
     }, undefined, true);
     this.emit({ type: "bot", botId });

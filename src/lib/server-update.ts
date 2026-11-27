@@ -119,7 +119,7 @@ const APP_ANSWER_TEXT: Partial<Record<AppUpdateAnswer, LocaleKey>> = {
   unavailable: "serverUpdate.appUnavailable",
 };
 
-function runNote(status: ServerUpdateStatus | null): Pick<ServerUpdateView, "note" | "noteTone"> {
+export function runNote(status: ServerUpdateStatus | null): Pick<ServerUpdateView, "note" | "noteTone"> {
   const run = status?.run;
   switch (run?.outcome) {
     case "updated": return { note: t("serverUpdate.updated", { version: run.to ?? status!.current }) };

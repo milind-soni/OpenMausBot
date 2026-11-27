@@ -1,6 +1,6 @@
-// Digests computed from the official GitHub assets on 2026-09-08, except the versioned Windows vendor build; update pins
+// Digests computed from the official GitHub assets on 2026-11-25, except the versioned Windows vendor build; update pins
 // only through a reviewed native end-to-end run. The Dockerfile keeps the official Linux version.
-export const AGENT_BROWSER_VERSION = "0.37.0";
+export const AGENT_BROWSER_VERSION = "0.39.0";
 
 export interface AgentBrowserReleaseAsset {
   /** `<platform>-<arch>`; Linux adds `-musl` on Alpine-style systems. */
@@ -17,32 +17,32 @@ export interface AgentBrowserReleaseAsset {
 const RELEASES = new Map<string, AgentBrowserReleaseAsset>([
   [
     "darwin-arm64",
-    { target: "darwin-arm64", asset: "agent-browser-darwin-arm64", sha256: "da5a2b4ef7be8ba279b1258c542c33877f480b1951d0d94de607fc1528edd380", bytes: 12429360 },
+    { target: "darwin-arm64", asset: "agent-browser-darwin-arm64", sha256: "636fc9aa269e3819b539998aa5b87e1c3953556c19eeb9685053743283464faa", bytes: 15803424 },
   ],
   [
     "darwin-x64",
-    { target: "darwin-x64", asset: "agent-browser-darwin-x64", sha256: "f402c96350ffd2adc68d0e5e4d83aa49cf7735fef29882a8866be36cc2fc67e9", bytes: 13588296 },
+    { target: "darwin-x64", asset: "agent-browser-darwin-x64", sha256: "c080b1c2c4f03c2690778d72f30a0f8807cea1a5946b71e0ab6d71498f2d573e", bytes: 17433384 },
   ],
   [
     "linux-arm64",
-    { target: "linux-arm64", asset: "agent-browser-linux-arm64", sha256: "0315a8c4f7bf167cc5fd5eeaea79009b0e6b5d2ae8b3057bf6f96be978483426", bytes: 12507840 },
+    { target: "linux-arm64", asset: "agent-browser-linux-arm64", sha256: "54eedbcaedcbd8b49f840098ea85dda653af0a036e28609b526ece068de6c0ab", bytes: 15842192 },
   ],
   [
     "linux-musl-arm64",
-    { target: "linux-musl-arm64", asset: "agent-browser-linux-musl-arm64", sha256: "db67c0e84e0668c052c2cbdca325c57f896e309c3723755dcdd65b700f8a2b52", bytes: 12369352 },
+    { target: "linux-musl-arm64", asset: "agent-browser-linux-musl-arm64", sha256: "e63f7aa47bff381469e8c34c2f3c2fe317a607b1ce1a0a712a9896a8de07ac43", bytes: 15640568 },
   ],
   [
     "linux-musl-x64",
-    { target: "linux-musl-x64", asset: "agent-browser-linux-musl-x64", sha256: "5cff3bc7b2486867aba2901f92c9ce6029bd2a37951630d9feec1c5b3fee402e", bytes: 14092888 },
+    { target: "linux-musl-x64", asset: "agent-browser-linux-musl-x64", sha256: "6adeb7e2466f0d9ea4ef562222e221bfdd067f5545d7b052dc64fb13ba250f48", bytes: 18099904 },
   ],
   [
     "linux-x64",
-    { target: "linux-x64", asset: "agent-browser-linux-x64", sha256: "78e0c5a14a7fa1f3d1ae2acdbdcc94a047b435b998a8c505fcc49d7fa4935a49", bytes: 14253776 },
+    { target: "linux-x64", asset: "agent-browser-linux-x64", sha256: "d258593db4899577748a4b2a671a315f76f07a4553ba7fbbeaa95f0d16a4aaa8", bytes: 18302648 },
   ],
   [
     "win32-x64",
     {
-      // Upstream 0.37.0 still lacks vercel-labs/agent-browser#1781's Windows cold-start fix.
+      // Upstream 0.39.0 still lacks vercel-labs/agent-browser#1781's Windows cold-start fix.
       // Retain the native-verified revision until its replacement is tested.
       target: "win32-x64", version: "0.36.0-omb.1",
       asset: "agent-browser-win32-x64-0.36.0-omb.1.exe",

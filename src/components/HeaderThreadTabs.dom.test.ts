@@ -11,7 +11,7 @@ const store = vi.hoisted(() => ({ state: { bots: [] as unknown[], newChat: null 
 vi.mock("@/lib/use-feature", () => ({ useFeature: (name: string) => name === "threadTabs" && feature.on }));
 vi.mock("@/state/store-select", () => ({ useStoreDispatch: () => dispatch, useStoreSelector: (select: (state: unknown) => unknown) => select(store.state) }));
 
-import { HeaderThreadTabs } from "./HeaderThreadTabs";
+import { HeaderThreadTabs, useBotHasThreads, useThreadTabsShown } from "./HeaderThreadTabs";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -36,14 +36,30 @@ beforeEach(() => { feature.on = true; dispatch.mockClear(); });
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; });
 
 describe("thread tab strip", () => {
-  it("is not there while Thread tabs is off, or for a bot with one thread", () => {
+  it("is not there while Thread tabs is off, even for a bot with many threads", () => {
     feature.on = false;
     render(kiwi(FIVE, "launch"));
     expect(document.querySelector("[data-thread-tabs]")).toBeNull();
     act(() => root!.unmount());
-    feature.on = true;
     render(kiwi([task("main", "Only", 1)], "main"));
     expect(document.querySelector("[data-thread-tabs]")).toBeNull();
+  });
+
+  it("shows for a bot with one thread once Thread tabs is on: one tab with no close, and the + for a new one", () => {
+    render(kiwi([task("main", "Only", 1)], "main"));
+    expect(document.querySelector("[data-thread-tabs]")).not.toBeNull();
+    expect(tabs().map((element) => element.getAttribute("data-tab-id"))).toEqual(["main"]);
+    expect(tab("Only").getAttribute("aria-selected")).toBe("true");
+    expect(closeOf("Only")).toBeNull();
+    act(() => document.querySelector<HTMLButtonElement>("[data-thread-tabs-new]")!.click());
+    expect(sent()).toEqual([{ type: "newTask", botId: "kiwi" }]);
+  });
+
+  it("shows a brand-new bot's open thread as a tab before it has a thread row", () => {
+    render(kiwi([], "main"));
+    expect(tabs().map((element) => element.getAttribute("data-tab-id"))).toEqual(["main"]);
+    expect(tab("Untitled chat").getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector("[data-thread-tabs-new]")).not.toBeNull();
   });
 
   it("lists pinned threads first, then by recent use, with the open one selected", () => {
@@ -109,5 +125,28 @@ describe("thread tab strip", () => {
     act(() => { setValue.call(input, "Call with Dana"); input.dispatchEvent(new Event("input", { bubbles: true })); });
     act(() => { input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
     expect(sent()).toEqual([{ type: "renameTask", botId: "kiwi", threadId: "notes", title: "Call with Dana" }]);
+  });
+});
+
+describe("whether the header shows tabs, and Simple's pill switcher", () => {
+  const Probe = () => createElement("output", { "data-tabs": String(useThreadTabsShown()), "data-pill": String(useBotHasThreads("kiwi")) });
+  const render2 = (element: ReturnType<typeof createElement>) => {
+    root = createRoot(document.body.appendChild(document.createElement("div")));
+    act(() => root!.render(element));
+  };
+  const probe = (bot: Bot) => {
+    store.state = { bots: [bot], newChat: null };
+    render2(createElement(Probe));
+    const out = document.querySelector("output")!;
+    return { tabs: out.dataset.tabs, pill: out.dataset.pill };
+  };
+
+  it("shows tabs for one thread with Thread tabs on, and keeps the pill switcher for two threads or more either way", () => {
+    expect(probe(kiwi([task("main", "Only", 1)], "main"))).toEqual({ tabs: "true", pill: "false" });
+    act(() => root!.unmount());
+    feature.on = false;
+    expect(probe(kiwi([task("main", "Only", 1)], "main"))).toEqual({ tabs: "false", pill: "false" });
+    act(() => root!.unmount());
+    expect(probe(kiwi(FIVE, "launch"))).toEqual({ tabs: "false", pill: "true" });
   });
 });

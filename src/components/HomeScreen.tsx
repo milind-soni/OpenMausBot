@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { HomeView, HomeBridge } from "../../electron/home-window.mjs";
+import { cloudWorkText, useNow } from "@/lib/cloud-work";
 import { CloudSetupSteps } from "./CloudSetupSteps";
 
 const MACHINE: Record<string, LocaleKey> = {
@@ -25,6 +26,12 @@ export function homeDay(at: number, now = Date.now()): string {
 export function homeScreenText(view: HomeView | null, now = Date.now()): { title: string; body: string | null; reason: string | null; action: HomeAction | null; busy: boolean } {
   // A team's Cloud is named; My Cloud keeps its own words.
   const name = view?.name ?? null;
+  // An operation of the Admin's own has it down: what it is and when it is back, never "can't be reached"; nothing to press,
+  // the window opens it by itself.
+  if (view?.screen === "working") {
+    const work = cloudWorkText(view.operation, now, name);
+    return { title: work.title, body: [work.backup, work.when, t("cloudWork.reconnects")].filter(Boolean).join(" "), reason: work.bots, action: null, busy: true };
+  }
   const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
   if (view?.screen === "setup") return { title: named("homeScreen.setup", "homeScreen.setupNamed"), body: t(view.slow ? "cloudHome.slow" : "homeScreen.setupBody"), reason: null, action: null, busy: true };
   if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), action: "retry", busy: false,
@@ -93,7 +100,8 @@ export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: ()
     window.addEventListener("focus", again);
     return () => { alive = false; stop(); window.removeEventListener("online", again); window.removeEventListener("focus", again); };
   }, [bridge]);
-  const text = homeScreenText(view);
+  // The working screen's words follow the clock ("taking longer than usual" once its usual time passed).
+  const text = homeScreenText(view, useNow(view?.screen === "working"));
   const act = (action: () => Promise<unknown>) => { setFailed(false); void action().catch(() => setFailed(true)); };
   // Its checkout's page again when this app keeps it (the Cloud it is buying), else the Cloud page, where it can be paid.
   const reopen = window.ogb?.cloudAdd?.reopen;

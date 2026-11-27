@@ -32,6 +32,7 @@ import { delimiter, isAbsolute, join, resolve } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
+import { ANTIGRAVITY_CLI_TOOL_BUDGET } from "../tool-list-budget.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { BOX_SSH_CONNECTION } from "../bot-box/env.ts";
 import type { BoxRelay } from "../bot-box/relay.ts";
@@ -87,6 +88,7 @@ const REMOVED_ENVIRONMENT_KEYS = new Set([
   "AGY_ACP_DEFAULT_MODEL",
   "GEMINI_HOME",
   "AGY_ACP_FORCE_FILE_STORAGE",
+  "AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
   "ANTIGRAVITY_HARNESS_PATH",
   "BROWSER",
   "PYTHONUNBUFFERED",
@@ -297,11 +299,13 @@ export async function prepareAntigravityProfile(input: {
           // Updates come only through this app's updater; the release folder is read-only besides.
           AGY_CLI_DISABLE_AUTO_UPDATE: "1",
           // The CLI ignores AGY_ACP_FORCE_FILE_STORAGE and keeps one Google sign-in per computer in the OS keyring,
-          // whatever --gemini-dir says (1.5.14), unless it believes it runs over SSH: then each profile keeps its own in
-          // its file (1.5.15, signed in for real). So every account here has its own sign-in, the keychain and the CLI
-          // in a terminal are never touched, and a box without a keyring works the same. A fixed value, so no address
-          // of the host reaches the box.
+          // whatever --gemini-dir says. 1.5.14 and 1.5.15 keep each profile's in its file instead while they believe
+          // they run over SSH. 1.5.16 ignores SSH_CONNECTION and uses the keychain whenever it can open one, unless
+          // AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set (both measured on macOS). With both, every account here has its
+          // own sign-in, the keychain and the CLI in a terminal are never touched, and a box without a keyring works
+          // the same. SSH_CONNECTION is a fixed value, so no address of the host reaches the box.
           SSH_CONNECTION: ANTIGRAVITY_SSH_CONNECTION,
+          AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1",
         }
       : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath! }),
     BROWSER: browserCommand,
@@ -776,6 +780,20 @@ export function antigravitySessionSetup(
  * a `/word` anywhere in a prompt's first text block into that command. */
 export function antigravityTakesSystemPrompt(initialized: any): boolean {
   return initialized?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
+}
+
+/** The native CLI (1.5.16) advertises no MCP transport in `initialize`, yet connects to a session's `type: "http"` servers.
+ * It gives a session's MCP servers about 5 s to list their tools during session/new or session/resume ("Failed to preload
+ * the session's MCP servers: context deadline exceeded"), then prompts without the ones still starting, so a stdio proxy
+ * whose process starts slowly loses its tools; a URL answers in milliseconds. */
+export function antigravityCliTakesHttpMcp(initialized: unknown): boolean {
+  return (initialized as { agentInfo?: { name?: unknown } } | null | undefined)?.agentInfo?.name === "Antigravity ACP Server";
+}
+
+/** The native CLI shows the model every MCP tool of a session and, past one budget for all their definitions, leaves out
+ * the largest silently (google-antigravity/antigravity-cli#1530); agy_acp_server lists them lazily and has none. */
+export function antigravityCliToolBudget(initialized: unknown): number | undefined {
+  return antigravityCliTakesHttpMcp(initialized) ? ANTIGRAVITY_CLI_TOOL_BUDGET : undefined;
 }
 
 /** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath

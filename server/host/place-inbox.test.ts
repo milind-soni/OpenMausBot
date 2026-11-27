@@ -80,8 +80,19 @@ describe("finished work reaches the inbox once", () => {
     f.tick(1);
     f.inbox.route(summary, { summary: true });
     expect(infoRows(f).map((row) => row.text)).toEqual(["All three pages are live.", "Weekly report."]);
-    expect(f.inbox.count(OWNER)).toBe(2);
+    expect(f.inbox.count(OWNER), "finished work sits in Activity, which the inbox's number never counts").toBe(0);
     expect(f.sent).toEqual([]);
+  });
+
+  it("counts a failure, which is for the person, until it is read", () => {
+    const f = setup();
+    f.handed.set("eli-pricing", "mira");
+    f.inbox.route(failure("eli-pricing"));
+    const [row] = infoRows(f);
+    expect(row).toMatchObject({ tab: "info", unread: true });
+    expect(f.inbox.count(OWNER)).toBe(1);
+    expect(f.inbox.markRead(OWNER, row!.id)).toBe(true);
+    expect(f.inbox.count(OWNER)).toBe(0);
   });
 
   it("keeps one row per job: the next summary replaces the last one the person has not read", () => {
@@ -131,6 +142,8 @@ describe("finished work reaches the inbox once", () => {
     expect(row.kind).toBe("message");
     f.inbox.markRead(OWNER, row.id);
     expect(f.inbox.view(OWNER).rows[0]!.tab, "it still waits for a reply").toBe("info");
+    expect(f.inbox.markRead(OWNER, row.id, false)).toBe(true);
+    expect(f.inbox.view(OWNER).rows[0]!.unread, "made new again").toBe(true);
   });
 
   it("points a line at the message it came from, so a client can open the conversation there", () => {
@@ -360,7 +373,7 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.message("nobody", "eli-main", "hi").status).toBe(403);
   });
 
-  it("counts news until it is read, and a routine's report notifies only through the notification it came with", () => {
+  it("lists a routine's report unread in Activity without counting it, and it notifies only through the notification it came with", () => {
     const f = setup();
     const note: Notification = { kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Daily digest", body: "3 new leads" };
     expect(f.inbox.route(note, { routine: true })).toBe(note);
@@ -368,9 +381,9 @@ describe("the inbox of a place that is no team's", () => {
     const [row] = f.inbox.view(OWNER).rows;
     expect(row).toMatchObject({ kind: "result", text: "3 new leads", tab: "info", unread: true });
     expect(row!.replies).toBeUndefined();
-    expect(f.inbox.count(OWNER)).toBe(1);
+    expect(f.inbox.count(OWNER), "a report is finished work: Activity, never counted").toBe(0);
     expect(f.inbox.markRead(OWNER, row!.id)).toBe(true);
-    expect(f.inbox.count(OWNER)).toBe(0);
+    expect(f.inbox.view(OWNER).rows[0]!.unread).toBe(false);
     expect(f.inbox.markDone(OWNER, row!.id)).toBe("done");
     expect(f.inbox.view(OWNER).rows[0]!.tab).toBe("done");
   });
@@ -394,6 +407,8 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.markRead(OWNER, "card-q")).toBe(true);
     expect(f.inbox.view(OWNER).rows[0]!.unread).toBe(false);
     expect(f.inbox.count(OWNER)).toBe(1);
+    expect(f.inbox.markRead(OWNER, "card-q", false)).toBe(true);
+    expect(f.inbox.view(OWNER).rows[0]!.unread, "an ask made new again").toBe(true);
     expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
     expect(f.inbox.markRead(OWNER, "not-a-line")).toBe(false);
     expect(f.inbox.markDone(OWNER, "not-a-line")).toBe("unknown");
