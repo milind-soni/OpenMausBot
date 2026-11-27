@@ -1117,9 +1117,9 @@ export class RoutineManager {
           this.runChecks(checked.id, checkHold(this.runs, checked.id, now, run.id), run.id).catch((error) => console.error(`routines: the checks of ${checked.id} failed`, error));
           continue;
         }
-        const sameRoutineWorking = (triggerSource === "schedule" || run.sameConversation) && this.runs.some(other =>
-          other.id !== run.id && other.routineId === run.routineId && ["running", "waiting"].includes(other.status));
-        const held = sameRoutineWorking || this.runs.some((other) => other.routineId === run.routineId && this.slowStops.holds(other.threadId));
+        const held = (triggerSource === "schedule" || run.sameConversation) && this.runs.some(other =>
+          other.id !== run.id && other.routineId === run.routineId && (["running", "waiting"].includes(other.status) || this.options.turnLive?.(other) === true)) ||
+          this.runs.some((other) => other.routineId === run.routineId && this.slowStops.holds(other.threadId));
         const state = held ? "busy" : this.targetState(run);
         if (state === "busy") {
           if (run.deferredAt == null) {

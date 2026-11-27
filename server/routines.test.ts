@@ -172,6 +172,25 @@ describe("bounded scheduled overlap and run health", () => {
     expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(0);
   });
 
+  it("holds the next scheduled occurrence while a finished run's thread works a follow-up", async () => {
+    const h = harness(start);
+    const live = new Set<string>();
+    h.options.turnLive = (run) => live.has(run.threadId ?? "");
+    h.manager.create(input());
+    h.setNow(start + 5 * 60_000); await h.manager.tick();
+    finish(h, "thread-1", true);
+    expect(h.manager.listRuns()[0].status).toBe("completed");
+    // The person's follow-up keeps the finished run's conversation busy.
+    live.add("thread-1");
+    h.setNow(start + 10 * 60_000); await h.manager.tick();
+    h.setNow(start + 15 * 60_000); await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(realRuns(h.manager.listRuns()).map(run => run.status).sort()).toEqual(["completed", "queued"]);
+    live.delete("thread-1");
+    await h.manager.tick();
+    expect(h.started.map(turn => turn.threadId)).toEqual(["thread-1", "thread-2"]);
+  });
+
   it("does not let queue mode accumulate work when the bot is busy before its first run", async () => {
     const h = harness(start); h.setBot("busy");
     const routine = h.manager.create({ ...input(), overlap: "queue" });
