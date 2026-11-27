@@ -67,6 +67,7 @@ const {
   saveFile,
   saveImage,
   saveImageUpload,
+  saveNamedAttachment,
   validateAttachmentUploadId,
 } = await import("./attachments.ts");
 
@@ -492,6 +493,16 @@ describe("readAttachment name lock", () => {
     expect(readAttachment("no-extension")).toBeNull();
     expect(readAttachment("uuid.jpeg")).toBeNull(); // saved as .jpg
     expect(readAttachment("note.wav")).toBeNull(); // only .mp3 audio is written
+  });
+});
+
+describe("saveNamedAttachment", () => {
+  it("refuses a name that is not a bare filename, so a synced attachment cannot land outside the folder", async () => {
+    const chunks = (async function* () {
+      yield Buffer.from("x");
+    })();
+
+    await expect(saveNamedAttachment("../escape.png", chunks)).rejects.toThrow(/filename/);
   });
 });
 
