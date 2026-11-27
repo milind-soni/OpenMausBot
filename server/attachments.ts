@@ -226,9 +226,11 @@ export function deleteAttachment(path: string): void {
   deleteAttachments([path]);
 }
 
-/** deleteAttachment for many files at once. An upload still on disk keeps its box copies; one gone loses them. */
+/** deleteAttachment for many files at once. An upload still on disk keeps its box copies; one gone loses them. A path
+ * outside the attachments folder is not ours to remove, so it is left alone before anything is unlinked. */
 export function deleteAttachments(paths: readonly string[]): void {
-  const gone = paths.filter((path) => unlinkAttachment(path) && resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)).map((path) => basename(path));
+  const ours = paths.filter((path) => resolve(dirname(path)) === resolve(ATTACHMENTS_DIR));
+  const gone = ours.filter((path) => unlinkAttachment(path)).map((path) => basename(path));
   dropBoxUploadCopies(gone);
   dropKeptOriginals(gone);
 }

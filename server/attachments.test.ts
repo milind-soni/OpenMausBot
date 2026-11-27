@@ -57,6 +57,7 @@ const {
   offerAttachmentClear,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
+  deleteAttachments,
   extensionForFileMime,
   extensionForMime,
   parseAudioRange,
@@ -352,6 +353,17 @@ describe("aggregate attachment storage", () => {
     })(), "retry.txt", "text/plain", { uploadId: UPLOAD_A, expectedBytes: 3 });
     expect(saved.path.endsWith(`${UPLOAD_A}.txt`)).toBe(true);
     expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("leaves a path outside the attachments folder alone", () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
+    const outside = join(DATA_ROOT, "notes.txt");
+    writeFileSync(outside, "keep me");
+
+    deleteAttachments([outside, `${ATTACHMENTS_DIR}/../notes.txt`]);
+
+    expect(existsSync(outside)).toBe(true);
+    expect(readFileSync(outside, "utf8")).toBe("keep me");
   });
 
   it("frees quota after deleteAttachment, without a rescan, for a file the cache already knows about", () => {
