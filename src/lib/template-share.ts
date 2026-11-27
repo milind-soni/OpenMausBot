@@ -28,7 +28,9 @@ export interface ImportedTemplate {
 
 const post = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) });
 
-export const exportDepartment = (department: string) => api<TemplateCard>("/api/share/export", post({ department }));
+/** What a template is made of: one bot, or every bot in a department. */
+export type TemplateTarget = { botId: string } | { department: string };
+export const exportTemplate = (target: TemplateTarget) => api<TemplateCard>("/api/share/export", post(target));
 export const templateDetails = (id: string) => api<{ card: TemplateCard; details: TemplateDetails }>(`/api/share/${encodeURIComponent(id)}`);
 /** `author` is "Published by": "" publishes it as the community's. */
 export const publishTemplate = (id: string, author?: string) =>
@@ -108,6 +110,12 @@ export async function saveTemplateFolder(card: Pick<TemplateCard, "id" | "name">
     if (!chosen) return null;
     return (await api<{ path: string }>(`/api/share/${encodeURIComponent(card.id)}/save`, post({ path: chosen }))).path;
   }
+  await downloadTemplate(card);
+  return null;
+}
+
+/** Downloads the template's folder as a .zip; the file's name. */
+export async function downloadTemplate(card: Pick<TemplateCard, "id" | "name">): Promise<string> {
   const response = await serverFetch(`/api/share/${encodeURIComponent(card.id)}/download`);
   if (!response.ok) throw new Error(t("template.failed"));
   const url = URL.createObjectURL(new Blob([await response.blob()], { type: "application/zip" }));
@@ -121,7 +129,7 @@ export async function saveTemplateFolder(card: Pick<TemplateCard, "id" | "name">
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  return null;
+  return link.download;
 }
 
 const readText = (file: File) => file.text();

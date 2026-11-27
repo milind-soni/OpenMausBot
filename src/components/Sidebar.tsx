@@ -28,7 +28,7 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
-import { ImportDialog, ShareDepartmentDialog, TeamDialog, TeamLibraryPanel, TeamSettingsDialog } from "./lazy-screens";
+import { ImportDialog, ShareTemplateDialog, TeamDialog, TeamLibraryPanel, TeamSettingsDialog } from "./lazy-screens";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
 import { openCommandPalette } from "./CommandPalette";
 import { RenameTitle } from "./RenameTitle";
@@ -1542,7 +1542,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
-      {shareTeam !== null && <ShareDepartmentDialog department={shareTeam} onClose={() => setShareTeam(null)} />}
+      {shareTeam !== null && <ShareTemplateDialog target={{ department: shareTeam }} onClose={() => setShareTeam(null)} />}
       {teamSettings !== null && <TeamSettingsDialog team={teamSettings} onClose={() => setTeamSettings(null)} />}
       <SectionPicker
           current={sectionPicker ? state.bots.find((b) => b.id === sectionPicker.botId)?.section : undefined}
