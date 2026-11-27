@@ -18,9 +18,9 @@ export interface UpdateCheckRouteDeps {
 }
 
 /** SECURITY: a person's admin session, never loopback: on a server, loopback is a bot's shell or a process beside it. This
- * guards the button only. The request file it leaves is in a folder of the server's user, so until the bots' sandbox is
- * on for self-hosted servers anything running as that user, a bot included, can leave it too; what that can cause is
- * only the standard update (server/server-update.ts). */
+ * guards the button only. The request file it leaves is in a folder of the server's user (under /run, which a bot's box
+ * does not have); where the bots' sandbox is off (--no-sandbox, or an install from before it) anything running as that
+ * user, a bot included, can leave it too; what that can cause is only the standard update (server/server-update.ts). */
 export function mayUpdateServer(auth: RequestAuth): boolean {
   return auth.kind === "session" && auth.scopes.includes("admin");
 }

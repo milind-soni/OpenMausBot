@@ -50,11 +50,37 @@ connects to a path inside the box.
 
 ## When it is on
 
-`server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), off everywhere else
-unless `OMB_BOT_BOX=1`; `OMB_BOT_BOX=0` turns it off. It is never on without a working unprivileged bubblewrap: if the
-kernel refuses user namespaces or the image has no `bwrap`, the box reports `off` with the reason, and the Admin shows
-it. The cloud-home image installs `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge does
-the same).
+`server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), tried by default in the
+self-hosted server image (`OMB_SERVER_IMAGE=1`, set by the Dockerfile's `server` target; not `OMB_IMAGE`, which an
+install's `.env` uses for the image's name; builds from before the rename said `OMB_IMAGE=server`, which still counts),
+off everywhere else (the desktop
+app, a server run from source) unless `OMB_BOT_BOX=1`; `OMB_BOT_BOX=0` turns it off. It is never on without a working
+unprivileged bubblewrap: if the kernel refuses user namespaces or the image has no `bwrap`, the box reports `off` with
+the reason, and the Admin shows it. Both images install `bubblewrap` and `socat` (the in-box bridges; without socat a
+bundled Node bridge does the same).
+
+`OMB_BOT_BOX=required` is on with no way down: when the box cannot start, every spawn it would have wrapped is refused
+(`BoxRequiredError`, `EBOXREQUIRED`) instead of running unboxed, `/api/health/engines` counts no engine (so an update
+that leads there is rolled back by `deploy/update.sh`), and the log says so at every start. The installer
+(`deploy/install.sh`) sets it through `deploy/box/compose.box.yaml`, beside the four `security_opt` lines a stock Docker
+host needs, after preparing the host with `deploy/box/prepare-host.sh`. A self-hosted server's admin sees the state in
+Settings, under Updates (`botSandbox` in `/api/config`, sent only by the server image or with `required`).
+
+With `required`, three more things refuse every spawn rather than let it run in a box that may not hold, each with its
+reason in the log and in Settings, until the server starts again without it:
+
+- the box was found but could not open its gates (`start-failed`): the server keeps serving instead of crash-looping;
+- the self-check the server runs a few seconds after start fails a check that must pass, or gives no answer
+  (`self-check-failed`). The checks that only warn (`BOX_WARN_ONLY_CHECKS` in `shared/bot-sandbox.ts`, the same list as
+  the installer's `SANDBOX_WARN_ONLY`) never refuse. Turns in the seconds before the check has run are not held back;
+- the installer's own run of the self-check fails: it stops the server it just started.
+
+`deploy/update.sh` never moves an install whose `COMPOSE_FILE` includes `compose.box.yaml` to an image without the
+marker, `--allow-older` included: under the host's sandbox profiles such an image would run every bot unconfined.
+`OMB_BOX_SELF_CHECK_MUTATE` (CI only) weakens the boot self-check's own fixture boxes, so the image's smoke can show a
+required box refusing turns.
+`node dist-server/bot-box/box-check.js --exec -- CMD` runs one command in a box planned as a bot's turn is, in the
+server's own layout.
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 
@@ -179,6 +205,23 @@ mutation (`--mutate=bind-data,share-pid,share-net,env-all,tmp-shared`) removes o
 checks it guards.
 
 ## What it does not do yet
+
+**Limits, as a self-hosted server's customer reads them.** The box keeps bots away from the server's settings, keys
+and database and from other bots' work folders. It does not separate bots from each other inside the server's HOME:
+off a Team Cloud HOME is bound read-write into every box (`plan.ts`), and every engine keeps its conversation history
+and settings there, so a bot can read other bots' engine transcripts and plant settings, hooks or dotfiles that other
+bots' engines then load (inside their own boxes). A Team Cloud gives each audience an engine home of its own
+(`server/engine-homes/`), and even there the engines' shared sign-in files, which include configuration (Codex's
+`config.toml`, Gemini's and Factory's `settings.json`), are bound read-write into every box. The bots' web browser runs
+outside the box off a Team Cloud. Bots can make user namespaces of their own inside the box (bubblewrap runs without
+`--disable-userns`, and the host's seccomp profile allows `clone`, `unshare` and `mount`), which reaches more of the
+kernel than a stock Docker container does; the self-check reports it as `nested-userns-blocked`, a check that only warns.
+
+The server's own reads of the engines run outside any box with the server's HOME, so they must never load what a bot
+planted there: Codex's account and catalog reads name OpenAI's provider (a planted provider's `auth.command` ran in
+`codex app-server`'s model list), and a background Claude call is isolated wherever the box is on or required, whatever
+`OMB_CLAUDE_INHERIT_USER_CONFIG` says (a call that loads the person's settings runs their `apiKeyHelper` and hooks).
+`server/drivers/planted-home-config.test.ts`, with `OMB_REAL_ENGINE_CHECKS=1`, runs the real CLIs against a planted HOME.
 
 - **Local VM (Docker) computer use.** The computer MCP talks to the Local VM over the host's Docker socket. The box does not expose that socket (mounting it would be root-equivalent on the host), so with the bot box on a Local VM turn fails early with a clear message instead of "MCP server exited". Use this computer, a Cloud computer, or turn the box off for Local VM work.
 

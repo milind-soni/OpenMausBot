@@ -41,6 +41,8 @@ export interface ProbeSpec {
   isolatedNet: boolean;
   /** The host has a CPU list (`/sys/devices/system/cpu/possible`), so the box must have it too (plan.ts CPU_LIST_FILES). */
   cpuList?: boolean;
+  /** Report whether a boxed process can make a user namespace (nested-userns-blocked): a self-hosted server's box only. */
+  nestedUserns?: boolean;
   /** T0c: the seccomp filter is on, so a kernel-keyring call must fail with EPERM (an unprivileged process may make it otherwise). */
   seccomp?: boolean;
   /** T0b: a model call through the broker, and the real key's value that must be nowhere in the box. */
@@ -48,6 +50,29 @@ export interface ProbeSpec {
 }
 
 export interface ProbeResult { id: string; ok: boolean; detail: string }
+
+/** add_key(2) (x86-64 number 248, the only architecture the box's filter covers) into the process keyring, which any user
+ * may, printing `ok` or the errno it got. python3 is in the Cloud's image; perl-base is an essential package of Debian, so
+ * the self-hosted server's image, which has no python3, has it. Perl refuses a string literal as a syscall argument, so
+ * its three strings are variables. */
+export const KEYRING_PROBES: ReadonlyArray<{ command: string; args: string[] }> = [
+  { command: "python3", args: ["-c", "import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(248,b'user',b'omb-box-probe',b'v',1,-2);print('ok' if r>=0 else 'errno %d' % ctypes.get_errno())"] },
+  { command: "perl", args: ["-e", 'my ($type, $name, $value) = ("user", "omb-box-probe", "v"); my $r = syscall(248, $type, $name, $value, 1, -2); print $r >= 0 ? "ok" : "errno " . ($! + 0);'] },
+];
+
+/** Whether the box's filter refuses a kernel-keyring call (EPERM), and what made the call. Security: with neither
+ * interpreter here the check fails rather than passes, since nothing else can tell this filter from none. */
+export function keyringDenied(
+  run: (command: string, args: string[]) => { error?: Error; stdout?: string; stderr?: string; status: number | null } = (command, args) => spawnSync(command, args, { encoding: "utf8", timeout: 10_000, windowsHide: true }),
+): [ok: boolean, detail: string] {
+  for (const probe of KEYRING_PROBES) {
+    const result = run(probe.command, probe.args);
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") continue;
+    const text = (result.stdout || result.stderr || "").trim();
+    return [text === "errno 1", `${probe.command}: ${text.slice(0, 60) || `exit ${result.status}`}`];
+  }
+  return [false, "could not be checked: neither python3 nor perl is here"];
+}
 
 /** A process's start, in clock ticks since boot: field 22 of /proc/<pid>/stat, counted after the command's last ")". */
 export function processStart(pid: number | "self", read: (path: string) => string = (path) => readFileSync(path, "utf8")): string | null {
@@ -152,6 +177,12 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("engine-read-only", existsSync(join(spec.engine.bin, spec.engine.name)) && tamper.failed, tamper.code);
   add("tmp-private", !existsSync(spec.hostTmpFile), existsSync(spec.hostTmpFile) ? "host /tmp visible" : "private");
   add("hostname-private", hostname() === "omb-box", hostname() === "omb-box" ? "omb-box" : "host name visible");
+  // Warn-only (shared/bot-sandbox.ts): a bot that can make a user namespace of its own reaches more of the kernel than a
+  // stock Docker container does. The box does not stop it yet (docs/bot-box.md, Limits); this says where it stands.
+  if (spec.nestedUserns) {
+    const nested = spawnSync("unshare", ["--user", "true"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
+    add("nested-userns-blocked", nested.status !== 0, nested.error ? `unshare: ${(nested.error as NodeJS.ErrnoException).code ?? "error"}` : nested.status === 0 ? "a bot can make user namespaces" : "refused");
+  }
   if (spec.cpuList) {
     // TCMalloc runtimes (Google's Antigravity) stop at start without it: exit 134.
     const cpus = fails(() => { if (!/^\d/.test(readFileSync("/sys/devices/system/cpu/possible", "utf8"))) throw new Error("empty"); });
@@ -170,13 +201,7 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("egress-metadata-refused", (await connectThroughGate(spec.egressPort, "169.254.169.254:80")) === "403", "CONNECT metadata");
   add("egress-private-refused", (await connectThroughGate(spec.egressPort, "10.0.0.1:443")) === "403", "CONNECT private");
   if (spec.publicTarget) add("egress-public-allowed", (await connectThroughGate(spec.egressPort, spec.publicTarget)) === "200", `CONNECT ${spec.publicTarget}`);
-  if (spec.seccomp) {
-    // add_key(2) into the process keyring: fine for any user, EPERM under the box's filter. python3 is in the image.
-    const probe = "import ctypes,os;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(248,b'user',b'omb-box-probe',b'v',1,-2);print('ok' if r>=0 else os.strerror(ctypes.get_errno()))";
-    const result = spawnSync("python3", ["-c", probe], { encoding: "utf8", timeout: 10_000 });
-    const text = (result.stdout || result.stderr || "").trim();
-    add("keyring-denied", /Operation not permitted/.test(text), text.slice(0, 60) || `exit ${result.status}`);
-  }
+  if (spec.seccomp) add("keyring-denied", ...keyringDenied());
   if (spec.broker) {
     const { port, token, provider, path, keyNames, marker: key } = spec.broker;
     const keys = keyNames.filter((name) => !env[name] || !env[name]!.startsWith("omb_t0_"));

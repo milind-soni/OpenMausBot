@@ -116,6 +116,20 @@ inspect() { docker inspect -f "$1" "$2" 2>/dev/null; }
 image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null; }
 published_ref() { docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$1" 2>/dev/null | grep "^$REPO@" | head -n 1; }
 # The released version an image is labelled with; nothing for a build of main, whose label is the branch.
+# The bots' sandbox (deploy/install.sh): an image that has it says OMB_SERVER_IMAGE=1 (OMB_IMAGE=server in builds from
+# before the rename), as the installer's image_has_sandbox reads it; scripts/server-installer.test.ts holds them equal.
+image_has_sandbox() {
+  case "$(docker image inspect -f '{{json .Config.Env}}' "$1" 2>/dev/null || true)" in
+    *'"OMB_SERVER_IMAGE=1"'* | *'"OMB_IMAGE=server"'*) return 0 ;;
+  esac
+  return 1
+}
+# An install the installer set up with the sandbox: its Compose files include compose.box.yaml, which runs the server
+# under the host's sandbox profiles and requires the sandbox.
+install_has_sandbox() {
+  case ":${COMPOSE_FILE:-$(sed -n 's/^COMPOSE_FILE=//p' .env 2>/dev/null | tail -n 1)}:" in *:compose.box.yaml:*) return 0 ;; esac
+  return 1
+}
 image_version() { docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null | sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p'; }
 if [ -n "$UNIT" ]; then
   # The unit's name is its container's: openmausbot.container runs openmausbot.service, container openmausbot.
@@ -937,6 +951,12 @@ if [ "$J_target_id" = "$J_previous_id" ]; then
   abandon
   say "This server already runs $(new_name). Nothing to do."
   exit 0
+fi
+# SECURITY: an image without the sandbox ignores OMB_BOT_BOX=required, and under compose.box.yaml's profiles (made for the
+# sandbox, so looser than Docker's own) it would run every bot unconfined. --allow-older does not lift this.
+if install_has_sandbox && ! image_has_sandbox "$J_target_id"; then
+  abandon
+  refuse "This install runs its bots in the sandbox, and $(new_name) has none, so it would run them without it. Nothing was changed. To move to it anyway, first take the sandbox away: run the install command again with --no-sandbox (only on a server you alone sign in to), then run this again."
 fi
 if [ "$ALLOW_OLDER" != yes ] && [ -n "$(older_reason)" ]; then
   abandon

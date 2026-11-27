@@ -200,6 +200,11 @@ describe("whether the server can start a bot", () => {
     const none = await serve({ describeInstances: async () => [{ instanceId: "codex", snapshot: { state: "unavailable" } }] });
     expect(await none.call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 0 });
   });
+
+  it("counts none while the bots' sandbox is required and not running, so an update that leads there is rolled back", async () => {
+    const refusing = await serve({ describeInstances: async () => [{ instanceId: "claude", snapshot: { state: "available" } }], boxRefusing: () => true });
+    expect(await refusing.call("GET", "/api/health/engines")).toEqual({ app: "openmausbot", engines: 0, sandbox: "refusing" });
+  });
 });
 
 describe("an engine's check", () => {

@@ -2,8 +2,10 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
+// Security: with OMB_BOT_BOX=required a box that could not start refuses each spawn it would have wrapped (wrap throws
+// BoxRequiredError), so a bot never runs unconfined on a server that asked for the box.
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
@@ -13,7 +15,8 @@ import { bridgedCommand, type BridgeTools } from "./bridge.ts";
 import { GITHUB_GRANT, boxGithubGit } from "../github/git-access.ts";
 import { brokerRewrite } from "./broker-env.ts";
 import { openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
-import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
+import { boxWanted, detectBox, serverImage, type BoxDetection, type BoxKind } from "./detect.ts";
+import { BOX_WARN_ONLY_CHECKS, mustPassFailures, type BotSandboxReason, type BotSandboxStatus } from "../../shared/bot-sandbox.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
@@ -211,7 +214,31 @@ export class BoxRunner {
   }
 }
 
-export interface BoxChecks { passed: number; total: number; failed: string[]; at: number }
+export interface BoxChecks { passed: number; total: number; failed: string[]; at: number; /** The self-check gave no answer (it could not run, or its probe did not reply). */ error?: string }
+
+const REFUSAL_WHY: Record<BotSandboxReason, string> = {
+  "switched-off": "it is switched off",
+  "start-failed": "it could not open its gates when the server started (the server's log says why)",
+  "self-check-failed": "its self-check failed a check that must pass, so bots may not be separated from the server",
+  "not-linux": "this server is not running on Linux",
+  "no-bwrap": "bubblewrap is not installed in this server's image",
+  "userns-refused": "this host does not let the server's container make the sandbox's namespaces (prepare it by running the install command again)",
+  "not-cloud": "it is not on here",
+};
+
+/** A bot spawn refused because the box is required (OMB_BOT_BOX=required) and could not start. `code` lets callers tell
+ * it from a failed spawn. */
+export class BoxRequiredError extends Error {
+  override name = "BoxRequiredError";
+  readonly code = "EBOXREQUIRED";
+  readonly reason: BotSandboxReason | null;
+  constructor(reason: BotSandboxReason | null) {
+    super(reason === "self-check-failed"
+      ? `This server requires the bots' sandbox, and ${REFUSAL_WHY[reason]}. The bot's command was not run. An admin sees which check in Settings, under Updates.`
+      : `This server requires the bots' sandbox, and it could not start: ${REFUSAL_WHY[reason ?? "not-cloud"]}. The bot's command was not run. An admin sees why in Settings, under Updates.`);
+    this.reason = reason;
+  }
+}
 
 export interface BoxReport {
   box: BoxKind;
@@ -262,6 +289,34 @@ export function defaultCodeRoots(): string[] {
   return roots;
 }
 
+/** The boxes this server started that still run: its own child processes that are bubblewrap, read from `procRoot`. Each
+ * leads its own process group (procs.ts spawns detached), so stopping the group stops what runs in the box. */
+export function runningBoxes(parentPid: number, procRoot = "/proc"): number[] {
+  const found: number[] = [];
+  let names: string[];
+  try { names = readdirSync(procRoot); } catch { return found; }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      // "pid (comm) state ppid ...": the command name may hold spaces and parentheses, so read after its last ")".
+      const stat = readFileSync(`${procRoot}/${name}/stat`, "utf8");
+      const comm = stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")"));
+      const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+      if (comm === "bwrap" && ppid === parentPid) found.push(Number(name));
+    } catch {}
+  }
+  return found;
+}
+
+function stopRunningBoxes(log: (line: string) => void): void {
+  if (process.platform !== "linux") return;
+  const boxes = runningBoxes(process.pid);
+  for (const pid of boxes) {
+    try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch {} }
+  }
+  if (boxes.length) log(`bot box: stopped ${boxes.length} bot process${boxes.length === 1 ? "" : "es"} already running in the sandbox`);
+}
+
 export class BotBox {
   private detection: BoxDetection = { box: "off", reason: "not-cloud", tools: null };
   private runner: BoxRunner | null = null;
@@ -274,17 +329,48 @@ export class BotBox {
   private unbrokered = new Set<string>();
   private started: StartOptions | null = null;
   private audiences: BoxAudienceScope | null = null;
+  /** OMB_BOT_BOX=required, and the server image (OMB_SERVER_IMAGE=1): what start() was told. */
+  private required = false;
+  private shown = false;
+  /** With `required`: the self-check failed these must-pass checks (or gave no answer), so every spawn is refused until
+   * the server starts again and its self-check passes. */
+  private checkRefusal: string[] | null = null;
 
   /** Detects, and when the box is on opens the gates. Safe to call once; returns what it decided. */
   async start(options: StartOptions): Promise<BoxDetection> {
     this.started = options;
+    this.checkRefusal = null;
     const env = options.env ?? process.env;
+    this.required = boxWanted(env) === "required";
+    this.shown = this.required || serverImage(env);
     this.detection = (options.detect ?? ((e) => detectBox({ env: e })))(env);
     const log = options.log ?? ((line: string) => console.log(line));
     if (this.detection.box !== "bwrap" || !this.detection.tools) {
-      log(`bot box: off (${this.detection.reason})`);
+      this.logOff(log);
       return this.detection;
     }
+    try {
+      await this.open(options, env, log);
+    } catch (error) {
+      // Security: a box that was found but could not open its gates never leaves the server half-boxed. Off by default;
+      // with `required` every spawn is refused, and the server keeps serving either way rather than crash-looping.
+      await this.stop();
+      log(`bot box: could not start: ${error instanceof Error ? error.message : String(error)}`);
+      this.detection = { box: "off", reason: "start-failed", tools: null };
+      this.logOff(log);
+    }
+    return this.detection;
+  }
+
+  private logOff(log: (line: string) => void): void {
+    const reason = this.detection.reason;
+    if (this.required) log(`bot box: REQUIRED but it could not start (${reason}): every bot's command is refused until it can, because ${REFUSAL_WHY[reason ?? "not-cloud"]}.`);
+    else if (this.shown && reason !== "switched-off") log(`bot box: off (${reason}): bots run beside the server, able to read its settings and keys. On a server installed with deploy/install.sh, run the install command again to turn the sandbox on.`);
+    else log(`bot box: off (${reason})`);
+  }
+
+  private async open(options: StartOptions, env: Record<string, string | undefined>, log: (line: string) => void): Promise<void> {
+    const tools = this.detection.tools!;
     const dir = join(options.dataDir, "box");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const egressSocket = join(dir, "egress.sock"), harnessSocket = join(dir, "harness.sock"), brokerSocket = join(dir, "broker.sock");
@@ -299,8 +385,8 @@ export class BotBox {
       { name: "broker", port: BOX_BROKER_PORT, socket: brokerSocket },
     ];
     this.runner = new BoxRunner({
-      bwrap: this.detection.tools.bwrap,
-      bridge: { socat: this.detection.tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
+      bwrap: tools.bwrap,
+      bridge: { socat: tools.socat, bridgeScript: BOX_BRIDGE_SCRIPT, node: process.execPath },
       setup: { dataDir: options.dataDir, home: options.home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: options.engineRoots ?? engineInstallRoots(options.dataDir), bridges },
       denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
@@ -309,9 +395,8 @@ export class BotBox {
     this.runner.scopeAudiences(this.audiences);
     distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes", "team-files"].map((name) => join(options.dataDir, name)));
     resetPathCache();
-    log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
+    log(`bot box: on (bubblewrap, ${tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
     if (toolCachesOn(env)) log(`bot box: tool caches go to the cache folder in each box's HOME (${CACHE_ROOT_SWITCH})`);
-    return this.detection;
   }
 
   /** The broker for callers that mint conversation-bound grants, or null when the box (and so the broker) is off. */
@@ -326,9 +411,14 @@ export class BotBox {
   /** The filter file each box gets, for a self-check. */
   seccomp(): string | null { return this.seccompFile; }
 
-  /** The box for one spawn, or null when turns are not boxed here. */
+  /** The box for one spawn, or null when turns are not boxed here. Throws BoxRequiredError where the box is required
+   * and did not start: the spawn must not run at all. */
   wrap(request: BoxRequest): WrappedSpawn | null {
-    if (!this.runner) return null;
+    if (this.checkRefusal) throw new BoxRequiredError("self-check-failed");
+    if (!this.runner) {
+      if (this.refusing()) throw new BoxRequiredError(this.detection.reason);
+      return null;
+    }
     const wrapped = this.runner.wrap(request);
     this.boxed += 1;
     for (const name of wrapped.unbrokered) this.unbrokered.add(name);
@@ -336,6 +426,21 @@ export class BotBox {
   }
 
   enabled(): boolean { return this.runner !== null; }
+
+  /** The box is required (OMB_BOT_BOX=required) and not running, or its self-check failed a must-pass check: every spawn
+   * it would wrap is refused. */
+  refusing(): boolean { return this.required && this.started !== null && (this.runner === null || this.checkRefusal !== null); }
+
+  /** What a self-hosted server's admin sees in Settings; null where nobody asked for the box this way (the desktop app,
+   * a Cloud, a server run from source), so those show nothing new. */
+  sandboxStatus(): BotSandboxStatus | null {
+    if (!this.started || !this.shown) return null;
+    const checks = this.runner && this.checks
+      ? { passed: this.checks.passed, total: this.checks.total, failed: [...this.checks.failed], warned: this.checks.failed.filter((id) => BOX_WARN_ONLY_CHECKS.includes(id)) }
+      : null;
+    if (this.checkRefusal) return { state: "refusing", reason: "self-check-failed", required: true, checks };
+    return { state: this.runner ? "on" : this.required ? "refusing" : "off", reason: this.runner ? null : this.detection.reason, required: this.required, checks };
+  }
 
   /** A relay for one boxed spawn (BoxRequest.relay), or null when bot spawns are not boxed here. */
   async openRelay(): Promise<BoxRelay | null> {
@@ -377,7 +482,19 @@ export class BotBox {
 
   tools(): { bwrap: string; socat: string | null } | null { return this.detection.tools; }
 
-  noteChecks(checks: BoxChecks): void { this.checks = checks; }
+  /** The self-check's result. With `required`, a failed must-pass check, or a self-check that gave no answer, refuses
+   * every spawn from now on (BoxRequiredError "self-check-failed"); a check that only warns never does. */
+  noteChecks(checks: BoxChecks, log: (line: string) => void = (line) => console.log(line)): void {
+    this.checks = checks;
+    if (!this.required || !this.runner) return;
+    const failing = checks.error ? ["no-answer"] : mustPassFailures(checks.failed);
+    if (!failing.length) return;
+    this.checkRefusal = failing;
+    log(`bot box: REQUIRED and its self-check failed (${failing.join(", ")}): every bot's command is refused until the server starts again with a self-check that passes.`);
+    // What started before the check answered (an engine kept warm, a shared app-server) stops too, so no later turn
+    // reaches a box that may not hold through a process that is already running.
+    stopRunningBoxes(log);
+  }
 
   report(): BoxReport {
     return {

@@ -29,6 +29,16 @@ export function backgroundCallArgs(input: {
   return args;
 }
 
+/**
+ * Whether a background call leaves the person's own Claude setup out. Security: the call runs outside the bot box with
+ * the server's HOME, where a boxed bot can write ~/.claude/settings.json, and a call that loads it runs its apiKeyHelper
+ * and hooks (seen with Claude Code 2.1.321; server/drivers/planted-home-config.test.ts). So where the box is on, or
+ * required, it is always isolated, whatever OMB_CLAUDE_INHERIT_USER_CONFIG says.
+ */
+export function backgroundIsolated(inheritsUserConfig: boolean, boxOn: boolean): boolean {
+  return !inheritsUserConfig || boxOn;
+}
+
 /** Runs in an empty temp folder so no project settings or files leak in; the caller removes it once settled. */
 export function spawnBackgroundCall(cli: string, args: string[], env: NodeJS.ProcessEnv) {
   const cwd = mkdtempSync(join(tmpdir(), "omb-claude-background-"));

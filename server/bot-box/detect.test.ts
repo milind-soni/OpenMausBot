@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { boxWanted, cloudRole, detectBox } from "./detect.ts";
+import { boxWanted, cloudRole, detectBox, serverImage } from "./detect.ts";
 
 const tools = (found: Record<string, string>) => (name: string) => found[name] ?? null;
 
@@ -19,6 +19,28 @@ describe("deciding whether turns are boxed", () => {
     expect(detectBox({ env: { OMB_CLOUD_ROLE: "home" }, ...working })).toEqual({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: "/usr/bin/socat" } });
     expect(detectBox({ env: { OMB_CLOUD_ROLE: "home", OMB_BOT_BOX: "0" }, ...working })).toEqual({ box: "off", reason: "switched-off", tools: null });
     expect(detectBox({ env: { OMB_BOT_BOX: "1" }, ...working }).box).toBe("bwrap");
+  });
+
+  it("tries the box by default in the server image (OMB_SERVER_IMAGE=1), takes `required` as on, and leaves every other place alone", () => {
+    const working = { platform: "linux" as const, probe: () => true, which: tools({ bwrap: "/usr/bin/bwrap", socat: "/usr/bin/socat" }) };
+    const refusing = { platform: "linux" as const, probe: () => false, which: tools({ bwrap: "/usr/bin/bwrap" }) };
+    expect(serverImage({ OMB_SERVER_IMAGE: "1" })).toBe(true);
+    expect(serverImage({ OMB_IMAGE: "server" })).toBe(true);
+    // An install's .env names the image in OMB_IMAGE; loaded into the container, it never hides the image's own marker.
+    expect(serverImage({ OMB_SERVER_IMAGE: "1", OMB_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.186" })).toBe(true);
+    expect(serverImage({ OMB_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.186" })).toBe(false);
+    expect(serverImage({ OMB_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.182" })).toBe(false);
+    expect(boxWanted({ OMB_BOT_BOX: "required" })).toBe("required");
+    expect(boxWanted({ OMB_BOT_BOX: " Required " })).toBe("required");
+    expect(detectBox({ env: { OMB_IMAGE: "server" }, ...working }).box).toBe("bwrap");
+    expect(detectBox({ env: { OMB_IMAGE: "server" }, ...refusing })).toEqual({ box: "off", reason: "userns-refused", tools: null });
+    expect(detectBox({ env: { OMB_IMAGE: "server", OMB_BOT_BOX: "0" }, ...working })).toEqual({ box: "off", reason: "switched-off", tools: null });
+    expect(detectBox({ env: { OMB_BOT_BOX: "required" }, ...working }).box).toBe("bwrap");
+    expect(detectBox({ env: { OMB_BOT_BOX: "required" }, ...refusing }).reason).toBe("userns-refused");
+    // The desktop app and a server run from source: no bwrap is even looked for.
+    let looked = false;
+    expect(detectBox({ env: {}, platform: "linux", probe: () => true, which: () => { looked = true; return "/usr/bin/bwrap"; } })).toEqual({ box: "off", reason: "not-cloud", tools: null });
+    expect(looked).toBe(false);
   });
 
   it("never runs unboxed turns by surprise: no bwrap, a refusing kernel or another platform report off with the reason", () => {

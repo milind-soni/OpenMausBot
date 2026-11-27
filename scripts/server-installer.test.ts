@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { BOX_WARN_ONLY_CHECKS } from "../shared/bot-sandbox.ts";
+
 const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "deploy", "install.sh");
 const script = readFileSync(SCRIPT, "utf8");
@@ -26,7 +28,7 @@ const HEALTHY = {
   FAKE_UID: "0", FAKE_ARCH: "x86_64", FAKE_CPUS: "4", FAKE_FREE_GB: "80", FAKE_DOCKER: "27.3.1", FAKE_SECURITY: '["name=apparmor","name=seccomp,profile=builtin"]',
   FAKE_COMPOSE: "0", FAKE_PUBLIC_IP: "203.0.113.7", FAKE_LOCAL_IP: "10.0.0.5", FAKE_DNS: "203.0.113.7", FAKE_NOW: "1794268800", FAKE_THEIRS: "1794268790",
   FAKE_STABLE: "404", FAKE_RELEASE: "v0.1.151", FAKE_RELEASE_STATUS: "200", FAKE_HEALTH: "healthy", FAKE_HTTPS: "openmausbot",
-  FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data","OMB_IMAGE=server"]', FAKE_BOX_CHECK: BOX_PASSED, FAKE_SOURCE: "published",
+  FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data","OMB_SERVER_IMAGE=1"]', FAKE_BOX_CHECK: BOX_PASSED, FAKE_SOURCE: "published",
 };
 
 interface Server {
@@ -40,6 +42,8 @@ interface Server {
   without?: string[];
   /** The umask the installer is started with, as a root shell may have it. */
   umask?: string;
+  /** More files on the made-up server, by their path under its root (etc/mausbot/...). */
+  files?: Record<string, string>;
 }
 
 /** Stand-ins for every tool install.sh asks about the machine, written once: what each answers comes from the run's FAKE_ settings. */
@@ -84,7 +88,7 @@ case "$*" in
     esac
     for last; do :; done
     case "$*" in
-      *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
+      *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host\${1:+ $1} profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
       *deploy/update-runner.sh*) printf '#!/bin/sh\\necho "update-runner $*" >> "$FAKE_LOG"\\nexit "\${FAKE_RUNNER:-0}"\\n' > "$last" ;;
       *) printf 'the repository file\\n' > "$last" ;;
     esac ;;
@@ -104,10 +108,12 @@ case "$*" in
   "run --rm --network none --entrypoint id "*" -u") /usr/bin/id -u ;;
   "run --rm --network none --entrypoint id "*" -g") /usr/bin/id -g ;;
   compose*" ps -q omb") echo c1 ;;
+  compose*" ps -a -q omb") printf '%s' "\${FAKE_CONTAINER-c1}" ;;
   "image inspect -f {{json .Config.Env}} "*) echo "$FAKE_IMAGE_ENV" ;;
   "image inspect -f {{index .Config.Labels "*) echo "\${FAKE_IMAGE_VERSION-v0.1.151}" ;;
   "compose exec -T omb node dist-server/bot-box/box-check.js --public=none") echo "$FAKE_BOX_CHECK"; case "$FAKE_BOX_CHECK" in *'"failed":[]'*) ;; *) exit 1 ;; esac ;;
   "inspect --format {{.State.Health.Status}} c1") echo "$FAKE_HEALTH" ;;
+  "inspect -f {{.Config.Image}} c1") printf '%s' "\${FAKE_RUNNING_IMAGE:-}" ;;
   "compose exec -T omb curl -sf http://127.0.0.1:8799/api/edition") printf '%s' "\${FAKE_EDITION:-}" ;;
 esac`,
 };
@@ -147,6 +153,10 @@ function run(args: string[], server: Server = {}, kept?: { dir: string }) {
   if (server.apparmor !== null) writeFileSync(join(sysroot, "sys", "module", "apparmor", "parameters", "enabled"), `${server.apparmor ?? "Y"}\n`);
   if (server.osRelease !== null) {
     writeFileSync(join(sysroot, "etc", "os-release"), server.osRelease ?? 'PRETTY_NAME="Ubuntu 24.04.1 LTS"\nNAME="Ubuntu"\nVERSION_ID="24.04"\nID=ubuntu\nID_LIKE=debian\n');
+  }
+  for (const [path, text] of Object.entries(server.files ?? {})) {
+    mkdirSync(join(sysroot, path, ".."), { recursive: true });
+    writeFileSync(join(sysroot, path), text);
   }
   writeFileSync(join(sysroot, "proc", "meminfo"), `MemTotal:       ${server.memoryKb ?? 8_100_000} kB\nMemFree:         1000000 kB\n`);
   writeFileSync(join(sysroot, "proc", "sys", "user", "max_user_namespaces"), `${server.userns?.max ?? "63000"}\n`);
@@ -352,10 +362,15 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
       `https://ghcr.io/v2/milind-soni/openmausbot/manifests/${digest("b")}`,
       `https://ghcr.io/v2/milind-soni/openmausbot/blobs/${digest("d")}`,
     ]);
-    expect(run(["--check", "--domain", "maus.example.com"], registry("OMB_IMAGE=server")).stdout).not.toContain("no bots' sandbox");
+    expect(run(["--check", "--domain", "maus.example.com"], registry("OMB_SERVER_IMAGE=1")).stdout).not.toContain("no bots' sandbox");
     // Asked for no sandbox, or a registry that does not say: nothing to add.
     expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
     expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
+    // An install whose bots run in the sandbox is never moved to a version without it.
+    const boxed = run(["--domain", "maus.example.com"]);
+    const downgrade = run(["--check", "--domain", "maus.example.com"], registry(""), { dir: boxed.dir });
+    expect(downgrade.status).toBe(1);
+    expect(downgrade.fixes).toEqual(["This install runs its bots in the sandbox, and the version chosen (v0.1.151) has none, so it would run them without it. Name a version that has it with OMB_INSTALL_IMAGE, or add --no-sandbox to install without the sandbox, on a server you alone sign in to."]);
   });
 
   it("reads the newest release without a token, and sends one only when a test run's OMB_INSTALL_GITHUB_TOKEN gives it, never on a command line", () => {
@@ -564,18 +579,24 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(readFileSync(join(result.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
     expect(readFileSync(join(result.install, "compose.box.yaml"), "utf8")).toBe("the repository file\n");
     expect(result.calls.indexOf(`prepare-host profiles=${result.install}/box/profiles`)).toBeLessThan(result.calls.indexOf("docker compose up -d --remove-orphans"));
-    expect(result.stdout).toContain("The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files.");
+    expect(result.stdout).toContain("The bots' sandbox is on: a bot cannot read the server's settings, keys or database, or other bots' work folders.");
+    // What it does not separate is said as plainly (docs/bot-box.md, Limits).
+    expect(result.stdout).toContain("note  Bots on this server share one home folder for their AI engines, so a bot can read what other bots' engines keep there (their conversation history and settings), and the bots' web browser runs outside the sandbox.");
+    expect(result.calls).not.toContain("docker compose stop omb");
     for (const word of ["security_opt", "seccomp=", "apparmor="]) expect(script, word).not.toContain(word);
   });
 
-  it("says so, and does not finish, when the sandbox does not hold or the server cannot be prepared", () => {
+  it("says so, stops the server it started, and does not finish, when the sandbox does not hold or the server cannot be prepared", () => {
     const failed = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: BOX_FAILED } });
     expect(failed.status).toBe(1);
-    expect(failed.stderr).toContain("MausBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden)");
+    expect(failed.stderr).toContain("MausBot's sandbox self-check did not show that a bot cannot read the server's settings (config-hidden)");
+    expect(failed.stderr).toContain("MausBot was stopped, so no bot runs until this is fixed. To see why: cd ");
+    expect(failed.calls.indexOf("docker compose stop omb")).toBeGreaterThan(failed.calls.indexOf("docker compose up -d --remove-orphans"));
     expect(failed.all).not.toContain("MausBot is running at");
     const silent = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"bwrap","failed":[],"results":[]}' } });
     expect(silent.status).toBe(1);
-    expect(silent.stderr).toContain("MausBot is running, but its bots' sandbox gave no answer to its self-check");
+    expect(silent.stderr).toContain("MausBot's bots' sandbox gave no answer to its self-check");
+    expect(silent.calls).toContain("docker compose stop omb");
     const off = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"off","reason":"userns-refused"}' } });
     expect(off.stderr).toContain("gave no answer to its self-check");
     const refused = run(["--domain", "maus.example.com"], { env: { FAKE_PREPARE: "1" } });
@@ -594,10 +615,15 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
   const hidden = { id: "config-hidden", ok: true, detail: "ENOENT" };
 
-  it.each(["keyring-denied", "hostname-private", "cpu-list-readable", "fly-api-hidden", "egress-public-allowed"])("goes on with a warning when only %s fails, showing what the check said", (id) => {
+  it("warns on the same checks as the server, which never refuses bots over them (shared/bot-sandbox.ts)", () => {
+    const listed = /SANDBOX_WARN_ONLY="([^"]*)"/.exec(script)?.[1]?.split(" ") ?? [];
+    expect(listed).toEqual([...BOX_WARN_ONLY_CHECKS]);
+  });
+
+  it.each(["keyring-denied", "hostname-private", "cpu-list-readable", "fly-api-hidden", "egress-public-allowed", "nested-userns-blocked"])("goes on with a warning when only %s fails, showing what the check said", (id) => {
     const result = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id, ok: false, detail: "exit null" }]) } });
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain(`  note  The sandbox's self-check did not pass ${id} (exit null).`);
+    expect(result.stdout).toContain(`  note  The sandbox's self-check did not pass ${id} (exit null), a check that only warns: bots are still kept from the server's settings and keys.`);
     expect(result.stdout).toContain("The bots' sandbox is on:");
     expect(result.all).toContain("MausBot is running at https://maus.example.com");
   });
@@ -611,8 +637,9 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   ])("stops when %s fails", (id) => {
     const result = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([{ id, ok: false, detail: "sees 4 entries" }, hidden, { id: "keyring-denied", ok: false, detail: "exit null" }]) } });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`MausBot is running, but its bots' sandbox failed its self-check: ${id} (sees 4 entries). Bots are not safely separated from the server.`);
-    expect(result.stdout).toContain("  note  The sandbox's self-check did not pass keyring-denied (exit null).");
+    expect(result.stderr).toContain(`MausBot's bots' sandbox failed its self-check: ${id} (sees 4 entries). Bots are not safely separated from the server. MausBot was stopped`);
+    expect(result.calls).toContain("docker compose stop omb");
+    expect(result.stdout).toContain("  note  The sandbox's self-check did not pass keyring-denied (exit null), a check that only warns");
     expect(result.all).not.toContain("MausBot is running at");
   });
 
@@ -623,7 +650,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const marked = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id: "keyring-denied", ok: false, detail: "EACCES", severity: "must" }, { id: "new-soft-check", ok: false, detail: "slow", severity: "warn" }]) } });
     expect(marked.status).toBe(1);
     expect(marked.stderr).toContain("failed its self-check: keyring-denied (EACCES). Bots are not safely separated");
-    expect(marked.stdout).toContain("  note  The sandbox's self-check did not pass new-soft-check (slow).");
+    expect(marked.stdout).toContain("  note  The sandbox's self-check did not pass new-soft-check (slow), a check that only warns");
     expect(script.match(/keyring-denied/g)).toHaveLength(1);
   });
 
@@ -649,20 +676,89 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(copy.calls.some((call) => call.includes(FILES) && call.includes(" -o "))).toBe(false);
   });
 
-  it("leaves the sandbox out for a version that has none and when asked, and takes its settings back out", () => {
+  it("leaves the sandbox out for a version that has none, and when asked records that it was, so the app says so", () => {
     const first = run(["--domain", "maus.example.com"]);
-    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=");
-    const asked = run(["--no-sandbox"], { apparmor: null }, { dir: first.dir });
+    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+    // A host with no AppArmor and no user namespaces: --no-sandbox is the one way on, and it is not blocked by either check.
+    const asked = run(["--no-sandbox"], { apparmor: null, userns: { max: "0" } }, { dir: first.dir });
     expect(asked.status).toBe(0);
+    expect(asked.fixes).toEqual([]);
     expect(asked.stdout).toContain("note  This server will not be prepared for the bots' sandbox, as asked.");
-    expect(readFileSync(join(first.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
+    expect(asked.stdout).toContain("note  Bots will run without the sandbox, as asked; Settings shows it as switched off.");
+    expect(asked.stdout).not.toContain("user namespaces");
+    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.nobox.yaml\n");
+    expect(readFileSync(join(first.install, "compose.nobox.yaml"), "utf8")).toMatch(/services:\n {2}omb:\n {4}environment:\n {6}OMB_BOT_BOX: "0"\n$/);
+    expect(statSync(join(first.install, "compose.nobox.yaml")).mode & 0o777).toBe(0o644);
     expect(asked.calls.some((call) => call.startsWith("prepare-host"))).toBe(false);
     expect(asked.docker.some((call) => call.includes("box-check"))).toBe(false);
+    // Run again without the flag: the sandbox is back on, and the record of the opt-out is gone.
+    // A run without the flag that fails before the sandbox's settings are in place keeps the opt-out's file, which .env
+    // still names: every later `docker compose` and update.sh go on working.
+    for (const failing of [{ FAKE_PREPARE: "1" }, { FAKE_SOURCE: "missing" }]) {
+      const broken = run([], { env: failing }, { dir: first.dir });
+      expect(broken.status).toBe(1);
+      expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.nobox.yaml\n");
+      expect(existsSync(join(first.install, "compose.nobox.yaml"))).toBe(true);
+    }
+    const again = run([], {}, { dir: first.dir });
+    expect(again.status).toBe(0);
+    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+    expect(existsSync(join(first.install, "compose.nobox.yaml"))).toBe(false);
     const old = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } });
     expect(old.status).toBe(0);
     expect(old.stdout).toContain("note  This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it.");
     expect(readFileSync(join(old.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
     expect(old.calls.some((call) => call.includes("deploy/box/"))).toBe(false);
+  });
+
+  it("never moves an install whose bots run in the sandbox to a version without it, and never restarts it to do so", () => {
+    const boxed = run(["--domain", "maus.example.com"]);
+    const older = run([], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]', OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.150", FAKE_RUNNING_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.151" } }, { dir: boxed.dir });
+    expect(older.status).toBe(1);
+    // .env names the image that runs, not the one without the sandbox.
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("OMB_IMAGE=ghcr.io/milind-soni/openmausbot:v0.1.151\n");
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).not.toContain("v0.1.150");
+    expect(older.stderr).toContain("This install runs its bots in the sandbox, and ghcr.io/milind-soni/openmausbot:v0.1.150 has none, so it would run them without it. The server was not restarted.");
+    expect(older.docker).not.toContain("docker compose up -d --remove-orphans");
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+    // A stopped server's container still names its image (compose ps -a); with no container at all, .env goes back to
+    // what it named before this run.
+    const stopped = run([], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]', OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.150", FAKE_RUNNING_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.152" } }, { dir: boxed.dir });
+    expect(stopped.status).toBe(1);
+    expect(stopped.docker).toContain("docker compose ps -a -q omb");
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("OMB_IMAGE=ghcr.io/milind-soni/openmausbot:v0.1.152\n");
+    const gone = run([], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]', OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.150", FAKE_CONTAINER: "" } }, { dir: boxed.dir });
+    expect(gone.status).toBe(1);
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("OMB_IMAGE=ghcr.io/milind-soni/openmausbot:v0.1.152\n");
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).not.toContain("v0.1.150");
+  });
+
+  it("reads the image's sandbox marker as update.sh does, and still takes the old one", () => {
+    const marker = (text: string) => /image_has_sandbox\(\) \{\n(?:.*\n){2}/.exec(text)?.[0];
+    expect(marker(script)).toContain(`*'"OMB_SERVER_IMAGE=1"'* | *'"OMB_IMAGE=server"'*) return 0 ;;`);
+    expect(marker(readFileSync(join(ROOT, "deploy", "update.sh"), "utf8"))).toBe(marker(script));
+    const legacy = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","OMB_IMAGE=server"]' } });
+    expect(legacy.status).toBe(0);
+    expect(readFileSync(join(legacy.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+  });
+
+  it("refuses to prepare the sandbox under a Docker that applies neither AppArmor nor seccomp, and names --no-sandbox", () => {
+    const bare = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_SECURITY: '["name=cgroupns"]' } });
+    expect(bare.status).toBe(1);
+    expect(bare.fixes).toEqual(['Docker on this server does not confine containers with AppArmor and seccomp (["name=cgroupns"]), which the bots\' sandbox needs. Install the current Docker with: curl -fsSL https://get.docker.com | sudo sh  and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to.']);
+    expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], { env: { FAKE_SECURITY: '["name=cgroupns"]' } }).fixes).toEqual([]);
+  });
+
+  it("--uninstall takes the host's preparation back with the installed prepare-host.sh", () => {
+    const installed = run(["--domain", "maus.example.com"]);
+    const prepared = run(["--uninstall"], { files: { "etc/mausbot/seccomp-omb-home.json": "{}" } }, { dir: installed.dir });
+    expect(prepared.status).toBe(0);
+    expect(prepared.calls).toContain(`prepare-host --remove profiles=`);
+    expect(prepared.calls.indexOf("docker compose down --remove-orphans")).toBeLessThan(prepared.calls.indexOf("prepare-host --remove profiles="));
+    // A host the installer never prepared: nothing to take back.
+    const never = run(["--uninstall"], {}, { dir: installed.dir });
+    expect(never.status).toBe(0);
+    expect(never.calls.some((call) => call.startsWith("prepare-host"))).toBe(false);
   });
 
   it("places update.sh as the repository has it, names it as the way to update, and keeps the version it pinned", () => {

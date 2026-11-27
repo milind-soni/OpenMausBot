@@ -141,6 +141,8 @@ function imageInspect(format, ref) {
   if (format.includes(".RepoDigests")) return found.refs.filter((name) => name.includes("@sha256:")).forEach((name) => out(name));
   // `label`: what the image says it is, when that is not its version (a build of main says the branch).
   if (format.includes("image.version")) return out(found.label ?? (found.version ? `v${found.version}` : ""));
+  // `env`: the image's own settings; one with the bots' sandbox says OMB_SERVER_IMAGE=1.
+  if (format === "{{json .Config.Env}}") return out(JSON.stringify(found.env ?? ["PATH=/usr/bin"]));
   fail(`fake docker: unknown image format: ${format}`, 64);
 }
 
