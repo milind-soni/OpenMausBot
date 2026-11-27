@@ -1,4 +1,4 @@
-import { AppWindow, FolderOpen, FolderTree, Globe, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
+import { AppWindow, FolderOpen, FolderTree, Globe, ListTodo, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -183,6 +183,16 @@ export function SidebarFooterNav({
         icon={(active) => <Rocket size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "showPublishedApps" })}
       />
+      {state.config?.botTasks?.enabled && (
+        <NavRow
+          id="bot-tasks"
+          label={t("sidebar.nav.botTasks")}
+          iconsOnly={iconsOnly || toolbar}
+          active={state.activeView === "bot-tasks"}
+          icon={(active) => <ListTodo size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showBotTasks" })}
+        />
+      )}
       {state.config?.team && (
         <NavRow
           id="team-files"

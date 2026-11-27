@@ -977,8 +977,8 @@ export type ServerFrame =
   | { kind: "app-trigger.deleted"; triggerId: string }
   | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
-  /** An MCP server was added, changed or removed: a list of them is stale. `cli-login`: a terminal sign-in waits or was answered (admins only). */
-  | { kind: "mcp.changed" } | { kind: "cli-login" }
+  /** An MCP server was added, changed or removed: a list of them is stale. `cli-login`: a terminal sign-in waits or was answered (admins only). `bot-task`: that task changed; an open task list or that task reloads (admins only). */
+  | { kind: "mcp.changed" } | { kind: "cli-login" } | { kind: "bot-task"; taskId: string }
   /** `surface` names what the frame shows: the bot's desktop (`computer`) or its built-in browser. */
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string; surface?: "browser" | "computer" }
   /** A bot's computer is being set up or woken for a turn; the chat shows

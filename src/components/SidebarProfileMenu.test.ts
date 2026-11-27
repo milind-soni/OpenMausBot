@@ -449,6 +449,16 @@ describe("Simple mode's account menu", () => {
     expect(openApps).toHaveBeenCalledOnce();
   });
 
+  it("has Bot tasks among Simple's tools only while the feature is on, lit while its page is open", () => {
+    const openTasks = vi.fn();
+    const items = toolMenuItems({ activeView: "bot-tasks", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop, onPublishedApps: noop, onBotTasks: openTasks });
+    expect(items.map((item) => [item.key, item.active])).toEqual([["automations", false], ["team-map", false], ["published-apps", false], ["bot-tasks", true]]);
+    expect(items[3]!.label).toBe("Bot tasks");
+    items[3]!.onSelect();
+    expect(openTasks).toHaveBeenCalledOnce();
+    expect(toolMenuItems({ activeView: "chat", automationsNeedYou: false, onAutomations: noop, onTeamMap: noop, onPublishedApps: noop }).map((item) => item.key)).not.toContain("bot-tasks");
+  });
+
   it("names the account button after the person and whatever its dot is raised for", () => {
     expect(accountLabel("You", { automationsNeedYou: false, update: null })).toBe("You");
     expect(accountLabel("Ada", { automationsNeedYou: true, update: "Update failed. Try again." })).toBe("Ada · Automations need you · Update failed. Try again.");

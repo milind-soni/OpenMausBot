@@ -31,7 +31,7 @@ import { anySidePanel, botPanelFloats, panelsMovingSidebar, sidebarFoldsForPanel
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
   ActivityPanel, AnnouncementsPage, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InboxPanel, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
-  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, SkillBurgersPage, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
+  BotTasksPage, PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, SkillBurgersPage, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { closeRoomPanel, useRoomPanelShown } from "@/lib/room-panel";
@@ -447,6 +447,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <SkillBurgersPage />
       ) : state.activeView === "published-apps" ? (
         <PublishedAppsPage />
+      ) : state.activeView === "bot-tasks" && state.config?.botTasks?.enabled ? (
+        <BotTasksPage />
       ) : state.activeView === "announcements" ? (
         <AnnouncementsPage />
       ) : state.activeView === "team-files" && state.config?.team ? (

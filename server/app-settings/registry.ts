@@ -18,6 +18,7 @@ import type { BotRecord, Store } from "../store.ts";
 import type { SettingsPlaceId } from "../../shared/settings-places.ts";
 import { placePath } from "./places.ts";
 import { botEntries } from "./registry-bots.ts";
+import { botTasksSettings } from "../bot-tasks/settings.ts";
 import { configEntries } from "./registry-config.ts";
 import { pictureEntries } from "./registry-pictures.ts";
 import { windowEntries } from "./registry-window.ts";
@@ -321,6 +322,11 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
 
   const ownerOnly = (id: string, label: string, help: string, where: Where, synonyms: string[], read: () => string): SettingEntry => ({ id, label, help, where, synonyms, tier: "owner-only", read });
   const owner: SettingEntry[] = [
+    ownerOnly("botTasks.githubAccess", "Bot tasks and GitHub", "Which GitHub credential bot tasks use (the gh CLI or a token sealed in the vault), the repository allowlist, the evidence rules, and whether the person may post or merge from the task list.", "page:bot-tasks",
+      ["github token", "github credential", "comment on github", "merge", "outbound", "post to github", "repositories", "allowlist", "evidence"], () => {
+        const tasks = botTasksSettings(deps.cfg());
+        return `credential ${tasks.credential}, comments on GitHub ${tasks.allowOutboundComments ? "allowed" : "off"}, merging ${tasks.allowMerge ? "allowed" : "off"}, allowed repositories ${tasks.repos.join(", ") || "none"}, evidence for done ${tasks.requireEvidenceForDone ? "required" : "optional"}, evidence for review ${tasks.requireEvidenceForReview ? "required" : "optional"}`;
+      }),
     ownerOnly("cloud.account", "MausBot Cloud account", "The account this app is signed in with, and its plan.", "account", ["account", "sign in", "sign out", "plan", "billing", "subscription"], () => "managed in Settings"),
     ownerOnly("vault.logins", "Vault and logins", "Saved website logins and secrets bots may use.", "vault", ["vault", "password", "passwords", "login", "logins", "1password"], () => "managed in Settings"),
     ownerOnly("data.backups", "Backups", "Making a backup (it takes a password), restoring or deleting one, and the daily company backup (it takes a typed confirmation).", "backup-export",

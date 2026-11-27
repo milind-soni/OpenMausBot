@@ -29,6 +29,7 @@ export const SETTINGS_PLACES = [
   {"id":"page:people","path":"Settings → People","words":["people","members","invite","roles","bot access","sharing","team"],"only":"a team's or a self-hosted server's Settings, for admins"},
   {"id":"page:installations","path":"Settings → Installations","words":["installations","fleet","clients","tenants"],"only":"a server that manages installations"},
   {"id":"page:features","path":"Settings → Features","words":["features","turn off","turn on","hide","skill burger","skill burgers","tabs","thread tabs"]},
+  {"id":"page:bot-tasks","path":"Settings → Bot tasks","words":["bot tasks","tasks","task list","ledger","github","pull requests","issues","evidence","sync"]},
   {"id":"page:account","path":"Settings → Your account","words":["account","sign in","log in","log out","sign out","email","organization","mausbot cloud"]},
   {"id":"page:plan","path":"Settings → Plan & billing","words":["plan","billing","subscription","invoice","receipt","payment","card","upgrade","trial","cancel","refund","usage & billing","mausbot cloud","weekly","limits"]},
   {"id":"page:app","path":"Settings → This app","words":["this app","updates","update","version","help","about","servers","your computers","environments","diagnostics","logs","tour"]},

@@ -33,6 +33,7 @@ const answers: Record<string, unknown> = {
 
 const { StoreProvider, useStore } = await import("./store");
 const { listenLiveFrames } = await import("@/lib/live-events");
+const { onBotTaskChanged } = await import("@/lib/bot-task-events");
 
 let renders = 0;
 let seen!: AppState;
@@ -107,6 +108,18 @@ describe("live frames the store does not keep", () => {
     expect(seen.computerStarts.bot).toEqual({ state: "provisioning", place: "cloud" });
     await send({ kind: "bot", bot: { ...bot, busy: false } } as ServerFrame);
     expect(seen.computerStarts.bot).toBeUndefined();
+  });
+
+  it("pass a changed bot task on to the open task screens, and shrug off a frame it does not know", async () => {
+    const heard: string[] = [];
+    const stop = onBotTaskChanged((taskId) => heard.push(taskId));
+    const before = seen;
+    await send({ kind: "bot-task", taskId: "t1" });
+    await send({ kind: "something-newer", taskId: "t2" } as unknown as ServerFrame);
+    stop();
+    await send({ kind: "bot-task", taskId: "t3" });
+    expect(heard).toEqual(["t1"]);
+    expect(seen).toBe(before);
   });
 
   it("hand runtime events to listeners as they arrive", async () => {

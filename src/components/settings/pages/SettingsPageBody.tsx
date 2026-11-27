@@ -1,5 +1,6 @@
 import type { SettingsPageId } from "../settings-index";
 import { AccountPage, PlanPage } from "./AccountPages";
+import { BotTasksSettingsPage } from "./BotTasksSettingsPage";
 import { AppPage, AppearancePage, GeneralPage } from "./AppPages";
 import { DataPage, ImportExportPage, InstallationsPage, PeoplePage, SpendingPage, VaultPage } from "./DataPages";
 import { DevicesPage } from "./DevicesPage";
@@ -26,6 +27,7 @@ const PAGES: Record<SettingsPageId, () => React.ReactNode> = {
   general: GeneralPage,
   appearance: AppearancePage,
   features: FeaturesPage,
+  "bot-tasks": BotTasksSettingsPage,
 };
 
 export function SettingsPageBody({ page }: { page: SettingsPageId }) {

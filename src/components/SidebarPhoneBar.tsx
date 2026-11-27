@@ -1,4 +1,4 @@
-import { FolderOpen, Hamburger, LayoutGrid, Puzzle, Rocket, Search, UsersRound, X, Zap } from "lucide-react";
+import { FolderOpen, Hamburger, LayoutGrid, ListTodo, Puzzle, Rocket, Search, UsersRound, X, Zap } from "lucide-react";
 
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
@@ -47,6 +47,13 @@ export function SidebarPhoneBar({ query, onQuery }: { query: string; onQuery: (q
       active: state.activeView === "published-apps",
       onSelect: () => dispatch({ type: "showPublishedApps" }),
     },
+    ...(state.config?.botTasks?.enabled ? [{
+      key: "bot-tasks",
+      label: t("sidebar.nav.botTasks"),
+      icon: <ListTodo size={18} />,
+      active: state.activeView === "bot-tasks",
+      onSelect: () => dispatch({ type: "showBotTasks" }),
+    }] : []),
     {
       key: "apps",
       label: t("sidebar.nav.apps"),

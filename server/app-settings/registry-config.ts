@@ -9,6 +9,8 @@ import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { DEFAULT_WINDOW_MINUTES } from "../cache-keepwarm.ts";
 import { botsTowardLimit } from "../../shared/bot-limit.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
+import { BOT_TASKS_POLL_MINUTES } from "../../shared/bot-tasks.ts";
+import { botTasksSettings } from "../bot-tasks/settings.ts";
 import { CONFIG_PATCH_FIELDS as F, MAX_THREAD_EVENT_LOG_BYTES, MIN_THREAD_EVENT_LOG_BYTES } from "../config.ts";
 import { display, withoutKeys, type RegistryDeps, type SettingEntry, type Where, type WritableSpec } from "./registry.ts";
 
@@ -99,6 +101,16 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       synonyms: ["keep warm", "cache", "prompt cache"], value: F.cacheKeepWarm.unwrap(), allowed: '{"enabled":true|false,"windowMinutes"?:15-1440}',
       current: () => cfg().cacheKeepWarm ?? { enabled: false }, patch: (cacheKeepWarm) => ({ cacheKeepWarm }),
       says: ({ enabled, windowMinutes }) => (enabled ? `Keep prompt caches warm for ${windowMinutes ?? DEFAULT_WINDOW_MINUTES} minutes after each turn (spends tokens)` : "Stop keeping prompt caches warm"),
+    }),
+    section({
+      id: "botTasks.tasks", label: "Bot tasks", help: "The shared task list bots keep: whether it is on and when to poll GitHub.", where: "page:bot-tasks",
+      synonyms: ["tasks", "task list", "bot tasks", "github sync", "poll"],
+      value: nonEmpty(z.object({
+        enabled: z.boolean().optional(), githubSync: z.boolean().optional(), pollMinutes: z.number().int().min(BOT_TASKS_POLL_MINUTES.min).max(BOT_TASKS_POLL_MINUTES.max).optional(),
+      }).strict()),
+      allowed: `{"enabled"?,"githubSync"?,"pollMinutes"?:${BOT_TASKS_POLL_MINUTES.min}-${BOT_TASKS_POLL_MINUTES.max}}`,
+      current: () => { const { enabled, githubSync, pollMinutes } = botTasksSettings(cfg()); return { enabled, githubSync, pollMinutes }; }, patch: (botTasks) => ({ botTasks }),
+      says: (botTasks) => `Bot tasks: ${fields(botTasks)}`,
     }),
     feature("bots.skillAuthoring", "Bots write their own skills", "Bots may draft skills for your review.", "early", ["skills", "write skills", "early", "experimental"], "skillAuthoring", true,
       "Let bots draft skills for your review", "Stop bots drafting skills"),

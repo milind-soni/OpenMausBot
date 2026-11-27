@@ -32,6 +32,20 @@ const previousRelease = z.object({
 });
 
 describe("the saved logins store", () => {
+  it("seals the bot tasks token separately from bot-usable and sign-in secrets and redacts it", () => {
+    const token = "fixture-bot-task-token";
+    const store = new VaultStore({ dataDir: dir });
+    store.setBotTasksGithubToken(token);
+    expect(readFileSync(join(dir, LOGINS_FILE), "utf8")).not.toContain(token);
+    const reopened = new VaultStore({ dataDir: dir });
+    const scrubber = new HeldSecrets(reopened);
+    expect(reopened.botTasksGithubToken()).toBe(token);
+    expect(reopened.githubToken("owner")).toBeNull();
+    expect(reopened.listSecrets(TEAM_READER)).toEqual([]);
+    expect(scrubber.scrub(`sensitive ${token}`)).not.toContain(token);
+    reopened.setBotTasksGithubToken(null);
+    expect(new VaultStore({ dataDir: dir }).botTasksGithubToken()).toBeNull();
+  });
   it("round-trips a login and keeps nothing readable on disk", () => {
     const store = new VaultStore({ dataDir: dir, now: () => 1_000 });
     const saved = store.create({ ...at("accounts.example.com"), username: "alice@example.com", password: PASSWORD, totp: TOTP, source: "settings", bots: "all" });

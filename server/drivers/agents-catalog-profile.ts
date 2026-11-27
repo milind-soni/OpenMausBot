@@ -26,6 +26,8 @@ export interface CatalogProfile {
   team?: boolean;
   /** A Team Cloud with its board on: board_add, board_list and board_update are mounted. Absent means off. */
   board?: boolean;
+  /** Bot tasks are on in Settings: the task_* tools are mounted. Absent means off. */
+  botTasks?: boolean;
   /** The person's MausBot with a Chief's powers: its notification tools are mounted. */
   mausbot?: boolean;
   /** A direct chat whose bot may pick where it works (Works on is not Off and no team computer is its own): select_computer
@@ -60,6 +62,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     botId: env.OMB_BOT_ID ?? "",
     team: env.OMB_TEAM_PEOPLE === "1",
     board: env.OMB_TEAM_BOARD === "1",
+    botTasks: env.OMB_BOT_TASKS === "1",
     mausbot: env.OMB_MAUSBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",
     localVm: env.OMB_LOCAL_VM !== "0",

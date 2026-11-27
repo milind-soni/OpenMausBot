@@ -340,13 +340,13 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
 
 const PAGE_OWNER: Record<SettingsPageId, SettingsOwner> = {
   overview: "place", devices: "place", ai: "place", bots: "place", desktops: "place", vault: "place", usage: "place", transfer: "place", storage: "place",
-  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "place",
+  data: "place", people: "place", installations: "place", account: "account", plan: "account", app: "app", general: "app", appearance: "app", features: "place", "bot-tasks": "place",
 };
 
 const PAGE_KEY: Partial<Record<SettingsPageId, Parameters<typeof t>[0]>> = {
   devices: "settings.page.devices", ai: "settings.group.ai", bots: "settings.page.bots", desktops: "settings.page.desktops",
   vault: "settings.section.vault", usage: "settings.page.spending", transfer: "settings.page.importExport", storage: "settings.page.storage", data: "settings.page.data", people: "settings.section.people",
-  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance", features: "settings.page.features",
+  installations: "settings.section.workspaces", plan: "settings.page.plan", general: "settings.section.general", appearance: "settings.section.appearance", features: "settings.page.features", "bot-tasks": "settings.page.botTasks",
 };
 
 /** A result's second line: its owner and its page ("This computer › Devices"), or what a jump opens. */

@@ -2,6 +2,7 @@
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { ImageComplexity, ImageProvider } from "../../shared/image-generation";
 import type { ToolGroup } from "../../shared/tool-groups";
+import type { BotTasksSettings } from "../../shared/bot-tasks";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
 
@@ -187,6 +188,8 @@ export interface ConfigStatus {
   /** A Team Cloud: the team this server is the home of, and the Plan page (MausBot Cloud) where its people and plan
    * are managed. Absent everywhere else. */
   team?: { id: string; name: string; cloudPage?: string };
+  /** The bots-only task ledger. Absent on a server without it; the GitHub token itself never comes back. */
+  botTasks?: BotTasksSettings & { githubTokenSet: boolean };
 }
 
 export interface ManagedPolicySummary {

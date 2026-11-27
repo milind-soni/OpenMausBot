@@ -25,7 +25,7 @@ const PEOPLE = {
 
 describe("the pages", () => {
   it("lists the place's pages, then Your account, then This app, in one fixed order", () => {
-    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "features", "account", "plan", "app", "general", "appearance"]);
+    expect(ids(fullContext())).toEqual([...PLACE_PAGES, "features", "bot-tasks", "account", "plan", "app", "general", "appearance"]);
   });
 
   it.each(Object.entries(PEOPLE))("keeps the same place pages, in the same order, for %s", (who, ctx) => {
@@ -35,11 +35,19 @@ describe("the pages", () => {
   });
 
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
-    "shows Simple's eleven entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "devices", "ai", "vault", "usage", "transfer", "features", "account", "plan", "app", "appearance"]);
+    "shows Simple's twelve entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "devices", "ai", "vault", "usage", "transfer", "features", "bot-tasks", "account", "plan", "app", "appearance"]);
     });
 
-  it("is shorter in Simple: the four Advanced pages come back in Advanced, in place", () => {
+  it("shows Bot tasks in Simple and Advanced to an admin, and never to a team's member", () => {
+    for (const advanced of [false, true]) {
+      expect(ids(fullContext({ advanced }))).toContain("bot-tasks");
+      expect(ids({ ...PEOPLE["a team admin"], advanced })).toContain("bot-tasks");
+      expect(ids({ ...PEOPLE["a team member"], advanced })).not.toContain("bot-tasks");
+    }
+  });
+
+  it("is shorter in Simple: the Advanced pages come back in Advanced, in place", () => {
     const simple = ids(fullContext({ advanced: false }));
     for (const page of ADVANCED_PAGES) expect(simple).not.toContain(page);
     expect(ids(fullContext()).filter((id) => simple.includes(id))).toEqual(simple);

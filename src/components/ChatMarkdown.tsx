@@ -751,22 +751,15 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   );
 }
 
-const MARKDOWN_COMPONENTS: Components = {
+/** How chat draws code, tables, lists, headings and quotes; other Markdown surfaces (a bot task's GitHub comments)
+ * reuse these so text reads the same everywhere. Links, images and spans stay per surface. */
+export const MARKDOWN_BLOCK_COMPONENTS = {
   pre: MarkdownCode,
-  img: MarkdownImage,
   code({ children }: { children?: ReactNode }) {
     return (
       <code dir="ltr" className="ui-code-chip break-words [unicode-bidi:isolate]">{children}</code>
     );
   },
-  span(props) {
-    // SAFETY: react-markdown hands hast data-* attributes through as string props
-    const link = threadLinkFromProps(props as Record<string, unknown>);
-    if (link) return <ThreadLink target={link.target} ambiguous={link.ambiguous}>{props.children}</ThreadLink>;
-    const { node: _node, children, ...rest } = props;
-    return <span {...rest}>{children}</span>;
-  },
-  a: MarkdownLink,
   table({ node, children }: BlockProps) {
     return <MarkdownTable direction={blockDirection(node)}>{children}</MarkdownTable>;
   },
@@ -810,11 +803,24 @@ const MARKDOWN_COMPONENTS: Components = {
       <blockquote dir={blockDirection(node)} className="border-s-2 border-hairline ps-3 text-ink-secondary">{children}</blockquote>
     );
   },
-  del({ children }: { children?: ReactNode }) {
-    return <Spoiler>{children}</Spoiler>;
-  },
   hr() {
     return <hr className="border-hairline/40" />;
+  },
+} satisfies Components;
+
+const MARKDOWN_COMPONENTS: Components = {
+  ...MARKDOWN_BLOCK_COMPONENTS,
+  img: MarkdownImage,
+  span(props) {
+    // SAFETY: react-markdown hands hast data-* attributes through as string props
+    const link = threadLinkFromProps(props as Record<string, unknown>);
+    if (link) return <ThreadLink target={link.target} ambiguous={link.ambiguous}>{props.children}</ThreadLink>;
+    const { node: _node, children, ...rest } = props;
+    return <span {...rest}>{children}</span>;
+  },
+  a: MarkdownLink,
+  del({ children }: { children?: ReactNode }) {
+    return <Spoiler>{children}</Spoiler>;
   },
 };
 

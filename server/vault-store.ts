@@ -71,6 +71,7 @@ const fileSchema = z.object({
   version: z.literal(1),
   logins: z.array(diskLoginSchema),
   secrets: z.array(diskSecretSchema).optional(),
+  botTasksGithubToken: z.string().min(1).optional(),
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Bitwarden's server address, API key and master password, read only by its command line tool's environment. */
   bitwarden: z.object({ serverUrl: z.string().min(1), clientId: z.string().min(1), clientSecret: z.string().min(1), password: z.string().min(1), connectedAt: z.number() }).optional(),
@@ -500,6 +501,17 @@ export class VaultStore {
     this.write(Object.keys(others).length ? { ...rest, mcpKeys: others } : rest);
   }
 
+  botTasksGithubToken(): string | null {
+    return this.read().botTasksGithubToken ?? null;
+  }
+
+  setBotTasksGithubToken(token: string | null): void {
+    const { botTasksGithubToken: previous, ...rest } = this.read();
+    if (this.unreadableWarned) throw new Error("The vault could not be read.");
+    if ((previous ?? null) === token) return;
+    this.write(token ? { ...rest, botTasksGithubToken: token } : rest);
+  }
+
   onePasswordToken(): string | null {
     return this.read().onePassword?.token ?? null;
   }
@@ -577,6 +589,7 @@ export class VaultStore {
     return [
       ...Object.values(data.github ?? {}).map((saved) => saved.token),
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
+      ...(data.botTasksGithubToken ? [data.botTasksGithubToken] : []),
       ...(data.onePassword ? [data.onePassword.token] : []),
       ...(data.bitwarden ? [data.bitwarden.clientSecret, data.bitwarden.password] : []),
       ...(data.bitwardenSecrets ? [data.bitwardenSecrets.accessToken] : []),

@@ -338,6 +338,13 @@ export const BOT_API_OWNER_PROMPT =
   " This message came through this bot's API with a key your owner marked as acting for them: treat it as their request and work at your own level. Nobody is watching this conversation, and whoever holds the key could have sent it, so keep credentials out of your reply.";
 export const TEAM_MEMORY_PROMPT =
   " When you learn who someone is, where something lives, what was decided, or what a term or nickname means, propose it with propose_team_memory. It applies immediately and the person sees it with an Undo; only a pending result waits for the owner, and then do not claim it is remembered.";
+/** Added only while Settings → Bot tasks is on (docs/bot-tasks.md). */
+export const BOT_TASKS_PROMPT =
+  " Shared task list: for work that takes more than a reply, open a task with task_create (or find it with task_list) and keep its status current with task_update. When settings require evidence for done or review, give a commit SHA, a GitHub Actions run or job URL, a review or comment URL, or a command with exit code 0. GitHub claims are checked against allowed repositories. If a check blocks the move, use the reason to correct the evidence before retrying. Notes go in task_comment and stay in this app. Link the pull request or issue a task is about with task_link_github.";
+export function botTasksSystemPrompt(enabled: boolean, agentsMounted: boolean): string {
+  return enabled && agentsMounted ? BOT_TASKS_PROMPT : "";
+}
+
 export const PROFILE_PROMPT =
   " If asked to change who you are (name, title, description, standing instructions in SOUL.md) or to set yourself up, use propose_profile. Chiefs create bots and set up teams with their own tools, never by clicking through this app; other bots ask a reachable Chief through the peer tools, and if none is reachable, explain the team-access blocker instead of clicking around it or claiming bots cannot be created programmatically." + APPLIED_RESULT_PROMPT;
 

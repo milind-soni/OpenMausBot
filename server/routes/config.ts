@@ -1,3 +1,5 @@
+import { migrateBotTasksGithubToken } from "../bot-tasks/settings.ts";
+import type { VaultStore } from "../vault-store.ts";
 import { liveSavePatch } from "../live-config.ts";
 import { signInEnvRefusal } from "../sign-in-env.ts";
 import * as boat from "../boat.ts";
@@ -16,6 +18,7 @@ import {
   browserProfileReplacementConflict,
   builtInBrowserEnabled,
   changedInstanceIds,
+  DATA_DIR,
   engineLaunches,
   isValidSshAlias,
   loadConfig,
@@ -27,7 +30,7 @@ import {
   type AppConfig,
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
-import { fromPairedDevice, type RequestAuth } from "../request-auth.ts";
+import { fromPairedDevice, ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { teamPersonalHint } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
@@ -65,6 +68,7 @@ export type ConfigStatus = Record<string, unknown>;
 export interface ConfigRouteDeps {
   store: Pick<Store, "bots" | "patchBot" | "clearVoiceSelections">;
   cfg: AppConfig;
+  botTasksVault: Pick<VaultStore, "botTasksGithubToken" | "setBotTasksGithubToken">;
   registry: Pick<ProviderRegistry, "get" | "forgetSnapshots">;
   sessions: Pick<SessionRegistry, "revalidateEmailSessions">;
   browserCleanup: Pick<BrowserCleanupCoordinator, "hasPendingProfile" | "prepare" | "abort" | "commit" | "ensure">;
@@ -134,7 +138,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     vpsIdleMs, vpsIdles, localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
-    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, ownHints, postiz,
+    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, ownHints, postiz, botTasksVault,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     // API keys are never echoed back: booleans only.
@@ -148,7 +152,14 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         return json(res, 403, { error: "From a phone, only API keys can be changed. Change other settings on your computer." });
       }
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
-      const patch = parseConfigPatchForPerson(body);
+      const { botTasks, ...otherSettings } = parseConfigPatchForPerson(body);
+      const { githubToken, ...taskSettings } = botTasks ?? {};
+      const patch = { ...otherSettings, ...(Object.keys(taskSettings).length ? { botTasks: taskSettings } : {}) };
+      if ((githubToken !== undefined || taskSettings.credential !== undefined || taskSettings.allowOutboundComments !== undefined || taskSettings.allowMerge !== undefined ||
+        taskSettings.repos !== undefined || taskSettings.requireEvidenceForDone !== undefined || taskSettings.requireEvidenceForReview !== undefined)
+        && (!ownerOrAdmin(auth) || (deps.cloudTeam && !(auth.kind === "session" && auth.session.teamRole === "owner")))) {
+        return json(res, 403, { error: "Only the owner can change GitHub access for bot tasks." });
+      }
       if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
         return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
       }
@@ -157,7 +168,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         const { email: _email, ...own } = patch.profile;
         if (!ownProfile(auth, own)) return json(res, 403, { error: "Sign in to this team to have a profile." });
         delete patch.profile;
-        if (!Object.keys(patch).length) {
+        if (!Object.keys(patch).length && githubToken === undefined) {
           broadcast({ kind: "config", ...configStatus() });
           return json(res, 200, configForAccess(configStatus(), auth));
         }
@@ -200,7 +211,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         if (refusal) return json(res, 403, { error: refusal, code: "managed_policy" });
         patch.automaticRecovery.backup = checked.selection;
       }
-      if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
+      if (!Object.keys(patch).length && githubToken === undefined) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
         const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderBorrowedKey(cfg) });
         if (!planned.ok) return json(res, 400, refusalBody(planned));
@@ -577,7 +588,17 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
       // Only the desktop's own save has put the key in the encrypted store; a phone's must land in config.json.
       const externalSecretStorage = !pairedDevice && url.searchParams.get("secretStorage") === "external";
+      let previousTaskToken: string | null | undefined;
       try {
+        if (githubToken !== undefined) {
+          try {
+            migrateBotTasksGithubToken(DATA_DIR, botTasksVault);
+            previousTaskToken = botTasksVault.botTasksGithubToken();
+            botTasksVault.setBotTasksGithubToken(githubToken || null);
+          } catch {
+            throw Object.assign(new Error("The GitHub token could not be saved in the vault."), { status: 503 });
+          }
+        }
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
         // Before the provider commit, so a failed write never leaves a foreign voice id to speak.
         if (changingVoiceProvider) store.clearVoiceSelections();
@@ -633,6 +654,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           }
         } else {
           for (const request of browserCleanupRequests) browserCleanup.abort(request);
+          if (previousTaskToken !== undefined) {
+            try { botTasksVault.setBotTasksGithubToken(previousTaskToken); }
+            catch { console.warn("bot-tasks: could not restore the previous vault token after a config save failed"); }
+          }
         }
         throw error;
       }

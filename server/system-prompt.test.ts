@@ -5,6 +5,7 @@ import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
   longCommandsPrompt,
   buildSystemPrompt,
+  botTasksSystemPrompt,
   CONVERSATIONAL_STYLE_PROMPT,
   CLOUD_HOME_PLACE,
   CLOUD_ENGINES_HERE,
@@ -42,6 +43,15 @@ import { PUBLISH_HABIT, REPLY_HABITS_PROMPT, replyHabitsPrompt } from "./reply-h
 import { readFileSync } from "node:fs";
 import { PAGE_TOOL_DEFINITIONS } from "./drivers/agents-pages-tools.ts";
 import { HOSTING_TOOL_DEFINITIONS } from "./drivers/agents-hosting-tools.ts";
+
+describe("bot task guidance", () => {
+  it("only appears with enabled tasks and mounted tools", () => {
+    expect(botTasksSystemPrompt(false, true)).toBe("");
+    expect(botTasksSystemPrompt(true, false)).toBe("");
+    expect(botTasksSystemPrompt(true, true)).toMatch(/GitHub claims are checked against allowed repositories/);
+    expect(botTasksSystemPrompt(true, true)).toContain("exit code 0");
+  });
+});
 
 describe("the stable half", () => {
   it("leaves out a conversation's folder, so a new thread can read the bot's cached prompt", () => {
