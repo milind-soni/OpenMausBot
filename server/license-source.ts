@@ -1,42 +1,89 @@
-// Where the enterprise licence comes from: `<data>/license.key` first, then OMB_LICENSE_KEY. A pasted licence and one
-// the MausBot connector refreshes land in the same file, so both take effect without a restart: the file is read again
-// every hour, and on a Linux server also when it changes. Reading it never throws; what a bad licence means for the one
-// in force is decided in enterprise.ts.
-import { watch as fsWatch, type FSWatcher } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+// Where the enterprise licence comes from: `<data>/license.key`, OMB_LICENSE_KEY, and `<data>/license.last-good` (the
+// last licence this server accepted, so a restart with a broken or missing file keeps a licence still in its paid period).
+// A pasted licence and one the MausBot connector refreshes land in license.key and take effect without a restart: on a
+// server install the file is checked once a minute (size, change time, inode; never its folder, where the databases
+// write constantly) and read every hour. Reading never throws or hangs; which licence wins is decided in enterprise.ts.
+import { constants } from "node:fs";
+import { open, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const LICENSE_FILE = "license.key";
+export const LAST_GOOD_FILE = "license.last-good";
 export const LICENSE_REREAD_MS = 60 * 60_000;
-/** A licence is well under 1 KB; anything this big is not one, and is not read. */
-const MAX_LICENSE_BYTES = 64 * 1024;
-/** Writers replace the file in a few steps (write, rename); one read after they settle. */
-const SETTLE_MS = 1_000;
+/** How often the file's size, change time and inode are compared: one stat a minute. */
+export const LICENSE_CHECK_MS = 60_000;
+/** Never two reads closer than this, however often the file changes. */
+export const LICENSE_MIN_GAP_MS = 30_000;
+/** A licence is well under 1 KB; anything bigger than this is not one, and is not read past it. */
+export const MAX_LICENSE_BYTES = 64 * 1024;
 
-export type LicenseSource = "file" | "env";
-export interface LicenseCandidate { key: string; source: LicenseSource }
+/** `last-good`: the copy this server keeps of the last licence it accepted. */
+export type LicenseSource = "file" | "env" | "last-good";
 export type LicenseFileRead =
   | { state: "absent" }
   | { state: "present"; key: string }
   | { state: "unreadable"; error: string };
 
-export function licenseFilePath(dataDir: string): string {
-  return join(dataDir, LICENSE_FILE);
+export function licenseFilePath(dataDir: string, name: string = LICENSE_FILE): string {
+  return join(dataDir, name);
 }
 
-/** An empty file counts as no file: clearing it is how a person takes the licence out. */
-export async function readLicenseFile(dataDir: string): Promise<LicenseFileRead> {
-  const path = licenseFilePath(dataDir);
+// No following a link (a link could point anywhere) and no waiting on a pipe: a FIFO opens at once, is seen not to be a
+// file, and is never read. Neither flag exists on Windows, where neither case blocks either.
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+/** Opens the file once and reads at most MAX_LICENSE_BYTES + 1 bytes from that handle, so a file swapped for a huge
+ * one between checks is never read whole. An empty file counts as none. */
+export async function readLicenseFile(dataDir: string, name: string = LICENSE_FILE): Promise<LicenseFileRead> {
+  const path = licenseFilePath(dataDir, name);
+  let handle;
   try {
-    const info = await stat(path);
-    if (!info.isFile()) return { state: "unreadable", error: `${path} is not a file` };
-    if (info.size > MAX_LICENSE_BYTES) return { state: "unreadable", error: `${path} is too large to be a licence` };
-    const key = (await readFile(path, "utf8")).trim();
-    return key ? { state: "present", key } : { state: "absent" };
+    handle = await open(path, OPEN_FLAGS);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR") return { state: "absent" };
+    if (code === "ELOOP") return { state: "unreadable", error: `${path} is a link; put the licence itself there` };
+    if (code === "EISDIR") return { state: "unreadable", error: `${path} is not a file` };
     return { state: "unreadable", error: `${path} could not be read (${code ?? (error instanceof Error ? error.message : String(error))})` };
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) return { state: "unreadable", error: `${path} is not a file` };
+    if (info.size > MAX_LICENSE_BYTES) return { state: "unreadable", error: `${path} is too large to be a licence` };
+    const buffer = Buffer.alloc(MAX_LICENSE_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > MAX_LICENSE_BYTES) return { state: "unreadable", error: `${path} is too large to be a licence` };
+    const key = buffer.subarray(0, bytesRead).toString("utf8").trim();
+    return key ? { state: "present", key } : { state: "absent" };
+  } catch (error) {
+    return { state: "unreadable", error: `${path} could not be read (${(error as NodeJS.ErrnoException).code ?? String(error)})` };
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+/** Keeps the licence just accepted, replaced in one step (a temporary file, then a rename), readable by this user only. */
+export async function writeLastGood(dataDir: string, key: string): Promise<void> {
+  const path = licenseFilePath(dataDir, LAST_GOOD_FILE);
+  const kept = await readLicenseFile(dataDir, LAST_GOOD_FILE);
+  if (kept.state === "present" && kept.key === key) return;
+  const temporary = `${path}.${process.pid}.tmp`;
+  try {
+    await writeFile(temporary, `${key}\n`, { mode: 0o600 });
+    await rename(temporary, path);
+  } catch (error) {
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
+}
+
+/** Size, change time and inode of license.key, or "absent": what the minute check compares. */
+export async function licenseFileStamp(dataDir: string): Promise<string> {
+  try {
+    const info = await stat(licenseFilePath(dataDir));
+    return `${info.size}:${info.mtimeMs}:${info.ctimeMs}:${info.ino}`;
+  } catch {
+    return "absent";
   }
 }
 
@@ -45,41 +92,59 @@ export interface LicenseRefreshOptions {
   refresh(): Promise<unknown>;
   log?(line: string): void;
   intervalMs?: number;
-  /** The file watch runs on Linux only (the servers this is for): elsewhere the hourly read is enough, and a watch on
-   * the data folder would hold it open on Windows. */
-  platform?: NodeJS.Platform;
-  watch?: (dir: string, listener: (event: string, filename: string | Buffer | null) => void) => FSWatcher;
+  checkMs?: number;
+  minGapMs?: number;
+  now?(): number;
+  /** What the minute check compares; licenseFileStamp by default. */
+  stamp?(): Promise<string>;
 }
 
-/** Re-reads hourly, and soon after `license.key` changes. Timers and the watch never keep the process alive. */
+/** Reads hourly, and after the minute check sees license.key change, never twice within LICENSE_MIN_GAP_MS. Started
+ * only on a server install that has or had a licence (server/index.ts); its timers never keep the process alive. */
 export function startLicenseRefresh(options: LicenseRefreshOptions): { stop(): void } {
   const log = options.log ?? ((line: string) => console.warn(line));
-  let settle: ReturnType<typeof setTimeout> | null = null;
+  const now = options.now ?? Date.now;
+  const minGap = options.minGapMs ?? LICENSE_MIN_GAP_MS;
+  let lastRun = Number.NEGATIVE_INFINITY;
+  let deferred: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
   const run = () => {
+    if (stopped) return;
+    const wait = lastRun + minGap - now();
+    if (wait > 0) {
+      if (!deferred) {
+        deferred = setTimeout(() => { deferred = null; run(); }, wait);
+        deferred.unref?.();
+      }
+      return;
+    }
+    lastRun = now();
     void options.refresh().catch((error: unknown) => log(`licence re-read failed: ${error instanceof Error ? error.message : String(error)}`));
   };
-  const interval = setInterval(run, options.intervalMs ?? LICENSE_REREAD_MS);
-  interval.unref?.();
-  let watcher: FSWatcher | null = null;
-  if ((options.platform ?? process.platform) === "linux") {
+  let stamp: string | null = null;
+  let checking = false;
+  const check = async () => {
+    if (checking || stopped) return;
+    checking = true;
     try {
-      watcher = (options.watch ?? fsWatch)(options.dataDir, (_event, filename) => {
-        if (filename === null || String(filename) !== LICENSE_FILE) return;
-        if (settle) clearTimeout(settle);
-        settle = setTimeout(() => { settle = null; run(); }, SETTLE_MS);
-        settle.unref?.();
-      });
-      watcher.on("error", () => { watcher?.close(); watcher = null; });
-      watcher.unref?.();
-    } catch {
-      watcher = null; // no watch (e.g. the inotify limit): the hourly read still picks the licence up
+      const next = await (options.stamp ? options.stamp() : licenseFileStamp(options.dataDir));
+      if (stamp !== null && next !== stamp) run();
+      stamp = next;
+    } finally {
+      checking = false;
     }
-  }
+  };
+  void check();
+  const hourly = setInterval(run, options.intervalMs ?? LICENSE_REREAD_MS);
+  hourly.unref?.();
+  const minute = setInterval(() => { void check(); }, options.checkMs ?? LICENSE_CHECK_MS);
+  minute.unref?.();
   return {
     stop() {
-      clearInterval(interval);
-      if (settle) clearTimeout(settle);
-      watcher?.close();
+      stopped = true;
+      clearInterval(hourly);
+      clearInterval(minute);
+      if (deferred) clearTimeout(deferred);
     },
   };
 }

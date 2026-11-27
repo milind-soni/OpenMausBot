@@ -24,17 +24,27 @@ expires), signed with an Ed25519 key whose public half is baked into
 `enterprise/server/license.ts`. Verification is offline, and one build serves
 every customer, because the key decides the feature set rather than the code.
 
-The server reads the key from `license.key` in its data folder (`OMB_DATA_DIR`;
-`/data/.openmausbot` in the Docker image) first, then from `OMB_LICENSE_KEY`,
-and reads them again every hour and, on Linux, soon after `license.key`
-changes, so a pasted or renewed licence takes effect without a restart. A
-file that is missing, not a licence, or refused never replaces a licence still
-in force: the server logs it once and keeps the last good one until its grace
-ends. An `OMB_LICENSE_KEY` never replaces a licence that came from the file.
+On a server install the key may also be in `license.key` in the data folder
+(`OMB_DATA_DIR`; `/data/.openmausbot` in the Docker image). The server keeps a
+copy of the last licence it accepted in `license.last-good` (mode 0600), so a
+restart with a broken or missing file keeps a licence still in its paid
+period. Every candidate is verified; the one issued last wins (`issued`, then
+`iat` when both carry it, then the later expiry), the file first on a tie.
+While it runs, the server checks `license.key` once a minute (size, change
+time, inode) and reads everything every hour, at most once in 30 seconds. A
+licence in force is never replaced by one issued before it, nor dropped for a
+broken or missing file, until its grace ends; each such problem is logged
+once. The re-read starts only on a server install that had a licence at
+start; a server that started with none takes its first licence at the next
+restart. A desktop, a Cloud home and a hosted workspace (licensed by its
+operator's environment) read `OMB_LICENSE_KEY` alone, once at start, as before.
 
-Keys may also carry `seats`, `plan`, `sub` (subscription) and `server` claims,
-in the same `omb1` / `v: 1` format: a server from before them ignores them,
-and a key without them works on every server.
+Keys may also carry `seats`, `plan`, `sub` (subscription), `server` and `iat`
+(issue time, epoch ms) claims, in the same `omb1` / `v: 1` format: a server
+from before them ignores them, and a key without them works on every server.
+An issuer must validate claims with `validateClaims` from
+`enterprise/server/license.ts` before signing: a malformed optional claim makes
+a new server refuse the whole licence. `server` is carried, not yet checked.
 
 `GET /api/edition` reports the outcome:
 
@@ -45,7 +55,7 @@ and a key without them works on every server.
 ```
 
 `GET /api/license`, for the owner or an admin only, reports the licence for
-Settings: `valid`, `source` (`file` or `env`), `customer`, `plan`, `seats`,
+Settings: `valid`, `source` (`file`, `env` or `last-good`), `customer`, `plan`, `seats`,
 `features`, `expiresAt`, `expiresInDays`, `graceEndsAt`, `graceDaysLeft`
 (once expired: whole days until the features stop, 0 after) and `notice`. It
 never includes the key.
@@ -87,7 +97,7 @@ ahead of a feature landing.
 node enterprise/scripts/issue-license.mjs keygen          # once; prints the public key to add to license.ts
 node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features whitelabel,sso --expires 2027-09-02
 node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features admin --expires 2027-01-03 \
-  --seats 20 --plan business-server --sub <subscription id> --server <server id>
+  --seats 20 --plan business-server --sub <subscription id> --server <server id> --iat 1795000000000
 ```
 
 The signing key lives outside the repo (default

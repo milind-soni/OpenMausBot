@@ -189,7 +189,7 @@ describe("enterprise hook point", () => {
   it("tells the operator when the layer is present but no key is configured", async () => {
     const dir = fakeLayer(`export function register() { return { customer: "x", features: [], expiresAt: null }; }`);
     const status = await loadEnterpriseLayer({ dir, licenseKey: undefined });
-    expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but OMB_LICENSE_KEY is not set" });
+    expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but there is no licence: neither license.key nor OMB_LICENSE_KEY is set" });
   });
 
   it("refuses a layer that does not honour the contract", async () => {

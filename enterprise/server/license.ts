@@ -23,6 +23,9 @@ export const LICENSE_PUBLIC_KEYS: readonly string[] = [
   "6CHdwwJzxKJFimRkC79eQ5FR__bX2WaU2BBGNGPQTQU",
 ];
 
+/** The claims a licence may carry. An issuer (the cloud Admin's included) must validate with exactly this schema before
+ * signing, e.g. through `validateClaims`: a new server refuses the WHOLE licence when an optional claim is malformed (a
+ * `seats` of 0 or 2.5, an empty `plan`), it does not just drop that claim. */
 export const claimsSchema = z.object({
   v: z.literal(1),
   /** Who the license was issued to; shown in the UI and the startup log. */
@@ -41,11 +44,21 @@ export const claimsSchema = z.object({
   plan: z.string().min(1).optional(),
   /** The subscription the key renews with. */
   sub: z.string().min(1).optional(),
-  /** The server the key was issued for. */
+  /** The server the key was issued for. Carried; not checked yet (server/enterprise.ts, licenseServerRefusal). */
   server: z.string().min(1).optional(),
+  /** When the key was issued, in epoch milliseconds: orders two keys issued the same day, so a seat change made today
+   * cannot be undone by putting back this morning's key. */
+  iat: z.number().int().nonnegative().optional(),
 });
 
 export type LicenseClaims = z.infer<typeof claimsSchema>;
+
+/** The claims as a server will read them, or an error naming the first problem: what an issuer checks before it signs. */
+export function validateClaims(claims: unknown): LicenseClaims {
+  const result = claimsSchema.safeParse(claims);
+  if (!result.success) throw new Error(`licence claims are malformed (${result.error.issues[0]?.path.join(".") || "claims"}: ${result.error.issues[0]?.message ?? "invalid"})`);
+  return result.data;
+}
 
 const PREFIX = "omb1";
 

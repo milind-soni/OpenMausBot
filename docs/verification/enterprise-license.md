@@ -14,11 +14,14 @@
 - For 14 days after it expires the entitlements keep working, with a notice,
   `graceEndsAt` on `/api/edition`, and a banner saying until when. Then they
   stop, without a restart. The key format and signature check are unchanged.
-- The key is read from `<data>/license.key`, then `OMB_LICENSE_KEY`, and read
-  again hourly and (on Linux) soon after the file changes. A broken, missing
-  or refused file keeps the licence in force until it expires, logged once.
-- Optional `seats`, `plan`, `sub` and `server` claims in the same `omb1` /
-  `v: 1` format, accepted by servers from before them.
+- On a server install the key may be in `<data>/license.key`, in
+  `OMB_LICENSE_KEY`, or in `<data>/license.last-good` (the last one accepted);
+  the one issued last wins. The file is checked once a minute and everything
+  read hourly; a broken, missing or older file keeps the licence in force, even
+  across a restart, until its grace ends, logged once. Desktops, Cloud homes
+  and hosted workspaces read `OMB_LICENSE_KEY` alone, as before.
+- Optional `seats`, `plan`, `sub`, `server` and `iat` claims in the same
+  `omb1` / `v: 1` format, accepted by servers from before them.
 - `GET /api/license` (owner or admin): validity, source, plan, seats, expiry
   and days of grace left, never the key.
 

@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { register } from "./index.ts";
-import { issueLicenseKey, LICENSE_PUBLIC_KEYS, verifyLicenseKey, type LicenseClaims } from "./license.ts";
+import { claimsSchema, issueLicenseKey, LICENSE_PUBLIC_KEYS, validateClaims, verifyLicenseKey, type LicenseClaims } from "./license.ts";
 
 function keypair() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
@@ -86,7 +86,7 @@ function signRaw(claims: object, privateJwk: ReturnType<typeof keypair>["private
 }
 
 describe("subscription claims: seats, plan, sub, server", () => {
-  const subscription: LicenseClaims = { ...claims, seats: 20, plan: "business-server", sub: "sub_123", server: "srv_456" };
+  const subscription: LicenseClaims = { ...claims, seats: 20, plan: "business-server", sub: "sub_123", server: "srv_456", iat: 1_795_000_000_000 };
 
   it("round-trips the new optional claims in the same omb1 / v:1 format", () => {
     const { x, privateJwk } = keypair();
@@ -129,10 +129,18 @@ describe("subscription claims: seats, plan, sub, server", () => {
 
   it("refuses malformed values for them, on both sides", () => {
     const { x, privateJwk } = keypair();
-    for (const bad of [{ seats: 0 }, { seats: 2.5 }, { seats: "20" }, { plan: "" }, { sub: 7 }, { server: "" }]) {
+    for (const bad of [{ seats: 0 }, { seats: 2.5 }, { seats: "20" }, { plan: "" }, { sub: 7 }, { server: "" }, { iat: -1 }, { iat: 1.5 }]) {
       expect(() => issueLicenseKey({ ...claims, ...bad } as LicenseClaims, privateJwk), JSON.stringify(bad)).toThrow();
       expect(() => verifyLicenseKey(signRaw({ ...claims, ...bad }, privateJwk), { publicKeys: [x] }), JSON.stringify(bad)).toThrow(/claims are malformed/);
     }
+  });
+
+  it("exports the exact validation an issuer must run before signing", () => {
+    expect(validateClaims(subscription)).toEqual(subscription);
+    expect(() => validateClaims({ ...claims, seats: 0 })).toThrow("licence claims are malformed (seats:");
+    expect(() => validateClaims({ ...claims, plan: "" })).toThrow("licence claims are malformed (plan:");
+    expect(validateClaims({ ...claims, region: "eu" })).toEqual(claims);
+    expect(claimsSchema.safeParse({ ...claims, iat: 5 }).success).toBe(true);
   });
 
   it("keeps the public key list append-only: the first key stays first", () => {
@@ -157,18 +165,18 @@ describe("issue-license.mjs, the reference issuer", () => {
       const privateD = String(JSON.parse(readFileSync(keyPath, "utf8")).d);
       expect(made.stdout).not.toContain(privateD);
       const args = ["issue", "--key", keyPath, "--customer", "Acme", "--features", "admin,budgets", "--issued", "2026-11-27",
-        "--expires", "2026-12-30", "--seats", "20", "--plan", "business-server", "--sub", "sub_123", "--server", "srv_456"];
+        "--expires", "2026-12-30", "--seats", "20", "--plan", "business-server", "--sub", "sub_123", "--server", "srv_456", "--iat", "1795000000000"];
       const issued = run(args);
       expect(issued.status, issued.stderr).toBe(0);
       const key = issued.stdout.trim();
       expect(verifyLicenseKey(key, { publicKeys: [publicX!], now: new Date("2026-12-01") })).toEqual({
         v: 1, customer: "Acme", features: ["admin", "budgets"], issued: "2026-11-27", expires: "2026-12-30",
-        seats: 20, plan: "business-server", sub: "sub_123", server: "srv_456",
+        seats: 20, plan: "business-server", sub: "sub_123", server: "srv_456", iat: 1_795_000_000_000,
       });
       expect(run(args).stdout.trim()).toBe(key);
       const plain = run(["issue", "--key", keyPath, "--customer", "Acme", "--features", "admin", "--issued", "2026-11-27"]);
       expect(Object.keys(verifyLicenseKey(plain.stdout.trim(), { publicKeys: [publicX!] }))).toEqual(["v", "customer", "features", "issued", "expires"]);
-      const badSeats = run([...args.slice(0, -8), "--seats", "twenty"]);
+      const badSeats = run([...args.slice(0, -10), "--seats", "twenty"]);
       expect(badSeats.status).toBe(1);
       expect(badSeats.stderr).toContain("--seats must be a whole number of at least 1");
     } finally {

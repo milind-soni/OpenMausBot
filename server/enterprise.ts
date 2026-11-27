@@ -1,6 +1,7 @@
 // Hook point for the source-available enterprise layer (enterprise/, under its own licence), loaded only when present:
 // core never imports it statically. Its one obligation is `register()`, turning a licence key into entitlements. The key
-// is read from <data>/license.key, then OMB_LICENSE_KEY (license-source.ts), and read again while the server runs.
+// comes from <data>/license.key, OMB_LICENSE_KEY or the kept copy of the last one accepted (license-source.ts), and is
+// read again while a server install runs.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,7 +10,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { RequestAuth } from "./request-auth.ts";
 import type { SessionRegistry } from "./sessions.ts";
 
-import { licenseFilePath, readLicenseFile, type LicenseFileRead, type LicenseSource } from "./license-source.ts";
+import { LAST_GOOD_FILE, LICENSE_FILE, licenseFilePath, readLicenseFile, writeLastGood, type LicenseFileRead, type LicenseSource } from "./license-source.ts";
 import { SERVER_ROOT } from "./proxy-paths.ts";
 
 export interface EditionStatus {
@@ -37,7 +38,11 @@ const layerSchema = z.object({
   plan: z.string().min(1).optional(),
   sub: z.string().min(1).optional(),
   server: z.string().min(1).optional(),
+  /** When the licence was issued (YYYY-MM-DD) and, finer, `iat` (epoch ms): which of two licences is newer. */
+  issued: z.string().optional(),
+  iat: z.number().int().nonnegative().optional(),
 });
+type Layer = z.infer<typeof layerSchema>;
 
 /** The layer accepts a key that expired less than the grace period ago. */
 export const LICENSE_WARN_DAYS = 30;
@@ -60,9 +65,11 @@ let current: EditionStatus = { edition: "oss", features: [] };
 let workspaceAccessFactory: ((options: WorkspaceAccessOptions) => WorkspaceAccess) | undefined;
 type Register = (options: { licenseKey: string; graceDays: number }) => unknown;
 /** What the last load saw, so a re-read uses the same layer, data folder and environment key. */
-let loaded: { entry: string | undefined; dataDir: string | undefined; envKey: string | undefined; register?: Register } | null = null;
+let loaded: { entry: string | undefined; dataDir: string | undefined; envKey: string | undefined; keyAtStart: boolean; register?: Register } | null = null;
 /** The licence in force beyond what EditionStatus carries; kept out of /api/edition, which bot shells may read. */
-let held: { source: LicenseSource; seats?: number; plan?: string; sub?: string; server?: string } | null = null;
+let held: { source: LicenseSource; layer: Layer } | null = null;
+let clockWarned: string | undefined;
+let lastChangeLog = Number.NEGATIVE_INFINITY;
 /** The last licence problem logged, so an hourly re-read of the same bad file logs it once. */
 let lastProblem: string | undefined;
 let rereading: Promise<unknown> = Promise.resolve();
@@ -133,10 +140,14 @@ function oss(notice?: string): EditionStatus {
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-const LAYER_WITHOUT_KEY = "enterprise layer present but OMB_LICENSE_KEY is not set";
+const LAYER_WITHOUT_KEY = "enterprise layer present but there is no licence: neither license.key nor OMB_LICENSE_KEY is set";
+/** What a notice calls the licence in force: the file a person fixes, or the environment variable. */
+const keyName = () => held && held.source !== "env" ? "license.key" : "OMB_LICENSE_KEY";
 
 /** Never throws: a broken layer or key degrades to the open-source edition with a notice saying what to fix. With no key
- * and no hosted workspace nothing of the layer can be used, so it is not loaded. `dataDir`: where license.key may be. */
+ * and no hosted workspace nothing of the layer can be used, so it is not loaded. `dataDir`: where license.key and
+ * license.last-good are; server/index.ts leaves it out on a desktop, a Cloud home and a hosted workspace, which read
+ * OMB_LICENSE_KEY alone. */
 export async function loadEnterpriseLayer(
   options: { dir?: string; licenseKey?: string; env?: NodeJS.ProcessEnv; serverRoot?: string; dataDir?: string } = {},
 ): Promise<EditionStatus> {
@@ -145,12 +156,11 @@ export async function loadEnterpriseLayer(
   const dirs = options.dir ? [options.dir] : enterpriseLayerDirs(options.env, options.serverRoot);
   const envKey = options.licenseKey ?? process.env.OMB_LICENSE_KEY;
   const entry = dirs.map(layerEntry).find((candidate) => candidate !== undefined);
-  loaded = { entry, dataDir: options.dataDir, envKey };
-  // The one read on the start path: a small file, or nothing.
-  const file: LicenseFileRead = options.dataDir ? await readLicenseFile(options.dataDir) : { state: "absent" };
-  const keyGiven = file.state !== "absent" || Boolean(envKey);
+  const reads = await readSources(options.dataDir);
+  const keyGiven = reads.file.state !== "absent" || reads.lastGood.state !== "absent" || Boolean(envKey);
+  loaded = { entry, dataDir: options.dataDir, envKey, keyAtStart: keyGiven };
   if (!entry) {
-    const named = file.state !== "absent" ? `${licenseFilePath(options.dataDir!)} holds a licence` : "OMB_LICENSE_KEY is set";
+    const named = reads.file.state !== "absent" ? `${licenseFilePath(options.dataDir!)} holds a licence` : "OMB_LICENSE_KEY is set";
     return oss(keyGiven ? `${named} but no enterprise layer exists at ${dirs.join(" or ")}` : undefined);
   }
   if (!keyGiven && !hostedWorkspaceConfigured(options.env)) return oss(LAYER_WITHOUT_KEY);
@@ -160,7 +170,19 @@ export async function loadEnterpriseLayer(
     return oss(`enterprise layer disabled: ${message(error)}`);
   }
   if (!keyGiven) return oss(LAYER_WITHOUT_KEY);
-  return grant(file, false, (line) => console.warn(line));
+  return grant(reads, false, (line) => console.warn(line));
+}
+
+/** Whether server/index.ts starts the re-read: a layer, a data folder, and a licence (file, environment or kept copy)
+ * at start. A server that started with none picks up its first licence at the next restart. */
+export function licenseRefreshWanted(): boolean {
+  return Boolean(loaded?.entry && loaded.dataDir && loaded.keyAtStart);
+}
+
+async function readSources(dataDir: string | undefined): Promise<{ file: LicenseFileRead; lastGood: LicenseFileRead }> {
+  if (!dataDir) return { file: { state: "absent" }, lastGood: { state: "absent" } };
+  const [file, lastGood] = await Promise.all([readLicenseFile(dataDir), readLicenseFile(dataDir, LAST_GOOD_FILE)]);
+  return { file, lastGood };
 }
 
 async function importLayer(entry: string): Promise<Register> {
@@ -177,31 +199,78 @@ function note(problem: string, log: (line: string) => void) {
   lastProblem = problem;
 }
 
-/** The file's licence, else the environment's. On a re-read (`keep`) a licence still in force is never dropped for a
- * worse one: a broken, missing or refused file keeps it until it expires, and an environment key never replaces a
- * licence that came from the file. */
-async function grant(file: LicenseFileRead, keep: boolean, log: (line: string) => void): Promise<EditionStatus> {
+/** Where a licence came from, as a person would look for it. */
+function sourceName(source: LicenseSource): string {
+  return source === "env" ? "OMB_LICENSE_KEY" : source === "file" ? "license.key" : "license.last-good";
+}
+
+/** Positive when `a` was issued after `b`: the issue date, then `iat` when both carry it, then the later expiry. Equal
+ * (0) when none of those tell them apart: the same day's reissue without `iat` is not refused. */
+export function issuedOrder(a: LicenseOrder, b: LicenseOrder): number {
+  const issuedA = a.issued ?? "";
+  const issuedB = b.issued ?? "";
+  if (issuedA !== issuedB) return issuedA < issuedB ? -1 : 1;
+  if (a.iat !== undefined && b.iat !== undefined && a.iat !== b.iat) return a.iat < b.iat ? -1 : 1;
+  const ends = (expires: string | null) => expires === null ? Number.POSITIVE_INFINITY : Date.parse(expires);
+  const endA = ends(a.expiresAt);
+  const endB = ends(b.expiresAt);
+  return endA === endB || (Number.isNaN(endA) && Number.isNaN(endB)) ? 0 : endA < endB ? -1 : 1;
+}
+export type LicenseOrder = Pick<Layer, "issued" | "iat" | "expiresAt">;
+
+/** Off: a licence's `server` claim is carried, not checked. When it is switched on, a licence is refused only when this
+ * server knows its own id and the licence names a different one; a licence that names none, or a server that does not
+ * know its id, is never refused for it. */
+const ENFORCE_LICENSE_SERVER = false;
+export function licenseServerRefusal(licensed: string | undefined, own: string | undefined, enforce: boolean = ENFORCE_LICENSE_SERVER): string | null {
+  if (!enforce || !licensed || !own || licensed === own) return null;
+  return `the licence was issued for server ${licensed}, not this one`;
+}
+
+/** Every licence on offer (license.key, OMB_LICENSE_KEY, the kept copy), each verified by the layer; the one issued last
+ * wins, and on a tie the file, then the environment. On a re-read (`keep`) a licence in force is never replaced by one
+ * issued before it, nor dropped for a broken or missing file: it stays until its grace ends. */
+async function grant(reads: { file: LicenseFileRead; lastGood: LicenseFileRead }, keep: boolean, log: (line: string) => void): Promise<EditionStatus> {
   const { dataDir, envKey, register } = loaded!;
-  const active = keep && current.edition === "enterprise" && !expired(Date.now());
-  const problems: string[] = file.state === "unreadable" ? [file.error] : [];
-  const tries: { key: string; source: LicenseSource }[] = file.state === "present" ? [{ key: file.key, source: "file" }] : [];
-  if (envKey && !(active && held?.source === "file")) tries.push({ key: envKey, source: "env" });
-  for (const candidate of tries) {
+  const now = Date.now();
+  const active = keep && current.edition === "enterprise" && !expired(now) && held !== null;
+  const problems: string[] = [];
+  const offered: { key: string; source: LicenseSource }[] = [];
+  for (const [read, source] of [[reads.file, "file"], [envKey ? { state: "present", key: envKey } as const : { state: "absent" } as const, "env"], [reads.lastGood, "last-good"]] as const) {
+    if (read.state === "present") offered.push({ key: read.key, source });
+    else if (read.state === "unreadable") problems.push(read.error);
+  }
+  const accepted: { key: string; source: LicenseSource; layer: Layer }[] = [];
+  for (const candidate of offered) {
     try {
       // A layer that ignores graceDays refuses an expired key at startup.
       const layer = layerSchema.parse(await register!({ licenseKey: candidate.key, graceDays: LICENSE_GRACE_DAYS }));
-      current = { edition: "enterprise", customer: layer.customer, features: [...new Set(layer.features)].sort(), expiresAt: layer.expiresAt };
-      const { seats, plan, sub, server } = layer;
-      held = { source: candidate.source, ...(seats !== undefined ? { seats } : {}), ...(plan ? { plan } : {}), ...(sub ? { sub } : {}), ...(server ? { server } : {}) };
-      if (problems.length) note(`${problems[0]}; using OMB_LICENSE_KEY instead`, log);
-      else lastProblem = undefined;
-      return current;
+      const refusal = licenseServerRefusal(layer.server, undefined);
+      if (refusal) throw new Error(refusal);
+      accepted.push({ ...candidate, layer });
     } catch (error) {
-      problems.push(candidate.source === "file" ? `the licence in ${licenseFilePath(dataDir!)} was refused: ${message(error)}` : message(error));
+      problems.push(candidate.source === "env" ? message(error) : `the licence in ${licenseFilePath(dataDir!, candidate.source === "file" ? LICENSE_FILE : LAST_GOOD_FILE)} was refused: ${message(error)}`);
     }
   }
+  const best = accepted.reduce<(typeof accepted)[number] | undefined>((top, next) => !top || issuedOrder(next.layer, top.layer) > 0 ? next : top, undefined);
+  const file = accepted.find((candidate) => candidate.source === "file");
+  if (best && (!active || issuedOrder(best.layer, held!.layer) >= 0)) {
+    const { layer } = best;
+    const fileGone = active && held!.source === "file" && reads.file.state === "absent";
+    current = { edition: "enterprise", customer: layer.customer, features: [...new Set(layer.features)].sort(), expiresAt: layer.expiresAt };
+    held = { source: best.source, layer };
+    if (reads.file.state !== "absent" && best.source !== "file") {
+      note(`${file ? `the licence in ${licenseFilePath(dataDir!)} was issued before the one in ${sourceName(best.source)}` : problems[0]}; using ${sourceName(best.source)} instead`, log);
+    } else if (fileGone) note(`no licence in ${licenseFilePath(dataDir!)} any more; using ${sourceName(best.source)} instead`, log);
+    else lastProblem = undefined;
+    warnClock(layer, now, log);
+    if (dataDir) await writeLastGood(dataDir, best.key).catch((error: unknown) => note(`could not keep a copy of the licence: ${message(error)}`, log));
+    return current;
+  }
   if (active) {
-    note(`${problems[0] ?? `no licence in ${licenseFilePath(dataDir!)} any more`}; keeping the licence in force until it expires`, log);
+    const why = file && issuedOrder(file.layer, held!.layer) < 0 ? `the licence in ${licenseFilePath(dataDir!)} was issued before the one in force`
+      : problems[0] ?? `no licence in ${licenseFilePath(dataDir!)} any more`;
+    note(`${why}; keeping the licence in force until it expires`, log);
     return current;
   }
   if (!problems.length) return current;
@@ -209,13 +278,26 @@ async function grant(file: LicenseFileRead, keep: boolean, log: (line: string) =
   return oss(`enterprise layer disabled: ${problems[0]}`);
 }
 
+/** Once per licence: a clock more than a day before the issue date makes every expiry check wrong. */
+function warnClock(layer: Layer, now: number, log: (line: string) => void) {
+  if (!layer.issued || now >= Date.parse(layer.issued) - DAY_MS || clockWarned === layer.issued) return;
+  clockWarned = layer.issued;
+  log(`this server's clock says ${new Date(now).toISOString()}, before the licence was issued (${layer.issued}): set the clock right, or the licence's dates are judged wrongly`);
+}
+
+/** A re-read that has not finished after this long no longer holds up the next one. */
+const REREAD_DEADLINE_MS = 30_000;
+/** At most one "licence changed" line in this long. */
+const CHANGE_LOG_GAP_MS = 10 * 60_000;
+
 /** Reads the licence again (license-source.ts calls this hourly and when the file changes) and switches licensed
- * features on or off without a restart. Never throws, and one re-read runs at a time. */
+ * features on or off without a restart. Never throws; one re-read runs at a time, and a hung one stops blocking the
+ * next after REREAD_DEADLINE_MS. */
 export function refreshLicense(log: (line: string) => void = (line) => console.warn(line)): Promise<EditionStatus> {
   const run = async (): Promise<EditionStatus> => {
     if (!loaded?.entry) return current;
-    const file: LicenseFileRead = loaded.dataDir ? await readLicenseFile(loaded.dataDir) : { state: "absent" };
-    if (file.state === "absent" && !loaded.envKey && !(current.edition === "enterprise" && held?.source === "file")) return current;
+    const reads = await readSources(loaded.dataDir);
+    if (reads.file.state === "absent" && reads.lastGood.state === "absent" && !loaded.envKey && !(current.edition === "enterprise" && held)) return current;
     if (!loaded.register) {
       try {
         loaded.register = await importLayer(loaded.entry);
@@ -225,12 +307,16 @@ export function refreshLicense(log: (line: string) => void = (line) => console.w
       }
     }
     const before = JSON.stringify([current, held]);
-    const status = await grant(file, true, log);
-    if (JSON.stringify([current, held]) !== before && status.edition === "enterprise") log(`licence changed: ${describeEdition(status)}`);
+    const status = await grant(reads, true, log);
+    const now = Date.now();
+    if (JSON.stringify([current, held]) !== before && status.edition === "enterprise" && now - lastChangeLog >= CHANGE_LOG_GAP_MS) {
+      lastChangeLog = now;
+      log(`licence changed: ${describeEdition(status)}`);
+    }
     return status;
   };
   const next = rereading.then(run, run);
-  rereading = next.catch(() => undefined);
+  rereading = Promise.race([next.catch(() => undefined), new Promise<void>((done) => setTimeout(done, REREAD_DEADLINE_MS).unref?.())]);
   return next.catch((error: unknown) => { log(`licence re-read failed: ${message(error)}`); return current; });
 }
 
@@ -253,7 +339,7 @@ export function editionStatus(now: number = Date.now()): EditionStatus {
     return {
       edition: "oss",
       features: [],
-      notice: `enterprise layer disabled: OMB_LICENSE_KEY expired on ${current.expiresAt}; renew it to keep enterprise features`,
+      notice: `enterprise layer disabled: ${keyName()} expired on ${current.expiresAt}; renew it to keep enterprise features`,
     };
   }
   const expiresInDays = Math.ceil((at - now) / DAY_MS);
@@ -263,7 +349,7 @@ export function editionStatus(now: number = Date.now()): EditionStatus {
     ...current,
     expiresInDays,
     graceEndsAt,
-    notice: `OMB_LICENSE_KEY expired on ${current.expiresAt}; enterprise features keep working until ${graceEndsAt} while it is renewed`,
+    notice: `${keyName()} expired on ${current.expiresAt}; enterprise features keep working until ${graceEndsAt} while it is renewed`,
   };
 }
 
@@ -293,8 +379,8 @@ export function licenseState(now: number = Date.now()): LicenseState {
     valid: status.edition === "enterprise",
     source: licensed ? held?.source ?? null : null,
     customer: licensed ? current.customer ?? null : null,
-    plan: licensed ? held?.plan ?? null : null,
-    seats: licensed ? held?.seats ?? null : null,
+    plan: licensed ? held?.layer.plan ?? null : null,
+    seats: licensed ? held?.layer.seats ?? null : null,
     features: status.features,
     expiresAt: licensed ? current.expiresAt ?? null : null,
     expiresInDays: at === null ? null : Math.ceil((at - now) / DAY_MS),
@@ -318,11 +404,11 @@ export function entitled(feature: string, now: number = Date.now()): boolean {
 export function licenseWarning(status: EditionStatus): string | null {
   if (status.edition !== "enterprise" || !status.expiresAt || status.expiresInDays === undefined) return null;
   if (status.graceEndsAt) {
-    return `OMB_LICENSE_KEY expired on ${status.expiresAt}; enterprise features keep working until ${status.graceEndsAt} — renew the key before then`;
+    return `${keyName()} expired on ${status.expiresAt}; enterprise features keep working until ${status.graceEndsAt} — renew the key before then`;
   }
   if (status.expiresInDays > LICENSE_WARN_DAYS) return null;
   const days = status.expiresInDays === 1 ? "1 day" : `${status.expiresInDays} days`;
-  return `OMB_LICENSE_KEY expires on ${status.expiresAt} (in ${days}); renew it before then to keep enterprise features`;
+  return `${keyName()} expires on ${status.expiresAt} (in ${days}); renew it before then to keep enterprise features`;
 }
 
 export function describeEdition(status: EditionStatus): string {

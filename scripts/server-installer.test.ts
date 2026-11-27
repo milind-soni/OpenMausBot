@@ -108,6 +108,7 @@ case "$*" in
   "image inspect -f {{index .Config.Labels "*) echo "\${FAKE_IMAGE_VERSION-v0.1.151}" ;;
   "compose exec -T omb node dist-server/bot-box/box-check.js --public=none") echo "$FAKE_BOX_CHECK"; case "$FAKE_BOX_CHECK" in *'"failed":[]'*) ;; *) exit 1 ;; esac ;;
   "inspect --format {{.State.Health.Status}} c1") echo "$FAKE_HEALTH" ;;
+  "compose exec -T omb curl -sf http://127.0.0.1:8799/api/edition") printf '%s' "\${FAKE_EDITION:-}" ;;
 esac`,
 };
 
@@ -438,8 +439,25 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const second = run([], { env: { FAKE_RELEASE: "v0.1.152" } }, { dir: first.dir });
     expect(second.status).toBe(0);
     expect(readFileSync(env, "utf8").split("\n").filter((line) => line.startsWith("OMB_LICENSE_KEY="))).toEqual([`OMB_LICENSE_KEY=${licence}`]);
-    // The paste fallback the installer's header names: license.key in the server's data folder, written as the server's user.
-    expect(script).toContain(`sudo docker compose exec -T omb sh -c 'cat > "$OMB_DATA_DIR/license.key"'`);
+    // The paste fallback the installer's header names: license.key in the server's data folder, written as the server's
+    // user, readable by it alone, from a file rather than the command line.
+    expect(script).toContain(`sudo docker compose exec -T omb sh -c 'umask 077; cat > "$OMB_DATA_DIR/license.key"' < licence.txt`);
+  });
+
+  it("says in one line whether the server took the licence, from its own notice, never echoing the licence", () => {
+    const licence = "omb1.eyJ2IjoxfQ.c2lnbmF0dXJlLW9ubHktZm9yLXRlc3Rz";
+    const refused = run(["--domain", "maus.example.com"], { env: { OMB_LICENSE_KEY: licence,
+      FAKE_EDITION: '{"edition":"oss","features":[],"notice":"enterprise layer disabled: OMB_LICENSE_KEY signature does not match any OpenMausBot signing key"}' } });
+    expect(refused.status).toBe(0);
+    expect(refused.stdout).toContain("  note  The licence was not accepted: enterprise layer disabled: OMB_LICENSE_KEY signature does not match any OpenMausBot signing key\n");
+    expect(refused.all).not.toContain(licence);
+    const accepted = run(["--domain", "maus.example.com"], { env: { OMB_LICENSE_KEY: licence, FAKE_EDITION: '{"edition":"enterprise","customer":"Acme","features":["admin"]}' } });
+    expect(accepted.stdout).toContain("  ok    The licence was accepted.\n");
+    const leaky = run(["--domain", "maus.example.com"], { env: { OMB_LICENSE_KEY: licence, FAKE_EDITION: `{"edition":"oss","features":[],"notice":"bad key ${licence}"}` } });
+    expect(leaky.all).not.toContain(licence);
+    expect(leaky.stdout).toContain("The licence was not accepted: see: cd ");
+    const none = run(["--domain", "maus.example.com"], { env: { FAKE_EDITION: '{"edition":"oss","features":[],"notice":"x"}' } });
+    expect(none.docker.some((call) => call.includes("/api/edition"))).toBe(false);
   });
 
   it("refuses an OMB_LICENSE_KEY that is not a licence before changing anything, without echoing it", () => {

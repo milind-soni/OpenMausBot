@@ -11,6 +11,9 @@ export interface RegisteredLayer {
   plan?: string;
   sub?: string;
   server?: string;
+  /** Core orders licences by these: the issue date, then `iat` when both carry it. */
+  issued: string;
+  iat?: number;
 }
 
 /** The longest grace core may ask for; a larger number is clamped, never trusted. */
@@ -29,5 +32,7 @@ export function register(options: { licenseKey: string | undefined; graceDays?: 
     ...(claims.plan !== undefined ? { plan: claims.plan } : {}),
     ...(claims.sub !== undefined ? { sub: claims.sub } : {}),
     ...(claims.server !== undefined ? { server: claims.server } : {}),
+    issued: claims.issued,
+    ...(claims.iat !== undefined ? { iat: claims.iat } : {}),
   };
 }

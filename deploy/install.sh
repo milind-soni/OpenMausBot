@@ -6,11 +6,11 @@
 #   ... | sudo sh -s -- --check --domain maus.example.com    only checks the server; changes nothing
 #   ... | sudo sh -s -- --uninstall                          stops the server; keeps your data
 #   ... | sudo sh -s -- --domain maus.example.com <code>     also connects the server to MausBot with a one-time code
-#   ... | sudo OMB_LICENSE_KEY=omb1... sh -s -- --domain maus.example.com   also gives the server its licence (kept in .env)
+#   ... | sudo OMB_LICENSE_KEY="$(cat licence.txt)" sh -s -- --domain maus.example.com   also gives it its licence (kept in .env)
 #
-# A licence can also be pasted later, without a restart: the server reads license.key in its data folder first, every
-# hour and soon after it changes. Paste it, press Enter, then Ctrl-D:
-#   cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'cat > "$OMB_DATA_DIR/license.key"'
+# A licence can also be put in later: the server reads license.key in its data folder (and OMB_LICENSE_KEY), checks the
+# file once a minute and takes a newer licence without a restart. From a file, so the licence stays out of your history:
+#   cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'umask 077; cat > "$OMB_DATA_DIR/license.key"' < licence.txt
 #
 # Nothing runs until the last line calls main, so a download that is cut off part-way runs nothing. It sends no
 # telemetry. The addresses it contacts are the ones the checks name: the image registries, Let's Encrypt, GitHub's
@@ -89,7 +89,7 @@ usage() {
   say "  --no-sandbox       do not prepare this server for the bots' sandbox (only for a server you alone sign in to)"
   say "  <code>             the one-time code MausBot shows, to also connect this server to MausBot"
   say ""
-  say "  A licence goes in as OMB_LICENSE_KEY after sudo: ... | sudo OMB_LICENSE_KEY=omb1... sh -s -- --domain ..."
+  say "  A licence goes in as OMB_LICENSE_KEY after sudo: ... | sudo OMB_LICENSE_KEY=\"\$(cat licence.txt)\" sh -s -- --domain ..."
 }
 
 parse() {
@@ -1117,8 +1117,24 @@ run_install() {
   fi
   if [ "$DOCKER_STATE" = missing ]; then offer_docker; fi
   install_server
+  report_licence
   if [ -n "$CODE" ]; then connect_server; fi
   finish
+}
+
+# When a licence was given, whether the server took it, in one line from its own edition notice. Never the licence:
+# the notice names what is wrong with a key, not the key, and a line that held it anyway is not printed.
+report_licence() {
+  [ -n "$LICENSE_KEY" ] || return 0
+  edition=$(compose exec -T omb curl -sf http://127.0.0.1:8799/api/edition 2>/dev/null || true)
+  case "$edition" in
+    *'"edition":"enterprise"'*) ok "The licence was accepted." ;;
+    *'"notice":"'*)
+      reason=$(printf '%s' "$edition" | tr -d '\r\n' | sed -n 's/.*"notice":"\([^"]*\)".*/\1/p' | cut -c1-300)
+      case "$reason" in *"$LICENSE_KEY"*) reason="see: cd $INSTALL_DIR && sudo docker compose logs omb" ;; esac
+      note "The licence was not accepted: $reason"
+      ;;
+  esac
 }
 
 run_check() {

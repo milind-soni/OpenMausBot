@@ -136,22 +136,26 @@ writes and what it contacts are in
 [Deploy on a VPS](deploy-vps.md#quick-start-one-command-on-your-own-domain).
 
 A licence goes in with the install, as `OMB_LICENSE_KEY` after `sudo` (it is
-kept in `/opt/openmausbot/.env`):
+kept in `/opt/openmausbot/.env`). Save the licence in a file first, so it does
+not end up in your shell history; the installer says whether it was accepted:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo OMB_LICENSE_KEY=omb1… sh -s -- --domain maus.example.com
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo OMB_LICENSE_KEY="$(cat licence.txt)" sh -s -- --domain maus.example.com
 ```
 
-Or paste it later, with no restart: the server reads `license.key` in its
-data folder before `OMB_LICENSE_KEY`, every hour and, on Linux, within seconds
-of the file changing. Paste the licence, press Enter, then Ctrl-D:
+Or put it in later, with no restart: the server also reads `license.key` in
+its data folder, checks it once a minute and takes a newer licence at once:
 
 ```sh
-cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'cat > "$OMB_DATA_DIR/license.key"'
+cd /opt/openmausbot && sudo docker compose exec -T omb sh -c 'umask 077; cat > "$OMB_DATA_DIR/license.key"' < licence.txt
 ```
 
-A file that is not a valid licence never takes away the one in force; it is
-logged once and the server keeps the last good licence until it expires.
+When several licences are on offer (`license.key`, `OMB_LICENSE_KEY`, and the
+copy the server keeps of the last one it accepted, `license.last-good`), the
+one issued last wins. A file that is broken, missing or older never takes away
+the licence in force, not even across a restart: it is logged once, and the
+licence stays until its 14-day grace ends. To remove a licence, delete
+`license.key` and `license.last-good`, unset `OMB_LICENSE_KEY`, and restart.
 
 By hand, on any system with Docker:
 

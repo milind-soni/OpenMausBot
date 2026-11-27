@@ -514,7 +514,7 @@ import {
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
 import { acquireDataDirLeaseForProcess, releaseOnceAtExit } from "./data-dir-lease.ts"; import { markEngineRunClean, startEngineRecords } from "./engine-records.ts";
-import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, refreshLicense, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts"; import { startLicenseRefresh } from "./license-source.ts";
+import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, licenseRefreshWanted, loadEnterpriseLayer, refreshLicense, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts"; import { startLicenseRefresh } from "./license-source.ts";
 import { environmentDescriptor, loadEnvironmentId, OWNER_LENDING, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts"; import { doctorAtStart } from "./doctor/start.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl, releaseDataForBackup } from "./workspace-backup-http.ts";
@@ -15044,8 +15044,8 @@ upgrades.attach(server, handleRequest);
 
 moveFreeze.hold(() => calendarCalls.start(), () => calendarCalls.stop());
 
-// Resolve the edition before accepting requests so /api/edition is never a guess.
-console.log(describeEdition(await loadEnterpriseLayer({ dataDir: DATA_DIR }))); startLicenseRefresh({ dataDir: DATA_DIR, refresh: () => refreshLicense() });
+// Resolve the edition before accepting requests so /api/edition is never a guess. A desktop, a Cloud home and a hosted workspace (licensed by its operator's environment) read OMB_LICENSE_KEY alone, as before: no licence files, no timers.
+console.log(describeEdition(await loadEnterpriseLayer(DESKTOP_MANAGED || CLOUD_HOME || HOSTED_WORKSPACE ? {} : { dataDir: DATA_DIR }))); if (licenseRefreshWanted()) startLicenseRefresh({ dataDir: DATA_DIR, refresh: () => refreshLicense() });
 const startupLicenseWarning = licenseWarning(editionStatus());
 if (startupLicenseWarning) console.warn(startupLicenseWarning);
 console.log(LOOPBACK.trust === "service"
