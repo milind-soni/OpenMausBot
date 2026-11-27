@@ -6,6 +6,9 @@ import { PROGRESS_WRITE_MS, RERUN_BURST, RERUN_GAP_MS, RERUN_HELD, RERUN_SUPERSE
 import { openRuntimeStore, type RuntimeStore } from "./store.ts";
 import { CUT_TWICE, INTERRUPTED_OUTWARD, loopStop, nextGuard, outwardDetail } from "./tree.ts";
 import type { Assignment, Clock, EnqueueRequest, Limits, RunInput, RunResult, TurnRunner } from "./types.ts";
+import { assignmentResultPart } from "../assignment-read.ts";
+import { resultPartLines } from "../drivers/agents-assignment-result.ts";
+import { handoffReply } from "../runtime-coordinator.ts";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -807,6 +810,23 @@ describe("access rechecked while work runs", () => {
     }
     expect(read).toBe(report);
     expect(read.endsWith("US$")).toBe(true);
+    invariants(w);
+  });
+
+  it("says a report cut before it reached the runtime lost its end: a 2,000,003-character reply reads as truncated", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const reply = handoffReply(`${"r".repeat(2_000_000)}US$`);
+    expect(reply).toMatchObject({ chars: 2_000_003 });
+    expect(reply.text).toHaveLength(2_000_000);
+    await w.runner.release(child.id, { kind: "completed", text: reply.text, chars: reply.chars });
+    const row = w.store.get(child.id)!;
+    expect(row.resultChars).toBe(2_000_003);
+    const last = assignmentResultPart(row, String(2_000_000), (...args) => w.store.resultPart(...args)).resultPart!;
+    expect(last).toMatchObject({ offset: 2_000_000, end: 2_000_000, total: 2_000_003, text: "", truncated: true });
+    expect(resultPartLines(last, child.id).join("\n")).toMatch(/\[truncated: only the first 2000000 of 2000003 characters.*Tell the person the end of the report is missing/);
     invariants(w);
   });
 

@@ -1,8 +1,8 @@
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { DatabaseSync, StatementSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openRuntimeStore, RESULT_KEPT_MAX, type RuntimeStore } from "./store.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -285,6 +285,33 @@ describe("runtime store: a result kept beside its record", () => {
     expect(store.resultPart("root", 0, 10)).toBeUndefined();
     store.keepResult("root", "z".repeat(RESULT_KEPT_MAX + 5));
     expect(store.resultPart("root", RESULT_KEPT_MAX, 10)).toEqual({ text: "", total: RESULT_KEPT_MAX + 5, kept: RESULT_KEPT_MAX });
+    // A text already cut upstream (handoffReply) carries its own length: what was kept is all there is, the total says more.
+    store.keepResult("root", "c".repeat(30_000), 2_000_003);
+    expect(store.resultPart("root", 30_000, 16_000)).toEqual({ text: "", total: 2_000_003, kept: 30_000 });
+  });
+
+  it("reads a page from only the stored parts it covers, in JavaScript's own character offsets", () => {
+    const store = open();
+    store.insert(assignment("root"), { kind: "enqueued", at: 1_000 });
+    // Astral characters count two in JavaScript and one in SQLite: the offsets the record's head gives must still line up.
+    const whole = `${"🙂a".repeat(70_000)}Total: 1,240.00 US$`;
+    store.keepResult("root", whole);
+    const all = vi.spyOn(StatementSync.prototype, "all");
+    let read = "";
+    for (;;) {
+      const part = store.resultPart("root", read.length, 16_000)!;
+      if (!part.text) break;
+      read += part.text;
+    }
+    expect(read).toBe(whole);
+    expect(store.resultPart("root", 15_990, 20)).toMatchObject({ text: whole.slice(15_990, 16_010) });
+    const pages = all.mock.results.map(r => r.value as Array<{ text: string }>);
+    all.mockRestore();
+    expect(pages.length).toBeGreaterThan(5);
+    for (const rows of pages) {
+      expect(rows.length).toBeLessThanOrEqual(2);
+      expect(rows.reduce((sum, row) => sum + row.text.length, 0)).toBeLessThanOrEqual(32_000);
+    }
   });
 
   it("prunes it with its tree, and any an older build's prune left behind", () => {

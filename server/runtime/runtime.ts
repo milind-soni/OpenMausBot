@@ -581,7 +581,7 @@ export class Runtime {
     const root = n.parentId ? this.store.get(n.rootId) : n;
     if (result.kind === "continue") {
       // The count comes from events because dispatch deletes n.continuation.
-      this.keepResult(n, result.text);
+      this.keepResult(n, result.text, result.chars);
       n.guard = nextGuard(n.guard, result.evidence);
       const stop = loopStop(n.guard, result.text);
       if (stop) {
@@ -614,7 +614,7 @@ export class Runtime {
       }
       return;
     }
-    this.keepResult(n, result.text);
+    this.keepResult(n, result.text, result.chars);
     if (result.kind === "completed" && result.statusOnly) n.statusOnly = true;
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
@@ -948,15 +948,17 @@ export class Runtime {
 
   /** The record holds a result's head; a longer one is kept whole beside it, so its end is never lost. A failed keep
    * leaves resultChars set with nothing beside it, which the reader reports as cut, never as the whole text. */
-  private keepResult(n: Assignment, said: string): void {
-    const long = said.length > RESULT_MAX;
-    // Masked before the cut, as an answer is, so a secret is never kept half shown at the record's edge.
-    const text = long ? redactSecretsInText(said) : said;
+  private keepResult(n: Assignment, said: string, saidChars?: number): void {
+    // A long result is masked before the cut, as an answer is, so a secret is never kept half shown at the record's edge.
+    const text = said.length > RESULT_MAX || (saidChars ?? 0) > said.length ? redactSecretsInText(said) : said;
+    // saidChars: the reply was already cut before it got here (handoffReply); the reader must still say its end is lost.
+    const whole = Math.max(text.length, saidChars !== undefined && saidChars > said.length ? text.length + saidChars - said.length : 0);
+    const long = whole > RESULT_MAX;
     n.result = clip(text, RESULT_MAX);
     if (!long && n.resultChars === undefined) return;
-    if (long) n.resultChars = text.length; else delete n.resultChars;
+    if (long) n.resultChars = whole; else delete n.resultChars;
     try {
-      this.store.keepResult(n.id, long ? text : undefined);
+      this.store.keepResult(n.id, long ? text : undefined, whole);
     } catch (error) {
       this.log(`keep result threw: ${String(error)}`);
     }

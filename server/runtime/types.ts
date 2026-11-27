@@ -263,15 +263,16 @@ export interface RunInput {
   mode: Mode;
 }
 
+/** `chars` on a result: the reply's own length when `text` is already a cut of it (handoffReply), so the end is reported lost.
+ * statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
 export type RunResult =
-  /** statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
-  | { kind: "completed"; text: string; evidence?: TurnEvidence; statusOnly?: boolean }
+  | { kind: "completed"; text: string; chars?: number; evidence?: TurnEvidence; statusOnly?: boolean }
   /** failure: the system's own words for why the turn failed and the engine's stop reason, apart from anything the bot said. */
-  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence; failure?: { text: string; stopReason?: string | null } }
+  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; chars?: number; evidence?: TurnEvidence; failure?: { text: string; stopReason?: string | null } }
   | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */
-  | { kind: "continue"; text: string; note: string; handoffPath?: string; evidence?: TurnEvidence };
+  | { kind: "continue"; text: string; chars?: number; note: string; handoffPath?: string; evidence?: TurnEvidence };
 
 /** How a host-run root turn ended (Runtime.end). */
 export interface EndResult {

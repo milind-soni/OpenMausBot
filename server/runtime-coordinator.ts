@@ -95,9 +95,15 @@ export function needsInputQuestion(text: string): string | undefined {
 }
 
 /** The turn's reply whole, up to what the store keeps beside a record: the runtime keeps the record's head and the rest
- * beside it, so a long report is never cut here. */
-export function handoffReply(text: string): Pick<HostTurnResult, "text" | "question"> {
-  return { text: text.slice(0, RESULT_KEPT_MAX), question: needsInputQuestion(text) ?? null };
+ * beside it. A longer reply is cut here and carries its own length (`chars`), so the reader says its end was lost. */
+export function handoffReply(text: string): Pick<HostTurnResult, "text" | "question" | "chars"> {
+  const question = needsInputQuestion(text) ?? null;
+  return text.length > RESULT_KEPT_MAX ? { text: text.slice(0, RESULT_KEPT_MAX), chars: text.length, question } : { text, question };
+}
+
+/** A reply's own length when its text is a cut of it. */
+function cutAt(result: Pick<HostTurnResult, "text" | "chars">): { chars?: number } {
+  return result.chars !== undefined && result.chars > result.text.length ? { chars: result.chars } : {};
 }
 
 export function handoffQuestion(result: Pick<HostTurnResult, "text" | "question">): string | undefined {
@@ -725,13 +731,13 @@ export class RuntimeCoordinator implements Coordinator {
     const evidence = (result: HostTurnResult) => result.evidence ? { evidence: result.evidence } : {};
     const result = await this.host.run(node, resumed, signal,
       { text: `${input.restartNote}${body}`, note: `${input.restartNote}${note}`, restartNote: input.restartNote, turn: input.turn });
-    if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
-    if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
+    if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text, ...cutAt(result) };
+    if (result.cap) return { kind: "continue", text: result.text, ...cutAt(result), note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     const question = root ? undefined : handoffQuestion(result);
     if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
-    if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...cutAt(result), ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
+    if (question === undefined) return { kind: "completed", text: result.text, ...cutAt(result), ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
     return { kind: "needs_input", question, ...decide, ...evidence(result) };
