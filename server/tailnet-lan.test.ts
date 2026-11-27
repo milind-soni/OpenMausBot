@@ -79,7 +79,8 @@ it("still binds IPv6 separately and accepts the shared IPv4 address as a tailnet
 });
 
 it("reports a port occupied by another listener instead of borrowing a primary on a different port", async () => {
-  const other = await listen();
+  // The other listener holds 127.0.0.1 itself: Windows lets a specific address bind beside a wildcard on the same port.
+  const other = await listen(false);
   const main = await listen();
   const port = (other.address() as AddressInfo).port;
   share = createTailnetShare({ port, primaryAddress: () => main.address(), interfaces, handle, attach: () => {} });
