@@ -47,7 +47,7 @@ import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-m
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { PRESTART_IDLE_MS, armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
-import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
+import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts"; import { claudeProjectMemory, withProjectMemory } from "./claude-project-memory.ts";
 import { versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
@@ -935,7 +935,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       let promptMsg = claudeUserMessage(turn.text, turn.images);
       // A new process gets the stable half only; the volatile half rides its first message, so a relaunch reuses the cached prefix.
       const halves = promptHalves(turn);
-      const launchSystem = halves.stable ?? turn.system;
       // A CLI without the snapshot flag reopens a session with the prompt it recorded at launch, so a changed prompt
       // would never reach it: rebuild the turn from the recovery text in a fresh session instead of resuming stale.
       const recordedPrompt = createHash("sha256").update(keyedStable(turn) ?? turn.system ?? "").digest("hex");
@@ -1060,8 +1059,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
-      // Project-only settings still find the personal memory and rules via ancestors when the bot lives under HOME.
-      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**")];
+      const projectMemory = isolated && mcpConfigPath ? claudeProjectMemory(cwd, homedir()) : null;
+      if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**"), ...(projectMemory?.excludes ?? [])];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (shellOff(turn)) own.permissions = GUEST_CLAUDE_PERMISSIONS;
       // Approvals and browser credentials expire at the turn boundary; native background workers and cron jobs must not outlive it.
@@ -1144,10 +1143,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (!spare) retryState.delete(threadId);
       };
 
+      const systemText = withProjectMemory(halves.stable ?? turn.system, projectMemory);
       try {
-        if (launchSystem) {
+        if (systemText) {
           systemPromptPath = join(mkdtempSync(join(tmpdir(), "omb-system-")), "prompt.txt");
-          writeFileSync(systemPromptPath, launchSystem, { mode: 0o600 });
+          writeFileSync(systemPromptPath, systemText, { mode: 0o600 });
           args.push("--append-system-prompt-file", systemPromptPath);
         }
         if (socketPath) {
@@ -1235,7 +1235,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (shellOff(turn)) warmContracts.delete(threadId);
       else {
         warmContracts.set(threadId, {
-          args: [...args], env: { ...env }, cwd, system: launchSystem ?? null,
+          args: [...args], env: { ...env }, cwd, system: systemText ?? null,
           mcpServers: mcpConfigPath ? JSON.parse(JSON.stringify(mcpServers)) : null,
           settings: authSettingsPath ? JSON.parse(JSON.stringify(settings)) : null,
         });
