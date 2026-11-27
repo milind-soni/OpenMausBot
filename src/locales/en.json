@@ -8271,7 +8271,7 @@
   "chat.emailDraft.sending": "Sending…",
   "chat.emailDraft.openInGmail": "Open in Gmail",
   "chat.emailDraft.confirmTitle": "Send this email?",
-  "chat.emailDraft.confirmBody": "It goes to {to} now, from your Gmail.",
+  "chat.emailDraft.confirmBody": "It goes to {to} now.",
   "chat.settingsCard.elsewhereDevices": "This is set on the computer itself: open MausBot there, then Settings → Devices → Private network → Your other computers.",
   "chat.helperSuggestion.about": "A helper key lets a small model sort your mail without using your main AI. Jev (typesafe.ai) and Cloudflare Workers AI both offer one.",
   "chat.helperSuggestion.addKey": "Add key",

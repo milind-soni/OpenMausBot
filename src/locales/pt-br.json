@@ -13,7 +13,7 @@
   "chat.emailDraft.sending": "Enviando…",
   "chat.emailDraft.openInGmail": "Abrir no Gmail",
   "chat.emailDraft.confirmTitle": "Enviar este e-mail?",
-  "chat.emailDraft.confirmBody": "Ele vai para {to} agora, pelo seu Gmail.",
+  "chat.emailDraft.confirmBody": "Ele vai para {to} agora.",
   "server.emailDraft.saved": "Rascunho salvo no Gmail: \"{subject}\" para {to}.",
   "server.emailDraft.sent": "E-mail enviado: \"{subject}\" para {to}.",
   "server.emailDraft.noRecipient": "nenhum destinatário ainda",

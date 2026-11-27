@@ -50,7 +50,7 @@ describe("the Gmail draft card", () => {
     for (const part of ["Gmail draft", "ana@example.com", "cy@example.com", "Launch", "Ready to go."]) expect(text).toContain(part);
     await click("Send");
     expect(posted).toEqual([]);
-    expect(document.body.textContent).toContain("It goes to ana@example.com, cy@example.com now, from your Gmail.");
+    expect(document.body.textContent).toContain("It goes to ana@example.com, cy@example.com now.");
     const confirm = [...document.querySelectorAll("button")].filter((one) => one.textContent === "Send").at(-1)!;
     await act(async () => { confirm.click(); });
     expect(posted).toEqual([{ path: "/api/email-draft", body: { threadId: "t1", messageId: "card-1", action: "send", revision: draftRevision(draft.emailDraft!) } }]);

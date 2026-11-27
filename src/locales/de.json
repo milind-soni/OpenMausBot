@@ -13,7 +13,7 @@
   "chat.emailDraft.sending": "Wird gesendet…",
   "chat.emailDraft.openInGmail": "In Gmail öffnen",
   "chat.emailDraft.confirmTitle": "Diese E-Mail senden?",
-  "chat.emailDraft.confirmBody": "Die E-Mail geht jetzt an {to}, aus deinem Gmail.",
+  "chat.emailDraft.confirmBody": "Die E-Mail geht jetzt an {to}.",
   "serverError.emailDraft.notHere": "Dieser Entwurf ist nicht in diesem Gespräch.",
   "serverError.emailDraft.alreadySent": "Diese E-Mail wurde schon gesendet.",
   "serverError.emailDraft.busy": "Dieser Entwurf wird gerade gespeichert oder gesendet.",
