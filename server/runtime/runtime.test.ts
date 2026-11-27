@@ -201,6 +201,32 @@ describe("Runtime: one tree, one lane", () => {
     expect(w.store.all()).toHaveLength(4);
   });
 
+  it("lets work come back to an ancestor only when its reply cannot wait on that ancestor", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    expect(w.store.get(child.id)?.status).toBe("running");
+    const builder = { kind: "bot_turn" as const, botId: "builder", threadId: "builder-work" };
+    const ask = ok(w.runtime.enqueue({ ...toBot("chief", child.id), requester: builder, reply: "poll" }));
+    expect(ask).toMatchObject({ parentId: child.id, reply: "poll", assignee: { botId: "chief" } });
+    const notice = ok(w.runtime.enqueue({ ...toBot("chief", child.id, "A one-way notice"), requester: builder, mode: "notify" }));
+    expect(notice).toMatchObject({ parentId: child.id, reply: "none" });
+    const refused = "Cannot assign work back to an ancestor; results return automatically";
+    expect(w.runtime.enqueue({ ...toBot("chief", child.id, "Wait on me"), requester: builder }))
+      .toMatchObject({ ok: false, outcome: "refused", reason: refused });
+    expect(w.runtime.enqueue({ ...toBot("chief", child.id, "Wait on me too"), requester: builder, reply: "resume" }))
+      .toMatchObject({ ok: false, outcome: "refused", reason: refused });
+    invariants(w);
+    await w.runner.release(child.id, { kind: "completed", text: "builder done" });
+    w.runtime.tick();
+    expect(w.store.get(ask.id)?.status).toBe("running");
+    await w.runner.release(ask.id, { kind: "completed", text: "chief answered" });
+    expect(w.store.get(ask.id)).toMatchObject({ status: "completed", outcome: "done" });
+    expect(w.store.inbox({ botId: "builder", threadId: "builder-work" }).map(i => i.assignmentId)).toEqual([ask.id]);
+    invariants(w);
+  });
+
   it("renews the root's budgets on progress, and never refuses the owed resume turn", async () => {
     const w = world(undefined, { requests: 2, executions: 2 });
     const root = w.runtime.begin(beginReq());
