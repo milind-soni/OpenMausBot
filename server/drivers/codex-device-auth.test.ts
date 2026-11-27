@@ -289,7 +289,7 @@ describe("Codex server-owned device authentication", () => {
     expect(existsSync(join(home, "calls.jsonl"))).toBe(false);
   });
 
-  it.each([["old", "needs updating"], ["disabled", "Enable device-code login"], ["overflow", "unexpected sign-in response"]])("reports a safe, actionable %s failure", async (mode, message) => {
+  it.each([["old", "needs updating"], ["disabled", "did not allow device code sign-in"], ["overflow", "unexpected sign-in response"]])("reports a safe, actionable %s failure", async (mode, message) => {
     const controller = create(mode);
     await expect(controller.start()).rejects.toThrow(message);
     await controller.cancel();

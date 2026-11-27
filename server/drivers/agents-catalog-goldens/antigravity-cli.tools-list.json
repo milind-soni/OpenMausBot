@@ -465,11 +465,7 @@
           "uses": {
             "type": "array",
             "items": {
-              "type": "string",
-              "enum": [
-                "data",
-                "state"
-              ]
+              "type": "string"
             }
           },
           "app_id": {

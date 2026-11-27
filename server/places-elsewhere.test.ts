@@ -225,7 +225,7 @@ describe("a team the person is a member of", () => {
     const here = createPlacesElsewhere({ dataDir: dataDir() });
     here.write({ v: 1, self: { name: "Garage server", kind: "server" }, places: [ACME] });
     const told = (here.explain("Support") as { where: string }).where;
-    expect(told).toContain("Tell the person they can ask it in Acme, or, from My Cloud, move a bot to Acme.");
+    expect(told).toContain("Tell the person they can ask it in Acme, or, from a My Cloud of theirs, move a bot to Acme.");
     expect(told).not.toMatch(/bring their bots together|my home|Bring them together|Keep this computer/);
     expect(resolveTeammate([{ id: "chief", name: "Chief" }], { id: "chief", name: "Chief" }, "Support", here.explain)).toEqual({ error: told });
   });

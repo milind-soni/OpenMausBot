@@ -99,9 +99,12 @@ describe("a bot page's declared uses", () => {
     expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data"] }).can).toMatchObject({ data: true });
     expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data"] }).can.state).toBeUndefined();
     expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data", "state"] }).can).toMatchObject({ data: true, state: true });
-    const room = botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data", "state"], room: true }).can;
+    const connectors = [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }, { server: "notes", tools: ["search"] }];
+    expect(botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", connectors }).can.connectors).toEqual(connectors);
+    const room = botHtmlDocument({ messageId: "m", rev: 0, html: "<p>x</p>", uses: ["data", "state"], connectors, room: true }).can;
     expect(room.data).toBeUndefined();
     expect(room.state).toBeUndefined();
+    expect(room.connectors).toBeUndefined();
   });
 
   it("are refused with a plain reason on a published page", async () => {
@@ -109,7 +112,9 @@ describe("a bot page's declared uses", () => {
     const script = /<script>(.*?)<\/script>/.exec(html)![1]!;
     const window: Record<string, unknown> = { matchMedia: () => ({ matches: false }), open: () => null };
     new Function("window", "matchMedia", script)(window, window.matchMedia);
-    const mausbot = window.mausbot as { data: { query(): Promise<unknown> }; state: { set(): Promise<unknown> } };
+    const mausbot = window.mausbot as { data: { query(): Promise<unknown> }; state: { set(): Promise<unknown> }; connectors: { call(): Promise<unknown>; list(): Promise<unknown> } };
+    await expect(mausbot.connectors.call()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
+    await expect(mausbot.connectors.list()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
     await expect(mausbot.data.query()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
     await expect(mausbot.state.set()).rejects.toThrow(PUBLISHED_PAGE_NO_BOT);
   });

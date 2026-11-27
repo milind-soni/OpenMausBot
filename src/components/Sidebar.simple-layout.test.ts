@@ -1,5 +1,6 @@
-import { Children, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
+import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { AppState, Bot, Group } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
@@ -147,6 +148,19 @@ describe("Simple-mode sidebar layout", () => {
     const advanced = render();
     expect(advanced.tree.find((node) => node.type === GlassScrollFrame)!.props.fade).toBe(true);
     expect(advanced.root.props.className).toContain("max-md:[--scroll-fade-surface:var(--color-app)]");
+  });
+
+  it("stacks the top bar, and the + menu that drops from it, above the list's scroll fade in both modes", () => {
+    const zOf = (markup: string, attribute: string) => Number(new RegExp(`${attribute}[^>]*class="[^"]*\\bz-\\[?(\\d+)`).exec(markup)?.[1]);
+    for (const advanced of [false, true]) {
+      fixture.advanced = advanced;
+      const head = render().tree.find((node) => node.type === GlassBar && node.props.edge === "top")!;
+      const markup = renderToStaticMarkup(createElement(GlassScrollFrame, { fade: true, children: [
+        createElement(GlassBar, { key: "head", edge: "top", className: head.props.className, children: "head" }),
+        createElement(GlassScroller, { key: "list", children: "list" }),
+      ] }));
+      expect(zOf(markup, 'data-glass-bar="top"')).toBeGreaterThan(zOf(markup, 'data-scroll-fade-edge="top"'));
+    }
   });
 
   it("keeps Advanced's Pinned heading and rows, with the Chief as a row", () => {

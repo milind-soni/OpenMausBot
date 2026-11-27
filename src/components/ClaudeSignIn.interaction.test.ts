@@ -78,12 +78,53 @@ it("ends the flow with Claude Code's own words when it refuses the code, and off
 
 it("keeps the flow open after a code Claude Code never took, so a typo can be fixed", async () => {
   fixture.api.mockResolvedValueOnce({ auth: waiting })
-    .mockRejectedValueOnce(new ApiError("Paste the whole code shown on Anthropic's page after signing in.", 500))
+    .mockRejectedValueOnce(new ApiError("That is not the code from Claude's page. If it is the login code Claude emails you, enter it on Claude's page, click Authorize, then paste the longer code Claude shows.", 500))
     .mockResolvedValueOnce({ auth: waiting });
   await startAndPaste("half-a-code");
   expect(fixture.values[AUTH]).toMatchObject({ phase: "waiting", flowId: "flow-one" });
-  expect(fixture.values[ERROR]).toBe("Paste the whole code shown on Anthropic's page after signing in.");
+  expect(fixture.values[ERROR]).toBe("That is not the code from Claude's page. If it is the login code Claude emails you, enter it on Claude's page, click Authorize, then paste the longer code Claude shows.");
   expect(fixture.track).not.toHaveBeenCalled();
+});
+
+it.each(["085764", "08576412", "abc"])("says at once that %s is the emailed login code, not Anthropic's, and keeps Finish off", async (pasted) => {
+  fixture.api.mockResolvedValueOnce({ auth: waiting });
+  render().find((node) => node.type === "button")!.props.onClick!();
+  await flush();
+  fixture.values[CODE] = pasted;
+  const tree = render();
+  const hint = tree.find((node) => node.type === "p" && JSON.stringify(node.props.children).includes("login code Claude emails you"));
+  expect(hint).toBeDefined();
+  expect(JSON.stringify(hint!.props.children)).toContain("click Authorize, then paste the longer code Claude shows");
+  const finish = tree.find((node) => node.type === "button" && (node.props as { type?: string }).type === "submit")!;
+  expect((finish.props as { disabled?: boolean }).disabled).toBe(true);
+  fixture.values[CODE] = "alice-12345678#state";
+  const ready = render();
+  expect(ready.some((node) => node.type === "p" && JSON.stringify(node.props.children).includes("login code Claude emails you"))).toBe(false);
+  expect((ready.find((node) => node.type === "button" && (node.props as { type?: string }).type === "submit")!.props as { disabled?: boolean }).disabled).toBe(false);
+});
+
+const INTERRUPTED = "This sign-in was interrupted because the server stopped. Start sign-in again.";
+it.each([
+  ["the code is sent (its reason)", [new ApiError(INTERRUPTED, 404, { error: INTERRUPTED, reason: "interrupted" })]],
+  ["the code is sent (an older server's 404)", [new ApiError("This sign-in is no longer available in this browser. Start a new sign-in.", 404)]],
+  ["the status check after a refusal (its reason)", [new ApiError("This sign-in is no longer available. Start sign-in again.", 500), { auth: { phase: "failed", flowId: "flow-one", authorizationUrl: null, expiresAt: null, reason: "interrupted" } }]],
+  ["the status check after a refusal (an older server's 404)", [new ApiError("This sign-in is no longer available. Start sign-in again.", 500), new ApiError("This sign-in is no longer available in this browser. Start a new sign-in.", 404)]],
+] as const)("says the sign-in was interrupted when the server lost it at %s, and starts a fresh one", async (_when, answers) => {
+  fixture.api.mockResolvedValueOnce({ auth: waiting });
+  for (const answer of answers) {
+    if (answer instanceof Error) fixture.api.mockRejectedValueOnce(answer);
+    else fixture.api.mockResolvedValueOnce(answer);
+  }
+  await startAndPaste("alice-12345678#state");
+  expect(fixture.values[AUTH]).toMatchObject({ phase: "failed", message: "This sign-in was interrupted. Start again." });
+  const tree = render();
+  expect(tree.some((node) => node.type === "p" && node.props.children === "This sign-in was interrupted. Start again.")).toBe(true);
+  const again = tree.find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("Try again"))!;
+  fixture.api.mockResolvedValueOnce({ auth: { ...waiting, flowId: "flow-two" } });
+  await again.props.onClick!();
+  await flush();
+  expect(fixture.api).toHaveBeenLastCalledWith("/api/instances/claude/auth/start", { method: "POST" });
+  expect(fixture.values[AUTH]).toMatchObject({ phase: "waiting", flowId: "flow-two" });
 });
 
 it("reports no sign-in when the person cancels or the code expires", async () => {

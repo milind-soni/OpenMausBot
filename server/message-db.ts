@@ -12,7 +12,7 @@ import { BOT_TEXT_MESSAGE_INDEXES_SQL } from "./message-db-bot-text-indexes.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
-import { MessageSearchWorker } from "./message-search-worker.ts";
+import { MessageSearchWorker } from "./message-search-worker.ts"; import { messageWritten } from "./message-writes.ts";
 import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
 import type { Notification, NotificationLogEntry } from "../shared/notification.ts";
 export type { SearchHit } from "./message-search-query.ts";
@@ -437,7 +437,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 }
 
 export function insertMessage(threadId: string, message: Message): void {
-  prepared(UPSERT_MESSAGE).run(...messageRow(threadId, message));
+  const row = messageRow(threadId, message); prepared(UPSERT_MESSAGE).run(...row); messageWritten(row[6]);
 }
 
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
@@ -449,11 +449,11 @@ export function importThread(threadId: string, messages: Message[], activeLeafId
     }
     const insert = relinked && database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     for (const message of messages) {
-      if (insert) insert.run(...messageRow(threadId, message));
+      if (insert) { const row = messageRow(threadId, message); insert.run(...row); messageWritten(row[6]); }
       else insertMessage(threadId, message);
     }
     const link = database.prepare("UPDATE messages SET json = json_set(json, '$.parentId', ?) WHERE thread_id = ? AND id = ?");
-    for (const row of relinked ?? []) link.run(row.parentId, threadId, row.id);
+    for (const row of relinked ?? []) { link.run(row.parentId, threadId, row.id); messageWritten(JSON.stringify(row.parentId)); }
     setActiveLeaf(threadId, activeLeafId);
   });
 }
@@ -466,7 +466,7 @@ export function appendMessage(threadId: string, message: Message): void {
 }
 
 export function updateMessage(threadId: string, message: Message): void {
-  prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), cjkSearchText(message.text), threadId, message.id);
+  const json = JSON.stringify(message); prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, json, cjkSearchText(message.text), threadId, message.id); messageWritten(json);
 }
 
 export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {

@@ -16,6 +16,7 @@ import { killCliTree } from "./procs.ts";
 import { readStdioLines } from "./stdio-lines.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsListResultForSessionShare } from "./tool-list-share.ts";
 
 type Json = Record<string, unknown>;
 
@@ -224,6 +225,9 @@ if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
 const childEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.env };
 for (const key of Object.keys(childEnv)) if (key.startsWith("OMB_GATE_")) delete childEnv[key];
+// The gate fits and records the list; a relay behind it doing so too would record the fitted list as the full one.
+delete childEnv[TOOL_LIST_SHARE_ENV];
+delete childEnv[TOOL_LIST_RECORD_ENV];
 
 // CreateProcess cannot exec an npm .cmd shim or a node-shebang script, and a shell would re-interpret JSON argv.
 const resolved = resolveCliSpawn(spec.command, spec.args ?? []);
@@ -409,6 +413,9 @@ readStdioLines(child.stdout, (line) => {
   }
   if (TOOL_LIMIT !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result)) {
     message.result = capToolListResult(result, TOOL_LIMIT, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
+  }
+  if (request?.kind === "list" && message.error === undefined) {
+    message.result = toolsListResultForSessionShare(message.result, process.env, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
   if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
   if (request?.kind === "call" && request.trim && isRecord(result)) {

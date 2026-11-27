@@ -1,5 +1,6 @@
 // Codex's device-code sign-in: `codex login --device-auth`, `codex login status` to keep and confirm a login, `codex logout`.
 import { stripVTControlCharacters } from "node:util";
+import type { SignInOutcome } from "../../shared/sign-in-outcome.ts";
 import { deviceSignInPrompt } from "../../shared/device-sign-in.ts";
 import { DeviceAuthController, type DeviceAuthOptions, type DeviceSignIn } from "./device-auth.ts";
 import { codexReportsLogin } from "./codex-login.ts";
@@ -14,12 +15,19 @@ function loginFailure(output: string): string {
     return "This server's Codex CLI needs updating for browser sign-in. Run npm install -g @openai/codex@latest on the server, then try again.";
   }
   if (/device.{0,40}(disabled|not enabled|not allowed)|enable.{0,40}device/i.test(output)) {
-    return "Enable device-code login in your ChatGPT security settings or ask your workspace admin to allow it, then try again.";
+    return "OpenAI did not allow device code sign-in. Turn it on in ChatGPT Settings → Security (your ChatGPT admin may need to), then try again.";
   }
   if (/expired|expiration|timed out/i.test(output)) {
     return "The ChatGPT sign-in code expired. Start sign-in again for a new code.";
   }
-  return "ChatGPT sign-in did not finish. Check the server's connection and that device-code login is enabled in ChatGPT, then try again.";
+  return "ChatGPT sign-in did not finish. If OpenAI said device code sign-in isn't allowed, turn it on in ChatGPT Settings → Security (your ChatGPT admin may need to), then try again.";
+}
+
+/** `loginFailure` as a fixed code: an expired code, device sign-in refused by the account's settings, else the command ended. */
+function loginFailureReason(output: string): SignInOutcome {
+  if (/device.{0,40}(disabled|not enabled|not allowed)|enable.{0,40}device/i.test(output)) return "refused";
+  if (/expired|expiration|timed out/i.test(output)) return "expired";
+  return "exited";
 }
 
 export const CODEX_DEVICE_SIGN_IN: DeviceSignIn = {
@@ -31,6 +39,7 @@ export const CODEX_DEVICE_SIGN_IN: DeviceSignIn = {
   loginArgs: ["login", "--device-auth"],
   install: "Run npm install -g @openai/codex@latest on the server, then try again.",
   failure: loginFailure,
+  failureReason: loginFailureReason,
   status: {
     args: ["login", "status"],
     read: (code, output) =>

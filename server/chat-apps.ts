@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   APP_LIMITS, APP_PAGE_VERSIONS, appBlockedText, htmlFallbackText, oneLine, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes,
-  type AppCan, type AppDocument, type AppPayload, type AppUse,
+  type AppCan, type AppConnectorUse, type AppDocument, type AppPayload, type AppUse,
 } from "../shared/app.ts";
 import { BOT_HTML_NETWORK } from "../shared/app-frame/csp.ts";
 import { botHtmlDocument, mcpAppDocument, publishedBotHtml, ROOM_CAN } from "../shared/app-frame/document.ts";
@@ -49,7 +49,8 @@ function scrubbed(html: string, title: string): { html: string; title: string; m
 }
 
 /** A folder page also carries the files beside its index.html and where they were read. */
-type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"]; uses?: AppUse[] };
+type PageText = { html: string; format?: "jsx"; files?: PageFile[]; folder?: string; videos?: AppDocData["videos"]; uses?: AppUse[];
+  connectors?: AppConnectorUse[] };
 type MadePage = { ok: true; page: PageText; title: string; masked: boolean; leftOut?: string };
 
 /** The page's text, scrubbed; a jsx page is transpiled first, so one that cannot run is refused with where. */
@@ -90,7 +91,7 @@ async function folderPage(path: string, title: string, folders: BotFolders): Pro
 
 function storePage(docs: AppDocs, page: PageText): AppDocPut {
   const data = { ...(page.format ? { format: page.format } : {}), ...(page.folder ? { folder: page.folder } : {}), ...(page.videos ? { videos: page.videos } : {}),
-    ...(page.uses?.length ? { uses: page.uses } : {}) };
+    ...(page.uses?.length ? { uses: page.uses } : {}), ...(page.connectors?.length ? { connectors: page.connectors } : {}) };
   return docs.put({ source: "html", html: page.html, ...(Object.keys(data).length ? { data } : {}), ...(page.files ? { files: page.files } : {}) });
 }
 
@@ -130,11 +131,11 @@ export function createAppCard(args: {
 
 function placePage(
   args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: MausColor }; threadId: string; authored?(messageId: string): void },
-  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean; uses?: AppUse[] },
+  value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean; uses?: AppUse[]; connectors?: AppConnectorUse[] },
   given: MadePage,
 ): AgentCardResult {
   const { store, docs, bot, threadId } = args;
-  const made = value.uses === undefined ? given : { ...given, page: { ...given.page, uses: value.uses } };
+  const made = value.uses === undefined ? given : { ...given, page: { ...given.page, uses: value.uses, connectors: value.connectors ?? [] } };
   const { page } = made;
   if (value.appId === undefined) {
     const stored = storePage(docs, page);
@@ -167,7 +168,8 @@ function replacePage(
   options: { frameless?: boolean; live?: boolean } = {},
 ): Message | null {
   // A version that says nothing about `uses` (a live folder's reload, a replacement without it) keeps what the page declared.
-  const page = made.page.uses !== undefined ? made.page : { ...made.page, uses: docs.read(existing.app.doc)?.data?.uses };
+  const before = made.page.uses !== undefined ? undefined : docs.read(existing.app.doc)?.data;
+  const page = before === undefined ? made.page : { ...made.page, uses: before?.uses, connectors: before?.connectors };
   const stored = storePage(docs, page);
   const border = options.frameless === undefined ? existing.app.border : !options.frameless;
   // Only a page from a folder can stay live; a page sent as html or jsx stops being live.
@@ -236,7 +238,7 @@ export function appDocument(args: {
       ? `${args.files.origin}${args.files.folder({ threadId: args.threadId, messageId: row.id, doc: version.doc })}` : undefined;
     return botHtmlDocument({ messageId: row.id, rev, html: stored.html, title: row.app.title,
       ...(stored.data?.format === "jsx" ? { format: "jsx" as const } : {}), ...(files ? { files } : {}), ...(room ? { room } : {}),
-      ...(stored.data?.uses?.length ? { uses: stored.data.uses } : {}) });
+      ...(stored.data?.uses?.length ? { uses: stored.data.uses } : {}), ...(stored.data?.connectors?.length ? { connectors: stored.data.connectors } : {}) });
   }
   if (!stored.data?.tool) return null;
   const access: ReturnType<McpAppAccess> = room ? { can: ROOM_CAN } : (args.mcpAccess ?? MCP_READ_ONLY)(row, args.threadId);
@@ -463,6 +465,8 @@ export interface ChatApps {
   readonly states: AppStates;
   /** What the current version of a bot's page declared it uses; none for an MCP app or a missing row. */
   declaredUses(threadId: string, messageId: string): AppUse[];
+  /** The connector tools the current version of a bot's page declared; none for an MCP app or a missing row. */
+  declaredConnectors(threadId: string, messageId: string): AppConnectorUse[];
   /** True while the workspace is being backed up or restored: a page's state waits. */
   paused(): boolean;
   createAppCard(args: {
@@ -623,6 +627,10 @@ export function createChatApps(deps: {
     declaredUses: (threadId, messageId) => {
       const row = appRow(deps.store, threadId, messageId);
       return row?.app.source === "html" && row.app.doc ? docs.read(row.app.doc)?.data?.uses ?? [] : [];
+    },
+    declaredConnectors: (threadId, messageId) => {
+      const row = appRow(deps.store, threadId, messageId);
+      return row?.app.source === "html" && row.app.doc ? docs.read(row.app.doc)?.data?.connectors ?? [] : [];
     },
     paused: () => deps.paused?.() ?? false,
     createAppCard: (args) => {

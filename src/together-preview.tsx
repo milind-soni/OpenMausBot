@@ -4,12 +4,15 @@
 // What's new carrying the notice as its first slide: ?view=whats-new|whats-new-commands|whats-new-off|whats-new-cloud-home
 //   &slide=1..4 (the slide on screen) &who=team (a plan and a team: the Cloud's and the team's news) |own (a plan of one's
 //   own: Start a Team) |none (no plan: the selling Cloud and Team slides) &seen=1 (What's new of the release before was seen)
+// The one list: ?page=cloud (My Cloud's own page), ?home=cloud (the person's home is My Cloud),
+// ?other=asleep|waking|offline|signin (the other place lists no rows and says why), and ?arranged=1 (the person dragged
+// Scout under Git Tasks and Atlas into Finance).
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { CloudAccountState } from "../electron/cloud-account.mjs";
 import type { CloudOffer } from "../electron/cloud-home.mjs";
 import type { RailState } from "../electron/cloud-rail.mjs";
-import type { PlaceBotRow, PlacesTogetherState } from "../electron/places-together.mjs";
+import type { BotHome, PlaceBotRow, PlacesTogetherState } from "../electron/places-together.mjs";
 import { PlacesRail } from "@/components/PlacesRail";
 import { Sidebar } from "@/components/Sidebar";
 import { TogetherNotice } from "@/components/TogetherNotice";
@@ -35,30 +38,39 @@ const here = (id: string, name: string, color: string, title: string, line: stri
   id, name, color, threadId: `${id}-main`, mainThreadId: `${id}-main`, busy: false, activity: "idle",
   tasks: [{ threadId: `${id}-main`, title, createdAt: AT, updatedAt: AT + 5 * 60_000 }], messages: [said(`${id}-1`, 5, line)], ...over,
 }) as Bot;
-const bots: Bot[] = [
-  here("mausbot", "MausBot", "violet", "Today", "Your week is planned; three things need you.", { chiefOfStaff: true } as Partial<Bot>),
-  here("ledger", "Ledger", "orange", "Invoices", "The March invoices are filed in your Drive."),
+const page: BotHome = params.get("page") === "cloud" ? "cloud" : "computer", homePlace: BotHome = params.get("home") === "cloud" ? "cloud" : "computer";
+const otherState = (["asleep", "waking", "offline", "signin"] as const).find((name) => name === params.get("other")) ?? null;
+// Each place's own bots: the page's are its store, the other place's come as rows. Each place has its own MausBot: the
+// tile on its own page, and a row (first, as main lists it) among its rows on the other page.
+const chief = here("mausbot", "MausBot", "violet", "Today", "Your week is planned; three things need you.", { chiefOfStaff: true } as Partial<Bot>);
+const computerBots: Bot[] = [
+  here("ledger", "Ledger", "orange", "Invoices", "The March invoices are filed in your Drive.", { section: "Finance" }),
   here("git", "Git Tasks", "teal", "Release notes", "Release notes drafted from the last 40 commits."),
 ];
-const row = (id: string, name: string, color: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home: "cloud", id, threadId: `${id}-main`, name, color, lastAt: AT + 20 * 60_000, ...over });
-const cloudRows: PlaceBotRow[] = [
-  row("scout", "Scout", "blue", { preview: "Found four flats under budget near the park.", chat: "Flat hunt" }),
-  row("atlas", "Atlas", "green", { preview: "Booked: the 9:40 train to Leeds on Friday.", chat: "Trip", unread: true }),
+const cloudBots: Bot[] = [
+  here("scout", "Scout", "blue", "Flat hunt", "Found four flats under budget near the park."),
+  here("atlas", "Atlas", "green", "Trip", "Booked: the 9:40 train to Leeds on Friday.", { unread: true }),
 ];
+const bots: Bot[] = [chief, ...(page === "cloud" ? cloudBots : computerBots)];
+const rowOf = (home: BotHome, bot: Bot): PlaceBotRow => ({ home, id: bot.id, threadId: bot.threadId, name: bot.name, color: bot.color, lastAt: AT + 20 * 60_000,
+  preview: (bot.messages[0] as { text: string }).text, chat: bot.tasks?.[0]?.title, ...(bot.section ? { section: bot.section } : {}), ...(bot.unread ? { unread: true as const } : {}), ...(bot.chiefOfStaff ? { chief: true as const } : {}) });
+const otherHome: BotHome = page === "cloud" ? "computer" : "cloud";
+const otherRows: PlaceBotRow[] = otherState ? [] : [chief, ...(page === "cloud" ? computerBots : cloudBots)].map((bot) => rowOf(otherHome, bot));
 const whatsNew = view.startsWith("whats-new");
 const joined = !["before", "rail-before"].includes(view) && view !== "notice-off";
 const together: PlacesTogetherState = joined
-  ? { v: 1, available: true, on: true, here: "computer", other: { home: "cloud", state: "ready", bots: cloudRows, newBot: true }, ...(view.startsWith("notice") || whatsNew
+  ? { v: 1, available: true, on: true, here: page, home: homePlace, arranged: params.get("arranged") ? [{ key: "cloud:scout", section: "", after: "computer:git" }, { key: "cloud:atlas", section: "Finance", after: "computer:ledger" }] : [],
+    other: { home: otherHome, state: otherState ?? "ready", bots: otherRows, ...(page === "cloud" ? { sections: ["Finance"] } : {}), newBot: true }, ...(view.startsWith("notice") || whatsNew
     ? { notice: true, commands: view === "whats-new-commands", ...(view.endsWith("cloud-home") ? { profileHome: true as const } : {}) } : {}) }
-  : { v: 1, available: true, on: false, here: "computer", other: null, ...(view === "notice-off" ? { notice: true, commands: false } : {}) };
+  : { v: 1, available: true, on: false, here: page, other: null, ...(view === "notice-off" ? { notice: true, commands: false } : {}) };
 
-const cloudHome = view === "rail-cloud-home";
+const cloudHome = view === "rail-cloud-home" || homePlace === "cloud";
 const rail: RailState = { places: cloudHome ? [
-  { id: "profile:default", name: "This computer", color: null, kind: "computer", profile: "default", opens: true, active: true, paint: { swatch: null }, together: true },
-  { id: "home", name: "My Cloud", color: "purple", kind: "cloud", opens: true, paint: { swatch: "violet" }, together: true },
+  { id: "profile:default", name: "This computer", color: null, kind: "computer", profile: "default", opens: true, ...(page === "computer" ? { active: true } : {}), paint: { swatch: null }, together: true },
+  { id: "home", name: "My Cloud", color: "purple", kind: "cloud", opens: true, ...(page === "cloud" ? { active: true } : {}), paint: { swatch: "violet" }, together: true },
 ] : [
-  { id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true, paint: { swatch: null }, ...(view === "rail-before" ? {} : { together: joined }) },
-  { id: "home", name: "My Cloud", color: "purple", kind: "cloud", opens: true, paint: { swatch: "violet" }, ...(view === "rail-before" ? {} : { together: joined }) },
+  { id: "local", name: "This computer", color: null, kind: "computer", opens: true, ...(page === "computer" ? { active: true } : {}), paint: { swatch: null }, ...(view === "rail-before" ? {} : { together: joined }) },
+  { id: "home", name: "My Cloud", color: "purple", kind: "cloud", opens: true, ...(page === "cloud" ? { active: true } : {}), paint: { swatch: "violet" }, ...(view === "rail-before" ? {} : { together: joined }) },
 ], add: { cloud: true, link: true, address: false } };
 
 let state = together;
@@ -103,11 +115,11 @@ function useWalk() {
 
 function Gallery() {
   useWalk();
-  const state: AppState = { ...initialState, bots, selectedId: "ledger", connected: true, config: { ...initialState.config, profile: { name: "Sam", email: "", aboutMe: "" } } as AppState["config"] };
+  const state: AppState = { ...initialState, bots, sections: page === "cloud" ? [] : ["Finance"], selectedId: page === "cloud" ? "atlas" : "ledger", connected: true, config: { ...initialState.config, profile: { name: "Sam", email: "", aboutMe: "" } } as AppState["config"] };
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   useEffect(() => {
     if (!view.startsWith("rail-")) return;
-    const id = cloudHome ? "profile:default" : "local";
+    const id = view === "rail-cloud-home" ? "profile:default" : "local";
     const timer = setInterval(() => {
       const circle = document.querySelector(`[data-rail-place="${id}"]`);
       if (!circle || document.querySelector("[data-rail-menu]")) return;
