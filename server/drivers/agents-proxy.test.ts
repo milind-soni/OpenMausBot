@@ -1415,13 +1415,40 @@ describe("agents-proxy MCP surface", () => {
     const text = res.result.content[0].text;
     expect(res.result.isError).toBeFalsy();
     expect(text).toContain("Assignment asg-9 → @Helper: failed (provider_error): the engine exited early");
-    expect(text).toContain(`Result (first part): ${"x".repeat(2_000)}`);
+    expect(text).toContain(`Result: ${"x".repeat(2_000)}\n\n[Large tool result: showing the first 2000 characters.`);
     expect(text).not.toContain("x".repeat(2_001));
     expect(text).toContain("Its own hand-offs:\n- asg-9-1 → @Quill: completed");
     expect(text).not.toContain("not settled");
     expect(text).not.toMatch(/Deprecated/);
     expect(lastAssignmentStatusUrl).toBe("/api/internal/assignment-status?id=asg-9");
     assignmentStatusResponse = DONE_ASSIGNMENT;
+  });
+
+  it("assignment_status keeps a long result whole: its head here, the rest read to the end with tool_result_read", async () => {
+    const budget = "Budget: US$ 1,240.00 for the month, US$ 310.00 already spent.";
+    const report = `${"A teammate's report line about the campaign plan.\n".repeat(400)}${budget}`;
+    expect(report.length).toBeGreaterThan(20_000);
+    assignmentStatusResponse = { assignment: { id: "asg-20", botId: "bot-helper", botName: "Helper", status: "completed", outcome: "done", result: report }, children: [], inbox: [] };
+    try {
+      const text = (await callTool("assignment_status", { id: "asg-20" })).result.content[0].text as string;
+      expect(text).toContain(`Result: ${report.slice(0, 2_000)}`);
+      expect(text).not.toContain(budget);
+      const [, id, offset] = text.match(/call tool_result_read with id "(r-[0-9a-f-]{36})" and offset (\d+)/)!;
+      let read = report.slice(0, Number(offset));
+      let next: number | undefined = Number(offset);
+      while (next !== undefined) {
+        const page = (await callTool("tool_result_read", { id, offset: next })).result.content[0].text as string;
+        const [body, notice] = [page.slice(0, page.lastIndexOf("\n\n[")), page.slice(page.lastIndexOf("\n\n["))];
+        read += body;
+        const more = notice.match(/offset (\d+)\.\]$/);
+        next = more ? Number(more[1]) : undefined;
+        if (!more) expect(notice).toBe("\n\n[End of retained result.]");
+      }
+      expect(read).toBe(report);
+      expect(read.endsWith(budget)).toBe(true);
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+    }
   });
 
   it("assignment_status on a hand-off sent from another own chat says its result does not resume this one", async () => {

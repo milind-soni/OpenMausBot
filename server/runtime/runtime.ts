@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { redactSecretsInText } from "../../shared/redact.ts";
 
 import { hostFaultOf, retryCannotFix } from "../host-fault.ts";
+import { TOOL_RESULT_MAX_CHARS } from "../tool-results.ts";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -52,7 +53,8 @@ export interface BeginRequest {
 }
 
 const BRIEF_MAX = 12_000;
-const RESULT_MAX = 12_000;
+/** A teammate's whole report, up to what a saved tool result holds, so assignment_status can still give its end. */
+const RESULT_MAX = TOOL_RESULT_MAX_CHARS;
 const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
 /** Ticks a settlement the store refused is retried on; past them it is dropped, so the tree's own expiry ends it. */

@@ -786,6 +786,18 @@ describe("access rechecked while work runs", () => {
     invariants(w);
   });
 
+  it("keeps a teammate's long report whole, its last line included, for the resume turn and assignment_status", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const report = `${"A line of the teammate's report.\n".repeat(650)}Budget: US$ 1,240.00 for the month.`;
+    expect(report.length).toBeGreaterThan(20_000);
+    await w.runner.release(child.id, { kind: "completed", text: report });
+    expect(w.store.get(child.id)?.result).toBe(report);
+    invariants(w);
+  });
+
   it("drops a reply that lands after the route closed, before any tick could notice", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());

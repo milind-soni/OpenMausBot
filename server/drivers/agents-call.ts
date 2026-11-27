@@ -91,7 +91,7 @@ function assignmentLine(a: Json): string {
   return `${id} → ${who}: ${STATUS_WORDS[status] ?? status}${outcome}${detail}`;
 }
 
-function renderAssignmentStatus(r: Json, id: string): string {
+async function renderAssignmentStatus(r: Json, id: string, context: ToolCallContext): Promise<string> {
   const raw = jsonRecord(r.assignment) ? r.assignment : r;
   const a: Json = { id, ...raw, botName: raw.botName ?? r.toBotName };
   const lines = [`Assignment ${assignmentLine(a)}`];
@@ -100,7 +100,7 @@ function renderAssignmentStatus(r: Json, id: string): string {
     lines.push(`It is parked on a question for the person: ${JSON.stringify(question)}. Nothing moves until the person answers it in that thread; tell them and do not keep checking.`);
   }
   const result = typeof a.result === "string" ? a.result.trim() : "";
-  if (result) lines.push(`Result${result.length > RESULT_HEAD ? " (first part)" : ""}: ${result.slice(0, RESULT_HEAD)}`);
+  if (result) lines.push(`Result: ${await boundedAgentResult(result, saveToolResult(context), { over: RESULT_HEAD, shown: RESULT_HEAD })}`);
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
@@ -136,11 +136,13 @@ function forgetText(passage: string, r: Json): string {
   return `Forgotten everywhere it was saved${aboutMe.length ? ", About me included, which all their bots read" : ""}: ${shown}${more}. Confirm to the person in one plain line what you forgot.`;
 }
 
-export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, (retained, truncated) => {
+const saveToolResult = (context: ToolCallContext) => async (retained: string, truncated: boolean) => {
   if (context.externalRuntime) throw new Error("External runtime results are not cached");
   return context.client.api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
     body: JSON.stringify({ text: retained, truncated }) });
-});
+};
+
+export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, saveToolResult(context));
 
 function ordinal(n: number): string {
   const rem100 = n % 100;
@@ -348,7 +350,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       if (r.sentThisTurn === true) return { text: why };
       return { text: why, isError: true };
     }
-    if (id) return { text: renderAssignmentStatus(r, id) };
+    if (id) return { text: await renderAssignmentStatus(r, id, context) };
     const outstanding = Array.isArray(r.outstanding) ? r.outstanding.filter(jsonRecord) : [];
     if (!outstanding.length) return { text: "Nothing outstanding: no assignment of this conversation is still open." };
     return {
