@@ -8,6 +8,7 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
 import { openBotRow } from "@/state/thread-navigation";
+import { openRoomRow } from "@/lib/last-room-thread";
 
 import { BotAvatar } from "./Avatar"; import { useMotionBeat } from "./mascot-beat";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
@@ -137,18 +138,15 @@ export function openBotContextMenu(onMenu: (menu: MenuState) => void, botId: str
   onMenu({ botId, x: event.clientX, y: event.clientY });
 }
 
-export const GroupListItem = memo(function GroupListItem({
-  group,
-  density,
-  query = "",
-  onMenu,
-}: {
+export const GroupListItem = memo(function GroupListItem({ group, viewerEmail, density, query = "", onMenu }: {
   group: Group;
+  viewerEmail?: string | null;
   density: SidebarDensity;
   query?: string;
   onMenu: (menu: { groupId: string; x: number; y: number }) => void;
 }) {
-  const dispatch = useStoreDispatch(), bots = useStoreSelector((s) => s.bots, sameDrawnBots), instances = useStoreSelector((s) => s.instances);
+  const store = useStoreRef(), { dispatch } = store;
+  const bots = useStoreSelector((s) => s.bots, sameDrawnBots), instances = useStoreSelector((s) => s.instances);
   const advanced = useAdvancedMode(), feed = useRoomFeed(group);
   const selected = useStoreSelector((s) => s.activeView === "chat" && s.selectedId === group.id);
   const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`group:${group.id}`, query ?? "", searchMatchesThreads(query ?? "", group.tasks), selected);
@@ -172,7 +170,7 @@ export const GroupListItem = memo(function GroupListItem({
     <button
       data-sidebar-group-row={group.id}
       aria-current={selected && !expanded ? "page" : undefined}
-      onClick={() => dispatch({ type: "select", id: group.id })}
+      onClick={() => openRoomRow(dispatch, group, store.state(), viewerEmail)}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
@@ -1431,6 +1429,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                       <GroupListItem
                         key={group.id}
                         group={group}
+                        viewerEmail={viewerEmail}
                         density={density}
                         query={q}
                         onMenu={setRoomMenu}

@@ -24,7 +24,7 @@ let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; fixture.dispatch.mockClear(); fixture.find.mockClear(); });
 const open = () => {
   root = createRoot(document.body.appendChild(document.createElement("header")));
-  act(() => root!.render(createElement(ThreadPanelHeading, { group, task, messages: [], working: false })));
+  act(() => root!.render(createElement(ThreadPanelHeading, { group, task, messages: [], working: false, onClose: vi.fn() })));
   act(() => document.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
 };
 const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[data-thread-overlay] button")].find((button) => button.textContent?.trim() === label);
