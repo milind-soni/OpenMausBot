@@ -606,13 +606,13 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     const first = await recorder.until((event) => event.turnId === turnId && (event.type === "request.opened" || event.type === "turn.completed"));
     if (first.type === "request.opened") await instance.adapter.respondToRequest(name, (first as { requestId: string }).requestId, { behavior: "deny" });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
-    const opened = recorder.events.find((event) => event.type === "request.opened") as { commandLine?: string; rawInput?: unknown } | undefined;
-    return { card: opened !== undefined, commandLine: opened?.commandLine, rawInput: opened?.rawInput, answer: readFileSync(answer, "utf8") };
+    const opened = recorder.events.find((event) => event.type === "request.opened") as { commandLine?: string } | undefined;
+    return { card: opened !== undefined, commandLine: opened?.commandLine, answer: readFileSync(answer, "utf8") };
   }
 
   it("answers a file edit inside the turn's folder itself on Auto-accept edits", async () => {
     expect(await asked("edits-inside", "edits", (directory) => ({ kind: "edit", title: "Edit notes.md", locations: [{ path: join(directory, "notes.md") }] })))
-      .toEqual({ card: false, commandLine: undefined, rawInput: undefined, answer: "allow-once" });
+      .toEqual({ card: false, commandLine: undefined, answer: "allow-once" });
     expect(await asked("edits-new-folder", "edits", (directory) => ({ kind: "edit", title: "Edit", locations: [{ path: join(directory, "new", "deep", "notes.md") }] })))
       .toMatchObject({ card: false, answer: "allow-once" });
   }, 90_000);
@@ -641,10 +641,5 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
       .toMatchObject({ card: true, commandLine: "rm -rf ~" });
     expect(await asked("full-other-kind", "full", () => ({ kind: "other", rawInput: { CommandLine: "rm -rf ~" }, title: "Tool" })))
       .toMatchObject({ card: true, commandLine: "rm -rf ~" });
-  }, 90_000);
-  it("forwards structured rawInput on non-shell ACP permission prompts", async () => {
-    const raw = { pid: 100, steps: [{ tool: "click", args: { x: 10, y: 20 } }] };
-    expect(await asked("full-non-shell-raw", "full", () => ({ kind: "other", rawInput: raw, title: "Run mcp_computer_run_steps" })))
-      .toMatchObject({ card: true, commandLine: undefined, rawInput: raw });
   }, 90_000);
 });

@@ -147,8 +147,6 @@ export type RuntimeEvent = RuntimeEventBase &
         /** The files a read tool's ask reads (absolute): a request that reads only the bot's own files is answered
          * without the person. Like `command`, never broadcast. */
         reads?: string[];
-        /** Raw structured tool input forwarded by ACP drivers for non-question permission prompts; never broadcast. */
-        rawInput?: unknown;
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer
