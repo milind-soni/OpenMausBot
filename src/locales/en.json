@@ -7413,6 +7413,7 @@
   "localApps.card.goToChat": "Go to chat",
   "localApps.card.remove": "Remove",
   "localApps.card.botGone": "Bot removed",
+  "localApps.card.sample": "Sample",
   "localApps.removed": "“{name}” removed.",
   "localApps.removeFailed": "“{name}” couldn't be removed. Try again.",
   "localApps.renameFailed": "The new name couldn't be saved. Try again.",

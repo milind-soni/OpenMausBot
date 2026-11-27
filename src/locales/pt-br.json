@@ -7024,6 +7024,7 @@
   "localApps.card.goToChat": "Ir para o chat",
   "localApps.card.remove": "Remover",
   "localApps.card.botGone": "Bot removido",
+  "localApps.card.sample": "Exemplo",
   "localApps.removed": "“{name}” removido.",
   "localApps.removeFailed": "Não foi possível remover “{name}”. Tente de novo.",
   "localApps.renameFailed": "Não foi possível salvar o novo nome. Tente de novo.",

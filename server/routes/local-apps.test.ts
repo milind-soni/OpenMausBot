@@ -11,6 +11,7 @@ import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
 import { createLocalApps, type LocalApps } from "../local-apps/service.ts";
+import { readRemovedStarters, type StarterSource } from "../local-apps/starters.ts";
 import { localAppDocRefs, localAppsFile } from "../local-apps/store.ts";
 import { appDocRefs } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -29,12 +30,12 @@ afterEach(async () => {
 });
 
 /** `seen`: which conversations a paired person (x-session) can read; the owner on this computer sees everything. */
-async function fixture(seen: (person: string, threadId: string) => boolean = () => true, options: { everything?: boolean; live?: (person: string) => boolean } = {}) {
+async function fixture(seen: (person: string, threadId: string) => boolean = () => true, options: { everything?: boolean; live?: (person: string) => boolean; starters?: StarterSource } = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const other = store.createBot({ name: "Other" });
   const chatApps: ChatApps = createChatApps({ store, dataDir: DATA_DIR, sweeps: false, references: () => [...appDocRefs(), ...localAppDocRefs(DATA_DIR)] });
-  const localApps: LocalApps = createLocalApps({ chat: store, docs: chatApps.docs, dataDir: DATA_DIR });
+  const localApps: LocalApps = createLocalApps({ chat: store, docs: chatApps.docs, dataDir: DATA_DIR, ...(options.starters ? { starters: options.starters } : {}) });
   closers.push(chatApps, localApps);
   const routes = [createLocalAppsRoutes({
     apps: localApps, store,
@@ -240,6 +241,22 @@ describe("local apps", () => {
     const guests = (await save(page("<p>g</p>", "Guest's"), "ann")).body.app.id;
     expect((await call("DELETE", `/api/local-apps/${guests}`, undefined, "guest")).status).toBe(403);
     expect((await call("DELETE", `/api/local-apps/${bobs}`, undefined, "bob")).body).toEqual({ ok: true });
+  });
+
+  it("shows a starter app to whoever sees everything; only this computer or an admin removes it, and for good", async () => {
+    const starters: StarterSource = { apps: [{ id: "la_starter_sample__", name: "Sample", file: "sample.html" }], html: () => "<p>Sample data</p>" };
+    const narrow = await fixture(() => true, { starters });
+    expect((await narrow.call("GET", "/api/local-apps")).body.apps.map((app: any) => [app.id, app.sample])).toEqual([["la_starter_sample__", true]]);
+    expect((await narrow.call("GET", "/api/local-apps", undefined, "ann")).body.apps).toEqual([]);
+    expect((await narrow.call("GET", "/api/local-apps/la_starter_sample__/app", undefined, "ann")).status).toBe(404);
+
+    const wide = await fixture(() => true, { everything: true, starters });
+    expect((await wide.call("GET", "/api/local-apps", undefined, "bob")).body.apps.map((app: any) => app.id)).toEqual(["la_starter_sample__"]);
+    expect((await wide.call("DELETE", "/api/local-apps/la_starter_sample__", undefined, "bob")).status).toBe(403);
+    expect((await wide.call("GET", "/api/local-apps/la_starter_sample__/app")).body.srcdoc).toContain("Sample data");
+    expect((await wide.call("DELETE", "/api/local-apps/la_starter_sample__")).body).toEqual({ ok: true });
+    expect(readRemovedStarters(DATA_DIR)).toEqual(new Set(["la_starter_sample__"]));
+    expect((await (await fixture(() => true, { starters })).call("GET", "/api/local-apps")).body.apps).toEqual([]);
   });
 
   it("stops serving a folder app's files once the session that opened it has ended", async () => {

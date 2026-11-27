@@ -8,6 +8,7 @@ import { appRow } from "../chat-apps.ts";
 import { createPageFiles, PAGE_FILES_PREFIX, type PageFilesViewer } from "../page-files.ts";
 import type { Message, StoreChange } from "../store.ts";
 import type { MausColor } from "../../shared/wire.ts";
+import { rememberRemovedStarter, seedStarterApps, type StarterSource } from "./starters.ts";
 import { LocalAppsStore, type LocalAppRecord, type LocalAppVersion } from "./store.ts";
 
 /** Where a saved folder page's files load from. They answer while the app still keeps that version, whatever became of
@@ -76,9 +77,12 @@ export function createLocalApps(deps: {
   /** Asked soon after an app is removed, so the versions only it kept are cleared. */
   sweep?(): void;
   now?(): number;
+  /** The sample apps added at start unless the person removed them. */
+  starters?: StarterSource;
 }): LocalApps {
   const store = new LocalAppsStore(deps.dataDir);
   const now = deps.now ?? Date.now;
+  if (deps.starters) seedStarterApps({ store, docs: deps.docs, dataDir: deps.dataDir, source: deps.starters, now: now() });
   const files = createPageFiles({ docs: deps.docs });
   let sweepTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -122,7 +126,7 @@ export function createLocalApps(deps: {
     view: (record) => ({
       id: record.id, name: record.name, ...(record.icon ? { icon: record.icon } : {}), botId: record.botId, bot: botOf(record.botId), threadId: record.threadId, messageId: record.messageId,
       versions: record.versions.map(({ rev, at }) => ({ rev, at })), rev: shownRev(record), ...(record.pinnedRev !== undefined ? { pinnedRev: record.pinnedRev } : {}),
-      createdAt: record.createdAt, updatedAt: record.updatedAt, manifest: record.manifest, chat: chatHas(record.threadId),
+      createdAt: record.createdAt, updatedAt: record.updatedAt, manifest: record.manifest, chat: chatHas(record.threadId), ...(record.sample ? { sample: true as const } : {}),
     }),
     save({ botId, threadId, messageId, owner }) {
       const row = pageRow(threadId, messageId);
@@ -144,6 +148,7 @@ export function createLocalApps(deps: {
       return store.update(id, ({ pinnedRev: _was, ...rest }) => ({ ...rest, ...(rev === null ? {} : { pinnedRev: rev }) }), now());
     },
     remove(id) {
+      if (store.get(id)?.sample) rememberRemovedStarter(deps.dataDir, id);
       if (!store.remove(id)) return false;
       if (deps.sweep && !sweepTimer) {
         sweepTimer = setTimeout(() => { sweepTimer = null; deps.sweep?.(); }, 2_000);
