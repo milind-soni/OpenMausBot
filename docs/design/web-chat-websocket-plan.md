@@ -52,4 +52,6 @@ Run `node scripts/verify-websocket-feed.ts` with `OMB_CDP_CHROME` set to a Chrom
 
 ## Go decision
 
+**Browser pilot result:** The browser adapter is available through `?liveTransport=auto`; SSE remains the default. The isolated built-UI check in `scripts/verify-websocket-browser.ts` passed normal delivery, replay after a mid-reply disconnect, and SSE fallback with stored and visible replies matched and no duplicate sends. Public HTTPS pairing and a scripted reply over WSS also passed through `demo-maus.sonwork.org`, using only the disposable fixture. Performance comparison thresholds and the affected company laptop remain unverified. The repeatable procedure is in [Browser WebSocket pilot](../verification/websocket-browser.md).
+
 Approve WS-1 to begin. Do not start a later change until the previous checks pass. Do not make WebSocket the production default until the browser demo and public pilot pass. The earlier public SSE test proved that one paired client could receive events. It did not identify the cause of the laptop warning or prove that WebSocket will fix it.

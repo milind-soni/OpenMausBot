@@ -527,3 +527,112 @@ describe("the live connection's phase, which the 30-second still-waiting event n
     stop();
   });
 });
+
+describe("the opt-in WebSocket feed", () => {
+  function socketHarness() {
+    const h = harness();
+    const sockets: FakeEventSource[] = [];
+    const fallback = vi.fn();
+    const platform = { ...h.platform, onTransportFallback: fallback, createWebSocket: (url: string) => {
+      const socket = new FakeEventSource(url);
+      sockets.push(socket);
+      return socket;
+    } };
+    return { ...h, sockets, fallback, platform };
+  }
+
+  it("requires hello, bounds a silent upgrade and ignores its late callbacks", () => {
+    const h = socketHarness();
+    const onOpen = vi.fn();
+    const onFrame = vi.fn();
+    const stop = openLiveEvents({ onFrame, onOpen, onSnapshotRequired: async () => true }, h.platform);
+    const socket = h.sockets[0]!;
+    const late = socket.onmessage!;
+    socket.message({ kind: "ping" });
+    expect(onOpen).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(3_000);
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(h.sources).toHaveLength(1);
+    late({ data: JSON.stringify({ kind: "message" }), lastEventId: "lost:2" });
+    expect(onFrame).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("replays from the committed cursor once then remains on SSE", async () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, h.platform);
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:1", resumed: false });
+    await Promise.resolve();
+    h.sockets[0]!.message({ kind: "bot" }, "epoch:2");
+    const error = h.sockets[0]!.onerror!;
+    error(); error();
+    vi.advanceTimersByTime(500);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.sockets[1]!.url).toContain("since=epoch%3A2");
+    h.sockets[1]!.message({ kind: "hello", cursor: "epoch:2", resumed: true });
+    h.sockets[1]!.error();
+    expect(h.sources).toHaveLength(1);
+    expect(h.sources[0]!.url).toContain("since=epoch%3A2");
+    expect(h.fallback).toHaveBeenCalledOnce();
+    h.sources[0]!.error();
+    expect(h.sources).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    expect(h.sources).toHaveLength(2);
+    stop();
+  });
+
+  it("does not spend the hello budget while hidden or offline", () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, h.platform);
+    h.setVisible(false);
+    vi.advanceTimersByTime(10_000);
+    h.setVisible(true);
+    h.setOnline(false);
+    vi.advanceTimersByTime(10_000);
+    expect(h.sources).toHaveLength(0);
+    h.setOnline(true);
+    vi.advanceTimersByTime(3_000);
+    expect(h.sources).toHaveLength(1);
+    stop();
+  });
+
+  it("keeps snapshot failure separate from transport failure", async () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => false }, h.platform);
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:1", resumed: false });
+    await Promise.resolve();
+    vi.advanceTimersByTime(500);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.sources).toHaveLength(0);
+    expect(h.sockets[1]!.url).not.toContain("since=");
+    stop();
+  });
+  it("does not commit a snapshot that completes after socket loss", async () => {
+    const h = socketHarness();
+    let finish: (loaded: boolean) => void = () => {};
+    const snapshot = new Promise<boolean>((resolve) => { finish = resolve; });
+    const opened = vi.fn();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onOpen: opened, onSnapshotRequired: () => snapshot }, h.platform);
+    h.sockets[0]!.open();
+    expect(opened).not.toHaveBeenCalled();
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:4", resumed: false });
+    h.sockets[0]!.message({ kind: "bot" }, "epoch:5");
+    h.sockets[0]!.error();
+    finish(true);
+    await Promise.resolve();
+    vi.advanceTimersByTime(500);
+    expect(h.sockets[1]!.url).not.toContain("since=");
+    stop();
+  });
+
+  it("falls back when constructing a WebSocket throws", () => {
+    const h = harness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, {
+      ...h.platform, createWebSocket: () => { throw new Error("unsupported"); }, onTransportFallback: vi.fn(),
+    });
+    vi.advanceTimersByTime(500);
+    expect(h.sources).toHaveLength(1);
+    stop();
+  });
+
+});
