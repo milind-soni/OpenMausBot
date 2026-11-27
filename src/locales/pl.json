@@ -1651,7 +1651,7 @@
   "team.deleteKeepBotsSimple": "Jego boty i czaty grupowe zostają wraz z rozmowami, ale poza jakimkolwiek działem. Dział i jego wspólne instrukcje zostaną usunięte. Tej operacji nie można cofnąć.",
   "team.delete": "Usuń dział",
   "team.actions": "Działania dla działu {name}",
-  "teamSettings.menu": "Ustaw dla wszystkich botów w tym dziale…",
+  "teamSettings.menu": "Ustawienia wszystkich botów…",
   "teamSettings.title": "Ustaw dla wszystkich botów w dziale {name}",
   "teamSettings.general": "Ogólny",
   "teamSettings.close": "Zamknij ustawienia działu",
