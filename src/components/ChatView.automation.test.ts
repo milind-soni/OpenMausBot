@@ -127,6 +127,23 @@ describe("an automation's line in the chat", () => {
     expect(caption("m2")).toBeNull();
   });
 
+  it("gives the routine header a scannable pill-and-divider boundary above the reply without tucking into the message before it", async () => {
+    await draw(transcript([{ id: "r1", parentId: "m2", role: "bot", kind: "text", text: "# Morning Summary\n\nAll systems normal.", at: at(3), automation: line("run-1") }]));
+    const label = caption("run-1")!;
+    expect(label.className).toContain("mt-2");
+    expect(label.className).not.toContain("text-[11px]");
+    expect(label.querySelector("[data-automation-rule]")?.getAttribute("aria-hidden")).toBe("true");
+    const badge = label.querySelector<HTMLElement>("[data-automation-badge]")!;
+    expect(badge.className).toContain("ui-chip");
+    expect(badge.className).toContain("bg-panel");
+    expect(badge.textContent).toContain("Inbox brief");
+    expect(badge.querySelector<HTMLElement>('[title="Inbox brief"]')?.textContent).toBe("Inbox brief");
+    const open = badge.querySelector<HTMLButtonElement>("button")!;
+    expect(open.className).toContain("motion-reduce:transition-none");
+    expect(open.className).toContain("focus-visible:outline-focus");
+    expect(document.querySelector('[data-mid="r1"]')?.hasAttribute("data-tuck")).toBe(false);
+  });
+
   it("says when the run needs the person or could not finish, and offers no run it cannot open", async () => {
     await draw(transcript([
       { id: "r1", parentId: "m2", role: "bot", kind: "text", text: "Should I send it?", at: at(3), automation: line("run-1", { needsYou: true }) },
