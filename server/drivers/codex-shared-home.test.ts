@@ -6,6 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 
+// Windows without Developer Mode refuses file symlinks with EPERM while directory junctions succeed; the flag
+// reproduces that split so tests can assert the turn fails loudly instead of falling back to the person's home.
+const linkFailure = vi.hoisted(() => ({ failFileLinks: false }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const symlinkSync = ((target: Parameters<typeof actual.symlinkSync>[0], link: Parameters<typeof actual.symlinkSync>[1],
+    type?: Parameters<typeof actual.symlinkSync>[2]) => {
+    if (linkFailure.failFileLinks && type !== "junction") {
+      throw Object.assign(new Error(`EPERM: operation not permitted, symlink '${target}' -> '${link}'`), { code: "EPERM" });
+    }
+    return (actual.symlinkSync as (...args: unknown[]) => unknown)(target, link, type);
+  }) as typeof actual.symlinkSync;
+  return { ...actual, symlinkSync, default: { ...actual, symlinkSync } };
+});
+
 let root: string;
 let shared: string;
 let plan: string;
@@ -26,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  linkFailure.failFileLinks = false;
   vi.restoreAllMocks();
   rmSync(root, { recursive: true, force: true });
 });
@@ -118,7 +134,7 @@ describe("linkSharedCodexHome", () => {
     expect(readFileSync(join(shared, "sessions", "2026", "rollout-person.jsonl"), "utf8")).toBe("person's chat");
   });
 
-  it("links the person's own login into a home that uses it, and says when it cannot", () => {
+  it("links the person's own login into a home that uses it, and fails loudly when it cannot", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(shared, "models_cache.json"), "person's models");
     write(join(shared, "history.jsonl"));
@@ -132,12 +148,24 @@ describe("linkSharedCodexHome", () => {
 
     const copied = join(root, "copied", "codex");
     write(join(copied, "auth.json"), "a login of its own");
-    expect(linkSharedCodexHome(shared, copied, "person")).toBe(false);
+    expect(() => linkSharedCodexHome(shared, copied, "person")).toThrow(/keeps its own "auth\.json" from earlier turns/);
     expect(readFileSync(join(copied, "auth.json"), "utf8")).toBe("a login of its own");
 
     const signedOut = join(root, "signed-out", ".codex");
     write(join(signedOut, "config.toml"));
     expect(linkSharedCodexHome(signedOut, join(root, "fresh", "codex"), "person")).toBe(true);
+  });
+
+  it("throws, naming the refused file link, when the person's login cannot be linked in, while an own turn carries on", () => {
+    write(join(shared, "auth.json"), "person's sign-in");
+    write(join(shared, "config.toml"), "person's config");
+    linkFailure.failFileLinks = true;
+
+    expect(() => linkSharedCodexHome(shared, plan, "person")).toThrow(/"auth\.json".*EPERM/s);
+    expect(() => lstatSync(join(plan, "auth.json"))).toThrow();
+
+    expect(linkSharedCodexHome(shared, plan)).toBe(true);
+    expect(readFileSync(join(shared, "config.toml"), "utf8")).toBe("person's config");
   });
 
   it("keeps the plan's own sign-in real and removes a link that stands in its place", () => {
@@ -248,7 +276,7 @@ describe("keepChatsOutOfCodexHistory", () => {
     expect(linksTo(join(mausHome("codex"), "config.toml"), join(shared, "config.toml"))).toBe(true);
   });
 
-  it("keeps the person's home when the login may be in the keyring, cannot be linked, or the home is MausBot's already", () => {
+  it("keeps the person's home when the login may be in the keyring or the home is MausBot's already, and fails loudly when their login cannot be linked in", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(shared, "config.toml"), 'cli_auth_credentials_store = "keyring"\n');
     expect(turnEnv().CODEX_HOME).toBeUndefined();
@@ -265,7 +293,17 @@ describe("keepChatsOutOfCodexHistory", () => {
 
     rmSync(mausHome("codex"), { recursive: true });
     write(join(mausHome("codex"), "auth.json"), "a login of its own");
-    expect(turnEnv().CODEX_HOME).toBeUndefined();
+    expect(() => turnEnv()).toThrow(/keeps its own "auth\.json"/);
+  });
+
+  it("fails the turn loudly when file links are refused (EPERM), instead of running it in the person's home", () => {
+    write(join(shared, "auth.json"), "person's sign-in");
+    write(join(shared, "config.toml"), 'model = "gpt-5"\n');
+    linkFailure.failFileLinks = true;
+    const env: Record<string, string | undefined> = { HOME: join(root, "person") };
+    expect(() => keepChatsOutOfCodexHistory(env, "codex", data())).toThrow(/isolate its Codex home from yours.*EPERM/s);
+    expect(env.CODEX_HOME).toBeUndefined();
+    expect(env.CODEX_SQLITE_HOME).toBeUndefined();
   });
 
   it("keeps the person's home when it has no login file or a system-wide setting may put the login in the keyring", () => {
@@ -281,12 +319,9 @@ describe("keepChatsOutOfCodexHistory", () => {
     expect(turnEnv({}, false, [managed]).CODEX_HOME).toBe(mausHome("codex"));
   });
 
-  it("keeps the person's home, and the turn going, when MausBot's Codex home cannot be made", () => {
+  it("fails the turn loudly when MausBot's Codex home cannot be made, instead of using theirs", () => {
     write(join(shared, "auth.json"), "person's sign-in");
     write(join(data(), "providers", "codex-own"), "a file where a folder should be");
-    let env: Record<string, string | undefined> = {};
-    expect(() => { env = turnEnv(); }).not.toThrow();
-    expect(env.CODEX_HOME).toBeUndefined();
-    expect(env.CODEX_SQLITE_HOME).toBeUndefined();
+    expect(() => turnEnv()).toThrow(/isolate its Codex home from yours/);
   });
 });

@@ -78,12 +78,15 @@ function linkEntry(target: string, link: string, name: string): boolean {
 /** Whose login a MausBot home uses: its own (a ChatGPT plan's) or the person's, linked in. */
 export type CodexHomeLogin = "own" | "person";
 
-/** Makes MausBot's Codex home and links the person's own Codex home into it. Linking never fails the turn: an entry
- * that cannot be linked (a file link Windows refuses without Developer Mode) stays as the home had it. True when the
- * home has the login it should: its own, or the person's (none when they have none). */
+/** Makes MausBot's Codex home and links the person's own Codex home into it. An "own" turn links best-effort: an entry
+ * that cannot be linked stays as the home had it, and the return says whether the home has the login it should. A
+ * "person" turn needs the person's login linked in, or isolation is gone: it returns true only when the home has it and
+ * throws (naming the failure, a file link Windows refuses without Developer Mode among them) otherwise, so the turn
+ * fails instead of quietly running in the person's own Codex home. */
 export function linkSharedCodexHome(sharedHome: string | null, mausHome: string, login: CodexHomeLogin = "own"): boolean {
+  const cannotShare = (reason: string): boolean => { if (login === "person") throw new Error(reason); return false; };
   mkdirSync(mausHome, { recursive: true, mode: 0o700 });
-  if (!isAbsolute(mausHome)) return false;
+  if (!isAbsolute(mausHome)) return cannotShare("MausBot's Codex home path is not absolute");
   const own = resolve(mausHome);
   const apart = (name: string) => CHATS.has(name) || DATABASE.test(name) || (login === "own" && PRIVATE.has(name))
     || USER_INSTRUCTIONS.has(name);
@@ -93,28 +96,32 @@ export function linkSharedCodexHome(sharedHome: string | null, mausHome: string,
     const path = join(own, name);
     if (apart(name)) try { if (lstatSync(path).isSymbolicLink()) unlinkSync(path); } catch {}
   }
-  if (!sharedHome || !isAbsolute(sharedHome)) return false;
+  if (!sharedHome || !isAbsolute(sharedHome)) return cannotShare("no absolute path to your Codex home");
   const shared = resolve(sharedHome);
-  if (inside(shared, own) || inside(own, shared)) return false;
+  if (inside(shared, own) || inside(own, shared)) return cannotShare("your Codex home and MausBot's contain each other");
   let names: string[];
   try {
     for (const name of SHARED_FOLDERS) mkdirSync(join(shared, name), { recursive: true, mode: 0o700 });
     names = readdirSync(shared);
   } catch (error) {
     note(shared, `could not share your Codex home with MausBot's: ${(error as Error).message}`);
-    return false;
+    return cannotShare(`your Codex home could not be read: ${(error as Error).message}`);
   }
   const kept: string[] = [];
+  let loginLinkFailure: string | null = null;
   for (const name of new Set([...SHARED_FOLDERS, ...names])) {
     if (apart(name) || LOCAL.has(name) || SQLITE_JOURNAL.test(name)) continue;
     try {
       if (!linkEntry(join(shared, name), join(own, name), name)) kept.push(name);
     } catch (error) {
       note(join(own, name), `could not link ${JSON.stringify(name)} of your Codex home into MausBot's: ${(error as Error).message}`);
+      if (name === "auth.json") loginLinkFailure = `could not link ${JSON.stringify(name)} of your Codex home into MausBot's: ${(error as Error).message}`;
     }
   }
   if (kept.length) note(own, `MausBot's Codex home keeps its own ${kept.join(", ")} from earlier turns; the rest of your Codex home is shared`);
-  return login === "own" || personLogin(shared, own);
+  if (login === "own" || personLogin(shared, own)) return true;
+  throw new Error(loginLinkFailure ?? (kept.includes("auth.json")
+    ? "MausBot's Codex home keeps its own \"auth.json\" from earlier turns" : "your Codex login could not be linked into MausBot's home"));
 }
 
 /** The home reads the person's login file itself, or, like the person's home, has none. */
@@ -140,18 +147,22 @@ function keyringLogin(home: string, managedConfigs: readonly string[]): boolean 
 
 /** A turn on the person's own Codex sign-in runs in MausBot's Codex home for this instance, so its chats stay out of their
  * Codex and ChatGPT apps. It keeps their home when that is MausBot's already (a Team Cloud's engine homes, anything in
- * the data folder), when their home has no login file or their login may be in the keyring, or when their login cannot
- * be linked or MausBot's home cannot be made: the turn still runs. */
+ * the data folder), when their home has no login file, or when their login may be in the keyring. When isolation itself
+ * fails, the turn fails with a clear error instead of quietly running in the person's own Codex home, where the Codex
+ * desktop app can hold a thread's writer lock and every later turn ends in "already has an active writer". */
 export function keepChatsOutOfCodexHistory(env: Record<string, string | undefined>, instanceId: string, dataDir = DATA_DIR,
   teamCloud = engineHomes.active(), managedConfigs: readonly string[] = MANAGED_CODEX_CONFIGS): void {
   const person = codexHome(env);
   if (!person || teamCloud || inside(resolve(dataDir), person) || !existsSync(join(person, "auth.json")) || keyringLogin(person, managedConfigs)) return;
   const home = join(resolve(dataDir), "providers", "codex-own", createHash("sha256").update(instanceId).digest("hex"), "codex");
   try {
-    if (!linkSharedCodexHome(person, home, "person")) return;
+    linkSharedCodexHome(person, home, "person");
   } catch (error) {
-    note(home, `could not make MausBot's Codex home, so this turn uses yours: ${(error as Error).message}`);
-    return;
+    throw new Error(
+      `MausBot could not isolate its Codex home from yours (${(error as Error).message}): the chat would share your own Codex home with the Codex desktop app.` +
+      (process.platform === "win32"
+        ? " File links need Developer Mode or admin rights on Windows; enable it and retry." : " Fix the cause and retry."),
+    );
   }
   env.CODEX_HOME = home;
   // Codex keeps its databases here too unless config.toml names another folder.
