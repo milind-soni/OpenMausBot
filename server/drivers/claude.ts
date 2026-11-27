@@ -967,7 +967,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       const replaysUserMessages = turnCliVersion === null || versionAtLeast(turnCliVersion, CLAUDE_REPLAY_FLOOR);
       if (replaysUserMessages) args.push("--replay-user-messages");
-      const isolated = !inheritsUserConfig(turnEnvironment); const projectSettingsOnly = isolated && claudeCliSupports(turnCliVersion, "--setting-sources");
+      const inheritsUserHooks = turnEnvironment.OMB_CLAUDE_INHERIT_USER_HOOKS === "1";
+      const isolated = !inheritsUserConfig(turnEnvironment);
+      const projectSettingsOnly = isolated && claudeCliSupports(turnCliVersion, "--setting-sources");
       const disallowed = [...(config.disallowedTools ?? []), ...unusableBuiltIns({ isolated, listsTools: config.tools !== undefined, guest: shellOff(turn) }), ...claudeDisabledNativeSkillRules(botId)];
       if (disallowed.length) args.push("--disallowedTools", disallowed.join(","));
       if (turn.toolScope !== undefined && (!isolated || turn.mcpFromUserConfig || turnCliVersion === null || !claudeCliSupports(turnCliVersion, "--strict-mcp-config"))) {
@@ -976,7 +978,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (isolated) {
         // Without these every turn gets this machine's MCP servers, connectors, skills, hooks and CLAUDE.md (one desktop: 407 tools, ~10k tokens).
         if (!turn.mcpFromUserConfig && claudeCliSupports(turnCliVersion, "--strict-mcp-config")) args.push("--strict-mcp-config");
-        if (projectSettingsOnly) args.push("--setting-sources", "project");
+        if (projectSettingsOnly) {
+          if (inheritsUserHooks) args.push("--setting-sources", "user,project");
+          else args.push("--setting-sources", "project");
+        }
         if (turn.userSkillsDir && !shellOff(turn)) args.push("--add-dir", turn.userSkillsDir);
       }
       const compactWindow = autoCompactWindow(turnEnvironment, injected.model);
