@@ -1,5 +1,4 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
-import { createPortal } from "react-dom";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
 import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
@@ -7,7 +6,7 @@ import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar"; import { useMotionBeat } from "./mascot-beat";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
-import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
+import { searchMatchesThreads } from "@/lib/search-disclosure";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
 import { BotProjectDialog } from "./BotProjects";
@@ -168,24 +167,19 @@ export function usePinnedCircleDrag(bots: Bot[]) {
 }
 
 export const PinnedBotCircle = memo(function PinnedBotCircle({
-  threadPanelHost,
+  threadsOpen = false,
+  onToggleThreads,
   drag,
   dragging = false,
   drop = null,
   prevId,
   nextId,
   ...props
-}: BotRowProps & PinnedCircleDragProps & { threadPanelHost?: HTMLElement | null }) {
-  const { bot, selected, mascotMotion, pendingQueued, reveal, density, query, dispatch, onMenu } = props;
+}: BotRowProps & PinnedCircleDragProps & { threadsOpen?: boolean; onToggleThreads?: () => void }) {
+  const { bot, selected, mascotMotion, pendingQueued, density, query, dispatch, onMenu } = props;
   const showThreads = useShowThreads();
   const visible = useVisibleMessages(bot);
-  const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`bot:${bot.id}`, showThreads ? query : "", searchMatchesThreads(query, bot.tasks, bot.projects));
-  // nonce, not the thread id: a second jump to the same thread opens it again
-  useEffect(() => {
-    if (reveal && showThreads) setThreadsOpen(true);
-  }, [reveal?.nonce, showThreads]);
   const hasThreadList = botHasThreadList(bot, query);
-  const expanded = showThreads && density !== "icons" && threadsOpen && hasThreadList;
   const activityTasks = sidebarBotActivityTasks(bot, pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
@@ -258,37 +252,39 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
           aria-label={t(threadsOpen ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
           aria-expanded={threadsOpen}
           aria-controls={pinnedCircleThreadPanelId(bot.id)}
-          onClick={() => setThreadsOpen((open) => !open)}
+          onClick={onToggleThreads}
           className="flex size-4 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60"
         ><ChevronRight aria-hidden="true" size={13} className={cn("transition-transform", threadsOpen && "rotate-90")} /></button>}
       </div>}
-      {expanded && threadPanelHost ? createPortal(<PinnedCircleThreadPanel {...props} />, threadPanelHost) : null}
     </div>
   );
 });
 
 function PinnedCircleGridRow({
-  bots,
+  items,
   columns,
-  row,
+  openId,
+  choose,
   circleDrag,
 }: {
-  bots: Bot[];
+  items: BotRowProps[];
   /** 0 until the grid has been measured: one auto-fill row is enough. */
   columns: number;
-  row: (bot: Bot) => BotRowProps;
+  openId: string | null;
+  choose: (id: string | null) => void;
   circleDrag: (bot: Bot) => PinnedCircleDragProps;
 }) {
-  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const active = items.find(({ bot, query }) => bot.id === openId && botHasThreadList(bot, query));
   return (
     <div>
       <div
         className="grid gap-1"
         style={{ gridTemplateColumns: columns > 0 ? `repeat(${columns}, minmax(84px, 1fr))` : "repeat(auto-fill, minmax(84px, 1fr))" }}
       >
-        {bots.map((bot) => <PinnedBotCircle key={bot.id} {...row(bot)} {...circleDrag(bot)} threadPanelHost={host} />)}
+        {items.map((item) => <PinnedBotCircle key={item.bot.id} {...item} {...circleDrag(item.bot)}
+          threadsOpen={item.bot.id === openId} onToggleThreads={() => choose(item.bot.id === openId ? null : item.bot.id)} />)}
       </div>
-      <div ref={setHost} />
+      {active && <PinnedCircleThreadPanel key={active.bot.id} {...active} />}
     </div>
   );
 }
@@ -338,6 +334,17 @@ export function PinnedBotRoster({
   const [width, setWidth] = useState(0);
   const circleLayout = circles && density !== "icons";
   const { ranked, dragProps: circleDrag, frameProps, moved } = usePinnedCircleDrag(bots);
+  const showThreads = useShowThreads();
+  const items = ranked.map(row);
+  const query = items[0]?.query.trim() ?? "";
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [searchChoice, setSearchChoice] = useState<{ id: string | null } | null>(null);
+  useEffect(() => setSearchChoice(null), [query]);
+  const choose = (id: string | null) => query ? setSearchChoice({ id }) : setOpenId(id);
+  const reveal = items.find((item) => item.reveal);
+  useEffect(() => {
+    if (circleLayout && showThreads && reveal) choose(reveal.bot.id);
+  }, [circleLayout, showThreads, reveal?.reveal?.nonce]);
   useLayoutEffect(() => {
     const element = frame.current;
     if (!element || !circleLayout) return;
@@ -351,17 +358,20 @@ export function PinnedBotRoster({
   if (!circleLayout) {
     return (
       <>
-        {ranked.map((bot) => <ListItem key={bot.id} {...row(bot)} />)}
+        {items.map((item) => <ListItem key={item.bot.id} {...item} />)}
       </>
     );
   }
   const columns = width > 0 ? pinnedCircleColumns(width) : 0;
-  const circleRows = columns > 0 ? chunkPinnedCircles(ranked, columns) : [ranked];
+  const circleRows = columns > 0 ? chunkPinnedCircles(items, columns) : [items];
+  const expandedId = query
+    ? searchChoice ? searchChoice.id : items.find(({ bot }) => searchMatchesThreads(query, bot.tasks, bot.projects))?.bot.id ?? null
+    : openId;
   return (
     <div className="px-1 pb-1">
       <div ref={frame} data-sidebar-pinned-circles="" className="flex flex-col gap-1" {...frameProps}>
-        {circleRows.map((rowBots) => (
-          <PinnedCircleGridRow key={rowBots.map((bot) => bot.id).join("\0")} bots={rowBots} columns={columns} row={row} circleDrag={circleDrag} />
+        {circleRows.map((group) => (
+          <PinnedCircleGridRow key={group[0]?.bot.id ?? ""} items={group} columns={columns} openId={expandedId} choose={choose} circleDrag={circleDrag} />
         ))}
       </div>
       <span role="status" className="sr-only">{moved}</span>
