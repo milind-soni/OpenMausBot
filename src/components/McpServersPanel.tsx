@@ -32,7 +32,7 @@ import { HostedMcpIcon } from "./HostedMcpIcon";
 import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
-import { HOSTED_KEY_HEADER, HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, mcpServerConnected, ownMcpServer, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
+import { HOSTED_KEY_HEADER, HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, mcpServerConnected, ownMcpServer, preferredHostedServer, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
 import { CHAT_TOOL_LIMIT, chatToolBudgetFit } from "../../shared/tool-budget";
 import { openBotSettings } from "./bot-panel/panel-link";
 
@@ -392,7 +392,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
 
   const connectHosted = async (app: HostedApp) => {
     if (!servers || busy !== null || signingIn !== null) return;
-    const existing = servers.find((server) => hostedOf(server) === app);
+    const existing = preferredHostedServer(servers, app);
     if ("key" in app) { await connectWithKey(app, existing); return; }
     if (existing) { await signIn(existing); return; }
     setBusy(`hosted:${app.id}`);
@@ -545,7 +545,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   }
 
   function renderHostedCard(app: HostedApp) {
-    const server = servers?.find((listed) => hostedOf(listed) === app);
+    const server = servers ? preferredHostedServer(servers, app) : undefined;
     const connected = Boolean(connections?.[app.id]);
     const result = server && probe[server.name];
     const failed = error || (cardFailure?.id === app.id ? cardFailure.message : null) || (result && !result.ok ? result.error : null);

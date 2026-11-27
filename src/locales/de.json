@@ -1,4 +1,6 @@
 {
+  "famulor.description": "KI-Telefonagenten: Assistenten, Anrufe, Kampagnen, Leads und Buchungen über Famulors offizielle Integration.",
+  "famulor.notice": "Mit Famulor anmelden. Kein API-Schlüssel nötig. Famulor fragt Zugriff auf Assistenten, Anrufe, Kampagnen, Leads und Einstellungen deines Workspace. Anrufe und Kampagnen können Credits kosten. Bots mit vollem Zugriff können sie ohne weitere Bestätigung starten.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API-Schlüssel einfügen",
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",

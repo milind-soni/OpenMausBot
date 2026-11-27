@@ -25,6 +25,8 @@
   "hostedMcp.connect": "Connect {service}",
   "hostedMcp.disconnect": "Disconnect {service}",
   "whop.notice": "Sign in with Whop. No API key needed. Whop requests admin access across businesses you manage, and requires confirmation for consequential financial or destructive actions.",
+  "famulor.description": "AI phone agents: assistants, calls, campaigns, leads and bookings through Famulor’s official integration.",
+  "famulor.notice": "Sign in with Famulor. No API key needed. Famulor asks for access to your workspace’s assistants, calls, campaigns, leads and settings. Calls and campaigns can cost credits. Bots in Full access can start them without another confirmation.",
   "hostedMcp.connected": "{service} is connected and enabled. Bot access follows each bot’s MCP server selection.",
   "hostedMcp.access": "Bot access",
   "hostedMcp.accessHint": "Bots using every enabled MCP server inherit this connection. Open a bot’s Access settings to choose its servers. Changes apply to its next task.",

@@ -1,9 +1,11 @@
 import { Clapperboard, CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
 
 import bubblavLogo from "@/assets/bubblav/logo.png";
+import famulorLogo from "@/assets/famulor/logo.png";
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
 import { POSTIZ_SERVER } from "../../shared/postiz";
+import { FAMULOR_MCP_URL } from "./famulor-integration";
 
 export interface HostedMcpApp {
   /** The card's id (`data-app-tile`) and the name the server is added under (then `-2`, `-3`…): a valid server name. */
@@ -35,6 +37,15 @@ export const HOSTED_MCP_APPS = [
     description: "whop.description",
     notice: "whop.notice",
     keywords: "whop checkout memberships",
+  },
+  {
+    id: "famulor",
+    label: "Famulor",
+    url: FAMULOR_MCP_URL,
+    icon: { image: famulorLogo },
+    description: "famulor.description",
+    notice: "famulor.notice",
+    keywords: "famulor phone agents assistants calls campaigns leads bookings",
   },
   {
     id: "agentcard",
@@ -137,15 +148,37 @@ export function hostedServerName(app: HostedMcpApp, servers: ReadonlyArray<{ nam
 
 export const HOSTED_KEY_HEADER = "Authorization";
 
+type HostedListing = ServerAddress & {
+  enabled: boolean;
+  auth?: "signed-in" | "needs-sign-in";
+  headerKeys?: readonly string[];
+};
+
+function holdsHostedKey(server: { headerKeys?: readonly string[] }): boolean {
+  return server.headerKeys?.some((name) => name.toLowerCase() === HOSTED_KEY_HEADER.toLowerCase()) === true;
+}
+
+function hostedServerReady(app: HostedApp, server: HostedListing): boolean {
+  return server.enabled && ("key" in app ? holdsHostedKey(server) : server.auth === "signed-in");
+}
+
+/** The listing a card acts on: an enabled signed-in match (a key app: enabled and holding its key), otherwise the first match. */
+export function preferredHostedServer<T extends HostedListing>(servers: readonly T[], app: HostedApp): T | undefined {
+  let fallback: T | undefined;
+  for (const server of servers) {
+    if (hostedMcpApp(server) !== app) continue;
+    if (hostedServerReady(app, server)) return server;
+    fallback ??= server;
+  }
+  return fallback;
+}
+
 /** The one rule for "connected", shared by the cards, the Connected filter and the count: the server is on and signed
  * in, or for a key app, on and holding its key. */
-export function hostedConnections(
-  servers: ReadonlyArray<ServerAddress & { enabled: boolean; auth?: "signed-in" | "needs-sign-in"; headerKeys?: readonly string[] }>,
-): HostedConnections {
-  const holdsKey = (server: (typeof servers)[number]) => server.headerKeys?.some((name) => name.toLowerCase() === HOSTED_KEY_HEADER.toLowerCase()) === true;
+export function hostedConnections(servers: ReadonlyArray<HostedListing>): HostedConnections {
   return Object.fromEntries(HOSTED_MCP_APPS.map((app) => [
     app.id,
-    servers.some((server) => hostedMcpApp(server) === app && server.enabled && ("key" in app ? holdsKey(server) : server.auth === "signed-in")),
+    servers.some((server) => hostedMcpApp(server) === app && hostedServerReady(app, server)),
   ])) as HostedConnections;
 }
 

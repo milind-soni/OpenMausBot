@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, type HostedApp } from "./hosted-mcp-apps";
+import { HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, preferredHostedServer, type HostedApp } from "./hosted-mcp-apps";
 
 describe("hosted MCP apps", () => {
   it("has unique ids that are valid server names and unique https endpoints", () => {
@@ -56,6 +56,16 @@ describe("hosted MCP apps", () => {
   it("takes a pasted key exactly for the services with no browser sign-in, each with an https page to make one", () => {
     expect(HOSTED_MCP_APPS.filter((app) => "key" in app).map((app) => app.id)).toEqual(["vapi", "telnyx"]);
     for (const app of HOSTED_MCP_APPS) if ("key" in app) expect(app.key.url).toMatch(/^https:\/\//);
+  });
+
+  it("acts on the enabled signed-in listing when a disconnected duplicate comes first", () => {
+    const famulor = HOSTED_MCP_APPS.find((app) => app.id === "famulor")!;
+    const off = { name: "famulor", type: "http" as const, url: famulor.url, enabled: false, auth: "needs-sign-in" as const, headerKeys: [] };
+    const on = { name: "famulor-2", type: "http" as const, url: famulor.url, enabled: true, auth: "signed-in" as const, headerKeys: [] };
+    expect(preferredHostedServer([off, on], famulor)?.name).toBe("famulor-2");
+    expect(preferredHostedServer([on, off], famulor)?.name).toBe("famulor-2");
+    expect(preferredHostedServer([off], famulor)?.name).toBe("famulor");
+    expect(hostedConnections([off, on]).famulor).toBe(true);
   });
 
   it("counts each app on its own server", () => {
