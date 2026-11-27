@@ -102,6 +102,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   const leftNotes = new Map<string, string[]>();
   /** One wake of the sandbox at a time, shared by every bot opening meanwhile. */
   let waking: Promise<{ id: string; started: boolean }> | null = null;
+  /** Erasures of deleted bots' profiles in a sleeping sandbox, one after another. */
+  let erasing: Promise<void> = Promise.resolve();
   let boxId: string | null = null;
   let sweep: ReturnType<typeof setInterval> | null = null;
   let leftAwakeArmed = false;
@@ -191,15 +193,60 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
   }
 
   /** A deleted bot: its sessions end without their sign-ins going home, its sync stamps go, and its profile in the
-   * sandbox is erased now if the sandbox is awake, else at its next wake. */
+   * sandbox is erased now if the sandbox is awake. A profile in a sleeping sandbox is not left for a wake that may never
+   * come (eraseAsleep, after this returns). */
   async function erase(botId: string): Promise<void> {
     const key = profileKey(botId);
+    const had = rails.hasProfile(key);
     rails.forgetProfile(key);
     sync.forget(key);
     const ops = deps.ops();
     // Erased while the sandbox is still awake for this session, before its close lets it sleep.
     if (awake && boxId && ops) await erasePending(ops, boxId);
     for (const [session, owner] of Array.from(sessions)) if (owner === botId) await close(session, { discard: true, why: "its bot was deleted" });
+    // A bot that never had a profile there keeps today's way: its erase waits for the next wake.
+    if (had && ops && rails.pendingErasures().includes(key)) {
+      erasing = erasing.then(() => eraseAsleep(ops)).catch((error: unknown) => log(`browser sandbox: a deleted bot's profile is erased at its next wake (${error instanceof Error ? error.name : "error"})`));
+    }
+  }
+
+  /** Deleted bots' profiles in a sleeping sandbox: with no other bot's profile left in it the whole sandbox is deleted (the
+   * next browser makes a fresh one); else it is woken once for the erase and let sleep, when a start may be sent now. When
+   * none may (the day's starts, a hold), the erase waits for the next wake. */
+  async function eraseAsleep(ops: ComputerOps): Promise<void> {
+    if (rails.pendingErasures().length === 0) return;
+    // A browser open or opening: its wake erases them.
+    if (bots().size > 0 || awake) return;
+    const box = await ops.find();
+    if (!box) {
+      for (const key of rails.pendingErasures()) rails.erased(key);
+      return;
+    }
+    boxId = box.id;
+    // Awake without a browser of this run (one an earlier run left): erased now; its idle path lets it sleep.
+    if (READY_STATES.has(box.state)) { await erasePending(ops, box.id); return; }
+    const broken = box.state === "error" || box.state === "cancelled";
+    if (broken || rails.profilesIn(box.id).length === 0) {
+      if (bots().size > 0) return;
+      const removed = await ops.remove(box.id);
+      for (const key of rails.pendingErasures()) rails.erased(key);
+      if (boxId === box.id) boxId = null;
+      log(`browser sandbox: ${removed ? "deleted" : "deletion requested and journaled"}: no bot with a browser profile is left in it`);
+      return;
+    }
+    if (rails.refusal(true) !== null) { log("browser sandbox: a deleted bot's profile is erased at its next wake: no start may be sent now"); return; }
+    try {
+      // wake() erases the pending profiles once the sandbox is ready.
+      await wake(ops);
+      log("browser sandbox: woken to erase a deleted bot's profile");
+    } catch (error) {
+      if (error instanceof StaysHome) return;
+      if (error instanceof OldRelay) { rails.oldRelay(); return; }
+      if (error instanceof Unavailable) { rails.unavailable(error.reason, error.resetsAt); return; }
+      refused(error);
+    } finally {
+      letSleep();
+    }
   }
 
   async function launch(request: OpenRequest, ops: ComputerOps, gaveUp: () => boolean): Promise<Opened> {
@@ -208,6 +255,9 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     const quit = async () => { if (box) await ops.quit(box.id, key).catch(() => undefined); };
     // Past the deadline this call already opened the home's browser: what follows only readies the sandbox for the next.
     const home = (_request: OpenRequest, reason: HomeReason): Opened => (gaveUp() ? { home: reason } : fallback(request, reason));
+    // An erase of a deleted bot's profile under way (a sandbox being deleted, or woken for it) finishes first: this open then
+    // finds the sandbox as that left it, never one half deleted.
+    await erasing;
     try {
       box = await wake(ops);
       if (gaveUp()) return { home: "slow" };
@@ -425,6 +475,8 @@ export function createCloudBrowser(deps: CloudBrowserDeps) {
     dialed: (session: string): number => doors.dialed(session),
     failed,
     erase,
+    /** Settles once the erasures erase() started in the background are done (tests). */
+    erased: (): Promise<void> => erasing,
     /** Lines for the session's next browser call (downloads that arrived, or could not). */
     takeNotes: (session: string): string[] => {
       const left = leftNotes.get(session) ?? [];
