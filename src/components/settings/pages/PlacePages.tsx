@@ -70,6 +70,7 @@ function useGroupedNote(): [boolean, () => void] {
 export function OverviewPage() {
   const { ctx, place, go } = useSettingsShell();
   const team = useStoreSelector((state) => state.config?.team), dispatch = useStoreDispatch();
+  const sandboxShown = useStoreSelector((state) => Boolean(state.config?.botSandbox));
   const engines = useStoreSelector((state) => state.instances.filter((instance) => instance.snapshot.state === "available").length);
   const [note, dismiss] = useGroupedNote();
   const phone = usePhonePlaceState(!ctx.client);
@@ -87,6 +88,8 @@ export function OverviewPage() {
       </SettingsRows>
     )}
     {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} />{ctx.admin && <BotSandboxRow />}</SettingsRows></SettingsGroup>}
+    {/* Where this app updates itself the Updates group is not shown; an admin still sees the bots' sandbox. */}
+    {place.kind === "server" && !ctx.client && window.ogb?.updater && ctx.admin && sandboxShown && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><BotSandboxRow /></SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
         {!ctx.client && <SettingsLinkRow title={t("settings.page.devices")} value={phoneValue} onClick={() => go("devices", "phones")} data={{ "data-glance": "devices" }} />}

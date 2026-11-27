@@ -916,6 +916,10 @@ prepare_sandbox() {
   if ! image_has_sandbox; then
     # An image from before the sandbox ignores compose.box.yaml's OMB_BOT_BOX=required: it would run the bots unconfined.
     if install_has_sandbox; then
+      # .env already names the new image: the running container's goes back, so a later `docker compose up` cannot
+      # start the one without the sandbox.
+      running=$(docker inspect -f '{{.Config.Image}}' "$(compose ps -q omb 2>/dev/null | head -n 1)" 2>/dev/null || true)
+      if [ -n "$running" ]; then set_env OMB_IMAGE "$running"; fi
       fail "This install runs its bots in the sandbox, and $IMAGE has none, so it would run them without it. The server was not restarted. Name a version that has the sandbox with OMB_INSTALL_IMAGE, or run this again with --no-sandbox, on a server you alone sign in to."
     fi
     unset_env COMPOSE_FILE

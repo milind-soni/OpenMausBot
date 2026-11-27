@@ -172,6 +172,16 @@ if sudo grep -qx "COMPOSE_FILE=compose.yaml:compose.box.yaml" "$DIR/.env"; then
   bound=$(box_check --mutate=bind-data || true)
   jq -e '.failed | index("config-hidden") != null' <<<"$bound" >/dev/null || fail "the self-check did not notice an uncovered data folder: $bound"
   echo "sandbox: $(jq -r '"\(.passed)/\(.total) checks passed"' <<<"$checks"); uncovered, it fails $(jq -c '.failed' <<<"$bound")"
+  # One command confined as a bot's turn is, in this server's own layout: it runs, and cannot read a file in the
+  # server's data folder that the server itself reads.
+  confined() { (cd "$DIR" && sudo docker compose exec -T omb node dist-server/bot-box/box-check.js --exec -- "$@"); }
+  (cd "$DIR" && sudo docker compose exec -T omb sh -c 'echo outside-canary > /data/.openmausbot/e2e-outside.txt')
+  [ "$(confined /bin/echo confined-ran)" = confined-ran ] || fail "a confined command did not run"
+  [ "$( (cd "$DIR" && sudo docker compose exec -T omb cat /data/.openmausbot/e2e-outside.txt) )" = outside-canary ] || fail "the server cannot read its own canary"
+  if confined cat /data/.openmausbot/e2e-outside.txt; then fail "a confined command read the server's data folder"; fi
+  if confined sh -c 'test -e /data/.openmausbot/messages.db || test -e /data/.openmausbot/config.json'; then fail "a confined command sees the server's database or settings"; fi
+  (cd "$DIR" && sudo docker compose exec -T omb rm -f /data/.openmausbot/e2e-outside.txt)
+  echo "a confined command runs, and cannot read the server's data folder"
 else
   contains "$OUT/install.txt" "has no bots' sandbox yet." "the install neither turned the sandbox on nor said why not"
   echo "this image has no sandbox; the install said so"

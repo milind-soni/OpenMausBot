@@ -110,6 +110,7 @@ case "$*" in
   "image inspect -f {{index .Config.Labels "*) echo "\${FAKE_IMAGE_VERSION-v0.1.151}" ;;
   "compose exec -T omb node dist-server/bot-box/box-check.js --public=none") echo "$FAKE_BOX_CHECK"; case "$FAKE_BOX_CHECK" in *'"failed":[]'*) ;; *) exit 1 ;; esac ;;
   "inspect --format {{.State.Health.Status}} c1") echo "$FAKE_HEALTH" ;;
+  "inspect -f {{.Config.Image}} c1") printf '%s' "\${FAKE_RUNNING_IMAGE:-}" ;;
 esac`,
 };
 
@@ -645,9 +646,12 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
 
   it("never moves an install whose bots run in the sandbox to a version without it, and never restarts it to do so", () => {
     const boxed = run(["--domain", "maus.example.com"]);
-    const older = run([], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } }, { dir: boxed.dir });
+    const older = run([], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]', OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.150", FAKE_RUNNING_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.151" } }, { dir: boxed.dir });
     expect(older.status).toBe(1);
-    expect(older.stderr).toContain("This install runs its bots in the sandbox, and ghcr.io/milind-soni/openmausbot:v0.1.151 has none, so it would run them without it. The server was not restarted.");
+    // .env names the image that runs, not the one without the sandbox.
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("OMB_IMAGE=ghcr.io/milind-soni/openmausbot:v0.1.151\n");
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).not.toContain("v0.1.150");
+    expect(older.stderr).toContain("This install runs its bots in the sandbox, and ghcr.io/milind-soni/openmausbot:v0.1.150 has none, so it would run them without it. The server was not restarted.");
     expect(older.docker).not.toContain("docker compose up -d --remove-orphans");
     expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
   });
