@@ -2,7 +2,7 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { personPin, type Place } from "@/lib/place";
 import type { Bot, Task } from "@/state/store";
 import { ApprovalChip, GoalToggle } from "./ComposerPlusMenu";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker } from "./ModelPicker"; import { isPlaceId } from "@/lib/place-chat"; import { PlacedModelPill } from "./PlacedBotMenu";
 import { PhonePlus } from "./PhonePlus";
 import { PlaceChip } from "./PlaceChip";
 import type { ApprovalChoice } from "./thread-approval";
@@ -33,7 +33,7 @@ export function ComposerAdvancedTools({ profile, bot, task, locked, remoteClient
         <PhonePlus quiet onAttach={onAttach} goal={goal} teach={teach} callBotId={callBotId}
           approval={approval && bot && { name: bot.name, choice: approval }} place={place} />
       )}
-      {bot && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} quiet />}
+      {bot && (isPlaceId(bot.id) ? <PlacedModelPill bot={bot} quiet /> : <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} quiet />)}
       {!locked && goal?.on && <GoalToggle {...goal} />}
       {!locked && ownLevel && <ApprovalChip choice={approval} quiet />}
       {!locked && place && personPin(task) && <PlaceChip bot={place.bot} task={task} live={place.disabled} disabled={place.disabled} onPin={onPin} />}

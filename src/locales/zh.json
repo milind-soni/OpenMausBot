@@ -254,6 +254,7 @@
   "server.problem.routineFailed": "{bot} 遇到问题：{where} 的定时例行任务失败了",
   "server.problem.routineFailedWhy": "{bot} 遇到问题：{where} 的定时例行任务失败了：「{detail}」",
   "server.incidents.where.thread": "在对话 #{title} 中",
+  "server.chief.retryQueued": "已将 {name} 的对话 #{title} 的重试加入队列",
   "server.incidents.where.main": "在主对话中",
   "server.connect.signIn": "请登录 {site}。",
   "server.connect.signInWhy": "请登录 {site}：{reason}",

@@ -49,7 +49,7 @@ import { signInCardResumePrompt, signInCardWaits, signInOutcome } from "../share
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { createPlaceMoves, type ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts"; import { recordHeldReason, withHeldReason } from "./routine-held-reasons.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey, providerToolConfig, savedToolGrant } from "./provider-tool-allow.ts";
@@ -577,6 +577,7 @@ import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerStore, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts"; import { createBotLibraryRoutes } from "./routes/bot-library.ts";
+import { createCalendarCallRoutes } from "./routes/calendar-calls.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts"; import { privateUntilShared } from "./new-bot-sharing.ts"; import { createShareNotice } from "./host/share-notice.ts"; import { memberDeleteRefusal } from "./host/member-bots.ts";
 import { createTeamOwnerRoutes } from "./routes/team-owners.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
@@ -6299,7 +6300,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const publicEvent = event.type === "request.opened" ? { ...event, command: undefined, commandLine: undefined, reads: undefined } : publicReplyEvent(event, groupSpeakers.get(event.threadId)?.botId);
     broadcast({ kind: "runtime", event: publicEvent });
   }
-  if (event.type === "turn.completed") { const note = runComputers.turnEnded(event.threadId, event.ok); if (note) store.appendMessage(event.threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${note}`, ok: true } }); } const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(event) ?? null);
+  if (event.type === "turn.completed") { const note = runComputers.turnEnded(event.threadId, event.ok); if (note) store.appendMessage(event.threadId, { role: "bot", kind: "activity", tool: { name: `recovery: ${note}`, ok: true } }); } const routineRun = privateImageEvent ? null : (routines?.handleRuntimeEvent(withHeldReason(event)) ?? null);
   const replayed = savedSteps.dispatch.answering(event); limitClock.noteRuntimeEvent(replayed ? undefined : runningTurnEngines.get(event.threadId)?.instanceId, event);
   const ownerBot = store.botByThread(event.threadId); // A quick route's model is the one this turn ran on, so its holds and its working turns are that model's.
   const bot = ownerBot ? botForThread(ownerBot.id, event.threadId) ?? undefined : undefined; if (bot && !replayed) limitTakeover.noteRuntimeEvent(bot.id, { ...bot.modelSelection, model: quickFallback.routedModel(event.threadId) ?? bot.modelSelection.model }, event);
@@ -6452,7 +6453,7 @@ bus.subscribe((event: RuntimeEvent) => {
         ? heldAtSafetyFloor(event, autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
           commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
-          toolAllowed: savedToolGrant(toolAllowKey, asker.alwaysAllow, store.bot(asker.id)?.alwaysAllow), ownFilesRead: !guestDriven && !linkHeld && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
+          summary: event.summary, toolAllowed: savedToolGrant(toolAllowKey, asker.alwaysAllow, store.bot(asker.id)?.alwaysAllow), ownFilesRead: !guestDriven && !linkHeld && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
         }))
         : null;
       // Claude accepts --permission-mode auto for any model but silently starts in Manual where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it).
@@ -6534,7 +6535,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 : "Your bot has a question",
           ...runtimeRequestCardFields(event, {
             permission, guestDriven, commandAllowlist: command ?? undefined, allowKey: toolAllowKey ?? undefined,
-            held: approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined),
+            held: recordHeldReason(event.threadId, event.requestId, approvalHeldReason(heldContext) ?? (permission && guestDriven && routineRun ? confinedWhy(event.threadId) : undefined)),
             heldCode: approvalHeldNote(heldContext),
           }),
         },
@@ -8802,6 +8803,13 @@ calendarCalls = new CalendarCallManager({
   botExists: (botId) => Boolean(store.bot(botId)),
   onDue: deliverCalendarCall,
 });
+ROUTES.push(createCalendarCallRoutes({
+  calls: calendarCalls,
+  audienceConflict: calendarAudienceConflict,
+  ensureRoom: ensureCalendarCallRoom,
+  roomView: (auth, group) => personRooms.groupForAuth(auth, publicGroupState(group)),
+  messages: (threadId) => store.messagesFor(threadId),
+}));
 const checkBacks = createCheckBacks({ dataDir: DATA_DIR, alive: (botId, threadId) => directChatOf(botId, threadId), busy: (botId, threadId) => threadBusy(botId, threadId), line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)), start: async (record, prompt) => { await startTurn(record.botId, prompt, { threadId: record.threadId, cardContinuation: true, origin: record.origin }); }, paused: (error) => [BOT_HELD_CODE, BOT_PAUSED_CODE].includes(String((error as { code?: unknown } | null)?.code)) }); const botWaits = new WaitManager(createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines!.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) })); store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy) botWaits.noteBotBusy(change.botId); });
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
@@ -11952,7 +11960,7 @@ ROUTES.push(createThreadRoutes({
   companionMutationToken: () => companionMutationToken,
   cliOwnerToken: () => cliOwnerToken,
   pageSize, messagePage, messagePageBefore, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
-  botComputerControlSnapshot: sharedVm.botSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, stopRefusal: (auth, threadId) => runOwners.stopRefusal(threadId, runActor(auth)), memberDefaultBot: CLOUD_TEAM ? (email) => { const own = ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name, opened: (made) => void mausbotOwnChat.claim(made) }); if (own) void mausbotOwnChat.claim(own); return own; } : undefined,
+  botComputerControlSnapshot: sharedVm.botSnapshot, messageFileRootsForThread, viewerFor, visibleTo, coordinator, groupThreadIsWorking, stopRefusal: (auth, threadId) => runOwners.stopRefusal(threadId, runActor(auth)), memberDefaultBot: CLOUD_TEAM ? (email) => { const own = ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM.name, opened: (made) => void mausbotOwnChat.claim(made) }); if (own) void mausbotOwnChat.claim(own); return own; } : undefined, ...(!CLOUD_HOME && !HOSTED_WORKSPACE ? { ownerOutsideFileRefuse: [DATA_DIR, ...(process.env.OMB_USER_DATA ? [process.env.OMB_USER_DATA] : [])] } : {}),
   uploads: uploadsFor(createUploadOwners(DATA_DIR), Boolean(CLOUD_TEAM)),
   attachmentInUse: (name) => threadsReferencing(name).length > 0 || store.bots.some((bot) => bot.avatarUrl === `/api/attachments/${name}`),
   keptAttachments: CLOUD_TEAM ? undefined : keptAttachments,
@@ -12240,7 +12248,7 @@ ROUTES.push(createComputerRoutes({
 ROUTES.push(createStatusRoutes({
   store, cfg,
   staticDir: STATIC_DIR,
-  sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown, records: privateRecords, boxOn: () => botBox.enabled(),
+  sharedWorkspaceFullAccessEnabled, adminActivityRecording, configStatus, broadcast, threadShown, records: privateRecords, boxOn: () => botBox.enabled(), eventLogDrops: () => bus.dropStats(),
   browserEngineInstall: { get: () => browserEngineInstall, set: (install) => { browserEngineInstall = install; } },
   browserEngineInstallError: { set: (error) => { browserEngineInstallError = error; } },
 }));
@@ -13714,18 +13722,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!task || (CLOUD_TEAM && !teamHost.readableFrom(fromThreadId)(threadId))) return json(res, 404, { error: "no such thread on that bot" });
         if (!outsideLineage.mayReach(fromThreadId, threadId)) return json(res, 403, { error: OUTSIDE_STAYS_HERE });
         requireActiveInternalCapability();
-        let retried: "request" | "turn";
+        let retried: "request" | "turn" | "queued";
         try {
           retried = await retryThread({ chief: from, bot: target, threadId, note, unattended: isUnattended(from.id, fromThreadId), ...(store.groupByThread(fromThreadId) ? {} : { coordinateBots }) });
         } catch (error) {
           return json(res, 409, { error: error instanceof Error ? error.message : String(error) });
         }
-        store.appendMessage(fromThreadId, {
-          role: "bot",
-          kind: "activity",
-          tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true },
-          threadRef: { botId: target.id, threadId, title: task.title },
-        });
+        if (retried === "queued") {
+          store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(fromThreadId), "server.chief.retryQueued", { name: target.name, title: task.title }), ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });
+          return json(res, 200, { queued: true, message: `${target.name} is busy right now, so the retry of thread #${task.title} is queued and starts by itself when ${target.name} frees up. Its result stays in that thread; you are not woken for it — do not report this hand-off as failed and do not retry again.` });
+        }
+        store.appendMessage(fromThreadId, { role: "bot", kind: "activity", tool: { name: `Retried ${target.name}'s thread #${task.title}`, ok: true }, threadRef: { botId: target.id, threadId, title: task.title } });
         return json(res, 200, { started: true, message: retriedMessage(target.name, task.title, retried) });
       }
       // post_to_room appends role "bot", never "user" (which would start a round of real turns), starts no turn, and takes membership from the record.
@@ -14417,47 +14424,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? await routines!.cancelRun(runMatch[1])
         : routines!.markSeen(runMatch[1]);
       return run ? json(res, 200, { run }) : json(res, 404, { error: "no such active run" });
-    }
-
-    if (path === "/api/calendar-calls" && method === "GET") {
-      return json(res, 200, { calls: calendarCalls!.list() });
-    }
-    if (path === "/api/calendar-calls" && method === "POST") {
-      try {
-        const body = await readBody(req);
-        const conflict = calendarAudienceConflict(body);
-        if (conflict) return json(res, 400, { error: conflict });
-        return json(res, 201, { call: calendarCalls!.create(body) });
-      } catch (error) {
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
-      }
-    }
-    const calendarCallRoomMatch = path.match(/^\/api\/calendar-calls\/([\w-]+)\/room$/);
-    if (calendarCallRoomMatch && method === "POST") {
-      const call = calendarCalls!.get(calendarCallRoomMatch[1]);
-      if (!call) return json(res, 404, { error: "no such scheduled call" });
-      if (call.botIds.length < 2) {
-        return json(res, 400, { error: "single-bot events open that bot's chat directly" });
-      }
-      const group = ensureCalendarCallRoom(call);
-      return json(res, 200, { group: { ...personRooms.groupForAuth(auth, publicGroupState(group)), messages: store.messagesFor(group.threadId) } });
-    }
-    const calendarCallMatch = path.match(/^\/api\/calendar-calls\/([\w-]+)$/);
-    if (calendarCallMatch && method === "PATCH") {
-      if (!calendarCalls!.get(calendarCallMatch[1])) return json(res, 404, { error: "no such scheduled call" });
-      try {
-        const body = await readBody(req);
-        const conflict = calendarAudienceConflict(body);
-        if (conflict) return json(res, 400, { error: conflict });
-        return json(res, 200, { call: calendarCalls!.update(calendarCallMatch[1], body) });
-      } catch (error) {
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { status: 400 });
-      }
-    }
-    if (calendarCallMatch && method === "DELETE") {
-      return calendarCalls!.remove(calendarCallMatch[1])
-        ? json(res, 200, { ok: true })
-        : json(res, 404, { error: "no such scheduled call" });
     }
 
     if (method === "GET" && path === "/api/events") {

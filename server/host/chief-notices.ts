@@ -141,10 +141,12 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   }
 
   /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and OpenMausBot's automatic retry both
-   * start it here, after the same refusal checks. Throws the refusal, or why the start failed. */
+   * start it here, after the same refusal checks. Throws the refusal, or why the start failed. A Chief's retry of an idle
+   * thread whose bot is busy elsewhere (at its turn limit, or in a room's turn) waits in that thread's queue instead, and
+   * the queue starts it when the bot frees up. A thread that still runs, shuts down or already waits is refused as before. */
   async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true;
     /** The retrying Chief's own coordinate_bots, from its current turn; left out from a room, where it would address the room, not this thread. */
-    coordinateBots?: (call: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> }): Promise<"request" | "turn"> {
+    coordinateBots?: (call: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> }): Promise<"request" | "turn" | "queued"> {
     const refused = retryRefusal(input.bot.id, input.threadId);
     if (refused) throw new Error(refused);
     // The Chief's own request failed here: it asks again from its current turn, so the result wakes it as the first would have.
@@ -162,8 +164,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     const lead = input.automatic
       ? `${AUTO_RETRY_LEAD}, once, before telling ${chief}, your Chief of Staff, that this thread's last run failed.`
       : `${RETRY_LEAD}${chief}, your Chief of Staff, after this thread's last run stopped.${input.note ? ` Note from ${chief}: ${quoteInNote(input.note, 300)}` : ""}`;
-    await deps.startTurn(input.bot.id, `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`,
-      { threadId: input.threadId, unattended: input.unattended, peerAsk: { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) } });
+    const text = `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`;
+    const peerAsk = { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) };
+    const atCapacity = !input.automatic && deps.botAtThreadCapacity(input.bot.id);
+    if (atCapacity || (!input.automatic && deps.groupTurnActive(input.bot.id))) {
+      queueSteeredMessage(input.bot.id, input.threadId, text, { reason: atCapacity ? "capacity" : "group-turn", unattended: input.unattended, peerAsk });
+      return "queued";
+    }
+    await deps.startTurn(input.bot.id, text, { threadId: input.threadId, unattended: input.unattended, peerAsk });
     return "turn";
   }
 

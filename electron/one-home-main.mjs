@@ -368,6 +368,10 @@ export function installOneHome({ localRequest: anyServer, clean = null, account,
     keep: { state: keepState, set: (on) => home.keep(on === true) },
     /** Why the account signed in can't be left now: its move, or a bot of its own moving into a team, is under way. */
     holding: () => { const bot = teamMove.view()?.phase; return home.moving() || (bot && !["done", "failed"].includes(bot)) || botMove.moving().length ? "moving" : null; },
+    /** A move to My Cloud, its way home, or a bot's move is under way (any journal phase but done and back, unless paused): the
+     * session is read every minute for it, as when the window is in front (cloud-account.mjs `attended`). */
+    underWay: () => { const moving = parseJournal(journal.read()); const bot = teamMove.view()?.phase;
+      return Boolean(moving && !moving.paused && !["done", "back"].includes(moving.phase)) || Boolean(bot && !["done", "failed"].includes(bot)) || botMove.moving().length > 0; },
     /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
     kick: () => {
       void teamMove.kick();

@@ -2,6 +2,10 @@ import { z } from "zod";
 import { mascotBodyColorSchema, mascotFaceColorSchema, mascotMaterialSchema } from "./bot-avatar.ts";
 
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
+import {
+  MAX_DATE_MS, refineStoredInterval, storedCronScheduleSchema, storedIntervalWindowSchema, storedLimitResetAtSchema,
+  storedLimitResetDefinition, storedWeekdaysSchema,
+} from "./routine-schedule-schema.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
 
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
@@ -67,9 +71,18 @@ const playbook = z.object({
   instructions: z.string().max(200_000),
 });
 const schedule = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("once"), at: timestamp }),
+  storedCronScheduleSchema,
+  z.object({ type: z.literal("limit_reset"), ...storedLimitResetDefinition, at: storedLimitResetAtSchema }).strict(),
+  z.object({ type: z.literal("once"), at: z.number().finite().min(-MAX_DATE_MS).max(MAX_DATE_MS) }),
   z.object({ type: z.literal("daily"), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7) }),
-  z.object({ type: z.literal("interval"), everyMinutes: z.number().int().min(5).max(1440), anchorAt: z.number().int().min(0).max(8_640_000_000_000_000) }),
+  z.object({
+    type: z.literal("interval"),
+    everyMinutes: z.number().int().min(5).max(1_440),
+    anchorAt: z.number().int().nonnegative().max(MAX_DATE_MS),
+    weekdays: storedWeekdaysSchema.optional(),
+    window: storedIntervalWindowSchema.optional(),
+    endsAt: z.number().int().nonnegative().max(MAX_DATE_MS).optional(),
+  }).strict().superRefine((value, context) => refineStoredInterval(value, context)),
 ]);
 // A bot's memory travels with it, in the same plain markdown it lives in:
 // the person's accumulated corrections are part of who the bot is. The

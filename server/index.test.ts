@@ -1736,6 +1736,7 @@ describe("harness HTTP API", () => {
     expect(body.app).toBe("openmausbot");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+    expect(body.eventLogDrops).toEqual({ events: expect.any(Number), bytes: expect.any(Number) });
   });
 
   it("refuses a second live server that shares the same data directory", async () => {
