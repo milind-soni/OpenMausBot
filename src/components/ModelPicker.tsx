@@ -26,7 +26,7 @@ import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
-import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning";
+import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning"; import { isPlaceId } from "@/lib/place-chat";
 import { BusyModelMenu } from "./ModelPickerBusyMenu";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -218,7 +218,7 @@ export function ModelPicker({
   const { dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStoreActions(), state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions, profile: s.bots.find((candidate) => candidate.id === shown.id) }), sameFields);
   const [open, setOpen] = useState(false);
   const { bot, dispatch } = useAiSwitch({ bot: shown, threadId, contained, dispatch: storeDispatch, setOpen: (next) => (next ? openMenu() : setOpen(false)) });
-  const locked = lockedWhileBusy(state, bot, contained, threadId);
+  const locked = lockedWhileBusy(state, bot, contained, threadId) || isPlaceId(shown.id); // a My Cloud bot open in place: its model is chosen on its own page
   const motion = useMenuMotion(open && !locked);
   const [railId, setRailId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -566,7 +566,7 @@ export function ModelPicker({
   };
 
   const currentOption = active?.models.options.find((option) => option.id === selection.model);
-  const attention = !active ? undefined
+  const attention = !active || isPlaceId(shown.id) ? undefined
     : active.policy ? t("policy.managedBy", { organization: active.policy.organizationName })
       : needsCli(active) ? t("model.setupRequired")
         : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : currentOption?.needsCliUpdate ? t("engines.updateClaude") : undefined;

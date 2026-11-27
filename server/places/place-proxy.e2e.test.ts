@@ -9,6 +9,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture } from "../../scripts/testing/cloud-send-fixture.ts";
 import { hostTimeout } from "../testing/host-timeout.ts";
 
+const codeOf = async (response: Response) => ((await response.json()) as { code?: string }).code;
 let fx: CloudSendFixture, edge: Server, edgeBase: string, token: string;
 
 beforeAll(async () => {
@@ -52,7 +53,7 @@ it("reads, streams and sends a My Cloud bot's conversation through this computer
   // Before main tells it a session, this computer's server forwards nothing.
   const { body: listed } = await fx.onCloud("GET", "/api/bots?messages=0");
   const bot = (listed.bots as Array<{ id: string; threadId: string; name: string }>)[0]!;
-  expect((await (await page(`/api/bots/cloud:${bot.id}`)).json()).code).toBe("place_closed");
+  expect(await codeOf(await page(`/api/bots/cloud:${bot.id}`))).toBe("place_closed");
 
   fx.tellDesktop({ type: "openmausbot:place-session", place: "cloud", origin: edgeBase, token });
   let opened: Response | null = null;
@@ -95,9 +96,17 @@ it("reads, streams and sends a My Cloud bot's conversation through this computer
 
   // Stopping is forwarded too, in the Cloud's ids.
   expect((await page(`/api/bots/${encodeURIComponent(shown.id)}/interrupt`, { method: "POST", body: JSON.stringify({ threadId: shown.threadId }) })).status).toBeLessThan(500);
+  // A new conversation is made there and named here in the page's ids.
+  const made = await page(`/api/bots/${encodeURIComponent(shown.id)}/tasks`, { method: "POST", body: "{}" });
+  expect(made.status, await made.clone().text()).toBeLessThan(300);
+  const { bot: fresh } = (await made.json()) as { bot: { id: string; threadId: string; tasks: Array<{ threadId: string }> } };
+  expect(fresh.id).toBe(shown.id);
+  expect(fresh.threadId).toMatch(/^cloud:/);
+  expect(fresh.threadId).not.toBe(shown.threadId);
+  expect(fresh.tasks.every((task) => task.threadId.startsWith("cloud:"))).toBe(true);
   stop.abort();
 
   // Nobody but the app's window gets anything through, and a bot's settings stay on its own page.
   expect((await fetch(`${fx.desktopBase}/api/bots/cloud:${bot.id}`)).status).toBeGreaterThanOrEqual(400);
-  expect((await (await page(`/api/bots/cloud:${bot.id}/soul`)).json()).code).toBe("place_unsupported");
+  expect(await codeOf(await page(`/api/bots/cloud:${bot.id}/soul`))).toBe("place_unsupported");
 }, hostTimeout(120_000));

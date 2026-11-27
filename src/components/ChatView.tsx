@@ -88,7 +88,7 @@ import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMess
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
-import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots"; import { ChatActivityControls, chatActivityMessages, useChatActivity } from "./ChatActivity";
+import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { isPlaceId } from "@/lib/place-chat"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots"; import { ChatActivityControls, chatActivityMessages, useChatActivity } from "./ChatActivity";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated"; import { NewThreadHeaderButton } from "./NewThreadHeaderButton"; import { HeaderThreadTabs, useThreadTabsShown } from "./HeaderThreadTabs";
 import { ModelPicker } from "./ModelPicker"; import { useFailedTurnFix } from "./FailedTurnFix";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine"; import { ownChatStarted } from "@/state/team-chats"; import { isNewChatThread } from "@/state/new-chat";
@@ -1013,9 +1013,9 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             pins={pinnedPreview(messages, bot.pinnedMessageId, bot.name)}
             triggerClassName={cn(ELEVATED_FLOAT, ELEVATED_HOVER)}
             onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })}
-            onUnpin={remoteClient ? undefined : () => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })}
+            onUnpin={remoteClient || isPlaceId(bot.id) ? undefined : () => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })}
           />
-          {!phoneMenu && <button
+          {!phoneMenu && !isPlaceId(bot.id) && <button
             data-tour="computer"
             onClick={(event) => { if (!state.computerOpen) rememberComputerPanelOpen({ botId: bot.id, opener: event.currentTarget, tabs: event.detail === 0 }); dispatch({ type: "toggleComputer" }); }}
             className={cn(
@@ -1027,7 +1027,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           >
             <Monitor size={16} />{busy && place === "browser" && <span aria-hidden="true" className="absolute right-1 top-1 size-1.5 animate-pulse rounded-full bg-success" data-testid="computer-button-live" />}
           </button>}
-          <HeaderShare bot={bot} />{!inForkPanel && <NewThreadHeaderButton botId={bot.id} />}{phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
+          {!isPlaceId(bot.id) && <HeaderShare bot={bot} />}{!inForkPanel && <NewThreadHeaderButton botId={bot.id} />}{isPlaceId(bot.id) ? null : phoneMenu ? <ChatMoreMenu bot={bot} phoneHeader /> : (advanced || remoteClient) && <ChatHeaderMenu key={`menu:${bot.threadId}`} bot={bot} />}
         </div>
         </div>
       </div>

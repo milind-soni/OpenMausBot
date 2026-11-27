@@ -3,7 +3,6 @@
 // conversation in this page's own store (src/lib/place-chat.ts), never moving the window; when that can't be done it
 // opens on My Cloud's page as before. Its row's menu keeps a way to My Cloud's own page.
 import { act, createElement } from "react";
-import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
@@ -40,12 +39,12 @@ const said = (over: Partial<PlacesTogetherState> = {}): PlacesTogetherState => (
 const OWN = [bot("mausbot", { chiefOfStaff: true }), bot("git"), bot("ledger")];
 
 const dispatch = vi.fn();
-let host: HTMLDivElement, root: Root, answer: () => Promise<PlacesTogetherState>, changed: () => void;
+let host: HTMLDivElement, root: Root, answer: () => Promise<PlacesTogetherState>;
 const page = {
   state: vi.fn(() => answer()),
   set: vi.fn(async () => said()),
   open: vi.fn(async () => true),
-  onChanged: vi.fn((callback: () => void) => { changed = callback; return () => {}; }),
+  onChanged: vi.fn((_callback: () => void) => () => {}),
   arrange: vi.fn(async (entries: ArrangedBot[]) => entries),
   openInPlace: vi.fn(async (_id: string) => ({ ok: true })),
 };

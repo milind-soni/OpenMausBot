@@ -13,6 +13,7 @@ const OWNER = "o".repeat(43);
 
 interface Seen { method: string; url: string; authorization: string | undefined; body: string }
 
+const codeOf = async (response: Response) => ((await response.json()) as { code?: string }).code;
 let cloud: Server, local: Server, cloudUrl: string, localUrl: string, proxy: PlaceProxy;
 const seen: Seen[] = [];
 /** The stand-in Cloud's answer to each request; the live stream is handled apart. */
@@ -119,7 +120,7 @@ describe("the conversation of a My Cloud bot, through this computer's server", (
     for (const [method, path] of [["PATCH", "/api/bots/cloud:scout"], ["DELETE", "/api/bots/cloud:scout"], ["GET", "/api/bots/cloud:scout/soul"], ["PATCH", "/api/bots/cloud:scout/tasks/cloud:t1"]] as const) {
       const answer = await ask(path, { method, ...(method === "PATCH" ? { body: "{}" } : {}) });
       expect(answer.status).toBe(404);
-      expect((await answer.json()).code).toBe("place_unsupported");
+      expect(await codeOf(answer)).toBe("place_unsupported");
     }
     expect(seen).toEqual([]);
   });
@@ -135,18 +136,18 @@ describe("the conversation of a My Cloud bot, through this computer's server", (
     let answer = await ask("/api/bots/cloud:scout/messages", { method: "POST", body: "{}" });
     expect(answer.status).toBe(503);
     expect(answer.headers.get("x-omb-cloud-power")).toBeNull();
-    expect((await answer.json()).code).toBe("place_asleep");
+    expect(await codeOf(answer)).toBe("place_asleep");
 
     answerWith = (_req, res) => void res.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ error: "unauthorized" }));
     answer = await ask("/api/bots/cloud:scout");
     expect(answer.status).toBe(502);
-    expect((await answer.json()).code).toBe("place_signin");
+    expect(await codeOf(answer)).toBe("place_signin");
 
     // An older My Cloud: no such route, answered by whatever serves unknown paths there.
     answerWith = (_req, res) => void res.writeHead(404, { "content-type": "text/html" }).end("<h1>Not found</h1>");
     answer = await ask("/api/bots/cloud:scout/read", { method: "POST", body: "{}" });
     expect(answer.status).toBe(404);
-    expect((await answer.json()).code).toBe("place_unsupported");
+    expect(await codeOf(answer)).toBe("place_unsupported");
 
     // My Cloud's own refusal keeps its words, never its code: this page must not read it as its own bot limit.
     answerWith = (_req, res) => void res.writeHead(409, { "content-type": "application/json" }).end(JSON.stringify({ error: "Too many bots", code: "bot_limit" }));
@@ -157,11 +158,11 @@ describe("the conversation of a My Cloud bot, through this computer's server", (
 
   it("says My Cloud can't be reached, and that nothing is open before main opened a session", async () => {
     proxy.setSession({ origin: "http://127.0.0.1:9", token: TOKEN });
-    expect((await (await ask("/api/bots/cloud:scout")).json()).code).toBe("place_offline");
+    expect(await codeOf(await ask("/api/bots/cloud:scout"))).toBe("place_offline");
     proxy.setSession(null);
     const answer = await ask("/api/bots/cloud:scout");
     expect(answer.status).toBe(503);
-    expect((await answer.json()).code).toBe("place_closed");
+    expect(await codeOf(answer)).toBe("place_closed");
   });
 });
 
@@ -209,7 +210,7 @@ describe("the bot's live stream", () => {
     streamTo = (res) => void res.writeHead(200, { "content-type": "text/html" }).end("old");
     const answer = await ask("/api/places/cloud/events?bot=cloud:scout");
     expect(answer.status).toBe(502);
-    expect((await answer.json()).code).toBe("place_unsupported");
+    expect(await codeOf(answer)).toBe("place_unsupported");
   });
 });
 

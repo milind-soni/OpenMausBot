@@ -4,13 +4,15 @@
 // PlaceChatKeeper lets the bot open in place go once the person chooses anything else.
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { ExternalLink, MoreHorizontal } from "lucide-react";
+import { ExternalLink, MoreHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { closePlaceBot, isPlaceId, noteChosen } from "@/lib/place-chat";
+import { closePlaceBot, isPlaceId, noteChosen, placeOwnId } from "@/lib/place-chat";
 import { openOtherPlaceBot } from "@/lib/places-together";
 import { isPlacedBot, type PlacedBot } from "@/lib/place-rows";
-import { useStoreSelector } from "@/state/store-select";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { sidePanelCls } from "./bot-panel/side-panel";
 import type { Bot } from "@/state/store";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 import type { MenuState } from "./Sidebar";
@@ -87,4 +89,24 @@ export function PlaceChatKeeper() {
     if (was && was !== chosen) closePlaceBot(was);
   }, [chosen]);
   return null;
+}
+
+/** The side panel of a My Cloud bot open in place: its settings, files, computer and everything else not in its
+ * conversation are on My Cloud's own page, which this opens at that bot. Said once, plainly, where its panel would be. */
+export function PlacedBotPanel({ bot }: { bot: Bot }) {
+  const dispatch = useStoreDispatch(), simple = !useAdvancedMode();
+  const close = () => { dispatch({ type: "toggleSettings", open: false }); dispatch({ type: "toggleComputer", open: false }); };
+  return <aside role="dialog" aria-labelledby="placed-bot-title" data-placed-panel="" className={sidePanelCls(false, simple)}>
+    <div className="flex shrink-0 items-center justify-between px-4 py-3">
+      <span id="placed-bot-title" className="truncate text-[15px] font-semibold text-ink">{bot.name}</span>
+      <button type="button" onClick={close} aria-label={t("botSettings.simple.close")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"><X size={18} className="pointer-events-none" /></button>
+    </div>
+    <div className="flex flex-col gap-3 px-4 pb-4 text-[13px] leading-[18px] text-ink-secondary">
+      <p>{t("together.inPlace.panel", { name: bot.name })}</p>
+      <button type="button" onClick={() => { close(); openOtherPlaceBot(placeOwnId(bot.id)); }}
+        className="flex h-9 items-center justify-center gap-2 self-start rounded-full bg-raised px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover">
+        <ExternalLink size={14} aria-hidden="true" />{t("together.openThere")}
+      </button>
+    </div>
+  </aside>;
 }
