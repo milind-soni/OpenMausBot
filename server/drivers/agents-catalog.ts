@@ -374,7 +374,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "list_team_setup",
-    description: "Chief of Staff only: list authorized teams, teammate IDs, and exact engine/model choices for team setup. Call before proposing configuration; never invent model IDs. Existing thread models are independent of bot defaults.",
+    description: "Chief of Staff only: list authorized teams, teammate IDs, exact engine/model choices, and each bot's ordered backup AIs for team setup. Call before proposing configuration; never invent model IDs. Existing thread models are independent of bot defaults.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -384,7 +384,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; mcpServers sets an existing bot's MCP servers; no other execution permission changes." + APPLIES_AT_ONCE,
+    description: "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; fallback sets an existing bot's ordered backup AIs (at most five, no duplicates) without changing its model or effort; mcpServers sets an existing bot's MCP servers; no other execution permission changes." + APPLIES_AT_ONCE,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -406,6 +406,7 @@ const TOOL_DEFINITIONS = [
               modelSelection: { type: "object", additionalProperties: false, properties: {
                 instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, variant: { type: "string" },
               }, required: ["instanceId", "model"] },
+              fallback: { type: "array", maxItems: 5, description: "update: this bot's backup AIs, first tried first. Exact instanceId and model from list_team_setup. Does not change its model or effort. [] clears the list.", items: { type: "object", additionalProperties: false, properties: { instanceId: { type: "string" }, model: { type: "string" } }, required: ["instanceId", "model"] } },
               mcpServers: { type: "array", maxItems: 20, items: { type: "string" }, description: "update: the bot's full MCP server list by name." },
             } },
           }, required: ["action", "fields"],

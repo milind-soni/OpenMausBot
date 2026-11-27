@@ -1359,7 +1359,7 @@ export class Store {
         if (operation.fields.modelSelection) next.tasks = this.withDefaultModel(previous, operation.fields.modelSelection);
         nextBots[at] = next;
       }
-      if (operation.fields.chiefOfStaff === false) delete next.managedSections; if (!Array.isArray(next.mcpServers)) delete next.mcpServers; // Undo's "every enabled server"
+      if (operation.fields.chiefOfStaff === false) delete next.managedSections; if (!Array.isArray(next.mcpServers)) delete next.mcpServers; if (operation.fields.fallback?.length) next.fallback = structuredClone(operation.fields.fallback); else if (operation.fields.fallback) delete next.fallback; // Undo's "every enabled server"
       next.section = sectionKey(next.section) || undefined;
       if (operation.fields.soul !== undefined) { next.soulHash = soulHash(operation.fields.soul); next.soulDrift = false; }
       changed.push(next);

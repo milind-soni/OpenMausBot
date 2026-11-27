@@ -232,7 +232,7 @@ describe("reviewed Chief team setup", () => {
   it("names where an unknown key is and what that level takes", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { model: "gpt" } }]))
-      .toThrow(/^operations\.0\.fields: Unrecognized key: "model"\. It takes chiefOfStaff, name, title, description, soul, soulAppend, cwd, section, modelSelection, mcpServers\.$/);
+      .toThrow(/^operations\.0\.fields: Unrecognized key: "model"\. It takes chiefOfStaff, name, title, description, soul, soulAppend, cwd, section, modelSelection, fallback, mcpServers\.$/);
     expect(() => h.service.propose({ botId: h.chief.id, threadId: h.chief.threadId, plan: { reason: "Requested", operations: [{ action: "update", botId: h.peer.id, fields: { title: "Lead" } }], teams: [] } }))
       .toThrow(/^Unrecognized key: "teams"\. It takes reason, newTeams, operations\.$/);
   });
@@ -644,6 +644,31 @@ describe("a bot's MCP servers in team setup", () => {
     expect((await h.resolve(card.requestId))?.result.state).toBe("cancelled");
     expect(h.peer.mcpServers).toEqual(["linear"]);
   });
+  it("sets the same ordered backup AIs on existing bots without changing their model or effort", async () => {
+    const h = harness();
+    h.peer.modelSelection = { instanceId: "claude", model: "sonnet", effort: "high" };
+    h.peer.approvalMode = "full";
+    const backups = [{ instanceId: "codex", model: "gpt-fixture" }, { instanceId: "claude", model: "opus" }];
+    const others = ["Bea", "Cara", "Drew", "Eden"].map((id) => h.bot(id, { modelSelection: { instanceId: "claude", model: "sonnet", effort: "high" }, approvalMode: "full" }));
+    const card = h.propose([h.peer, ...others].map((target) => ({ action: "update", botId: target.id, fields: { fallback: backups } })));
+    expect(card.detail).toContain("Backup AIs, in order: none → codex/gpt-fixture, then claude/opus");
+    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
+    for (const target of [h.peer, ...others]) {
+      expect(target.fallback).toEqual(backups);
+      expect(target.modelSelection).toEqual({ instanceId: "claude", model: "sonnet", effort: "high" });
+    }
+  });
+
+  it("rejects a backup list on a new bot, a duplicate entry, and a model that is not in the catalog", () => {
+    const h = harness();
+    const created = specialist("Mira", "Work");
+    expect(() => h.propose([{ ...created, fields: { ...created.fields, fallback: [{ instanceId: "claude", model: "opus" }] } }])).toThrow(/existing bot/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { fallback: [{ instanceId: "claude", model: "opus" }, { instanceId: "claude", model: "opus" }] } }])).toThrow(/same engine and model twice/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { fallback: [{ instanceId: "codex", model: "made-up" }] } }])).toThrow(/catalog/);
+    expect(h.peer.modelSelection).toEqual({ instanceId: "claude", model: "sonnet" });
+    expect(h.peer.fallback).toBeUndefined();
+  });
+
   it("refuses a new bot, an unknown server, another bot's own server, and a busy bot", () => {
     const h = harness();
     expect(() => h.propose([{ ...specialist("Mira", "Work"), fields: { ...specialist("Mira", "Work").fields, mcpServers: ["hindsight"] } }])).toThrow(/existing bot/);
@@ -682,6 +707,26 @@ describe("team setup below Full access", () => {
     expect(h.peer.title).toBe("Analyst");
     expect(h.chief.managedSections).toEqual(["Engineering"]);
     expect(h.store.bots.some((bot) => bot.name === "Mira")).toBe(false);
+  });
+
+  it("gives a bot back the backup list the card showed", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    h.peer.fallback = [{ instanceId: "claude", model: "opus" }];
+    h.peer.modelSelection = { instanceId: "claude", model: "sonnet", effort: "low" };
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { fallback: [{ instanceId: "codex", model: "gpt-fixture" }] } }]);
+    expect(h.peer.fallback).toEqual([{ instanceId: "codex", model: "gpt-fixture" }]);
+    expect(h.peer.modelSelection.effort).toBe("low");
+    expect(await undo(h, response.requestId)).toMatchObject({ state: "undone" });
+    expect(h.peer.fallback).toEqual([{ instanceId: "claude", model: "opus" }]);
+    expect(h.peer.modelSelection).toEqual({ instanceId: "claude", model: "sonnet", effort: "low" });
+  });
+
+  it("refuses Undo when a backup list changes after the setup applied", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("level");
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);
+    h.peer.fallback = [{ instanceId: "claude", model: "opus" }];
+    expect(await undo(h, response.requestId)).toMatchObject({ state: "invalid", stale: true });
+    expect(h.peer.title).toBe("Research lead");
   });
 
   it("refuses Undo, changing nothing, once a bot it touched changed or the new bot was used", async () => {

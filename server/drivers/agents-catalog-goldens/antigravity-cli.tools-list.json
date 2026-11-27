@@ -721,6 +721,26 @@
                         "model"
                       ]
                     },
+                    "fallback": {
+                      "type": "array",
+                      "maxItems": 5,
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "instanceId": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "instanceId",
+                          "model"
+                        ]
+                      }
+                    },
                     "mcpServers": {
                       "type": "array",
                       "maxItems": 20,

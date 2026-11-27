@@ -30,6 +30,10 @@ const fieldsSchema = z.object({
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
+  fallback: z.array(z.object({
+    instanceId: z.string().trim().regex(/^[\w.-]+$/, "fallback engine ids use letters, numbers, dots, underscores and dashes"),
+    model: z.string().trim().min(1).max(500),
+  }).strict()).max(5, "A bot can have at most five backup AIs").optional(),
   mcpServers: z.array(z.string()).max(MAX_MCP_SERVERS, `Select at most ${MAX_MCP_SERVERS} MCP servers.`).optional(),
 }).strict();
 /** The card says which execution permission a plan changes when it changes a bot's MCP servers. */
@@ -66,7 +70,7 @@ export class TeamSetupError extends Error {
 export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): string {
   if (fields === undefined) {
     return createHash("sha256").update(JSON.stringify({
-      ...profileSnapshot(bot), section: section(bot.section), modelSelection: bot.modelSelection,
+      ...profileSnapshot(bot), section: section(bot.section), modelSelection: bot.modelSelection, fallback: bot.fallback ?? [],
       hidden: Boolean(bot.hidden), chiefOfStaff: Boolean(bot.chiefOfStaff),
       managedSections: bot.managedSections,
       approvalMode: bot.approvalMode, autoApprove: bot.autoApprove, approvalGrant: bot.approvalGrant,
@@ -81,6 +85,7 @@ export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): str
   if (fields.soul !== undefined) scope.soul = snapshot.soul;
   if (fields.section !== undefined) scope.section = section(bot.section);
   if (fields.modelSelection !== undefined) scope.modelSelection = bot.modelSelection;
+  if (fields.fallback !== undefined) scope.fallback = bot.fallback ?? [];
   if (fields.chiefOfStaff !== undefined) scope.chiefOfStaff = Boolean(bot.chiefOfStaff);
   if (fields.mcpServers !== undefined) scope.mcpServers = bot.mcpServers ?? null;
   return createHash("sha256").update(JSON.stringify(scope)).digest("hex");
@@ -144,7 +149,7 @@ export class TeamSetupRequestService {
   }
 
   private fields(input: z.infer<typeof fieldsSchema>, current?: BotRecord): TeamSetupFields {
-    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, mcpServers, ...profile } = input;
+    const { section: targetSection, modelSelection, fallback, chiefOfStaff, cwd: rawCwd, mcpServers, ...profile } = input;
     const safe = Object.fromEntries(Object.entries(profile).map(([key, value]) => [key, redactSecretsInText(value!)]));
     const parsed = parseBotProfilePatch(safe, true);
     if (!parsed.ok) throw new TeamSetupError(parsed.error);
@@ -162,6 +167,20 @@ export class TeamSetupRequestService {
       const error = this.options.validateModel(selection, current);
       if (error) throw new TeamSetupError(error);
       result.modelSelection = selection;
+    }
+    if (fallback !== undefined) {
+      if (!current) throw new TeamSetupError("Backup AIs can only be set on an existing bot");
+      const chain = fallback.map((entry) => ({ instanceId: entry.instanceId, model: entry.model.trim() }));
+      const seen = new Set<string>();
+      for (const entry of chain) {
+        const key = `${entry.instanceId}\0${entry.model}`;
+        if (seen.has(key)) throw new TeamSetupError("Backup AIs cannot list the same engine and model twice");
+        seen.add(key);
+        // A backup is not a change of the bot's own model, so the engine-switch permission check does not apply.
+        const error = this.options.validateModel(entry);
+        if (error) throw new TeamSetupError(error);
+      }
+      result.fallback = chain;
     }
     if (mcpServers !== undefined) {
       if (!current) throw new TeamSetupError("MCP servers can only be chosen for an existing bot; a new bot starts with the Chief's apps");
@@ -338,6 +357,9 @@ export class TeamSetupRequestService {
               this.options.driverCapabilities((value as ModelSelection).instanceId),
             ));
           }
+        } else if (key === "fallback") {
+          const list = (entries?: Array<{ instanceId: string; model: string }> | null) => entries?.length ? entries.map((entry) => `${entry.instanceId}/${entry.model}`).join(", then ") : "none";
+          lines.push(`Backup AIs, in order: ${current ? `${list(current.fallback)} → ` : ""}${list(value as Array<{ instanceId: string; model: string }>)}`);
         } else if (key === "mcpServers") {
           const list = (names?: string[] | null) => names == null ? "every enabled server" : names.length ? names.join(", ") : "none";
           lines.push(`MCP servers it can use: ${current ? `${list(current.mcpServers)} → ` : ""}${list(value as string[])}`);
@@ -433,7 +455,9 @@ export class TeamSetupRequestService {
       if (!bot) continue;
       const fields: Record<string, unknown> = {};
       for (const key of Object.keys(operation.fields) as Array<keyof TeamSetupFields>) {
-        if (key !== "cwd") fields[key] = key === "section" ? section(bot.section) : key === "chiefOfStaff" ? Boolean(bot.chiefOfStaff) : structuredClone(bot[key]) ?? "";
+        if (key === "cwd") continue;
+        if (key === "fallback") fields.fallback = structuredClone(bot.fallback ?? []);
+        else fields[key] = key === "section" ? section(bot.section) : key === "chiefOfStaff" ? Boolean(bot.chiefOfStaff) : structuredClone(bot[key]) ?? "";
       }
       const teams = operation.fields.chiefOfStaff !== undefined || (bot.id === request.botId && request.newTeams.length > 0);
       before.push({ botId: bot.id, fields, ...(teams ? { managedSections: bot.managedSections ? [...bot.managedSections] : null } : {}) });
