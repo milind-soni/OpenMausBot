@@ -100,6 +100,18 @@ export function withoutScreenPixels(frame: ServerFrame): ServerFrame {
   return { ...rest, png: "" };
 }
 
+/** Where frames of a bot open in place (src/lib/place-chat.ts) go: the store's own way in for this page's live frames. */
+let placeSink: ((frame: LiveFrame) => void) | null = null;
+export function placeFrames<T extends (frame: LiveFrame) => void>(sink: T): T {
+  placeSink = sink;
+  return sink;
+}
+export function placeFrame(frame: ServerFrame): void {
+  // The chat's status line, steps and streaming reply read every live frame before the store does, as for this page's own.
+  tapLiveFrame(frame);
+  placeSink?.(frame as LiveFrame);
+}
+
 export function publishLiveFrame(frame: ServerFrame): void {
   for (const listener of liveFrameListeners) listener.onFrame(frame);
 }

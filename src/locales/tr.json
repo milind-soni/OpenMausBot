@@ -116,6 +116,7 @@
   "server.problem.routineFailed": "{bot} bir sorunla karşılaştı: {where} zamanlanmış rutini başarısız oldu",
   "server.problem.routineFailedWhy": "{bot} bir sorunla karşılaştı: {where} zamanlanmış rutini başarısız oldu: “{detail}”",
   "server.incidents.where.thread": "#{title} konusundaki",
+  "server.chief.retryQueued": "{name} için #{title} konusundaki yeniden deneme sıraya alındı",
   "server.incidents.where.main": "ana konuşmasındaki",
   "server.connect.signIn": "{site} için oturum açmanız gerekiyor.",
   "server.connect.signInWhy": "{site} için oturum açmanız gerekiyor: {reason}",

@@ -10,6 +10,7 @@ import type { MemoryModelSelection } from "../../shared/memory-model.ts";
 import { parseToolsOff, TOOL_GROUPS } from "../../shared/tool-groups.ts";
 import { isMausColor, MAUS_COLOR_NAMES, type BotUpdateResponse, type WireBot, type WireGroup } from "../../shared/wire.ts";
 import { dropRemovedGrants, MAX_ALWAYS_ALLOW } from "../always-allow.ts";
+import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import { checkBrowserProfileChange, settleBrowserChange } from "../bot-browser-profile.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -255,15 +256,26 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (!Array.isArray(body.fallback) || body.fallback.length > 5) {
           return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
         }
+        const primarySelection = normalizedSelection ?? existingBot?.modelSelection;
+        const primaryInstance = primarySelection ? registry.get(primarySelection.instanceId) : null;
+        const primaryEngine = primaryInstance ? { driverKind: primaryInstance.driverKind, capabilities: primaryInstance.adapter.capabilities } : null;
+        const saved = new Set((existingBot?.fallback ?? []).map((entry) => `${entry.instanceId}\u0000${entry.model}`));
         const chain: ModelSelection[] = [];
         for (const entry of body.fallback as unknown[]) {
           const row = entry && typeof entry === "object" ? (entry as Partial<Record<keyof ModelSelection, unknown>>) : null;
           if (!row || typeof row.instanceId !== "string" || !/^[\w.-]+$/.test(row.instanceId) || typeof row.model !== "string" || !row.model.trim() || row.model.length > 500) {
             return json(res, 400, { error: "fallback must be a list of up to five { instanceId, model } entries" });
           }
-          if (!registry.get(row.instanceId)) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
+          const instance = registry.get(row.instanceId);
+          if (!instance) return json(res, 400, { error: `fallback engine "${row.instanceId}" is not available` });
           const model = row.model.trim();
           if (chain.some((seen) => seen.instanceId === row.instanceId && seen.model === model)) continue;
+          // A backup that cannot use the bot's workspace or tools can never take over automatically. An entry saved
+          // before this check stays editable, so a chain can still be repaired without deleting it first.
+          if (primaryEngine && !saved.has(`${row.instanceId}\u0000${model}`)) {
+            const incompatible = recoveryCapabilityError(primaryEngine, { driverKind: instance.driverKind, capabilities: instance.adapter.capabilities });
+            if (incompatible) return json(res, 400, { error: incompatible });
+          }
           if (row.effort === undefined && row.variant === undefined) {
             chain.push({ instanceId: row.instanceId, model });
           } else {

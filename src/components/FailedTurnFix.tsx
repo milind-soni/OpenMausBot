@@ -10,7 +10,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import type { Message } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { settingFix } from "../../shared/setting-fixes";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker } from "./ModelPicker"; import { isPlaceId } from "@/lib/place-chat";
 
 export type FailedTurnAction = { label: string; onClick: () => void };
 
@@ -23,7 +23,8 @@ export function useFailedTurnFix(tool: NonNullable<Message["tool"]>, botId: stri
   const dispatch = useStoreDispatch();
   const bot = useStoreSelector((state) => (botId ? state.bots.find((candidate) => candidate.id === botId) : undefined));
   const phone = useMediaQuery(PHONE_LAYOUT), admin = useOwnerOrAdmin() !== false, advanced = useAdvancedMode();
-  const fix = settingFix(tool);
+  // A My Cloud bot open in place: its spending and its model are My Cloud's, set on its own page.
+  const fix = botId && isPlaceId(botId) ? null : settingFix(tool);
   if (fix === "spend-limit") {
     if (!admin) return { action: null, control: line(t("chat.error.askOwnerSpendLimit")) };
     if (!advanced) return { action: null, control: line(t("chat.error.raiseSpendLimitAdvanced")) };
