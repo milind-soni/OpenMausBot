@@ -8,6 +8,7 @@ import { KEYS_ANCHOR_FOR_FOCUS, requestKeyFocus } from "../keys/key-focus";
 import { LocalComputerSection } from "../LocalComputerSection";
 import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsMark, SettingsRows, StatusDot } from "../SettingsPrimitives";
 import { useAccountSummary } from "./account-summary";
+import { DESKTOP_DETAILS_ANCHOR } from "./IdleTimeLink";
 import { useOtherPlaces } from "./settings-context";
 import { SettingsDialog } from "./SettingsDialog";
 import { useSettingsShell } from "./settings-shell";
@@ -61,7 +62,7 @@ function PrivateSetup({ status, onCheck, onClose }: { status: PrivateStatus; onC
 
 /** Desktops: what each kind is, its state first, and one Set up. */
 export function DesktopKinds() {
-  const { ctx, place, go } = useSettingsShell();
+  const { ctx, place, go, anchor } = useSettingsShell();
   const cloudHome = useStoreSelector((state) => state.config?.cloudHome === true);
   const [local, setLocal] = useState<PrivateStatus>(null);
   const [cloud, setCloud] = useState<{ configured: boolean; available: boolean } | null>(null);
@@ -73,6 +74,8 @@ export function DesktopKinds() {
     void read<{ configured: boolean; available: boolean }>("vps").then(setVps);
   }, [cloudHome]);
   useEffect(load, [load]);
+  // The setup's idle-time link opens Desktop details on this page: the dialog steps aside for it.
+  useEffect(() => { if (anchor === DESKTOP_DETAILS_ANCHOR) setSetup(false); }, [anchor]);
   const openKey = (id: "box" | "vps") => { requestKeyFocus(id); go("ai", KEYS_ANCHOR_FOR_FOCUS); };
   const summary = useAccountSummary();
   const others = useOtherPlaces("desktops");

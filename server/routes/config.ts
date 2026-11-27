@@ -646,7 +646,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (!isValidSshAlias(bot.vpsAlias)) deps.vpsServerSwitched?.(bot);
         }
       }
-      if (patch.vpsIdle?.timeoutMinutes !== undefined) {
+      // Server desktops fall back to Desktop details' idle time, so a change to either re-arms them.
+      if (patch.vpsIdle?.timeoutMinutes !== undefined || patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of vpsIdles.values()) idle.setIdleMs(vpsIdleMs());
       }
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {

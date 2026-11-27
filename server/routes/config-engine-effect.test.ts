@@ -83,7 +83,7 @@ describe("saving config and the engines' status", () => {
       providerConfigs: () => ({}),
       localVmIdleMs: () => (deps.cfg.localVm?.idleTimeoutMinutes ?? 480) * 60_000,
       localVmIdles: new Map([["private", { setIdleMs: (ms: number) => localDeadlines.push(ms) }]]),
-      vpsIdleMs: () => (deps.cfg.vpsIdle?.timeoutMinutes ?? 480) * 60_000,
+      vpsIdleMs: () => (deps.cfg.vpsIdle?.timeoutMinutes ?? deps.cfg.localVm?.idleTimeoutMinutes ?? 480) * 60_000,
       vpsIdles: new Map([["server", { setIdleMs: (ms: number) => vpsDeadlines.push(ms) }]]),
       vpsServerSwitched: (bot: { id: string }) => { switchedBots.push(bot.id); },
       localVmActiveThreads: new Set(),
@@ -120,14 +120,25 @@ describe("saving config and the engines' status", () => {
     return { save, localDeadlines, vpsDeadlines, switchedBots, forgotten: () => forgotten, broadcasts: () => broadcasts, cfg: deps.cfg };
   }
 
-  it("re-arms only timers belonging to the changed idle setting", async () => {
+  it("re-arms only server desktop timers when the server-only override changes", async () => {
     const { save, localDeadlines, vpsDeadlines } = routes();
     expect(await save({ vpsIdle: { timeoutMinutes: 1440 } })).toEqual([200]);
     expect(vpsDeadlines).toEqual([1440 * 60_000]);
     expect(localDeadlines).toEqual([]);
+  });
+
+  it("re-arms private and server desktop timers when the shared idle time changes", async () => {
+    const { save, localDeadlines, vpsDeadlines } = routes();
     expect(await save({ localVm: { idleTimeoutMinutes: 5 } })).toEqual([200]);
     expect(localDeadlines).toEqual([5 * 60_000]);
-    expect(vpsDeadlines).toEqual([1440 * 60_000]);
+    expect(vpsDeadlines).toEqual([5 * 60_000]);
+  });
+
+  it("keeps the server-only override when the shared idle time changes", async () => {
+    const { save, vpsDeadlines } = routes();
+    expect(await save({ vpsIdle: { timeoutMinutes: 1440 } })).toEqual([200]);
+    expect(await save({ localVm: { idleTimeoutMinutes: 5 } })).toEqual([200]);
+    expect(vpsDeadlines).toEqual([1440 * 60_000, 1440 * 60_000]);
   });
 
   it("switches only bots that use the default VPS server when the default SSH alias changes", async () => {

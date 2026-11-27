@@ -4168,5 +4168,9 @@
   "server.github.card.description": "Connectez GitHub pour que {bot} puisse pousser son travail vers vos dépôts.",
   "server.github.card.connectInApps": "Connectez GitHub depuis cette carte dans l'app de votre ordinateur, ou dans Apps.",
   "githubSignIn.title": "Connexion à GitHub",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "vm.idle.detailAll": "S'applique aux bureaux privés et aux bureaux sur tes propres serveurs. Un bureau avec un tour en cours n'est jamais arrêté. L'arrêt pour inactivité conserve ses fichiers et ses apps installées.",
+  "vm.idle.serverOverride": "Les bureaux sur tes propres serveurs s'arrêtent plutôt après {minutes} minutes, selon vpsIdle.timeoutMinutes dans config.json.",
+  "vm.idle.shared": "Les bureaux inactifs s'arrêtent après {minutes} minutes.",
+  "vm.idle.change": "Modifier dans Détails des bureaux"
 }

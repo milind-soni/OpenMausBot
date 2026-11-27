@@ -5,6 +5,7 @@ import { productName } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { sshServerAnchor } from "../devices/device-words";
+import { IdleTimeLink } from "../settings/IdleTimeLink";
 import { SettingsShellContext } from "../settings/settings-shell";
 import { KEY_FIELD } from "./KeyRow";
 import { CPUS, Field, LimitField, limitValue, MEMORY_GB, useVpsSave, useVpsSaving, VpsServerEditor, type VpsNamedServer } from "./VpsServerEditor";
@@ -31,6 +32,7 @@ export function VpsConnection() {
       {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
       <VpsServers />
       <p className="text-[12px] leading-4 text-ink-secondary">{t("keys.vps.limitsHint")}</p>
+      <IdleTimeLink servers />
     </div>
   );
 }

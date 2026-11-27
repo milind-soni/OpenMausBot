@@ -20,7 +20,7 @@ import { cn } from "@/lib/cn";
 import { localizeComputerProblem } from "@/lib/computer-messages";
 import { computerInventoryRequest, jsonPostRequest, type ComputerApiRequest } from "@/lib/computer-requests";
 import { useStore } from "@/state/store";
-import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink"; import { serverFetch } from "@/lib/relay-server";
+import { VpsComputersCard } from "./VpsComputersCard"; import { KeysLink } from "./keys/KeysLink"; import { serverFetch } from "@/lib/relay-server"; import { IdleTimeLink, useServerIdleOverride } from "./settings/IdleTimeLink";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
@@ -676,6 +676,7 @@ export function LocalVmIdleTimeoutSetting({
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const serverOverride = useServerIdleOverride();
 
   useEffect(() => {
     if (!dirty) setValue(String(minutes));
@@ -706,7 +707,7 @@ export function LocalVmIdleTimeoutSetting({
       <div className="flex items-center justify-between gap-6">
         <div className="min-w-0">
           <label htmlFor="local-vm-idle-timeout" className="text-[14px] leading-5 text-ink">{t("vm.idle.label")}</label>
-          <div id="local-vm-idle-timeout-help" className="text-[13px] leading-[18px] text-ink-secondary">{t("vm.idle.detail")}</div>
+          <div id="local-vm-idle-timeout-help" className="text-[13px] leading-[18px] text-ink-secondary">{t("vm.idle.detailAll")}{serverOverride !== null && <> {t("vm.idle.serverOverride", { minutes: serverOverride })}</>}</div>
         </div>
         <span className="flex shrink-0 items-center gap-2">
           <input
@@ -1287,11 +1288,9 @@ export function LocalComputerSection({ privateOnly = false }: { privateOnly?: bo
             </Select>
           </div>
         )}
-        <LocalVmIdleTimeoutSetting
+        {privateOnly ? <div className="mt-3"><IdleTimeLink /></div> : <LocalVmIdleTimeoutSetting
           minutes={status ? Math.round(status.idle_timeout_ms / 60_000) : DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
-          disabled={!status || policyPending}
-          onSave={saveIdleTimeout}
-        />
+          disabled={!status || policyPending} onSave={saveIdleTimeout} />}
         {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> {t("vm.saving")}</div>}
       </Card>
 

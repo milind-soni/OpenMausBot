@@ -41,6 +41,7 @@ import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { AdvancedPagePart, AdvancedSection } from "../AdvancedSection";
+import { DESKTOP_DETAILS_ANCHOR } from "../IdleTimeLink";
 
 const GROUPED_NOTE = "omb-settings-grouped-note";
 const GROUPED_DAYS = 30;
@@ -183,21 +184,22 @@ export function BotsPage() {
 
 export function DesktopsPage() {
   const { ctx, anchor } = useSettingsShell();
-  const [details, setDetails] = useState(anchor === "desktop-details");
+  const [details, setDetails] = useState(anchor === DESKTOP_DETAILS_ANCHOR);
+  useEffect(() => { if (anchor === DESKTOP_DETAILS_ANCHOR) setDetails(true); }, [anchor]);
   return <>
     <AdvancedPagePart anchor="browser"><SettingsGroup label={t("settings.desktops.browserSection")} block="browser">
       <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow />{ctx.advanced && <div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
     </SettingsGroup></AdvancedPagePart>
     <AdvancedPagePart anchor="desktops"><AdminOnly><DesktopKinds /></AdminOnly></AdvancedPagePart>
     <AdvancedPagePart anchor="browser"><BrowserProfilesRow /></AdvancedPagePart>
-    {ctx.advanced && (
+    <AdvancedSection anchor={DESKTOP_DETAILS_ANCHOR}>
       <AdminOnly>
-        <SettingsDisclosureRow id="desktop-details" block="desktop-details" title={t("settings.desktops.detailsTitle")} subtitle={t("settings.desktops.detailsLine")}
+        <SettingsDisclosureRow id={DESKTOP_DETAILS_ANCHOR} block="desktop-details" title={t("settings.desktops.detailsTitle")} subtitle={t("settings.desktops.detailsLine")}
           open={details} onToggle={() => setDetails((open) => !open)}>
           <div className="flex flex-col gap-6 px-4 py-4"><LocalComputerSection /></div>
         </SettingsDisclosureRow>
       </AdminOnly>
-    )}
+    </AdvancedSection>
     {ctx.savedSteps && <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>}
   </>;
 }

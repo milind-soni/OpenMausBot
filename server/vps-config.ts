@@ -5,8 +5,10 @@ import { DEFAULT_DESKTOP_RESOURCES, MAX_DESKTOP_CPUS, MAX_DESKTOP_MEMORY_GB, MIN
 
 export const vpsIdleConfigSchema = z.object({ timeoutMinutes: z.number().int().min(5).max(1_440).optional() }).strict();
 
-export function vpsIdleTimeoutMinutes(cfg: { vpsIdle?: z.infer<typeof vpsIdleConfigSchema> }): number {
-  return cfg.vpsIdle?.timeoutMinutes ?? 480;
+/** One idle time for every desktop: Desktop details' "Stop idle desktops after" (localVm), unless config.json's
+ * server-only `vpsIdle.timeoutMinutes` overrides it for server desktops. */
+export function vpsIdleTimeoutMinutes(cfg: { vpsIdle?: z.infer<typeof vpsIdleConfigSchema>; localVm?: { idleTimeoutMinutes?: number } }): number {
+  return cfg.vpsIdle?.timeoutMinutes ?? cfg.localVm?.idleTimeoutMinutes ?? 480;
 }
 
 const SSH_ALIAS = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;

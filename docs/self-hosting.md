@@ -1383,9 +1383,13 @@ using Tailscale Serve. Viewer requests require an admin session. Logging out
 or revoking that session closes open viewers. Client-only pairing does not
 grant desktop control.
 
-Managed VPS desktops stop after 480 idle minutes by default. Set
-`vpsIdle.timeoutMinutes` in `config.json` to a whole number from 5 to 1440.
-Private desktops have their own `localVm.idleTimeoutMinutes` setting.
+Private desktops and managed VPS desktops share one idle time: **Stop idle
+desktops after** under **Settings → Desktops → Desktop details**
+(`localVm.idleTimeoutMinutes`, 480 minutes by default). The Private desktops
+setup and the **Your own server (SSH)** settings link to it. To give server
+desktops a different time, set the server-only `vpsIdle.timeoutMinutes` in
+`config.json` to a whole number from 5 to 1440; it overrides the shared time
+for them.
 
 An open Local VM viewer keeps that VM's idle timer active. Remote VPS viewers
 share a tunnel; it closes 30 seconds after the last viewer leaves, allowing
