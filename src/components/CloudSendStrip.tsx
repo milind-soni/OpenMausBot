@@ -36,8 +36,9 @@ export function useMoveQuiet(now: () => number = Date.now): boolean | null {
   return end > now();
 }
 
-/** In the desktop app, never in a browser: on My Cloud's page, a bot's move into a team. The one-time move to My Cloud is
- * never a strip over the page: it lives in the account area at the bottom of the sidebar (AccountMove). */
+/** In the desktop app, never in a browser: on My Cloud's page or this computer's, a move of that place's bots into a team
+ * (main sends each page only its own). The one-time move to My Cloud is never a strip over the page: it lives in the
+ * account area at the bottom of the sidebar (AccountMove). */
 export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   const bridge = !window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined;
   const [notice, setNotice] = useCloudSendNotice(bridge);
@@ -45,7 +46,7 @@ export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   if (!bridge || !notice) return null;
   return <>
     {notice.move?.phase === "choose" && !notNow && <MoveChooser onClose={() => setNotNow(true)} />}
-    {cloudHome && notice.teamMove && <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} />}
+    {notice.teamMove && <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} />}
     {!cloudHome && notice.botMove && <BotMoveLine move={notice.botMove} onChange={(next) => setNotice({ ...notice, botMove: next ?? undefined })} />}
   </>;
 }

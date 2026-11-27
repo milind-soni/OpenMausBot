@@ -1,6 +1,7 @@
-// Moving one bot from My Cloud into one of its person's teams ("Move to Acme"). The send a one-time move uses
-// (cloud-send.mjs, kept to that one bot) carries it; this runs it in phases and keeps where each move is in one journal
-// (userData/team-moves.json), so a move goes on after the app quits:
+// Moving one bot from My Cloud, or from this computer (`from: "computer"`), into one of its person's teams ("Move to
+// Acme"). The send a one-time move uses (cloud-send.mjs, kept to that one bot) carries it; this runs it in phases and
+// keeps where each move is in one journal (userData/team-moves.json), so a move goes on after the app quits. Several
+// bots chosen at once (`batch`) move one after another; one that fails waits for its next try while the rest go on:
 //
 //   copy    the bot, its skills, files, chats and routines go while it keeps working on My Cloud
 //   freeze  My Cloud holds it: no turns, its automations off (server/bot-moves.ts)
@@ -35,7 +36,13 @@ export const TEAM_MOVE_TEXT = Object.freeze({
   notInTeam: () => "You're not in that team.",
   notABot: () => "Choose one of your bots to move.",
   movingElsewhere: ({ bot, team }) => `${bot} is moving to ${team}.`,
+  computerMoving: () => "This computer's bots are moving to My Cloud.",
 });
+
+/** Where a move's bot comes from: My Cloud unless the journal says this computer. */
+export const sourceOf = (move) => (move?.from === "computer" ? "computer" : "cloud");
+/** The most bots one batch moves: the journal keeps 50 moves. */
+export const BATCH_MAX = 40;
 
 export function teamMoveRefusal(code, params = {}) {
   return Object.assign(new Error(TEAM_MOVE_TEXT[code](params)), { refusal: { code, params } });
@@ -74,11 +81,21 @@ export function createTeamMove(deps) {
   let running = null, again = false, timer = null, closed = false;
 
   const read = () => parseTeamMoves(deps.journal.read());
-  const view = () => {
-    const shown = read().moves.filter((move) => !move.told).at(-1);
+  /** The line a page shows: the newest move not yet closed, of the source that page is (`from`), any when not said. With
+   * a batch, how each of its bots went. */
+  const view = (from) => {
+    const mine = read().moves.filter((move) => !from || sourceOf(move) === from);
+    const shown = mine.filter((move) => !move.told).at(-1);
     if (!shown) return null;
-    const phase = shown.phase === "done" ? "done" : shown.failing ? "failed" : "moving";
-    return { bot: { id: shown.bot.id, name: shown.name ?? shown.bot.name }, team: { id: shown.team.id, name: shown.team.name }, phase, ...(Array.isArray(shown.bots) ? { bots: shown.bots.length } : {}) };
+    const phaseOf = (move) => (move.phase === "done" ? "done" : move.failing ? "failed" : "moving");
+    const group = shown.batch ? mine.filter((move) => move.batch === shown.batch) : null;
+    const current = group ? group.find((move) => phaseOf(move) === "moving") ?? shown : shown;
+    const phases = (group ?? [shown]).map(phaseOf);
+    const phase = phases.includes("moving") ? "moving" : phases.includes("failed") ? "failed" : "done";
+    return { bot: { id: current.bot.id, name: current.name ?? current.bot.name }, team: { id: current.team.id, name: current.team.name }, phase,
+      ...(sourceOf(shown) === "computer" ? { from: "computer" } : {}),
+      ...(Array.isArray(shown.bots) ? { bots: shown.bots.length } : {}),
+      ...(group ? { batch: group.map((move) => ({ id: move.bot.id, name: move.name ?? move.bot.name, phase: phaseOf(move), ...(move.stopped && move.why ? { why: move.why } : {}) })) } : {}) };
   };
   const publish = () => { try { deps.onChange?.(view()); } catch {} };
   /** The move of this bot, changed as `change` says; the journal is written before anything acts on it. */
@@ -122,7 +139,7 @@ export function createTeamMove(deps) {
       begun = await io.team.begin();
     } catch (error) {
       // The bot is gone from My Cloud, or is one that stays there: the move stops, nothing changed.
-      if (error?.final) return update(move.bot.id, { failing: true, stopped: true, error: sentence(error.message) ?? undefined, retryAt: undefined });
+      if (error?.final) return update(move.bot.id, { failing: true, stopped: true, error: sentence(error.message) ?? undefined, retryAt: undefined, ...(typeof error.why === "string" ? { why: error.why } : {}) });
       return failed(io, move, error, false);
     }
     // The team took it already: a run cut short after the switch goes on from there.
@@ -138,6 +155,8 @@ export function createTeamMove(deps) {
     try { answer = await io.myCloud.call("POST", `/api/bot-moves/${move.bot.id}`, { v: 1, state: "moving", team: { id: move.team.id, name: move.team.name } }); }
     catch (error) { return failed(io, move, error, true); }
     if (answer.status === 409 && typeof answer.body?.busy === "string") { later(BUSY_POLL_MS); return null; }
+    // Refused (held for another move, or moved already): this move holds nothing there, so it lets go of nothing.
+    if (answer.status === 409) return failed(io, move, new Error(sentence(answer.body?.error) ?? "My Cloud could not hold the bot."), false);
     if (!answer.ok || !record(answer.body?.movedTo)) return failed(io, move, new Error(sentence(answer.body?.error) ?? "My Cloud could not hold the bot."), true);
     return update(move.bot.id, { phase: "final", held: Array.isArray(answer.body.movedTo.held) ? answer.body.movedTo.held : [], frozenAt: now() });
   }
@@ -230,22 +249,38 @@ export function createTeamMove(deps) {
     return running;
   }
 
+  /** Each of `inputs` ({ bot, team, from? }) starts moving; one already moving to that team from the same place goes on.
+   * Moves done and closed are dropped, so the journal keeps room for the batch. */
+  function startMany(inputs) {
+    const journal = read();
+    const batch = inputs.length > 1 ? `b${now().toString(36)}` : null;
+    let moves = journal.moves.filter((move) => !(move.phase === "done" && move.told));
+    const added = [];
+    for (const { bot, team, ...rest } of inputs) {
+      const held = moves.find((move) => move.bot.id === bot.id);
+      if (held && held.phase !== "done" && !held.stopped) {
+        if (held.team.id !== team.id || sourceOf(held) !== sourceOf(rest)) throw teamMoveRefusal("movingElsewhere", { bot: held.bot.name, team: held.team.name });
+        continue;
+      }
+      added.push({ ...rest, bot, team, phase: "copy", startedAt: now(), ...(batch ? { batch } : {}) });
+    }
+    if (added.length) {
+      const ids = new Set(added.map((move) => move.bot.id));
+      moves = moves.filter((move) => !ids.has(move.bot.id)).map((move) => (move.phase === "done" ? { ...move, told: true } : move));
+      if (moves.length + added.length > 50) throw teamMoveRefusal("notABot");
+      deps.journal.write({ v: 1, moves: [...moves, ...added] });
+      publish();
+    }
+    return kick();
+  }
+
   return {
     kick,
     view,
-    /** Starts moving a bot into a team; a bot already moving there goes on. */
-    start({ bot, team, ...rest }) {
-      const journal = read();
-      const held = journal.moves.find((move) => move.bot.id === bot.id);
-      if (held && held.phase !== "done" && !held.stopped) {
-        if (held.team.id !== team.id) throw teamMoveRefusal("movingElsewhere", { bot: held.bot.name, team: held.team.name });
-        return kick();
-      }
-      const moves = journal.moves.filter((move) => move.bot.id !== bot.id).map((move) => (move.phase === "done" ? { ...move, told: true } : move));
-      deps.journal.write({ v: 1, moves: [...moves, { ...rest, bot, team, phase: "copy", startedAt: now() }] });
-      publish();
-      return kick();
-    },
+    /** Starts moving a bot into a team; a bot already moving there goes on. `from: "computer"`: from this computer. */
+    start(input) { return startMany([input]); },
+    /** Starts moving these bots into a team, one after another, as one batch whose line says how each went. */
+    startMany,
     /** Try again: now, not at the next try. */
     retry() {
       const journal = read();
@@ -254,13 +289,14 @@ export function createTeamMove(deps) {
       publish();
       return kick();
     },
-    /** The line was closed: a move that failed goes on trying by itself, and says so again once it is done. */
-    seen() {
+    /** The line was closed (on the page of `from`, any when not said): a move that failed goes on trying by itself, and
+     * says so again once it is done. */
+    seen(from) {
       const journal = read();
-      for (const move of journal.moves) if (move.phase === "done" || move.failing) move.told = true;
+      for (const move of journal.moves) if ((!from || sourceOf(move) === from) && (move.phase === "done" || move.failing)) move.told = true;
       deps.journal.write(journal);
       publish();
-      return view();
+      return view(from);
     },
     /** The bot this move carries, or null: a moving bot's menu offers no second move. */
     moving: (botId) => read().moves.find((move) => move.bot.id === botId && move.phase !== "done") ?? null,

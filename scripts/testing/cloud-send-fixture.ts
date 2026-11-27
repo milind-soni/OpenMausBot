@@ -76,8 +76,8 @@ export interface CloudSendFixture {
    * taking a computer's word that its move is done (when a test sets it), and the Admin's team pairing for one of the
    * account's teams (`state.teams`). */
   account: CloudSendAccount;
-  /** A bot moving from My Cloud into a team, as main runs it (team-move-main.mjs). */
-  teamMove: { start(input: { bot: { id: string; name: string }; team: { id: string; name: string; origin?: string } }): Promise<void>; kick(): Promise<void>; view(): any; retry(): Promise<void>; seen(): any; journal(): any };
+  /** A bot moving from My Cloud or this computer into a team, as main runs it (team-move-main.mjs). */
+  teamMove: { start(input: { bot: { id: string; name: string }; team: { id: string; name: string; origin?: string }; from?: "computer" }): Promise<void>; kick(): Promise<void>; view(): any; retry(): Promise<void>; seen(): any; journal(): any };
   /** The team moves' journal, and a look at each write before it lands: throwing there is the app killed. */
   teamJournalFile: string;
   beforeTeamJournalWrite: ((value: any) => void) | null;

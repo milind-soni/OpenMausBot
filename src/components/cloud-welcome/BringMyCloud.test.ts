@@ -92,3 +92,40 @@ it("is on the team's Bring your stuff in the desktop app, and nowhere else", asy
   expect(await bring(false, true), "on My Cloud itself").toBe(false);
   expect(await bring(true, false), "in a browser").toBe(false);
 });
+
+const SCOUT = { id: "scout", name: "Scout" }, QUILL = { id: "quill", name: "Quill" }, LUNA = { id: "luna", name: "Luna", stays: "chief" as const };
+const computerButton = (id: string) => host.querySelector<HTMLButtonElement>(`[data-bring-move-computer="${id}"]`);
+
+it("with no My Cloud, lists this computer's bots, each with one Move from this computer, and says why the Chief stays", async () => {
+  const bridge = page([], { teamBring: vi.fn(async () => ({ team: TEAM, bots: [], computer: [LUNA, SCOUT, QUILL] })) });
+  await draw();
+  expect(host.textContent).not.toContain("Move a bot here from My Cloud");
+  expect(host.textContent).toContain("Move a bot here from this computer");
+  expect(host.querySelector('[data-bring-computer-bot="luna"]')?.textContent).toContain("Your Chief of Staff stays on this computer");
+  expect(computerButton("luna")).toBeNull();
+  await act(async () => { computerButton("scout")!.click(); });
+  expect(bridge.teamBringMove).toHaveBeenCalledExactlyOnceWith("scout", "computer");
+});
+
+it("lists both places when the person has both, and offers several of this computer's at once through the chooser, sent by id with main's one confirm", async () => {
+  const many = { ...movingAtlas, bot: SCOUT, from: "computer" as const, batch: [{ ...SCOUT, phase: "moving" as const }, { ...QUILL, phase: "moving" as const }] };
+  const teamBringMany = vi.fn(async (_ids: string[]) => ({ started: true, move: many }));
+  page([ATLAS], { teamBring: vi.fn(async () => ({ team: TEAM, bots: [ATLAS], computer: [SCOUT, QUILL] })), teamBringMany });
+  await draw();
+  expect(moveButton("atlas")).not.toBeNull();
+  expect(computerButton("scout")).not.toBeNull();
+  await act(async () => { host.querySelector<HTMLButtonElement>("[data-bring-several]")!.click(); });
+  const chooser = document.body.querySelector("[data-move-chooser]")!;
+  expect(chooser.textContent).toContain("Move bots to Acme");
+  await act(async () => { document.body.querySelector<HTMLButtonElement>("[data-move-select-all]")!.click(); });
+  await act(async () => { document.body.querySelector<HTMLButtonElement>("[data-move-chosen]")!.click(); });
+  expect(teamBringMany).toHaveBeenCalledExactlyOnceWith(["scout", "quill"]);
+  expect(document.body.querySelector("[data-move-chooser]")).toBeNull();
+  expect(host.querySelector('[data-bring-line="sending"]')?.textContent).toContain("Moving Scout to Acme (1 of 2)…");
+});
+
+it("offers no several with one bot of this computer's to bring", async () => {
+  page([], { teamBring: vi.fn(async () => ({ team: TEAM, bots: [], computer: [SCOUT] })), teamBringMany: vi.fn() });
+  await draw();
+  expect(host.querySelector("[data-bring-several]")).toBeNull();
+});

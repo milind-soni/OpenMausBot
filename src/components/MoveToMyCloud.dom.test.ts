@@ -244,3 +244,31 @@ it("the line says how the move goes, and Try again and Open My Cloud reach main"
   await click(all("button").find((button) => button.textContent === "Open My Cloud") ?? null);
   expect(page.openMyCloud).toHaveBeenCalled();
 });
+
+it("given a team, chooses which of this computer's bots move into it: no Move everything, the bots that stay shown and never sent, Select all takes only those that may go", async () => {
+  const teamChoices = vi.fn(async () => ({ bots: [{ id: "maus", name: "MausBot", stays: "default" as const }, { id: "chief", name: "Luna", stays: "chief" as const }, { id: "a", name: "Ada" }, { id: "b", name: "Bea" }] }));
+  window.ogb = { cloudSendPage: { ...page, teamChoices } } as never;
+  const move = vi.fn(async () => {});
+  await act(async () => root.render(createElement(MoveChooser, { onClose, team: { name: "Acme", chosen: ["a"], move } }))); await act(async () => {});
+  expect(teamChoices).toHaveBeenCalled();
+  expect(q("#move-chooser-title")!.textContent).toBe("Move bots to Acme");
+  expect(q("[data-move-everything]")).toBeNull();
+  expect(q('[data-move-bot="a"]')!.getAttribute("aria-checked")).toBe("true");
+  expect((q('[data-move-bot="maus"]') as HTMLButtonElement).disabled).toBe(true);
+  expect(q('[data-move-bot-stays="chief"]')!.textContent).toBe("Your Chief of Staff stays on this computer");
+  expect(q('[data-move-bot-stays="default"]')!.textContent).toBe("Stays on this computer: everyone on a team gets their own");
+  await click(q("[data-move-select-all]"));
+  expect(q("[data-move-chosen]")!.textContent).toBe("Move 2 bots");
+  await click(q("[data-move-chosen]"));
+  expect(move).toHaveBeenCalledExactlyOnceWith(["a", "b"]);
+  expect(page.moveBots).not.toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it("given a team, says why the move could not start and stays open", async () => {
+  const move = vi.fn(async () => { throw new Error("You're not in that team."); });
+  await act(async () => root.render(createElement(MoveChooser, { onClose, team: { name: "Acme", bots: [{ id: "a", name: "Ada" }], chosen: ["a"], move } }))); await act(async () => {});
+  await click(q("[data-move-chosen]"));
+  expect(q('[role="alert"]')!.textContent).toBe("You're not in that team.");
+  expect(onClose).not.toHaveBeenCalled();
+});

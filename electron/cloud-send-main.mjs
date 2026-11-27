@@ -70,13 +70,14 @@ export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABE
  *   engineWaitMs?: number,
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  *   move?: () => { view(): unknown, seen(): unknown, retry(): Promise<unknown> } | null,
- *   teamMove?: () => { view(): unknown, seen(): unknown } | null,
+ *   teamMove?: () => { view(from?: "cloud" | "computer"): unknown, seen(from?: "cloud" | "computer"): unknown } | null,
  *   botMove?: () => { view(): unknown, seen(): unknown } | null,
  *   moveSession?: { open(target: { origin: string, grant(): Promise<{ origin: string, code: string }> }): Promise<any> },
  * }} deps `engineWaitMs`: how long a
  * move waits for My Cloud's engines (cloud-connections.mjs). `space`: My Cloud's plan disk and the Admin's grow, so a
  * move makes room for the files it carries. `move`: the one-time move (one-home.mjs), whose line either page shows.
- * `teamMove`: a bot moving from My Cloud into a team (team-move-main.mjs), whose line My Cloud's page shows.
+ * `teamMove`: a bot moving from My Cloud or this computer into a team (team-move-main.mjs), whose line the page of the
+ * place it comes from shows.
  * `botMove`: some of this computer's bots moving to My Cloud (bot-move-main.mjs), whose line this computer's page shows.
  * `moveSession`: the one session every pass of the move uses (move-session.mjs); without it each pass opens its own.
  */
@@ -94,7 +95,7 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
   const moving = () => move()?.view() ?? null;
   /** The notice either page gets, with the one-time move's line when there is one. */
   const notice = (snapshot) => {
-    const line = moving(), team = pageOf() === "cloud" ? teamMove()?.view() ?? null : null, bots = pageOf() === "local" ? botMove()?.view() ?? null : null;
+    const page = pageOf(), line = moving(), team = page ? teamMove()?.view(page === "local" ? "computer" : "cloud") ?? null : null, bots = page === "local" ? botMove()?.view() ?? null : null;
     return { ...sendNotice(snapshot), ...(line ? { move: line } : {}), ...(team ? { teamMove: team } : {}), ...(bots ? { botMove: bots } : {}) };
   };
   const deliver = (snapshot) => {
@@ -140,8 +141,8 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
   };
 
   ipcMain.handle("cloud-send:notice", onPage("cloud-send:notice", () => notice(send.snapshot())));
-  ipcMain.handle("cloud-send:dismiss", onPage("cloud-send:dismiss", (_event, signature) => {
-    if (String(signature) === TEAM_MOVE_LINE) { teamMove()?.seen(); return notice(send.snapshot()); }
+  ipcMain.handle("cloud-send:dismiss", onPage("cloud-send:dismiss", (asking, signature) => {
+    if (String(signature) === TEAM_MOVE_LINE) { teamMove()?.seen(asking === "local" ? "computer" : "cloud"); return notice(send.snapshot()); }
     if (String(signature) === BOT_MOVE_LINE) { botMove()?.seen(); return notice(send.snapshot()); }
     if (String(signature) === MOVE_LINE) {
       // The done line says what the move brought; the move's own send result is not said again after it.

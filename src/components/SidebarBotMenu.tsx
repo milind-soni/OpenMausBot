@@ -76,7 +76,8 @@ export function BotContextMenu({
   const admin = useOwnerOrAdmin();
   const member = admin === false;
   const mayMove = useMayMoveBots();
-  const clearThreads = useDeleteAllThreads(simpleMenu), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
+  const clearThreads = useDeleteAllThreads(simpleMenu), moveToTeam = useMoveToTeam({ blocked: (bot, from) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t(from === "computer" ? "teamMove.blockedChiefComputer" : "teamMove.blockedChief")
+    : state.bots.filter((candidate) => !candidate.hidden && !candidate.movedTo).length <= 1 ? t(from === "computer" ? "teamMove.blockedLastComputer" : "teamMove.blockedLast") : undefined) });
   const moveToCloud = useMoveToMyCloud();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;

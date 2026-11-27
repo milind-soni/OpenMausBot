@@ -1,12 +1,13 @@
-// "Move to Acme" on My Cloud, in the desktop app only: one item per team in a bot's menu, one confirm that names what
-// goes and what stays, the line that says how it goes (in CloudSendStrip), and the line a moved bot leaves in the
-// sidebar, which opens it in the team. Main runs the move (electron/team-move-main.mjs); the teams come from the
-// MausBot Cloud sign-in it verified, never from this page.
+// "Move to Acme" on My Cloud or this computer, in the desktop app only: one item per team in a bot's menu, one confirm
+// that names what goes and what stays (on this computer, with the way to choose several bots), the line that says how
+// it goes (in CloudSendStrip), and the line a moved bot leaves in the sidebar, which opens it in the team. Main runs the
+// move (electron/team-move-main.mjs); the teams come from the MausBot Cloud sign-in it verified, never from this page.
 import { useEffect, useState, type ReactNode } from "react";
 import { ArrowRightLeft, Loader2, Users } from "lucide-react";
-import type { TeamMoveView } from "../../electron/team-move.mjs";
+import type { TeamMoveSource, TeamMoveView } from "../../electron/team-move.mjs";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { MoveChooser } from "./MoveToMyCloud";
 import { ipcErrorText, MY_CLOUD_TEAM, teamMoveLine, teamMoveRefusalText } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
 
@@ -15,14 +16,16 @@ type MenuItem = (icon: ReactNode, label: string, onClick?: () => void, opts?: { 
 
 const bridge = () => (!window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined);
 
-/** The teams a bot of this Cloud can move into; none anywhere but My Cloud's own page in the app. */
-export function useMoveTeams(): Team[] {
-  const [teams, setTeams] = useState<Team[]>([]);
+/** The teams a bot of this place can move into, and which place that is; none anywhere but My Cloud's own page and this
+ * computer's in the app. */
+export function useMoveTeams(): { teams: Team[]; from: TeamMoveSource } {
+  const [teams, setTeams] = useState<{ teams: Team[]; from: TeamMoveSource }>({ teams: [], from: "cloud" });
   useEffect(() => {
     const page = bridge();
     if (!page?.teams) return;
     let alive = true;
-    const read = () => void page.teams!().then((answer) => { if (alive) setTeams(Array.isArray(answer?.teams) ? answer.teams : []); }).catch(() => { if (alive) setTeams([]); });
+    const read = () => void page.teams!().then((answer) => { if (alive) setTeams({ teams: Array.isArray(answer?.teams) ? answer.teams : [], from: answer?.from === "computer" ? "computer" : "cloud" }); })
+      .catch(() => { if (alive) setTeams({ teams: [], from: "cloud" }); });
     read();
     window.addEventListener("focus", read);
     return () => { alive = false; window.removeEventListener("focus", read); };
@@ -30,10 +33,13 @@ export function useMoveTeams(): Team[] {
   return teams;
 }
 
-/** The bot menu's "Move to {team}" items, and the one confirm they open. */
-export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | undefined }) {
-  const teams = useMoveTeams();
+/** The bot menu's "Move to {team}" items, and the one confirm they open. `blocked`: why this bot stays in the place
+ * `from` is. */
+export function useMoveToTeam({ blocked }: { blocked: (bot: Bot, from: TeamMoveSource) => string | undefined }) {
+  const { teams, from } = useMoveTeams();
+  const computer = from === "computer";
   const [asked, setAsked] = useState<{ bot: Bot; team: Team } | null>(null);
+  const [several, setSeveral] = useState<{ bot: Bot; team: Team } | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = () => {
@@ -51,14 +57,19 @@ export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | und
       .finally(() => setSending(false));
   };
   const names = asked ? { bot: asked.bot.name, team: asked.team.name } : { bot: "", team: "" };
+  const moveMany = (team: Team) => async (ids: string[]) => {
+    const answer = await bridge()?.moveToTeamMany?.(ids, team.id);
+    if (answer && "refused" in answer) throw new Error(teamMoveRefusalText(answer.refused));
+  };
   return {
     items(bot: Bot, item: MenuItem): ReactNode[] {
       if (bot.movedTo || !teams.length) return [];
-      const hint = blocked(bot);
+      const hint = blocked(bot, from);
       return teams.map((team) => item(<ArrowRightLeft size={16} className="text-ink-secondary" />, t("teamMove.menu", { team: team.name }),
         () => { setError(null); setAsked({ bot, team }); }, { disabled: Boolean(hint) || !team.ready, hint }));
     },
-    dialog: <ConfirmDialog
+    // "Move several bots…" swaps the confirm for the chooser, with this bot ticked.
+    dialog: several ? <MoveChooser onClose={() => setSeveral(null)} team={{ name: several.team.name, chosen: [several.bot.id], move: moveMany(several.team) }} /> : <ConfirmDialog
       open={asked !== null}
       tone="neutral"
       icon={<Users size={18} />}
@@ -67,9 +78,11 @@ export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | und
         <span>{t("teamMove.yours", names)}</span>
         <span>{t("teamMove.goes", names)}</span>
         <span>{t("teamMove.private", names)}</span>
-        <span>{t("teamMove.staysOnMyCloud", names)}</span>
-        <span>{t("teamMove.dataStays", names)}</span>
-        <span data-team-move-final className="font-medium text-ink">{t("teamMove.noWayBack", names)}</span>
+        <span>{t(computer ? "teamMove.staysOnComputer" : "teamMove.staysOnMyCloud", names)}</span>
+        {!computer && <span>{t("teamMove.dataStays", names)}</span>}
+        <span data-team-move-final className="font-medium text-ink">{t(computer ? "teamMove.noWayBackComputer" : "teamMove.noWayBack", names)}</span>
+        {computer && bridge()?.moveToTeamMany && <button type="button" data-team-move-several className="self-start font-medium text-accent-text underline underline-offset-2 hover:text-ink"
+          disabled={sending} onClick={() => { setSeveral(asked); setAsked(null); }}>{t("teamMove.several")}</button>}
         {error && <span role="alert" className="text-danger">{error}</span>}
       </span>}
       confirmLabel={t("teamMove.confirm", names)}
@@ -112,7 +125,7 @@ export function TeamMoveLine({ move, onChange }: { move: TeamMoveView; onChange(
     {line.kind === "sending" || busy ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <ArrowRightLeft size={14} aria-hidden="true" />}
     <span dir="auto" data-cloud-send-strip-line>{line.text}</span>
     {line.kind === "done" && page?.openTeam && <>
-      <button type="button" data-team-move-open className={link} onClick={() => { void page.openTeam!(move.team.id).catch(() => {}); }}>{t("teamMove.open", names)}</button>
+      <button type="button" data-team-move-open className={link} onClick={() => { void page.openTeam!(move.team.id).catch(() => {}); }}>{move.batch && move.batch.length > 1 ? t("teamMove.openTeam", names) : t("teamMove.open", names)}</button>
       <span aria-hidden="true">·</span>
     </>}
     {line.kind === "failed" && !busy && <>

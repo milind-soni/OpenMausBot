@@ -1,12 +1,14 @@
 // Moving some of this computer's bots to My Cloud, in the desktop app only: the dialog that asks which ones before the first
 // move ("Move everything" as the quick way), a bot's own "Move to My Cloud" in its menu, the line that says how it goes,
-// and the one row the bots that moved leave in the sidebar. Main runs the move (electron/bot-move-main.mjs).
+// and the one row the bots that moved leave in the sidebar. Main runs the move (electron/bot-move-main.mjs). The same
+// dialog, given a team, chooses which of this computer's bots move into that team (MoveToTeam.tsx).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRightLeft, Check, Cloud, Loader2, X } from "lucide-react";
-import type { BotMoveState, BotMoveView } from "../../electron/cloud-send.mjs";
+import type { BotMoveState, BotMoveView, TeamBringable } from "../../electron/cloud-send.mjs";
 import { botMoveLine, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { useListedOnMyCloud } from "@/lib/place-rows";
 import type { Bot } from "@/state/store";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -17,24 +19,42 @@ type MenuItem = (icon: ReactNode, label: string, onClick?: () => void, opts?: { 
 
 const bridge = () => (!window.ogb?.remoteClient?.active ? window.ogb?.cloudSendPage : undefined);
 
-/** Which bots go to My Cloud: any of them, found by name, or everything with one press. */
-export function MoveChooser({ onClose }: { onClose: () => void }) {
-  const [bots, setBots] = useState<ReadonlyArray<{ id: string; name: string }> | null>(null);
+/** The chooser given a team: which of this computer's bots move into it. `bots`: the list when the page has it already
+ * (a team's own page), else this computer's own page asks main; `chosen`: the bots ticked at first. */
+export interface TeamChoice {
+  name: string;
+  bots?: readonly TeamBringable[];
+  chosen?: readonly string[];
+  move(ids: string[]): Promise<unknown>;
+}
+
+const STAYS_HERE: Record<NonNullable<TeamBringable["stays"]>, LocaleKey> = {
+  default: "teamMove.mausBotStaysComputer", chief: "teamMove.blockedChiefComputer", last: "teamMove.blockedLastComputer",
+};
+
+/** Which bots go to My Cloud: any of them, found by name, or everything with one press. With `team`: which of this
+ * computer's bots move into that team, those that stay shown and not choosable. */
+export function MoveChooser({ onClose, team }: { onClose: () => void; team?: TeamChoice }) {
+  const [bots, setBots] = useState<ReadonlyArray<TeamBringable> | null>(team?.bots ?? null);
   useEffect(() => {
+    if (team?.bots) return;
     let alive = true;
-    void bridge()?.botChoices?.().then((answer) => { if (alive) setBots(answer.bots); }, () => { if (alive) setBots([]); });
+    const asked = team ? bridge()?.teamChoices?.() : bridge()?.botChoices?.();
+    void (asked ?? Promise.resolve({ bots: [] })).then((answer) => { if (alive) setBots(answer.bots); }, () => { if (alive) setBots([]); });
     return () => { alive = false; };
   }, []);
   const [query, setQuery] = useState("");
-  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set(team?.chosen ?? []));
   const [shown, setShown] = useState(CHOOSER_PAGE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const found = useMemo(() => filterBots(bots ?? [], query), [bots, query]);
-  const chosenIds = useMemo(() => (bots ?? []).filter((bot) => chosen.has(bot.id)).map((bot) => bot.id), [bots, chosen]);
-  const changes = useMoveChanges(chosenIds, chosenIds.length === 1 ? (bots ?? []).find((bot) => bot.id === chosenIds[0])?.name ?? null : null);
-  const allFound = found.length > 0 && found.every((bot) => chosen.has(bot.id));
+  const choosable = useMemo(() => found.filter((bot) => !bot.stays), [found]);
+  const chosenIds = useMemo(() => (bots ?? []).filter((bot) => chosen.has(bot.id) && !bot.stays).map((bot) => bot.id), [bots, chosen]);
+  // What moving to My Cloud lends this computer's folders and commands to: a move into a team lends nothing.
+  const changes = useMoveChanges(team ? [] : chosenIds, !team && chosenIds.length === 1 ? (bots ?? []).find((bot) => bot.id === chosenIds[0])?.name ?? null : null);
+  const allFound = choosable.length > 0 && choosable.every((bot) => chosen.has(bot.id));
   useEffect(() => {
     root.current?.querySelector<HTMLElement>("input")?.focus();
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } };
@@ -48,7 +68,7 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
   });
   const toggleFound = () => setChosen((before) => {
     const next = new Set(before);
-    for (const bot of found) if (allFound) next.delete(bot.id); else next.add(bot.id);
+    for (const bot of choosable) if (allFound) next.delete(bot.id); else next.add(bot.id);
     return next;
   });
   const go = (work: (() => Promise<unknown>) | undefined) => {
@@ -61,24 +81,25 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
   return createPortal(<div className="ui-scrim fixed inset-0 z-[80] flex items-center justify-center p-4">
     <div ref={root} role="dialog" aria-modal="true" aria-labelledby="move-chooser-title" data-move-chooser=""
       className={`ui-modal relative flex max-h-[min(640px,calc(100dvh-32px))] w-[min(440px,calc(100vw-32px))] flex-col border-0 p-5 text-ink${changes.view ? " overflow-y-auto" : ""}`}>
-      <h2 id="move-chooser-title" className="pe-8 text-[17px] font-semibold">{t("cloudSend.choose.title")}</h2>
-      <p className="mt-1 text-[14px] leading-5 text-ink-secondary">{t("cloudSend.choose.line")} {t("cloudSend.dataStays")}</p>
-      <button type="button" disabled={busy} data-move-everything="" className={`${PRIMARY_BUTTON} mt-4 w-full justify-center`}
-        onClick={() => go(page?.moveEverything)}>{t("cloudSend.choose.everything")}</button>
+      <h2 id="move-chooser-title" className="pe-8 text-[17px] font-semibold" dir="auto">{team ? t("teamMove.chooseTitle", { team: team.name }) : t("cloudSend.choose.title")}</h2>
+      <p className="mt-1 text-[14px] leading-5 text-ink-secondary">{team ? t("teamMove.chooseLine", { team: team.name }) : `${t("cloudSend.choose.line")} ${t("cloudSend.dataStays")}`}</p>
+      {!team && <button type="button" disabled={busy} data-move-everything="" className={`${PRIMARY_BUTTON} mt-4 w-full justify-center`}
+        onClick={() => go(page?.moveEverything)}>{t("cloudSend.choose.everything")}</button>}
       <div className="mt-4 flex items-center gap-2">
         <input type="search" value={query} placeholder={t("cloudSend.choose.search")} aria-label={t("cloudSend.choose.search")} data-move-search=""
           onChange={(event) => { setQuery(event.target.value); setShown(CHOOSER_PAGE); }} className="min-w-0 flex-1 rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-accent focus:outline-none disabled:opacity-50" />
-        <button type="button" data-move-select-all="" disabled={!found.length} onClick={toggleFound} className="ui-button whitespace-nowrap px-2.5 py-1.5 text-[13px]">
+        <button type="button" data-move-select-all="" disabled={!choosable.length} onClick={toggleFound} className="ui-button whitespace-nowrap px-2.5 py-1.5 text-[13px]">
           {t(allFound ? "cloudSend.choose.clear" : "cloudSend.choose.selectAll")}
         </button>
       </div>
       {/* With what changes below it, the dialog scrolls as one, so the grants are read before Move. */}
       <ul className={`mt-2 min-h-[120px] overflow-y-auto rounded-md border border-hairline ${changes.view ? "max-h-[240px] flex-none" : "flex-1"}`} data-move-bots="">
         {found.slice(0, shown).map((bot) => {
-          const on = chosen.has(bot.id);
+          const on = chosen.has(bot.id) && !bot.stays;
           return <li key={bot.id}>
-            <button type="button" role="checkbox" aria-checked={on} data-move-bot={bot.id} onClick={() => toggle(bot.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-start text-[14px] hover:bg-raised">
-              <span className="min-w-0 flex-1 truncate" dir="auto">{bot.name}</span>
+            <button type="button" role="checkbox" aria-checked={on} disabled={Boolean(bot.stays)} data-move-bot={bot.id} onClick={() => toggle(bot.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-start text-[14px] enabled:hover:bg-raised disabled:text-ink-tertiary">
+              <span className={bot.stays ? "min-w-0 max-w-[50%] shrink-0 truncate" : "min-w-0 flex-1 truncate"} dir="auto">{bot.name}</span>
+              {bot.stays && <span data-move-bot-stays={bot.stays} className="min-w-0 flex-1 truncate text-end text-[12px]" title={t(STAYS_HERE[bot.stays])}>{t(STAYS_HERE[bot.stays])}</span>}
               {on && <Check size={15} aria-hidden="true" />}
             </button>
           </li>;
@@ -88,12 +109,13 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
           {t("cloudSend.choose.more", { count: found.length - shown })}
         </button></li>}
       </ul>
-      <p className="mt-2 text-[12px] text-ink-tertiary">{t("cloudSend.choose.rooms")}</p>
+      {!team && <p className="mt-2 text-[12px] text-ink-tertiary">{t("cloudSend.choose.rooms")}</p>}
       {changes.view && <div data-move-chooser-changes="" className="mt-2 flex-none text-[13px] leading-5 text-ink-secondary">{changes.view}</div>}
       {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
-      <button type="button" disabled={busy || !chosen.size} data-move-chosen="" className="ui-button mt-3 w-full justify-center py-1.5 text-[14px]" onClick={() => go(page?.moveBots && (() => page.moveBots!([...chosen], changes.choice ?? undefined)))}>
+      <button type="button" disabled={busy || !chosenIds.length} data-move-chosen="" className={`${team ? PRIMARY_BUTTON : "ui-button py-1.5 text-[14px]"} mt-3 w-full justify-center`}
+        onClick={() => go(team ? () => team.move(chosenIds) : page?.moveBots && (() => page.moveBots!(chosenIds, changes.choice ?? undefined)))}>
         {busy && <Loader2 size={14} aria-hidden="true" className="me-1.5 animate-spin" />}
-        {chosen.size === 1 ? t("cloudSend.choose.moveOne") : t("cloudSend.choose.moveSome", { count: chosen.size })}
+        {chosenIds.length === 1 ? t("cloudSend.choose.moveOne") : t("cloudSend.choose.moveSome", { count: chosenIds.length })}
       </button>
       <div className="mt-1 flex justify-center"><NotNowButton onClick={onClose} /></div>
       <button type="button" onClick={onClose} aria-label={t("common.close")} className="ui-icon-button absolute end-3 top-3"><X size={16} /></button>
