@@ -105455,7 +105455,8 @@
       "keys.vps.servers.hintPlain": "e46a205cf65609c7c588e8cc58f326bb83f17208c3b0f4fe07667f70297b5b94",
       "keys.vps.servers.editIn": "d246dc6f7fee3e3ce89a3ecfee85e57efd0e50655a9164e5b6a09eff559266f3",
       "keys.vps.field.sshSettingsName": "d1aa2cf3c9bf42457240f312c434571f520444f7491b27be177fc95b44d14f5d",
-      "keys.vps.field.inherited": "1f2d1cb9144c704ea086ec96a7041d97c3de5a76ea98dd76a844c91302602fed"
+      "keys.vps.field.inherited": "1f2d1cb9144c704ea086ec96a7041d97c3de5a76ea98dd76a844c91302602fed",
+      "native.splash.openingWorkspace": "46d4b6f0255e6eb6527a1076a8df5cf72d885a99452796eda8415c061dbf0ec1"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
