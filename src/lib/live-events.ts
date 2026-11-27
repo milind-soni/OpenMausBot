@@ -107,6 +107,8 @@ export function placeFrames<T extends (frame: LiveFrame) => void>(sink: T): T {
   return sink;
 }
 export function placeFrame(frame: ServerFrame): void {
+  // The chat's status line, steps and streaming reply read every live frame before the store does, as for this page's own.
+  tapLiveFrame(frame);
   placeSink?.(frame as LiveFrame);
 }
 

@@ -59,14 +59,21 @@ export async function openPlaceBot(id: string, dispatch: Dispatch<Action>): Prom
   try { opened = await page.openInPlace(id); } catch { opened = null; }
   if (overtaken()) return "overtaken";
   if (!opened?.ok) return there();
-  let bot: Bot;
-  try {
-    ({ bot } = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(key)}?messages=${OPEN_MESSAGES}`));
-    if (!bot || bot.id !== key) throw new Error("not this bot");
-  } catch {
-    return overtaken() ? "overtaken" : there();
+  let bot: Bot | null = null;
+  const read = async () => {
+    const answer = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(key)}?messages=${OPEN_MESSAGES}`);
+    if (!answer?.bot || answer.bot.id !== key) throw new Error("not this bot");
+    return answer.bot;
+  };
+  try { bot = await read(); } catch (error) {
+    // The session was signed out at My Cloud, or this computer's server restarted without it: main opens a new one, once.
+    const code = (error as { body?: { code?: unknown } }).body?.code;
+    if (!overtaken() && (code === "place_signin" || code === "place_closed")) {
+      try { if ((await page.openInPlace(id, true))?.ok && !overtaken()) bot = await read(); } catch { bot = null; }
+    }
   }
   if (overtaken()) return "overtaken";
+  if (!bot) return there();
   dispatch({ type: "botPatched", bot: placeBot(bot) });
   dispatch({ type: "select", id: key });
   chosen = key;

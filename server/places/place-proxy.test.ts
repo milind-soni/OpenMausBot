@@ -96,6 +96,16 @@ describe("the conversation of a My Cloud bot, through this computer's server", (
     expect(JSON.parse(seen[1]!.body)).toEqual({ threadId: "t1" });
   });
 
+  it("forwards the conversation's own settings, edits, reactions and approvals, but never the bot's", async () => {
+    for (const [method, path] of [["PATCH", "/api/bots/cloud:scout/tasks/cloud:t1"], ["POST", "/api/bots/cloud:scout/messages/m1/edit"], ["POST", "/api/bots/cloud:scout/active-branch"],
+      ["POST", "/api/threads/cloud:t1/messages/m1/reactions"], ["POST", "/api/threads/cloud:t1/respond"], ["POST", "/api/threads/cloud:t1/undo"], ["POST", "/api/bots/cloud:scout/always-allow"]] as const) {
+      expect((await ask(path, { method, body: JSON.stringify({ threadId: "cloud:t1", pinnedMessageId: "m1" }) })).status, path).toBe(200);
+    }
+    expect(seen.map(({ method, url }) => `${method} ${url}`)).toEqual(["PATCH /api/bots/scout/tasks/t1", "POST /api/bots/scout/messages/m1/edit", "POST /api/bots/scout/active-branch",
+      "POST /api/threads/t1/messages/m1/reactions", "POST /api/threads/t1/respond", "POST /api/threads/t1/undo", "POST /api/bots/scout/always-allow"]);
+    expect(seen.every(({ body }) => JSON.parse(body).threadId === "t1")).toBe(true);
+  });
+
   it("serves My Cloud's file by the page's name for it", async () => {
     answerWith = (_req, res) => void res.writeHead(200, { "content-type": "image/png", "content-length": "3" }).end(Buffer.from([1, 2, 3]));
     const answer = await ask("/api/attachments/cloud--aa11-bb22.png");
@@ -117,8 +127,8 @@ describe("the conversation of a My Cloud bot, through this computer's server", (
   });
 
   it("refuses what a conversation does not need, without asking My Cloud: settings, deleting the bot, renaming", async () => {
-    for (const [method, path] of [["PATCH", "/api/bots/cloud:scout"], ["DELETE", "/api/bots/cloud:scout"], ["GET", "/api/bots/cloud:scout/soul"], ["PATCH", "/api/bots/cloud:scout/tasks/cloud:t1"]] as const) {
-      const answer = await ask(path, { method, ...(method === "PATCH" ? { body: "{}" } : {}) });
+    for (const [method, path] of [["PATCH", "/api/bots/cloud:scout"], ["DELETE", "/api/bots/cloud:scout"], ["GET", "/api/bots/cloud:scout/soul"], ["POST", "/api/bots/cloud:scout/computer/provision"]] as const) {
+      const answer = await ask(path, { method, ...(method === "GET" || method === "DELETE" ? {} : { body: "{}" }) });
       expect(answer.status).toBe(404);
       expect(await codeOf(answer)).toBe("place_unsupported");
     }

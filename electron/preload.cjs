@@ -650,7 +650,7 @@ const bridge = {
     open: botId => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
     // A My Cloud bot opened in this computer's window (main readies the session this computer's server forwards it with).
-    openInPlace: botId => (isLocalPage ? ipcRenderer.invoke("places-together:open-in-place", String(botId)) : Promise.resolve({ ok: false })),
+    openInPlace: (botId, fresh) => (isLocalPage ? ipcRenderer.invoke("places-together:open-in-place", String(botId), fresh === true) : Promise.resolve({ ok: false })),
     // Where the person dragged bots in the one list: main keeps it beside the switch, and checks every entry.
     arrange: entries => ipcRenderer.invoke("places-together:arrange", Array.isArray(entries) ? entries.slice(0, 2000) : []),
     onChanged: cb => {

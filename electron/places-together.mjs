@@ -538,9 +538,10 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       return true;
     },
     /** A row's click on this computer's page, where a My Cloud bot opens in this window: the session this computer's server
-     * forwards it with is readied (waking My Cloud first), with the row "waking" meanwhile. `ok` false: the page opens it
+     * forwards it with is readied (waking My Cloud first), with the row "waking" meanwhile; `fresh`, a new one in place of
+     * one My Cloud refused. `ok` false: the page opens it
      * with `open` instead, on My Cloud's own page. Only a bot main listed itself, for this Cloud and account. */
-    async openInPlace(asking, botId) {
+    async openInPlace(asking, botId, { fresh = false } = {}) {
       sameScope();
       if (asking !== "computer" || !active() || !inPlace) return { ok: false };
       const row = kept.get("cloud")?.bots.find((bot) => bot.id === botId);
@@ -549,7 +550,7 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       readying += 1;
       tell();
       try {
-        const ready = await inPlace.ensure();
+        const ready = await inPlace.ensure({ fresh });
         return { ok: mine === epoch && active() && ready?.ok === true };
       } catch { return { ok: false }; }
       finally { if (mine === epoch) { readying = Math.max(0, readying - 1); tell(); } }
@@ -641,7 +642,7 @@ export function installPlacesTogether({ ipcMain, asking, together, rail = () => 
     return together.set(page, value === true, { listOnly: from === "notice" });
   });
   ipcMain.handle("places-together:open", (event, botId) => together.open(side(event), String(botId)));
-  ipcMain.handle("places-together:open-in-place", (event, botId) => together.openInPlace(side(event), String(botId)));
+  ipcMain.handle("places-together:open-in-place", (event, botId, fresh) => together.openInPlace(side(event), String(botId), { fresh: fresh === true }));
   ipcMain.handle("places-together:arrange", (event, entries) => together.arrange(side(event), entries));
   ipcMain.handle("places-together:new-bot-choice", (event) => together.newBotChoice(side(event)));
   ipcMain.handle("places-together:new-bot", (event) => together.newBot(side(event)));

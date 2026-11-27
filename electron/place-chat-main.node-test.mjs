@@ -73,6 +73,15 @@ test("the session is signed out at My Cloud and dropped from the server when let
   assert.deepEqual(f.asked.map(([url]) => url.slice(CLOUD.length)), ["/api/auth/logout", "/api/auth/pair"], "the old one signed out, a new one opened");
 });
 
+test("a session My Cloud refused is replaced when asked: the old one let go, a new one opened", async () => {
+  const f = setup();
+  await f.chat.ensure();
+  f.asked.length = 0;
+  assert.deepEqual(await f.chat.ensure({ fresh: true }), { ok: true });
+  assert.deepEqual(f.asked.map(([url]) => url.slice(CLOUD.length)), ["/api/auth/logout", "/api/auth/pair"]);
+  assert.equal(f.grants, 2);
+});
+
 test("no My Cloud, no session", async () => {
   const f = setup({ cloud: { origin: null, account: null, asleep: false } });
   assert.deepEqual(await f.chat.ensure(), { ok: false });
@@ -119,8 +128,9 @@ test("the page asks to open in place over its own channel, and main answers for 
   const handlers = new Map();
   const asked = [];
   installPlacesTogether({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, asking: (event) => event.page,
-    together: { openInPlace: async (asking, id) => { asked.push([asking, id]); return { ok: true }; } } });
+    together: { openInPlace: async (asking, id, options) => { asked.push([asking, id, options]); return { ok: true }; } } });
   assert.deepEqual(await handlers.get("places-together:open-in-place")({ page: "local" }, "scout"), { ok: true });
-  assert.deepEqual(asked, [["computer", "scout"]]);
+  await handlers.get("places-together:open-in-place")({ page: "local" }, "scout", true);
+  assert.deepEqual(asked, [["computer", "scout", { fresh: false }], ["computer", "scout", { fresh: true }]]);
   await assert.rejects(async () => handlers.get("places-together:open-in-place")({ page: null }, "scout"));
 });

@@ -315,8 +315,8 @@ export function Composer({
 
   const slash = composerSlashTrigger(text, caret);
   const locale = activeLocale();
-  const slashSkills = useSlashSkills(group ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
-  const canLearn = skillAuthoringEnabled(state.config) &&
+  const slashSkills = useSlashSkills(group || isPlaceId(bot?.id) ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const canLearn = skillAuthoringEnabled(state.config) && !isPlaceId(bot?.id) &&
     (group ? (members ?? []).some((member) => supportsAgents(state.instances, member)) : supportsAgents(state.instances, bot));
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];

@@ -138,6 +138,19 @@ describe("a My Cloud bot opens in this window", () => {
     expect(dispatch.mock.calls.some(([action]) => action.type === "select")).toBe(false);
   });
 
+  it("a session My Cloud signed out is replaced once, and the bot opens here all the same", async () => {
+    window.ogb = { placesTogether: page } as never;
+    await render();
+    const good = served;
+    let first = true;
+    served = (path) => { if (first) { first = false; return new Response(JSON.stringify({ error: "x", code: "place_signin" }), { status: 502 }); } return good(path); };
+    await act(async () => q('[data-sidebar-bot-row="cloud:scout"]')!.click());
+    await settled();
+    expect(page.openInPlace.mock.calls).toEqual([["scout"], ["scout", true]]);
+    expect(page.open).not.toHaveBeenCalled();
+    expect(dispatch.mock.calls.map(([action]) => action).at(-1)).toEqual({ type: "select", id: "cloud:scout" });
+  });
+
   it("an app without it opens on My Cloud's page, as before", async () => {
     const { openInPlace: _gone, ...older } = page;
     window.ogb = { placesTogether: older } as never;

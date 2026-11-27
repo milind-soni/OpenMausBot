@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StoreProvider, useStore } from "@/state/store";
 import { PlaceChatKeeper } from "@/components/PlacedBotMenu";
 import { openPlaceBot, resetPlaceChatForTest } from "./place-chat";
+import { liveReplies, resetLiveReplies } from "@/state/live-reply";
 
 class Source {
   static made: Source[] = [];
@@ -53,6 +54,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await act(async () => root.unmount());
   resetPlaceChatForTest();
+  resetLiveReplies();
   vi.unstubAllGlobals();
   delete (window as { ogb?: unknown }).ogb;
 });
@@ -111,4 +113,15 @@ it("a click overtaken by the person choosing something else lands nowhere", asyn
   expect(await opened).toBe("overtaken");
   expect(store.state.selectedId).toBe("git");
   expect(bots()).toEqual(["ledger", "git"]);
+});
+
+it("a turn streams in place: each delta of the reply shows live under the conversation's place id, as this page's own do", async () => {
+  await act(async () => { await openPlaceBot("scout", store.dispatch); });
+  await settle();
+  const runtime = (event: Record<string, unknown>) => placed().say({ kind: "runtime", event: { eventId: `e${Math.random()}`, provider: "claudeAgent", threadId: "cloud:t1", createdAt: "2026-11-27T10:00:00.000Z", turnId: "turn-1", ...event } });
+  await act(async () => { runtime({ type: "turn.started" }); runtime({ type: "content.delta", streamKind: "assistant_text", delta: "Two of the four " }); });
+  expect(liveReplies("cloud:t1").map((item) => item.text)).toEqual(["Two of the four "]);
+  await act(async () => runtime({ type: "content.delta", streamKind: "assistant_text", delta: "have a balcony." }));
+  expect(liveReplies("cloud:t1").map((item) => item.text)).toEqual(["Two of the four have a balcony."]);
+  expect(liveReplies("t1")).toEqual([]);
 });

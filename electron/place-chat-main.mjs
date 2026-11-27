@@ -88,9 +88,10 @@ export function createPlaceChatMain({ cloud, grant, wake, server, fetch: fetchIm
   return {
     /** Gets the session ready for a click on a My Cloud row: the one already open (told to the server again, which may
      * have restarted since), or a new one. `{ ok: false }` when there is no My Cloud or it can't sign this in. */
-    ensure() {
+    ensure({ fresh = false } = {}) {
       const key = scope();
-      if (session && session.key !== key) this.close();
+      // `fresh`: My Cloud refused the one held (it was signed out there): a new one replaces it.
+      if (session && (session.key !== key || fresh)) this.close();
       if (session) { tell({ origin: session.origin, token: session.token }); return Promise.resolve({ ok: true }); }
       if (!opening) {
         const mine = epoch;

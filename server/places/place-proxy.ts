@@ -5,7 +5,8 @@
 // process's memory only, and every answer is rebuilt here from My Cloud's body with its ids in this page's names.
 //
 // Only what a conversation needs goes through (ROUTES): reading it and its other conversations, its live turns, sending,
-// stopping, answering its cards, marking it read and its files. Anything else asked of such a bot is refused plainly
+// stopping, editing and reacting, answering its cards and approvals, the conversation's own settings, marking it read
+// and its files. Anything else asked of such a bot is refused plainly
 // with the words to open My Cloud's own page, which the bot's row offers.
 //
 // Who may ask: only the app's own window, by the desktop capability Chromium adds to its requests below JavaScript, from
@@ -37,6 +38,15 @@ const ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ["GET", /^\/api\/bots\/[\w-]+$/],
   ["POST", /^\/api\/bots\/[\w-]+\/tasks$/],
   ["POST", /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/],
+  // The conversation's own settings: its title, a pinned message, Work until done, how it asks before acting; and
+  // archiving it. The bot's settings stay on its own page.
+  ["PATCH", /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/],
+  ["DELETE", /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/],
+  ["POST", /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+\/title$/],
+  ["POST", /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+\/forks$/],
+  ["POST", /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/],
+  ["POST", /^\/api\/bots\/[\w-]+\/active-branch$/],
+  ["POST", /^\/api\/bots\/[\w-]+\/always-allow$/],
   ["POST", /^\/api\/bots\/[\w-]+\/messages$/],
   ["POST", /^\/api\/bots\/[\w-]+\/read$/],
   ["POST", /^\/api\/bots\/[\w-]+\/interrupt$/],
@@ -44,6 +54,10 @@ const ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ["POST", /^\/api\/bots\/[\w-]+\/queue\/[\w-]+\/steer$/],
   ["POST", /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/],
   ["POST", /^\/api\/threads\/[\w-]+\/respond$/],
+  ["POST", /^\/api\/threads\/[\w-]+\/undo$/],
+  ["POST", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/reactions$/],
+  ["GET", /^\/api\/threads\/[\w-]+\/job$/],
+  ["POST", /^\/api\/threads\/[\w-]+\/job\/[\w-]+\/stop$/],
   ["GET", /^\/api\/threads\/[\w-]+\/messages$/],
   ["GET", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/(?:image|file|tool)$/],
   ["GET", /^\/api\/attachments\/[\w.-]+$/],
