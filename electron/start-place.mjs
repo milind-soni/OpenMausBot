@@ -19,9 +19,12 @@ import { DEFAULT_PROFILE } from "./clean-workspace.mjs";
 export async function openStartPlace({ home, places, profiles, server, log = () => {} }) {
   const { kind } = await home.refresh();
   const last = places.remembered();
-  // Signed out, nothing of the account's opens: home shows as ever, and the place waits for the person to be back.
-  if (!last || home.opensNow("cloud") === null) { await home.show(); return "home"; }
-  if (await reopens(last)) return "remembered";
+  if (!last) { await home.show(); return "home"; }
+  // A server saved by hand belongs to this computer, not to an account: it reopens even when nobody is signed in.
+  if (typeof last.server === "string" && (await server(last.server).catch(() => false)) === true) return "remembered";
+  // Signed out, nothing else of the account's opens: home shows as ever, and the place waits for the person to be back.
+  if (home.opensNow("cloud") === null) { await home.show(); return "home"; }
+  if (typeof last.server !== "string" && (await reopens(last))) return "remembered";
   log(`start: the place open last time can't open now (${Object.keys(last)[0]}); My Cloud instead`);
   places.remember(null);
   if (kind === "cloud" && home.opensNow("cloud") === false && profiles && (await profiles.open(DEFAULT_PROFILE)) === true) return "this-mac";
@@ -30,7 +33,6 @@ export async function openStartPlace({ home, places, profiles, server, log = () 
 
   async function reopens(place) {
     if (typeof place.profile === "string") return Boolean(profiles) && (await profiles.open(place.profile)) === true;
-    if (typeof place.server === "string") return kind === "cloud" && (await server(place.server).catch(() => false)) === true;
     if (!home.opensNow(place)) return false;
     await home.show();
     return true;

@@ -13,6 +13,7 @@ import { visibleMessages, type Bot, type Group, type Message } from "@/state/sto
 import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { useContextAction } from "./ContextWarning";
 import { MENU_ICON, MENU_LABEL, MENU_NOTE, MENU_ROW, MENU_SEPARATOR, MENU_SHEET } from "./menu-recipe";
+import { ShortcutHint } from "./ShortcutHint";
 
 const TONE_INK: Record<ContextTone, string> = { quiet: "", warning: "text-warning", danger: "text-danger" };
 const TONE_FILL: Record<ContextTone, string> = { quiet: "bg-ink-tertiary", warning: "bg-warning", danger: "bg-danger" };
@@ -146,7 +147,7 @@ function ChatContext({ bot, reading, breakdown, detailed, onDone }: { bot: Bot; 
   const messages = visibleMessages(bot);
   const rows = contextRows(breakdown);
   const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
-  const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart;
+  const idle = !bot.busy && !compact.pending && !fresh.pending && messages.length > 0 && !atFreshStart && !bot.switchingTo;
   return (
     <>
       <div className={MENU_LABEL}>{t("contextMenu.title")}</div>
@@ -162,9 +163,11 @@ function ChatContext({ bot, reading, breakdown, detailed, onDone }: { bot: Bot; 
       </button>
       <button type="button" data-context-fresh className={MENU_ROW} disabled={!idle}
         title={t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint")}
+        aria-keyshortcuts="Meta+Shift+K Control+Shift+K"
         onClick={() => { fresh.run(`/api/bots/${bot.id}/start-fresh`, { threadId: bot.threadId }); onDone(); }}>
         <RotateCcw size={16} className={MENU_ICON} />
         <span className="min-w-0 truncate">{t("chat.startFresh")}</span>
+        <span className="ms-auto"><ShortcutHint id="start-fresh" /></span>
       </button>
     </>
   );

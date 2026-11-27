@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { soulSystemPrompt } from "./bot-folder.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
+  botPersona,
   longCommandsPrompt,
   buildSystemPrompt,
   CONVERSATIONAL_STYLE_PROMPT,
@@ -700,3 +701,13 @@ describe("a heavy bot", () => {
   });
 });
 
+describe("the MausBot app map", () => {
+  it("rides only the default bot's persona, in the stable half", () => {
+    const withMap = botPersona({ name: "Maus", defaultBot: {} });
+    expect(withMap).toContain("shared Skills library every bot can be assigned from");
+    expect(botPersona({ name: "Kiwi" })).not.toContain("Skills library");
+    const built = buildSystemPrompt(withMap, "", []);
+    expect(built.stable).toContain("Skills library");
+    expect(built.volatile).not.toContain("Skills library");
+  });
+});

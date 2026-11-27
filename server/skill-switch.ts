@@ -40,7 +40,7 @@ export function skillSwitchTarget(
     return { error: `skill "${name}" is shared with this bot, not its own; only the person can change it, in the bot's Skills settings` };
   }
   if (action === "delete" && skill.kind === "imported") {
-    return { error: `skill "${name}" comes from this computer and can't be deleted from one bot; turn it off instead (action "disable")` };
+    return { error: `skill "${name}" comes from this computer and can't be deleted from one bot; turn it off instead (action "disable"), or the person can remove it in the bot's Skills settings` };
   }
   // Its scan warnings and helper files are reviewed in Settings, not on this card.
   if (action === "enable" && skill.kind === "imported") {
