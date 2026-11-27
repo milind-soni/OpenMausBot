@@ -1451,7 +1451,7 @@ describe("What's new for everyone once more: Apps, Publish your bots, then the C
   it("Publish your bots names the bot's menu item and the card's button, and asks nothing of a bot: no button of its own", async () => {
     const html = await launch();
     expect(html).toContain(PUBLISH);
-    expect(html).toContain("Share a bot as a template others can add to their own MausBot. Choose “Share as template” in the bot&#x27;s Share or ⋯ menu, then “Publish”.");
+    expect(html).toContain("Share a bot as a template others can add to their own MausBot. Choose “Publish” in the bot&#x27;s ⋯ menu, then “Publish to community”.");
     expect(vi.mocked(api).mock.calls.filter(([path]) => String(path).includes("/messages")), "nothing sent to a bot").toEqual([]);
   });
 
