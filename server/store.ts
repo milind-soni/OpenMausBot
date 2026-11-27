@@ -19,7 +19,7 @@ import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { rotationColor } from "./bot-look.ts";
-import { redactBotAuthored } from "./message-redaction.ts";
+import { redactBotAuthored } from "./message-redaction.ts"; import { withOrigin } from "./message-origin.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
@@ -1132,7 +1132,7 @@ export class Store {
 
   appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }, command?: Command): Message {
     const t = this.thread(threadId);
-    const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
+    const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(withOrigin(message)) };
     const persist = () => { mdb.appendMessage(threadId, full); return full; };
     const committed = command ? runCommand(command, persist) : persist();
     if (committed.id !== full.id) return committed;
@@ -1154,7 +1154,7 @@ export class Store {
     const t = this.thread(threadId);
     const anchorExists = anchorId !== undefined && t.messages.some((m) => m.id === anchorId);
     if (!anchorExists || t.activeLeafId === anchorId) return this.appendMessage(threadId, message);
-    const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
+    const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(withOrigin(message)), parentId: anchorId };
     const children = t.messages.filter((m) => m.parentId === anchorId);
     t.messages.push(full); this.threads.grew(threadId, full);
     mdb.insertMessage(threadId, full);
@@ -1199,7 +1199,7 @@ export class Store {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);
     if (!source) return null;
-    const full: Message = {
+    const full: Message = withOrigin({
       id: newId(),
       at: Date.now(),
       role: "user", kind: "text",
@@ -1208,10 +1208,10 @@ export class Store {
       replyToId: source.replyToId,
       ...(source.reaction && source.text === text ? { reaction: source.reaction } : {}),
       // Regenerate and Try again send the stored words back: an automation's line stays the automation's.
-      ...(source.automated === true && source.text?.trim() === text.trim() ? { automated: true, ...(source.waitId ? { waitId: source.waitId } : {}) } : {}),
+      ...(source.automated === true && source.text?.trim() === text.trim() ? { automated: true, ...(source.origin ? { origin: source.origin } : {}), ...(source.waitId ? { waitId: source.waitId } : {}) } : {}),
       ...(sendId ? { sendId } : {}), ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}), ...from,
-    };
+    });
     t.messages.push(full); this.threads.grew(threadId, full);
     t.activeLeafId = full.id; mdb.appendMessage(threadId, full);
     this.noteThreadActivity(threadId, full.at, true);

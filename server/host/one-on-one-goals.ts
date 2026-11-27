@@ -176,6 +176,7 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
       kind: "text",
       text,
       channelMode: "goal",
+      origin: options.runId ? "routine" : "client",
       ...(options.sendId ? { sendId: options.sendId } : {}),
       ...(options.sender ? { sender: options.sender } : {}),
     });

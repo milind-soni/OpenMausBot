@@ -363,7 +363,13 @@ export function cancelledChatFollowup(kind: ChatFollowup["kind"], ownerId: strin
   ).get(kind, ownerId, threadId, sendId));
 }
 
-const rowToMessage = (row: { json: string }): Message => JSON.parse(row.json) as Message;
+function storedMessage(json: string): Message {
+  const message = JSON.parse(json) as Message;
+  if (message.role === "user" && message.origin === undefined) message.origin = "unknown";
+  return message;
+}
+
+const rowToMessage = (row: { json: string }): Message => storedMessage(row.json);
 
 export interface ThreadRows {
   messages: Message[];
@@ -417,6 +423,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
     messages = ((raw as { messages?: Message[] }).messages ?? []) as Message[];
     activeLeafId = (raw as { activeLeafId?: string | null }).activeLeafId ?? null;
   }
+  for (const message of messages) if (message.role === "user" && message.origin === undefined) message.origin = "unknown";
   const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
