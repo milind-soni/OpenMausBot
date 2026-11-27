@@ -18,7 +18,7 @@ function resolvedHome(): string {
 const here = (): OutsideFilePlace => ({ home: resolvedHome(), platform: process.platform, env: process.env });
 
 /** Names that hold keys or credentials wherever they sit. */
-const SECRET_NAME = /^(?:id_(?:rsa|ed25519|ecdsa|dsa)|credentials)|\.(?:pem|key|p12|pfx|kdbx|env)$/i;
+const SECRET_NAME = /^(?:id_(?:rsa|ed25519|ecdsa|dsa)|credentials)|\.(?:pem|key|p12|pfx|p8|kdbx|kdb|ppk|jks|keystore|asc|gpg|env)$/i;
 
 /** Browser profile folders under macOS's Application Support; each holds cookies, saved passwords and session tokens. */
 const MAC_BROWSERS = [
