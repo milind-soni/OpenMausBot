@@ -1,12 +1,13 @@
 // The Team Board on a real Team Cloud: Olive (the Owner) and three Members. Desk is in the Launch room everyone sees;
 // Payroll is shared with Mira to chat and Cara to view, so its Pay desk room is Mira's and Cara's to see and Ben's not at
-// all. The board answers 404 until Olive switches it on; a member's item opens a room thread with their line and starts
+// all. The board is there from the start, with no switch; a member's item opens a room thread with their line and starts
 // no turn; nobody who cannot see the room hears of its items; needs ready what waits on them; and a personal Cloud has
 // no board. The engine is the synthetic Claude CLI.
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import type { BoardItem, BoardItemFrame } from "../shared/board.ts";
+import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OLIVE = { email: "olive@acme.test", role: "owner" as const };
@@ -89,16 +90,17 @@ afterAll(async () => {
   await fx?.close();
 });
 
-it("has no board until it is switched on, and the switch shows only here", async () => {
-  expect((await team.as(mira, "GET", "/api/board")).status).toBe(404);
-  expect((await team.as(mira, "POST", "/api/board/items", { groupId: launch.id, title: "Early" })).status).toBe(404);
-  expect((await team.as(olive, "GET", "/api/config")).body.features.teamBoard).toBe(false);
-  const on = await team.as(olive, "PATCH", "/api/config", { features: { teamBoard: true } });
-  expect(on.status, JSON.stringify(on.body)).toBe(200);
-  expect(on.body.features.teamBoard).toBe(true);
-  expect((await team.as(mira, "GET", "/api/config")).body.features?.teamBoard).toBe(true);
+it("has a board from the start with no switch, names each caller's own key, and ignores an older app's switch", async () => {
   expect(await board(mira)).toEqual([]);
-  expect((await fx.onCloud("GET", "/api/config")).body.features?.teamBoard).toBeUndefined();
+  // "Needs you": the key an item's question names is the one GET /api/board says is the caller's, the Owner's too.
+  for (const [token, person] of [[olive, OLIVE], [mira, MIRA]] as const) {
+    expect((await team.as(token, "GET", "/api/board")).body.you).toBe(personKey({ id: "", email: person.email }));
+  }
+  expect((await team.as(olive, "GET", "/api/config")).body.features.teamBoard).toBeUndefined();
+  const old = await team.as(olive, "PATCH", "/api/config", { features: { teamBoard: false } });
+  expect(old.status, JSON.stringify(old.body)).toBe(200);
+  expect(old.body.features.teamBoard).toBeUndefined();
+  expect(await board(mira)).toEqual([]);
 }, hostTimeout(60_000));
 
 it("a member's item opens a room thread with their line and starts no turn", async () => {
