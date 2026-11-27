@@ -9,9 +9,12 @@ MausBot checks for updates in the background and offers the download in a card a
 | Build | What the button does |
 |---|---|
 | macOS, Windows, Linux AppImage | **Restart to update** — the app replaces itself and reopens. An AppImage is always rewritten at the path you launch, so your launcher, symlink or dock pin keeps working. |
-| Ubuntu `.deb` (and rpm/pacman) | **Install** — MausBot downloads and verifies the package, copies the install command, and opens a terminal for you to paste it into. The app never installs a system package itself, so it never asks for your administrator password. |
+| Ubuntu `.deb` | **Install** — MausBot downloads and verifies the package, asks for your password once in the system's own prompt, installs it with `apt-get` so new dependencies are resolved, and reopens. If that prompt cannot be shown (SSH, no desktop, no `pkexec`) or the install fails, it copies the `sudo apt-get install` line and opens a terminal for you to paste it into instead. |
+| Fedora `.rpm`, Arch `pacman` | **Install** — MausBot downloads and verifies the package, copies the install command, and opens a terminal for you to paste it into. It never installs an `.rpm` or `pacman` package itself. |
 
-Ubuntu packages are installed from the releases repository by hand, so the app hands you the exact line rather than guessing at a package handler:
+The `.deb` is installed from a root-only copy of the file, and only after it matches the checksum in the update feed; a file that does not match is refused and nothing is installed. Closing the prompt leaves the update ready to try again. Set `OMB_UPDATE_INSTALL=terminal` to always take the terminal route.
+
+To install it yourself, the package is already downloaded:
 
 ```bash
 sudo apt-get install -y '/home/you/.cache/openmausbot-updater/pending/OpenMausBot-<version>-amd64.deb'
@@ -37,15 +40,15 @@ The installed version runs the updater, not the version being downloaded. If you
 
 Open **App settings → General → Diagnostics → Export Diagnostics…**. Include your operating system, the currently installed version, the target version, and whether the failure happened during download, preparation, or restart. Newer builds include a bounded, redacted updater log alongside the server and desktop logs. Review the exported file before sharing it privately with support.
 
-## No terminal opened
+## The terminal did not open
 
-The install command is on your clipboard either way. Open a terminal yourself and paste it. If the clipboard was overwritten, the package is already downloaded and you can run:
+This is the `.rpm` and `pacman` route, and the `.deb` fallback when the password prompt could not be shown. The install command is on your clipboard either way. Open a terminal yourself and paste it. If the clipboard was overwritten, the package is already downloaded and you can run:
 
 ```bash
 sudo apt-get install -y ~/.cache/openmausbot-updater/pending/OpenMausBot-*-amd64.deb
 ```
 
-Use `apt-get`, not `dpkg -i` — only `apt-get` resolves dependencies, and on Ubuntu 24.04 ours are satisfied through virtual packages that `dpkg` alone will not follow.
+Use `apt-get`, not `dpkg -i` — only `apt-get` resolves dependencies, and on Ubuntu 24.04 ours are satisfied through virtual packages that `dpkg` alone will not follow. On Fedora, use `sudo rpm -Uvh` with the same file name and `.rpm`; on Arch, `sudo pacman -U` with the `.pacman` package.
 
 ## Verify the installed version
 

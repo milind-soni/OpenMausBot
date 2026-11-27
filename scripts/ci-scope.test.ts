@@ -270,6 +270,7 @@ describe("CI outputs", () => {
       "server/cloud-team-skills-all-bots.e2e.test.ts",
       "server/cloud-team-templates.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
+      "server/desktop-updates-docs.test.ts",
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
