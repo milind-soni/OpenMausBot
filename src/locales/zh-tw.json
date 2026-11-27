@@ -1777,6 +1777,8 @@
   "notifications.railUnread": "通知，{count} 則未讀",
   "notifications.unread": "{count} 則未讀",
   "notifications.markAllRead": "全部標示為已讀",
+  "notifications.clearAll": "全部清除",
+  "notifications.cleared": "已清除通知",
   "notifications.pin": "將通知固定為開啟",
   "notifications.unpin": "取消固定通知",
   "notifications.close": "關閉通知",

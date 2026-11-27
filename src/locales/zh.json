@@ -2056,6 +2056,8 @@
   "notifications.railUnread": "通知，{count} 条未读",
   "notifications.unread": "{count} 条未读",
   "notifications.markAllRead": "全部标为已读",
+  "notifications.clearAll": "全部清除",
+  "notifications.cleared": "已清除通知",
   "notifications.pin": "将通知固定为打开状态",
   "notifications.unpin": "取消固定通知",
   "notifications.close": "关闭通知",

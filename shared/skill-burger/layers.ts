@@ -91,7 +91,8 @@ const COMPUTER_LOOK = /^(?:screenshot|get_screen_size|exec_status|move|wait|zoom
 const FILE_WRITE = new Set(["Write", "write", "write_file", "create_file"]);
 const FILE_EDIT = new Set(["Edit", "MultiEdit", "NotebookEdit", "edit", "apply_patch", "str_replace_based_edit_tool"]);
 const BROWSER_OPEN = /(?:^|_)(?:navigate|open|open_url|goto|tab_new)$/;
-const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tabs|wait|check|console|network|close|evaluate_read)$/;
+const BROWSER_LOOK = /(?:^|_)(?:snapshot|screenshot|read|get_text|status|tab_list|wait|console|network|evaluate_read)$/;
+const browserLook = (bare: string, input: Record<string, unknown> | undefined) => BROWSER_LOOK.test(bare) || (/(?:^|_)tabs$/.test(bare) && input?.action === "list");
 /** A status row the app writes as an activity: a lowercase word, a colon, then words, never a tool name. */
 const STATUS_ROW = /^[a-z]+: \S/;
 const COORDINATE = /(?:^|__)coordinate_bots$/;
@@ -313,7 +314,7 @@ function layersIn(message: RunMessage, live: ReadonlySet<string>): RawLayer[] {
     return layer ? [layer] : [];
   }
   if (/browser/i.test(server ?? "") || /^(?:agent_)?browser_/.test(bare)) {
-    if (BROWSER_LOOK.test(bare)) return [];
+    if (browserLook(bare, input)) return [];
     const url = text(input?.url);
     if (BROWSER_OPEN.test(bare) && url) {
       let host = url;
@@ -444,7 +445,7 @@ function looked(message: RunMessage): boolean {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool?.name || isServerRow(message) || tool.ok === false) return false;
   const { bare } = splitName(tool.name);
-  return BROWSER_LOOK.test(bare) || /^(?:Read|WebFetch|read_file|view)$/.test(bare) || bare === "Bash" || bare === "shell";
+  return browserLook(bare, parse(tool.input)) || /^(?:Read|WebFetch|read_file|view)$/.test(bare) || bare === "Bash" || bare === "shell";
 }
 
 /** The run since the person's last ask, as layers. */
@@ -506,8 +507,9 @@ function joinDelegations(layers: BurgerLayer[], round: Map<string, number>, repl
   for (const layer of layers) {
     if (layer.kind !== "delegate" || !layer.delegation) { out.push(layer); continue; }
     const call = layer.delegation.rounds[0]![0]!;
+    const sameMode = (one: BurgerLayer) => Boolean(one.delegation?.rounds[0]?.[0]?.consult) === Boolean(call.consult);
     const last = out[out.length - 1];
-    if (last?.kind === "delegate" && last.delegation && round.get(last.id) === round.get(layer.id)) {
+    if (last?.kind === "delegate" && last.delegation && sameMode(last) && round.get(last.id) === round.get(layer.id)) {
       const rounds = last.delegation.rounds;
       rounds[rounds.length - 1]!.push(call);
       out[out.length - 1] = { ...last, words: [...new Set([...last.words.split(", "), ...layer.words.split(", ")])].join(", "), status: last.status === "failed" ? layer.status : last.status };
@@ -515,7 +517,7 @@ function joinDelegations(layers: BurgerLayer[], round: Map<string, number>, repl
       continue;
     }
     const ids = call.bots.map((bot) => bot.id ?? bot.name);
-    const earlier = [...out].reverse().find((one) => one.kind === "delegate" && ids.every((id) => botsOf(one).has(id)));
+    const earlier = [...out].reverse().find((one) => one.kind === "delegate" && sameMode(one) && ids.every((id) => botsOf(one).has(id)));
     if (earlier?.delegation && round.get(earlier.id) !== round.get(layer.id)) {
       const rounds = earlier.delegation.rounds;
       const lastRoundAt = round.get(`${earlier.id}#last`) ?? round.get(earlier.id);

@@ -1503,6 +1503,8 @@
   "notifications.railUnread": "Powiadomienia, nieprzeczytane: {count}",
   "notifications.unread": "Nieprzeczytane: {count}",
   "notifications.markAllRead": "Oznacz wszystkie jako przeczytane",
+  "notifications.clearAll": "Wyczyść wszystko",
+  "notifications.cleared": "Powiadomienia wyczyszczone",
   "notifications.pin": "Przypnij panel powiadomień",
   "notifications.unpin": "Odepnij powiadomienia",
   "notifications.close": "Zamknij powiadomienia",

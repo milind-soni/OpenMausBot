@@ -109,6 +109,11 @@ const BLOCKED: Case[] = [
   ["FORCE=1 rm -rf /", "delete-root"],
   ['A=1 B="two words" rm -rf /usr', "delete-system-directory"],
   ["env FOO=bar rm -rf /", "delete-root"],
+  ["env - rm -rf /", "delete-root"],
+  ["env -i - PATH=/bin rm -rf /etc", "delete-system-directory"],
+  ["sudo env - rm -rf ~", "delete-home"],
+  ["env - 'X-Y=1' rm -rf /etc", "delete-system-directory"],
+  ["env 'X-Y=1' rm -rf /etc", "delete-system-directory"],
   // `env -S LINE` / `--split-string=LINE`: env runs what it splits LINE into
   ["env -S 'rm -rf /'", "delete-root"],
   ['env -S"rm -rf /"', "delete-root"],
@@ -136,6 +141,8 @@ const BLOCKED: Case[] = [
   ["bash -o pipefail -c 'rm -rf /'", "delete-root"],
   ["sudo sh -c \"bash -c 'rm -rf /'\"", "delete-root"],
   ["eval 'rm -rf /'", "delete-root"],
+  ["eval -- 'rm -rf /'", "delete-root"],
+  ["eval -- rm -rf ~", "delete-home"],
   // chains
   ["ls; rm -rf /", "delete-root"],
   ["cd /tmp && rm -rf /", "delete-root"],
@@ -383,9 +390,12 @@ const ALLOWED: Array<[command: string, on?: Platform | "posix"]> = [
   ["echo rm -rf /"],
   ["env -S 'echo rm -rf /'"],
   ["env -S 'node --no-warnings' script.js"],
+  ["env - PATH=/bin ls -la /"],
+  ["env 'X-Y=1' ls -la /"],
   // env hands rm a directory named "~": nothing expands it without a shell
   ["env -S 'rm -rf ~'"],
   ["printf '%s\\n' 'rm -rf /' > notes.txt"],
+  ["eval -- echo rm -rf /"],
   ["grep -r 'mkfs' ."],
   ['rg "dd if=/dev/zero of=/dev/sda" docs'],
   ['git log --grep="rm -rf /"'],

@@ -293,14 +293,23 @@ export async function runFrom(state: Omit<RunState, "waiting" | "createdAt"> & {
       continue;
     }
     if (step.kind === "ai" || step.where === "yourComputer") return hand(step, "ai_step");
-    if (step.kind === "delegate") return startDelegation(step, state.delegation?.step === step.id ? state.delegation.who : {});
+    if (step.kind === "delegate") {
+      const chosen = state.delegation?.step === step.id ? state.delegation.who : {};
+      if (step.tasks.every((task) => chosen[task.bot.name] === null)) {
+        end(step, { state: "skipped" });
+        continue;
+      }
+      return startDelegation(step, chosen);
+    }
 
     deps.events.started(id, name, step);
     const limit = step.timeoutMs ?? STEP_TIMEOUT_MS;
     const outcome = await timed(limit, deps.signal, (signal) => execute(step, args, results, deps.exec, signal))
       .catch((error: unknown): ExecResult => ({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     if (deps.signal?.aborted) return envelope({ status: "cancelled" });
-    if (outcome === "timeout") return fail(step, "timeout", `"${step.label}" took longer than ${Math.round(limit / 1000)} s and was stopped.`);
+    if (outcome === "timeout") return fail(step, "timeout", `"${step.label}" took longer than ${Math.round(limit / 1000)} s${step.kind === "shell" && step.where === "vm"
+      ? ". The run stopped, but the cloud command may still be running. Check its status before retrying."
+      : " and was stopped."}`);
     if (!outcome.ok) return fail(step, outcome.tooLarge ? "output_too_large" : "step_failed", clip(redactSecretsInText(outcome.error), ERROR_MAX));
     const output = parsed(outcome.output);
     const check = checkRule(step);
@@ -418,7 +427,7 @@ export async function resumeRun(state: RunState, response: string, deps: RunDeps
       const replies = Object.values(delegation.replies);
       results[step.id] = {
         state: "done",
-        output: { replies: Object.fromEntries(replies.map((reply) => [reply.name, reply.text])), text: repliesText(delegation.replies), rounds: delegation.round, ...(unmet.length ? { unmet } : {}) },
+        output: { replies: Object.fromEntries(Object.entries(delegation.replies).map(([part, reply]) => [part, reply.text])), text: repliesText(delegation.replies), rounds: delegation.round, ...(unmet.length ? { unmet } : {}) },
         detail: { rounds: delegation.round, replies: replies.map((reply) => ({ name: reply.name, ok: reply.ok, text: reply.text.slice(0, 600) })) },
       };
       deps.events.ended(state.id, state.name, step, results[step.id]!);

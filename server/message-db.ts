@@ -109,7 +109,7 @@ function open(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS notification_log_at ON notification_log(at);
   `);
   const notificationColumns = db.prepare("PRAGMA table_info(notification_log)").all() as Array<{ name: string }>;
-  for (const added of ["for_person", "read_by"]) if (!notificationColumns.some((column) => column.name === added)) db.exec(`ALTER TABLE notification_log ADD COLUMN ${added} TEXT`);
+  for (const added of ["for_person", "read_by", "cleared_by"]) if (!notificationColumns.some((column) => column.name === added)) db.exec(`ALTER TABLE notification_log ADD COLUMN ${added} TEXT`);
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
   return db;
@@ -314,16 +314,16 @@ export function logNotification(notification: Notification): NotificationLogEntr
 }
 
 export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT, reader?: string): NotificationLogEntry[] {
-  const read = reader === undefined ? "read" : "(read = 1 OR EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?)) AS read";
-  const rows = db().prepare(`SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, ${read} FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?`)
-    .all(...(reader === undefined ? [] : [reader]), limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
+  const [read, kept] = reader === undefined ? ["read", ""] : ["(read = 1 OR EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)) AS read", "WHERE NOT EXISTS (SELECT 1 FROM json_each(coalesce(cleared_by, '[]')) WHERE value = ?1)"];
+  const rows = db().prepare(`SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, ${read} FROM notification_log ${kept} ORDER BY at DESC, rowid DESC LIMIT ${reader === undefined ? "?1" : "?2"}`).all(...(reader === undefined ? [] : [reader]), limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
   return rows.map(rowToNotificationLogEntry);
 }
 export function markNotificationLogRead(ids: readonly string[], reader?: string): void {
   if (reader === undefined) db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
   else db().prepare("UPDATE notification_log SET read_by = json_insert(coalesce(read_by, '[]'), '$[#]', ?1) WHERE id IN (SELECT value FROM json_each(?2)) AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(reader, JSON.stringify(ids));
 }
-export function forgetNotificationReader(person: string): void { db().prepare("UPDATE notification_log SET read_by = (SELECT json_group_array(value) FROM json_each(read_by) WHERE value <> ?1) WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(person); }
+export function clearNotificationLog(ids: readonly string[], reader?: string): void { if (reader === undefined) db().prepare("DELETE FROM notification_log WHERE id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids)); else db().prepare("UPDATE notification_log SET cleared_by = json_insert(coalesce(cleared_by, '[]'), '$[#]', ?1) WHERE id IN (SELECT value FROM json_each(?2)) AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(cleared_by, '[]')) WHERE value = ?1)").run(reader, JSON.stringify(ids)); }
+export function forgetNotificationReader(person: string): void { for (const column of ["read_by", "cleared_by"]) db().prepare(`UPDATE notification_log SET ${column} = (SELECT json_group_array(value) FROM json_each(${column}) WHERE value <> ?1) WHERE EXISTS (SELECT 1 FROM json_each(coalesce(${column}, '[]')) WHERE value = ?1)`).run(person); }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   writeFollowups((connection) => connection.prepare(

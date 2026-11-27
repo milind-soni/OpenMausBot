@@ -1508,6 +1508,8 @@
   "notifications.railUnread": "Уведомления, {count} непрочитанных",
   "notifications.unread": "{count} непрочитанных",
   "notifications.markAllRead": "Отметить все как прочитанные",
+  "notifications.clearAll": "Очистить всё",
+  "notifications.cleared": "Уведомления удалены",
   "notifications.pin": "Закрепить уведомления открытыми",
   "notifications.unpin": "Открепить уведомления",
   "notifications.close": "Закрыть уведомления",

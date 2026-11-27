@@ -54,6 +54,28 @@ describe("the person's choices", () => {
     expect(applyChoices(workflow, { inputs: { url: { name: "page" } } })).toEqual({ error: "There is already an input named page." });
     expect(applyChoices(workflow, { inputs: { url: { name: "9x" } } })).toMatchObject({ error: expect.stringContaining("can't be an input's name") });
   });
+
+  const boundedFields = [
+    { field: "AI prompt", limit: 4_000, token: "{a}", renamed: "{website}", step: (text: string) => ({ kind: "ai", deterministic: false, prompt: text }) },
+    { field: "decision prompt", limit: 2_000, token: "{a}", renamed: "{website}", step: (text: string) => ({ kind: "decide", cases: ["yes"], prompt: text }) },
+    { field: "check text", limit: 1_000, token: "{a}", renamed: "{website}", step: (text: string) => ({ kind: "shell", run: "echo ok", check: { says: text } }) },
+    { field: "shell command", limit: 20_000, token: "$OMB_ARG_A", renamed: "$OMB_ARG_WEBSITE", step: (text: string) => ({ kind: "shell", run: text }) },
+  ];
+
+  it.each(boundedFields)("explains a rename that exceeds the $field limit", ({ limit, token, step }) => {
+    const original = wf([{ id: "s1", label: "Work", ...step("x".repeat(limit - token.length) + token) }], { a: { default: "value" } });
+    const snapshot = structuredClone(original);
+    const chosen = applyChoices(original, { inputs: { a: { name: "website" } } });
+    expect(chosen).toEqual({ error: `Renaming input names ("a" to "website") makes "Work" exceed its ${limit}-character limit.` });
+    expect(original).toEqual(snapshot);
+  });
+
+  it.each(boundedFields)("accepts a rename that exactly reaches the $field limit", ({ limit, token, renamed, step }) => {
+    const original = wf([{ id: "s1", label: "Work", ...step("x".repeat(limit - renamed.length) + token) }], { a: { default: "value" } });
+    const chosen = applyChoices(original, { inputs: { a: { name: "website" } } });
+    expect(workflowSchema.safeParse(chosen).success).toBe(true);
+    expect(JSON.stringify(chosen)).toContain(renamed);
+  });
 });
 
 describe("dependencies inside app record IDs", () => {
