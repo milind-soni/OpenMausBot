@@ -203,6 +203,80 @@ describe("fitting a tool list to Gemini's list budget", () => {
   });
 });
 
+describe("fitting one tool schema to Gemini's per-tool limit", () => {
+  const GEMINI = toolSchemaProfile("gemini")!;
+  const keys = () => ({ type: "array", items: { type: "integer" }, allOf: Array.from({ length: 200 }, () => ({ maxItems: 16 })) });
+
+  it("keeps an integer array's items when a nested field is collapsed", () => {
+    const schema = { type: "object", properties: { group: { type: "object", properties: { keys: keys() } } } };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("loosened");
+    if (fit.outcome !== "loosened") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect((fit.schema.properties as Json).group).toEqual({ type: "object", properties: { keys: { type: "array", items: { type: "integer" } } } });
+  });
+
+  it("keeps an integer array's items and its required name when only the top-level fields remain", () => {
+    const schema = { type: "object", required: ["keys"], properties: { keys: keys() } };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("minimal");
+    if (fit.outcome !== "minimal") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect(fit.schema).toEqual({
+      type: "object", properties: { keys: { type: "array", items: { type: "integer" } } }, required: ["keys"], additionalProperties: true,
+    });
+  });
+
+  it("keeps a known item type, and a string where an array has no single item schema", () => {
+    const schema = {
+      type: "object",
+      $defs: { node: { type: "array", items: { $ref: "#/$defs/node" } } },
+      properties: { group: { type: "object", properties: {
+        keys: keys(),
+        nullable: { type: ["array", "null"], items: { type: "integer", minimum: 0 } },
+        nested: { type: "array", items: { type: "array", items: { type: "boolean", description: "drop me" } } },
+        bare: { type: "array" },
+        rows: { type: "array", items: { type: "object", description: "row", properties: { a: { type: "string" } } } },
+        tuple: { type: "array", prefixItems: [{ type: "string" }, { type: "integer" }] },
+        flag: { type: "array", items: true },
+        tree: { $ref: "#/$defs/node" },
+      } } },
+    };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("loosened");
+    if (fit.outcome !== "loosened") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect(fit.schema).toEqual({ type: "object", properties: { group: { type: "object", properties: {
+      keys: { type: "array", items: { type: "integer" } },
+      nullable: { type: ["array", "null"], items: { type: "integer" } },
+      nested: { type: "array", items: { type: "array", items: { type: "boolean" } } },
+      bare: { type: "array", items: { type: "string" } },
+      rows: { type: "array", items: { type: "object" } },
+      tuple: { type: "array", items: { type: "string" } },
+      flag: { type: "array", items: { type: "string" } },
+      tree: { type: "array", items: { type: "array", items: { type: "string" } } },
+    } } } });
+  });
+
+  it("names items when a top-level value has no schema to copy", () => {
+    const schema = { type: "object", properties: { keys: keys(), note: null } };
+    expect(schemaBytes(schema)).toBeGreaterThan(GEMINI.maxSchemaBytes);
+    const fit = fitToolSchema(schema, GEMINI);
+    expect(fit.outcome).toBe("minimal");
+    if (fit.outcome !== "minimal") return;
+    expect(fit.bytes).toBeLessThanOrEqual(GEMINI.maxSchemaBytes);
+    expect(fit.schema).toEqual({
+      type: "object", additionalProperties: true, properties: {
+        keys: { type: "array", items: { type: "integer" } },
+        note: { type: ["string", "number", "integer", "boolean", "object", "array", "null"], items: { type: "string" } },
+      },
+    });
+  });
+});
+
 describe("OpenMausBot's own tools", () => {
   const catalogs: Array<[string, ReadonlyArray<{ name: string; inputSchema: unknown }>]> = [
     ["agents (full)", fullAgents.tools], ["agents (bridged)", bridgedAgents.tools], ["browser", BROWSER_TOOLS],
