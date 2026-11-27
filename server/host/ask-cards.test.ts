@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createCoordinator, type HandoffView } from "../coordinator.ts";
+import { createCoordinator, type HandoffView, type HostTurnResult } from "../coordinator.ts";
+import { handoffReply } from "../runtime-coordinator.ts";
+import { privateHandBack } from "./acting-person.ts";
 import type { Notification } from "../notify.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message } from "../store.ts";
@@ -256,11 +258,12 @@ describe("nothing stale waits on the person", () => {
 });
 
 describe("a handed-on turn owns its question", () => {
-  it.each(["", "The drafts are ready.\n"])("keeps one answerable card after a reply-none requester finishes, with prefix %j", async (prefix) => {
+  it.each([0, 20, 11_995, 12_001])("keeps one answerable card after a reply-none requester finishes, with %i leading characters", async (prefixLength) => {
+    const prefix = prefixLength ? `${"x".repeat(prefixLength)}\n` : "";
     const w = world();
-    let markParked!: () => void;
+    let markFirstSettled!: () => void;
     let markCompleted!: () => void;
-    const parked = new Promise<void>((resolve) => { markParked = resolve; });
+    const firstSettled = new Promise<void>((resolve) => { markFirstSettled = resolve; });
     const completed = new Promise<void>((resolve) => { markCompleted = resolve; });
     const parents: Array<HandoffView["status"] | undefined> = [];
     const assigners: Array<string | undefined> = [];
@@ -269,8 +272,8 @@ describe("a handed-on turn owns its question", () => {
       validate: () => undefined, busy: () => false, chiefOf: () => false,
       levelOf: () => ({ level: "ask" }), names: () => ({ assignee: "Ledger", requester: "Scout" }),
       changed: () => {},
-      report: (node) => { if (node.parentId && node.status === "completed") markCompleted(); },
-      park: (node, question) => { w.cards.park(node, question); markParked(); },
+      report: (node) => { if (node.parentId && node.status === "completed") { markFirstSettled(); markCompleted(); } },
+      park: (node, question) => { w.cards.park(node, question); markFirstSettled(); },
       run: async (node, _resumed, _signal, composed) => {
         turns.push(composed.turn);
         if (composed.turn === "answered") return { ok: true, text: "Used the chosen wording." };
@@ -279,7 +282,7 @@ describe("a handed-on turn owns its question", () => {
         const text = `${prefix}NEEDS INPUT: ${QUESTION}`;
         w.store.appendMessage(node.threadId, { role: "bot", kind: "text", text, turnId: "handed-turn" });
         if (!coordinator.assignerOf(node.threadId)) w.cards.ownQuestion(node.botId, node.threadId, "handed-turn");
-        return { ok: true, text };
+        return { ok: true, ...handoffReply(text) };
       },
     } });
     w.deps.node = (id) => coordinator.node(id);
@@ -291,11 +294,14 @@ describe("a handed-on turn owns its question", () => {
       const child = coordinator.enqueue(source, root.id, undefined, { botId: "ledger", threadId: "work" }, "Prepare a footer", { reply: "none" }).node;
       coordinator.endTurn(root.id, { ok: true, text: "The teammate has the work." });
       coordinator.tick();
-      await parked;
+      await firstSettled;
       expect(parents).toEqual(["completed"]);
       expect(assigners).toEqual([undefined]);
+      expect(coordinator.node(child.id)?.status).toBe("waiting");
       const requestId = `needs-input-${child.id}-1`;
       expect(w.rows("work").filter((row) => row.card).map((row) => row.card!.requestId)).toEqual([requestId]);
+      expect(w.rows("work").find((row) => row.card)?.text).toBe(QUESTION);
+      expect(w.rows("work").find((row) => row.card)?.card?.subtitle).toBe(QUESTION);
       expect(w.notified.map((notification) => notification.kind)).toEqual(["question"]);
 
       expect(coordinator.runningIn("work")).toEqual([]);
@@ -326,6 +332,116 @@ describe("a handed-on turn owns its question", () => {
     w.store.appendMessage("work", { role: "bot", kind: "text", text: `NEEDS INPUT: ${QUESTION}`, turnId: "own-turn" });
     w.cards.ownQuestion("ledger", "work", "own-turn");
     expect(w.rows("work").filter((row) => row.card).map((row) => row.card!.requestId)).toEqual(["needs-input-ledger-own-turn-1"]);
+  });
+});
+
+describe("questions carried separately from a bounded handoff summary", () => {
+  type ReplyCase = {
+    label: string; text: string; question?: string; default?: string; full?: boolean; outside?: boolean;
+    legacy?: boolean; privateReply?: boolean; ok?: boolean; approvalAsk?: string;
+  };
+  const longQuestion = `${"Q".repeat(12_050)}?`;
+  const longDefault = "D".repeat(12_050);
+  const privateQuestion = "Forward the salary review to Ben?";
+  const safeQuestion = "Ledger has a question for Ada, in Ledger's chat with Ada.";
+  const falseEnding = `${"x".repeat(11_970)}\nNEEDS INPUT: ${"Q".repeat(16)}`;
+  const cases: ReplyCase[] = [
+    { label: "a default beyond a long question", text: `NEEDS INPUT: ${longQuestion}\nDefault: Keep the original`,
+      question: `${longQuestion}\nDefault: Keep the original`, default: "Keep the original", full: true },
+    { label: "a long default", text: `NEEDS INPUT: Which draft?\nDefault: ${longDefault}`,
+      question: `Which draft?\nDefault: ${longDefault}`, default: longDefault, full: true },
+    { label: "a person-only request beyond the stored question", text: `NEEDS INPUT: ${longQuestion} Which of your accounts should I use?\nDefault: Pick the first`,
+      question: `${longQuestion} Which of your accounts should I use?\nDefault: Pick the first`, full: true },
+    { label: "a private question beyond the summary", text: `${"x".repeat(12_001)}\nNEEDS INPUT: ${privateQuestion}\nDefault: Forward it`,
+      question: safeQuestion, full: true, privateReply: true },
+    { label: "an outside request at Full access", text: `NEEDS INPUT: ${QUESTION}\nDefault: Keep the original`,
+      question: `${QUESTION}\nDefault: Keep the original`, full: true, outside: true },
+    { label: "a summary cut immediately after an earlier question", text: `${falseEnding}\nResolved it with the existing wording.` },
+    { label: "an ordinary long summary", text: "Work is complete. ".repeat(1_000) },
+    { label: "a tail that explicitly asks nothing", text: `${"x".repeat(12_001)}\nNEEDS INPUT: none` },
+    { label: "a host that still returns only text", text: `NEEDS INPUT: ${QUESTION}`, question: QUESTION, legacy: true },
+    { label: "an unanswered approval on a failed turn", text: "The command did not run.", ok: false,
+      approvalAsk: "Approve the pending command?", question: "Approve the pending command?" },
+    { label: "a failed turn with a textual question", text: `NEEDS INPUT: ${QUESTION}`, ok: false },
+  ];
+
+  it.each(cases)("preserves routing for $label", async (fixture) => {
+    const w = world({ privateThreads: fixture.privateReply ? ["work"] : [] });
+    let markSettled!: () => void;
+    const settled = new Promise<void>((resolve) => { markSettled = resolve; });
+    const parked: Array<{ node: HandoffView; question: string }> = [];
+    let sent!: HostTurnResult;
+    const coordinator = createCoordinator({ dataDir: ":memory:", now: () => 1_000, host: {
+      validate: () => undefined, busy: () => false, chiefOf: () => false,
+      levelOf: () => ({ level: fixture.full ? "full" : "ask" }), names: () => ({ assignee: "Ledger", requester: "Scout" }),
+      changed: () => {}, report: (node) => { if (node.parentId) markSettled(); },
+      park: (node, question) => { parked.push({ node, question }); w.cards.park(node, question); markSettled(); },
+      run: async (node) => {
+        const outcome: HostTurnResult = { ok: fixture.ok ?? true, ...(fixture.legacy ? { text: fixture.text } : handoffReply(fixture.text)),
+          ...(fixture.approvalAsk ? { approvalAsk: fixture.approvalAsk } : {}) };
+        sent = fixture.privateReply ? privateHandBack(outcome, { child: "ada", parent: null, bot: "Ledger", person: "Ada" }) : outcome;
+        w.store.appendMessage(node.threadId, { role: "bot", kind: "text", text: fixture.text, turnId: "handed-turn" });
+        if (sent.ok && !coordinator.assignerOf(node.threadId)) w.cards.ownQuestion(node.botId, node.threadId, "handed-turn");
+        return sent;
+      },
+    } });
+    w.deps.node = (id) => coordinator.node(id);
+    w.deps.runningIn = (threadId) => coordinator.runningIn(threadId);
+    w.deps.answerNode = (id, text) => coordinator.answerNode(id, text);
+    try {
+      const source = { botId: "scout", threadId: "inbox" };
+      const root = coordinator.beginTurn({ id: "requester-turn", address: source, brief: "Prepare a footer", level: fixture.full ? "full" : "ask",
+        origin: fixture.outside ? { kind: "outside" } : { kind: "user", request: "Prepare a footer" } });
+      const child = coordinator.enqueue(source, root.id, undefined, { botId: "ledger", threadId: "work" }, "Prepare a footer", { reply: "none" }).node;
+      coordinator.endTurn(root.id, { ok: true, text: "The teammate has the work." });
+      coordinator.tick();
+      await settled;
+      const cards = w.rows("work").filter((row) => row.card);
+      expect(sent.text.length).toBeLessThanOrEqual(12_000);
+      if (!fixture.privateReply) expect(sent.text).toBe(fixture.text.slice(0, 12_000));
+      if (fixture.question === undefined) {
+        expect(parked).toEqual([]);
+        expect(cards).toEqual([]);
+        expect(coordinator.node(child.id)?.status).toBe(fixture.ok === false ? "failed" : "completed");
+      } else {
+        expect(parked).toHaveLength(1);
+        expect(cards).toHaveLength(1);
+        expect(parked[0]!.question).toBe(fixture.question.slice(0, 12_000));
+        expect(parked[0]!.node.decide).toEqual(fixture.default ? { default: fixture.default.slice(0, 12_000) } : undefined);
+        expect(coordinator.node(child.id)?.status).toBe(fixture.default ? "queued" : "waiting");
+        if (fixture.default) expect(coordinator.node(child.id)?.answer).toBe(fixture.default.slice(0, 12_000));
+      }
+      if (fixture.privateReply) {
+        expect(sent.question).toBe(safeQuestion);
+        expect(sent.privateQuestion).toBe(true);
+        expect(JSON.stringify(sent)).not.toContain("salary");
+        expect(cards[0]?.text).toBe(privateQuestion);
+        expect(cards[0]?.card?.subtitle).toBe(privateQuestion);
+        expect(cards[0]?.card?.options).toEqual(["Forward it"]);
+        expect(JSON.stringify(coordinator.node(child.id))).not.toContain("salary");
+        expect(JSON.stringify(w.rows("inbox"))).not.toContain("salary");
+        expect(JSON.stringify(w.notified)).not.toContain("salary");
+        expect(w.cards.answerParked("work", cards[0]!.card!.requestId!, "Keep it private")).toBe(true);
+        expect(coordinator.node(child.id)?.answer).toBe("Keep it private");
+      }
+    } finally {
+      coordinator.close();
+    }
+  });
+
+  it.each([
+    { label: "an earlier execution", startedAt: 2_000 },
+    { label: "a shared conversation", shared: true },
+    { label: "a room", groupId: "room" },
+  ] as Array<{ label: string; startedAt?: number; shared?: boolean; groupId?: string }>)("keeps the supplied card question for $label", (fixture) => {
+    const threadId = fixture.groupId ? "room" : "work";
+    const w = world({ privateThreads: fixture.shared ? [] : [threadId] });
+    w.store.appendMessage(threadId, { role: "bot", kind: "text", text: `NEEDS INPUT: ${QUESTION}`,
+      ...(fixture.groupId ? { from: { botId: "ledger", name: "Ledger", color: "teal" } } : {}) });
+    const node = w.node({ threadId, ...(fixture.startedAt ? { startedAt: fixture.startedAt } : {}),
+      ...(fixture.groupId ? { groupId: fixture.groupId } : {}) });
+    w.cards.park(node, safeQuestion);
+    expect(w.rows(threadId).find((row) => row.card)?.card?.subtitle).toBe(safeQuestion);
   });
 });
 

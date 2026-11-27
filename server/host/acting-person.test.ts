@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { OUTSIDE, workOriginSchema, type WorkOrigin } from "../peer-provenance.ts";
 import { personKey } from "../person-key.ts";
 import { createActingPeople, HandedPeople, onlyTheirs, privateHandBack, withPerson, type ActingLine, type DirectRequest, type RoomRun } from "./acting-person.ts";
+import { handoffReply } from "../runtime-coordinator.ts";
 
 const ADA = personKey({ id: "", email: "ada@acme.test" });
 const BEN = personKey({ id: "", email: "ben@acme.test" });
@@ -226,6 +227,21 @@ describe("what work in one person's private chat hands back", () => {
   it("hands everything back into her own private chat, and anything from a chat others read already", () => {
     expect(privateHandBack(done, place(ADA))).toBe(done);
     expect(privateHandBack(done, { child: null, parent: null, bot: "Helper", person: "them" })).toBe(done);
+  });
+
+  it("redacts an explicit question even when its line lies beyond the summary", () => {
+    const outcome = { ok: true, ...handoffReply(`${"x".repeat(12_001)}\nNEEDS INPUT: Forward the salary review to Ben?\nDefault: Forward it`) };
+    const safe = privateHandBack(outcome, place(null));
+    expect(safe).toEqual({ ok: true, text: "NEEDS INPUT: Helper has a question for Ada, in Helper's chat with Ada.",
+      question: "Helper has a question for Ada, in Helper's chat with Ada.", privateQuestion: true });
+    expect(JSON.stringify(safe)).not.toContain("salary");
+    expect(privateHandBack(outcome, place(BEN))).toEqual(safe);
+    expect(privateHandBack(outcome, place(ADA))).toBe(outcome);
+  });
+
+  it("keeps an explicit absence of a question when the shortened summary ends on one", () => {
+    const outcome = { ok: true, text: "NEEDS INPUT: Forward the salary review to Ben?", question: null };
+    expect(privateHandBack(outcome, place(null))).toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada.", question: null });
   });
 });
 
