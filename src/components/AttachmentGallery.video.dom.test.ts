@@ -24,6 +24,13 @@ describe("a chat video the player cannot decode", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps a clip that has not loaded to a short strip, so its file chip stays in view", async () => {
+    await act(async () => root.render(createElement(AttachmentGallery, { files: [file], message })));
+    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Preview trip.mov"]')!;
+    expect(button.parentElement!.className).toContain("h-28");
+    expect(button.parentElement!.className).not.toContain("aspect-");
+  });
+
   it("streams a large file, and when it will not play offers a download of the same link instead of a dead player", async () => {
     await act(async () => root.render(createElement(AttachmentGallery, { files: [file], message })));
     expect(host.textContent).toContain("Plays on request");

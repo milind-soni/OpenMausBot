@@ -319,7 +319,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
   return (
     <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-hairline/40 bg-inset/40"
       style={shown ? { width: `min(100%, ${Math.round(VIDEO_MAX_HEIGHT * shown)}px)` } : undefined}>
-      <div ref={box} className={cn("relative flex items-center justify-center bg-inset", !shown && "aspect-[4/3]")}
+      <div ref={box} className={cn("relative flex items-center justify-center bg-inset", !shown && (preview ? "aspect-video" : "h-28"))}
         style={shown ? { aspectRatio: String(shown) } : undefined}>
         {preview && error ? (
           <div className="flex size-full flex-col items-center justify-center gap-2 p-3 text-center">
