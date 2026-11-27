@@ -15,6 +15,7 @@ import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySavedText, memorySearchText, threadReadText, threadsListText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
+import { assignmentResultLines, isAssignmentResultRead, readAssignmentResult, resultPartLines } from "./agents-assignment-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
@@ -78,7 +79,6 @@ const STATUS_WORDS: Record<string, string> = {
   failed: "failed",
   cancelled: "cancelled",
 };
-const RESULT_HEAD = 2_000;
 
 function assignmentLine(a: Json): string {
   const id = typeof a.id === "string" && a.id ? a.id : "?";
@@ -101,36 +101,12 @@ function renderAssignmentStatus(r: Json, id: string): string {
   }
   const part = jsonRecord(raw.resultPart) ? raw.resultPart : undefined;
   if (part) return [lines[0], ...resultPartLines(part, id)].join("\n");
-  const result = typeof a.result === "string" ? a.result : "";
-  const total = typeof a.resultChars === "number" ? a.resultChars : result.length;
-  if (result.trim() && total <= RESULT_HEAD) lines.push(`Result: ${result.trim()}`);
-  else if (result.trim()) {
-    lines.push(`Result, characters 0-${RESULT_HEAD} of ${total}: ${result.slice(0, RESULT_HEAD)}`,
-      readOn(id, RESULT_HEAD));
-  }
+  lines.push(...assignmentResultLines(a, id));
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
   if (!settled) lines.push(`It is not settled. ${r.sentElsewhere === true ? "It was sent from another of your chats, so its result returns there and does not resume you here" : "Its result resumes you on its own"}; do not wait on it in this turn.`);
   return lines.join("\n");
-}
-
-/** A long result is read on with tool_result_read, given the assignment's own id: it is kept with the assignment, not in
- * the hour-long saved results, so the tool list stays as it is. */
-const readOn = (id: string, offset: number) => `[The result goes on: call tool_result_read with id "${id}" and offset ${offset} to read the next part.]`;
-
-/** One part of a long result, and where the next starts; past the end of what was kept, whether it was all of it. */
-function resultPartLines(part: Json, id: string): string[] {
-  const text = typeof part.text === "string" ? part.text : "";
-  const offset = Number(part.offset) || 0;
-  const end = Number(part.end) || offset;
-  const total = Number(part.total) || end;
-  const lines = [`Result, characters ${offset}-${end} of ${total}: ${text}`];
-  if (text && end < total) lines.push(readOn(id, end));
-  else if (part.truncated === true) {
-    lines.push(`[truncated: only the first ${end} of ${total} characters of this result were kept; the rest is lost. Tell the person the end of the report is missing; do not present what you read as the whole report.]`);
-  } else lines.push("[End of the result: that was all of it.]");
-  return lines;
 }
 
 function handoffIds(r: Json): string[] {
@@ -299,13 +275,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: JSON.stringify(result) };
   }
   if (name === "tool_result_read") {
-    const offsetOk = args.offset === undefined || (Number.isSafeInteger(args.offset) && Number(args.offset) >= 0);
-    if (typeof args.id === "string" && !args.id.startsWith("r-") && /^[\w-]{4,64}$/.test(args.id) && offsetOk) {
-      const { ok, status, body: r } = await apiResponse(`/api/internal/assignment-status?id=${encodeURIComponent(args.id)}&offset=${Number(args.offset ?? 0)}`);
-      const part = ok && jsonRecord(r.assignment) && jsonRecord(r.assignment.resultPart) ? r.assignment.resultPart : undefined;
-      if (!part) return { text: status === 404 ? `No assignment ${args.id} is known here: use the id the last notice gave.` : String(r.error ?? `HTTP ${status}`), isError: true };
-      return { text: resultPartLines(part, args.id).join("\n") };
-    }
+    if (isAssignmentResultRead(args)) return readAssignmentResult(args, context);
     if (typeof args.id !== "string" || !/^r-[0-9a-f-]{36}$/.test(args.id) ||
       (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0))) {
       return { text: "Use the saved result id and a non-negative integer offset from its notice.", isError: true };

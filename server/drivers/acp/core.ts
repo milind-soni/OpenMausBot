@@ -74,7 +74,7 @@ import { startupFailureRecoverable } from "./startup-recovery.ts";
 import { engineFailure, engineFailureKind } from "../engine-errors.ts";
 import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { leftOutToolsNote } from "../session-tool-budget.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
+import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
 import { learnedTextOnlyTools, learnTextOnlyTools, TEXT_ONLY_PROMPT_NOTE } from "../../mcp-text-only.ts"; import { isHermesReasoningReplay } from "./hermes-replay.ts";
 
@@ -1121,11 +1121,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (liveSessionId !== null && session.sessionKey === liveSessionKey(sessionKey, heldSystem()) && (cursor === null || cursor === liveSessionId)) {
                 break;
               }
-              const sessionServers = () => acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget,
-                (left) => { session.toolsLeftOut = () => leftOutToolsNote(left()); });
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
-              let loaded = false;
+              let loaded = false; const sessionServers = () => acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget, (note) => { session.toolsLeftOut = note; });
               if (cursor && !brokenSessions.has(cursor) && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 try {
                   await loadUntilReplayQuiet({
