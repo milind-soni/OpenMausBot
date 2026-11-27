@@ -116,14 +116,15 @@ class Scroller {
   }
 }
 
-/** The mounted rows, each `heightOf` tall (ROW unless a test says otherwise), laid out from the scroller's top. */
+/** The mounted rows, each `heightOf` tall (ROW unless a test says otherwise), laid out from the scroller's top; a row
+ * 0 tall draws nothing, as a hidden tool step does, and has no element. */
 const transcriptOf = (shown: readonly Row[]) => ({
   querySelectorAll: () => {
     let below = 0;
-    return shown.map((row) => {
+    return shown.flatMap((row) => {
       const top = below - scroller.scrollTop, height = heightOf(row);
       below += height;
-      return { dataset: { mid: row.id }, getBoundingClientRect: () => ({ top, bottom: top + height, height }) };
+      return height ? [{ dataset: { mid: row.id }, getBoundingClientRect: () => ({ top, bottom: top + height, height }) }] : [];
     });
   },
 });
@@ -761,6 +762,86 @@ describe("a long conversation read from its end to its start and back", () => {
     dispatched = [];
     view.rerender({ threadId: "other", messages: rows(10, 9_000) });
     expect(dispatched).toEqual([{ type: "trimHeldMessages", threadId: "thread", keepFromId: windowFirst }]);
+  });
+});
+
+describe("a long reply whose 300 tool steps draw nothing", () => {
+  // m100–m399 are the steps, m400 the answer: one reply taller than the view, 301 rows with nothing drawn between them.
+  const height = (row: Row) => { const n = Number(row.id.slice(1)); return n === 400 ? 3_000 : n >= 100 && n < 400 ? 0 : ROW; };
+  /** Where the top of the view is in the whole conversation, in px; null when it is off the drawn rows. */
+  const position = (view: ReturnType<typeof mount>) => scroller.scrollTop >= 0 && scroller.scrollTop < scroller.scrollHeight
+    ? rows(view.current.hiddenCount).reduce((sum, row) => sum + height(row), 0) + scroller.scrollTop
+    : null;
+  const wheel = (view: ReturnType<typeof mount>, delta: number) => view.act(() => {
+    view.current.scrollHandlers.onWheel({ deltaY: delta } as never);
+    scroller.scrollTop = Math.max(0, Math.min(scroller.scrollTop + delta, scroller.bottom));
+    view.current.scrollHandlers.onScroll();
+  });
+  const answerDrawn = (view: ReturnType<typeof mount>) => view.current.windowedMessages.some((row) => row.id === "m400");
+  beforeEach(() => {
+    heightOf = height;
+    // The top sentinel is seen again on each new observer, as a browser does, while it is within 1.5 views of the top.
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(private seen: (entries: { isIntersecting: boolean }[]) => void) {}
+      observe() { frames.push(() => this.seen([{ isIntersecting: scroller.scrollTop <= 1.5 * scroller.clientHeight }])); }
+      disconnect() { this.seen = () => {}; }
+    });
+  });
+  /** Opens on a search hit at `row`, in a window that stops short of the newest rows. */
+  const open = (row = "m400") => {
+    store.state.focusMessage = { threadId: "thread", messageId: row, nonce: 1, consumed: false };
+    const view = mount({ messages: rows(600) });
+    expect(view.current.laterCount, "Show later messages is offered").toBeGreaterThan(0);
+    return view;
+  };
+
+  /** Wheels `delta` at a time until `done`; each tick moves the view by at most the wheel, never against it, and keeps
+   * the answer drawn while any of it is on screen. */
+  const wheelUntil = (view: ReturnType<typeof mount>, delta: number, done: (at: number) => boolean) => {
+    for (let ticks = 0, at = position(view)!; !done(at); ticks++, at = position(view)!) {
+      expect(ticks).toBeLessThan(200);
+      wheel(view, delta);
+      const moved = position(view)! - at;
+      expect([moved * Math.sign(delta) >= 0, Math.abs(moved) <= Math.abs(delta)], `a ${delta} px wheel at ${at} px moved ${moved} px`).toEqual([true, true]);
+      if (position(view)! > 5_000 - 400 && position(view)! < 8_000) expect(answerDrawn(view), `the answer is drawn at ${position(view)} px`).toBe(true);
+    }
+  };
+
+  it("scrolls up through the answer to its first line, holds there, and goes on up past the steps", () => {
+    const view = open();
+    scroller.scrollTop = 1_000;
+    wheelUntil(view, -100, (at) => at === 5_000);
+    for (let tick = 0; tick < 3; tick++) wheel(view, -100);
+    expect([position(view), answerDrawn(view)], "steps that draw nothing joined above the first line").toEqual([5_000, true]);
+    wheelUntil(view, -100, (at) => at === 0);
+    expect(view.current.hiddenCount).toBe(0);
+  });
+
+  it("scrolls down from the start onto the answer and through it without a jump", () => {
+    const view = open("m0");
+    wheelUntil(view, 100, (at) => at >= 7_500);
+    expect(view.current.following).toBe(false);
+  });
+
+  it("keeps the reader's row in place when Show later messages is pressed just above the answer", () => {
+    const view = open("m0");
+    scroller.scrollTop = 4_500;
+    for (let press = 1; !answerDrawn(view); press++) {
+      expect(press, "the answer is 281 rows past the window's end").toBeLessThanOrEqual(Math.ceil(281 / TRANSCRIPT_WINDOW_STEP));
+      view.act(() => view.current.showLater());
+      expect(position(view), `press ${press}`).toBe(4_500);
+    }
+  });
+
+  it("keeps the reader's row drawn while the steps of a reply still running arrive under it", () => {
+    const view = mount({ messages: rows(100) });
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    view.act(() => { scroller.scrollTop = scroller.bottom - 100; view.current.scrollHandlers.onScroll(); });
+    const at = position(view);
+    for (let total = 120; total <= 400; total += 20) {
+      view.rerender({ messages: rows(total) });
+      expect(position(view), `${total} rows`).toBe(at);
+    }
   });
 });
 
