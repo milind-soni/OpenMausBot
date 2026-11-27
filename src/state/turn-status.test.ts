@@ -64,11 +64,11 @@ describe("a thread's live turn", () => {
   it("ends with the turn, and a newer turn starts it over", () => {
     note({ type: "turn.progress", activity: "command", itemId: "c" } as Partial<RuntimeEvent>);
     note({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
-    expect(turnLive("t")).toEqual({ turnId: "turn-1", ended: true, status: null });
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-1", ended: true, status: null });
     note({ type: "thread.token-usage.updated", input: 1, output: 1 } as Partial<RuntimeEvent>);
     expect(turnLive("t").ended, "a late frame of the ended turn does not reopen it").toBe(true);
     note({ type: "item.completed", itemType: "assistant_text", text: "late", turnId: "turn-2" } as Partial<RuntimeEvent>);
-    expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", ended: false, status: null });
   });
 
   it("says it is summarizing earlier messages until the summary is done, and leaves anything newer on the line", () => {
@@ -80,11 +80,64 @@ describe("a thread's live turn", () => {
     expect(turnLive("t").ended, "a summary after the turn ended (Compact button) leaves it ended").toBe(true);
     note({ type: "context.summarizing", active: true, turnId: undefined } as Partial<RuntimeEvent>);
     note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
-    expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", ended: false, status: null });
     note({ type: "content.delta", streamKind: "reasoning_text", delta: "x", turnId: "turn-2" } as Partial<RuntimeEvent>);
     note({ type: "context.summarizing", active: false, turnId: undefined } as Partial<RuntimeEvent>);
     expect(turnLive("t").status, "a late end leaves the turn's own status").toEqual({ activity: "thinking" });
     expect(turnLive("t").ended, "a summary inside a running turn leaves it running").toBe(false);
+  });
+
+  it("counts each tool call once per turn and restarts on a new turn", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(1);
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(1);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(2);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 0 });
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Write", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(1);
+  });
+
+  it("keeps the steps of the turn that just ended for a late frame after the next turn started", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    note({ type: "turn.completed", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 0 });
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t"), "a late start of a call already counted for turn-1 keeps its two").toMatchObject({ turnId: "turn-1", toolSteps: 2 });
+    note({ type: "item.completed", itemType: "tool", itemId: "b", title: "Bash", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t"), "a late completion of turn-1 keeps its two").toMatchObject({ turnId: "turn-1", toolSteps: 2 });
+    note({ type: "item.started", itemType: "tool", itemId: "d", title: "Edit", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps, "a new call of turn-1 is its third").toBe(3);
+  });
+
+  it("keeps the turn that started last when a late frame of an earlier turn arrived in between", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Write", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 2 });
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-1", toolSteps: 2 });
+    note({ type: "turn.started", turnId: "turn-3" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t"), "a late duplicate of turn-2's call b still counts turn-2's two steps").toMatchObject({ turnId: "turn-2", toolSteps: 2 });
+  });
+
+  it("counts a late frame of an earlier turn from the steps that turn already had", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(2);
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Write", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 1 });
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t"), "a call already counted for turn-1 is not counted again, and turn-1 keeps its two").toMatchObject({ turnId: "turn-1", toolSteps: 2 });
+    note({ type: "item.started", itemType: "tool", itemId: "d", title: "Edit", turnId: "turn-1" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps, "a new call of turn-1 is its third").toBe(3);
   });
 
   it("carries what a call works on, how it is doing and its last output, and changes only when one of them does", () => {

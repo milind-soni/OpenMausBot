@@ -3034,6 +3034,8 @@
   "chat.now.wroteFile": "Ha scritto un file",
   "chat.now.editedFile": "Ha modificato un file",
   "chat.now.searchedFiles": "Ha cercato nei file",
+  "chat.activity.stepsOne": "1 passo",
+  "chat.activity.stepsMany": "{count} passi",
   "chat.activity.sizeKb": "{count} KB",
   "chat.activity.sizeMb": "{count} MB",
   "chat.activity.alt.mullingItOver": "Ci rimugina",

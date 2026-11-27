@@ -101,6 +101,7 @@ export function TurnPresence({
   hover,
   quiet,
   threadId,
+  stepCount,
   card,
   cardLabel,
   className,
@@ -122,6 +123,8 @@ export function TurnPresence({
   quiet?: StepQuiet;
   /** The thread whose live frames tell whether the turn has gone silent. */
   threadId?: string;
+  /** Tool calls started in the current turn, shown beside the timer while the bot is working. */
+  stepCount?: number;
   card?: ReactNode;
   cardLabel?: string;
   className?: string;
@@ -173,6 +176,9 @@ export function TurnPresence({
     return () => document.removeEventListener("keydown", fold);
   }, [open]);
   const lead = label ?? t("chat.activity.working");
+  const stepsLabel = !simple && stepCount !== undefined && stepCount > 0
+    ? (stepCount === 1 ? t("chat.activity.stepsOne") : t("chat.activity.stepsMany", { count: stepCount }))
+    : null;
   const now = phrases && phrases.length > 0 ? phrases : null;
   const { current, previous } = useRotatingPhrase(now ?? NOTHING, phase ?? now?.[0] ?? "", seed, mounted && showWorking && now !== null);
   if (!mounted) return null;
@@ -194,6 +200,12 @@ export function TurnPresence({
         <>
           <Dot />
           <WorkingTimer since={since} className="text-[12px] text-ink-tertiary" />
+        </>
+      )}
+      {stepsLabel && (
+        <>
+          <Dot />
+          <span data-turn-step-count="" className="text-[12px] tabular-nums text-ink-tertiary">{stepsLabel}</span>
         </>
       )}
       {now && (

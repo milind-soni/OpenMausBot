@@ -2778,6 +2778,8 @@
   "chat.activity.thinking": "Pensando",
   "chat.activity.summarizing": "Resumindo mensagens anteriores…",
   "chat.activity.working": "Trabalhando",
+  "chat.activity.stepsOne": "1 passo",
+  "chat.activity.stepsMany": "{count} passos",
   "chat.queue.workingFor": "Trabalhando no pedido de {name}",
   "chat.queue.workingForYou": "Trabalhando no seu pedido",
   "chat.queue.next": "A seguir: pedido de {name}",

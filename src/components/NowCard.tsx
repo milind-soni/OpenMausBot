@@ -69,6 +69,7 @@ export function useTurnNow(bot: Pick<Bot, "id" | "name" | "threadId" | "tasks">,
     detail: advanced ? undefined : exact?.phrases[0],
     hover: exact?.hover,
     quiet,
+    stepCount: advanced ? live.toolSteps : undefined,
     cardLabel: t("chat.now.title", { name: bot.name }),
     card: steps.length > 0 || tail?.length ? <NowCard steps={steps} tail={tail} onOpenActivity={openActivity} /> : undefined,
   };

@@ -571,6 +571,7 @@ export function GroupView({ group, inForkPanel = false, bare = false }: { group:
                 />
               }
               visible={presenceVisible} threadId={group.threadId}
+              stepCount={advancedMode ? live.toolSteps : undefined}
               phrases={activity?.phrases}
               phase={activity?.phase}
               size={activity?.size} hover={activity?.hover} quiet={live.status && "quiet" in live.status ? live.status.quiet : undefined}
