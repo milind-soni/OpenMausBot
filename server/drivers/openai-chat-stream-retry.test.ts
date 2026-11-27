@@ -1,5 +1,5 @@
-// A stream cut retries the one model call even after output streamed or a tool call ran earlier in the
-// turn; these tests pin that resend and the side-effect budget it keeps.
+// A stream cut retries the one model call even after a tool call ran earlier in the turn, but never once
+// this call streamed text; these tests pin that resend and the side-effect budget it keeps.
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,16 +66,15 @@ describe("createOpenAIChatRuntime stream truncation retry", () => {
     expect(requests).toBe(3);
   });
 
-  it("resends a cut that streamed answer text and still finishes the turn", async () => {
-    const cutAfterText = () => sse('data: {"choices":[{"index":0,"delta":{"content":"Hel"}}]}\n\n'
-      + 'data: {"error":"terminated"}\n\n');
-    const { events, requests } = await runTurn([cutAfterText, answer]);
-    expect(events.filter((event) => event.type === "turn.retrying"))
-      .toEqual([expect.objectContaining({ attempt: 1, reason: "stream_cut" })]);
-    expect(events.find((event) => event.type === "runtime.error")).toBeUndefined();
-    expect(events.find((event) => event.type === "item.completed")).toMatchObject({ text: "hi" });
-    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
-    expect(requests).toBe(2);
+  it.each([
+    ["a plain cut", () => sse('data: {"choices":[{"index":0,"delta":{"content":"Hel"}}]}\n\n'), "Stream ended before completion"],
+    ["a terminated chunk", () => sse('data: {"choices":[{"index":0,"delta":{"content":"Hel"}}]}\n\n' + 'data: {"error":"terminated"}\n\n'), "terminated"],
+  ])("does not resend %s once answer text streamed, even with a clean retry available", async (_name, cut, message) => {
+    const { events, requests } = await runTurn([cut, answer]);
+    expect(events.some((event) => event.type === "turn.retrying")).toBe(false);
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining(message) });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    expect(requests).toBe(1);
   });
 
   it("resends a cut in a round after a tool call ran, without running the tool twice", async () => {
