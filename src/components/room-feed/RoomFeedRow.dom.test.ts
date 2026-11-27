@@ -71,6 +71,27 @@ describe("a room feed row", () => {
     expect(item().textContent).not.toContain("2 replies");
   });
 
+  it("shows a work thread's one status beside its time, where Closed would be, and says it to a screen reader", () => {
+    render(row({ work: { kind: "needs", label: "Needs you" }, closedBy: { botId: "kiwi", name: "Kiwi", at: NOW } }));
+    const work = item().querySelector("[data-feed-work]")!;
+    expect([work.getAttribute("data-feed-work"), work.textContent]).toEqual(["needs", "Needs you"]);
+    expect(work.className).toContain("text-ink");
+    expect(item().querySelector("[data-feed-closed]")).toBeNull();
+    expect(item().querySelector("button")!.getAttribute("aria-label")).toBe("Ana, Plan the launch, No replies yet, Needs you");
+    act(() => root!.unmount());
+    render(row({ work: { kind: "next", label: "Up next" } }));
+    expect(item().querySelector("[data-feed-work]")?.className).toContain("text-ink-tertiary");
+  });
+
+  it("says a bot is working on a work thread once: the line under it does while its turn runs", () => {
+    render(row({ work: { kind: "working", label: "Kiwi working" }, working: true, workingBotId: "kiwi" }));
+    expect(item().querySelector("[data-feed-work]")).toBeNull();
+    expect(item().textContent).toContain("Kiwi is working…");
+    act(() => root!.unmount());
+    render(row({ work: { kind: "working", label: "Kiwi working" } }));
+    expect(item().querySelector("[data-feed-work]")?.textContent).toBe("Kiwi working");
+  });
+
   it("fades a long line, ends a clipped one with an ellipsis, and names an attachment-only line", () => {
     render(row({ text: "word ".repeat(80), clipped: true }));
     const body = item().querySelector<HTMLElement>(".chat-text")!;

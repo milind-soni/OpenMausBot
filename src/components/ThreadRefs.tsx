@@ -1,4 +1,6 @@
 import { MentionText } from "./MentionText";
+import { parseAppLink } from "../../electron/app-link.mjs";
+import { openLocalApp } from "@/lib/local-apps";
 import type { MentionPeer } from "@/lib/mentions";
 import { createContext, Fragment, useContext, useMemo, useRef, type ReactNode } from "react";
 import { botOpensTo, openBot, openThread, useStore, type Action, type AppState, type Bot, type Group, type ThreadTarget } from "@/state/store";
@@ -75,6 +77,12 @@ export function ThreadLink({ target, ambiguous, children }: { target: ThreadLink
 
 /** Security: a link from outside the app only navigates. */
 export function openChatLink(dispatch: (action: Action) => void, link: string, state: AppState, threadsShown: boolean): boolean {
+  const appId = parseAppLink(link)?.id;
+  if (appId) {
+    openLocalApp(appId);
+    dispatch({ type: "showPublishedApps" });
+    return true;
+  }
   const openOwner = (id: string) => {
     const bot = state.bots.find((candidate) => candidate.id === id);
     if (bot) {

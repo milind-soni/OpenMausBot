@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../../shared/notification.ts";
 import type { PersonWait } from "../../shared/person-wait.ts";
@@ -47,6 +47,7 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
     },
     patchTask: () => undefined, patchGroup: () => undefined,
     messagesFor: (threadId: string) => said.get(threadId) ?? [],
+    newestMessageId: (threadId: string) => said.get(threadId)?.at(-1)?.id,
     activePath: (threadId: string) => said.get(threadId) ?? [],
     onChange: (listener: (change: { type: string; threadId: string }) => void) => { listeners.push(listener); return () => undefined; },
   };
@@ -151,6 +152,17 @@ describe("finished work reaches the inbox once", () => {
     const posted = f.store.appendMessage("eli-main", { role: "bot", text: "All three pages are live." });
     f.inbox.route(summary, { summary: true });
     expect(f.inbox.view(OWNER).rows[0]!.origin?.messageId).toBe(posted.id);
+  });
+
+  it("finds that message without loading the whole conversation", () => {
+    const f = setup();
+    f.store.appendMessage("eli-main", { role: "bot", text: "Earlier." });
+    const posted = f.store.appendMessage("eli-main", { role: "bot", text: "All three pages are live." });
+    f.inbox.route(summary, { summary: true });
+    const whole = vi.spyOn(f.store, "messagesFor");
+    expect(f.inbox.view(OWNER).rows[0]!.origin?.messageId).toBe(posted.id);
+    expect(f.inbox.count(OWNER), "finished work waits on nobody").toBe(0);
+    expect(whole).not.toHaveBeenCalled();
   });
 });
 

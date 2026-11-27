@@ -19,6 +19,7 @@ import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { whopLikeCatalog } from "./testing/whop-like-catalog.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
+import { TEXT_ONLY_TOOLS_ENV } from "./mcp-text-only.ts";
 
 const TOKEN = "disposable-remote-fixture-token";
 type Frame = { id?: string | number; method?: string; params?: Record<string, unknown> };
@@ -439,6 +440,22 @@ describe("remote MCP tool directory", () => {
     start(mcpStdioServer(spec(fake.url))!, { ...process.env, [TOOL_LIMIT_ENV]: "1" });
     await initialize();
     expect((await request("tools/list")).result.tools).toEqual(tools.slice(0, 1));
+  });
+
+  it("replaces an image in a tool's result with a note a text-only model can read", async () => {
+    fake = await startFakeHttpMcp({
+      tools: [{ name: "preview", inputSchema: { type: "object" } }],
+      callResult: () => ({ content: [{ type: "text", text: "here is the design:" }, { type: "image", data: "QUJD", mimeType: "image/png" }] }),
+    });
+    start(mcpStdioServer(spec(fake.url))!, { ...process.env, [TEXT_ONLY_TOOLS_ENV]: "1" });
+    await initialize();
+    expect((await call("preview")).result.content).toEqual([
+      { type: "text", text: "here is the design:" },
+      { type: "text", text: expect.stringMatching(/^\[Image from this tool's result not shown: this model reads text only \(image\/png, ~1 kB\)\.\]$/) },
+    ]);
+    start(mcpStdioServer(spec(fake.url))!);
+    await initialize();
+    expect((await call("preview")).result.content[1]).toEqual({ type: "image", data: "QUJD", mimeType: "image/png" });
   });
 
   it("reads every page of a paginated catalog, once", async () => {

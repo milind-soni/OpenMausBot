@@ -19,6 +19,7 @@ import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { toolsListResultForSessionShare } from "./tool-list-share.ts";
 import { readStdioLines } from "./stdio-lines.ts";
 
 type Json = Record<string, unknown>;
@@ -267,9 +268,9 @@ function withArgumentNotes(name: string, response: Json, changed: readonly strin
 }
 
 function fittedList(frame: Json): Json {
-  if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
+  if (!("result" in frame)) return frame;
   const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
-  return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
+  return { ...frame, result: toolsListResultForSessionShare(capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log), process.env, log) };
 }
 
 /** A refusal that answers the same way every time: an HTTP 4xx other than 429, or a result that is not a list (the

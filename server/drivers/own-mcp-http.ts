@@ -7,7 +7,7 @@
 // port is the box's bridge to the harness gate (bot-box/harness-gate.ts), which passes /api/internal/ only, and the box
 // keeps loopback out of its egress proxy (NO_PROXY).
 import { botBox } from "../bot-box/box.ts";
-import { withSessionToolShares } from "./own-mcp-session-budget.ts";
+import { withSessionToolBudget } from "./session-tool-budget.ts";
 import { acpOwnServersOverHttp, ownMcpOverHttp, type AcpMcpServer } from "./turn-mcp.ts";
 
 /** "1" turns the URL form on for every engine that can take it; "0" keeps every engine on stdio proxies, the ACP agents
@@ -78,11 +78,11 @@ export function acpAgentTakesHttpMcp(init: unknown): boolean {
 /** The servers a session/new or session/load sends: under `advertised`, OpenMausBot's own as this server's endpoints when
  * the session's agent takes them, by its `initialize` answer or, for an agent that takes them without saying so, by
  * `takesUnadvertised`. Deciding here, after `initialize`, lets an agent's first session use the URL form too. An agent
- * with a session-wide budget for tool definitions (`toolBudget`, by its `initialize` answer) has OpenMausBot's own servers
- * share it out, by URL or stdio alike. */
+ * with a session-wide budget for tool definitions (`toolBudget`, by its `initialize` answer) has every server OpenMausBot
+ * serves or relays share it out, by URL or stdio alike. */
 export function acpSessionMcpServers(servers: AcpMcpServer[], transport: AcpOwnMcpTransport, init: unknown,
   takesUnadvertised?: (init: unknown) => boolean, toolBudget?: (init: unknown) => number | undefined): AcpMcpServer[] {
   const budget = toolBudget?.(init);
-  const shared = budget === undefined ? servers : withSessionToolShares(servers, budget);
+  const shared = budget === undefined ? servers : withSessionToolBudget(servers, budget);
   return transport === "advertised" && (acpAgentTakesHttpMcp(init) || takesUnadvertised?.(init) === true) ? acpOwnServersOverHttp(shared) : shared;
 }

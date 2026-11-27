@@ -775,7 +775,7 @@ export function EngineSetup({
       ))}
 
       {engineBrowserSignIn ? (
-        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} onStart={signInStarted} />
+        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} name={engineDisplayName(instance)} onStart={signInStarted} />
       ) : deviceSignIn || browserSignIn ? (
         <>
           <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} onStart={signInStarted} />

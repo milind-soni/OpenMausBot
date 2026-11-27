@@ -2,15 +2,42 @@
 
 A work layer over a Team Cloud's rooms. A room thread can carry one **board item**: a title, a state, what it waits
 for, labels, and which bot may take it. Rooms and threads stay what they are; the item only says where the work in that
-thread stands. Nothing new is shown to anyone: a person sees an item exactly when they can see its room thread.
+thread stands. A person sees an item exactly when they can see its room thread.
 
-It is off unless an Owner or Admin turns on **Board** in Settings → Features (`features.teamBoard` in `config.json`).
-The switch exists only on a Team Cloud; anywhere else, and while it is off, the routes below answer 404.
+It is on every Team Cloud, with no switch; anywhere else the routes below answer 404 and the bots have no board tools.
+An older `config.json` that still has `features.teamBoard` loads as before, and the key is dropped.
 
-The server hands each ready item to a free bot of its room and starts that bot's turn in the item's thread; the bot
-settles it with its board tools. There is no Board page: items are read and changed through the routes below and the
-bots' tools, and a room thread whose item waits on a person shows as waiting on you, as an open card does. Repeating
-items come later.
+People never see the word "board". A person asks a bot in a room to split work up (or hands it a goal with clear
+separate parts); the bot calls `board_add`, which opens one room thread per piece, and the server hands each ready piece
+to a free bot of the room and starts that bot's turn in the piece's thread; the bot settles it with its board tools.
+There is no Board page and nothing to fill in. Repeating items come later.
+
+## What people see
+
+A room thread that is an item shows one short status on its row in the room feed and under its title when it is open
+beside the feed (`src/lib/room-work.ts`):
+
+| State | Status |
+|---|---|
+| `waiting`, `ready` | Up next |
+| `working` | *Bot* working (on the row only while no turn runs: the row's own line says a bot is working while one does) |
+| `needs_person` | Needs you, when the viewer was asked or nobody in particular was; else Needs *name* |
+| `done` | Done |
+| `failed` | Stopped |
+| `cancelled` | nothing |
+
+On a row the status stands where "Closed" would. A room thread whose item waits on a person also shows as waiting on
+you, as an open card does. A room with no threads yet says, under its empty line, that a bot can split big work into
+threads. The feed reads `GET /api/board?groupId=` and follows `board.item` frames.
+
+## What bots are told
+
+Every room turn on a Team Cloud carries one line (`ROOM_SPLIT_PROMPT`, `server/system-prompt.ts`): when a person asks to
+split or share out work, or hands over a goal with clearly separate parts, use `board_add`; otherwise just answer; never
+split a small request or a piece you were handed. When someone asks to see the work or where it stands, the bot calls
+`board_list` and shows it in the chat with the existing `show_html` tool, one compact page grouped by the statuses above,
+and replaces that page by its `app_id` when asked again; never unasked. No tool was added for it. `board_add` itself refuses a call from a thread that is already an
+item, so a bot working one piece cannot turn it into more turns.
 
 ## The item
 
@@ -51,7 +78,7 @@ Every other move is refused with 409 `board_bad_move`. The rules are `server/boa
 
 ## Dispatch
 
-`server/board/dispatcher.ts`, wired in `server/board/wiring.ts`. It runs on a Team Cloud with the board on, whenever the
+`server/board/dispatcher.ts`, wired in `server/board/wiring.ts`. It runs on a Team Cloud, whenever the
 board changes, a bot's state changes, the runtime reports a turn's node changed, and on the shared due-timer.
 
 - **Per bot.** A bot runs one room turn at a time and only when idle everywhere. For each `ready` item, oldest first,
@@ -62,7 +89,7 @@ board changes, a bot's state changes, the runtime reports a turn's node changed,
   waiting). A refusal pauses every dispatch until the cap resets; no attempt is counted.
 - **Model.** A bot whose engine is missing is passed over for 10 minutes.
 - **The turn.** `take` (attempts + 1), then `startGroupTurn` in the item's thread with `@Bot` and the bot as the one
-  mention, as unattended work (`trigger: { kind: "bot" }`, never the person's own request), from a sender named Board
+  mention, as unattended work (`trigger: { kind: "bot" }`, never the person's own request), from a sender named Handoff
   with no person behind it. The line carries the item's title, its thread's first line, what each need came to, and how
   to finish. A start the server refuses hands the item back (or fails it at the third attempt) and waits a minute.
 - **The lease is the turn.** An item still `working`, not set aside, whose thread is idle 20 seconds or more after its
@@ -81,18 +108,19 @@ board changes, a bot's state changes, the runtime reports a turn's node changed,
 
 ## Bot tools
 
-Listed only on a Team Cloud with the board on (`OMB_TEAM_BOARD`), in chats and in rooms, deferred for Claude; each is
-in the core tool group. The internal routes are `server/routes/board-tools.ts`; a confined turn (work from outside)
+Listed to every bot of a Team Cloud (`OMB_TEAM_BOARD`, set from the Team Cloud itself), in chats and in rooms,
+deferred for Claude; each is in the core tool group. The internal routes are `server/routes/board-tools.ts`; a confined turn (work from outside)
 cannot reach them.
 
 - `board_add` `{ room?, items: [{ key, title, brief?, needs?, labels?, for? }] }`: 1 to 15 items, each on a new thread of
   the room (default: the room of the turn), the bot's `brief` (or the title) as its first line, written as the bot's.
   `needs` are keys of the same call or item ids of the room; `for` is a bot's name in the room. Everything is checked
-  before the first thread opens, so a bad entry leaves nothing behind. Only rooms the bot is a member of.
+  before the first thread opens, so a bad entry leaves nothing behind. Only rooms the bot is a member of, and never from
+  a thread that is already an item.
 - `board_list` `{ room?, state? }`: the items of the bot's rooms, one line each, at most 60.
 - `board_update` `{ item?, move?, text?, person?, minutes?, labels? }`: the item of this thread unless `item` is given.
   `done` and `failed` take `text` as the result; `ask` posts `text` as the bot's line in the thread and puts it in the
-  inbox of `person` (a teammate's name or email), else of the person who made the item; `later` takes `minutes` (1 to
+  inbox of `person` (a teammate's name or email), else of the person who made the item, and keeps their name on the item; `later` takes `minutes` (1 to
   1,440) and `text` as the note; `release` hands it back to ready. `labels` replaces them. Only the bot holding an item
   may settle, ask about or set it aside.
 
@@ -101,7 +129,8 @@ cannot reach them.
 For every member and admin who is signed in (`server/routes/board.ts`). Writing needs what writing in the room needs:
 chat access to each of its bots.
 
-- `GET /api/board[?groupId=]` → `{ items }`, the ones the caller can see, oldest first.
+- `GET /api/board[?groupId=]` → `{ items, you }`, the ones the caller can see, oldest first; `you` is the caller's
+  person key, as `question.person` names whoever was asked.
 - `POST /api/board/items` `{ groupId, title, text?, needs?, labels?, forBotId?, threadId? }` → 201 `{ item }`. Without
   `threadId` it opens a new thread in the room, without making it the room's current one, whose first line is `text`
   (or the title), written as the caller's; no bot answers it. With `threadId`, that thread of the room becomes the item.

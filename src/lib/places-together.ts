@@ -1,9 +1,9 @@
 // This computer and My Cloud together (electron/places-together.mjs), as a page sees it: the other place's bots, listed
 // beside its own. Every row carries its `home`, and ids are unique only within a place, so rows are keyed by home and id.
 import { useEffect, useState, useSyncExternalStore } from "react";
-import type { BotHome, PlaceBotRow, PlacesTogetherState } from "../../electron/places-together.mjs";
+import type { ArrangedBot, BotHome, PlaceBotRow, PlacesTogetherState } from "../../electron/places-together.mjs";
 
-export type { BotHome, PlaceBotRow, PlacesTogetherState };
+export type { ArrangedBot, BotHome, PlaceBotRow, PlacesTogetherState };
 
 /** A bot's key in a list that holds both places: ids are unique only within one. */
 export const placedKey = (home: BotHome, id: string): string => `${home}:${id}`;
@@ -76,6 +76,12 @@ export function useTogetherNoticeDue(): boolean | null {
   return hasBridge ? due : false;
 }
 
+/** The notice of the default was drawn on this computer before and never closed: main still calls it due, and calls the
+ * list on with no choice of the person's, which only a drawn notice does (electron/places-together.mjs). */
+export function useTogetherNoticeDrawn(): boolean {
+  return usePlacesTogetherPart((state) => state?.notice === true && state.on === true);
+}
+
 /** The notice was drawn: main turns the default on from now (it never does before). */
 export async function togetherNoticeShown(): Promise<void> {
   const page = bridge();
@@ -89,6 +95,13 @@ export function togetherNoticeDone(): void {
   void bridge()?.noticeDone?.().catch(() => {});
 }
 
+/** What's new showed the notice's slide: the default is on from now, as the drawn notice turns it, and the corner notice
+ * never shows for this account, as when it is closed. */
+export async function togetherSlideShown(): Promise<void> {
+  await togetherNoticeShown();
+  togetherNoticeDone();
+}
+
 /** The notice's own switch for "Let My Cloud's bots run commands on this computer": what main says it is now. */
 export async function setTogetherCommands(on: boolean): Promise<boolean> {
   const page = bridge();
@@ -96,6 +109,17 @@ export async function setTogetherCommands(on: boolean): Promise<boolean> {
   const now = await page.setCommands(on);
   read();
   return now;
+}
+
+/** Keeps where the person moved bots in the one list. The list shows it at once; main's answer then stands. Whether main
+ * kept every entry. */
+export function arrangeOneList(entries: readonly ArrangedBot[]): Promise<boolean> {
+  const page = bridge();
+  if (!page?.arrange || !entries.length || !known?.on) return Promise.resolve(!entries.length);
+  const keys = new Set(entries.map((entry) => entry.key));
+  publish({ ...known, arranged: [...(known.arranged ?? []).filter((entry) => !keys.has(entry.key)), ...entries] });
+  const same = (a: ArrangedBot, b: ArrangedBot) => a.key === b.key && a.section === b.section && a.after === b.after;
+  return page.arrange([...entries]).then((kept) => { read(); return entries.every((entry) => kept.some((had) => same(had, entry))); }, () => { read(); return false; });
 }
 
 /** Opens one of the other place's bots there. */

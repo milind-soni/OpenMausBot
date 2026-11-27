@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reorderIfMoved, reorderInPlace, reorderStable } from "./bot-order.ts";
+import { reorderIfMoved, reorderInPlace, reorderNamesStable, reorderStable } from "./bot-order.ts";
 
 const items = (...ids: string[]) => ids.map((id) => ({ id }));
 const ids = (list: ReadonlyArray<{ id: string }>) => list.map((item) => item.id);
@@ -57,5 +57,11 @@ describe("reorderIfMoved", () => {
     expect(ids(reorderIfMoved(list, ["c", "a"])!)).toEqual(["c", "b", "a"]);
     expect(reorderIfMoved(list, ["a", "c"])).toBeNull();
     expect(reorderIfMoved(list, ["ghost"])).toBeNull();
+  });
+});
+
+describe("reorderNamesStable", () => {
+  it("reorders plain names the same way, ignoring names it does not have", () => {
+    expect(reorderNamesStable(["a", "b", "c", "d"], ["d", "ghost", "b"])).toEqual(["a", "d", "c", "b"]);
   });
 });

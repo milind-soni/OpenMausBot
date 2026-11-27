@@ -1736,6 +1736,7 @@ describe("harness HTTP API", () => {
     expect(body.app).toBe("openmausbot");
     expect(typeof body.pid).toBe("number");
     expect(body.static).toBe(true);
+    expect(body.eventLogDrops).toEqual({ events: expect.any(Number), bytes: expect.any(Number) });
   });
 
   it("refuses a second live server that shares the same data directory", async () => {
@@ -5009,6 +5010,43 @@ describe("harness HTTP API", () => {
       expect(await managed(partial.id)).toEqual([""]);
     } finally {
       for (const bot of [whole, partial]) await api("DELETE", `/api/bots/${bot.id}`);
+      for (const name of made) await api("DELETE", `/api/sidebar-sections?section=${encodeURIComponent(name)}`);
+    }
+  });
+
+  it("stores the department order: a partial, stable reorder every client reads back and is sent live", async () => {
+    const made = ["Order fixture A", "Order fixture B", "Order fixture C"];
+    const mine = (names: string[]) => names.filter((name) => made.includes(name));
+    const listed = async () => mine((await api("GET", "/api/sidebar-sections")).body.sections);
+    try {
+      for (const name of made) expect((await api("POST", "/api/sidebar-sections", { name, botIds: [] })).status).toBe(200);
+      expect(await listed()).toEqual(made);
+
+      const stream = await openSse(`${BASE}/api/events`);
+      try {
+        await stream.until((frame) => frame.kind === "hello");
+        const moved = await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture C", "Order fixture A"] });
+        expect(moved.status).toBe(200);
+        expect(mine(moved.body.sections)).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+        const frame = await stream.until((candidate) => candidate.kind === "sections" && mine(candidate.sections ?? [])[0] === "Order fixture C");
+        expect(frame.sections).toEqual(moved.body.sections);
+      } finally {
+        stream.close();
+      }
+      expect(await listed()).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+      // A late device's first offer of its old order does not undo the order someone set.
+      const offered = await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A", "Order fixture C"], first: true });
+      expect(offered.status).toBe(200);
+      expect(mine(offered.body.sections)).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+
+      const invalid = { status: 400, body: { error: "sections must be a non-empty array of distinct department names" } };
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A", "Order fixture A"] })).toMatchObject(invalid);
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: [] })).toMatchObject(invalid);
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A"], extra: true })).toMatchObject(invalid);
+      expect(await api("PUT", "/api/sidebar-sections/order", { sections: ["Order fixture A", "Nowhere"] }))
+        .toMatchObject({ status: 400, body: { error: "unknown department: Nowhere" } });
+      expect(await listed()).toEqual(["Order fixture C", "Order fixture B", "Order fixture A"]);
+    } finally {
       for (const name of made) await api("DELETE", `/api/sidebar-sections?section=${encodeURIComponent(name)}`);
     }
   });

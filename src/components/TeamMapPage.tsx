@@ -1,3 +1,4 @@
+import { isPlaceId } from "@/lib/place-chat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, BookOpen, Box, Loader2, Monitor, Plus, Save, Users, UsersRound, X } from "lucide-react";
@@ -287,7 +288,7 @@ export function TeamMapPage() {
   const pendingMoveRef = useRef(pendingMove);
   pendingMoveRef.current = pendingMove;
   useEffect(() => () => pendingMoveRef.current?.resolve(false), []);
-  const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
+  const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden && !isPlaceId(bot.id)), [state.bots]);
   const sections = useMemo(() => {
     const names = [...new Set([...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : [])])];
     const order = (key: string) => key === "" ? -1 : names.includes(key) ? names.indexOf(key) : names.length;

@@ -37,7 +37,7 @@ type Kind = Place["kind"];
  * (`here`): only a computer's page in the desktop app moves its bots to My Cloud, and a server becomes home from its icon. */
 export function onePlace(here: Kind | null): string {
   const how = here === "computer"
-    ? ` To bring them together, in the desktop app ${CLOUD_HOW}, or right-click their own server's icon on the left of the desktop app and choose "Make … my home".`
+    ? ` To bring them together, with a My Cloud of their own, in the desktop app ${CLOUD_HOW}, or right-click their own server's icon on the left of the desktop app and choose "Make … my home".`
     : here === "cloud" ? " To bring a computer's bots here, the person can choose \"Bring them together\" on that computer's page in the desktop app."
       : here === "server" ? " To bring them together here, in the desktop app, right-click this server's icon on the left of the app and choose \"Make … my home\"."
         : "";
@@ -80,7 +80,7 @@ function bringTogether(place: Place, self: Elsewhere["self"], to: "bot" | "perso
 function moveToTeam(place: Place, self: Elsewhere["self"], to: "bot" | "person"): string {
   const move = self.kind === "cloud"
     ? `or move this bot to ${place.name}: in the desktop app, open the bot's menu in the sidebar and choose "Move to ${place.name}"`
-    : `or, from My Cloud, move a bot to ${place.name}`;
+    : `or, from a My Cloud of theirs, move a bot to ${place.name}`;
   return to === "bot" ? `Tell the person they can ask it in ${place.name}, ${move}.` : `Ask it in ${place.name}, ${move}.`;
 }
 

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RESERVED_MCP_NAMES, slugMcpName } from "../shared/mcp-name.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
 import { MCP_RESTART_ENV } from "./mcp-app-catalog.ts";
+import { trimmedHeaderValues, unsendableHeader } from "./bot-box/broker-headers.ts";
 
 export { importedMcpServerName } from "../shared/mcp-name.ts";
 
@@ -200,6 +201,10 @@ function headerError(name: string, value: string): string | null {
   return null;
 }
 
+function unsendableHeaderError(name: string, value: string): string | null {
+  return unsendableHeader({ [name]: value }) ? `Header “${name}” has characters that are not allowed in a header (such as a curly quote or a control character).` : null;
+}
+
 /** Credentials belong in a write-only header, not in the address the listing shows. */
 function urlError(value: string): string | null {
   let parsed: URL;
@@ -385,7 +390,10 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   }
   const headers = resolveSecrets(incoming, existing && isRemoteMcpServer(existing) ? existing.headers : undefined);
   if (!headers.ok) return headers;
-  const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value)).find((error) => error !== null);
+  // The whitespace a paste leaves around a value (a trailing newline) is dropped, on a save and on a read of what an earlier
+  // version saved. A save refuses what still cannot be sent; a stored one is read as it is, and the broker refuses only its request.
+  headers.values = trimmedHeaderValues(headers.values);
+  const invalidHeader = Object.entries(headers.values).map(([name, value]) => headerError(name, value) ?? (mutation ? unsendableHeaderError(name, value) : null)).find((error) => error !== null);
   if (invalidHeader) return { ok: false, error: invalidHeader };
   const oauth = resolveOAuthClient(parsed.data.oauth, existing && isRemoteMcpServer(existing) ? existing.oauth : undefined);
   if (!oauth.ok) return oauth;

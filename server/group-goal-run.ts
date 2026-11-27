@@ -7,10 +7,17 @@ import type { GroupDefaultResponder } from "./store.ts";
 export const GROUP_GOAL_MAX_TURNS = 13;
 export const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
+/** How many replies in a row may miss the control envelope before the run is blocked. */
+export const GROUP_GOAL_CONTROL_MISSES = 3;
 export const GROUP_GOAL_CONTROL_OPEN = "<openmaus-goal>";
 export const GROUP_GOAL_CONTROL_CLOSE = "</openmaus-goal>";
 /** A close tag the model sometimes escapes; it ends an envelope exactly like the plain one. */
 const ESCAPED_GOAL_CONTROL_CLOSE = "<\\/openmaus-goal>";
+
+const controlMissNote = (next: string, instruction: string): string =>
+  "Your last reply did not end with exactly one valid control envelope, so the goal could not take your decision. "
+  + "Do not repeat the work or the assignments you already made. Write one short update, then end with the envelope alone on its own last line: "
+  + `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"${next}","instruction":"${instruction}","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`;
 
 export type GroupGoalDecision =
   | { status: "continue"; next: string; instruction: string; detail?: string }
@@ -310,6 +317,7 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
 
   let coordinatorNote: string | undefined;
   let waitExhaustions = 0;
+  let controlMisses = 0;
   while (!deps.cancelled() && run.turnCount < run.maxTurns) {
     const coordinatorTurn = run.turnCount + 1;
     const note = coordinatorNote;
@@ -354,9 +362,19 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
 
     const decision = parseGroupGoalDecision(coordinatorResult.replyText).decision;
     if (!decision) {
-      deps.finish("blocked", `${coordinator.name} did not provide a valid next-step decision.`);
-      return;
+      controlMisses += 1;
+      const limit = GROUP_GOAL_CONTROL_MISSES;
+      if (controlMisses >= limit || run.turnCount >= run.maxTurns) {
+        deps.finish("blocked", `${coordinator.name} did not provide a valid next-step decision after ${controlMisses} ${controlMisses === 1 ? "reply" : "replies"}.`);
+        return;
+      }
+      deps.progress(`${coordinator.name}'s reply did not end with a valid control envelope. Asking again (${controlMisses}/${limit}).`);
+      coordinatorNote = deps.solo
+        ? controlMissNote(coordinator.id, "Your next step")
+        : controlMissNote("Exact member id from the roster", "Concrete next assignment");
+      continue;
     }
+    controlMisses = 0;
     if (decision.status !== "continue") {
       deps.finish(decision.status, decision.detail);
       return;

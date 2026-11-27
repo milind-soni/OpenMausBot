@@ -110,7 +110,7 @@ test("another Cloud of the person's own being moved: its screen names it", async
   assert.deepEqual(w.home.view(), { screen: "working", operation: move, name: "Client A" });
 });
 
-test("the Cloud's own page asks what has it down: the Admin's word for the place on screen only, read again when it is old, never while the Admin is failing", async () => {
+test("the Cloud's own page asks what has it down: the Admin's word for the place on screen only, read again when it is old, while the Admin fails at most each minute", async () => {
   const w = world({ state: { ...connected({ operation: UPDATE }), verifiedAt: 1_000_000 } });
   await w.home.refresh();
   assert.deepEqual(await w.home.operation(), UPDATE);
@@ -123,15 +123,21 @@ test("the Cloud's own page asks what has it down: the Admin's word for the place
   stale.refreshed = { ...connected({ operation: UPDATE }), verifiedAt: stale.clock };
   assert.deepEqual(await stale.home.operation(), UPDATE);
   assert.equal(stale.refreshes, 1);
-  // The Admin itself failing: the account's own retry wait is kept, however often the page asks.
+  // The Admin itself failing: within a minute of the account's last try, its retry wait is kept, however often the page asks.
   const failing = world({ state: { ...connected(), verifiedAt: 1 } });
   await failing.home.refresh();
-  failing.failingUntil = failing.clock + 30_000;
+  failing.failingUntil = failing.clock + 300_000; failing.lastAttemptAt = failing.clock;
   for (let i = 0; i < 3; i++) assert.equal(await failing.home.operation(), null);
   assert.equal(failing.refreshes, 0);
-  failing.clock += 30_000;
+  failing.clock += 60_000;
   await failing.home.operation();
-  assert.equal(failing.refreshes, 1, "read again once its wait is over");
+  assert.equal(failing.refreshes, 1, "a minute after the last try: read again, inside a 5-minute wait");
+  failing.lastAttemptAt = failing.clock; failing.clock += 30_000;
+  await failing.home.operation();
+  assert.equal(failing.refreshes, 1);
+  failing.failingUntil = 0;
+  await failing.home.operation();
+  assert.equal(failing.refreshes, 2, "read again once its wait is over");
   const signedOut = world({ state: { status: "signed-out" } });
   assert.equal(await signedOut.home.operation(), null);
 });
@@ -145,4 +151,21 @@ test("a team's Cloud's own page is told its name with what has it down", async (
 
 test("a rollback is its own kind", () => {
   assert.deepEqual(parseCloudOperation({ kind: "rollback", since: 5, until: 9, expectedAt: 7 }), { kind: "rollback", since: 5, until: 9, expectedAt: 7 });
+});
+
+test("Try again draws the screen at once, never after a session read that hangs, and again when that read lands", async () => {
+  const w = world({ state: { status: "signed-out" } });
+  await w.home.show();
+  await w.home.retry();
+  assert.equal(w.freshens ?? 0, 0, "only a press reads the sign-in");
+  let land, timer;
+  w.freshRead = new Promise((resolve) => { land = resolve; });
+  const drawn = await Promise.race([w.home.retry({ pressed: true }).then(() => "drawn"), new Promise((resolve) => { timer = setTimeout(resolve, 5_000, "waited for the read"); })]);
+  clearTimeout(timer);
+  assert.equal(drawn, "drawn");
+  assert.equal(w.freshens, 1);
+  const reads = w.stateReads;
+  land(w.state);
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(w.stateReads > reads, "drawn again once the read lands");
 });

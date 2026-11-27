@@ -489,7 +489,7 @@ test("only this computer's page and My Cloud's own page are answered", async () 
   const handlers = new Map();
   const f = setup();
   installPlacesTogether({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, asking: (event) => event.page, together: f.together });
-  assert.deepEqual([...handlers.keys()], ["places-together:state", "places-together:set", "places-together:open", "places-together:new-bot-choice", "places-together:new-bot", "places-together:new-bot-heard",
+  assert.deepEqual([...handlers.keys()], ["places-together:state", "places-together:set", "places-together:open", "places-together:cloud-awake", "places-together:open-in-place", "places-together:arrange", "places-together:new-bot-choice", "places-together:new-bot", "places-together:new-bot-heard",
     "places-together:notice-shown", "places-together:notice-done", "places-together:commands", "places-together:rail-set"]);
   for (const [channel, handler] of handlers) assert.throws(() => handler({ page: null }, "nova"), channel === "places-together:rail-set" ? /Only the window's rail/ : /Only this computer's page and My Cloud's page/);
   assert.equal(handlers.get("places-together:state")({ page: "local" }).here, "computer");
@@ -520,7 +520,7 @@ test("main wires it to the one rule for this app's own pages, and the preload of
   const preload = readFileSync(join(HERE, "preload.cjs"), "utf8");
   assert.match(preload.match(/const REMOTE_SAFE = new Set\(\[([^\]]*)\]\)/)[1], /"placesTogether"/);
   const bridge = preload.slice(preload.indexOf("  placesTogether: "), preload.indexOf("  twoPlaces: {"));
-  assert.deepEqual(bridge.match(/"places-together:[a-z-]+"/g), ['"places-together:state"', '"places-together:set"', '"places-together:open"', '"places-together:changed"', '"places-together:changed"',
+  assert.deepEqual(bridge.match(/"places-together:[a-z-]+"/g), ['"places-together:state"', '"places-together:set"', '"places-together:open"', '"places-together:cloud-awake"', '"places-together:open-in-place"', '"places-together:arrange"', '"places-together:changed"', '"places-together:changed"',
     '"places-together:notice-shown"', '"places-together:notice-done"', '"places-together:commands"', '"places-together:new-bot-choice"', '"places-together:new-bot"']);
 });
 

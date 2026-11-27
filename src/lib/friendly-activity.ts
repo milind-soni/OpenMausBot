@@ -71,7 +71,6 @@ const TOOL_TALK: ReadonlySet<LocaleKey> = new Set(["chat.friendly.code", "chat.f
 
 /** Titles the app gives a conversation itself (task-title.ts localizes the last two). */
 const FACTORY_TITLES: ReadonlySet<string> = new Set(["New task", "New thread", "Conversation", "work", SHARED_CHAT_TITLE]);
-/** A generated title is 3 to 6 words; a longer one is a hand-off's brief or a message's opening cut short. */
 const TITLE_MAX = 48;
 
 /** The conversation's title as the name of the work, only when it is a title the engine generated. Anything else, or

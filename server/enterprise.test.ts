@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createWorkspaceAccess, describeEdition, editionForMembers, editionStatus, enterpriseLayerDirs, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionForMembers, editionStatus, enterpriseLayerDirs, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, LICENSE_GRACE_DAYS, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer } from "./enterprise.ts";
 import { SessionRegistry } from "./sessions.ts";
 
 const dirs: string[] = [];
@@ -103,9 +103,10 @@ describe("enterprise hook point", () => {
     expect(describeEdition(status)).toBe("openmausbot enterprise edition for Built: admin");
   });
 
-  it("warns for 30 days, keeps working for a 7-day grace, then stops granting features without a restart", async () => {
+  it("warns for 30 days, keeps working for a 14-day grace, then stops granting features without a restart", async () => {
+    expect(LICENSE_GRACE_DAYS).toBe(14);
     const dir = fakeLayer(`export function register({ graceDays }) {
-      if (graceDays !== 7) throw new Error("core must ask for its grace period");
+      if (graceDays !== 14) throw new Error("core must ask for its grace period");
       return { customer: "Acme", features: ["sso"], expiresAt: "2027-01-01" };
     }`);
     await loadEnterpriseLayer({ dir, licenseKey: "k" });
@@ -123,13 +124,14 @@ describe("enterprise hook point", () => {
     expect(entitled("sso", at("2026-12-31T23:59:59Z"))).toBe(true);
     // expired, in grace: still enterprise, still entitled, and it says so
     const grace = editionStatus(at("2027-01-03T00:00:00Z"));
-    expect(grace).toMatchObject({ edition: "enterprise", features: ["sso"], expiresInDays: -2, graceEndsAt: "2027-01-08" });
-    expect(grace.notice).toBe("OMB_LICENSE_KEY expired on 2027-01-01; enterprise features keep working until 2027-01-08 while it is renewed");
-    expect(licenseWarning(grace)).toContain("keep working until 2027-01-08");
+    expect(grace).toMatchObject({ edition: "enterprise", features: ["sso"], expiresInDays: -2, graceEndsAt: "2027-01-15" });
+    expect(grace.notice).toBe("OMB_LICENSE_KEY expired on 2027-01-01; enterprise features keep working until 2027-01-15 while it is renewed");
+    expect(licenseWarning(grace)).toContain("keep working until 2027-01-15");
     expect(entitled("sso", at("2027-01-01T00:00:00Z"))).toBe(true);
-    expect(entitled("sso", at("2027-01-07T23:59:59Z"))).toBe(true);
-    // grace over
-    const after = at("2027-01-08T00:00:00Z");
+    expect(entitled("sso", at("2027-01-08T00:00:00Z"))).toBe(true);
+    expect(entitled("sso", at("2027-01-14T23:59:59.999Z"))).toBe(true);
+    // grace over: 14 days after the expiry instant, to the millisecond
+    const after = at("2027-01-15T00:00:00Z");
     expect(entitled("sso", after)).toBe(false);
     const lapsed = editionStatus(after);
     expect(lapsed.edition).toBe("oss");
@@ -187,7 +189,7 @@ describe("enterprise hook point", () => {
   it("tells the operator when the layer is present but no key is configured", async () => {
     const dir = fakeLayer(`export function register() { return { customer: "x", features: [], expiresAt: null }; }`);
     const status = await loadEnterpriseLayer({ dir, licenseKey: undefined });
-    expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but OMB_LICENSE_KEY is not set" });
+    expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but there is no licence: neither license.key nor OMB_LICENSE_KEY is set" });
   });
 
   it("refuses a layer that does not honour the contract", async () => {

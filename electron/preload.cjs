@@ -90,9 +90,11 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
+/** A page's typed array can arrive from another realm, where `instanceof Uint8Array` is false. */
+const iconBytes = (value) => (ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength) : undefined);
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate", "lendComputer"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
-const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
+const HOME_PAGE = ["home", "onChatLink", "localApps", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -414,6 +416,10 @@ const bridge = {
     }
     return () => chatLinkListeners.delete(cb);
   },
+  localApps: {
+    openWindow: (id) => ipcRenderer.invoke("local-apps:open-window", id),
+    openChat: (link) => ipcRenderer.invoke("local-apps:open-chat", link),
+  },
   setUnreadCount: (count) => ipcRenderer.send("desktop:unread-count", count),
   desktopViewer: {
     open: (url, title, contextId) => ipcRenderer.invoke("desktop-viewer:open", url, title, contextId),
@@ -505,6 +511,20 @@ const bridge = {
       ipcRenderer.on("update-all:state", handler);
       return () => ipcRenderer.removeListener("update-all:state", handler);
     },
+  },
+
+  /** Saved apps as launchers on this computer: this app's own page only (never REMOTE_SAFE; main checks the sender
+   * again). `install({ id, name, iconPng?, desktopShortcut? })`, `uninstall(id)`, `addToDesktop(id)`, `removeFromDesktop(id)`,
+   * `list()`, `cleanup(ids)` (every saved app's id). */
+  appInstall: {
+    install: (input) => ipcRenderer.invoke("app-install:install", {
+      id: input?.id, name: input?.name, iconPng: iconBytes(input?.iconPng), desktopShortcut: input?.desktopShortcut === true,
+    }),
+    uninstall: (id) => ipcRenderer.invoke("app-install:uninstall", id),
+    addToDesktop: (id) => ipcRenderer.invoke("app-install:add-to-desktop", id),
+    removeFromDesktop: (id) => ipcRenderer.invoke("app-install:remove-from-desktop", id),
+    list: () => ipcRenderer.invoke("app-install:list"),
+    cleanup: (ids) => ipcRenderer.invoke("app-install:cleanup", Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : null),
   },
 
   /** A remote page may read the list but never change where this window goes. */
@@ -629,6 +649,11 @@ const bridge = {
       ? ipcRenderer.invoke("places-together:set", on === true, ...(from === "notice" ? ["notice"] : [])) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
     open: botId => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
+    // A My Cloud bot opened in this computer's window (main readies the session this computer's server forwards it with).
+    cloudAwake: () => (isLocalPage ? ipcRenderer.invoke("places-together:cloud-awake") : Promise.resolve(false)),
+    openInPlace: (botId, fresh) => (isLocalPage ? ipcRenderer.invoke("places-together:open-in-place", String(botId), fresh === true) : Promise.resolve({ ok: false })),
+    // Where the person dragged bots in the one list: main keeps it beside the switch, and checks every entry.
+    arrange: entries => ipcRenderer.invoke("places-together:arrange", Array.isArray(entries) ? entries.slice(0, 2000) : []),
     onChanged: cb => {
       const handler = () => cb();
       ipcRenderer.on("places-together:changed", handler);
@@ -760,6 +785,8 @@ const bridge = {
       ? ipcRenderer.invoke("lend:set", isLocalPage ? id : null, on === true) : Promise.reject(new Error("Use the switch to change this.")),
     allowScreen: id => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("lend:allow-screen", isLocalPage ? id : null) : Promise.reject(new Error("Use the button to allow this.")),
+    choose: id => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("lend:choose", isLocalPage ? id : null) : Promise.reject(new Error("Use the button to choose this.")),
     wish: isLocalPage ? (address, on) => ipcRenderer.invoke("lend:wish", String(address ?? ""), on === true) : undefined,
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),

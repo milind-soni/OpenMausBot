@@ -1,8 +1,8 @@
-// The end of the one list, while "This computer and My Cloud together" is on: the other place's bots are rows among this
-// place's own (src/lib/place-rows.ts), so this says something only when that place has no rows to show: My Cloud not
+// The end of the one list, while "This computer and My Cloud together" is on: the other place's bots are rows in this
+// place's departments (src/lib/one-list.ts), so this says something only when that place has no rows to show: My Cloud not
 // signed in to yet, or a place that is asleep or can't be reached with nothing kept from before. One quiet line in the
 // list's secondary text, not a card or a banner; it opens My Cloud where there is something to do there. Nothing while
-// the first read is under way, nothing with the switch off, and nothing on My Cloud's page, which lists its own bots only.
+// the first read is under way, and nothing with the switch off. On My Cloud's page it speaks of this computer's bots.
 import { Cloud, CloudMoon, CloudOff, MonitorOff } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";

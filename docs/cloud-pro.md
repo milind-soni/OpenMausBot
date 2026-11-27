@@ -1799,9 +1799,34 @@ wait for the next read, `truncated: true`):
     "boot": { "waits": 5, "stopped": 1, "killed": 1, "stallMinutes": 4 } },
   "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
     "turnStarts": [12, 3, 1, 0, 0, 0], "loop": { "n": 2, "worstMs": 1800 } },
-  "clock": { "v": 1, "errorMs": 21660000, "measuredAt": 1790021660000 }
+  "clock": { "v": 1, "errorMs": 21660000, "measuredAt": 1790021660000 },
+  "signIns": { "attempts": 3, "open": 0,
+    "engines": [{ "kind": "claudeAgent", "attempts": 3, "completed": 0, "last": { "outcome": "interrupted", "at": 1790000780000 } }],
+    "recent": [{ "kind": "claudeAgent", "method": "paste-code", "outcome": "wrong_code", "at": 1790000420000 },
+               { "kind": "claudeAgent", "method": "paste-code", "outcome": "interrupted", "at": 1790000780000 }] }
 }
 ```
+
+**`signIns`** is the home's engine sign-ins (`server/sign-in-trace.ts`, kept
+in `sign-in-trace.json` so a stop can't wipe it): `attempts` since the first
+one (each press of an engine's sign-in), how many are `open` now, per engine
+kind its attempts, completed ones and the last event, and the last 10 events
+(`started`, or an outcome). An outcome is a fixed code
+(`shared/sign-in-outcome.ts`): `completed`, `wrong_code` (a pasted code that
+is not a code; the sign-in stays open), `refused` (the provider refused it),
+`expired`, `cancelled`, `exited` (the engine's login command ended),
+`interrupted` (the server stopped or restarted under it, which the next boot
+records, or the engine's settings changed), `not_installed`, `timed_out` or
+`failed`. `method` is the provider card's (`paste-code`, `device-code`,
+`browser-pkce`, `browser`, `callback-url`). Never a code, link, account,
+session or flow. Each event is also one log line, such as `sign-in:
+claudeAgent paste-code wrong_code after 1m 12s`. Left out when it can't be
+read; older homes don't send it, and an Admin that doesn't know it drops it.
+The sign-in status the screen polls (`GET /api/instances/<id>/auth/status`)
+carries the same code as `reason` on a finished sign-in, and an error from
+`auth/start`, `auth/complete` or `auth/cancel` carries it as `reason` where
+known: a flow the server's stop cut short reads `{"phase":"failed",
+"reason":"interrupted"}`.
 
 **`clock`** is the home's clock as it last measured it ("The home's clock"
 below): `errorMs` how far it is behind the true time (negative: ahead), and
@@ -2083,7 +2108,9 @@ judge a pending timer by a wall-clock time stored when it was set.
   send; one parked on a person's answer doesn't count), no Live call, no cloud
   computer on or starting (its idle timer
   lives in this process), no maintenance (backup or restore, Move to Cloud, an
-  engine or browser install, a provider sign-in) and no request in progress;
+  engine or browser install, a provider sign-in until it finishes, fails, is
+  cancelled or reaches its own expiry, at most 15 minutes for every engine) and no
+  request in progress;
 - nobody used the home for 10 minutes (the Admin may ask for another window).
   A use is an authenticated request, except the event stream, `/api/health`,
   `/api/sync/…`, `/api/shared-computers/…` and requests the page marks
@@ -2360,36 +2387,49 @@ a later launch, in the list's order. A new notice is one entry in `NOTICES` and
 its fact in AppNotices. So What's new and Boat's credit offer never share a
 launch: What's new comes first, and the Boat card waits for a later one.
 
-1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11b`):
-   one centered popup with up to three slides, **Next** and **Back**, its dots
+1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11c`):
+   one centered popup with its slides, **Next** and **Back**, its dots
    and the arrow keys, each slide with a short loop of the app itself (its
-   still where motion is reduced), once per person: a close is kept in the
+   still where motion is reduced) or a picture drawn from the app's own
+   labels, once per person: a close is kept in the
    workspace record (on a Team Cloud, the person's own), in the page's storage
    and in this desktop's own record (`electron/desktop-prefs.mjs`), so every
    port the app's page is served on agrees. A close also counts as seeing the
-   earlier What's new (`whats-new-2026-11`), the Teams popup and ModelGo's
-   sponsor card, so nobody sees those again; a new campaign id shows it once
-   more to everyone who closed them. It is the launch's notice, centred, on
-   every page but a branded build's, never during setup (the welcome, the
-   tour), before a new install's first reply, a call, a move, another dialog,
-   busy work or an update being offered, and never in the launch MausBot's
-   first-launch card took. In the launch a new install's welcome finished, it
-   comes once the first chat has had its first reply. `lib/whats-new.ts`
-   decides the slides (`whatsNewCarousel`), in this order:
+   earlier What's new (`whats-new-2026-11b`, `whats-new-2026-11`), the Teams
+   popup and ModelGo's sponsor card, so nobody sees those again; a new campaign
+   id shows it once more to everyone who closed them. It is the launch's notice,
+   centred, on every page but a branded build's, never during setup (the
+   welcome, the tour), before a new install's first reply, a call, a move,
+   another dialog, busy work or an update being offered, and never in the
+   launch MausBot's first-launch card took. In the launch a new install's
+   welcome finished, it comes once the first chat has had its first reply.
+   `lib/whats-new.ts` decides the slides (`whatsNewCarousel`), in this order:
+   - **Your apps have a home**, for everyone: where the apps the bots build
+     are (Published apps, under the section that page lists them in), and
+     **Open apps**, which opens Published apps. The words about opening an
+     app in its own window and installing it are only on this computer's
+     page of the desktop app, which can do both.
+   - **Publish your bots**, for everyone: Publish in the bot's ⋯ menu, then
+     Publish to community. It only tells; it has no button.
    - **Meet the new MausBot Cloud**: on this computer's page of a desktop that
      sells the Cloud and no organization runs, for someone with no Cloud plan
-     (signed out, or signed in with none).
+     (signed out, or signed in with none). Whoever has a Cloud (a plan of
+     their own or a team's, or this page is a Cloud's) gets **What's new in
+     MausBot Cloud** instead, which only tells.
    - **Team**: for anyone who can start a team (on the website, or in the
      app's Add a Cloud for a plan of one's own on this desktop) and a Team
-     Cloud's Owner and Admins (**Invite your team**, the team's People page);
-     never someone already in a team or a Team Cloud's member, who keep the
-     Teams popup's **Got it**.
-   - **ModelGo**, the sponsor: wherever `modelgoOfferable` allows it, on a Team
-     Cloud only for its Owner and Admins. **Get a ModelGo key** opens the
-     sponsor's exact address; **Add key** opens Settings → AI, where its key
-     goes, for whoever may change this place's settings.
+     Cloud's Owner and Admins (**Invite your team**, the team's People page).
+     Someone already in a team, or a Team Cloud's member, gets **What's new
+     for your team** instead, which only tells and sells nothing.
+   - **Your bots are in one list now**, last: the notice of This computer and
+     My Cloud together, with its switches, where its corner notice would show
+     and main calls it due and it was never drawn. Main hears that it was
+     shown, which turns the default on, only once that slide is on screen;
+     someone who closes What's new before it gets the corner notice on a
+     later launch.
 
-   No slide for someone: no popup.
+   A slide that only tells has no **Not now**; the last slide, when it only
+   tells, ends with **Got it**.
 
    A plan slide shows only while the Admin's offer sells its plan, with that
    plan's price from the offer (the Team plan's free trial when it has one);

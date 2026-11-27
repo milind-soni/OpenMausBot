@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, ApiError } from "@/state/store";
-import { chatgptPlanLink, codexDeviceLink, deviceFlowUnavailable, DeviceSignInProgress, deviceSignInProvider, type DeviceSignInStatus } from "./DeviceSignIn";
+import { chatgptPlanLink, codexDeviceLink, deviceFlowUnavailable, DeviceSignInProgress, deviceSignInProvider, type DeviceSignInStatus, unavailableFlow } from "./DeviceSignIn";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,6 +24,34 @@ describe("Codex device sign-in UI", () => {
     expect(html).toContain("Copy sign-in code");
     expect(html).toContain("Waiting for you");
     expect(html).not.toContain("codex login");
+  });
+
+  it("says how to turn on device code sign-in as step 1, before the code", () => {
+    const html = render(waiting);
+    const step = html.indexOf("1. If OpenAI says device code sign-in isn&#x27;t allowed, turn it on in ChatGPT Settings → Security");
+    expect(step).toBeGreaterThan(-1);
+    expect(html).toContain("your ChatGPT admin may need to");
+    expect(html.indexOf("2. Enter this one-time code on OpenAI&#x27;s sign-in page")).toBeGreaterThan(step);
+    expect(html.indexOf("ABCD-12345")).toBeGreaterThan(step);
+  });
+
+  it("says a flow the server lost was interrupted, and keeps the pairing reason for 401/403", () => {
+    expect(unavailableFlow(new ApiError("This sign-in is no longer available in this browser. Start a new sign-in.", 404)))
+      .toEqual({ phase: "failed", flowId: null, authorizationUrl: null, expiresAt: null, reason: "interrupted", message: "This sign-in was interrupted. Start again." });
+    expect(unavailableFlow(new ApiError("gone", 410), true).message).toBe("This sign-in was interrupted. Start again.");
+    expect(unavailableFlow(new ApiError("Your session ended.", 401)).message).toContain("still paired with Full access");
+    expect(render(unavailableFlow(new ApiError("gone", 404)))).toContain("This sign-in was interrupted. Start again.");
+    expect(unavailableFlow(new ApiError("Cut short.", 404, { reason: "interrupted" })).reason).toBe("interrupted");
+    // A reason other than interrupted is not read as one, whatever the status.
+    expect(unavailableFlow(new ApiError("Gone.", 404, { reason: "expired" })).message).toContain("still paired with Full access");
+  });
+
+  it("words a status the server ended as interrupted (a code, no message) in the person's language", () => {
+    const html = render({ phase: "failed", flowId: "fixture-flow", authorizationUrl: null, expiresAt: null, reason: "interrupted" });
+    expect(html).toContain("This sign-in was interrupted. Start again.");
+    expect(html).not.toContain("could not be completed");
+    expect(render({ phase: "failed", flowId: "fixture-flow", authorizationUrl: null, expiresAt: null, reason: "expired", message: "The ChatGPT sign-in code expired. Start sign-in again for a new code." }))
+      .toContain("This code expired. Request a new code to try again.");
   });
 
   it.each([
@@ -123,6 +151,7 @@ describe("Grok Build device sign-in UI", () => {
     expect(html).toContain("Open Grok sign-in");
     expect(html).toContain("grok.com subscription");
     expect(html).not.toMatch(/ChatGPT|OpenAI/);
+    expect(html).not.toContain("1. ");
   });
 
   it("follows the page that carries the code, only for that code", () => {

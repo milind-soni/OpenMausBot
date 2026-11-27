@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EVENTS_DIR, ensureDirs } from "../config.ts";
 import { addHeldSecretScrubber } from "../redact.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
-import { EventBus } from "./bus.ts";
+import { EventBus, eventLogLimits } from "./bus.ts";
 
 const QUEUE_LIMIT = 4096;
 
@@ -365,6 +365,112 @@ describe("EventBus", () => {
       .filter(event => event.threadId === "thread-1");
     expect(lines.map(event => event.type)).toEqual(["turn.started", "runtime.error", "turn.completed"]);
     expect(lines[0].eventId).toBe("before-gap");
+  });
+
+  it("counts dropped events and names the full queue, not the disk, as the cause", async () => {
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { writes.push(data); }, undefined,
+      { batchLines: 64, queueEvents: 2, queueBytes: 32 * 1024 * 1024, drainThreads: 8 });
+    bus.publish(testEvent({ eventId: "kept-1" }));
+    bus.publish(testEvent({ eventId: "kept-2" }));
+    bus.publish(testEvent({ eventId: "dropped-1" }));
+    bus.publish(testEvent({ eventId: "dropped-2", threadId: "thread-2" }));
+
+    const drops = bus.dropStats();
+    expect(drops.events).toBe(2);
+    expect(drops.bytes).toBeGreaterThan(0);
+    await bus.flush();
+    const lines = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string }));
+    const warnings = lines.filter((line) => line.type === "runtime.error");
+    expect(warnings).not.toHaveLength(0);
+    for (const warning of warnings) {
+      expect(warning.message).toContain("dropped events because the event log queue was full");
+      expect(warning.message).not.toContain("could not write");
+    }
+  });
+
+  it("counts a byte-bound drop and still logs a terminal event", async () => {
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { writes.push(data); }, undefined,
+      { batchLines: 64, queueEvents: 4096, queueBytes: 1, drainThreads: 8 });
+    bus.publish(testEvent({ eventId: "first" }));
+    bus.publish(testEvent({ eventId: "refused" }));
+    bus.publish(testEvent({ eventId: "done", type: "turn.completed", ok: true } as Partial<RuntimeEvent>));
+
+    expect(bus.dropStats().events).toBe(1);
+    expect(bus.dropStats().bytes).toBeGreaterThan(0);
+    await bus.flush();
+    const ids = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { eventId: string })).map((line) => line.eventId);
+    expect(ids).toContain("first");
+    expect(ids).toContain("done");
+    expect(ids).not.toContain("refused");
+  });
+
+  it("keeps a batch and a worker when the limits say zero", async () => {
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { writes.push(data); }, undefined,
+      { batchLines: 0, queueEvents: 1, queueBytes: 1, drainThreads: 0 });
+    bus.publish(testEvent({ eventId: "first" }));
+    bus.publish(testEvent({ eventId: "refused" }));
+    await bus.flush();
+    const ids = writes.flatMap((chunk) => chunk.trim().split("\n").map((line) => JSON.parse(line) as { eventId: string })).map((line) => line.eventId);
+    expect(ids).toContain("first");
+    expect(ids).not.toContain("refused");
+    expect(bus.dropStats().events).toBe(1);
+  });
+
+  it("scrubs the write-failure marker it stores", async () => {
+    let failing = true;
+    const writes: string[] = [];
+    const bus = new EventBus((_path, data) => { if (failing) throw new Error("disk full"); writes.push(data); });
+    const threadId = "sk-ant-abcdefghijklmnop";
+    bus.publish(testEvent({ threadId }));
+    await bus.flush();
+    failing = false;
+    bus.publish(testEvent({ threadId, eventId: "after", type: "turn.completed", ok: true } as Partial<RuntimeEvent>));
+    await bus.flush();
+    const lines = writes.flatMap((chunk) => chunk.trim().split("\n"));
+    expect(lines.join("\n")).toContain("«redacted");
+    expect(lines.join("\n")).not.toContain("abcdefghijklmnop");
+  });
+
+  it("appends different threads at the same time, and one thread's lines in order", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const appends: Array<{ file: string; data: string }> = [];
+    const bus = new EventBus((path, data) => {
+      appends.push({ file: path, data });
+      return appends.length === 1 ? pending : undefined;
+    }, undefined, { batchLines: 64, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 2 });
+    bus.publish(testEvent({ threadId: "a", eventId: "a1" }));
+    bus.publish(testEvent({ threadId: "b", eventId: "b1" }));
+    bus.publish(testEvent({ threadId: "a", eventId: "a2" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(appends.map((append) => basename(append.file))).toEqual(["a.ndjson", "b.ndjson"]);
+    release();
+    await bus.flush();
+    expect(appends[0].data.trim().split("\n").map((line) => (JSON.parse(line) as { eventId: string }).eventId)).toEqual(["a1", "a2"]);
+  });
+
+  it("reads its bounds from the environment, falling back on unusable values", () => {
+    expect(eventLogLimits({
+      OMB_EVENT_LOG_BATCH_LINES: "128",
+      OMB_EVENT_LOG_QUEUE_EVENTS: "512",
+      OMB_EVENT_LOG_QUEUE_BYTES: "1048576",
+      OMB_EVENT_LOG_DRAIN_THREADS: "3",
+    })).toEqual({ batchLines: 128, queueEvents: 512, queueBytes: 1024 * 1024, drainThreads: 3 });
+    expect(eventLogLimits({
+      OMB_EVENT_LOG_BATCH_LINES: "0",
+      OMB_EVENT_LOG_QUEUE_EVENTS: "-5",
+      OMB_EVENT_LOG_QUEUE_BYTES: "eight",
+      OMB_EVENT_LOG_DRAIN_THREADS: "2.5",
+    })).toEqual({ batchLines: 64, queueEvents: 4096, queueBytes: 32 * 1024 * 1024, drainThreads: 8 });
+    expect(eventLogLimits({
+      OMB_EVENT_LOG_BATCH_LINES: "999999",
+      OMB_EVENT_LOG_QUEUE_EVENTS: "999999999999",
+      OMB_EVENT_LOG_QUEUE_BYTES: "999999999999999",
+      OMB_EVENT_LOG_DRAIN_THREADS: "9999",
+    })).toEqual({ batchLines: 4096, queueEvents: 1_000_000, queueBytes: 1024 * 1024 * 1024, drainThreads: 64 });
   });
 
   it("does not report a successful shutdown flush after an append fails", async () => {

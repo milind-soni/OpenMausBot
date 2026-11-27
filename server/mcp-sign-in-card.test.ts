@@ -20,6 +20,8 @@ import type { RequestAuth } from "./request-auth.ts";
 import { createInternalMcpRoutes, type InternalMcpDeps } from "./routes/internal-mcp.ts";
 import type { RouteContext } from "./routes/table.ts";
 import type { Scope, SessionRecord } from "./sessions.ts";
+import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
+import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 import { startFakePostiz, type FakePostiz } from "./testing/fake-postiz.ts";
 
 const SIGN_IN_PAGE = "https://postiz.example";
@@ -380,6 +382,67 @@ describe("the Sign in card", () => {
     expect(await f.authorize(card)).toEqual({ status: 409, body: { error: "linear no longer exists." } });
     expect(f.answers).toHaveLength(1);
     expect(f.provider.counts.register).toBe(0);
+  });
+
+  it("a server that registers no apps fails the card with the reason, and the bot hears it once", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth({ noRegistration: true });
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(oauth, mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    const refused = await f.authorize(card);
+    expect(refused).toMatchObject({ status: 400, body: { code: "no-registration", error: expect.stringContaining("only signs in apps registered with it in advance") } });
+    expect(f.current(card).connector).toMatchObject({ status: "failed", error: refused.body.error, resumed: true });
+    expect(f.answers).toEqual([{ messageId: card.id, text: `OpenMausBot MCP sign-in for linear: ${refused.body.error as string} Nothing was signed in.` }]);
+    await f.authorize(card);
+    expect(f.answers).toHaveLength(1);
+  });
+
+  it("a server that signs in apps only by a client ID metadata document says OpenMausBot can't do that yet", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth({ noRegistration: true, clientIdMetadataDocument: true });
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(oauth, mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    const refused = await f.authorize(card);
+    expect(refused).toMatchObject({ status: 400, body: { code: "no-registration", error: "This server signs in apps by a published app ID (a client ID metadata document), which OpenMausBot doesn't support yet." } });
+    expect(f.current(card).connector).toMatchObject({ status: "failed", error: refused.body.error, resumed: true });
+    expect(f.answers).toEqual([{ messageId: card.id, text: `OpenMausBot MCP sign-in for linear: ${refused.body.error as string} Nothing was signed in.` }]);
+  });
+
+  it("a server that registers no apps, refused before the turn parks, still reaches the bot once it parks", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth({ noRegistration: true });
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(oauth, mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    f.turn.parked = false;
+    const refused = await f.authorize(card);
+    expect(f.answers).toEqual([]);
+    expect(f.current(card).connector).toMatchObject({ status: "failed", error: refused.body.error });
+    expect(f.current(card).connector!.resumed).toBeFalsy();
+    const waited = resumableCards({ activePath: (threadId: string) => f.store.messagesFor(threadId) } as never, "main-chat", 0);
+    expect(waited.map((entry) => entry.id)).toEqual([card.id]);
+    expect(f.cards.parkedAnswer(f.current(card).connector!)).toBe(`OpenMausBot MCP sign-in for linear: ${refused.body.error as string} Nothing was signed in.`);
+    expect(f.cards.parkedAnswer({ ...f.current(card).connector!, resumed: true })).toBeNull();
+  });
+
+  it("a discovery that fails for now leaves the card for another tap and tells the bot nothing", async () => {
+    const f = await setup();
+    const oauth = await startFakeOAuth();
+    const mcp = await startFakeHttpMcp({ acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge });
+    fixtures.push(mcp);
+    f.cfg.mcpServers!.linear = { type: "http", url: mcp.url, headers: {}, enabled: true } as never;
+    const { card } = await f.signIn();
+    await oauth.close();
+    const refused = await f.authorize(card);
+    expect(refused).toMatchObject({ status: 400, body: { code: "not-oauth" } });
+    expect(f.current(card).connector!.status).not.toBe("failed");
+    expect(f.current(card).connector!.error).toBeUndefined();
+    expect(f.answers).toEqual([]);
   });
 
   it("dismiss cancels the flow and resumes with the not-signed-in text", async () => {

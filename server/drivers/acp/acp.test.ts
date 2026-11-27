@@ -26,6 +26,7 @@ import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { antigravityUpdateFilter } from "../antigravity.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { forgetTextOnlyTools } from "../../mcp-text-only.ts";
 import { TurnWatchdog } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import { wideSchema } from "../../testing/oversized-tool-schema.ts";
@@ -298,6 +299,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_MODE;
     delete process.env.FAKE_ACP_AUTH_METHOD;
     delete process.env.FAKE_ACP_DUMP;
+    forgetTextOnlyTools();
     delete process.env.FAKE_ACP_RPC_DUMP;
     delete process.env.FAKE_ACP_RPC_APPEND_FILE;
     delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
@@ -3084,6 +3086,59 @@ describe("ACP turns (fake CLI)", () => {
             message: "Select Model Test can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.",
             text: { key: "chat.notice.modelNoRoute", params: { provider: "Select Model Test", model: "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017" } },
           })]);
+        });
+      });
+
+      describe("an image a text-only model cannot read", () => {
+        // Z.ai GLM's refusal of a request whose message content holds an image part, reported from a chat where a tool
+        // had read a picture into the conversation.
+        const imageOnly = { code: -32603, message: "Internal error: messages.content.type is invalid, allowed values: ['text']", data: { service: "session", errorName: "provider.invalid-request" } };
+
+        it("fails in plain words that say why every message in this conversation fails", async () => {
+          await refusePrompt(imageOnly);
+          releaseFailure();
+          const ack = await instance.adapter.sendTurn({ threadId: "text-only-image", text: "go" });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+            .toMatchObject({ ok: false, stopReason: "rpc_error" });
+          expect(recorder.events.filter((event) => event.type === "runtime.error" && event.turnId === ack.turnId)).toEqual([expect.objectContaining({
+            message: "Select Model Test refused this turn as an invalid request because this model reads text only and this conversation carries an image — one attached in chat or read by a tool — so every message fails the same way. Switch this bot to a model that can see images, or start a new conversation.",
+            text: { key: "chat.notice.imageContent", params: { provider: "Select Model Test" } },
+          })]);
+        });
+
+        it("rebuilds the conversation on the next message instead of resuming the poisoned session", async () => {
+          const dump = join(scratch, "poisoned.json");
+          process.env.FAKE_ACP_DUMP = dump;
+          process.env.FAKE_ACP_DUMP_PROMPT = "1";
+          const methods = join(scratch, "poisoned-rpc.json");
+          process.env.FAKE_ACP_RPC_DUMP = methods;
+          await refusePrompt(imageOnly);
+          releaseFailure();
+          const failed = await instance.adapter.sendTurn({ threadId: "text-only-rebuild", text: "show me the design" });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === failed.turnId))
+            .toMatchObject({ ok: false, stopReason: "rpc_error" });
+
+          // A fresh fake answers this turn: the poisoned gate applied only to the first process.
+          delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
+          delete process.env.FAKE_ACP_RPC_FAILURE_GATE;
+          const recoveryText = "User: Show me the design.\nAssistant: I read design.png.\nUser: and now?";
+          const ack = await instance.adapter.sendTurn({
+            threadId: "text-only-rebuild", text: "and now?", resumeCursor: "fake-acp-session", recoveryText,
+          });
+          expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+            .toMatchObject({ ok: true });
+          // The dump file holds the last process's methods: the fresh fake this turn launched never loads the
+          // poisoned session, and its prompt is the rebuilt conversation plus the text-only note.
+          const sent = JSON.parse(readFileSync(methods, "utf8"));
+          expect(sent).not.toContain("session/load");
+          expect(sent.filter((method: string) => method === "session/new")).toHaveLength(1);
+          expect(recorder.events.find((event) => event.type === "session.started" && event.turnId === ack.turnId))
+            .toMatchObject({ rebuilt: true });
+          const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+          expect(prompt).toEqual([
+            { type: "text", text: recoveryText },
+            { type: "text", text: "(Your model for this conversation reads text only. Reading an image file with a file tool, or keeping a picture a tool returned, makes every later reply fail. Say you cannot see it, or attach the file unchanged.)" },
+          ]);
         });
       });
 

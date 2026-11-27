@@ -422,7 +422,8 @@ export async function readCodexModelCatalog(
   fetchImpl: typeof fetch = fetch,
   cli?: string,
 ): Promise<ModelCatalog> {
-  const official = cli ? await readCodexAppServerModelCatalog(cli, env) : null;
+  let official = cli ? await readCodexAppServerModelCatalog(cli, env) : null;
+  if (cli && official === null) official = await readCodexAppServerModelCatalog(cli, env);
   const catalog = await catalogAround(official ?? STATIC_CODEX_MODELS, official !== null, env, fetchImpl);
   if (cli && !official) unconfirmedModelCatalog(catalog);
   return catalog;

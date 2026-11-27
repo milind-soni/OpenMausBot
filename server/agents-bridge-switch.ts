@@ -12,7 +12,7 @@ import { bridgedCallName } from "./agents-bridge-names.ts";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { decodeInjectId } from "./drivers/local-inject.ts";
 import { onThisNetwork } from "./drivers/openai-compat.ts";
-import { claudeCliSupports, parseClaudeCliVersion, resolveClaudeConfigDir } from "./drivers/claude.ts";
+import { resolveClaudeConfigDir } from "./drivers/claude.ts"; import { claudeCliSupports, parseClaudeCliVersion } from "./drivers/claude-cli-version.ts";
 import { claudeToolSearchOn, claudeToolSearchSetting } from "./drivers/claude-tool-search.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
 

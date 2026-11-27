@@ -14,12 +14,16 @@ import { serverLine } from "../server-lines.ts";
 import { retriesTeammateThread, type RoutineFailureFacts } from "../routine-recovery.ts";
 import { queueSteeredMessage } from "../steer-queue.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import type { Coordinator, CoordinateBotsCall } from "../coordinator.ts";
+import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
 
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
 export interface ChiefNoticeDeps {
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath"> & Partial<Pick<Store, "patchMessage">>;
   assignerOf(threadId: string): unknown;
+  /** Who asked, with reply resume, for this thread's newest assignment, and whether it was a question, when it failed (`failedRequester`). */
+  failedRequester?(threadId: string): FailedRequest | undefined;
   notify(notification: Notification | null): void;
   threadBusy(botId: string, threadId: string): boolean;
   botAtThreadCapacity(botId: string): boolean;
@@ -75,6 +79,23 @@ export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itse
 export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
+/** The bot that asked, with reply resume, for this thread's newest assignment, and whether it asked a question (consult). */
+export interface FailedRequest { botId: string; consult: boolean }
+
+/** Who asked for the work this thread's newest assignment was, when that assignment failed. */
+export function failedRequester(coordinator: Pick<Coordinator, "inThread" | "node">, threadId: string): FailedRequest | undefined {
+  const last = coordinator.inThread(threadId).at(-1);
+  const botId = last?.status === "failed" && last.reply === "resume" && last.parentId ? coordinator.node(last.parentId)?.botId : undefined;
+  return last && botId ? { botId, consult: last.mode === "consult" } : undefined;
+}
+
+/** What retry_thread tells the Chief: a retry of its own failed request comes back to it; any other result stays there. */
+export function retriedMessage(botName: string, title: string, how: "request" | "turn"): string {
+  return how === "request"
+    ? `${botName}'s thread #${title} is running again as a new request from you: its result comes back to this conversation and resumes you.`
+    : `${botName}'s thread #${title} is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.`;
+}
+
 export function createChiefNotices(deps: ChiefNoticeDeps) {
   const { store } = deps;
   const incidentLedger = new IncidentLedger();
@@ -120,16 +141,38 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   }
 
   /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and OpenMausBot's automatic retry both
-   * start it here, after the same refusal checks. Throws the refusal, or why the start failed. */
-  async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true }): Promise<void> {
+   * start it here, after the same refusal checks. Throws the refusal, or why the start failed. A Chief's retry of an idle
+   * thread whose bot is busy elsewhere (at its turn limit, or in a room's turn) waits in that thread's queue instead, and
+   * the queue starts it when the bot frees up. A thread that still runs, shuts down or already waits is refused as before. */
+  async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true;
+    /** The retrying Chief's own coordinate_bots, from its current turn; left out from a room, where it would address the room, not this thread. */
+    coordinateBots?: (call: CoordinateBotsCall) => Promise<{ status: number; body: Record<string, unknown> }> }): Promise<"request" | "turn" | "queued"> {
     const refused = retryRefusal(input.bot.id, input.threadId);
     if (refused) throw new Error(refused);
+    // The Chief's own request failed here: it asks again from its current turn, so the result wakes it as the first would have.
+    const failed = input.automatic || !input.coordinateBots ? undefined : deps.failedRequester?.(input.threadId);
+    if (input.coordinateBots && failed?.botId === input.chief.id) {
+      const note = input.note ? ` Note: ${quoteInNote(input.note, 300)}` : "";
+      // A question stays a question: asked again, the teammate still acts on nothing.
+      const sent = await input.coordinateBots({ botIds: [input.bot.id], thread: input.threadId, reply: "resume", consult: failed.consult, rework: false,
+        message: `Your last run in this thread stopped before it finished my request, so I am asking again.${note} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.` });
+      const receipt = (sent.body.receipts as PeerDeliveryReceipt[] | undefined)?.[0];
+      if (sent.status !== 200 || !receipt || receipt.outcome === "failed") throw new Error(String(receipt?.detail ?? sent.body.error ?? "Not delivered."));
+      return "request";
+    }
     const chief = peerName(input.chief.name);
     const lead = input.automatic
       ? `${AUTO_RETRY_LEAD}, once, before telling ${chief}, your Chief of Staff, that this thread's last run failed.`
       : `${RETRY_LEAD}${chief}, your Chief of Staff, after this thread's last run stopped.${input.note ? ` Note from ${chief}: ${quoteInNote(input.note, 300)}` : ""}`;
-    await deps.startTurn(input.bot.id, `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`,
-      { threadId: input.threadId, unattended: input.unattended, peerAsk: { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) } });
+    const text = `${lead} Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]`;
+    const peerAsk = { botId: input.chief.id, name: input.chief.name, ...(input.unattended ? { unattended: true } : {}) };
+    const atCapacity = !input.automatic && deps.botAtThreadCapacity(input.bot.id);
+    if (atCapacity || (!input.automatic && deps.groupTurnActive(input.bot.id))) {
+      queueSteeredMessage(input.bot.id, input.threadId, text, { reason: atCapacity ? "capacity" : "group-turn", unattended: input.unattended, peerAsk });
+      return "queued";
+    }
+    await deps.startTurn(input.bot.id, text, { threadId: input.threadId, unattended: input.unattended, peerAsk });
+    return "turn";
   }
 
   /** A notice about this thread may go to `chief`: its asks are the Chief's person's, never another person's private chat. */

@@ -37,7 +37,7 @@ import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
 export * from "./vps-config.ts";
 
-const optionalText = z.string().optional();
+const optionalText = z.string().optional(), secretText = z.string().trim().optional(); // secretText: a saved key without a paste's surrounding whitespace (a trailing newline), so it can go in a header.
 const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
@@ -226,7 +226,7 @@ const featureConfigSchema = z.object({
   /** Room jobs to several members run side by side, each in a thread of its own. On unless false. */
   parallelRoomJobs: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
-}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional(), skillBurger: z.boolean().optional(), threadTabs: z.boolean().optional(), teamBoard: z.boolean().optional(), suggestedReplies: z.boolean().optional() }); // suggestedReplies: a faded next-line suggestion in an empty composer after a bot replies, written by the bot's own engine's smallest model, on unless false; skillBurger: Skill Burgers in chat, the side menu and the bot panel, and the tools that run them, on unless false; threadTabs: a bot's threads as tabs above its chat, off unless true; teamBoard: the Team Board on a Team Cloud (docs/team-board.md), off unless true; cloudComputerAutoReplace: set a dead or silent cloud computer aside (kept seven days with its files) and give its bot a new one by itself, on unless false (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, on unless false (OMB_PHONE_PUSH=0 or 1 wins)
+}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional(), skillBurger: z.boolean().optional(), threadTabs: z.boolean().optional(), suggestedReplies: z.boolean().optional() }); // suggestedReplies: a faded next-line suggestion in an empty composer after a bot replies, written by the bot's own engine's smallest model, on unless false; skillBurger: Skill Burgers in chat, the side menu and the bot panel, and the tools that run them, on unless false; threadTabs: a bot's threads as tabs above its chat, off unless true; cloudComputerAutoReplace: set a dead or silent cloud computer aside (kept seven days with its files) and give its bot a new one by itself, on unless false (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, on unless false (OMB_PHONE_PUSH=0 or 1 wins)
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),
@@ -301,19 +301,19 @@ const appConfigSchema = z.object({
     publicUrl: z.string().url().optional(),
     phone: z.enum(["ios", "android"]).optional(),
   }).optional(),
-  mistral: z.object({ key: optionalText }).optional(),
-  cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(), postiz: z.object({ key: optionalText, url: optionalText }).optional(),
-  groq: z.object({ key: optionalText, url: optionalText }).optional(),
-  greenference: z.object({ key: optionalText }).optional(), modelgo: z.object({ key: optionalText }).optional(),
-  meta: z.object({ key: optionalText, url: optionalText }).optional(),
-  deepseek: z.object({ key: optionalText }).optional(),
-  xai: z.object({ key: optionalText, url: optionalText }).optional(),
+  mistral: z.object({ key: secretText }).optional(),
+  cerebras: z.object({ key: secretText }).optional(), treg: z.object({ key: secretText }).optional(), postiz: z.object({ key: secretText, url: optionalText }).optional(),
+  groq: z.object({ key: secretText, url: optionalText }).optional(),
+  greenference: z.object({ key: secretText }).optional(), modelgo: z.object({ key: secretText }).optional(),
+  meta: z.object({ key: secretText, url: optionalText }).optional(),
+  deepseek: z.object({ key: secretText }).optional(),
+  xai: z.object({ key: secretText, url: optionalText }).optional(),
   /** Anthropic API key for Claude Code billed per token; `url` is for a proxy or test double. Never a login OAuth token. */
-  anthropic: z.object({ key: optionalText, url: optionalText, everyClaudeBot: z.boolean().optional() }).optional(),
+  anthropic: z.object({ key: secretText, url: optionalText, everyClaudeBot: z.boolean().optional() }).optional(),
   /** OpenAI API key for the `openai` instance only; Codex keeps its own login. */
-  openai: z.object({ key: optionalText }).optional(),
+  openai: z.object({ key: secretText }).optional(),
   /** OpenRouter key, for the `openrouter` instance only. */
-  openrouter: z.object({ key: optionalText }).optional(),
+  openrouter: z.object({ key: secretText }).optional(),
   /** Workspace monthly spend limit; enforced only with the `budgets` entitlement. */
   budgets: z
     .object({
@@ -339,20 +339,20 @@ const appConfigSchema = z.object({
     .optional(),
   /** `model` seeds the default selection; `provider` pins an OpenRouter upstream (e.g. "fireworks"). */
   openaiCompat: z
-    .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
+    .object({ key: secretText, url: optionalText, model: optionalText, provider: optionalText })
     .optional(),
   /** Composio project key; `userId`/`sessionId` reuse one Composio Session. */
-  composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
-  box: z.object({ token: optionalText }).optional(),
+  composio: z.object({ apiKey: secretText, userId: optionalText, sessionId: optionalText }).optional(),
+  box: z.object({ token: secretText }).optional(),
   vps: vpsConfigSchema.optional(),
   vpsServers: vpsServersSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
-  opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
+  opencodeGo: z.object({ apiKey: secretText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
   /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`), "deepseek" (`deepseek.key`; it also hears dictation) or "chatterbox" (local; `baseUrl`, `model`). */
   tts: z.object({
-    key: optionalText,
-    fishKey: optionalText,
-    geminiKey: optionalText,
+    key: secretText,
+    fishKey: secretText,
+    geminiKey: secretText,
     voice: optionalText,
     provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "deepseek"]).optional(),
     baseUrl: z
@@ -404,7 +404,7 @@ const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
   browserProfiles: storedBrowserProfilesSchema.optional(),
   /** Loose like mcpServers: a bad provider key is dropped later, never the whole file. */
   opencodeGo: z.object({
-    apiKey: optionalText,
+    apiKey: secretText,
     providerKeys: z.record(z.string(), z.unknown()).catch({})
       .transform((keys) => Object.fromEntries(Object.entries(keys).filter((entry): entry is [string, string] => typeof entry[1] === "string")))
       .optional(),
@@ -467,7 +467,7 @@ export interface AppConfig extends HelperConfig {
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   vpsIdle?: z.infer<typeof vpsIdleConfigSchema>; localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean; skillBurger?: boolean; threadTabs?: boolean; teamBoard?: boolean; suggestedReplies?: boolean };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean; phonePush?: boolean; skillBurger?: boolean; threadTabs?: boolean; suggestedReplies?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
   browserEngine?: BrowserEngineConfig;
@@ -814,7 +814,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
   }
 }
 
-import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV } from "./credential-env.ts";
+import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV, onWorkspaceServer } from "./credential-env.ts";
 export { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV };
 
 export const OPENCODE_PROVIDER_KEY_LIMIT = 20;
@@ -1181,10 +1181,10 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
       if (cfg.openaiCompat.provider) defaults.provider = cfg.openaiCompat.provider;
       if (Object.keys(defaults).length) {
         const raw = entry.config;
-        const current =
-          typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+        const current = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
         const merged = { ...current };
-        for (const [k, v] of Object.entries(defaults)) {
+        const workspaceServer = onWorkspaceServer(current.url, cfg.openaiCompat.url || process.env.OPENAI_COMPAT_URL);
+        for (const [k, v] of Object.entries(defaults).filter(([key]) => key === "url" || workspaceServer)) {
           // An empty provider means "no upstream pin"; never fill it from the workspace.
           if (k === "provider" && typeof merged[k] === "string") continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;

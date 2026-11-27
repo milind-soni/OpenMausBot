@@ -1,6 +1,7 @@
 // Chat apps: HTML in a sandboxed frame inside a chat row, speaking the MCP Apps bridge
 // (io.modelcontextprotocol/ui, SEP-1865). Bot HTML (show_html) and an MCP server's UI
 // (_meta.ui.resourceUri) share the one wire kind, `app`.
+import { CONNECTOR_TOOL_NAME_PATTERN } from "./wire.ts";
 
 export const APP_MIME = "text/html;profile=mcp-app";
 export const APP_PROTOCOL_VERSION = "2026-01-26";
@@ -40,12 +41,28 @@ export const APP_LIMITS = {
   pageStateValueBytes: 64 * 1024,
   pageStateBytes: 256 * 1024,
   pageStateKeys: 200,
+  /** show_html `uses` connector tools: connected apps and MCP servers one page names, and tools in all. */
+  pageConnectors: 8,
+  pageConnectorTools: 24,
+  /** mausbot.connectors.call: arguments' JSON bytes, the answer's JSON bytes before it is cut, its wall clock, a tool's
+   * own error text, and calls per page and per bot and connector each minute. */
+  pageConnectorArgsBytes: 64 * 1024,
+  pageConnectorResultBytes: 512 * 1024,
+  pageConnectorMs: 60_000,
+  pageConnectorErrorChars: 1_000,
+  pageConnectorCallsPerMinute: 30,
+  connectorCallsPerMinute: 60,
 } as const;
 
 /** What a bot's page may ask the host for beyond the bridge's basics, declared with show_html `uses`: `data`, read-only
  * SQL on its bot's database; `state`, a small store of its own that its later versions keep. */
 export const APP_USES = ["data", "state"] as const;
 export type AppUse = (typeof APP_USES)[number];
+
+/** Connector tools a bot's page declared it calls (show_html `uses`), each tool by its exact name: a connected app's by its
+ * toolkit (`connector`, as "gmail:GMAIL_FETCH_EMAILS" in `uses`), or an MCP server's by the server's name (`server`, as
+ * "mcp:notes:search"). Calls run with the viewing person's own connection and the bot's own grants. */
+export type AppConnectorUse = { connector: string; tools: string[] } | { server: string; tools: string[] };
 
 /** Versions of one bot page kept for stepping back, the current one included. */
 export const APP_PAGE_VERSIONS = 10;
@@ -157,6 +174,8 @@ export interface AppCan {
   /** A bot's page that declared `data` or `state` (show_html `uses`), outside a room. */
   data?: boolean;
   state?: boolean;
+  /** The connector tools the page declared, outside a room; whether each can run is decided when it is called. */
+  connectors?: AppConnectorUse[];
 }
 
 export interface AppToolDefinition {
@@ -216,6 +235,8 @@ export interface ShowHtmlInput {
   /** Reload the page in place whenever a file in its folder changes; only with `path`. */
   live?: boolean;
   uses?: AppUse[];
+  /** Given exactly when `uses` is. */
+  connectors?: AppConnectorUse[];
 }
 
 export interface UpdateHtmlInput {
@@ -230,6 +251,8 @@ export interface UpdateHtmlInput {
   live?: boolean;
   /** Kept as the page's current version declared when omitted. */
   uses?: AppUse[];
+  /** Given exactly when `uses` is. */
+  connectors?: AppConnectorUse[];
 }
 
 export type AppInputResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -319,10 +342,74 @@ function checkLive(value: unknown, path: string | undefined): AppInputResult<boo
   return { ok: true, value };
 }
 
-const USES_HELP = 'uses: a list of "data" and "state", e.g. ["data", "state"].';
+const USES_HELP = 'uses: a list of "data", "state" and connector tools by exact name: "gmail:GMAIL_FETCH_EMAILS" for a connected app, '
+  + '"mcp:<server>:<tool>" for an MCP server; no wildcards. E.g. ["data", "gmail:GMAIL_FETCH_EMAILS"].';
+const TOOLKIT_NAME = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+const SERVER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+const SERVER_TOOL_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 
-/** A list of names; a string holding one name, several separated by commas, or a JSON list is read as that list. */
-function checkUses(value: unknown): AppInputResult<AppUse[] | undefined> {
+type ConnectorEntry = { kind: "connector" | "server"; name: string; tool: string };
+type DeclaredUses = { uses: AppUse[]; connectors: AppConnectorUse[] };
+
+/** A connected app's own tool, by exact name: never Composio's own tools or its connection tools. */
+function connectorToolProblem(toolkit: string, tool: string): string | null {
+  if (!TOOLKIT_NAME.test(toolkit) || toolkit === "composio") return `uses: "${toolkit}" is not a connected app's name.`;
+  if (!CONNECTOR_TOOL_NAME_PATTERN.test(tool) || !tool.startsWith(`${toolkit.toUpperCase()}_`)) {
+    return `uses: "${tool}" is not one of ${toolkit}'s tools; name each tool exactly, e.g. "gmail:GMAIL_FETCH_EMAILS".`;
+  }
+  if (/_(?:MANAGE|WAIT_FOR)_CONNECTIONS$/.test(tool)) return `uses: a page cannot call ${tool}.`;
+  return null;
+}
+
+function connectorEntries(item: unknown): AppInputResult<ConnectorEntry[]> {
+  if (typeof item === "string") {
+    const parts = item.trim().split(":").map((part) => part.trim());
+    if (parts.length === 3 && parts[0]!.toLowerCase() === "mcp") return { ok: true, value: [{ kind: "server", name: parts[1]!.toLowerCase(), tool: parts[2]! }] };
+    if (parts.length === 2) return { ok: true, value: [{ kind: "connector", name: parts[0]!.toLowerCase(), tool: parts[1]!.toUpperCase() }] };
+    return { ok: false, error: USES_HELP };
+  }
+  if (!isRecord(item)) return { ok: false, error: USES_HELP };
+  const server = typeof item.server === "string" ? item.server : undefined;
+  const connector = [item.connector, item.app, item.toolkit].find((value): value is string => typeof value === "string");
+  if ((server === undefined) === (connector === undefined)) return { ok: false, error: USES_HELP };
+  const given = item.tools ?? item.tool;
+  const tools = typeof given === "string" ? given.split(",") : Array.isArray(given) ? given : null;
+  if (!tools?.length || tools.some((tool) => typeof tool !== "string")) return { ok: false, error: USES_HELP };
+  return {
+    ok: true,
+    value: (tools as string[]).map((tool) => server !== undefined
+      ? { kind: "server" as const, name: server.trim().toLowerCase(), tool: tool.trim() }
+      : { kind: "connector" as const, name: connector!.trim().toLowerCase(), tool: tool.trim().toUpperCase() }),
+  };
+}
+
+function groupConnectors(entries: ConnectorEntry[]): AppInputResult<AppConnectorUse[]> {
+  const groups = new Map<string, AppConnectorUse>();
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.tool.includes("*")) return { ok: false, error: "uses: name each tool exactly; wildcards are not allowed." };
+    if (entry.kind === "connector") {
+      const problem = connectorToolProblem(entry.name, entry.tool);
+      if (problem) return { ok: false, error: problem };
+    } else if (!SERVER_NAME.test(entry.name) || !SERVER_TOOL_NAME.test(entry.tool)) {
+      return { ok: false, error: `uses: "mcp:${entry.name}:${entry.tool}" does not name an MCP server and one of its tools.` };
+    }
+    const key = `${entry.kind}\u0000${entry.name}`;
+    const group = groups.get(key) ?? (entry.kind === "connector" ? { connector: entry.name, tools: [] } : { server: entry.name, tools: [] });
+    groups.set(key, group);
+    if (group.tools.includes(entry.tool)) continue;
+    group.tools.push(entry.tool);
+    count += 1;
+  }
+  if (groups.size > APP_LIMITS.pageConnectors || count > APP_LIMITS.pageConnectorTools) {
+    return { ok: false, error: `uses: at most ${APP_LIMITS.pageConnectors} connected apps or servers and ${APP_LIMITS.pageConnectorTools} tools in all.` };
+  }
+  return { ok: true, value: [...groups.values()] };
+}
+
+/** A list of names; a string holding one name, several separated by commas, or a JSON list is read as that list. An entry
+ * may also be an object, {connector, tools} or {server, tools}. */
+function checkUses(value: unknown): AppInputResult<DeclaredUses | undefined> {
   if (value === undefined || value === null) return { ok: true, value: undefined };
   let list: unknown = value;
   if (typeof list === "string") {
@@ -331,12 +418,24 @@ function checkUses(value: unknown): AppInputResult<AppUse[] | undefined> {
   }
   if (!Array.isArray(list)) return { ok: false, error: USES_HELP };
   const uses: AppUse[] = [];
+  const entries: ConnectorEntry[] = [];
   for (const item of list) {
     const name = typeof item === "string" ? item.trim().toLowerCase() : "";
-    if (!(APP_USES as readonly string[]).includes(name)) return { ok: false, error: USES_HELP };
-    if (!uses.includes(name as AppUse)) uses.push(name as AppUse);
+    if ((APP_USES as readonly string[]).includes(name)) {
+      if (!uses.includes(name as AppUse)) uses.push(name as AppUse);
+      continue;
+    }
+    const found = connectorEntries(item);
+    if (!found.ok) return found;
+    entries.push(...found.value);
   }
-  return { ok: true, value: uses };
+  const connectors = groupConnectors(entries);
+  return connectors.ok ? { ok: true, value: { uses, connectors: connectors.value } } : connectors;
+}
+
+/** `uses` as one list of strings, the form checkUses reads back. */
+export function appUsesList(uses: readonly AppUse[], connectors: readonly AppConnectorUse[] = []): string[] {
+  return [...uses, ...connectors.flatMap((group) => group.tools.map((tool) => ("server" in group ? `mcp:${group.server}:${tool}` : `${group.connector}:${tool}`)))];
 }
 
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
@@ -354,7 +453,10 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
   if (live.value) out.live = true;
   const uses = checkUses(input.uses);
   if (!uses.ok) return uses;
-  if (uses.value?.length) out.uses = uses.value;
+  if (uses.value?.uses.length || uses.value?.connectors.length) {
+    out.uses = uses.value.uses;
+    out.connectors = uses.value.connectors;
+  }
   if (input.height !== undefined && input.height !== null) {
     if (typeof input.height !== "number" || !Number.isFinite(input.height)) return { ok: false, error: "height: must be a number of pixels, 80 to 720." };
     out.height = Math.round(Math.min(APP_LIMITS.heightMax, Math.max(APP_LIMITS.heightMin, input.height)));
@@ -384,7 +486,10 @@ export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlI
   if (live.value !== undefined) out.live = live.value;
   const uses = checkUses(input.uses);
   if (!uses.ok) return uses;
-  if (uses.value !== undefined) out.uses = uses.value;
+  if (uses.value !== undefined) {
+    out.uses = uses.value.uses;
+    out.connectors = uses.value.connectors;
+  }
   if (input.title !== undefined && input.title !== null) {
     const title = checkTitle(input.title);
     if (!title.ok) return title;
