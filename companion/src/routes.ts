@@ -107,6 +107,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
   { method: "POST", path: /^\/api\/sidebar-sections$/ },
+  // Display order only; the harness accepts just the departments the device can see.
+  { method: "PUT", path: /^\/api\/sidebar-sections\/order$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/cards\/[\w-]+$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/respond$/ },

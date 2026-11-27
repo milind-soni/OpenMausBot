@@ -63,7 +63,7 @@ import { stepKey, type BotDropPlace } from "@/lib/sidebar-bot-drop";
 import { BotDropLine, botRowDropClass, useSidebarBotDrag, type BotRowDrag } from "./SidebarBotDrag";
 import { useSidebarRoomDrag } from "./SidebarRoomDrag";
 import { useSidebarSections } from "./SidebarSections";
-import { departmentNames, moveBotsToSection } from "./bot-sections";
+import { departmentNames, moveBotsToSection, useDepartmentOrder } from "./bot-sections";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { SidebarFooter } from "./SidebarFooter";
@@ -1073,7 +1073,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     : undefined;
 
   const q = query.trim().toLowerCase();
-  const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef });
+  const sections = useSidebarSections({ simple, rail, density, query: q, label: sectionLabel, sidebarRef, departments: useDepartmentOrder(state.sections, dispatch) });
   const botDrag = useSidebarBotDrag({ dispatch, announce: sections.announce, onNamed: sections.focusHeader, onRenamed: sections.renamed,
     onError: (text) => setTeamFeedback({ error: true, text }), onCancelled: () => sidebarRef.current?.focus() }), roomDrag = useSidebarRoomDrag({ dispatch, announce: sections.announce, enabled: (sections.interactive || density === "icons") && !phone && !q, groups: state.groups });
 
