@@ -5,6 +5,7 @@ import type { SendTurnInput } from "../contracts.ts";
 import { appMountFor, customServerGate, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
 import { remoteMcpSpec } from "../mcp-http.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { agentsStartupMs } from "./chat-mcp-tools.ts";
 
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
@@ -23,7 +24,8 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
       ...(local.scope ? { scope: local.scope } : {}),
     };
   }
-  if (turn.integrations?.agents) servers.agents = { ...turn.integrations.agents };
+  // A turn can't run without the agents server: give it the start time every other engine gives it.
+  if (turn.integrations?.agents) servers.agents = { ...turn.integrations.agents, startupMs: agentsStartupMs() };
   if (turn.integrations?.phone) servers.phone = { ...turn.integrations.phone };
   if (turn.integrations?.dweb) {
     servers.dweb = {
@@ -42,8 +44,8 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, nodeEnv: NODE_ENV_FLAG, directory, ...customServerGate(name, name in (turn.integrations?.custom ?? {}), turn.integrations?.customResultBudgets), apps: appMountFor(name, turn) });
     const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
     if (!stdio) throw new Error("Pi MCP server configuration is invalid");
-    const original = server as { scope?: string };
-    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(directory ? { directory: true } : {}) };
+    const original = server as { scope?: string; startupMs?: number };
+    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(original.startupMs ? { startupMs: original.startupMs } : {}), ...(directory ? { directory: true } : {}) };
   }
   return Object.keys(servers).length ? servers : null;
 }
