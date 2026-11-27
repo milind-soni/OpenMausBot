@@ -89,13 +89,31 @@ describe("included X research access on the desktop", () => {
     expect(waits.map((timer) => timer.ms), "then after two minutes").toEqual([120_000]);
     await pass(120_000);
     expect(fetchAccess).toHaveBeenCalledTimes(3);
-    expect(waits.map((timer) => timer.ms), "the Admin's own Retry-After, longer than the next step, is kept").toEqual([900_000]);
-    await pass(899_000); await x.onState(paid());
+    expect(waits.map((timer) => timer.ms), "the Admin's own Retry-After, longer than the next step, is kept (spread only later)").toEqual([990_000]);
+    await pass(989_000); await x.onState(paid());
     expect(fetchAccess).toHaveBeenCalledTimes(3);
     await pass(1_000);
     expect(fetchAccess).toHaveBeenCalledTimes(4);
     expect(sent).toEqual([access]);
     expect(waits).toEqual([]);
+  });
+
+  it("never waits more than 5 minutes between asks, and asks at once when the window comes to the front or the sign-in is verified again", async () => {
+    const fetchAccess = vi.fn(async () => { throw new Error("offline"); });
+    const { x, waits, pass } = sync(fetchAccess);
+    await x.onState(paid());
+    for (const ms of [60_000, 120_000, 300_000]) { expect(waits.map((timer) => timer.ms)).toEqual([ms]); await pass(ms); }
+    expect(waits.map((timer) => timer.ms)).toEqual([300_000]);
+    expect(fetchAccess).toHaveBeenCalledTimes(4);
+    x.retryNow(); await pass(0);
+    expect(fetchAccess, "the window came to the front").toHaveBeenCalledTimes(5);
+    expect(waits.map((timer) => timer.ms), "and the count starts again").toEqual([60_000]);
+    x.retryNow(); await pass(0);
+    expect(fetchAccess).toHaveBeenCalledTimes(6);
+    await x.onState({ ...paid(), checking: true }); await x.onState(paid());
+    expect(fetchAccess, "verified again after failed reads").toHaveBeenCalledTimes(7);
+    await x.onState(paid());
+    expect(fetchAccess, "an ordinary refresh asks nothing").toHaveBeenCalledTimes(7);
   });
 
   it("a sign-in unverified for a while gets its token back once verified again, without asking the Admin for a new one", async () => {

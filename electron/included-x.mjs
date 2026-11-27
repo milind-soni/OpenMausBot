@@ -13,8 +13,10 @@
 // the sign-in's answer is only unverified for a while (the Admin unreachable),
 // the server holds nothing, and the same sign-in verified again gets the same
 // token back without asking. An ask that fails is asked again later, longer
-// each time (cloud-cadence.mjs), never on each state the sign-in publishes.
-import { createBackoff } from "./cloud-cadence.mjs";
+// each time up to 5 minutes (cloud-cadence.mjs), never on each state the
+// sign-in publishes; at once when the window comes to the front (`retryNow`) or
+// the sign-in is verified again after its reads failed.
+import { createBackoff, TOKEN_RETRY_MS } from "./cloud-cadence.mjs";
 
 const paidDevice = (state) =>
   state?.status === "connected" && state.entitlement?.plan === "pro" && state.entitlement.status === "active" && typeof state.deviceId === "string"
@@ -44,8 +46,8 @@ export function createIncludedXSync({ fetchAccess, send, device = paidDevice, no
   /** The token held when the same sign-in's answer stopped being verified for a while (state "unavailable"). */
   let parked = null;
   /** Failed asks in a row for the plan key `failingKey`: none again before `failing.until()`, when `retry` asks. */
-  const failing = createBackoff({ now, random });
-  let failingKey = null, retry = null;
+  const failing = createBackoff({ steps: TOKEN_RETRY_MS, now, random });
+  let failingKey = null, retry = null, healthy = true;
   const askLater = (ms) => {
     if (retry) timers.clear(retry);
     retry = timers.set(() => { retry = null; if (latest) void onState(latest); }, Math.max(1, ms));
@@ -53,6 +55,10 @@ export function createIncludedXSync({ fetchAccess, send, device = paidDevice, no
   const unverified = (state, entry) => Boolean(entry) && state?.status === "unavailable" && state.deviceId === entry.deviceId;
   const onState = async (state) => {
     latest = state;
+    // The sign-in verified again after its reads failed (the Admin is back): a failed ask goes again now.
+    const verified = state?.status === "connected" && !state.checking;
+    if (verified && !healthy) failing.ok();
+    healthy = verified;
     const deviceId = device(state);
     if (!deviceId) {
       if (unverified(state, held)) parked = held;
@@ -93,6 +99,13 @@ export function createIncludedXSync({ fetchAccess, send, device = paidDevice, no
   return {
     /** Every Cloud account state the desktop publishes. */
     onState,
+    /** The window came to the front: an ask that failed goes again now, not at the end of its wait. */
+    retryNow() {
+      if (!failing.waiting()) return;
+      failing.ok();
+      if (retry) { timers.clear(retry); retry = null; }
+      if (latest) void onState(latest);
+    },
     /** The local server (re)started and holds nothing yet. */
     serverStarted() {
       if (held) send(held.access);

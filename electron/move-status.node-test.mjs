@@ -382,9 +382,9 @@ test("a send that fails waits longer each time, whatever changes meanwhile, and 
   await h.pass(18 * 60_000);
   assert.equal(h.sent.length, 7, "the next half hour's try is refused for an hour");
   await h.pass(57 * 60_000);
-  assert.equal(h.sent.length, 7, "an hour, as the Admin asked, rather than the next half hour");
+  assert.equal(h.sent.length, 7, "an hour, as the Admin asked (spread only later), rather than the next half hour");
   h.answer = async () => true;
-  await h.pass(4 * 60_000);
+  await h.pass(10 * 60_000);
   assert.equal(h.sent.length, 8);
   h.body = { ...h.body, passes: 3 };
   h.r.changed();

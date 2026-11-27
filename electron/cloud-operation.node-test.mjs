@@ -110,7 +110,7 @@ test("another Cloud of the person's own being moved: its screen names it", async
   assert.deepEqual(w.home.view(), { screen: "working", operation: move, name: "Client A" });
 });
 
-test("the Cloud's own page asks what has it down: the Admin's word for the place on screen only, read again when it is old, never while the Admin is failing", async () => {
+test("the Cloud's own page asks what has it down: the Admin's word for the place on screen only, read again when it is old, while the Admin fails at most each minute", async () => {
   const w = world({ state: { ...connected({ operation: UPDATE }), verifiedAt: 1_000_000 } });
   await w.home.refresh();
   assert.deepEqual(await w.home.operation(), UPDATE);
@@ -123,15 +123,21 @@ test("the Cloud's own page asks what has it down: the Admin's word for the place
   stale.refreshed = { ...connected({ operation: UPDATE }), verifiedAt: stale.clock };
   assert.deepEqual(await stale.home.operation(), UPDATE);
   assert.equal(stale.refreshes, 1);
-  // The Admin itself failing: the account's own retry wait is kept, however often the page asks.
+  // The Admin itself failing: within a minute of the account's last try, its retry wait is kept, however often the page asks.
   const failing = world({ state: { ...connected(), verifiedAt: 1 } });
   await failing.home.refresh();
-  failing.failingUntil = failing.clock + 30_000;
+  failing.failingUntil = failing.clock + 300_000; failing.lastAttemptAt = failing.clock;
   for (let i = 0; i < 3; i++) assert.equal(await failing.home.operation(), null);
   assert.equal(failing.refreshes, 0);
-  failing.clock += 30_000;
+  failing.clock += 60_000;
   await failing.home.operation();
-  assert.equal(failing.refreshes, 1, "read again once its wait is over");
+  assert.equal(failing.refreshes, 1, "a minute after the last try: read again, inside a 5-minute wait");
+  failing.lastAttemptAt = failing.clock; failing.clock += 30_000;
+  await failing.home.operation();
+  assert.equal(failing.refreshes, 1);
+  failing.failingUntil = 0;
+  await failing.home.operation();
+  assert.equal(failing.refreshes, 2, "read again once its wait is over");
   const signedOut = world({ state: { status: "signed-out" } });
   assert.equal(await signedOut.home.operation(), null);
 });

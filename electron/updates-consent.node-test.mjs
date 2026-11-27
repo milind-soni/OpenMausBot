@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 import { createCloudAccountClient } from "./cloud-account.mjs";
 import { createDesktopPrefs, registerDesktopPrefs } from "./desktop-prefs.mjs";
-import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent, UPDATES_CONSENT_VERSION } from "./updates-consent.mjs";
+import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent, UPDATES_CONSENT_RECHECK_MS, UPDATES_CONSENT_VERSION } from "./updates-consent.mjs";
 
 // The real Cloud client and desktop prefs against a fake Admin on loopback: what this computer keeps, and what reaches
 // the Admin's consent endpoints (account: GET/POST /api/cloud/desktop/updates-consent; no account: POST /api/updates-consent).
@@ -157,6 +157,20 @@ test("the account's answer is read once per sign-in: later looks are answered he
   await until(() => f.requests.length === 4);
   assert.equal((await f.consent.state()).due, true);
   assert.equal(f.requests.length, 4);
+});
+
+test("an answer changed on the website shows on a look once the last read is 10 minutes old, without a restart", async t => {
+  const f = await world(t);
+  await f.signInNow();
+  f.account = { status: "opted_in", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
+  assert.equal((await f.consent.state()).status, "opted_in");
+  f.account = { status: "withdrawn", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
+  f.now += UPDATES_CONSENT_RECHECK_MS - 1_000;
+  assert.equal((await f.consent.state()).status, "opted_in", "under 10 minutes: answered from here");
+  f.now += 1_000;
+  assert.equal((await f.consent.state()).status, "withdrawn");
+  assert.deepEqual(f.requests.map(({ method }) => method), ["GET", "GET"]);
+  assert.equal(UPDATES_CONSENT_RECHECK_MS, 10 * 60_000);
 });
 
 test("an answer given while signed out is carried over to an account that has none, with no second question", async t => {

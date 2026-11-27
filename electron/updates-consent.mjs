@@ -11,6 +11,9 @@ const RECEIPT = /^[A-Za-z0-9_-]{43}$/;
 // oxlint-disable-next-line no-control-regex
 const text = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
 const STATE_WAIT_MS = 8_000;
+/** A look asks the Admin again once the last read that put this computer in step with it is this old: an answer changed on the
+ * website shows without a restart, and pages asking often never each ask. */
+export const UPDATES_CONSENT_RECHECK_MS = 10 * 60_000;
 
 /**
  * The record kept on this computer. `account`: the MausBot Cloud account the answer belongs to (given while signed in,
@@ -62,13 +65,14 @@ export function parseAccountConsent(result) {
  * `account()`: the Cloud account client (cloud-account.mjs), or null where there is none. `available()`: this app may
  * ask at all (the installed app, not a branded build). A failure to reach the Admin never loses an answer: it stays
  * `pending` and is sent again on the next launch, sign-in or look at Settings, after a wait that grows with each failure.
- * Once this computer's answer is in step with the Admin's for the account signed in, the Admin is not asked again this
- * run until another account signs in or an answer waits to be sent: a page asking for the state is answered from here.
+ * Once this computer's answer is in step with the Admin's for the account signed in, a page asking for the state is
+ * answered from here; the Admin is asked again when another account signs in, an answer waits to be sent, or that read is
+ * UPDATES_CONSENT_RECHECK_MS old.
  */
 export function createUpdatesConsent({ prefs, account, available, now = Date.now, onChange = () => {}, random = Math.random }) {
   let running = null, choices = 0;
   /** The account (null: signed out) whose answer is in step with the Admin's this run; undefined before the first. */
-  let settled, failedFor;
+  let settled, settledAt = -Infinity, failedFor;
   /** Failures in a row for the account `failedFor`: another account signing in asks at once. */
   const failing = createBackoff({ now, random });
   const client = () => account();
@@ -170,7 +174,7 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
       const sameAnswer = () => choices === answer;
       const fresh = () => sameAnswer() && (signedIn()?.id ?? null) === who;
       try { await reconcile(sameAnswer, fresh); } catch (error) { if (fresh()) { if (failedFor !== who) failing.ok(); failedFor = who; failing.failed(error); throw error; } }
-      if (fresh()) { settled = who; failing.ok(); return; }
+      if (fresh()) { settled = who; settledAt = now(); failing.ok(); return; }
     }
   }
 
@@ -180,7 +184,7 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     const local = prefs.updatesConsent(), who = signedIn()?.id ?? null;
     // An answer this sign-in (or no sign-in) can send now; another account's waits for that account.
     const waiting = Boolean((local?.pending && (local.account ?? null) === who) || local?.replacedReceipts?.length || (who && local?.pendingAccounts?.some(choice => choice.account === who)));
-    return (waiting || settled !== who) && !(failedFor === who && failing.waiting());
+    return (waiting || settled !== who || now() - settledAt >= UPDATES_CONSENT_RECHECK_MS) && !(failedFor === who && failing.waiting());
   };
 
   const snapshot = () => {

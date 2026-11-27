@@ -124,12 +124,18 @@ test("the same app with its window in front reads the session every minute, as b
   assert.deepEqual(counts, { "GET session": 60, "POST move-status": 0, "POST services/pages": 0, "POST services/x": 0, "GET updates-consent": 0 });
 });
 
-test("an Admin failing everything but the session: each other ask waits longer each time, 2 an hour, instead of going with every session read (was 60 an hour each)", async () => {
+test("an Admin failing everything but the session: the move's report backs off to 2 an hour, the tokens to every 5 minutes, instead of going with every session read (was 60 an hour each)", async () => {
   for (const [name, answer] of Object.entries(failing)) {
     const counts = await hour({ paid: true, admin: (key) => (key === "GET session" ? undefined : answer()) });
-    // After the launch's try and the first ten minutes' (1, 2 and 5 minutes on), the hour holds the 10-minute one and the first 30-minute one.
-    assert.deepEqual(counts, { "GET session": 12, "POST move-status": 2, "POST services/pages": 2, "POST services/x": 2, "GET updates-consent": 0 }, name);
+    // The report: after the launch's try and the first ten minutes' (1, 2 and 5 minutes on), the 10-minute one and the first
+    // 30-minute one. The tokens: 1, 2 and 5 minutes on, then every 5 minutes. (A Retry-After of 60 s changes neither.)
+    assert.deepEqual(counts, { "GET session": 12, "POST move-status": 2, "POST services/pages": 12, "POST services/x": 12, "GET updates-consent": 0 }, name);
   }
+});
+
+test("someone looking (window in front or visible) with a failing Admin: the session is tried within the minute, as before", async () => {
+  const counts = await hour({ paid: true, attended: () => true, admin: (key) => (key === "GET session" ? json({ error: "unavailable" }, 503) : undefined) });
+  assert.equal(counts["GET session"], 60, "15 s, 30 s, then every minute: as many as before, never fewer");
 });
 
 test("an Admin failing everything: the session is tried after 15 s, 30 s, 1, 2, 4 minutes and then every 5 (was every minute), and the move's report twice an hour (was 60)", async () => {
@@ -139,14 +145,14 @@ test("an Admin failing everything: the session is tried after 15 s, 30 s, 1, 2, 
   }
 });
 
-test("pages asking for the updates answer are answered from this run once the account's answer is in step (each look asked the Admin before)", async () => {
+test("pages asking for the updates answer are answered from this run, read again only once the last read is 10 minutes old (each look asked the Admin before)", async () => {
   const counts = await hour({ paid: false }, async (a) => {
     for (let look = 0; look < 10; look++) { await a.updates.state(); await a.pass(5 * 60_000); }
   });
-  assert.equal(counts["GET updates-consent"], 0);
+  assert.equal(counts["GET updates-consent"], 5, "10 looks 5 minutes apart: every other one reads (was 10)");
 });
 
-test("the Admin unreachable for 20 minutes, then back: the same sign-in gets its tokens back without new ones, and its updates answer is not read again", async () => {
+test("the Admin unreachable for 20 minutes, then back: the same sign-in gets its tokens back without new ones, and its updates answer is read once", async () => {
   let down = false;
   const counts = await hour({ paid: true, admin: () => (down ? json({ error: "unavailable" }, 503) : undefined) }, async (a) => {
     down = true;
@@ -159,7 +165,7 @@ test("the Admin unreachable for 20 minutes, then back: the same sign-in gets its
   // Was: 1 new pages token, 1 new research relay token and 1 updates read on the way back, and a move report each minute meanwhile (19).
   assert.equal(counts["POST services/pages"], 0);
   assert.equal(counts["POST services/x"], 0);
-  assert.equal(counts["GET updates-consent"], 0);
+  assert.equal(counts["GET updates-consent"], 1, "the sign-in verified again, and its last read over 10 minutes old");
   assert.equal(counts["POST move-status"], 3, "the report says it is unverified, and verified again, as each changes");
 });
 
@@ -183,20 +189,58 @@ test("coming to the front reads the session at once when its answer is a minute 
 });
 
 // The session's own waits, against the loopback fixture (fixtures/cloud-account.mjs).
-test("a failing check never asks before the Admin's Retry-After", async t => {
-  const f = await fixture(t); await f.connect();
-  f.sessionError = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "600" } };
+test("a failing check never asks before the Admin's Retry-After, held to five minutes and spread only later, with a last try before the answer stops counting", async t => {
+  let draw = 0.5;
+  const f = await fixture(t, { random: () => draw }); await f.connect();
+  f.sessionError = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "60" } };
+  for (const [drawn, delay] of [[0, 60_000], [0.5, 66_000], [1, 72_000]]) { draw = drawn; await f.client.refresh(); assert.equal(f.delay, delay, "the Admin's own wait, not 15 s, spread up to a fifth later"); }
+  f.sessionError.headers["retry-after"] = "3600"; draw = 0;
   await f.client.refresh();
-  assert.equal(f.delay, 600_000, "the Admin's own wait, not 15 s");
+  assert.equal(f.delay, 300_000, "an hour asked for is held to five minutes");
+  f.now = f.client.state().verifiedUntil - 140_000;
+  await f.client.refresh();
+  assert.equal(f.delay, 120_000, "and never past 20 s before the verified answer stops counting");
   assert.equal(f.client.state().status, "connected");
 });
 
+test("a failing check while someone looks: 15 s, 30 s, then each minute, as before; while a sleeping Cloud is awaited: every 15 s", async t => {
+  let front = true, waking = false;
+  const f = await fixture(t, { attended: () => front, awaitingWake: () => waking }); await f.connect();
+  f.sessionStatus = 503;
+  const waits = [];
+  for (let i = 0; i < 6; i++) { await f.client.refresh(); waits.push(f.delay); }
+  assert.deepEqual(waits, [15_000, 30_000, 60_000, 60_000, 60_000, 60_000]);
+  waking = true;
+  await f.client.refresh();
+  assert.equal(f.delay, 15_000);
+  waking = false; front = false;
+  await f.client.refresh();
+  assert.equal(f.delay, 300_000, "nobody looking: the eighth failure waits 5 minutes");
+});
+
+test("coming to the front inside a failure's wait reads at once when the last read began a minute ago; under a minute, the next read moves up to a minute after the last", async t => {
+  let front = false;
+  const f = await fixture(t, { attended: () => front }); await f.connect();
+  assert.equal(f.delay, 300_000, "in the back: 5 minutes");
+  f.now += 20_000; front = true;
+  const before = f.requests.length;
+  assert.equal(f.client.freshen(), null, "the answer is 20 s old: not read again now");
+  assert.equal(f.delay, 40_000, "the 5-minute read moves up to a minute after the last");
+  f.sessionStatus = 503; front = false;
+  for (let i = 0; i < 5; i++) await f.client.refresh();
+  assert.equal(f.delay, 240_000, "in the back, failing: 4 minutes");
+  f.now += 61_000; front = true;
+  await f.client.freshen();
+  assert.equal(f.requests.length, before + 6, "a minute after the last try: read now, inside the failure's wait");
+  assert.equal(f.delay, 60_000, "and, in front, every minute from then on");
+});
+
 test("a failing check gets one last try before the verified answer stops counting, so a short outage never shows", async t => {
-  const f = await fixture(t); await f.connect();
+  const f = await fixture(t, { attended: () => false }); await f.connect();
   const counted = f.client.state().verifiedUntil;
   f.sessionStatus = 503;
-  for (let i = 0; i < 7; i++) { f.now += f.delay; await f.client.refresh(); }
-  assert.equal(f.now + f.delay, counted - 20_000, "after 1, 15 s, 30 s, 1, 2, 4 and 5 minutes, the next try is 20 s before the answer stops counting, not 5 minutes on");
+  for (let i = 0; i < 6; i++) { f.now += f.delay; await f.client.refresh(); }
+  assert.equal(f.now + f.delay, counted - 20_000, "after 5 minutes, then 15 s, 30 s, 1, 2 and 4 minutes, the next try is 20 s before the answer stops counting, not 5 minutes on");
   assert.equal(f.client.state().status, "connected");
   f.now += f.delay; f.sessionStatus = 200; await f.client.refresh();
   assert.equal(f.client.state().status, "connected");

@@ -294,8 +294,12 @@ export interface CloudAccountClient {
   refresh(): Promise<CloudAccountState>;
   /** While the Admin's session read keeps failing, when this client tries it again by itself (epoch ms); 0 otherwise. */
   failingUntil?(): number;
-  /** The window came to the front: the session is read now if its last answer is a minute old (never inside a failure's wait), at once while a checkout is watched. */
-  freshen(): void;
+  /** The window came to the front, the computer woke, or the person pressed Try again: the session is read now (that read) when
+   * the last read began a minute ago or more, a failure's wait or not, and at once while a checkout is watched; otherwise null,
+   * and the next read comes a minute after the last at the latest. */
+  freshen(): Promise<CloudAccountState> | null;
+  /** When the last session read began (epoch ms); 0 before the first. */
+  lastAttemptAt?(): number;
   signOut(): Promise<CloudAccountState>;
   openDashboard(): Promise<CloudAccountState>;
   offer(): Promise<import("./cloud-home.mjs").CloudOffer | null>;
@@ -408,7 +412,7 @@ export declare function createCloudAccountClient(options: {
   readWaitMs?: number;
   /** Spreads each wait between session reads (Math.random). */
   random?: () => number;
-  /** Someone is looking (main's window in front) or a move is under way: the session is read every minute instead of every five. Default true. */
+  /** Someone is looking (main's window in front or visible) or a move is under way: the session is read every minute instead of every five, and a failed read retried within the minute. Default true. */
   attended?: () => boolean;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;

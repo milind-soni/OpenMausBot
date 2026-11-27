@@ -1,6 +1,7 @@
 export type UpdatesConsentStatus = "opted_in" | "declined" | "withdrawn";
 export declare const UPDATES_CONSENT_VERSION: string;
 export declare const UPDATES_CONSENT_STATUSES: readonly UpdatesConsentStatus[];
+export declare const UPDATES_CONSENT_RECHECK_MS: number;
 export interface UpdatesConsentRecord {
   status: UpdatesConsentStatus; version: string; at: number;
   account?: string; email?: string; receipt?: string; replacedReceipts?: string[]; pending?: true;
