@@ -19,6 +19,7 @@ import { localizedTaskTitle } from "./task-title";
 import { plainPreviewText } from "../../shared/plain-preview";
 import { MAUS_COLOR_NAMES, type MausColor } from "./mascot";
 import { openOtherPlaceBot, usePlacesTogetherPart, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "./places-together";
+import { openPlaceBot } from "./place-chat";
 
 /** How a place is doing, as main last said. Asleep and waking are normal for a Cloud, never an error. */
 export type PlaceHealth = NonNullable<PlacesTogetherState["other"]>["state"];
@@ -137,23 +138,25 @@ export function useOtherPlaceBots(query: string): readonly PlacedBot[] {
 /** The last search's rows, kept while the list and the words stay the same (no hook: the sidebar calls this on every draw). */
 let lastSearch: { all: readonly PlacedBot[]; query: string; found: readonly PlacedBot[] } = { all: NONE, query: "", found: NONE };
 
-const openers = new Map<string, Dispatch<Action>>();
+const openers = new Map<string, { store: Dispatch<Action> | undefined; opener: Dispatch<Action> }>();
 
-/** What a row of the other place does with what its row would send this place's store: choosing it opens its bot where
- * it lives (main switches the window there, as a row of the old group did), once per click or key; renaming, a new
- * conversation, a folder or anything else is not for this place and is dropped. */
-export function otherPlaceDispatch(bot: PlacedBot): Dispatch<Action> {
+/** What a row of the other place does with what its row would send this place's store: choosing it opens its bot, once
+ * per click or key. A My Cloud bot on this computer's page opens right here, in this window (src/lib/place-chat.ts:
+ * `store` is this page's store); anywhere else, or when that can't be done, main switches the window to the place it
+ * lives in, as before. Renaming, a folder or anything else is not for this place and is dropped. */
+export function otherPlaceDispatch(bot: PlacedBot, store?: Dispatch<Action>): Dispatch<Action> {
   const had = openers.get(bot.id);
-  if (had) return had;
-  const { id } = bot.placedFrom;
+  if (had && had.store === store) return had.opener;
+  const { id, place } = bot.placedFrom;
   let opening = false;
   const opener: Dispatch<Action> = (action) => {
     if ((action.type !== "select" && action.type !== "switchTask") || opening) return;
     opening = true;
     queueMicrotask(() => { opening = false; });
-    openOtherPlaceBot(id);
+    if (store && place.kind === "my-cloud") void openPlaceBot(id, store);
+    else openOtherPlaceBot(id);
   };
-  openers.set(bot.id, opener);
+  openers.set(bot.id, { store, opener });
   return opener;
 }
 
