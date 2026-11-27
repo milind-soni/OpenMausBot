@@ -1739,7 +1739,7 @@
   "team.deleteKeepBotsSimple": "봇과 그룹 채팅은 대화와 함께 그대로 남고, 어느 부서에도 속하지 않게 돼요. 부서와 공유 지침은 삭제돼요. 되돌릴 수 없어요.",
   "team.delete": "부서 삭제",
   "team.actions": "{name} 부서 작업",
-  "teamSettings.menu": "이 부서의 모든 봇에 설정…",
+  "teamSettings.menu": "모든 봇 설정…",
   "teamSettings.title": "{name}의 모든 봇에 설정",
   "teamSettings.general": "일반",
   "teamSettings.close": "부서 설정 닫기",

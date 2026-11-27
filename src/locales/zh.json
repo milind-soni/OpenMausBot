@@ -2083,7 +2083,7 @@
   "team.deleteKeepBotsSimple": "其中的机器人和群组聊天会连同对话一起保留，只是不再属于任何部门。部门及其共享指示会被删除，且无法复原。",
   "team.delete": "删除部门",
   "team.actions": "{name} 部门的操作",
-  "teamSettings.menu": "为此部门的所有机器人设置…",
+  "teamSettings.menu": "所有机器人的设置…",
   "teamSettings.title": "为 {name} 中的所有机器人设置",
   "teamSettings.general": "通用",
   "teamSettings.close": "关闭部门设置",

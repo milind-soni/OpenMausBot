@@ -1828,7 +1828,7 @@
   "team.deleteKeepBotsSimple": "ボットとグループチャットは会話を保ったまま残り、どの部署にも属さなくなります。部署と共有の指示は削除されます。取り消せません。",
   "team.delete": "部署を削除",
   "team.actions": "{name}部署の操作",
-  "teamSettings.menu": "この部署のすべてのボットに設定…",
+  "teamSettings.menu": "すべてのボットの設定…",
   "teamSettings.title": "{name}のすべてのボットに設定",
   "teamSettings.general": "一般",
   "teamSettings.close": "部署設定を閉じる",
