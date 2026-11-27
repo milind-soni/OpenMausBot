@@ -10,6 +10,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { browserBundlePaths, browserBundleSpec } from "../server/browser-bundle-release.ts";
+import { STARTER_APPS } from "../server/local-apps/starters.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const { values } = parseArgs({ options: { "browser-bundle": { type: "string" } } });
@@ -137,6 +138,17 @@ if (listening) {
     const response = await fetch(`http://127.0.0.1:${port}/api/search?q=packaged-worker-probe`, { signal: AbortSignal.timeout(10_000) });
     searchReport = { status: response.status, body: await response.json() };
   } catch (error) { searchReport = { error: String(error) }; }
+}
+
+// The starter apps' pages are files beside the bundle: a fresh data folder lists them, each page served.
+let startersReport = null;
+if (listening) {
+  try {
+    const { apps } = await (await fetch(`http://127.0.0.1:${port}/api/local-apps`, { signal: AbortSignal.timeout(5_000) })).json();
+    const samples = apps.filter((app) => app.sample);
+    const pages = await Promise.all(samples.map(async (app) => (await fetch(`http://127.0.0.1:${port}/api/local-apps/${app.id}/app`, { signal: AbortSignal.timeout(5_000) })).ok));
+    startersReport = { ids: samples.map((app) => app.id), served: pages.filter(Boolean).length };
+  } catch (error) { startersReport = { error: String(error) }; }
 }
 
 let browserReport = null;
@@ -463,6 +475,11 @@ if (!process.env.OMB_SMOKE_DIST && versionReport !== repoVersion) {
 
 if (searchReport?.status !== 200 || !Array.isArray(searchReport.body?.hits)) {
   console.error("The packaged read-only search worker did not respond:", searchReport);
+  process.exit(1);
+}
+
+if (!startersReport || startersReport.error || startersReport.ids.join() !== STARTER_APPS.map((app) => app.id).join() || startersReport.served !== STARTER_APPS.length) {
+  console.error("the packaged server did not list and serve its starter apps:", startersReport);
   process.exit(1);
 }
 
