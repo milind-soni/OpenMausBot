@@ -801,7 +801,7 @@ function ensureCloudAccount() {
   cloudAccount = createCloudAccountClient({
     store: cloudAccountStore(),
     platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(), origin: cloudTarget(process.env).origin,
-    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(), warn: slog,
+    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(), warn: slog, attended: () => { try { return BrowserWindow.getFocusedWindow() !== null || oneHome.holding() !== null; } catch { return true; } },
     onState: state => {
       cloudSync.accountChanged(state.account?.id ?? null); rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
@@ -1952,7 +1952,7 @@ function createWindow({ deferNavigation = false } = {}) {
   });
   mainWindow = win; hiddenStart = false; chromeRail.attach(win);
   win.on("show", () => desktopTray?.windowShown(win));
-  win.on("focus", () => { if (cloudAccount?.checkoutPending()) void cloudAccount.refresh().catch(() => {}); cloudFocusWake.focused({ shown: !desktopRemoteAccess && win.isVisible() && !win.isMinimized(), showingCloud: placeShown() === "cloud" }); }); win.on("blur", () => cloudFocusWake.blurred({ showingCloud: placeShown() === "cloud" }));
+  win.on("focus", () => { cloudAccount?.freshen(); cloudFocusWake.focused({ shown: !desktopRemoteAccess && win.isVisible() && !win.isMinimized(), showingCloud: placeShown() === "cloud" }); }); win.on("blur", () => cloudFocusWake.blurred({ showingCloud: placeShown() === "cloud" }));
   win.on("close", (event) => {
     if (process.platform === "win32" && !desktopShutdownStarted && desktopTray) {
       event.preventDefault();

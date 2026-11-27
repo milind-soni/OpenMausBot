@@ -40,6 +40,8 @@ export declare function createUpdatesConsent(options: {
   available(): boolean | Promise<boolean>;
   now?: () => number;
   onChange?: () => void;
+  /** Spreads the wait after a failed read (Math.random). */
+  random?: () => number;
 }): UpdatesConsent;
 export declare function registerUpdatesConsent(options: {
   ipcMain: { handle(channel: string, handler: (event: unknown, ...args: unknown[]) => unknown): void };

@@ -133,6 +133,32 @@ test("signed in: one tap is recorded on the account, and the account's own answe
   assert.deepEqual(await f.consent.state(), { available: true, due: false, status: "withdrawn", signedIn: true, email: "person@example.test", version: UPDATES_CONSENT_VERSION });
 });
 
+test("the account's answer is read once per sign-in: later looks are answered here, a failed read waits before the next, another account reads at once", async t => {
+  const f = await world(t);
+  await f.signInNow();
+  f.account = { status: "opted_in", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
+  for (let look = 0; look < 3; look++) assert.equal((await f.consent.state()).status, "opted_in");
+  f.consent.accountChanged(f.client.state());
+  assert.deepEqual(f.requests.map(({ method }) => method), ["GET"], "one read for this sign-in, however many pages ask");
+  // A new launch reads it again; with the Admin down, each look within the next minute asks nothing more.
+  f.launch(); f.down = true;
+  await f.consent.state(); await f.consent.state();
+  assert.equal(f.requests.length, 2);
+  f.now += 75_000; f.down = false; // a minute, spread by up to a fifth
+  assert.equal((await f.consent.state()).status, "opted_in");
+  assert.equal(f.requests.length, 3, "asked again once the wait is over");
+  await f.consent.state();
+  assert.equal(f.requests.length, 3);
+  // Another account signs in: its own answer is read at once.
+  await f.client.signOut();
+  f.accountId = "account-2"; f.accessToken = `omc_${"B".repeat(43)}`; f.account = null;
+  await f.signInNow();
+  f.consent.accountChanged(f.client.state());
+  await until(() => f.requests.length === 4);
+  assert.equal((await f.consent.state()).due, true);
+  assert.equal(f.requests.length, 4);
+});
+
 test("an answer given while signed out is carried over to an account that has none, with no second question", async t => {
   const f = await world(t);
   await f.consent.choose({ status: "opted_in" });
@@ -530,7 +556,8 @@ test("an unanswered account withdraws another account's retained email receipt w
       assert.equal(state.due, true);
       assert.equal(state.status, null);
       assert.equal(f.account, null);
-      assert.deepEqual(f.requests.filter(request => request.path === "/api/cloud/desktop/updates-consent").map(request => request.method), ["GET", "GET", "GET"]);
+      // The state is answered from what this run already has in step with the Admin: no third read.
+      assert.deepEqual(f.requests.filter(request => request.path === "/api/cloud/desktop/updates-consent").map(request => request.method), ["GET", "GET"]);
       assert.deepEqual(f.requests.filter(request => request.method === "POST").map(request => request.body), [
         { status: "opted_in", email: "old@example.test", installId: f.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
         { status: "withdrawn", receipt: receiptOf("old@example.test") },
