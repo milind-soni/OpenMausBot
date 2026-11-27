@@ -315,4 +315,13 @@ describe("removing a skill brought in from this computer", () => {
     expect(importedSkillListings(newBot(), new Set())).toEqual([]);
     expect(purgeImportedSkill("pdf")).toHaveProperty("error");
   });
+
+  it("never calls a source gone when the folder it was read from is not on this computer, as after a move to a Cloud", () => {
+    const root = join(HOME, `elsewhere-${randomUUID()}`);
+    store([input("pdf", { root })]);
+    expect(existsSync(root)).toBe(false);
+    expect(importedSkillListings(newBot(), new Set())[0]).toMatchObject({ name: "pdf", sourceGone: false });
+    expect(purgeImportedSkill("pdf")).toHaveProperty("error");
+    expect(readImportedSkills()["pdf"]).toBeDefined();
+  });
 });

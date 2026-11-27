@@ -107,6 +107,12 @@ function writeRemoved(botId: string, removed: readonly string[]): void {
  * source is only asked whether its SKILL.md is a file; it is never read. */
 function sourceFolderGone(entry: ImportedSkillEntry): boolean {
   if (!entry.origin) return true;
+  // A workspace moved to another computer (a Cloud) never had the folder it was read from: that proves nothing gone.
+  try {
+    if (!statSync(entry.root).isDirectory()) return false;
+  } catch {
+    return false;
+  }
   try {
     return !statSync(join(entry.origin, "SKILL.md")).isFile();
   } catch (error) {
