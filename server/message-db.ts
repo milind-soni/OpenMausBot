@@ -10,6 +10,7 @@ import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 import { BOT_TEXT_MESSAGE_INDEXES_SQL } from "./message-db-bot-text-indexes.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
+import { createAttachmentNameIndex, STORED_UPLOAD_NAME } from "./message-db-attachment-names.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts"; import { messageWritten } from "./message-writes.ts";
@@ -153,6 +154,7 @@ function db(): DatabaseSync {
   } catch {}
   statements = new Map();
   handle = open();
+  attachmentNameIndex.reset();
   handlePath = file;
   handleCheckedAt = Date.now();
   return handle;
@@ -420,7 +422,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
-    for (const message of messages) insert.run(...messageRow(threadId, message));
+    for (const message of messages) { const row = messageRow(threadId, message); insert.run(...row); attachmentNameIndex.written(threadId, message.id, row[6]); }
     setActiveLeaf(threadId, activeLeafId);
     db().exec("COMMIT");
   } catch (error) {
@@ -437,7 +439,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 }
 
 export function insertMessage(threadId: string, message: Message): void {
-  const row = messageRow(threadId, message); prepared(UPSERT_MESSAGE).run(...row); messageWritten(row[6]);
+  const row = messageRow(threadId, message); prepared(UPSERT_MESSAGE).run(...row); messageWritten(row[6]); attachmentNameIndex.written(threadId, message.id, row[6]);
 }
 
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
@@ -449,7 +451,7 @@ export function importThread(threadId: string, messages: Message[], activeLeafId
     }
     const insert = relinked && database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     for (const message of messages) {
-      if (insert) { const row = messageRow(threadId, message); insert.run(...row); messageWritten(row[6]); }
+      if (insert) { const row = messageRow(threadId, message); insert.run(...row); messageWritten(row[6]); attachmentNameIndex.written(threadId, message.id, row[6]); }
       else insertMessage(threadId, message);
     }
     const link = database.prepare("UPDATE messages SET json = json_set(json, '$.parentId', ?) WHERE thread_id = ? AND id = ?");
@@ -466,7 +468,7 @@ export function appendMessage(threadId: string, message: Message): void {
 }
 
 export function updateMessage(threadId: string, message: Message): void {
-  const json = JSON.stringify(message); prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, json, cjkSearchText(message.text), threadId, message.id); messageWritten(json);
+  const json = JSON.stringify(message); prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, json, cjkSearchText(message.text), threadId, message.id); messageWritten(json); attachmentNameIndex.written(threadId, message.id, json);
 }
 
 export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {
@@ -663,6 +665,8 @@ export function deleteThreads(threadIds: readonly string[], beforeCommit?: () =>
     for (const id of threadIds) for (const statement of statements) statement.run(id);
     beforeCommit?.();
   });
+  // After the commit: a rolled-back batch's rows stay, and the index must not forget them.
+  attachmentNameIndex.threadsDeleted(threadIds);
 }
 
 /** Option-card rows whose card names one of `tools`, oldest first; the caller judges each card itself. */
@@ -684,8 +688,13 @@ export function liveAppRows(limit = 100): Array<{ threadId: string; messageId: s
   return db().prepare("SELECT thread_id AS threadId, id AS messageId FROM messages WHERE kind = 'app' AND json_extract(json, '$.app.live') = 1 ORDER BY rowid DESC LIMIT ?").all(limit) as Array<{ threadId: string; messageId: string }>;
 }
 
+/** The attachment-name index (message-db-attachment-names.ts), which threadsReferencing answers stored upload names
+ * from; exported so tests can see how often it built. */
+export const attachmentNameIndex = createAttachmentNameIndex({ prepare: (sql) => prepared(sql) });
+
 export function threadsReferencing(fragment: string): string[] {
   if (!fragment) return [];
+  if (STORED_UPLOAD_NAME.test(fragment)) return attachmentNameIndex.threadsFor(fragment);
   const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
   return rows.map((row) => row.thread_id);
 }
