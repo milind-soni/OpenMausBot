@@ -142,6 +142,53 @@ describe("plan usage parsers", () => {
     expect(parsed.models).toEqual([]);
   });
 
+  it("shows a per-model weekly limit that arrives in the limits list", () => {
+    const resetsAt = "2026-12-01T15:00:00.000Z";
+    const parsed = parseClaudeUsage({
+      five_hour: null,
+      seven_day: { utilization: 79, resets_at: resetsAt },
+      limits: [
+        { kind: "weekly_scoped", group: "weekly", percent: 95, resets_at: resetsAt, scope: { model: { display_name: "Fable" } } },
+      ],
+    });
+    expect(parsed.weekly).toMatchObject({ available: true, usedPercent: 79, remainingPercent: 21 });
+    expect(parsed.models).toEqual([
+      { name: "Fable", windows: [expect.objectContaining({ label: "Weekly", usedPercent: 95, remainingPercent: 5, resetsAt })] },
+    ]);
+    expect(parsed.extra).toEqual([]);
+  });
+
+  it("lists a model's weekly limit once when it comes both as a key and in the limits list", () => {
+    const parsed = parseClaudeUsage({
+      seven_day_opus: { utilization: 40, resets_at: "2026-12-01T15:00:00.000Z" },
+      seven_day_fable: { utilization: 94 },
+      limits: [
+        { kind: "weekly_scoped", percent: 41, resets_at: 1_800_000_000, scope: { model: { display_name: "Opus 4.5" } } },
+        { kind: "weekly_scoped", percent: 95, scope: { model: { display_name: "Fable" } } },
+        { kind: "weekly_scoped", percent: 7, scope: { model: { display_name: "Haiku\nsk-ant-abc" } } },
+        { kind: "session", percent: 10, scope: { model: { display_name: "Haiku" } } },
+        { kind: "weekly_scoped", percent: "high", scope: { model: { display_name: "Sonnet" } } },
+        { kind: "weekly_scoped", percent: 5, scope: {} },
+        null,
+      ],
+    });
+    expect(parsed.models).toEqual([
+      { name: "Opus", windows: [expect.objectContaining({ label: "Weekly", usedPercent: 40 })] },
+    ]);
+    expect(parsed.extra).toEqual([expect.objectContaining({ label: "Fable", usedPercent: 94 })]);
+  });
+
+  it("still shows a model's weekly limit from the limits list when only its 5-hour window comes as a key", () => {
+    const parsed = parseClaudeUsage({
+      five_hour_fable: { utilization: 30 },
+      limits: [{ kind: "weekly_scoped", percent: 95, scope: { model: { display_name: "Fable" } } }],
+    });
+    expect(parsed.models).toEqual([
+      { name: "Fable", windows: [expect.objectContaining({ label: "Weekly", usedPercent: 95 })] },
+    ]);
+    expect(parsed.extra).toEqual([expect.objectContaining({ label: "Fable", usedPercent: 30 })]);
+  });
+
   it("classifies Codex windows by duration and does not stuff a 30-day window into weekly", () => {
     const parsed = parseCodexUsage({
       plan_type: "plus",
