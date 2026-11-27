@@ -1236,7 +1236,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       )}
     >
       <GlassScrollFrame className="flex-1" fade><PlaceTint />
-      <GlassBar edge="top">
+      <GlassBar edge="top" className="z-20">
       <div
         data-sidebar-top-row={corner ? "corner" : simpleDesk ? "simple" : true}
         className={cn(
