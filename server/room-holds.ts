@@ -94,8 +94,21 @@ function isBareResume(text: string): boolean {
 /** `ownName`: the bot it was sent to, which may be tagged. A tag of anyone else is a message about them, not a stop. */
 export function isStopCommand(text: string, ownName?: string): boolean {
   const line = maskQuotedAndCode(text).normalize("NFC").toLowerCase();
-  const untagged = ["everyone", ...(ownName ? [ownName.normalize("NFC").toLowerCase()] : [])].reduce((rest, name) => rest.split(`@${name}`).join(" "), line);
-  const words = untagged.match(/[\p{L}\p{M}\p{N}_-]+/gu) ?? [];
+  const names = ["everyone", "all", ...(ownName ? [ownName.normalize("NFC").toLowerCase()] : [])].sort((a, b) => b.length - a.length);
+  const parts: string[] = [];
+  let start = 0;
+  for (let at = line.indexOf("@"); at !== -1; at = line.indexOf("@", start)) {
+    if (!isMentionBoundary(line, at)) return false;
+    const name = names.find((candidate) => {
+      const tail = line.slice(at + 1 + candidate.length);
+      return line.startsWith(candidate, at + 1) && !isMentionNameContinuation(tail) && !/^[.+-][\p{L}\p{M}\p{N}_]/u.test(tail);
+    });
+    if (!name) return false;
+    parts.push(line.slice(start, at));
+    start = at + 1 + name.length;
+  }
+  parts.push(line.slice(start));
+  const words = parts.join(" ").match(/[\p{L}\p{M}\p{N}_-]+/gu) ?? [];
   return words.some((word) => STOP_COMMANDS.has(word)) && words.every((word) => STOP_COMMANDS.has(word) || STOP_FILLERS.has(word));
 }
 
