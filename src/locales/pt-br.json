@@ -21,6 +21,7 @@
   "serverError.emailDraft.notHere": "Esse rascunho não está nesta conversa.",
   "serverError.emailDraft.alreadySent": "Este e-mail já foi enviado.",
   "serverError.emailDraft.busy": "Este rascunho ainda está sendo salvo ou enviado.",
+  "serverError.emailDraft.changed": "Este rascunho mudou antes de ser enviado. Confira e toque em Enviar de novo.",
   "serverError.emailDraft.appsOff": "Os apps conectados estão desligados para este bot.",
   "serverError.emailDraft.ownGmail": "Conecte seu próprio Gmail em Apps para salvar ou enviar este rascunho.",
   "serverError.emailDraft.appsDown": "Não foi possível acessar os Apps agora. Tente de novo em alguns minutos.",

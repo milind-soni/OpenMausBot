@@ -17,6 +17,7 @@
   "serverError.emailDraft.notHere": "Dieser Entwurf ist nicht in diesem Gespräch.",
   "serverError.emailDraft.alreadySent": "Diese E-Mail wurde schon gesendet.",
   "serverError.emailDraft.busy": "Dieser Entwurf wird gerade gespeichert oder gesendet.",
+  "serverError.emailDraft.changed": "Dieser Entwurf hat sich geändert, bevor er gesendet wurde. Prüfe ihn und drücke erneut auf Senden.",
   "serverError.emailDraft.appsOff": "Verbundene Apps sind für diesen Bot aus.",
   "serverError.emailDraft.ownGmail": "Verbinde dein eigenes Gmail unter Apps, um diesen Entwurf zu speichern oder zu senden.",
   "serverError.emailDraft.appsDown": "Apps sind gerade nicht erreichbar. Versuch es in ein paar Minuten noch einmal.",

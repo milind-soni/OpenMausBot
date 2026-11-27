@@ -2,10 +2,10 @@
 // edit and save, send after a confirmation, or open in Gmail. Save and Send run from here through the bot's connected
 // apps, under the same Rules and app permissions as the bot's own calls; no model sees or runs them.
 //   POST /api/email-draft  {threadId, messageId, action: "save", draft}  →  {ok: true}
-//   POST /api/email-draft  {threadId, messageId, action: "send"}         →  {ok: true}
+//   POST /api/email-draft  {threadId, messageId, action: "send", revision}  →  {ok: true}  (draftRevision of what the confirmation showed)
 import { z } from "zod";
 
-import { EMAIL_DRAFT_LIMITS, EMAIL_DRAFT_PATH, type EmailDraftCardData, type EmailDraftEdit } from "../shared/email-draft.ts";
+import { draftRevision, EMAIL_DRAFT_LIMITS, EMAIL_DRAFT_PATH, type EmailDraftCardData, type EmailDraftEdit } from "../shared/email-draft.ts";
 import type { ConnectorCall } from "../shared/outbound.ts";
 import { toolData } from "./connected-reads.ts";
 import { parseMcpResponse } from "./connector-tools-list.ts";
@@ -40,8 +40,10 @@ const httpsUrl = (value: unknown): string | undefined => {
   }
 };
 
-/** The card for the one draft call in `calls` the answer says succeeded, or null (none, several, or it failed). */
-export function draftCardFrom(calls: readonly ConnectorCall[], frame: Row | null, botId: string): EmailDraftCardData | null {
+/** The card for the one draft call in `calls` the answer says succeeded, or null (none, several, or it failed). An update
+ *  leaves in Gmail what it omits, so each omitted field keeps its value from `shown` (the card already showing that draft);
+ *  with no such card an update that omits a field shows none, rather than a draft Gmail doesn't have. */
+export function draftCardFrom(calls: readonly ConnectorCall[], frame: Row | null, botId: string, shown?: (draftId: string) => EmailDraftCardData | undefined): EmailDraftCardData | null {
   const drafts = calls.filter((call) => isDraftTool(call.slug));
   if (drafts.length !== 1) return null;
   const [call] = drafts;
@@ -55,17 +57,25 @@ export function draftCardFrom(calls: readonly ConnectorCall[], frame: Row | null
   const body = record(data?.response_data) ?? data;
   const draftId = text(body?.id) ?? (call.slug === GMAIL_UPDATE_DRAFT ? text(args.draft_id) : undefined);
   if (!draftId) return null;
-  const threadId = text(record(body?.message)?.threadId) ?? text(args.thread_id);
-  const url = httpsUrl(body?.display_url) ?? httpsUrl(record(body?.message)?.display_url);
+  const update = call.slug === GMAIL_UPDATE_DRAFT;
+  const before = update ? shown?.(draftId) : undefined;
+  const given = (...keys: string[]) => !update || keys.some((key) => args[key] !== undefined);
+  const fields = [given("recipient_email", "extra_recipients"), given("cc"), given("bcc"), given("subject"), given("body", "message_body"), given("is_html")];
+  if (!before && fields.includes(false)) return null;
+  const [to, cc, bcc, subject, message, html] = fields;
+  const threadId = text(record(body?.message)?.threadId) ?? text(args.thread_id) ?? before?.threadId;
+  const url = httpsUrl(body?.display_url) ?? httpsUrl(record(body?.message)?.display_url) ?? before?.url;
+  const account = call.account ?? before?.account;
   return {
     app: "gmail", draftId, botId,
-    to: [...list(args.recipient_email), ...list(args.extra_recipients)],
-    cc: list(args.cc), bcc: list(args.bcc),
-    subject: typeof args.subject === "string" ? args.subject : "",
-    body: typeof args.body === "string" ? args.body : typeof args.message_body === "string" ? args.message_body : "",
-    ...(args.is_html === true ? { html: true as const } : {}),
+    to: to ? [...list(args.recipient_email), ...list(args.extra_recipients)] : before!.to,
+    cc: cc ? list(args.cc) : before!.cc,
+    bcc: bcc ? list(args.bcc) : before!.bcc,
+    subject: !subject ? before!.subject : typeof args.subject === "string" ? args.subject : "",
+    body: !message ? before!.body : typeof args.body === "string" ? args.body : typeof args.message_body === "string" ? args.message_body : "",
+    ...((html ? args.is_html === true : before!.html) ? { html: true as const } : {}),
     ...(threadId ? { threadId } : {}),
-    ...(call.account ? { account: call.account } : {}),
+    ...(account ? { account } : {}),
     ...(url ? { url } : {}),
   };
 }
@@ -107,7 +117,7 @@ export function showDraftCard(store: DraftCardStore, threadId: string, card: Ema
 }
 
 /** After the bot's relayed Gmail call succeeds (raw JSON or event-stream bytes): a saved draft shows or updates its card,
- *  a sent one turns its card into what was sent. */
+ *  a sent one turns its card into what was sent. Never throws: the card only shows the call, which already ran. */
 export function showDraftAnswer(store: DraftCardStore, threadId: string, botId: string, calls: readonly ConnectorCall[], bytes: Uint8Array, id: unknown, language?: string): void {
   if (!calls.some((call) => isDraftTool(call.slug) || call.slug === GMAIL_SEND_DRAFT)) return;
   let frame: Row | null;
@@ -116,23 +126,41 @@ export function showDraftAnswer(store: DraftCardStore, threadId: string, botId: 
   } catch {
     return;
   }
-  const card = draftCardFrom(calls, frame, botId);
-  if (card) showDraftCard(store, threadId, card, language);
-  const sent = sentDraftFrom(calls, frame);
-  const shown = sent ? cardOf(store, threadId, sent, botId) : undefined;
-  if (shown?.emailDraft && !shown.emailDraft.sentAt) {
-    const next = { ...shown.emailDraft, sentAt: Date.now() };
-    store.patchMessage(threadId, shown.id, { text: draftCardText(next, language), emailDraft: next });
+  try {
+    const card = draftCardFrom(calls, frame, botId, (draftId) => cardOf(store, threadId, draftId, botId)?.emailDraft);
+    if (card) showDraftCard(store, threadId, card, language);
+    const sent = sentDraftFrom(calls, frame);
+    const shown = sent ? cardOf(store, threadId, sent, botId) : undefined;
+    if (shown?.emailDraft && !shown.emailDraft.sentAt) {
+      const next = { ...shown.emailDraft, sentAt: Date.now() };
+      store.patchMessage(threadId, shown.id, { text: draftCardText(next, language), emailDraft: next });
+    }
+  } catch (error) {
+    console.warn("email draft card: could not show the bot's Gmail draft", error);
   }
 }
 
-/** The relay to the connected-apps service a press runs through, or why it can't run. */
+type Refusal = UserError | { error: string };
+
+/** Thrown by a relay that checks the Rules and the bot's app permissions again right before it sends, and finds a refusal. */
+export class DraftRefused extends Error {
+  readonly refusal: Refusal;
+  constructor(refusal: Refusal) {
+    super(refusal.error);
+    this.refusal = refusal;
+  }
+}
+
+/** The relay to the connected-apps service a press runs through (it throws DraftRefused when a check fails right before
+ *  it sends), or why it can't run. */
 export type DraftConnection =
   | { ok: true; relay(payload: unknown, transportSessionId: string | undefined, signal: AbortSignal): Promise<{ status: number; bytes: Uint8Array; transportSessionId?: string }> }
-  | { ok: false; refusal: UserError | { error: string } };
+  | { ok: false; refusal: Refusal };
 
 export interface EmailDraftRouteDeps {
   sees(auth: RequestAuth, threadId: string): boolean;
+  /** A room's conversation: its draft cards are view-only. */
+  inRoom(threadId: string): boolean;
   /** The person may write to this bot. */
   mayChat(auth: RequestAuth, botId: string): boolean;
   store: DraftCardStore;
@@ -151,7 +179,8 @@ const edit = z.object({
 const where = { threadId: z.string().min(1).max(200), messageId: z.string().min(1).max(200) };
 const press = z.discriminatedUnion("action", [
   z.object({ ...where, action: z.literal("save"), draft: edit }).strict(),
-  z.object({ ...where, action: z.literal("send") }).strict(),
+  // Send names the draft as its confirmation showed it, so a draft changed since then is never sent unseen.
+  z.object({ ...where, action: z.literal("send"), revision: z.string().min(1).max(40) }).strict(),
 ]);
 
 /** The Composio call a press makes: Save with the edited `draft`, else Send. */
@@ -200,9 +229,10 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
     if (!parsed.success) return json(res, 400, { error: "Send threadId, messageId and action." });
     const { threadId, messageId } = parsed.data;
     const card = () => deps.store.messagesFor(threadId).find((message) => message.id === messageId)?.emailDraft;
-    const shown = deps.sees(auth, threadId) ? card() : undefined;
+    const shown = deps.sees(auth, threadId) && !deps.inRoom(threadId) ? card() : undefined;
     if (!shown || !deps.mayChat(auth, shown.botId)) return json(res, 404, userError("serverError.emailDraft.notHere"));
     if (shown.sentAt) return json(res, 409, userError("serverError.emailDraft.alreadySent"));
+    if (parsed.data.action === "send" && draftRevision(shown) !== parsed.data.revision) return json(res, 409, userError("serverError.emailDraft.changed"));
     const key = `${threadId}:${messageId}`;
     if (pressing.has(key)) return json(res, 409, userError("serverError.emailDraft.busy"));
     pressing.add(key);
@@ -215,6 +245,7 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
       try {
         data = await runCall(connection, call);
       } catch (error) {
+        if (error instanceof DraftRefused) return json(res, 403, error.refusal);
         const known = userErrorFields(error);
         const message = error instanceof Error ? error.message : String(error);
         return json(res, 502, known.errorKey ? { error: message, ...known } : userError("serverError.emailDraft.refused", { detail: message.slice(0, 300) }));

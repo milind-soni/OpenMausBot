@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
-import type { EmailDraftCardData } from "../shared/email-draft.ts";
+import { draftRevision, type EmailDraftCardData } from "../shared/email-draft.ts";
 import type { ConnectorCall } from "../shared/outbound.ts";
 import {
-  createEmailDraftRoutes, draftCardFrom, showDraftAnswer, showDraftCard,
+  createEmailDraftRoutes, draftCardFrom, DraftRefused, showDraftAnswer, showDraftCard,
   type DraftCardStore, type DraftConnection, type EmailDraftRouteDeps,
 } from "./email-draft-card.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -60,8 +60,17 @@ describe("draftCardFrom", () => {
   });
 
   it("keeps the draft id of an update that answers without one", () => {
-    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", recipient_email: "ana@example.com", subject: "Launch v2", body: "New" } };
+    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", recipient_email: "ana@example.com", cc: [], bcc: [], subject: "Launch v2", body: "New", is_html: false } };
     expect(draftCardFrom([update], answer("GMAIL_UPDATE_DRAFT", { successful: true, data: {} }), "b")).toMatchObject({ draftId: "r-123", subject: "Launch v2", body: "New" });
+  });
+
+  it("keeps what an update leaves out from the card already showing the draft, and shows none without one", () => {
+    const before = { ...draftCardFrom([createCall], created(), "b")!, html: true as const, body: "<p>Hi</p>" };
+    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { user_id: "me", draft_id: "r-123", subject: "Launch v2" } };
+    const done = answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } });
+    expect(draftCardFrom([update], done, "b", (id) => (id === "r-123" ? before : undefined))).toEqual({ ...before, subject: "Launch v2" });
+    expect(draftCardFrom([update], done, "b")).toBeNull();
+    expect(draftCardFrom([update], done, "b", () => undefined)).toBeNull();
   });
 });
 
@@ -88,6 +97,13 @@ describe("showDraftAnswer", () => {
     expect(store.rows).toHaveLength(1);
     expect(store.rows[0].emailDraft?.sentAt).toEqual(expect.any(Number));
     expect(store.rows[0].text).toBe('Email sent: "Launch" to ana@example.com, ben@example.com.');
+  });
+});
+
+describe("showDraftAnswer when the card can't be written", () => {
+  it("leaves the bot's finished call alone", () => {
+    const store = { ...memoryStore(), appendMessage: () => { throw new Error("disk full"); } };
+    expect(() => showDraftAnswer(store, "t1", "bot-1", [createCall], new TextEncoder().encode(JSON.stringify(created())), 7)).not.toThrow();
   });
 });
 
@@ -139,13 +155,16 @@ function setup(over: Partial<EmailDraftRouteDeps> = {}, connection: DraftConnect
   const row = showDraftCard(store, "t1", card)!;
   const checked: ConnectorCall[][] = [];
   const route = createEmailDraftRoutes({
-    store, sees: () => true, mayChat: () => true,
+    store, sees: () => true, inRoom: () => false, mayChat: () => true,
     connection: async (_auth, _bot, calls) => { checked.push(calls); return connection; }, ...over,
   });
   return { store, row, route, checked };
 }
 
 const edit = { to: ["ana@example.com"], cc: [], bcc: ["boss@example.com"], subject: "Launch (final)", body: "Ready to go." };
+/** The draft as the card shows it, which the confirmation names. */
+const shownDraft = { to: ["ana@example.com", "ben@example.com"], cc: ["cy@example.com"], bcc: [], subject: "Launch", body: "Hi both,\nready." };
+const confirmed = draftRevision(shownDraft);
 
 describe("POST /api/email-draft", () => {
   it("saves an edit to the same draft in the same account, then shows it", async () => {
@@ -166,13 +185,13 @@ describe("POST /api/email-draft", () => {
   it("sends the draft once, and the card then only shows what was sent", async () => {
     const { connection, ran } = relayed(() => ({ successful: true, data: { id: "m-3", labelIds: ["SENT"] } }));
     const { store, row, route } = setup({}, connection);
-    const first = request({ threadId: "t1", messageId: row.id, action: "send" });
+    const first = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
     await route(first.context);
     expect(first.sent.status).toBe(200);
     expect(ran).toEqual([{ slug: "GMAIL_SEND_DRAFT", account: "ca_work", arguments: { user_id: "me", draft_id: "r-123" } }]);
     expect(store.rows[0]!.emailDraft?.sentAt).toEqual(expect.any(Number));
     expect(store.rows[0]!.text).toBe('Email sent: "Launch" to ana@example.com, ben@example.com.');
-    const again = request({ threadId: "t1", messageId: row.id, action: "send" });
+    const again = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
     await route(again.context);
     expect(again.sent.status).toBe(409);
     expect(ran).toHaveLength(1);
@@ -182,10 +201,10 @@ describe("POST /api/email-draft", () => {
     let open!: () => void;
     const { connection, ran, calling } = relayed(() => ({ successful: true, data: {} }), new Promise((resolve) => { open = resolve; }));
     const { row, route } = setup({}, connection);
-    const first = request({ threadId: "t1", messageId: row.id, action: "send" });
+    const first = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
     const running = route(first.context);
     await calling;
-    const second = request({ threadId: "t1", messageId: row.id, action: "send" });
+    const second = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
     await route(second.context);
     expect(second.sent.status).toBe(409);
     open();
@@ -194,19 +213,39 @@ describe("POST /api/email-draft", () => {
     expect(ran).toHaveLength(1);
   });
 
-  it("runs nothing for someone who can't see the conversation or write to the bot", async () => {
-    for (const over of [{ sees: () => false }, { mayChat: () => false }]) {
+  it("runs nothing for someone who can't see the conversation or write to the bot, or in a room", async () => {
+    for (const over of [{ sees: () => false }, { mayChat: () => false }, { inRoom: () => true }]) {
       const { row, route, checked } = setup(over);
-      const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send" });
+      const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
       await route(context);
       expect(sent.status).toBe(404);
       expect(checked).toHaveLength(0);
     }
   });
 
+  it("sends nothing when the draft changed after the person confirmed it", async () => {
+    const { connection, ran } = relayed(() => ({ successful: true, data: {} }));
+    const { store, row, route } = setup({}, connection);
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: draftRevision({ ...shownDraft, to: ["ana@example.com"] }) });
+    await route(context);
+    expect(sent.status).toBe(409);
+    expect((sent.body as { errorKey: string }).errorKey).toBe("serverError.emailDraft.changed");
+    expect(ran).toHaveLength(0);
+    expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
+  });
+
+  it("sends nothing when the bot's permissions change right before the call goes out", async () => {
+    const refusal = { error: "Bot may not save or send Gmail drafts." };
+    const { store, row, route } = setup({}, { ok: true, relay: async () => { throw new DraftRefused(refusal); } });
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
+    await route(context);
+    expect(sent).toEqual({ status: 403, body: refusal });
+    expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
+  });
+
   it("says why when the Rules or the bot's app permissions refuse, and changes nothing", async () => {
     const { store, row, route } = setup({}, { ok: false, refusal: { error: "Your team's Rules don't allow Gmail." } });
-    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send" });
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
     await route(context);
     expect(sent).toEqual({ status: 403, body: { error: "Your team's Rules don't allow Gmail." } });
     expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
@@ -215,7 +254,7 @@ describe("POST /api/email-draft", () => {
   it("passes Gmail's refusal on and keeps the card live", async () => {
     const { connection } = relayed(() => ({ successful: false, error: "Requested entity was not found." }));
     const { store, row, route } = setup({}, connection);
-    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send" });
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
     await route(context);
     expect(sent.status).toBe(502);
     expect((sent.body as { error: string }).error).toContain("Requested entity was not found.");
@@ -224,7 +263,7 @@ describe("POST /api/email-draft", () => {
 
   it("refuses a press it can't read", async () => {
     const { row, route, checked } = setup();
-    for (const body of [{ threadId: "t1", messageId: row.id, action: "delete" }, { threadId: "t1", messageId: row.id, action: "save" }, { threadId: "t1", messageId: row.id, action: "send", draft: edit }]) {
+    for (const body of [{ threadId: "t1", messageId: row.id, action: "delete" }, { threadId: "t1", messageId: row.id, action: "save" }, { threadId: "t1", messageId: row.id, action: "send" }]) {
       const { context, sent } = request(body);
       await route(context);
       expect(sent.status).toBe(400);

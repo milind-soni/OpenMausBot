@@ -9897,6 +9897,7 @@
   "serverError.emailDraft.notHere": "That draft is not in this conversation.",
   "serverError.emailDraft.alreadySent": "This email was already sent.",
   "serverError.emailDraft.busy": "This draft is still being saved or sent.",
+  "serverError.emailDraft.changed": "This draft changed before it could be sent. Check it and press Send again.",
   "serverError.emailDraft.appsOff": "Connected apps are off for this bot.",
   "serverError.emailDraft.ownGmail": "Connect your own Gmail in Apps to save or send this draft.",
   "serverError.emailDraft.appsDown": "Apps can't be reached right now. Try again in a few minutes.",
