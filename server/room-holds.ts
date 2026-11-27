@@ -48,7 +48,7 @@ export function maskQuotedAndCode(value: string): string {
       continue;
     }
     // Typographic quotes too: smart-quote substitution rewrites straight ones.
-    kept.push(line.replace(/`[^`\n]*`/g, mentionsOnly).replace(/["“”][^"“”\n]*["“”]/g, mentionsOnly));
+    kept.push(line.replace(/`[^`\n]*`/g, (span) => mentionsOnly(span.slice(1, -1))).replace(/["“”][^"“”\n]*["“”]/g, (span) => mentionsOnly(span.slice(1, -1))));
   }
   return kept.join("\n");
 }

@@ -67,7 +67,7 @@ describe("a typed stop", () => {
     },
   );
 
-  it.each(["@aDa stop", "(**@Ada**) STOP!", "@all stop"])(
+  it.each(["@aDa stop", "(**@Ada**) STOP!", "@all stop", "`@Ada` stop", "`@all` stop"])(
     "still stops work addressed to the bot or everyone: %s", async (text) => {
       const w = world({ working: ["t"] });
       expect(await w.send(text, { busy: true })).toMatchObject({ ok: true });
