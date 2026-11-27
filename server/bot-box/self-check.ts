@@ -38,6 +38,8 @@ export interface SelfCheckOptions {
   broker?: boolean;
   /** T0c: the seccomp filter file to hand the box; none (or an unsupported architecture) loads no filter. */
   seccompFile?: string | null;
+  /** Add the warn-only nested-userns-blocked line: a self-hosted server's box (the server image, or `required`), not a Cloud's. */
+  nestedUserns?: boolean;
 }
 
 export interface SelfCheckResult extends BoxChecks {
@@ -135,6 +137,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
     // Checked whenever a filter is in the setup: the no-seccomp mutation leaves it out of the box, so the check must fail.
     seccomp: Boolean(options.seccompFile),
     cpuList: existsSync("/sys/devices/system/cpu/possible"),
+    nestedUserns: options.nestedUserns === true,
   };
   const wrapped = runner.wrap({
     command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",
@@ -159,10 +162,13 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
     child.stdout?.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
     child.stderr?.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
     child.once("error", (error) => { clearTimeout(timer); resolve(`the box could not start: ${error.message}`); });
-    child.once("close", (code) => {
+    // On "close", or two seconds after "exit" when something the probe left behind keeps a pipe open.
+    const settle = (code: number | null) => {
       clearTimeout(timer);
       try { resolve((JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { results: ProbeResult[] }).results); } catch { resolve(`the probe exited with ${code}: ${stderr.slice(-400)}`); }
-    });
+    };
+    child.once("exit", (code) => { setTimeout(() => settle(code), 2_000).unref(); });
+    child.once("close", (code) => settle(code));
   });
   canary.kill("SIGKILL");
   wrapped.release();

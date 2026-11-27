@@ -41,6 +41,8 @@ export interface ProbeSpec {
   isolatedNet: boolean;
   /** The host has a CPU list (`/sys/devices/system/cpu/possible`), so the box must have it too (plan.ts CPU_LIST_FILES). */
   cpuList?: boolean;
+  /** Report whether a boxed process can make a user namespace (nested-userns-blocked): a self-hosted server's box only. */
+  nestedUserns?: boolean;
   /** T0c: the seccomp filter is on, so a kernel-keyring call must fail with EPERM (an unprivileged process may make it otherwise). */
   seccomp?: boolean;
   /** T0b: a model call through the broker, and the real key's value that must be nowhere in the box. */
@@ -177,8 +179,10 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("hostname-private", hostname() === "omb-box", hostname() === "omb-box" ? "omb-box" : "host name visible");
   // Warn-only (shared/bot-sandbox.ts): a bot that can make a user namespace of its own reaches more of the kernel than a
   // stock Docker container does. The box does not stop it yet (docs/bot-box.md, Limits); this says where it stands.
-  const nested = spawnSync("unshare", ["--user", "true"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
-  add("nested-userns-blocked", nested.status !== 0, nested.error ? `unshare: ${(nested.error as NodeJS.ErrnoException).code ?? "error"}` : nested.status === 0 ? "a bot can make user namespaces" : "refused");
+  if (spec.nestedUserns) {
+    const nested = spawnSync("unshare", ["--user", "true"], { stdio: "ignore", timeout: 5_000, windowsHide: true });
+    add("nested-userns-blocked", nested.status !== 0, nested.error ? `unshare: ${(nested.error as NodeJS.ErrnoException).code ?? "error"}` : nested.status === 0 ? "a bot can make user namespaces" : "refused");
+  }
   if (spec.cpuList) {
     // TCMalloc runtimes (Google's Antigravity) stop at start without it: exit 134.
     const cpus = fails(() => { if (!/^\d/.test(readFileSync("/sys/devices/system/cpu/possible", "utf8"))) throw new Error("empty"); });

@@ -8,7 +8,7 @@ import type { EffortLevel, ModelCatalog } from "../contracts.ts";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
-import { CODEX_OFFICIAL_READ_ARGS, codexHome } from "./codex-identity.ts";
+import { codexHome, codexReadArgs } from "./codex-identity.ts";
 import { MODEL_ID, SEP, TIERED_ID, codexTierOf } from "./codex-tier.ts";
 import { unconfirmedModelCatalog } from "../startup-model-catalog.ts";
 import { codexLocalProviderArgs, mergeLocalInject } from "./local-inject.ts";
@@ -122,7 +122,7 @@ export function readCodexAppServerModelCatalog(
   timeoutMs = 8_000,
 ): Promise<ModelCatalog | null> {
   return new Promise((resolve) => {
-    const child = spawnCli(cli, [...CODEX_OFFICIAL_READ_ARGS], {
+    const child = spawnCli(cli, codexReadArgs(), {
       cwd: homedir(),
       env,
       stdio: ["pipe", "pipe", "pipe"],

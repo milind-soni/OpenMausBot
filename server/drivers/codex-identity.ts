@@ -3,6 +3,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { userHome } from "../env-path.ts";
+import { botBox } from "../bot-box/box.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 
 const MAX_OUTPUT = 16_384;
@@ -17,10 +18,15 @@ export function codexHome(env: Record<string, string | undefined>): string | nul
 /**
  * Security: the server's own reads of Codex (this account read, the model catalog) run outside the bot box with the
  * server's HOME, where a bot can write ~/.codex/config.toml. A provider there with an `auth.command` is run by
- * `codex app-server` when it lists models (seen with codex-cli 0.160.1), so these reads name OpenAI's provider (the
- * account and catalog they are about) and a planted one is never active. server/drivers/planted-home-config.test.ts.
+ * `codex app-server` when it lists models (seen with codex-cli 0.160.1), so where the box is on, or required, these reads
+ * name OpenAI's provider (the account and catalog they are about) and a planted one is never active. Elsewhere nothing
+ * boxed writes that HOME, and they read as before. server/drivers/planted-home-config.test.ts.
  */
 export const CODEX_OFFICIAL_READ_ARGS: readonly string[] = ["app-server", "-c", 'model_provider="openai"'];
+
+export function codexReadArgs(boxOn = botBox.enabled() || botBox.refusing()): string[] {
+  return boxOn ? [...CODEX_OFFICIAL_READ_ARGS] : ["app-server"];
+}
 
 /** Unsupported CLIs and uncertain answers stay unnamed; never fall back to a possibly inactive credential file. */
 export async function codexAccountEmail(
@@ -33,7 +39,7 @@ export async function codexAccountEmail(
   return new Promise((resolveEmail) => {
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(cli, [...CODEX_OFFICIAL_READ_ARGS], { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawnCli(cli, codexReadArgs(), { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     } catch {
       resolveEmail(null);
       return;

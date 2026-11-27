@@ -380,7 +380,9 @@ if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then
   step "update.sh never moves this sandboxed install to the release before the sandbox, --allow-older or not"
   status=0
   # shellcheck disable=SC2024 # the evidence file is the runner's, not root's
-  sudo "$DIR/update.sh" --image "$OLD_IMAGE" --allow-older >"$OUT/downgrade.txt" 2>&1 || status=$?
+  # --replace-local-build: this checkout's image is served from the runner's own registry, which update.sh takes for a
+  # build of this machine's; the sandbox's refusal comes after that question, and must hold whatever it is answered.
+  sudo "$DIR/update.sh" --image "$OLD_IMAGE" --allow-older --replace-local-build >"$OUT/downgrade.txt" 2>&1 || status=$?
   cat "$OUT/downgrade.txt"
   [ "$status" = 4 ] || fail "update.sh exited $status moving a sandboxed install to an image without the sandbox"
   contains "$OUT/downgrade.txt" "This install runs its bots in the sandbox, and" "update.sh did not say why it refused"

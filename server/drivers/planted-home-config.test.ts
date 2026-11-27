@@ -7,16 +7,19 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { whichOnPath } from "../bot-box/detect.ts";
 import { backgroundCallArgs, backgroundIsolated, spawnBackgroundCall } from "./claude-background.ts";
 import { readCodexAppServerModelCatalog } from "./codex-catalog.ts";
-import { CODEX_OFFICIAL_READ_ARGS, codexAccountEmail } from "./codex-identity.ts";
+import { botBox } from "../bot-box/box.ts";
+import { CODEX_OFFICIAL_READ_ARGS, codexAccountEmail, codexReadArgs } from "./codex-identity.ts";
 
 describe("the server's own engine reads leave config planted in HOME out", () => {
-  it("Codex's account and catalog reads name OpenAI's provider, so a planted provider is never active", () => {
+  it("where the box is on, Codex's account and catalog reads name OpenAI's provider, so a planted provider is never active", () => {
     expect(CODEX_OFFICIAL_READ_ARGS).toEqual(["app-server", "-c", 'model_provider="openai"']);
+    expect(codexReadArgs(true)).toEqual([...CODEX_OFFICIAL_READ_ARGS]);
+    expect(codexReadArgs(false)).toEqual(["app-server"]);
   });
 
   it("a background Claude call is isolated wherever the box is on or required, even with the inherit switch", () => {
@@ -71,9 +74,14 @@ describe.skipIf(!real)("the real CLIs, with config planted in a throwaway HOME",
     rmSync(join(marks, "codex-provider-auth"), { force: true });
   }, 30_000);
 
-  it("Codex's catalog and account reads run none of it", async () => {
-    await readCodexAppServerModelCatalog(codex!, env, 8_000);
-    await codexAccountEmail(codex!, env, 8_000);
+  it("with the box on, Codex's catalog and account reads run none of it", async () => {
+    const box = vi.spyOn(botBox, "enabled").mockReturnValue(true);
+    try {
+      await readCodexAppServerModelCatalog(codex!, env, 8_000);
+      await codexAccountEmail(codex!, env, 8_000);
+    } finally {
+      box.mockRestore();
+    }
     expect(ran()).toEqual([]);
   }, 30_000);
 

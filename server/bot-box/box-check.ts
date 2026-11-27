@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { engineInstallRoots } from "../engine-roots.ts";
 import { BoxRunner, defaultCodeRoots, writeSeccompFile } from "./box.ts";
-import { detectBox } from "./detect.ts";
+import { boxWanted, detectBox, serverImage } from "./detect.ts";
 import { BOX_MUTATIONS, type BoxMutation } from "./plan.ts";
 import { runBoxSelfCheck } from "./self-check.ts";
 
@@ -51,7 +51,10 @@ export async function boxExec(command: readonly string[], env: Record<string, st
       child.stdout?.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
       child.stderr?.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
       child.once("error", (error) => resolve({ code: 126, stdout, stderr: `${stderr}the box could not start: ${error.message}` }));
-      child.once("close", (code, signal) => resolve({ code: code ?? (signal ? 128 : 1), stdout, stderr }));
+      const settle = (code: number | null, signal: NodeJS.Signals | null) => resolve({ code: code ?? (signal ? 128 : 1), stdout, stderr });
+      // On "close", or two seconds after "exit" when something the command left behind keeps a pipe open.
+      child.once("exit", (code, signal) => { setTimeout(() => settle(code, signal), 2_000).unref(); });
+      child.once("close", settle);
     });
   } finally {
     wrapped.release();
@@ -91,6 +94,7 @@ export async function boxCheckMain(argv: readonly string[], env: Record<string, 
     bwrap: detection.tools.bwrap, bridge: { socat: detection.tools.socat, bridgeScript: sibling("box-bridge"), node: process.execPath },
     probeScript: sibling("box-probe"), codeRoots: [dirname(dirname(here)), ...defaultCodeRoots()],
     root, denyEnv: CHECK_DENY_ENV, mutate, publicTarget, seccompFile: writeSeccompFile(root),
+    nestedUserns: serverImage(env) || boxWanted(env) === "required",
   });
   process.stdout.write(`${JSON.stringify({ box: detection.box, bridge: detection.tools.socat ? "socat" : "node", mutate: [...mutate], ...result })}\n`);
   return result.error || result.failed.length ? 1 : 0;

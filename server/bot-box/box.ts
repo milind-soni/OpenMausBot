@@ -5,7 +5,7 @@
 // Security: with OMB_BOT_BOX=required a box that could not start refuses each spawn it would have wrapped (wrap throws
 // BoxRequiredError), so a bot never runs unconfined on a server that asked for the box.
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
@@ -288,6 +288,34 @@ export function defaultCodeRoots(): string[] {
   return roots;
 }
 
+/** The boxes this server started that still run: its own child processes that are bubblewrap, read from `procRoot`. Each
+ * leads its own process group (procs.ts spawns detached), so stopping the group stops what runs in the box. */
+export function runningBoxes(parentPid: number, procRoot = "/proc"): number[] {
+  const found: number[] = [];
+  let names: string[];
+  try { names = readdirSync(procRoot); } catch { return found; }
+  for (const name of names) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      // "pid (comm) state ppid ...": the command name may hold spaces and parentheses, so read after its last ")".
+      const stat = readFileSync(`${procRoot}/${name}/stat`, "utf8");
+      const comm = stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")"));
+      const ppid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+      if (comm === "bwrap" && ppid === parentPid) found.push(Number(name));
+    } catch {}
+  }
+  return found;
+}
+
+function stopRunningBoxes(log: (line: string) => void): void {
+  if (process.platform !== "linux") return;
+  const boxes = runningBoxes(process.pid);
+  for (const pid of boxes) {
+    try { process.kill(-pid, "SIGKILL"); } catch { try { process.kill(pid, "SIGKILL"); } catch {} }
+  }
+  if (boxes.length) log(`bot box: stopped ${boxes.length} bot process${boxes.length === 1 ? "" : "es"} already running in the sandbox`);
+}
+
 export class BotBox {
   private detection: BoxDetection = { box: "off", reason: "not-cloud", tools: null };
   private runner: BoxRunner | null = null;
@@ -462,6 +490,9 @@ export class BotBox {
     if (!failing.length) return;
     this.checkRefusal = failing;
     log(`bot box: REQUIRED and its self-check failed (${failing.join(", ")}): every bot's command is refused until the server starts again with a self-check that passes.`);
+    // What started before the check answered (an engine kept warm, a shared app-server) stops too, so no later turn
+    // reaches a box that may not hold through a process that is already running.
+    stopRunningBoxes(log);
   }
 
   report(): BoxReport {

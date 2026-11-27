@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } from "./box.ts";
+import { BotBox, runningBoxes, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } from "./box.ts";
 import { keyringDenied, KEYRING_PROBES, processStart, seesProcess } from "./box-probe.ts";
 import { procHidepid } from "./hidepid.ts";
 import { boxUploadsDir, visibleInBox } from "./plan.ts";
@@ -256,6 +256,19 @@ describe("BotBox", () => {
     shown.box.noteChecks({ passed: 31, total: 32, failed: ["config-hidden"], at: 1 }, () => {});
     expect(shown.box.refusing()).toBe(false);
     expect(shown.box.sandboxStatus()).toMatchObject({ state: "on", checks: { failed: ["config-hidden"], warned: [] } });
+  });
+
+  it("finds the boxes this server started that still run: its own bubblewrap children, whatever their command line", () => {
+    const proc = temp();
+    const stat = (pid: number, comm: string, ppid: number) => { mkdirSync(join(proc, String(pid))); writeFileSync(join(proc, String(pid), "stat"), `${pid} (${comm}) S ${ppid} ${pid} ${pid} 0 -1\n`); };
+    stat(101, "bwrap", 42);
+    stat(102, "bwrap", 7);
+    stat(103, "node", 42);
+    stat(104, "bwrap", 42);
+    stat(105, "a (bwrap) b", 42);
+    mkdirSync(join(proc, "self"));
+    expect(runningBoxes(42, proc).sort()).toEqual([101, 104]);
+    expect(runningBoxes(42, join(proc, "missing"))).toEqual([]);
   });
 
   it.skipIf(process.platform === "win32")("a box found but unable to open its gates: the server keeps running, refusing every spawn where required, off elsewhere", async () => {

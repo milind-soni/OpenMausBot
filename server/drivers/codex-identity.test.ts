@@ -36,7 +36,7 @@ describe("Codex account identity", () => {
 
   it("asks the configured CLI for its account without refreshing tokens and waits for cleanup", async () => {
     expect(await codexAccountEmail(FAKE_CLI, env())).toBe("ada@example.test");
-    expect(calls().argv).toEqual(["app-server", "-c", 'model_provider="openai"']);
+    expect(calls().argv).toEqual(["app-server"]);
     expect(calls().calls).toEqual([
       { method: "initialize", params: { clientInfo: { name: "openmausbot", version: "1" } } },
       { method: "initialized", params: {} },
