@@ -56,7 +56,9 @@ case "${1:-}" in
   "") ;;
   *) fail "Unknown option $1. Use no option to prepare this server, or --remove to take it back." ;;
 esac
-[ -s "$profiles/$seccomp" ] && [ -s "$profiles/$profile.apparmor" ] || fail "The sandbox's profiles are missing from $profiles."
+if [ ! -s "$profiles/$seccomp" ] || [ ! -s "$profiles/$profile.apparmor" ]; then
+  fail "The sandbox's profiles are missing from $profiles."
+fi
 
 max=$(cat "$sysroot/proc/sys/user/max_user_namespaces" 2>/dev/null || echo 1)
 clone=$(cat "$sysroot/proc/sys/kernel/unprivileged_userns_clone" 2>/dev/null || echo 1)
