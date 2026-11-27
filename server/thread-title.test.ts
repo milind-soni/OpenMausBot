@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createJobSlots } from "./job-slots.ts";
 import type { Message } from "./store.ts";
-import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, titleFromMessage, TITLE_INPUT_MAX_CHARS, UNTITLED_TASK } from "./thread-title.ts";
+import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, titleFromMessage, TITLE_INPUT_MAX_CHARS, UNTITLED_TASK, type ThreadTitleSource } from "./thread-title.ts";
 import { AUTO_RETRY_LEAD } from "./incidents.ts";
 import { AUTHORITY, botWho, fromNote, fromNoteWith, routineWho } from "./provenance-label.ts";
 import { generateThreadTitle, THREAD_TITLE_TIMEOUT_MS } from "./thread-title-generate.ts";
@@ -112,6 +112,22 @@ describe("threadTitlePrompt", () => {
     expect(prompt).toContain("Conversation:\nUser: fix the login");
     expect(prompt.length).toBeLessThan(TITLE_INPUT_MAX_CHARS + 300);
   });
+
+  it.each<[ThreadTitleSource, string]>([
+    ["first-message", "为什么 OpenMausBot 返回 HTTP 403？"],
+    ["call", "为什么 OpenMausBot 返回 HTTP 403？"],
+    ["conversation", titleConversationExcerpt([
+      message("user", "为什么 OpenMausBot 返回 HTTP 403？"),
+      message("bot", "权限不足时接口返回 403。"),
+    ])],
+  ])("asks for the title in the same language as the user's request, from %s", (source, text) => {
+    const prompt = threadTitlePrompt(text, source);
+    expect(prompt).toContain("为什么 OpenMausBot 返回 HTTP 403？");
+    const instruction = prompt.split("\n")[1]!;
+    expect(instruction).toContain("same language as the user's request");
+    expect(instruction).toContain("at most 48 characters");
+    expect(instruction).not.toContain("3 to 6 words");
+  });
 });
 
 describe("a Live call's title", () => {
@@ -119,7 +135,7 @@ describe("a Live call's title", () => {
     const prompt = threadTitlePrompt("what is the weather in Pune\nand tomorrow?", "call");
     expect(prompt.split("\n").slice(0, 3)).toEqual([
       "Name the voice call below by what was asked on it.",
-      "Reply with only a short title: 3 to 6 words, plain text, no quotes, no trailing period.",
+      "Reply with only a short title in the same language as the user's request. Use a concise phrase of at most 48 characters, in plain text, with no quotes or trailing period.",
       "Requests:",
     ]);
     expect(prompt.endsWith("Requests:\nwhat is the weather in Pune\nand tomorrow?")).toBe(true);
