@@ -4518,7 +4518,7 @@ function guardedRequestSnapshot(botId: string, threadId: string, sendId: string)
   // A restart keeps proven annotations, not an execution lease: unproven output or another live owner always requires the workspace.
   const untracked = messages[0].requestCancelled || (owner && (owner.messageId !== messageId || owner.stopped)) ||
     (busy && !owner) || messages.slice(1).some(message =>
-      (message.turnId || (message.role === "bot" && message.kind === "text")) && message.requestMessageId !== messageId) ||
+      (!message.progressUpdate && (message.turnId || (message.role === "bot" && message.kind === "text")) && message.requestMessageId !== messageId)) ||
     (!busy && !waiting && (messages[0].requestPending !== false || !latestTerminal?.turnSucceeded || latestTurn?.turnId !== latestTerminal.turnId ||
       latestOutcome?.turnSucceeded !== true || (owner && owner.turnId !== latestTerminal.turnId)));
   const snapshot = {

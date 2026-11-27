@@ -146,4 +146,62 @@ describe("attachProgressUpdates", () => {
     expect(h.appended).toHaveLength(0);
     h.controller.dispose();
   });
+
+  it("counts empty normalized replies toward the failure limit and stops retrying", async () => {
+    const h = harness(true);
+    h.setReplyImpl(async () => '  \n> ""  ');
+    h.emit({ type: "turn.started" });
+    await expect.poll(() => h.getCalls(), { timeout: 2000 }).toBe(3);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(h.getCalls()).toBe(3);
+    expect(h.appended).toHaveLength(0);
+    h.controller.dispose();
+  });
+
+  it("aborts and invalidates pending generation on request.opened and request.resolved transitions, then reschedules", async () => {
+    const h = harness(true);
+    let callNum = 0;
+    let abortedFirst = false;
+    let resolveFirst!: (v: string) => void;
+    let abortedSecond = false;
+    let resolveSecond!: (v: string) => void;
+
+    h.setReplyImpl(async (prompt, signal) => {
+      callNum += 1;
+      if (callNum === 1) {
+        return await new Promise<string>((resolve) => {
+          resolveFirst = resolve;
+          signal?.addEventListener("abort", () => { abortedFirst = true; }, { once: true });
+        });
+      }
+      const parsed = JSON.parse(prompt.split("\n").at(-1)!);
+      if (callNum === 2) {
+        expect(parsed.waitingOnHuman).toBe(true);
+        return await new Promise<string>((resolve) => {
+          resolveSecond = resolve;
+          signal?.addEventListener("abort", () => { abortedSecond = true; }, { once: true });
+        });
+      }
+      expect(parsed.waitingOnHuman).toBe(false);
+      return "Resumed executing after approval.";
+    });
+
+    h.emit({ type: "turn.started" });
+    await expect.poll(() => h.getCalls(), { timeout: 2000 }).toBe(1);
+
+    h.emit({ type: "request.opened", requestType: "permission", requestId: "r-2", tool: "shell", summary: "Run step" });
+    expect(abortedFirst).toBe(true);
+    resolveFirst("Stale running message before wait");
+
+    await expect.poll(() => h.getCalls(), { timeout: 2000 }).toBe(2);
+    expect(h.appended).toHaveLength(0);
+
+    h.emit({ type: "request.resolved", requestId: "r-2" });
+    expect(abortedSecond).toBe(true);
+    resolveSecond("Stale waiting message after resolve");
+
+    await expect.poll(() => h.appended.length, { timeout: 2000 }).toBe(1);
+    expect(h.appended[0]!.message.text).toBe("Resumed executing after approval.");
+    h.controller.dispose();
+  });
 });

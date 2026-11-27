@@ -157,9 +157,9 @@ export interface LiveHistoryMessage {
   text: string;
 }
 
-export function liveHistoryFrom(messages: ReadonlyArray<Pick<Message, "role" | "kind" | "text">>): LiveHistoryMessage[] {
+export function liveHistoryFrom(messages: ReadonlyArray<Pick<Message, "role" | "kind" | "text" | "progressUpdate">>): LiveHistoryMessage[] {
   return messages
-    .filter((message) => message.kind === "text" && typeof message.text === "string" && (message.role === "user" || message.role === "bot"))
+    .filter((message) => message.kind === "text" && !message.progressUpdate && typeof message.text === "string" && (message.role === "user" || message.role === "bot"))
     .map((message) => ({ role: message.role === "user" ? "user" as const : "assistant" as const, text: message.text ?? "" }));
 }
 

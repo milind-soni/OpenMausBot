@@ -177,6 +177,19 @@ export function attachProgressUpdates(deps: ProgressUpdatesDeps): { dispose(): v
     watch.timer.unref?.();
   };
 
+  const invalidatePendingAndReschedule = (watch: TurnWatch) => {
+    const wasInFlight = watch.abortController !== null;
+    if (wasInFlight) {
+      watch.generation = nextGeneration++;
+      watch.abortController?.abort();
+      watch.abortController = null;
+    }
+    const config = deps.getConfig();
+    if ((wasInFlight || watch.timer === null) && config.enabled && watch.reportsPosted < config.maxPerTurn && watch.consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+      scheduleNext(watch, config.intervalMs);
+    }
+  };
+
   async function tick(watch: TurnWatch): Promise<void> {
     if (watches.get(watch.threadId) !== watch) return;
     const config = deps.getConfig();
@@ -218,6 +231,8 @@ export function attachProgressUpdates(deps: ProgressUpdatesDeps): { dispose(): v
         deps.store.appendMessage(watch.threadId, { role: "bot", kind: "text", text: line, progressUpdate: true });
         watch.reportsPosted += 1;
         watch.consecutiveFailures = 0;
+      } else {
+        watch.consecutiveFailures += 1;
       }
     } catch {
       if (controller.signal.aborted || watches.get(watch.threadId) !== watch || watch.generation !== generation) return;
@@ -226,7 +241,7 @@ export function attachProgressUpdates(deps: ProgressUpdatesDeps): { dispose(): v
       if (watch.abortController === controller) watch.abortController = null;
     }
 
-    if (watches.get(watch.threadId) === watch && watch.reportsPosted < config.maxPerTurn && watch.consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
+    if (watches.get(watch.threadId) === watch && watch.generation === generation && watch.reportsPosted < config.maxPerTurn && watch.consecutiveFailures < MAX_CONSECUTIVE_FAILURES) {
       const backoff = watch.consecutiveFailures > 0 ? config.intervalMs * (watch.consecutiveFailures + 1) : config.intervalMs;
       scheduleNext(watch, backoff);
     }
@@ -316,6 +331,7 @@ export function attachProgressUpdates(deps: ProgressUpdatesDeps): { dispose(): v
       watch.waitingOnHuman = true;
       watch.waitingKind = event.requestType === "permission" && !event.questions?.length ? "approval" : "question";
       watch.waitingSummary = event.summary ?? null;
+      invalidatePendingAndReschedule(watch);
       return;
     }
 
@@ -324,6 +340,7 @@ export function attachProgressUpdates(deps: ProgressUpdatesDeps): { dispose(): v
       watch.waitingOnHuman = false;
       watch.waitingKind = null;
       watch.waitingSummary = null;
+      invalidatePendingAndReschedule(watch);
     }
   });
 

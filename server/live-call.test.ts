@@ -142,6 +142,7 @@ describe("live startup context", () => {
       { role: "bot", kind: "activity" },
       { role: "bot", kind: "text", text: "Six times seven is 42." },
       { role: "bot", kind: "call", text: "Call with Ada · 0:42" },
+      { role: "bot", kind: "text", text: "Still scanning files...", progressUpdate: true },
       { role: "bot", kind: "options", text: "Approve?" },
     ])).toEqual([
       { role: "user", text: "what is six times seven" },
