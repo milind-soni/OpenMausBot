@@ -31,17 +31,17 @@ export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfil
     if (server) servers.push({ name, command: server.command, args: server.args, env: server.env ?? {} });
   };
   add("agents", turn.integrations?.agents);
-  add("composio", turn.integrations?.composio);
-  add(OWN_APPS_SERVER, turn.integrations?.composioOwn);
   add("browser", turn.integrations?.browser);
   add("data", turn.integrations?.data);
   add("email", turn.integrations?.email);
   add("device", turn.integrations?.device);
   // Cua connections expose Cua Driver's own MCP server; a cloud turn runs on its boat, so none is mounted.
   add("computer", turn.integrations?.localComputer);
-  // User servers after the built-ins: a residual name collision keeps the built-in.
+  // The person's own servers before the connected-apps aggregation: an engine lists tools in mount order, so a dedicated
+  // server's tools come ahead of composio's pack, and a tool budget's remainder reaches them first. A residual name
+  // collision still keeps the built-in, the aggregation included.
   for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-    if (servers.some((existing) => existing.name === name)) continue;
+    if (servers.some((existing) => existing.name === name) || name === "composio" || name === OWN_APPS_SERVER) continue;
     const apps = appMountFor(name, turn);
     if (apps && !("url" in server)) observedCommands.set(name, apps);
     const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}) })
@@ -51,6 +51,9 @@ export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfil
     if (!stdio) continue;
     servers.push({ name, command: stdio.command, args: stdio.args ?? [], env: stdio.env ?? {} });
   }
+  // Composio and own apps after the person's servers: the fallback when no dedicated server covers a call.
+  add("composio", turn.integrations?.composio);
+  add(OWN_APPS_SERVER, turn.integrations?.composioOwn);
   const profiled = (server: TurnStdioMcpServer) =>
     schemaProfile ? { ...server, env: { ...server.env, [TOOL_SCHEMA_PROFILE_ENV]: schemaProfile } } : server;
   const fitted = turn.toolScope === undefined ? servers.map(profiled) : servers.filter((server) => canUseMcpServer(turn.toolScope, server.name)).map((server) => {

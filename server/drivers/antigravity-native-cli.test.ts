@@ -502,7 +502,7 @@ describe.skipIf(WINDOWS)("a native CLI set as the engine's own path", () => {
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
     // Under a schema profile (the native CLI carries the Gemini engine's) the person's stdio server goes through the MCP gate.
     const sent = JSON.parse(readFileSync(`${fake.dump}.mcp.json`, "utf8")) as Array<{ name: string; type?: string; url?: string; command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
-    expect(sent.map((server) => server.name)).toEqual(["agents", "composio", "browser", "notes"]);
+    expect(sent.map((server) => server.name)).toEqual(["agents", "browser", "notes", "composio"]);
     const byName = Object.fromEntries(sent.map((server) => [server.name, server])) as Record<string, { command?: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
     if (own === "url") {
       expect(byName.agents).toMatchObject({ type: "http", url: `${harness}/api/internal/mcp-http/agents` });
