@@ -127,6 +127,6 @@ export function phonePairingInstructions(
       : "On Android, open the OpenMausBot app and scan the QR with its pairing scanner. The QR is an app link, so Camera will not open it in a browser.",
     `Or open ${origin}/pair on your phone and enter the code.`,
     "Choose Connect on the phone. Scanning a QR does not mean the phone is paired.",
-    "The code works once and expires after five minutes. This phone receives client access: chat and approvals, not settings or pairing administration.",
+    "The code works once and expires after 10 minutes. This phone receives client access: chat and approvals, not settings or pairing administration.",
   ];
 }
