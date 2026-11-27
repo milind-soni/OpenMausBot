@@ -128,7 +128,8 @@ export interface SendTurnInput {
   /** Drivers namespace process-level resources (broker socket, CLI session) by botId too: threadIds may coincide across bots. */
   botId?: string;
   text: string;
-  /** The recall block the harness put in front of `text`; it informs this turn only, so a replay can leave it out. */
+  /** The recall block the harness put in front of `text`, for this turn. A transcript engine replays it as sent, so each
+   * later request starts with this one and the provider's prompt cache keeps matching. */
   recalled?: string;
   /** Reasserted every turn so a resumed native session cannot keep a stale, more permissive mode. */
   approvalMode?: ApprovalMode;

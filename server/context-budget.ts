@@ -1,4 +1,5 @@
 import type { ModelCatalog } from "./contracts.ts";
+import type { TaskRecord } from "./store.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -15,6 +16,11 @@ export function contextWindowFor(model: string | undefined, catalog?: ModelCatal
 /** A "meter" reading (an ACP agent's own usage_update) is shown only; it never times OpenMausBot's compaction. */
 export function compactionReading<T>(capabilities: { contextReading?: "meter" } | undefined, reading: T | undefined): T | undefined {
   return capabilities?.contextReading === "meter" ? undefined : reading;
+}
+
+/** The context a thread's last turn on this engine and model reported, the reading compaction times its folds by. */
+export function lastContextReading(instance: { instanceId: string; adapter: { capabilities: { contextReading?: "meter" } } }, model: string | undefined, task: Pick<TaskRecord, "lastContextModel" | "rewound" | "usage">) {
+  return compactionReading(instance.adapter.capabilities, task.lastContextModel === `${instance.instanceId}:${model}` && !task.rewound ? task.usage?.context : undefined);
 }
 
 /** Leave headroom even for a small local model: an 8k floor would make compaction unreachable on an 8k window. */

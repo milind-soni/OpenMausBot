@@ -196,6 +196,48 @@ Each refusal's full error object, `failed_generation` included, is written to
 the thread's redacted native log (`native/THREAD.ndjson` in the data
 directory), next to the tool names every request offered.
 
+## A conversation's requests only grow at the end
+
+A provider reuses only the unchanged start of a request: OpenAI, OpenRouter
+and DeepSeek bill it as cached input, and llama.cpp skips reading it again. A
+hybrid model (Qwen3.5 and 3.6, Granite 4) reuses nothing once anything before
+the end has changed, so a change near the start costs a full re-read, minutes
+for a 40k-token prompt on a local GPU. So within a conversation each request
+is the previous one with new messages added at the end:
+
+- Earlier turns go again exactly as sent: the user message with its context
+  note and automatic recall, every tool call and result, the final reply.
+  Screenshots of earlier turns become a one-line note.
+- The history is not trimmed to a fixed size each turn. Compaction folds it
+  when it nears the model's window; past the replay bound, old messages go
+  in batches of half the bound, so the start holds still between batches.
+- A local server's refusal of an oversized request reports its real window
+  (llama.cpp's `n_ctx`), which compaction then times its folds by.
+- The tool list holds still. Most templates (Qwen3.6 among them) render it
+  first, so a change there costs the whole prompt. A model on this computer or
+  network waits for every MCP server before a turn's first request. On a
+  hosted model a server still starting joins that turn once, and the bot's
+  later turns wait for it.
+- A model on this computer or network is asked to keep earlier turns'
+  thinking in the prompt (`chat_template_kwargs.preserve_thinking`), which
+  Qwen3.6's template otherwise drops at every new message.
+
+The start changes only when the conversation itself changes: an edit or
+rewind, a compaction, another model, new bot instructions, an app restart.
+
+Every request's native log line says how much of the previous request it
+repeats, as `repeats: { messages, of, tools }`. Start the app with
+`OPENMAUS_LOG_CHAT_REQUESTS=1` to log each request's full messages and tools
+too (secrets redacted, images left out), to see where two requests differ.
+
+```sh
+pnpm exec vitest run server/openai-prefix.e2e.test.ts server/drivers/openai-chat-prefix.test.ts
+```
+
+The end-to-end test sends eight tool-using turns to a fake provider through
+the isolated harness, past the old 24 KB history bound, and checks that each
+request starts with all of the one before.
+
 Cloud routine readiness uses the executing bot’s selected runner (including a
 thread’s model override at dispatch), rather than any available cloud engine.
 The probe checks the bot-owned or inherited team Boat without provisioning or

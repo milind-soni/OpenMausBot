@@ -44,6 +44,11 @@ const NO_MODELS: ModelCatalog = { default: "", options: [] };
 const OLLAMA_STATUS_MS = 5_000;
 const OLLAMA_FIRST_LIST_MS = 2_000;
 
+/** Qwen3.6's chat template drops earlier turns' thinking unless asked to keep it, which changes the prompt's start at every
+ * new message; a hybrid model then reads it all again. llama.cpp, vLLM and SGLang pass these to the template, and a
+ * template without the option ignores it. https://huggingface.co/Qwen/Qwen3.6-35B-A3B#preserve-thinking */
+const KEEP_EARLIER_THINKING = { preserve_thinking: true };
+
 const withEffort = (effort: string | undefined) => effort ? { reasoning_effort: effort } : {};
 const EFFORT_CHOICES = ["low", "medium", "high"].map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) }));
 /** OpenAI's reasoning models, gpt-5 onward. o1-mini, o1-preview and the chat aliases refuse `reasoning_effort`. */
@@ -427,6 +432,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
         ...(isOpenRouterUrl(config.url) && isClaudeModel(model) ? openRouterPromptCache(threadId) : {}),
+        ...(onThisNetwork(config.url) ? { chat_template_kwargs: KEEP_EARLIER_THINKING } : {}),
       }),
       httpErrorLabel: "upstream",
       missingKeyError: missingKey,

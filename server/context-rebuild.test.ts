@@ -94,6 +94,26 @@ describe("context replay", () => {
     }
   });
 
+  it.each([
+    { budgetBytes: 4_096, maxMessages: 1_000, stable: true },
+    { budgetBytes: 1_000_000, maxMessages: 40, stable: true },
+  ])("drops old messages in batches, so a growing conversation replays the same start between drops (%j)", (bounds) => {
+    const history: ReplayEntry[] = [];
+    const replays: string[][] = [];
+    for (let turn = 0; turn < 120; turn++) {
+      history.push({ id: `q${turn}`, role: "user", text: `question ${turn} ${"words ".repeat(turn % 7 * 9)}` });
+      history.push({ id: `a${turn}`, role: "assistant", text: `answer ${turn} ${"words ".repeat(turn % 5 * 11)}` });
+      const result = selectReplay(history, bounds);
+      expect(size(result)).toBeLessThanOrEqual(bounds.budgetBytes);
+      expect(result.transcript.filter((entry) => entry.id).length).toBeLessThanOrEqual(bounds.maxMessages);
+      expect(result.representedIds.at(-1)).toBe(`a${turn}`);
+      replays.push(result.transcript.map((entry) => entry.text));
+    }
+    const restarts = replays.slice(1).filter((next, index) => replays[index]!.some((text, at) => next[at] !== text)).length;
+    expect(restarts).toBeGreaterThan(0);
+    expect(restarts).toBeLessThanOrEqual(replays.length / 4);
+  });
+
   it.each([NaN, Infinity, -1, 0, 512, 1_024.5])("rejects an invalid budget %s", (budgetBytes) => {
     expect(() => selectReplay([], { budgetBytes })).toThrow("invalid context");
   });

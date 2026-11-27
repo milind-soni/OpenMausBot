@@ -60,6 +60,8 @@ export interface ChatToolSession {
   /** With `background`: lists the tools of servers that finished starting since the last call. The lines say which were
    * skipped and what the tool limit did; undefined when none finished. */
   join(): Promise<string[] | undefined>;
+  /** The servers with a tool listed now. */
+  listedServers(): string[];
   validate(name: string, args: unknown): void;
   /** Directory reads and OpenMausBot's own agents server need no card; call_tool shows the tool it runs. */
   view(name: string, args: Record<string, unknown>): ChatToolCallView;
@@ -109,6 +111,9 @@ export interface ChatToolMountOptions {
   conversation?: string;
   notice?: (line: { message: string; text: ServerText }) => void;
   background?: boolean;
+  /** Started before the first request even with `background`: servers the conversation listed before, since a tool list
+   * that changes mid-conversation makes the model read the whole prompt again. */
+  waitFor?: ReadonlySet<string>;
   onSettled?: (server: string) => void;
 }
 const DEFAULT_CALL_MS = 10 * 60_000;
@@ -798,7 +803,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     const waited = (index: number) => {
       const [name, descriptor] = servers[index]!;
       return (index < builtIns && (mustHave(descriptor) || !OPTIONAL_BUILT_INS.has(name) || descriptor === integrations?.localComputer || descriptor === integrations?.browser))
-        || servers.filter(([other]) => other === name).length > 1;
+        || servers.filter(([other]) => other === name).length > 1 || options.waitFor?.has(name) === true;
     };
     const waitAll = !options.background || !servers.some(([, descriptor]) => descriptor === agentsServer);
     await Promise.all(settled.filter((_, index) => waitAll || waited(index)));
@@ -921,6 +926,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   return {
     definitions, skipped, trimmed, merged, budget, validate, view, close,
+    listedServers: () => [...new Set([...registered.values()].map((tool) => tool.server))],
     async refit(limit) {
       if (closed || signal.aborted) throw new ChatToolSessionError("MCP session closed");
       await layout(limit);

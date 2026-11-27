@@ -995,10 +995,9 @@ describe("OpenAICompatDriver", () => {
       await done();
     });
 
-    it("leaves automatic recall out of the replay and keeps the added bytes bounded", async () => {
+    it("replays each turn's automatic recall and changing context as sent, so every request starts with the last", async () => {
       const { send, done } = await fixture();
       const transcript: Array<{ role: "user" | "assistant"; text: string }> = [];
-      const bytes = (messages: any[]) => Buffer.byteLength(JSON.stringify(messages));
       let previous: any[] = [];
       for (let turn = 0; turn < 20; turn++) {
         const minute = String(turn).padStart(2, "0");
@@ -1011,10 +1010,7 @@ describe("OpenAICompatDriver", () => {
           transcript: [...transcript],
         });
         expect(messages.at(-1).content).toContain(recalled);
-        if (turn > 0) expect(messages.slice(0, previous.length - 1)).toEqual(previous.slice(0, -1));
-        for (const message of messages.slice(1, -1)) expect(message.content).not.toContain("<recalled");
-        const stored = [{ role: "system", content: "Standing rules." }, ...transcript.map((m) => ({ role: m.role, content: m.text }))];
-        expect(bytes(messages.slice(0, -1)) - bytes(stored)).toBeLessThanOrEqual(24_000 + 2_000);
+        if (turn > 0) expect(messages.slice(0, previous.length)).toEqual(previous);
         previous = messages;
         transcript.push({ role: "user", text: typed }, { role: "assistant", text: "hi" });
       }

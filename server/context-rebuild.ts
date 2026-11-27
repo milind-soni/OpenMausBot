@@ -177,12 +177,35 @@ export function boundedContextText(text: string, limit: number): string {
   return head + notice + bytes.subarray(start).toString("utf8");
 }
 
+/** Where the replay starts: the earliest of a fixed set of cut points, counted from the conversation's start, that leaves
+ * the rest within `bytes` and `messages`. Cut points sit half the bounds apart, so a growing conversation replays the same
+ * start until half its replay has to go at once, and a provider's prompt cache keeps matching in between. Undefined when
+ * the newest messages alone are too big for any cut point. */
+function stableCut(entries: readonly ReplayEntry[], bytes: number, messages: number): number | undefined {
+  if (bytes <= 16) return undefined;
+  const sizes = entries.map((entry) => Buffer.byteLength(entry.text) + 16);
+  const total = sizes.reduce((n, size) => n + size, 0);
+  const byteStep = bytes / 2;
+  let byteCut: number | undefined;
+  for (let index = 0, before = 0; index < entries.length; before += sizes[index]!, index++) {
+    const onGrid = index === 0 || Math.floor(before / byteStep) > Math.floor((before - sizes[index - 1]!) / byteStep);
+    if (onGrid && total - before <= bytes) { byteCut = index; break; }
+  }
+  if (byteCut === undefined) return undefined;
+  const messageStep = Math.max(1, Math.floor(messages / 2));
+  const messageCut = Math.ceil(Math.max(0, entries.length - messages) / messageStep) * messageStep;
+  return Math.max(byteCut, messageCut);
+}
+
 export function selectReplay(
   history: readonly ReplayEntry[],
   options: {
     budgetBytes?: number; maxMessages?: number; excludedIds?: ReadonlySet<string>; compaction?: CompactionRecord & { id: string };
     /** Reach `inline` only. */
     tools?: readonly ReplayToolCall[];
+    /** For an engine that sends the history with every request: drop old messages in batches (see stableCut), so the
+     * provider's prompt cache keeps matching, rather than filling the bounds anew each turn. */
+    stable?: boolean;
   } = {},
 ): {
   transcript: ReplayEntry[];
@@ -216,7 +239,13 @@ export function selectReplay(
   }
   const kept: ReplayEntry[] = [];
   const shortened: string[] = [];
-  for (let i = entries.length - 1; i >= 0 && kept.length < maxMessages; i--) {
+  const start = options.stable ? stableCut(entries, available, maxMessages) : undefined;
+  if (start !== undefined) {
+    kept.push(...entries.slice(start));
+    representedIds.push(...kept.map((entry) => entry.id));
+    available -= kept.reduce((n, entry) => n + Buffer.byteLength(entry.text) + 16, 0);
+  }
+  for (let i = entries.length - 1; start === undefined && i >= 0 && kept.length < maxMessages; i--) {
     const entry = entries[i]!;
     if (available <= 16) break;
     const size = Buffer.byteLength(entry.text) + 16;

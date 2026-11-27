@@ -1464,7 +1464,10 @@ describe("structured tool execution boundaries", () => {
     expect(log.length).toBeLessThan(large.length);
     const outgoing = log.trim().split("\n").map((line) => JSON.parse(line) as { dir: string; msg: unknown })
       .filter((entry) => entry.dir === "out").map((entry) => entry.msg);
-    expect(outgoing).toEqual(f.requests.map((request) => ({ model: "fixture-model", messageCount: request.messages.length })));
+    expect(outgoing).toEqual(f.requests.map((request, index) => {
+      const before = f.requests[index - 1]?.messages.length;
+      return { model: "fixture-model", messageCount: request.messages.length, ...(before ? { repeats: { messages: before, of: before, tools: true } } : {}) };
+    }));
   });
 
   it.each(["stream", "approval", "rpc", "continuation"] as const)("cancels during %s, closes execution authority, and settles exactly once", async (stage) => {
@@ -1537,7 +1540,7 @@ describe("a turn with the person's Windows computer, the built-in browser and th
     return { ...others, agents: catalog(syntheticToolNames("agent", agents), { after: names.map((name) => join(gates, name)) }) };
   };
 
-  it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
+  it("sends a hosted model's first request without waiting for a slow server, and lists its tools from the next round", async () => {
     // The slow server cannot start until the first request has arrived: a turn that waited for it would give up on it
     // first, so its tools could never be listed in the next round, however slow the runner.
     const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-slow-"));
@@ -1552,7 +1555,7 @@ describe("a turn with the person's Windows computer, the built-in browser and th
       // The turn has the slow server's tools in hand before the next round.
       await settledServer("notes");
       sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
-    });
+    }, "groq");
     await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(settledBeforeFirst).toBe(false);
@@ -1575,7 +1578,7 @@ describe("a turn with the person's Windows computer, the built-in browser and th
       if ((body.tools?.length ?? 0) <= 6) return answer(response);
       response.writeHead(400, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 6, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
-    });
+    }, "groq");
     const warn = console.warn;
     console.warn = () => {};
     try {

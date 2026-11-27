@@ -100,6 +100,24 @@ describe("smallerResend", () => {
     { role: "user", content: [{ type: "text", text: `Screenshot result from tool call ${id}:` }, image(screenshot)] },
   ];
 
+  it("drops an earlier turn's tool call together with its results, never one without the other", () => {
+    const call = (id: string): OpenAIChatMessage[] => [
+      { role: "assistant", content: null, tool_calls: [{ id, type: "function", function: { name: "look_up", arguments: "{}" } }, { id: `${id}-b`, type: "function", function: { name: "look_up", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: id, content: `result ${id} ${"r".repeat(3_000)}` },
+      { role: "tool", tool_call_id: `${id}-b`, content: `result ${id}-b ${"r".repeat(3_000)}` },
+      { role: "assistant", content: `answer ${id}` },
+    ];
+    const earlier: OpenAIChatMessage[] = ["one", "two", "three"].flatMap((id) => [{ role: "user", content: `question ${id}` }, ...call(id)]);
+    for (let share = 0.2; share < 1; share += 0.05) {
+      const { request, messages, refused } = turn(earlier);
+      const resend = smallerResend(messages, request, refused, share)!;
+      const calls = new Set(resend.messages.flatMap((message) => message.tool_calls?.map((entry) => entry.id) ?? []));
+      const results = resend.messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id);
+      expect(results.filter((id) => !calls.has(id!)), `share ${share.toFixed(2)}`).toEqual([]);
+      expect([...calls].filter((id) => !results.includes(id)), `share ${share.toFixed(2)}`).toEqual([]);
+    }
+  });
+
   it("strips this turn's older screenshots first and never touches the system prompt or the request's attachment", () => {
     const { system, request, messages, refused } = turn(history(4, 500), [...toolRound("first", 100, 100_000), ...toolRound("second", 100, 20_000)]);
     const resend = smallerResend(messages, request, refused)!;

@@ -1,5 +1,5 @@
 import { draftSummary, foldPoint } from "../compaction-summary.ts";
-import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "../context-budget.ts";
+import { compactBudget, contextWindowFor, lastContextReading, shouldCompact } from "../context-budget.ts";
 import { MAX_SUMMARY_BYTES, selectReplay } from "../context-rebuild.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { EngineCompactCheck, EngineCompactOutcome } from "./warm-summary-host.ts";
@@ -92,7 +92,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     });
     const history = selected.transcript.filter(entry => entry.id);
     if (!history.length) return;
-    const measurement = compactionReading(instance.adapter.capabilities, task.lastContextModel === `${instance.instanceId}:${model}` && !task.rewound ? task.usage?.context : undefined);
+    const measurement = lastContextReading(instance, model, task);
     const window = contextWindowFor(model, instance.models, measurement?.window);
     const bytes = history.reduce((n, entry) => n + Buffer.byteLength(entry.text), 0);
     let floor = task.contextFloor, seededFloor = false;

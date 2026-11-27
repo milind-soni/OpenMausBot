@@ -1591,6 +1591,17 @@ describe("Chat MCP servers starting in the background", () => {
     expect(await session.join()).toBeUndefined();
   });
 
+  it("waits for a slow server the conversation listed before, so the tool list holds still from the first request", async () => {
+    const agents = fixture();
+    const slow = fixture(slowStart(800));
+    const session = await mountChatTools({ agents: agents.server, custom: { slow: slow.server } }, agents.controller.signal, false, undefined, undefined, undefined, undefined,
+      undefined, undefined, { background: true, waitFor: new Set(["slow"]) });
+    sessions.push(session);
+    expect(names(session)).toEqual(["agents_write", "slow_write"]);
+    expect(session.listedServers().sort()).toEqual(["agents", "slow"]);
+    expect(await session.join()).toBeUndefined();
+  });
+
   it("says when a server that was still starting is skipped", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const agents = fixture();

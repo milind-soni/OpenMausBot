@@ -31,7 +31,9 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     if (path === "/v1/chat/completions") {
       if (isTitleCall(body)) { res.statusCode = 500; return res.end("{}"); }
       requests.push(body);
-      const completed = body.messages.some((message: any) => message.role === "tool");
+      // Earlier turns come back with their tool calls, so only a result since this turn's request means the call ran.
+      const asked = body.messages.findLastIndex((message: any) => message.role === "user" && JSON.stringify(message.content).includes("Inspect the assigned cloud desktop."));
+      const completed = body.messages.slice(asked + 1).some((message: any) => message.role === "tool");
       const tool = body.tools?.find((entry: any) => entry.function.name === "computer_screenshot");
       return res.end(JSON.stringify({ choices: [{ message: completed
         ? { role: "assistant", content: "Fixture completed." }
