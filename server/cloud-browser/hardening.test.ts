@@ -1,7 +1,8 @@
 // What the home keeps from a browser sandbox it does not control: the sign-ins it writes back, the addresses a call opens,
-// a deleted bot's profile in a sandbox that sleeps, and a sandbox that can never resume. Only the fake relay and provider
+// a deleted bot's profile in a sandbox that sleeps, a sandbox that can never resume, and files of a sandbox that takes no
+// direct connections. Only the fake relay and provider
 // (testing/fake-computer.ts) and temporary folders: never a real sandbox or provider.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +14,7 @@ import { RuntimeRouter } from "../browser/engines.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import type { ChromeEngine } from "../browser/engines.ts";
 import { SIGN_IN_SYNC_MS, type SignInStore } from "./companion.ts";
+import { INLINE_MAX_BYTES } from "../cloud-computer-files.ts";
 import { addressGuard, PRIVATE_ADDRESS_REFUSAL } from "./guards.ts";
 import { CLOUD_BROWSER_IDLE_MS, createCloudBrowser, REOPENED_NOTE, type CloudBrowserDeps } from "./index.ts";
 import { createCloudBrowserRails } from "./rails.ts";
@@ -375,5 +377,95 @@ describe("a sandbox that can never resume", () => {
     expect(await cloud.open(request())).toEqual({ home: "backoff" });
     expect(deletes()).toEqual([]);
     expect(fake.creates()).toBe(0);
+  });
+});
+
+describe("files of a sandbox that takes no direct connections", () => {
+  let folder: string;
+  beforeEach(() => { folder = mkdtempSync(join(tmpdir(), "bot-folder-")); fake.inbound = "boat-only"; });
+  afterEach(() => { rmSync(folder, { recursive: true, force: true }); });
+
+  const downloadPath = (guid: string) => `/home/user/.omb-browser/.downloads/${profileKey("scout")}/${guid}`;
+  const finish = (guid: string, name: string, bytes: Buffer) => {
+    fake.files.set(downloadPath(guid), bytes);
+    fake.emit(profileKey("scout"), "Browser.downloadWillBegin", { guid, suggestedFilename: name, url: "https://files.example/x" });
+    fake.emit(profileKey("scout"), "Browser.downloadProgress", { guid, totalBytes: bytes.length, receivedBytes: bytes.length, state: "completed" });
+  };
+  const fileCalls = () => fake.requests.filter((one) => one.path.endsWith("/files")).map((one) => one.method);
+  const tooLarge = (name: string, size: string) => `${name} (${size}) is too large to copy: this browser's sandbox takes no direct connections, so a file moves between it and the Cloud in one piece of at most 5 MiB.`;
+
+  it("brings a download over through the provider's JSON file read, byte for byte, and removes it from the sandbox", async () => {
+    const cloud = browser({ folder: () => folder });
+    urlOf(await cloud.open(request()));
+    const bytes = Buffer.from(Array.from({ length: 70_000 }, (_, i) => i % 256));
+    finish("0f3e2a1b-guid", "report.pdf", bytes);
+    await vi.waitFor(() => expect(existsSync(join(folder, "downloads", "report.pdf"))).toBe(true));
+    expect(readFileSync(join(folder, "downloads", "report.pdf"))).toEqual(bytes);
+    await vi.waitFor(() => expect(fake.files.has(downloadPath("0f3e2a1b-guid"))).toBe(false));
+    expect(cloud.takeNotes("bot-scout")).toEqual([`Downloaded "report.pdf" into your working folder as ${join("downloads", "report.pdf")} (${bytes.length} bytes).`]);
+    expect(fileCalls()).toEqual(["GET"]);
+  });
+
+  it("says plainly that a download over 5 MiB can't be brought over, and neither keeps it nor tries it again", async () => {
+    const cloud = browser({ folder: () => folder });
+    urlOf(await cloud.open(request()));
+    finish("big-guid", "video.mp4", Buffer.alloc(INLINE_MAX_BYTES + 1));
+    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toEqual([`"video.mp4" was downloaded in the browser but could not be brought to your working folder: ${downloadPath("big-guid")} is too large to copy: this browser's sandbox takes no direct connections, so a file moves between it and the Cloud in one piece of at most 5 MiB.`]));
+    await vi.waitFor(() => expect(fake.files.has(downloadPath("big-guid")), "removed from the sandbox").toBe(false));
+    const before = fake.requests.length;
+    await cloud.close("bot-scout");
+    expect(fake.requests.slice(before).filter((one) => one.path.includes("/files")), "not tried again at close").toEqual([]);
+    expect(existsSync(join(folder, "downloads", "video.mp4"))).toBe(false);
+    expect(cloud.takeNotes("bot-scout"), "no line about it at close").toEqual([REOPENED_NOTE]);
+  });
+
+  it("a failure that may pass is kept and tried again at close, as before", async () => {
+    let available = false;
+    const cloud = browser({ folder: () => (available ? folder : null) });
+    urlOf(await cloud.open(request()));
+    finish("retry-guid", "data.csv", Buffer.from("a,b\n1,2\n"));
+    await vi.waitFor(() => expect(cloud.takeNotes("bot-scout")).toEqual([expect.stringContaining("It is kept in the browser sandbox for a day and is tried again when this browser closes.")]));
+    available = true;
+    await cloud.close("bot-scout");
+    expect(readFileSync(join(folder, "downloads", "data.csv"), "utf8")).toBe("a,b\n1,2\n");
+  });
+
+  it("gives a page a file through the provider's JSON file write, and refuses one over the cap in one line", async () => {
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    mkdirSync(join(folder, "in"), { recursive: true });
+    const cv = Buffer.from("my cv \u0000\u00ff bytes");
+    writeFileSync(join(folder, "in", "cv.pdf"), cv);
+    const path = `/home/user/.omb-browser/.uploads/${profileKey("scout")}/cv.pdf`;
+    expect(await cloud.upload("bot-scout", join(folder, "in", "cv.pdf"), null, cv.length)).toEqual({ path });
+    expect(fake.files.get(path)).toEqual(cv);
+    expect(fileCalls()).toEqual(["PUT"]);
+    writeFileSync(join(folder, "in", "big.bin"), Buffer.alloc(INLINE_MAX_BYTES + 1));
+    expect(await cloud.upload("bot-scout", join(folder, "in", "big.bin"), null, INLINE_MAX_BYTES + 1))
+      .toEqual({ error: `big.bin could not be given to the browser: ${tooLarge("big.bin", "5.0 MiB")} Tell the person in one sentence and ask them to upload it themselves.` });
+    expect(fileCalls(), "never sent").toEqual(["PUT"]);
+  });
+
+  it("takes the relay's own cap on a request the same way: one plain line, nothing written", async () => {
+    fake.relayJsonMax = 2 * 1024 * 1024;
+    const cloud = browser();
+    urlOf(await cloud.open(request()));
+    mkdirSync(join(folder, "in"), { recursive: true });
+    writeFileSync(join(folder, "in", "scan.pdf"), Buffer.alloc(3 * 1024 * 1024));
+    expect(await cloud.upload("bot-scout", join(folder, "in", "scan.pdf"), null, 3 * 1024 * 1024))
+      .toEqual({ error: `scan.pdf could not be given to the browser: ${tooLarge("scan.pdf", "3.0 MiB")} Tell the person in one sentence and ask them to upload it themselves.` });
+    expect([...fake.files.keys()].some((key) => key.includes(".uploads"))).toBe(false);
+  });
+
+  it("a sandbox that takes direct connections copies through its links only, as before", async () => {
+    fake.inbound = "open";
+    const cloud = browser({ folder: () => folder });
+    urlOf(await cloud.open(request()));
+    finish("link-guid", "a.txt", Buffer.from("x"));
+    await vi.waitFor(() => expect(existsSync(join(folder, "downloads", "a.txt"))).toBe(true));
+    mkdirSync(join(folder, "in"), { recursive: true });
+    writeFileSync(join(folder, "in", "b.txt"), "y");
+    await cloud.upload("bot-scout", join(folder, "in", "b.txt"), null, 1);
+    expect(fileCalls()).toEqual([]);
   });
 });

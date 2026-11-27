@@ -177,7 +177,8 @@ export class SandboxCompanion {
     if (size > UPLOAD_MAX_BYTES) return { error: `${shown} is over ${UPLOAD_MAX_BYTES / 1024 / 1024} MiB, which this browser can't take from the Cloud yet. Tell the person in one sentence and ask them to upload it themselves.` };
     const target = `${this.#deps.home}/.omb-browser/.uploads/${this.#deps.key}/${safeFileName(name ?? shown) || "upload"}`;
     const sent = await this.#deps.ops.sendFile(this.#deps.boxId, dirname(file), shown, target);
-    return "error" in sent ? { error: `${shown} could not be given to the browser: ${sent.error}` } : { path: target };
+    if (!("error" in sent)) return { path: target };
+    return { error: `${shown} could not be given to the browser: ${sent.error}${sent.final ? " Tell the person in one sentence and ask them to upload it themselves." : ""}` };
   }
 
   /** A clean close: downloads still waiting are tried once more, and the sandbox's cookies are saved as the home's. */
@@ -245,6 +246,13 @@ export class SandboxCompanion {
     if (disk.free - pending.bytes < Math.max(KEEP_FREE_BYTES, disk.total / 10)) return failed("the Cloud's disk is too full for it");
     const to = unusedName(folder, pending.name);
     const fetched = await ops.fetchFile(boxId, `${this.downloadDir}/${pending.guid}`, folder, to).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "it failed" }));
+    if ("error" in fetched && "final" in fetched && fetched.final) {
+      // Never copyable this way (too large while the sandbox takes no direct connections): not kept, nor tried again.
+      this.#pending.delete(pending.guid);
+      await ops.removeDownload(boxId, key, pending.guid).catch(() => undefined);
+      this.#notes.push(`"${pending.name}" was downloaded in the browser but could not be brought to your working folder: ${fetched.error}`);
+      return;
+    }
     if ("error" in fetched) return failed(fetched.error);
     this.#pending.delete(pending.guid);
     this.#delivered += fetched.bytes;

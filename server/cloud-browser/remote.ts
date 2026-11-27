@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { boatAccount, boatFetch, boatNameFor, boatRefusal, deadBoatOf, findBoat, requestRecordedBoatDeletion, SLEEPING_BOAT_STATES } from "../boat.ts";
 import { beginBoatCreate, discardBoatCreate, rememberCreatedBoat, resolveBoatCreate } from "../boat-create-idempotency.ts";
 import { relayBody } from "../boat-relay.ts";
-import { copyFromComputer, copyToComputer, type CopyOutcome } from "../cloud-computer-files.ts";
+import { copyFromComputer, copyToComputer, readFromComputerInline, writeToComputerInline, type CopyOutcome } from "../cloud-computer-files.ts";
 import type { AppConfig } from "../config.ts";
 
 const READY = new Set(["idle", "ready", "running"]);
@@ -49,9 +49,10 @@ export interface ComputerOps {
   /** One bot's Chrome started on its profile, with this open's door secret; `home` is the sandbox's home folder. */
   /** `policy`: the Chrome policy that blocks file:// and Chrome's own pages could be written in the sandbox. */
   launch(boxId: string, key: string, secret: string): Promise<{ chrome: boolean; home: string | null; policy: boolean }>;
-  /** A finished download (a sandbox path) brought into `folder` as `to`, with the cloud computers' copy checks and limits. */
+  /** A finished download (a sandbox path) brought into `folder` as `to`, with the cloud computers' copy checks and limits.
+   * A sandbox that takes no direct connections is copied from through the provider's JSON file read (at most 5 MiB). */
   fetchFile(boxId: string, path: string, folder: string, to: string): Promise<CopyOutcome>;
-  /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload. */
+  /** A file of the Cloud (`from`, inside `folder`) copied to a sandbox path for an upload; likewise through the JSON file write. */
   sendFile(boxId: string, folder: string, from: string, path: string): Promise<CopyOutcome>;
   /** A deleted bot's profile, door secret and files in the sandbox, erased. */
   erase(boxId: string, key: string): Promise<void>;
@@ -169,8 +170,18 @@ export function providerOps(cfg: () => AppConfig): ComputerOps {
       const home = typeof answer?.home === "string" && /^\/[^\0\n]*$/.test(answer.home) && !answer.home.split("/").includes("..") ? answer.home.replace(/\/+$/, "") : null;
       return { chrome: answer?.chrome === true, home, policy: answer?.policy === true };
     },
-    fetchFile: (boxId, path, folder, to) => copyFromComputer(cfg(), boxId, folder, { path, to }, AbortSignal.timeout(10 * 60_000)),
-    sendFile: (boxId, folder, from, path) => copyToComputer(cfg(), boxId, folder, { from, path }, AbortSignal.timeout(10 * 60_000)),
+    // The link first, as on every sandbox before: on one that takes no direct connections the relay answers its 409
+    // `inbound_closed` itself, without asking the provider, and the JSON file call goes instead.
+    async fetchFile(boxId, path, folder, to) {
+      const signal = AbortSignal.timeout(10 * 60_000);
+      const linked = await copyFromComputer(cfg(), boxId, folder, { path, to }, signal);
+      return "error" in linked && linked.inboundClosed ? readFromComputerInline(cfg(), boxId, folder, { path, to }, signal) : linked;
+    },
+    async sendFile(boxId, folder, from, path) {
+      const signal = AbortSignal.timeout(10 * 60_000);
+      const linked = await copyToComputer(cfg(), boxId, folder, { from, path }, signal);
+      return "error" in linked && linked.inboundClosed ? writeToComputerInline(cfg(), boxId, folder, { from, path }, signal) : linked;
+    },
     async erase(boxId, key) {
       if (!HEX16.test(key)) throw new Error("bad browser profile key");
       await action(boxId, { action: "erase", key });
