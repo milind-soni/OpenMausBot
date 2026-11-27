@@ -1674,4 +1674,19 @@ describe("Runtime: a turn cut by the restart after a memory freeze", () => {
     runtime.close();
     store.close();
   });
+
+  it("marks a node terminal when settlement throws instead of leaving it running (#7642)", async () => {
+    const w = world();
+    w.runner.script = () => ({ kind: "completed", text: "done" });
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    expect(w.store.get(child.id)?.status).toBe("completed");
+    w.runtime.end(root.id, { ok: true, text: "" });
+    w.runtime.tick(); await flush();
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    expect(w.store.get(root.id)?.outcome).toBe("done");
+    invariants(w);
+    w.runtime.close();
+  });
 });

@@ -197,6 +197,12 @@ export class Runtime {
       this.withBatch(() => this.finishTurn(n, outcome, live));
     } catch (error) {
       this.log(`end(${rootId}) failed: ${String(error)}`);
+      this.safe("settle-end", () => {
+        const now = this.clock.now();
+        if (outcome.kind === "completed") { n.status = "completed"; n.outcome = "done"; n.finishedAt = now; n.lastActivityAt = now; }
+        else if (outcome.kind === "failed") { n.status = "failed"; n.outcome = outcome.outcome; n.finishedAt = now; n.lastActivityAt = now; }
+        this.store.update(n, { kind: "settled", at: now, detail: `settlement error: ${String(error).slice(0, DETAIL_MAX)}` });
+      });
     }
   }
 
@@ -510,14 +516,23 @@ export class Runtime {
 
   /** Only the live handle's result settles the node: an ended, cancelled or stalled turn has no handle. */
   private turnEnded(id: string, live: LiveTurn, result: RunResult): void {
+    let n: Assignment | undefined;
     try {
       if (this.turns.get(id) !== live) return;
-      const n = this.store.get(id);
-      if (!n || n.status !== "running") return;
+      n = this.store.get(id);
+      if (!n) return;
+      if (n.status !== "running") return;
       if (this.closing && result.kind === "failed") return;
-      this.withBatch(() => this.finishTurn(n, result, live));
+      this.withBatch(() => this.finishTurn(n!, result, live));
     } catch (error) {
       this.log(`settling ${id} failed: ${String(error)}`);
+      this.safe("settle-turn-ended", () => {
+        if (!n) return;
+        const now = this.clock.now();
+        if (result.kind === "completed") { n.status = "completed"; n.outcome = "done"; n.finishedAt = now; n.lastActivityAt = now; }
+        else if (result.kind === "failed") { n.status = "failed"; n.outcome = result.outcome; n.finishedAt = now; n.lastActivityAt = now; }
+        this.store.update(n, { kind: "settled", at: now, detail: `settlement error: ${String(error).slice(0, DETAIL_MAX)}` });
+      });
     }
   }
 
