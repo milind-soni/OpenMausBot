@@ -215,6 +215,11 @@ describe("outboundCallsIn", () => {
     expect(effectiveToolName("bash", "Run mcp_composio_GMAIL_SEND_EMAIL")).toBe("bash");
     expect(isOutboundTool("other", "Run mcp_composio_GMAIL_SEND_EMAIL")).toBe(true);
     expect(isOutboundTool("other", "Run mcp_composio_COMPOSIO_PROXY_EXECUTE")).toBe(true);
+    expect(isOutboundTool("other", "Run mcp_telnyx_invoke_api_endpoint")).toBe(true);
+    expect(isOutboundTool("other", "Run mcp_telnyx_list_numbers")).toBe(false);
+    expect(isReadOnlyTool("mcp_composio_REDDIT_GET_POST")).toBe(true);
+    expect(isReadOnlyTool("mcp_composio_GOOGLECALENDAR_EVENTS_LIST")).toBe(true);
+    expect(isOutboundTool("other", "Run mcp_composio_REDDIT_GET_POST")).toBe(false);
     expect(isOutboundTool("other", "Run mcp_computer_click")).toBe(false);
   });
 });
