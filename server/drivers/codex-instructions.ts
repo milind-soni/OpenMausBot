@@ -35,7 +35,7 @@ export interface CodexInstructionReceipt {
   injected?: number;
 }
 
-// Providers merge developer content into one system prompt with a hard character cap (issue #5317: GLM rejects above 100,000); 85,000 leaves room for Codex's own developer blocks.
+// Providers merge developer content into one system prompt with a hard character cap (GLM rejects above 100,000); 85,000 leaves room for Codex's own developer blocks.
 export const CODEX_INJECTED_CHAR_LIMIT = 85_000;
 
 const isFingerprint = (value: string) => /^[0-9a-f]{64}$/.test(value);
@@ -84,6 +84,7 @@ export async function syncCodexInstructions(
   resumed: boolean,
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   mentionTurn = false,
+  canReset = true,
 ): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; commitVolatile: (() => void) | null; resetSession: boolean }> {
   const directory = join(DATA_DIR, "codex-instructions");
   const path = join(directory, `${digest(JSON.stringify([key, nativeThreadId]))}.sha256`);
@@ -100,9 +101,10 @@ export async function syncCodexInstructions(
   const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
   const replacement = "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
     + (instructions || "No OpenMausBot bot-specific instructions remain.");
-  if (resumed && injected + (previous?.instructions === fingerprint ? 0 : replacement.length) > CODEX_INJECTED_CHAR_LIMIT) {
+  if (canReset && resumed && previous?.instructions !== fingerprint && injected + replacement.length > CODEX_INJECTED_CHAR_LIMIT) {
     // Superseded blocks stay in the thread until codex compacts, so another injection would only push the
-    // provider's system prompt past its cap; the driver's fresh-session recovery is the only cleanup.
+    // provider's system prompt past its cap; the driver's fresh-session recovery is the only cleanup. Only a changed
+    // block is injected, so a thread whose first block alone is that long is not reset on every turn.
     return { deliverVolatile: false, hadVolatile, commitVolatile: null, resetSession: true };
   }
   if (resumed && previous?.instructions !== fingerprint) {

@@ -882,7 +882,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const instructions = `Stable rules.${codexSandboxSuffix}`;
     const receiptPath = join(DATA_DIR, "codex-instructions", `${createHash("sha256").update(JSON.stringify(["t-overflow", "codex-thread-1"])).digest("hex")}.sha256`);
     mkdirSync(dirname(receiptPath), { recursive: true });
-    writeFileSync(receiptPath, JSON.stringify({ instructions: createHash("sha256").update(instructions).digest("hex"), injected: 90_000 }), { mode: 0o600 });
+    // An earlier block, with the thread's blocks already near the cap: injecting this changed one would cross it.
+    writeFileSync(receiptPath, JSON.stringify({ instructions: createHash("sha256").update("Older rules.").digest("hex"), injected: 84_900 }), { mode: 0o600 });
     const dump = join(scratch, "instruction-overflow.json");
     process.env.FAKE_CODEX_DUMP = dump;
     const recoveryText = "History\nUser: go on";

@@ -1319,7 +1319,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
         const { deliverVolatile, hadVolatile, commitVolatile, resetSession } = await syncCodexInstructions(threadId, codexThreadId, instructionsFor(approvalParams),
-          promptSplit ? turn.systemVolatile ?? "" : "", resumedNativeThread, request, Boolean(turn.mentionTurn));
+          promptSplit ? turn.systemVolatile ?? "" : "", resumedNativeThread, request, Boolean(turn.mentionTurn), Boolean(turn.recoveryText?.trim()));
         if (resetSession) { droppedSession = "instruction-overflow"; return relaunch("instruction_overflow", "Codex did not shut down while moving this conversation to a fresh session", "rpc_error"); }
         if (deliverVolatile) {
           promptText = withContextNote(

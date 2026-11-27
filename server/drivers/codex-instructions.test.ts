@@ -191,16 +191,30 @@ describe("Codex instruction receipts", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it("asks for a fresh session even without a new edit once the accumulated blocks pass the provider cap", async () => {
+  it("keeps a thread past the provider cap while its block is unchanged, and asks for a fresh session at the next edit", async () => {
     const key = randomUUID();
     const request = vi.fn().mockResolvedValue({});
     await syncCodexInstructions(key, "native", "rules", "", false, request);
     const path = receiptPath(key, "native");
     const receipt = JSON.parse(readFileSync(path, "utf8"));
     writeFileSync(path, JSON.stringify({ ...receipt, injected: CODEX_INJECTED_CHAR_LIMIT + 1 }), { mode: 0o600 });
-    const result = await syncCodexInstructions(key, "native", "rules", "", true, request);
-    expect(result).toEqual({ deliverVolatile: false, hadVolatile: false, commitVolatile: null, resetSession: true });
+    const unchanged = await syncCodexInstructions(key, "native", "rules", "", true, request);
+    expect(unchanged.resetSession).toBe(false);
+    const edited = await syncCodexInstructions(key, "native", "rules v2", "", true, request);
+    expect(edited).toEqual({ deliverVolatile: false, hadVolatile: false, commitVolatile: null, resetSession: true });
     expect(request).not.toHaveBeenCalled();
     expect(JSON.parse(readFileSync(path, "utf8")).injected).toBe(CODEX_INJECTED_CHAR_LIMIT + 1);
+  });
+
+  it("injects the edit as before when the conversation has no history to start a fresh session from", async () => {
+    const key = randomUUID();
+    const request = vi.fn().mockResolvedValue({});
+    await syncCodexInstructions(key, "native", "rules", "", false, request);
+    const path = receiptPath(key, "native");
+    const receipt = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...receipt, injected: CODEX_INJECTED_CHAR_LIMIT + 1 }), { mode: 0o600 });
+    const result = await syncCodexInstructions(key, "native", "rules v2", "", true, request, false, false);
+    expect(result.resetSession).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });
