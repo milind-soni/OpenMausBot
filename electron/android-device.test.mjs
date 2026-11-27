@@ -85,4 +85,16 @@ describe("Android USB device bridge", () => {
       }),
     ).rejects.toThrow("basic punctuation");
   });
+
+  it("runs adb hidden so Windows does not give it a visible console", async () => {
+    const optionsSeen = [];
+    const run = async (_binary, args, options) => {
+      optionsSeen.push(options);
+      return { stdout: devicesOutput, stderr: "" };
+    };
+    const controller = createAndroidDeviceController({ run, resolveBinary: () => "/trusted/adb" });
+
+    await controller.status();
+    expect(optionsSeen.at(-1)?.windowsHide).toBe(true);
+  });
 });

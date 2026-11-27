@@ -753,7 +753,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     if (startupCancelled) throw new SetupCancelled();
     if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
-    child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"] });
+    child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"], windowsHide: true });
     if (ownerToken) {
       child.stdin?.on("error", () => {});
       child.stdin?.end(`${ownerToken}\n`);
