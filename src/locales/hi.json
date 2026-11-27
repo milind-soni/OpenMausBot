@@ -4010,5 +4010,8 @@
   "server.github.card.description": "GitHub कनेक्ट करें ताकि {bot} अपना काम आपकी रिपॉज़िटरी में पुश कर सके।",
   "server.github.card.connectInApps": "अपने कंप्यूटर के ऐप में इस कार्ड से, या Apps में, GitHub कनेक्ट करें।",
   "githubSignIn.title": "GitHub साइन-इन",
-  "githubSignIn.tokenPlaceholder": "github_pat_…"
+  "githubSignIn.tokenPlaceholder": "github_pat_…",
+  "vm.idle.detailAll": "निजी डेस्कटॉप और आपके अपने सर्वर पर चलने वाले डेस्कटॉप, दोनों पर लागू होता है। जिस डेस्कटॉप पर कोई टर्न चल रहा हो, उसे कभी बंद नहीं किया जाता। निष्क्रियता के कारण बंद होने पर उसकी फ़ाइलें और इंस्टॉल किए गए ऐप बने रहते हैं।",
+  "vm.idle.shared": "निष्क्रिय डेस्कटॉप {minutes} मिनट बाद बंद हो जाते हैं।",
+  "vm.idle.change": "डेस्कटॉप विवरण में बदलें"
 }

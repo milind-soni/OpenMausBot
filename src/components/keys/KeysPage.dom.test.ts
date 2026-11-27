@@ -590,6 +590,18 @@ describe("Your own servers (SSH)", () => {
     expect(text).not.toMatch(/\bVPS\b|\balias\b|config/);
   });
 
+  it("links to the one shared idle time in Desktop details, showing its minutes", async () => {
+    const { VpsConnection } = await import("./VpsServersPanel");
+    const { SettingsShellContext } = await import("../settings/settings-shell");
+    const go = vi.fn();
+    setConfig({ ...fx.config, localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 45 } });
+    render(() => createElement(SettingsShellContext.Provider, { key: "vps", value: { go } as never }, createElement(VpsConnection)));
+    const line = host.querySelector<HTMLElement>("[data-idle-time-link]")!;
+    expect(line.textContent).toBe("Idle desktops stop after 45 minutes. Change in Desktop details");
+    flushSync(() => line.querySelector("button")!.click());
+    expect(go).toHaveBeenCalledWith("desktops", "desktop-details");
+  });
+
   it("saves the first alias as the default server, then shows it with its limits", async () => {
     const { VpsConnection } = await import("./VpsServersPanel");
     fx.api.mockImplementation(echo({}));

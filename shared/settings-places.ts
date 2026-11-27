@@ -66,6 +66,7 @@ export const SETTINGS_PLACES = [
   {"id":"early","path":"Settings → You and your bots → Early features","words":["experimental","early","preview","write their own skills"],"advanced":true},
   {"id":"all-bots","path":"Settings → You and your bots","words":["all bots"],"advanced":true},
   {"id":"browser","path":"Settings → Desktops & browser → Built-in browser","words":["browser","profiles","browser profiles","open sites","new browser"],"advanced":true},
+  {"id":"desktop-details","path":"Settings → Desktops & browser → Desktop details","words":["idle","idle time","stop idle desktops","idle timeout"],"advanced":true},
   {"id":"desktop-kinds","path":"Settings → Desktops & browser → Desktops","words":["private desktop","sandbox","docker","podman","container","vps","own server","cloud desktops","desktop","vm"],"advanced":true},
   {"id":"saved-steps","path":"Settings → Desktops & browser → Repeat computer tasks without AI","words":["repeat","saved steps","without ai"],"advanced":true},
   {"id":"vault","path":"Settings → Vault","words":["password","passwords","login","logins","secrets","1password","2fa","totp"]},

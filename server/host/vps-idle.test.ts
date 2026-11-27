@@ -19,9 +19,9 @@ import { createVpsIdleHost } from "./vps-idle.ts";
 const DEFAULT_WINDOW_MS = 480 * 60_000;
 
 /** The Cloud browser sandbox's 3-minute rule lives in cloud-computer-power and never reaches this timer. */
-function host() {
+function host(extra: Partial<AppConfig> = {}) {
   const bot = { id: "bot-1", name: "Bot", cloudBackend: "vps" } as BotRecord;
-  const cfg = { vps: { sshAlias: "my-vps" } } as AppConfig;
+  const cfg = { vps: { sshAlias: "my-vps" }, ...extra } as AppConfig;
   const idle = createVpsIdleHost({
     cfg,
     store: { bots: [bot], bot: (id) => (id === bot.id ? bot : null) },
@@ -53,6 +53,26 @@ describe("idle SSH server desktops", () => {
     await vi.advanceTimersByTimeAsync(DEFAULT_WINDOW_MS - 1_000);
     expect(stops()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1_000);
+    expect(stops()).toHaveLength(1);
+    idle.cancelAll();
+  });
+
+  it("uses Desktop details' shared idle time when config.json sets no server-only time", async () => {
+    const { bot, idle } = host({ localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 30 } });
+    idle.touchVpsIdle(bot);
+    await vi.advanceTimersByTimeAsync(30 * 60_000 - 1_000);
+    expect(stops()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stops()).toHaveLength(1);
+    idle.cancelAll();
+  });
+
+  it("lets the server-only vpsIdle.timeoutMinutes override the shared idle time", async () => {
+    const { bot, idle } = host({ localVm: { mode: "shared", maxInstances: 1, idleTimeoutMinutes: 30 }, vpsIdle: { timeoutMinutes: 60 } });
+    idle.touchVpsIdle(bot);
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(stops()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(stops()).toHaveLength(1);
     idle.cancelAll();
   });
