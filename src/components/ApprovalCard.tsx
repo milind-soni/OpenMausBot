@@ -226,6 +226,12 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
   return undefined;
 }
 
+/** What Details shows under an applied change: for a teammate skills batch, each teammate's change. */
+export function appliedDetails(card: OptionCardData, name: string): string {
+  if (activeLocale() !== "en" && card.waitRequest) return t("approval.applied.waitFollowUp", { name, followUp: card.waitRequest.followUp ?? "" });
+  return card.skillRequest?.teammates && card.skillRequest.preview ? card.skillRequest.preview : card.subtitle;
+}
+
 function AppliedChangeLine({
   card,
   name,
@@ -336,7 +342,7 @@ function AppliedChangeLine({
           aria-label={t("approval.aria.appliedDetails")}
           className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink"
         >
-          {activeLocale() !== "en" && card.waitRequest ? t("approval.applied.waitFollowUp", { name: originalName ?? name, followUp: card.waitRequest.followUp ?? "" }) : card.subtitle}
+          {appliedDetails(card, originalName ?? name)}
         </pre>
       )}
     </div>

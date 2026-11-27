@@ -65,8 +65,10 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
     for (const step of all) {
       const result = turnOne(step);
       if ("error" in result) {
-        for (const back of turned.reverse()) turnOne({ ...back, on: !back.on });
-        return { error: `${botName(step.botId)}, "${step.name}": ${String(result.error)}. Nothing was changed.` };
+        const stuck = turned.reverse().filter((back) => "error" in turnOne({ ...back, on: !back.on }));
+        const failed = `${botName(step.botId)}, "${step.name}": ${String(result.error)}.`;
+        if (!stuck.length) return { error: `${failed} Nothing was changed.` };
+        return { error: `${failed} These could not be turned back and are still changed: ${stuck.map((back) => `${botName(back.botId)}, "${back.name}"`).join("; ")}.` };
       }
       turned.push(step);
     }
