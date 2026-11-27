@@ -303,7 +303,7 @@ import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPos
 import { messagePages, pageMessage, pageSize, slimMessage } from "./host/message-pages.ts"; import { SUGGESTION_MAX_AGE_MS, suggestedSelection } from "./host/suggested-selection.ts"; import { otherProviderSelection } from "./checker-model.ts"; import { checkWorkFile, createCheckWork } from "./host/check-work.ts";
 import { coordinateResultMessage, createAsksActingPerson, createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts"; import { createMausBotOwnChat } from "./host/mausbot-own-chat.ts"; import { moveMemoryLayer } from "./memory-move.ts";
 import { createQueuedReason } from "./host/queued-reason.ts";
-import { ReplayBuffer } from "./host/sse-replay.ts";
+import { ReplayBuffer, type ReplayFrame } from "./host/sse-replay.ts";
 import {
   mentionedBots,
   roomResponders,
@@ -568,7 +568,8 @@ import {
   type Viewer,
 } from "./bot-visibility.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
-import { deliverSseFrame, openSseHeartbeat } from "./sse-fanout.ts"; import { createBotFrames, takesFrame, type BotFrameForm } from "./host/bot-frames.ts";
+import { createEventFeed, type EventWriter } from "./routes/event-feed.ts";
+import { createBotFrames, takesFrame, type BotFrameForm } from "./host/bot-frames.ts";
 import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret.ts";
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
@@ -4552,8 +4553,7 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
   store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: !personRequest(owner) });
 }
 
-interface SseClient {
-  res: ServerResponse;
+interface SseClient extends EventWriter {
   admin: boolean;
   /** On a Team Cloud, who the stream is for: its config frames carry that person's own profile. */
   person?: SessionRecord;
@@ -4561,12 +4561,9 @@ interface SseClient {
   appWindow: boolean; /** The phone behind this stream, as routes/phones.ts keys it: while it is open, that phone gets no push. */ pushKey?: string;
   /** Revoking or expiring this session must end the stream, not just future requests. */
   sessionId?: string;
-  backpressured: boolean;
   viewer: Viewer;
   seen: StreamSeen;
   ask: AskViewer;
-  /** Stops the heartbeat and leaves `sseClients` before ending the response; every way a stream ends goes through it. */
-  close: () => void;
 }
 const { streams: sseClients, ...teamPresence } = createTeamPresenceHost<SseClient>({ people: teamOwners.people, broadcast, audienceOf: (threadId) => teamHost.audienceOf(threadId), sharedWithOne: (threadId) => conversationShares.readers(threadId) !== null, store: () => store, visibleTo }); type StreamView = Pick<SseClient, "admin" | "person" | "viewer" | "seen" | "ask">; const phonePush = new PhonePush({ dataDir: DATA_DIR, access: () => phonePushAccess.current(), enabled: () => phonePushEnabled(cfg), live: (key) => [...sseClients].some((client) => client.pushKey === key), room: (notification) => { const group = (notification.groupId ? store.group(notification.groupId) : undefined) ?? store.groupByThread(notification.threadId); return group && !group.dm ? { id: group.id, name: group.name } : undefined; } }); const phoneActivity = new PhoneActivity({ dataDir: DATA_DIR, push: phonePush, available: () => CLOUD_TEAM === null, /* a Team Cloud: a bot's state is everyone's, not one person's */ hasOpenAsk: (botId) => openCardRows().some((row) => row.fromBotId === botId || store.botByThread(row.threadId)?.id === botId), bot: (botId) => { const bot = store.bot(botId); const working = bot ? store.tasks(botId).find((task) => threadBusy(botId, task.threadId)) : undefined; return bot ? { name: bot.name, busy: Boolean(working), threadId: working?.threadId ?? bot.threadId } : undefined; }, botOfThread: (threadId) => store.botByThread(threadId)?.id });
 
@@ -4649,6 +4646,7 @@ const SSE_HEARTBEAT_MS =
   Number.isFinite(configuredSseHeartbeatMs) && configuredSseHeartbeatMs > 0
     ? configuredSseHeartbeatMs
     : 15_000;
+const openEventFeed = createEventFeed(upgrades, SSE_HEARTBEAT_MS, id => sessions.isLive(id));
 let lastSeq = 0;
 const replayBuffer = new ReplayBuffer();
 
@@ -4663,58 +4661,64 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
+const numberedJson = (payload: Record<string, unknown>, seq: number) => JSON.stringify({ ...payload, seq });
+
 /** `adminOnly` frames are withheld from client sessions, live and on replay; a `person`'s frames reach only their streams. */
 function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string; frames?: BotFrameForm } = {}) {
   // Close stale email streams before any further workspace data is delivered.
   sessions.recheckMembership();
   const seq = ++lastSeq;
   const kind = String(payload.kind ?? "");
-  const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
+  const json = numberedJson(payload, seq);
   // Members get config as configured-or-not and every bot without its server alias.
   const clientPayload = options.adminOnly ? null : kind === "config" ? configForAccess(payload as ReturnType<typeof configStatus>, false) : memberFramePayload(payload);
-  const clientFrame = clientPayload === null ? null : clientPayload === payload ? frame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...clientPayload, seq })}\n\n`;
-  replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}), ...(options.frames ? { frames: options.frames } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, seq, options));
-  const ownGroups: OwnGroupFrames = new Map();
+  const clientJson = clientPayload === null ? null : clientPayload === payload ? json : numberedJson(clientPayload, seq);
+  const event = { seq, kind, json, clientJson, payload, person: options.person, frames: options.frames };
+  replayBuffer.push(event); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, options));
+  const ownGroups: OwnGroupFrames | undefined = kind === "group" && sseClients.size > 1 ? new Map() : undefined;
+  const projected = ownGroups && new Map<Record<string, unknown>, string>();
+  const id = `${STREAM_ID}:${seq}`;
   for (const client of Array.from(sseClients)) {
-    if (!wants(client, kind, options.frames) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, options.person)) continue;
-    // Admin-only frames (clientFrame null) never reach members, and a member never falls back to the admin frame.
-    const out = CLOUD_TEAM && kind === "config" && clientFrame !== null ? teamConfigFrame(client, seq, payload)
-      : memberFrame(client, seq, payload, client.admin ? frame : clientFrame, ownGroups);
-    if (out === null) continue;
-    if (deliverSseFrame(client, kind, out) === "disconnected") client.close();
+    const out = streamJson(client, event, ownGroups, projected);
+    if (out !== null) client.send(kind, out, id);
   }
 }
 
-/** A Team Cloud's config frame is each person's own: it carries their profile as "you". */
-function teamConfigFrame(client: SseClient, seq: number, payload: Record<string, unknown>): string {
-  const own = configForAccess(payload as ReturnType<typeof configStatus>, client.admin, client.person);
-  return `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...own, seq })}\n\n`;
+function streamJson(client: SseClient, event: ReplayFrame, ownGroups?: OwnGroupFrames, projected?: Map<Record<string, unknown>, string>): string | null {
+  const { kind, seq, payload } = event;
+  const base = client.admin ? event.json : event.clientJson;
+  if (base === null || !payload || !wants(client, kind, event.frames) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, event.person)) return null;
+  const selected = CLOUD_TEAM && kind === "config" && event.clientJson !== null
+    ? configForAccess(payload as ReturnType<typeof configStatus>, client.admin, client.person)
+    : memberPayload(client, payload, ownGroups);
+  if (!selected) return null;
+  if (selected === payload) return base;
+  const cached = projected?.get(selected);
+  if (cached !== undefined) return cached;
+  const json = numberedJson(selected, seq);
+  projected?.set(selected, json);
+  return json;
 }
 
 const streamFor = (client: Pick<SseClient, "person">, person: string | undefined) => !person || (client.person !== undefined && personKey(client.person) === person);
 /** What a stream for `auth` is shown; a phone with no stream open is judged by the same view (pushReaches). */
 function streamView(auth: RequestAuth, viewer: Viewer = viewerFor(auth)): StreamView { const visibleNow = visibleTo(viewer); return { admin: auth.scopes.includes("admin"), viewer, ask: teamOwners.viewer(auth), seen: viewer.kind === "all" && !visibleNow.filtersThreads ? { bots: new Set(), groups: new Set() } : { bots: new Set(store.bots.filter((bot) => visibleNow.bot(bot.id)).map((bot) => bot.id)), groups: new Set(store.groups.filter((group) => visibleNow.group(group.id)).map((group) => group.id)) }, ...(CLOUD_TEAM && auth.kind === "session" ? { person: auth.session } : {}) }; }
 /** Whether the phone behind `key` would have been sent this frame had its stream been open: broadcast's own rule. */
-function pushReaches(key: string, payload: Record<string, unknown>, seq: number, options: { adminOnly?: boolean; person?: string }): boolean {
+function pushReaches(key: string, payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string }): boolean {
   const session = key.startsWith("session:") ? sessions.record(key.slice("session:".length)) : null;
   const auth: RequestAuth | null = key.startsWith("companion:") ? { kind: "loopback", scopes: ["admin", "client"], companionDevice: key.slice("companion:".length) } : session ? { kind: "session", session, via: "bearer", scopes: session.scopes } : null;
-  const view = auth && streamView(auth); return view !== null && teamOwners.reaches(view.ask, payload) && streamFor(view, options.person) && memberFrame(view, seq, payload, view.admin || !options.adminOnly ? "" : null) !== null; }
+  const view = auth && streamView(auth); return view !== null && (view.admin || !options.adminOnly) && teamOwners.reaches(view.ask, payload) && streamFor(view, options.person) && memberPayload(view, payload) !== null; }
 
-/** `clientFrame` is the frame this client would get unnarrowed: an admin's is the admin frame, narrowed on a Team Cloud.
- * `ownGroups` keeps each person's room for one frame. */
-function memberFrame(client: StreamView, seq: number, payload: Record<string, unknown>, clientFrame: string | null, ownGroups: OwnGroupFrames = new Map()): string | null {
-  const own = client.person && clientFrame !== null ? personRooms.ownGroupFrame(ownGroups, personKey(client.person), payload, (mine) => `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...mine, seq })}\n\n`) : null;
-  if (own) { payload = own.payload; clientFrame = own.frame; }
-  const order = clientFrame === null ? null : botOrders?.streamFrame(client, payload); if (order) { payload = order; clientFrame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...order, seq })}\n\n`; }
+function memberPayload(client: StreamView, payload: Record<string, unknown>, ownGroups?: OwnGroupFrames): Record<string, unknown> | null {
+  if (client.person && payload.kind === "group") payload = personRooms.ownGroupPayload(ownGroups ?? new Map(), personKey(client.person), payload) ?? payload;
+  payload = botOrders?.streamFrame(client, payload) ?? payload;
   const visible = visibleTo(client.viewer);
-  if (clientFrame === null || (client.viewer.kind === "all" && !visible.filtersThreads)) return clientFrame;
+  if (client.viewer.kind === "all" && !visible.filtersThreads) return payload;
   if (visible.everything) {
     noteSeen(payload, client.seen);
-    return clientFrame;
+    return payload;
   }
-  const narrowed = frameForMember(payload, memberFrameContext(visible), client.seen);
-  if (!narrowed) return null;
-  return narrowed === payload ? clientFrame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...narrowed, seq })}\n\n`;
+  return frameForMember(payload, memberFrameContext(visible), client.seen) ?? null;
 }
 onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueuedMessages() }));
 
@@ -14462,62 +14466,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     if (method === "GET" && path === "/api/events") {
       const pushKey = phoneKey(auth);
-      const client: SseClient = {
-        res, ...streamView(auth, viewer), ...(pushKey ? { pushKey } : {}),
-        screens: url.searchParams.get("screens") !== "off", threadFrames: url.searchParams.get("frames") === "thread", appWindow: url.searchParams.get("window") === "1",
-        backpressured: false,
-        // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
-        close: openSseHeartbeat(res, {
-          everyMs: SSE_HEARTBEAT_MS,
-          live: () => !client.sessionId || sessions.isLive(client.sessionId),
-          onClose: () => sseClients.delete(client),
-        }),
-      };
-      if (auth.kind === "session") client.sessionId = auth.session.id;
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-        // Honoured by nginx-compatible reverse proxies; harmless elsewhere.
-        "x-accel-buffering": "no",
-      });
-
-      // EventSource reconnects with a newer Last-Event-ID while the URL keeps an older ?since=: prefer the header, or the stale query replays forever.
-      const since =
-        cursorSeq(req.headers["last-event-id"]) ??
-        cursorSeq(url.searchParams.get("since") ?? undefined);
-      // A cursor that fell off the buffer gets no partial replay: it would leave a permanent hole.
-      const resumed =
-        since !== null &&
-        since <= lastSeq &&
-        replayBuffer.covers(since, lastSeq) && botFrames.resumable(since, threadFramesFor(client)) &&
-        // A replay is judged by today's audience and cannot withdraw what an audience change hid: snapshot instead.
-        !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
-      res.write(
-        `data: ${JSON.stringify({
-          kind: "hello",
-          cursor: `${STREAM_ID}:${lastSeq}`,
-          resumed,
-        } satisfies ServerFrame)}\n\n`,
-      );
-      if (resumed) {
-        for (const buffered of replayBuffer) {
-          if (buffered.seq <= since || !wants(client, buffered.kind, buffered.frames) || (buffered.payload && !teamOwners.reaches(client.ask, buffered.payload)) || !streamFor(client, buffered.person)) continue;
-          const frame = CLOUD_TEAM && buffered.kind === "config" && buffered.clientFrame !== null && buffered.payload
-            ? teamConfigFrame(client, buffered.seq, buffered.payload)
-            : buffered.payload
-              ? memberFrame(client, buffered.seq, buffered.payload, client.admin ? buffered.frame : buffered.clientFrame)
-              : client.admin
-                ? buffered.frame
-                : buffered.clientFrame;
-          if (frame) res.write(frame);
+      let active: SseClient | undefined;
+      return openEventFeed(req, res, auth, writer => {
+        const client: SseClient = {
+          ...writer, ...streamView(auth, viewer), ...(pushKey ? { pushKey } : {}),
+          sessionId: auth.kind === "session" ? auth.session.id : undefined,
+          screens: url.searchParams.get("screens") !== "off", threadFrames: url.searchParams.get("frames") === "thread", appWindow: url.searchParams.get("window") === "1",
+        };
+        active = client;
+        const since = cursorSeq(req.headers["last-event-id"]) ?? cursorSeq(url.searchParams.get("since") ?? undefined);
+        const resumed = since !== null && since <= lastSeq && replayBuffer.covers(since, lastSeq)
+          && botFrames.resumable(since, threadFramesFor(client))
+          && !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
+        if (!client.send("hello", JSON.stringify({ kind: "hello", cursor: `${STREAM_ID}:${lastSeq}`, resumed } satisfies ServerFrame))) return;
+        if (resumed) {
+          for (const buffered of replayBuffer) {
+            if (buffered.seq <= since) continue;
+            const json = streamJson(client, buffered);
+            if (json !== null && !client.send(buffered.kind, json, `${STREAM_ID}:${buffered.seq}`)) return;
+          }
         }
-      }
-
-      sseClients.add(client);
-      req.socket.setTimeout(0);
-      req.on("close", client.close);
-      return;
+        sseClients.add(client);
+      }, () => { if (active) sseClients.delete(active); });
     }
 
     if (method === "GET" && path === "/api/bot-defaults") {

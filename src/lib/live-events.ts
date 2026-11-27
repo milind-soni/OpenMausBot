@@ -1,4 +1,5 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
+import { isDirectWebBrowser, websocketEvents } from "./websocket-events";
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
 import { relayEventSource, relayLink, type LiveEventSourceLike } from "./relay-server";
@@ -42,6 +43,7 @@ interface ListenerTarget {
 
 export interface LiveEventsPlatform {
   createEventSource: (url: string) => LiveEventSourceLike;
+  createWebSocket?: (url: string) => LiveEventSourceLike;
   windowTarget?: ListenerTarget;
   documentTarget?: ListenerTarget;
   isVisible: () => boolean;
@@ -173,12 +175,14 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
       native.onmessage = (event) => adapter.onmessage?.(event);
       return adapter;
     });
-  if (!overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
+  const socket = overrides.createWebSocket ?? (!overrides.createEventSource && isDirectWebBrowser() ? websocketEvents : undefined);
+  if (!socket && !overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
 
   const browserWindow = globalThis.window;
   const browserDocument = globalThis.document;
   return {
     createEventSource,
+    createWebSocket: socket,
     windowTarget:
       overrides.windowTarget ??
       (browserWindow
@@ -217,10 +221,16 @@ export function openLiveEvents(
   const retryMaxMs = Math.max(retryMinMs, handlers.retryMaxMs ?? LIVE_EVENTS_RETRY_MAX_MS);
   const staleCheckMs = Math.min(10_000, Math.max(250, staleMs / 2));
 
+  const socketFeed = Boolean(platform.createWebSocket);
+  const createSource = platform.createWebSocket ?? platform.createEventSource;
+  let helloReceived = false;
+  let helloBudget = 3_000;
   let stopped = false;
   let source: LiveEventSourceLike | null = null;
   let sourceScreens = screensWanted();
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let helloTimer: ReturnType<typeof setTimeout> | undefined;
+  let helloStartedAt = 0;
   let retryAttempt = 0;
   let cursor: string | null = null;
   let lastHeardAt = platform.now();
@@ -241,6 +251,8 @@ export function openLiveEvents(
   const closeSource = () => {
     const current = source;
     source = null;
+    clearTimeout(helloTimer);
+    helloTimer = undefined;
     if (!current) return;
     if (pendingSnapshot?.source === current) {
       snapshotGeneration += 1;
@@ -274,13 +286,33 @@ export function openLiveEvents(
     scheduleReconnect();
   };
 
+  const updateHelloDeadline = () => {
+    if (!source || helloReceived || !socketFeed) return;
+    if (holdReason(platform)) {
+      if (helloTimer !== undefined) {
+        helloBudget = Math.max(0, helloBudget - (platform.now() - helloStartedAt));
+        clearTimeout(helloTimer);
+        helloTimer = undefined;
+      }
+    } else if (helloTimer === undefined) {
+      const current = source;
+      helloStartedAt = platform.now();
+      helloTimer = setTimeout(() => {
+        helloTimer = undefined;
+        if (!holdReason(platform)) connectionLost(current);
+      }, helloBudget);
+    }
+  };
+
   connect = () => {
     if (!stopped && !source) livePhaseNow = (!platform.isOnline() ? "offline" : cloudAsleep() ? "asleep" : null) ?? "opening";
     if (stopped || source || !platform.isOnline() || cloudAsleep()) return;
     let current: LiveEventSourceLike;
     try {
       sourceScreens = screensWanted();
-      current = platform.createEventSource(liveEventsUrl({ since: cursor, screens: sourceScreens }));
+      helloReceived = false;
+      helloBudget = 3_000;
+      current = createSource(liveEventsUrl({ since: cursor, screens: sourceScreens }));
     } catch {
       handlers.onError?.();
       scheduleReconnect();
@@ -288,9 +320,10 @@ export function openLiveEvents(
     }
 
     source = current;
+    updateHelloDeadline();
     lastHeardAt = platform.now();
     current.onopen = () => {
-      if (stopped || source !== current) return;
+      if (stopped || source !== current || socketFeed) return;
       lastHeardAt = platform.now();
       livePhaseNow = "open";
       handlers.onOpen?.();
@@ -303,6 +336,8 @@ export function openLiveEvents(
       const frame = parseLiveFrame(event.data);
       if (!frame) return;
 
+      if (socketFeed && !helloReceived && frame.kind !== "hello") return;
+
       if (isLivePing(frame)) {
         // An open event only proves a handshake; a ping proves the stream stayed usable.
         retryAttempt = 0;
@@ -310,6 +345,14 @@ export function openLiveEvents(
       }
 
       if (frame.kind === "hello") {
+        if (socketFeed && !helloReceived) {
+          if (typeof frame.resumed !== "boolean" || typeof frame.cursor !== "string") return;
+          helloReceived = true;
+          clearTimeout(helloTimer);
+          helloTimer = undefined;
+          livePhaseNow = "open";
+          handlers.onOpen?.();
+        }
         // Replay frames follow `resumed:true`: advancing to hello's cursor now could skip one if the socket dies mid-replay.
         if (frame.resumed === false) {
           const generation = ++snapshotGeneration;
@@ -382,15 +425,17 @@ export function openLiveEvents(
   const recover = () => {
     // Background tabs suspend timers and network delivery: recover once on wake.
     if (stopped || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
+    if (source && socketFeed && !helloReceived) return;
     if (!source || shouldReconnectLiveEvents(lastHeardAt, platform.now(), staleMs)) {
       reconnectNow(source !== null);
     }
   };
-  const onOnline = () => recover();
+  const onOnline = () => { updateHelloDeadline(); recover(); };
   const onFocus = () => {
     if (platform.isVisible()) recover();
   };
   const onVisibilityChange = () => {
+    updateHelloDeadline();
     if (platform.isVisible()) recover();
   };
   const onRetry = () => {
@@ -404,8 +449,9 @@ export function openLiveEvents(
   connect();
   const staleTimer = setInterval(recover, staleCheckMs);
   // The person is back after the Cloud slept: reconnect at once, which wakes it.
-  const stopPower = onCloudPower((asleep) => { if (!asleep) reconnectNow(false); });
+  const stopPower = onCloudPower((asleep) => { updateHelloDeadline(); if (!asleep) reconnectNow(false); });
   platform.windowTarget?.addEventListener("online", onOnline);
+  platform.windowTarget?.addEventListener("offline", updateHelloDeadline);
   platform.windowTarget?.addEventListener("focus", onFocus);
   platform.windowTarget?.addEventListener(RETRY_LIVE_EVENTS, onRetry);
   platform.documentTarget?.addEventListener("visibilitychange", onVisibilityChange);
@@ -419,6 +465,7 @@ export function openLiveEvents(
     clearRetry();
     closeSource();
     platform.windowTarget?.removeEventListener("online", onOnline);
+    platform.windowTarget?.removeEventListener("offline", updateHelloDeadline);
     platform.windowTarget?.removeEventListener("focus", onFocus);
     platform.windowTarget?.removeEventListener(RETRY_LIVE_EVENTS, onRetry);
     platform.documentTarget?.removeEventListener("visibilitychange", onVisibilityChange);

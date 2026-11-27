@@ -5,6 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { WebSocket } from "ws";
+import { loadEnvironmentId } from "./environment.ts";
+import { sessionCookieName } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -108,6 +111,27 @@ function openStream(as: string, lastEventId?: string) {
     }
   })();
   return { frames, state, ready: () => waitFor(() => state.hello, 10_000), close: () => controller.abort() };
+}
+
+function openSocket(as: string, since?: string): ReturnType<typeof openStream> {
+  const url = new URL("/api/events", BASE);
+  if (since) url.searchParams.set("since", since);
+  const cookie = sessionCookieName(Number(url.port), loadEnvironmentId(join(home, ".openmausbot")));
+  const ws = new WebSocket(url, { origin: BASE, headers: { cookie: `${cookie}=${tokens[as]}` } });
+  const frames: ReturnType<typeof openStream>["frames"] = [];
+  const state: ReturnType<typeof openStream>["state"] = { hello: null, ended: false };
+  ws.on("message", data => {
+    const { id, frame } = JSON.parse(data.toString());
+    if (frame.kind === "hello") {
+      state.hello = frame;
+      state.cursor = frame.cursor;
+    } else if (frame.kind !== "ping") {
+      frames.push(frame);
+      if (id) state.cursor = id;
+    }
+  });
+  ws.on("close", () => { state.ended = true; });
+  return { frames, state, ready: () => waitFor(() => state.hello, 10_000), close: () => ws.terminate() };
 }
 
 const ids = { pub: "", pubThread: "", hr: "", hrThread: "", board: "", roomPub: "", roomMixed: "", roomMixedThread: "", hrRoutine: "", hrHook: "", hrImage: "", avatar: "", fresh: "" };
@@ -366,21 +390,22 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect((await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === ids.pub).visibility).toBeUndefined();
   });
 
-  it("streams a member only what they may see, and hands a fresh snapshot to every member stream when an audience changes", async () => {
-    let bob = openStream(BOB);
-    let ada = openStream(ADA);
+  it.each([{ transport: "SSE", open: openStream }, { transport: "WebSocket", open: openSocket }])("streams a member only what they may see over $transport, and hands a fresh snapshot to every member stream when an audience changes", async ({ transport, open }) => {
+    const secret = `Quarterly bonus plan ${transport}`;
+    let bob = open(BOB);
+    let ada = open(ADA);
     try {
       expect(await bob.ready()).toBeTruthy();
       expect(await ada.ready()).toBeTruthy();
-      expect((await api("POST", `/api/bots/${ids.hr}/messages`, { text: "Quarterly bonus plan", threadId: ids.hrThread }, BOSS)).status).toBe(202);
-      expect(await settledReply(ids.hrThread, "Quarterly bonus plan")).not.toBeNull();
-      expect(await waitFor(() => ada.frames.some((f) => f.kind === "message" && f.threadId === ids.hrThread && f.message?.text?.includes("Quarterly bonus plan")))).toBe(true);
+      expect((await api("POST", `/api/bots/${ids.hr}/messages`, { text: secret, threadId: ids.hrThread }, BOSS)).status).toBe(202);
+      expect(await settledReply(ids.hrThread, secret)).not.toBeNull();
+      expect(await waitFor(() => ada.frames.some((f) => f.kind === "message" && f.threadId === ids.hrThread && f.message?.text?.includes(secret)))).toBe(true);
       expect(await waitFor(() => ada.frames.some((f) => f.kind === "runtime" && f.event?.threadId === ids.hrThread))).toBe(true);
       expect((await api("POST", `/api/bots/${ids.pub}/messages`, { text: "Printer help", threadId: ids.pubThread }, BOSS)).status).toBe(202);
       expect(await waitFor(() => bob.frames.some((f) => f.kind === "message" && f.threadId === ids.pubThread))).toBe(true);
-      for (const hidden of [ids.hr, ids.hrThread, ids.board, ids.roomMixed, "Quarterly bonus plan", "Payroll Zebra"]) expect(JSON.stringify(bob.frames)).not.toContain(hidden);
+      for (const hidden of [ids.hr, ids.hrThread, ids.board, ids.roomMixed, secret, "Payroll Zebra"]) expect(JSON.stringify(bob.frames)).not.toContain(hidden);
 
-      const admin = openStream(BOSS);
+      const admin = open(BOSS);
       expect(await admin.ready()).toBeTruthy();
       expect((await api("PATCH", `/api/bots/${ids.hr}`, { visibility: { people: [ADA, BOB] } }, BOSS)).status).toBe(200);
       const arrived = await waitFor(() => bob.frames.find((f) => f.kind === "bot" && f.bot?.id === ids.hr));
@@ -390,7 +415,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       await new Promise((r) => setTimeout(r, 300));
       expect(admin.state.ended).toBe(false);
       admin.close();
-      bob = openStream(BOB, bob.state.cursor);
+      bob = open(BOB, bob.state.cursor);
       expect((await bob.ready())?.resumed).toBe(false);
       expect((await api("GET", "/api/bots?messages=5", undefined, BOB)).body.groups.map((g: any) => g.id)).not.toContain(ids.roomMixed);
 
@@ -398,7 +423,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       bob.close();
       ada.close();
       expect((await api("PATCH", `/api/bots/${ids.hr}`, { visibility: "admins" }, BOSS)).status).toBe(200);
-      bob = openStream(BOB, away);
+      bob = open(BOB, away);
       expect((await bob.ready())?.resumed).toBe(false);
       const bobNow = (await api("GET", "/api/bots?messages=5", undefined, BOB)).body;
       expect(bobNow.bots.map((b: any) => b.id)).not.toContain(ids.hr);
@@ -406,7 +431,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(await status("GET", `/api/threads/${ids.hrThread}/messages`, ADA)).toBe(404);
       expect((await api("PATCH", `/api/bots/${ids.pub}`, { color: "green" }, BOSS)).status).toBe(200);
       expect(await waitFor(() => bob.frames.some((f) => f.kind === "bot" && f.bot?.id === ids.pub))).toBe(true);
-      const settled = openStream(BOB, bob.state.cursor);
+      const settled = open(BOB, bob.state.cursor);
       expect((await settled.ready())?.resumed).toBe(true);
       settled.close();
       const before = bob.frames.length;

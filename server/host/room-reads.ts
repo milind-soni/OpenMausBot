@@ -102,7 +102,7 @@ const threadHoldKey = (threadId: string) => `held:${threadId}`;
 
 /** One stream frame's `group` payload as a person's own room, built once per person for that frame; null: theirs is the
  * room as it is. */
-export type OwnGroupFrames = Map<string, { payload: Record<string, unknown>; frame: string } | null>;
+export type OwnGroupFrames = Map<string, Record<string, unknown> | null>;
 
 export interface PersonRoomsDeps {
   /** Each person's own read line in each room, on a Team Cloud; null anywhere else, where a room reads the same for all. */
@@ -162,15 +162,12 @@ export function createPersonRooms(deps: PersonRoomsDeps) {
       else if (change.type === "thread.deleted" && change.threadId) for (const key of [threadReadKey, threadHoldKey]) reads?.forgetRoom(key(change.threadId));
     },
     groupForAuth: (auth: RequestAuth, group: WireGroup): WireGroup => groupForPerson(group, auth.kind === "session" ? personKey(auth.session) : null),
-    /** A `group` frame as `person`'s own room (`frameOf` writes the stream's frame for a payload), kept in `ownGroups` for
-     * the rest of that frame's streams; null when it is the room as it is. */
-    ownGroupFrame(ownGroups: OwnGroupFrames, person: string, payload: Record<string, unknown>, frameOf: (payload: Record<string, unknown>) => string) {
+    ownGroupPayload(ownGroups: OwnGroupFrames, person: string, payload: Record<string, unknown>) {
       if (!reads || payload.kind !== "group") return null;
       if (!ownGroups.has(person)) {
         const group = payload.group as WireGroup;
         const own = groupForPerson(group, person);
-        const ownPayload = { ...payload, group: own };
-        ownGroups.set(person, own === group ? null : { payload: ownPayload, frame: frameOf(ownPayload) });
+        ownGroups.set(person, own === group ? null : { ...payload, group: own });
       }
       return ownGroups.get(person) ?? null;
     },

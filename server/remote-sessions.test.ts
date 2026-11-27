@@ -1,10 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { request } from "node:http";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 
 import { PAIRING_LOCKOUT } from "./sessions.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -111,11 +113,44 @@ const header = (headers: Record<string, string | string[] | undefined>, name: st
   return Array.isArray(v) ? v.join("\n") : (v ?? "");
 };
 
+async function refusedFeed(headers: Record<string, string>): Promise<number> {
+  const ws = new WebSocket(`${BASE}/api/events`, { headers });
+  try {
+    const result = await Promise.race([
+      once(ws, "unexpected-response").then(([, res]) => { res.resume(); return res.statusCode as number; }),
+      once(ws, "open").then(() => { throw new Error("unexpectedly subscribed"); }),
+    ]);
+    return result;
+  } finally { ws.on("error", () => {}); ws.terminate(); }
+}
 async function pairingCode(scopes?: string[]): Promise<{ code: string; credential: string; url: string | null; inviteUrl: string | null; serverName: string; hint: string | null }> {
   const opened = await call("/api/auth/pairing", { method: "POST", body: JSON.stringify(scopes ? { scopes } : {}) });
   expect(opened.status).toBe(200);
   return opened.body;
 }
+
+it("admits only a same-origin paired browser to the event socket", async () => {
+  const source = "10.0.0.88";
+  const origin = `http://${REMOTE_HOST}`;
+  const opened = await pairingCode(["client"]);
+  const paired = await call("/api/auth/pair", { method: "POST", headers: remote(source), body: JSON.stringify({ code: opened.code, cookie: true }) });
+  expect(paired.status).toBe(200);
+  const cookie = header(paired.headers, "set-cookie").split(";")[0]!;
+  expect(await refusedFeed(remote(source, { origin }))).toBe(403);
+  expect(await refusedFeed({ origin: BASE })).toBe(401);
+  expect(await refusedFeed({})).toBe(403);
+  expect(await refusedFeed(remote(source, { cookie }))).toBe(403);
+  expect(await refusedFeed(remote(source, { cookie, origin: "https://another.example" }))).toBe(403);
+  const ws = new WebSocket(`${BASE}/api/events`, { headers: remote(source, { cookie, origin }) });
+  try {
+    const message = once(ws, "message");
+    const ended = once(ws, "close");
+    const [first] = await message;
+    expect(JSON.parse(first.toString()).frame.kind).toBe("hello");
+    ws.send("not a command channel");
+    await ended;
+  } finally { ws.terminate(); }
+});
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-remote-test-"));

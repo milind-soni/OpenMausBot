@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { EventFeedMessage } from "../shared/wire.ts";
+import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { openHeadlessChrome, type HeadlessPage } from "./testing/headless-chrome.ts";
+import { fixtureApi } from "./testing/preview-fixture.ts";
+
+const site = mkdtempSync(join(tmpdir(), "omb-event-feed-"));
+writeFileSync(join(site, "index.html"), "<!doctype html><title>Event feed fixture</title>");
+const reply = "Fixture socket reply 437";
+const fixture = await launchVerificationServer({ FAKE_CLAUDE_REPLIES: JSON.stringify([reply]) }, undefined, undefined, undefined, undefined, undefined, [], undefined, site);
+let page: HeadlessPage | undefined;
+try {
+  const { url, dataDir } = fixture.info;
+  const api = fixtureApi(url);
+  const { bot } = await runControlOmb(["new-bot", "--name", "Socket probe", "--url", url]) as { bot: { id: string } };
+  const pairing = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+  page = await openHeadlessChrome(join(dataDir, "chrome"));
+  await page.send("Page.navigate", { url });
+  await page.until("document.title === 'Event feed fixture'");
+  const session = await page.evaluate(`fetch('/api/auth/pair', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({code:${JSON.stringify(pairing.code)},cookie:true}) }).then(r => r.json()).then(p => p.session.id)`);
+  assert.equal(typeof session, "string");
+  await page.evaluate(`
+    window.connect = since => {
+      const messages = []; window.framesSeen = messages;
+      const socket = new WebSocket('/api/events?since=' + encodeURIComponent(since)); window.feed = socket;
+      socket.onmessage = e => messages.push(JSON.parse(e.data));
+    };
+    window.sse = new EventSource('/api/events'); window.sseSeen = [];
+    sse.onmessage = e => sseSeen.push({id:e.lastEventId,frame:JSON.parse(e.data)});
+    connect('obsolete:1');
+  `);
+  await page.until("framesSeen[0]?.frame.kind === 'hello' && sseSeen[0]?.frame.kind === 'hello'");
+  const hello = await page.evaluate("framesSeen[0]") as EventFeedMessage;
+  assert(hello.frame.kind === "hello" && !hello.frame.resumed && hello.id === undefined);
+  await api("PATCH", "/api/config", { profile: { name: "Feed fixture", email: "private-fixture@example.invalid" } });
+  const config = `(e => e.frame.kind === 'config' && e.frame.profile?.name === 'Feed fixture')`;
+  await page.until(`framesSeen.some(${config}) && sseSeen.some(${config})`);
+  const restricted = await page.evaluate(`framesSeen.find(${config})`);
+  assert.equal(restricted.frame.profile.email, "");
+  assert.deepEqual(restricted, await page.evaluate(`sseSeen.find(${config})`));
+  await runControlOmb(["send", "--bot", bot.id, "--text", "Please reply", "--url", url]);
+  const settled = await runControlOmb(["wait", "--bot", bot.id, "--timeout", "30", "--url", url]) as { status: string };
+  assert.equal(settled.status, "settled");
+  const select = `(e => e.frame.kind === 'message' && JSON.stringify(e.frame.message).includes(${JSON.stringify(reply)}))`;
+  await page.until(`framesSeen.some(${select}) && sseSeen.some(${select})`);
+  const live = await page.evaluate(`framesSeen.find(${select})`);
+  assert(live.id);
+  assert.deepEqual(live, await page.evaluate(`sseSeen.find(${select})`));
+  await page.evaluate(`feed.close(); connect(${JSON.stringify(hello.frame.cursor)});`);
+  await page.until(`framesSeen.some(${select})`);
+  assert.equal(await page.evaluate("framesSeen[0].frame.resumed"), true);
+  assert.deepEqual(live, await page.evaluate(`framesSeen.find(${select})`));
+  assert.deepEqual(restricted, await page.evaluate(`framesSeen.find(${config})`));
+  await page.until("framesSeen.some(e => e.frame.kind === 'ping' && !('id' in e))", 25_000);
+  await page.evaluate("sse.close()");
+  await api("DELETE", `/api/auth/sessions/${session}`);
+  await page.until("feed.readyState === WebSocket.CLOSED");
+  await page.evaluate("connect('')");
+  await page.until("feed.readyState === WebSocket.CLOSED");
+  assert.deepEqual(await page.evaluate("framesSeen"), []);
+  console.log("PASS: paired Chromium received the same reply and id over SSE, live WebSocket and replay; obsolete cursor, heartbeat, revocation and refused reconnect passed.");
+} finally {
+  page?.close();
+  await page?.exited(5000);
+  await fixture.close();
+  rmSync(site, { recursive: true, force: true });
+}

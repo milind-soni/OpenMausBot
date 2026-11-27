@@ -1,3 +1,4 @@
+import { isDirectWebBrowser } from "./lib/websocket-events";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -65,6 +66,11 @@ async function chooseRoot(): Promise<React.ReactNode> {
     signInGateShown(endedBeforeReload() ? "session_ended" : "signed_out");
     const pair = <PairPage initialCode={null} reason={endedBeforeReload() ? t("pair.sessionEnded") : session.error} />;
     return home ? <SignedOutAtHome bridge={home} fallback={pair} /> : pair;
+  }
+  if (session.kind === "loopback" && isDirectWebBrowser()) {
+    signInGateShown("signed_out");
+    await pageLanguage;
+    return <PairPage initialCode={null} />;
   }
   forgetEndedSession();
   if (session.kind === "session") rememberTeamSignIn(session.teamSignIn);
