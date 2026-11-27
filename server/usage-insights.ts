@@ -1,5 +1,5 @@
 import type { InsightBucket, InsightEntry, InsightTokens, InsightTotals, UsageInsights } from "../shared/usage-insights.ts";
-import { usageGroupOf, type UsageRow } from "./usage-ledger.ts";
+import { isOnPlanRow, usageGroupOf, type UsageRow } from "./usage-ledger.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 const WEEKDAYS: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
@@ -61,15 +61,27 @@ const rowDuration = (row: UsageRow): number | null => {
 
 const failed = (row: UsageRow) => row.outcome?.status === "error";
 
-function totalsOf(rows: readonly { row: UsageRow; local: LocalTime }[], days: number): InsightTotals {
-  const totals: InsightTotals = { input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, unpriced: 0, errors: 0, tools: 0, durationMs: 0, timedTurns: 0, activeDays: 0, days };
+function totalsOf(
+  rows: readonly { row: UsageRow; local: LocalTime }[],
+  days: number,
+  isPlan: (row: UsageRow) => boolean,
+): InsightTotals {
+  const totals: InsightTotals = { input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, billedCostUsd: null, planCostUsd: 0, unpriced: 0, errors: 0, tools: 0, durationMs: 0, timedTurns: 0, activeDays: 0, days };
   const active = new Set<string>();
   for (const { row, local } of rows) {
     addTokens(totals, row);
     totals.turns += 1;
     const cost = price(row.costUsd);
     if (cost === null) totals.unpriced += 1;
-    else totals.costUsd = (totals.costUsd ?? 0) + cost;
+    else {
+      totals.costUsd = (totals.costUsd ?? 0) + cost;
+      if (isPlan(row)) {
+        totals.planCostUsd = (totals.planCostUsd ?? 0) + cost;
+        totals.billedCostUsd ??= 0;
+      } else {
+        totals.billedCostUsd = (totals.billedCostUsd ?? 0) + cost;
+      }
+    }
     if (failed(row)) totals.errors += 1;
     totals.tools += count(row.tools);
     const duration = rowDuration(row);
@@ -80,19 +92,31 @@ function totalsOf(rows: readonly { row: UsageRow; local: LocalTime }[], days: nu
   return totals;
 }
 
-function entries(rows: readonly UsageRow[], keyOf: (row: UsageRow) => { key: string; label: string; driverKind?: string }): InsightEntry[] {
+function entries(
+  rows: readonly UsageRow[],
+  keyOf: (row: UsageRow) => { key: string; label: string; driverKind?: string },
+  isPlan: (row: UsageRow) => boolean,
+): InsightEntry[] {
   const found = new Map<string, InsightEntry>();
   for (const row of rows) {
     const { key, label, driverKind } = keyOf(row);
     let entry = found.get(key);
     if (!entry) {
-      entry = { key, label, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, errors: 0, durationMs: 0, timedTurns: 0, ...(driverKind ? { driverKind } : {}) };
+      entry = { key, label, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: null, billedCostUsd: null, planCostUsd: 0, errors: 0, durationMs: 0, timedTurns: 0, ...(driverKind ? { driverKind } : {}) };
       found.set(key, entry);
     }
     addTokens(entry, row);
     entry.turns += 1;
     const cost = price(row.costUsd);
-    if (cost !== null) entry.costUsd = (entry.costUsd ?? 0) + cost;
+    if (cost !== null) {
+      entry.costUsd = (entry.costUsd ?? 0) + cost;
+      if (isPlan(row)) {
+        entry.planCostUsd = (entry.planCostUsd ?? 0) + cost;
+        entry.billedCostUsd ??= 0;
+      } else {
+        entry.billedCostUsd = (entry.billedCostUsd ?? 0) + cost;
+      }
+    }
     if (failed(row)) entry.errors += 1;
     const duration = rowDuration(row);
     if (duration !== null) { entry.durationMs += duration; entry.timedTurns += 1; }
@@ -101,7 +125,14 @@ function entries(rows: readonly UsageRow[], keyOf: (row: UsageRow) => { key: str
   return [...found.values()].sort((a, b) => (b.costUsd ?? -1) - (a.costUsd ?? -1) || weight(b) - weight(a));
 }
 
-export function summarizeInsights(rows: readonly UsageRow[], range: { from: string; to: string }, timeZone: string): UsageInsights {
+export function summarizeInsights(
+  rows: readonly UsageRow[],
+  range: { from: string; to: string },
+  timeZone: string,
+  onPlan: (instanceId: string) => boolean = () => false,
+): UsageInsights {
+  const planCache = new Map<string, boolean>();
+  const isPlan = (row: UsageRow) => isOnPlanRow(row, onPlan, planCache);
   const clock = localClock(timeZone);
   const dayList = daysBetween(range.from, range.to);
   const previousFrom = shiftDay(range.from, -dayList.length);
@@ -119,7 +150,7 @@ export function summarizeInsights(rows: readonly UsageRow[], range: { from: stri
   const unit = dayList.length === 1 ? "hour" : "day";
   const starts = unit === "hour" ? Array.from({ length: 24 }, (_, hour) => `${range.from}T${String(hour).padStart(2, "0")}`) : dayList;
   const buckets = new Map<string, InsightBucket>(starts.map((start) => [start, {
-    start, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: 0, unpriced: 0, errors: 0, durationMs: 0, timedTurns: 0, models: {}, modelCosts: {},
+    start, input: 0, cachedInput: 0, output: 0, reasoning: 0, turns: 0, costUsd: 0, billedCostUsd: 0, planCostUsd: 0, unpriced: 0, errors: 0, durationMs: 0, timedTurns: 0, models: {}, modelCosts: {},
   }]));
   const hours = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
   for (const { row, local } of current) {
@@ -128,7 +159,11 @@ export function summarizeInsights(rows: readonly UsageRow[], range: { from: stri
     day.turns += 1;
     const cost = price(row.costUsd);
     if (cost === null) day.unpriced += 1;
-    else day.costUsd += cost;
+    else {
+      day.costUsd += cost;
+      if (isPlan(row)) day.planCostUsd = (day.planCostUsd ?? 0) + cost;
+      else day.billedCostUsd = (day.billedCostUsd ?? 0) + cost;
+    }
     if (failed(row)) day.errors += 1;
     const duration = rowDuration(row);
     if (duration !== null) { day.durationMs += duration; day.timedTurns += 1; }
@@ -143,16 +178,16 @@ export function summarizeInsights(rows: readonly UsageRow[], range: { from: stri
     from: range.from,
     to: range.to,
     timeZone,
-    totals: totalsOf(current, dayList.length),
-    previous: totalsOf(before, dayList.length),
+    totals: totalsOf(current, dayList.length, isPlan),
+    previous: totalsOf(before, dayList.length, isPlan),
     unit,
     buckets: [...buckets.values()],
     hours,
-    models: entries(rowsNow, (row) => ({ ...usageGroupOf(row, "model"), driverKind: row.driverKind })),
-    bots: entries(rowsNow, (row) => usageGroupOf(row, "bot")),
-    engines: entries(rowsNow, (row) => usageGroupOf(row, "engine")),
-    people: entries(rowsNow, (row) => usageGroupOf(row, "user")),
-    routines: entries(rowsNow, (row) => usageGroupOf(row, "routine")),
-    departments: entries(rowsNow, (row) => usageGroupOf(row, "department")),
+    models: entries(rowsNow, (row) => ({ ...usageGroupOf(row, "model"), driverKind: row.driverKind }), isPlan),
+    bots: entries(rowsNow, (row) => usageGroupOf(row, "bot"), isPlan),
+    engines: entries(rowsNow, (row) => usageGroupOf(row, "engine"), isPlan),
+    people: entries(rowsNow, (row) => usageGroupOf(row, "user"), isPlan),
+    routines: entries(rowsNow, (row) => usageGroupOf(row, "routine"), isPlan),
+    departments: entries(rowsNow, (row) => usageGroupOf(row, "department"), isPlan),
   };
 }

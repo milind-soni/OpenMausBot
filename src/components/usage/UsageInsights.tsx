@@ -135,6 +135,8 @@ interface Provider {
   label: string;
   color: string;
   costUsd: number;
+  billedCostUsd: number;
+  planCostUsd: number;
   tokens: number;
   turns: number;
   models: string[];
@@ -144,15 +146,22 @@ export function providersOf(models: readonly InsightEntry[], metric: InsightMetr
   const found = new Map<string, Provider>();
   for (const entry of models) {
     const family = modelFamily(entry.key);
-    const provider = found.get(family.id) ?? { key: family.id, label: family.label, color: family.color, costUsd: 0, tokens: 0, turns: 0, models: [] };
+    const provider = found.get(family.id) ?? {
+      key: family.id, label: family.label, color: family.color, costUsd: 0, billedCostUsd: 0, planCostUsd: 0, tokens: 0, turns: 0, models: [],
+    };
+    const plan = entry.planCostUsd ?? 0;
+    const billed = entry.billedCostUsd !== undefined ? (entry.billedCostUsd ?? 0) : Math.max(0, (entry.costUsd ?? 0) - plan);
     provider.costUsd += entry.costUsd ?? 0;
+    provider.billedCostUsd += billed;
+    provider.planCostUsd += plan;
     provider.tokens += tokensOf(entry);
     provider.turns += entry.turns;
     provider.models.push(entry.key);
     found.set(family.id, provider);
   }
-  const size = (provider: Provider) => metric === "cost" ? provider.costUsd : provider.tokens;
-  return [...found.values()].sort((a, b) => size(b) - size(a) || b.tokens - a.tokens);
+  const size = (provider: Provider) => metric === "cost" ? provider.billedCostUsd : provider.tokens;
+  const tie = (provider: Provider) => metric === "cost" ? provider.planCostUsd : 0;
+  return [...found.values()].sort((a, b) => size(b) - size(a) || tie(b) - tie(a) || b.tokens - a.tokens);
 }
 
 function bucketValue(bucket: InsightBucket, metric: InsightMetric, models: readonly string[]): number {
@@ -200,7 +209,7 @@ function axisAnchor(index: number, count: number): "start" | "end" | "middle" {
   return index === count - 1 ? "end" : "middle";
 }
 
-function ProviderChart({ data, metric, providers }: { data: UsageInsights; metric: InsightMetric; providers: readonly Provider[] }) {
+function ProviderChart({ data, metric, providers, includesPlan = false }: { data: UsageInsights; metric: InsightMetric; providers: readonly Provider[]; includesPlan?: boolean }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const buckets = data.buckets;
@@ -233,7 +242,12 @@ function ProviderChart({ data, metric, providers }: { data: UsageInsights; metri
   const title = t(CHART_TITLES[metric][data.unit]);
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-label={title}>
-      <h3 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h3>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-medium leading-[18px] text-ink">{title}</h3>
+        {includesPlan && (
+          <span className="text-[12px] leading-4 text-ink-tertiary">{t("insights.includesPlanValue")}</span>
+        )}
+      </div>
       <div ref={ref} tabIndex={0} role="group" aria-label={title} data-testid="insight-chart"
         className="relative cursor-crosshair touch-pan-y rounded-lg outline-none focus-visible:outline-2 focus-visible:outline-focus"
         onPointerMove={pick} onPointerDown={pick} onPointerLeave={() => setHover(null)} onKeyDown={onKey} onBlur={() => setHover(null)}>
@@ -288,12 +302,18 @@ function ProviderChart({ data, metric, providers }: { data: UsageInsights; metri
   );
 }
 
-function Overview({ data, metric }: { data: UsageInsights; metric: InsightMetric }) {
+export function Overview({ data, metric }: { data: UsageInsights; metric: InsightMetric }) {
   const providers = useMemo(() => providersOf(data.models, metric), [data.models, metric]);
-  const total = metric === "cost" ? data.totals.costUsd ?? 0 : tokensOf(data.totals);
-  const totalText = metric === "cost" ? formatCost(data.totals.costUsd) : formatTokens(total);
-  const before = metric === "cost" ? data.previous.costUsd ?? 0 : tokensOf(data.previous);
-  const size = (provider: Provider) => metric === "cost" ? provider.costUsd : provider.tokens;
+  const planTotal = data.totals.planCostUsd ?? 0;
+  const hasPlan = metric === "cost" && planTotal > 0;
+  const hadPlan = metric === "cost" && (planTotal > 0 || (data.previous.planCostUsd ?? 0) > 0);
+  const billedTotal = data.totals.billedCostUsd !== undefined ? data.totals.billedCostUsd : data.totals.costUsd;
+  const beforeBilled = data.previous.billedCostUsd !== undefined ? data.previous.billedCostUsd : data.previous.costUsd;
+  const heroCost = hasPlan ? billedTotal : data.totals.costUsd;
+  const total = metric === "cost" ? heroCost ?? 0 : tokensOf(data.totals);
+  const totalText = metric === "cost" ? formatCost(heroCost) : formatTokens(total);
+  const before = metric === "cost" ? (hadPlan ? beforeBilled ?? 0 : data.previous.costUsd ?? 0) : tokensOf(data.previous);
+  const size = (provider: Provider) => metric === "cost" ? (hasPlan ? provider.billedCostUsd : provider.costUsd) : provider.tokens;
   const whole = providers.reduce((sum, provider) => sum + size(provider), 0);
   return (
     <div className="grid gap-6 p-4 @min-[720px]/insights:grid-cols-[15rem_minmax(0,1fr)]">
@@ -301,28 +321,49 @@ function Overview({ data, metric }: { data: UsageInsights; metric: InsightMetric
         <div className="flex flex-col gap-1" data-testid="insight-hero">
           <span className="text-[12px] leading-4 text-ink-secondary">{t(metric === "cost" ? "insights.totalSpend" : "insights.totalTokens")}</span>
           <span className="text-[40px] font-semibold leading-[44px] tracking-[-0.02em] text-ink">{totalText}</span>
+          {hasPlan && (
+            <span className="text-[12px] leading-4 text-ink-secondary">
+              {t("insights.planValue", { cost: formatCost(planTotal) })}
+            </span>
+          )}
           <span className="text-[12px] leading-4 text-ink-secondary">
             {t("insights.heroSub", { turns: data.totals.turns.toLocaleString(locale()), days: String(data.totals.days) })}
           </span>
           <Delta now={total} before={before} />
         </div>
         <ul className="flex flex-col gap-3" aria-label={t("insights.providers")}>
-          {providers.map((provider) => (
-            <li key={provider.key} className="flex min-w-0 flex-col gap-0.5">
-              <span className="flex items-center gap-2 text-[13px] leading-5">
-                <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: provider.color }} />
-                <span className="min-w-0 flex-1 truncate text-ink">{provider.label}</span>
-                <span className="font-medium tabular-nums text-ink">{metricText(metric, size(provider))}</span>
-              </span>
-              <span className="pl-4 text-[11px] leading-4 tabular-nums text-ink-tertiary">
-                {t(metric === "cost" ? "insights.shareOfSpend" : "insights.shareOfTokens", { share: whole > 0 ? percent(size(provider) / whole) : "0%" })}
-                {" · "}{metric === "cost" ? t("insights.tokensCount", { tokens: formatTokens(provider.tokens) }) : t("insights.turnsCount", { count: String(provider.turns) })}
-              </span>
-            </li>
-          ))}
+          {providers.map((provider) => {
+            const planOnly = metric === "cost" && provider.planCostUsd > 0 && provider.billedCostUsd === 0;
+            const mixedPlan = metric === "cost" && provider.planCostUsd > 0 && provider.billedCostUsd > 0;
+            const subtext = planOnly
+              ? t("insights.onPlanNotBilled")
+              : mixedPlan
+                ? `${t("insights.shareOfSpend", { share: whole > 0 ? percent(size(provider) / whole) : "0%" })} · ${t("insights.onPlanAmount", { cost: formatCost(provider.planCostUsd) })}`
+                : t(metric === "cost" ? "insights.shareOfSpend" : "insights.shareOfTokens", { share: whole > 0 ? percent(size(provider) / whole) : "0%" });
+            return (
+              <li key={provider.key} className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex items-center gap-2 text-[13px] leading-5">
+                  <span aria-hidden="true" className="size-2 shrink-0 rounded-full" style={{ backgroundColor: provider.color }} />
+                  <span className="min-w-0 flex-1 truncate text-ink">{provider.label}</span>
+                  {planOnly && (
+                    <span className="shrink-0 rounded-md bg-ink/[0.06] px-1.5 py-0.5 text-[11px] font-medium leading-4 text-ink-secondary">
+                      {t("insights.onPlan")}
+                    </span>
+                  )}
+                  <span className={cn("font-medium tabular-nums", planOnly ? "text-ink-secondary" : "text-ink")}>
+                    {planOnly ? formatCost(provider.planCostUsd) : metricText(metric, size(provider))}
+                  </span>
+                </span>
+                <span className="pl-4 text-[11px] leading-4 tabular-nums text-ink-tertiary">
+                  {subtext}
+                  {" · "}{metric === "cost" ? t("insights.tokensCount", { tokens: formatTokens(provider.tokens) }) : t("insights.turnsCount", { count: String(provider.turns) })}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       </div>
-      <ProviderChart data={data} metric={metric} providers={providers} />
+      <ProviderChart data={data} metric={metric} providers={providers} includesPlan={hasPlan} />
     </div>
   );
 }
@@ -476,15 +517,36 @@ function ActivityHeatmap({ data }: { data: UsageInsights }) {
   );
 }
 
+const billedOf = (value: { costUsd: number | null; billedCostUsd?: number | null }) =>
+  value.billedCostUsd !== undefined ? (value.billedCostUsd ?? 0) : (value.costUsd ?? 0);
+const planOf = (value: { planCostUsd?: number }) => value.planCostUsd ?? 0;
+
+function SpendValue({ value }: { value: { costUsd: number | null; billedCostUsd?: number | null; planCostUsd?: number } }) {
+  const plan = planOf(value);
+  const billed = value.billedCostUsd !== undefined ? value.billedCostUsd : value.costUsd;
+  if (plan <= 0) return <>{formatCost(billed)}</>;
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span>{formatCost(billed ?? 0)}</span>
+      <span className="text-[12px] font-normal leading-4 text-ink-tertiary">
+        {t("insights.onPlanAmount", { cost: formatCost(plan) })}
+      </span>
+    </span>
+  );
+}
+
 interface Part { key: string; label: string; value: number; color: string }
 
-function ShareBar({ title, parts, format, testId, empty = t("insights.empty") }: { title: string; parts: Part[]; format: (value: number) => string; testId?: string; empty?: string }) {
+function ShareBar({ title, parts, format, testId, note, empty = t("insights.empty") }: { title: string; parts: Part[]; format: (value: number) => string; testId?: string; note?: string; empty?: string }) {
   const whole = parts.reduce((sum, part) => sum + part.value, 0);
   const visible = parts.filter((part) => part.value > 0);
   return (
     <div className="flex flex-col gap-2" data-testid={testId}>
-      <div className="flex items-baseline justify-between gap-2">
-        <h4 className="text-[12px] font-medium text-ink">{title}</h4>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h4 className="text-[12px] font-medium text-ink">{title}</h4>
+          {note && <span className="text-[12px] leading-4 text-ink-tertiary">{note}</span>}
+        </div>
         <span className="text-[12px] tabular-nums text-ink-secondary">{format(whole)}</span>
       </div>
       {whole > 0 ? (
@@ -511,9 +573,11 @@ function ShareBar({ title, parts, format, testId, empty = t("insights.empty") }:
   );
 }
 
-function Shares({ data, metric, groupLabel }: { data: UsageInsights; metric: InsightMetric; groupLabel: GroupLabel }) {
+export function Shares({ data, metric, groupLabel }: { data: UsageInsights; metric: InsightMetric; groupLabel: GroupLabel }) {
   const { totals } = data;
-  const size = (entry: InsightEntry) => metric === "cost" ? entry.costUsd ?? 0 : tokensOf(entry);
+  const size = (entry: InsightEntry) => metric === "cost" ? billedOf(entry) : tokensOf(entry);
+  const planPeople = metric === "cost" ? data.people.reduce((sum, entry) => sum + planOf(entry), 0) : 0;
+  const billedPeople = metric === "cost" ? data.people.reduce((sum, entry) => sum + billedOf(entry), 0) : 0;
   const people = [...data.people].sort((a, b) => size(b) - size(a));
   const shown = people.length > CATEGORICAL.length ? people.slice(0, CATEGORICAL.length - 1) : people;
   const rest = people.slice(shown.length).reduce((sum, entry) => sum + size(entry), 0);
@@ -525,7 +589,8 @@ function Shares({ data, metric, groupLabel }: { data: UsageInsights; metric: Ins
         { key: "output", label: t("insights.output"), value: totals.output, color: TYPE_COLORS.output },
       ]} />
       <ShareBar title={t(metric === "cost" ? "insights.spendByPerson" : "insights.tokensByPerson")} format={(value) => metricText(metric, value)}
-        empty={totals.turns ? "—" : undefined} parts={[
+        note={planPeople > 0 && billedPeople > 0 ? t("insights.planValue", { cost: formatCost(planPeople) }) : undefined}
+        empty={planPeople > 0 && billedPeople === 0 ? t("insights.planValue", { cost: formatCost(planPeople) }) : (totals.turns ? "—" : undefined)} parts={[
         ...shown.map((entry, index) => ({ key: entry.key, label: groupLabel("user", entry), value: size(entry), color: CATEGORICAL[index]! })),
         ...(rest > 0 ? [{ key: "rest", label: t("insights.other"), value: rest, color: OTHER_COLOR }] : []),
       ]} />
@@ -557,10 +622,11 @@ function entryLabel(board: Board, entry: InsightEntry, instances: Parameters<typ
   return groupBy ? groupLabel(groupBy, entry) : entry.label;
 }
 
-function Breakdown({ data, metric, groupLabel }: { data: UsageInsights; metric: InsightMetric; groupLabel: GroupLabel }) {
+export function Breakdown({ data, metric, groupLabel }: { data: UsageInsights; metric: InsightMetric; groupLabel: GroupLabel }) {
   const { state } = useStore();
   const [board, setBoard] = useState<Board>("models");
-  const size = (value: { costUsd: number | null } & Pick<InsightTotals, "input" | "cachedInput" | "output">) => metric === "cost" ? value.costUsd ?? 0 : tokensOf(value);
+  const size = (value: { costUsd: number | null; billedCostUsd?: number | null } & Pick<InsightTotals, "input" | "cachedInput" | "output">) =>
+    metric === "cost" ? billedOf(value) : tokensOf(value);
   const boardLabel = (value: Board) => t(value === "time" && data.unit === "hour" ? "insights.byHour" : BOARD_KEYS[value]);
   const options = (Object.keys(BOARD_KEYS) as Board[]).map((value) => ({ value, label: boardLabel(value) }));
   const header = "grid grid-cols-[1.25rem_minmax(0,1fr)_3.5rem_4.5rem] items-center gap-3 @min-[600px]/insights:grid-cols-[1.25rem_minmax(0,1fr)_3.5rem_4rem_3.5rem_4.5rem_4.5rem]";
@@ -576,11 +642,13 @@ function Breakdown({ data, metric, groupLabel }: { data: UsageInsights; metric: 
         <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{bucket.errors || "—"}</span>
         <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{percent(cacheRate(bucket) ?? 0)}</span>
         <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{formatTokens(tokensOf(bucket))}</span>
-        <span role="cell" className="text-right font-medium tabular-nums text-ink">{formatCost(bucket.costUsd)}</span>
+        <span role="cell" className="text-right font-medium tabular-nums text-ink">{metric === "cost" ? <SpendValue value={bucket} /> : formatCost(bucket.costUsd)}</span>
       </div>
     ));
   } else {
-    const entries = [...data[board]].sort((a, b) => size(b) - size(a)).slice(0, 10);
+    const entries = [...data[board]]
+      .sort((a, b) => metric === "cost" ? (billedOf(b) - billedOf(a) || planOf(b) - planOf(a)) : (tokensOf(b) - tokensOf(a)))
+      .slice(0, 10);
     const peak = Math.max(0, ...entries.map(size));
     const whole = data[board].reduce((sum, entry) => sum + size(entry), 0);
     rows = entries.map((entry, index) => {
@@ -597,14 +665,14 @@ function Breakdown({ data, metric, groupLabel }: { data: UsageInsights; metric: 
               <span className="truncate">{label}</span>
             </span>
             <span aria-hidden="true" className="h-0.5 max-w-56">
-              <span className="block h-full rounded-full" style={{ width: `max(0.5rem, ${peak > 0 ? (size(entry) / peak) * 100 : 0}%)`, backgroundColor: color }} />
+              <span className="block h-full rounded-full" style={{ width: size(entry) > 0 && peak > 0 ? `max(0.5rem, ${(size(entry) / peak) * 100}%)` : "0%", backgroundColor: color }} />
             </span>
           </span>
           <span role="cell" className="text-right tabular-nums text-ink-secondary">{entry.turns}</span>
           <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{entry.errors || "—"}</span>
           <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{whole > 0 ? percent(size(entry) / whole) : "—"}</span>
           <span role="cell" className={cn(wide, "text-right tabular-nums text-ink-secondary")}>{metric === "cost" ? formatTokens(tokensOf(entry)) : formatCost(entry.costUsd)}</span>
-          <span role="cell" className="text-right font-medium tabular-nums text-ink">{metricText(metric, size(entry))}</span>
+          <span role="cell" className="text-right font-medium tabular-nums text-ink">{metric === "cost" ? <SpendValue value={entry} /> : formatTokens(tokensOf(entry))}</span>
         </div>
       );
     });

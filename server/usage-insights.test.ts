@@ -34,6 +34,42 @@ describe("summarizeInsights", () => {
     expect(insights.buckets[14]).toMatchObject({ start: "2026-11-03T14", turns: 1 });
     expect(insights.totals).toMatchObject({ costUsd: null, unpriced: 1 });
   });
+
+  it("separates billed spend from subscription-covered plan value without floating-point residue", () => {
+    const purePlan = summarizeInsights([
+      row("2026-11-03T10:00:00Z", { costUsd: 0.1, billing: "subscription" }),
+      row("2026-11-03T11:00:00Z", { costUsd: 0.2, billing: "subscription" }),
+    ], { from: "2026-11-03", to: "2026-11-03" }, "UTC");
+    expect(purePlan.totals).toMatchObject({ billedCostUsd: 0, planCostUsd: expect.closeTo(0.3, 12) });
+    expect(purePlan.models[0]).toMatchObject({ billedCostUsd: 0, planCostUsd: expect.closeTo(0.3, 12) });
+    expect(purePlan.buckets[10]).toMatchObject({ costUsd: 0.1, billedCostUsd: 0, planCostUsd: 0.1 });
+    expect(purePlan.buckets[11]).toMatchObject({ costUsd: 0.2, billedCostUsd: 0, planCostUsd: 0.2 });
+
+    const asked: string[] = [];
+    const mixed = summarizeInsights([
+      row("2026-11-03T10:00:00Z", { instanceId: "claude", costUsd: 2, billing: "subscription" }),
+      row("2026-11-03T11:00:00Z", { instanceId: "claude", costUsd: 1, billing: "metered" }),
+      row("2026-11-03T12:00:00Z", { instanceId: "openai", driverKind: "codex", model: "gpt-5.5", costUsd: 0.5 }),
+      row("2026-11-02T12:00:00Z", { instanceId: "claude", costUsd: 0.75 }),
+    ], { from: "2026-11-03", to: "2026-11-03" }, "UTC", (id) => {
+      asked.push(id);
+      return id === "claude";
+    });
+    expect(asked).toEqual(["openai", "claude"]);
+    expect(mixed.totals).toMatchObject({ billedCostUsd: 1.5, planCostUsd: 2 });
+    expect(mixed.previous).toMatchObject({ billedCostUsd: 0, planCostUsd: 0.75 });
+    expect(mixed.buckets[10]).toMatchObject({ costUsd: 2, billedCostUsd: 0, planCostUsd: 2 });
+    expect(mixed.buckets[11]).toMatchObject({ costUsd: 1, billedCostUsd: 1, planCostUsd: 0 });
+    expect(mixed.buckets[12]).toMatchObject({ costUsd: 0.5, billedCostUsd: 0.5, planCostUsd: 0 });
+    expect(mixed.models.find((entry) => entry.key === "model:claudeAgent/claude-sonnet-5-5")).toMatchObject({
+      billedCostUsd: 1,
+      planCostUsd: 2,
+    });
+    expect(mixed.models.find((entry) => entry.key === "model:codex/gpt-5.5")).toMatchObject({
+      billedCostUsd: 0.5,
+      planCostUsd: 0,
+    });
+  });
 });
 
 describe("insight helpers", () => {

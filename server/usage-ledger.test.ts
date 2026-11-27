@@ -6,6 +6,7 @@ import { removeTempDir } from "./testing/cleanup.ts";
 import {
   appendUsage,
   flushUsageLedger,
+  isOnPlanRow,
   parseUsageRange,
   readUsage,
   summarizeUsage,
@@ -77,6 +78,26 @@ describe("usage ledger files", () => {
     expect(rows[0]).toMatchObject({ costUsd: 0.25, costSource: "estimated" });
     expect(rows[1]!.costUsd).toBeNull();
     expect(rows[1]).not.toHaveProperty("costSource");
+  });
+
+  it("persists subscription or metered billing without altering costSource and resolves row plan state", async () => {
+    appendUsage(dataDir, row({ at: "2026-09-03T10:00:00.000Z", billing: "subscription", costSource: "reported" }));
+    appendUsage(dataDir, row({ at: "2026-09-03T11:00:00.000Z", billing: "metered" }));
+    appendUsage(dataDir, row({ at: "2026-09-03T12:00:00.000Z", billing: "other" as UsageRow["billing"] }));
+    await flushUsageLedger(dataDir);
+    const rows = readUsage(dataDir, { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") });
+    expect(rows[0]).toMatchObject({ billing: "subscription", costSource: "reported" });
+    expect(rows[1]).toMatchObject({ billing: "metered", costSource: "reported" });
+    expect(rows[2]).not.toHaveProperty("billing");
+
+    const cache = new Map<string, boolean>();
+    const asked: string[] = [];
+    const onPlan = (id: string) => { asked.push(id); return id === "claude"; };
+    expect(isOnPlanRow({ instanceId: "openai", billing: "subscription" }, onPlan, cache)).toBe(true);
+    expect(isOnPlanRow({ instanceId: "claude", billing: "metered" }, onPlan, cache)).toBe(false);
+    expect(isOnPlanRow({ instanceId: "claude" }, onPlan, cache)).toBe(true);
+    expect(isOnPlanRow({ instanceId: "claude" }, onPlan, cache)).toBe(true);
+    expect(asked).toEqual(["claude"]);
   });
 
   it("filters by time, skips torn lines and foreign rows, and never stores a negative or fractional token", async () => {

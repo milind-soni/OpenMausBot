@@ -16,4 +16,16 @@ describe("the part of a period's dollars nobody is billed", () => {
     expect(asked).toEqual(["claude", "openai"]);
     expect(notBilledShare([], onPlan)).toEqual({ usd: 0, turns: 0 });
   });
+
+  it("prefers recorded row billing over live engine sign-in state", () => {
+    const asked: string[] = [];
+    const onPlan = (instanceId: string) => { asked.push(instanceId); return instanceId === "openai"; };
+    const rows: UsageRow[] = [
+      { ...row("claude", 0.75), billing: "subscription" },
+      { ...row("openai", 1.25), billing: "metered" },
+      row("openai", 0.5),
+    ];
+    expect(notBilledShare(rows, onPlan)).toEqual({ usd: 1.25, turns: 2 });
+    expect(asked).toEqual(["openai"]);
+  });
 });

@@ -9,6 +9,8 @@ import type { CostSource } from "./model-prices.ts";
 import { billableFor, type PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
+export type UsageBilling = "subscription" | "metered";
+
 /** `helper`: a job the helper model wrote for `botId`, kept apart from `bot` so its cost reads on its own. */
 /** `email` on an owner, routine, bot or helper row: the person it was spent for (`usage-attribution.ts`), such as the
  * person whose turn delegated to it. */
@@ -33,6 +35,8 @@ export interface UsageRow {
   promptBytes?: { stable: number; volatile: number };
   costUsd: number | null;
   costSource?: CostSource;
+  /** Whether this turn ran under a flat subscription or metered billing when booked. */
+  billing?: UsageBilling;
   trigger: UsageTrigger;
   /** The bot's department when the row was booked. */
   section?: string;
@@ -126,6 +130,8 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
   };
   if (record.costUsd === null) delete record.costSource;
   else record.costSource = row.costSource === "estimated" ? "estimated" : "reported";
+  if (row.billing === "subscription" || row.billing === "metered") record.billing = row.billing;
+  else delete record.billing;
   const previous = writeQueues.get(dataDir) ?? Promise.resolve();
   const attempt = previous.then(() => write(dataDir, record));
   const queued = attempt.then(
@@ -361,6 +367,19 @@ function emptyGroup(key: string, label: string): UsageGroup {
 export function costSourceOf(row: Pick<UsageRow, "costUsd" | "costSource">): CostSource | null {
   if (finiteOrNull(row.costUsd) === null) return null;
   return row.costSource === "estimated" ? "estimated" : "reported";
+}
+
+/** Whether a row ran under a subscription rather than metered billing; recorded row billing wins over live engine state. */
+export function isOnPlanRow(
+  row: Pick<UsageRow, "instanceId" | "billing">,
+  onPlan: (instanceId: string) => boolean,
+  cache?: Map<string, boolean>,
+): boolean {
+  if (row.billing === "subscription") return true;
+  if (row.billing === "metered") return false;
+  if (!cache) return onPlan(row.instanceId);
+  if (!cache.has(row.instanceId)) cache.set(row.instanceId, onPlan(row.instanceId));
+  return cache.get(row.instanceId)!;
 }
 
 /** Books one row into a group, keeping its raw aggregates and its additive bar total. */
