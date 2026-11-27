@@ -17,6 +17,12 @@ import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
+// A stream cut now retries; real backoff would only slow these tests (retry.ts's own suite covers the schedule).
+vi.mock("./retry.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./retry.ts")>();
+  return { ...actual, computeBackoff: () => 0 };
+});
+
 const sse = (body: string) => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 
 /** `body` is every request's stream, or a factory per chat completion (the catalog fetch then gets a 404). */
