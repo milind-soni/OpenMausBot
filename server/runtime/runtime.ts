@@ -229,12 +229,15 @@ export class Runtime {
     if (parent && parent.status !== "running") return refuse("The requesting turn is not running");
     const brief = clip(req.brief, BRIEF_MAX);
     const mode = req.mode ?? "work";
+    const reply = req.reply ?? (mode === "notify" ? "none" : "resume");
     const lineage = parent ? path(this.store, parent) : [];
     const root = lineage[0];
     const target = req.assignee;
     let sameCall = false;
     const ancestors = ownThread(lineage, target, req.ownThread) ? lineage.slice(0, -1) : lineage;
-    if (!answersSender(parent, mode, { botId: target.botId, ...target.destination }) && ancestors.some(a => a.assignee.botId === target.botId &&
+    // Work that would wait on an ancestor's completion closes the wait cycle the delegation already opened; a reply
+    // that cannot wait on it (none, poll) cannot, so an ancestor may take it.
+    if (!answersSender(parent, mode, { botId: target.botId, ...target.destination }) && reply === "resume" && ancestors.some(a => a.assignee.botId === target.botId &&
       (!a.assignee.destination.groupId || !target.destination.groupId || a.assignee.destination.groupId === target.destination.groupId))) {
       return refuse("Cannot assign work back to an ancestor; results return automatically");
     }
@@ -260,7 +263,7 @@ export class Runtime {
     const node: Assignment = {
       id: randomUUID(), rootId: parent ? parent.rootId : "", ...(parent ? { parentId: parent.id } : {}), depth: parent ? parent.depth + 1 : 0,
       origin: root ? root.origin : req.origin, requester: req.requester, assignee: target, mode,
-      reply: req.reply ?? (mode === "notify" ? "none" : "resume"), brief, ...(req.doneWhen ? { doneWhen: req.doneWhen } : {}),
+      reply, brief, ...(req.doneWhen ? { doneWhen: req.doneWhen } : {}),
       status: "queued", level, levelSource: source, executions: 0, restarts: 0, createdAt: now, lastActivityAt: now, result: "",
       rework: Boolean(req.rework), ...(req.approved !== undefined ? { approved: req.approved } : {}),
       ...(req.batchKey !== undefined ? { batchKey: req.batchKey } : {}), ...(req.fanOut !== undefined ? { fanOut: req.fanOut } : {}), version: 1,
