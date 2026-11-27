@@ -8,6 +8,7 @@ import { APP_LIMITS, APP_MIME, type AppPayload } from "../shared/app.ts";
 import { createChatApps, type ChatApps } from "./chat-apps.ts";
 import { APP_WRITE_DECLINED, createChatAppsMcp, type ChatAppsMcp, type ChatAppsMcpOAuth, type ChatAppsMcpStore } from "./chat-apps-mcp.ts";
 import { createAgentCard } from "./chat-widgets.ts";
+import { createConnectorGate, type ConnectorCaller } from "./connector-gate.ts";
 import type { McpServerSpec } from "./contracts.ts";
 import { McpOAuthManager, withMcpSignIn } from "./mcp-oauth.ts";
 import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
@@ -477,5 +478,40 @@ describe("a server that lists tools before anyone signs in", () => {
     const { oauth, result } = await startupProbe({ open: { type: "http", url: fake.url, enabled: true } });
     expect(result).toMatchObject({ ok: true });
     expect(oauth.authState("open", fake.url)).toBe("none");
+  });
+});
+
+describe("a bot page's call to one of its bot's MCP servers, through the connector gate", () => {
+  const gateFor = (mcp: ChatAppsMcp, bot: BotRecord, full = false) => {
+    const gate = createConnectorGate({ bot: (id) => (id === bot.id ? bot : undefined), servers: { open: mcp.openServer }, decide: () => {}, log: () => {} });
+    const caller = (engaged = false): ConnectorCaller => ({
+      botId: bot.id, person: null, declared: [{ server: "board", tools: ["show_board", "paint_board", "save_board", "peek_board"] }],
+      fullAccess: () => full, engaged, audit: { label: "page m1", key: `${THREAD}:m1`, threadId: THREAD },
+    });
+    return { gate, caller };
+  };
+
+  it("reads with a tool its own listing marks read-only, and changes only at Full access after a click", async () => {
+    const { mcp, bot } = setup();
+    const { gate, caller } = gateFor(mcp, bot);
+    expect(await gate.call(caller(), { server: "board", tool: "show_board" }, { cards: 5 })).toEqual({ ok: true, result: { cards: 5 } });
+    expect(await gate.call(caller(), { server: "board", tool: "peek_board" }, {})).toEqual({ ok: true, result: "3 cards" });
+    expect(await gate.call(caller(true), { server: "board", tool: "paint_board" }, { color: "red" })).toMatchObject({ ok: false, reason: "needs-access" });
+    const full = gateFor(mcp, bot, true);
+    expect(await full.gate.call(full.caller(false), { server: "board", tool: "paint_board" }, { color: "red" })).toMatchObject({ ok: false, reason: "needs-click" });
+    expect(await full.gate.call(full.caller(true), { server: "board", tool: "paint_board" }, { color: "red" })).toEqual({ ok: true, result: "Painted red" });
+    // A tool only the server's own app may call is not one of the bot's.
+    expect(await full.gate.call(full.caller(true), { server: "board", tool: "save_board" }, {})).toMatchObject({ ok: false, reason: "not-granted" });
+    expect(await gate.list(caller())).toEqual([{ server: "board", label: "board", connected: true, tools: ["show_board", "paint_board", "save_board", "peek_board"] }]);
+  }, 30_000);
+
+  it("refuses a server the bot's selection leaves out, one switched off, and one waiting for a sign-in", async () => {
+    const scoped = setup({ scope: { allow: ["mcp:other:*"] } });
+    expect(await gateFor(scoped.mcp, scoped.bot).gate.call(gateFor(scoped.mcp, scoped.bot).caller(), { server: "board", tool: "show_board" }, {})).toMatchObject({ ok: false, reason: "not-granted" });
+    const off = setup({ servers: { board: { ...board(), enabled: false } } });
+    expect(await gateFor(off.mcp, off.bot).gate.call(gateFor(off.mcp, off.bot).caller(), { server: "board", tool: "show_board" }, {})).toMatchObject({ ok: false, reason: "not-connected" });
+    const signedOut = setup({ servers: { board: { url: "https://mcp.example/board", enabled: true } }, needsSignIn: ["board"] });
+    expect(await gateFor(signedOut.mcp, signedOut.bot).gate.call(gateFor(signedOut.mcp, signedOut.bot).caller(), { server: "board", tool: "show_board" }, {}))
+      .toEqual({ ok: false, reason: "not-connected", status: 409, message: "Connect board in Settings first." });
   });
 });

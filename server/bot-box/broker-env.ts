@@ -66,7 +66,8 @@ export function brokerRewrite(env: Record<string, string>, token: string, port: 
   // later one adds its header there (an endpoint may answer only one of them) and is replaced too, never left raw.
   const routed: Record<string, string> = {};
   for (const provider of BROKERED_PROVIDERS) {
-    const key = out[provider.keyEnv];
+    // Trimmed: a pasted key's trailing newline cannot go in a header (the broker would refuse it), and is no part of the key.
+    const key = out[provider.keyEnv]?.trim();
     if (!key || isToken(key)) continue;
     const shared = routed[provider.baseUrlEnv];
     if (shared) {

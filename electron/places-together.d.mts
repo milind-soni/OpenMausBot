@@ -26,6 +26,8 @@ export interface PlaceBotRow {
   preview?: string;
   /** The title of the conversation it has open there: its second line while no preview came. */
   chat?: string;
+  /** The department it is in there, if any: where the one list draws it on the other page. */
+  section?: string;
   /** Epoch ms its conversations last moved there (the newest thread's `updatedAt`): Unread's order across places. */
   lastAt?: number;
 }
@@ -37,9 +39,17 @@ export interface PlacesTogetherState {
   on: boolean;
   /** The place whose page asked. */
   here: BotHome;
+  /** While the switch is on: the person's home place (My Cloud once their bots moved there), the same on both pages. The
+   * one list shows its bots first and the other place's second, whichever page is open. Absent from older apps: this computer. */
+  home?: BotHome;
   /** The other place's bots while the switch is on. `state`: how that place is doing: asleep, waking and offline keep the
    * bots it gave last; "signin" is a My Cloud this window has not signed in to yet, which lists none. */
-  other: { home: BotHome; state: "ready" | "loading" | "asleep" | "waking" | "offline" | "signin"; bots: PlaceBotRow[]; newBot?: boolean } | null;
+  other: { home: BotHome; state: "ready" | "loading" | "asleep" | "waking" | "offline" | "signin"; bots: PlaceBotRow[];
+    /** That place's departments in its own order, while it said them. */
+    sections?: string[]; newBot?: boolean } | null;
+  /** While the switch is on: where the person put bots in the one list, kept for their account through restarts and the
+   * switch going off. A bot with no entry is where its own place keeps it (home) or in its place's department (other). */
+  arranged?: ArrangedBot[];
   /** This computer's page shows the one-time notice that this is on by default: the person never chose, and has not closed it. */
   notice?: true;
   /** With the notice, for a person whose home is My Cloud: this computer's own workspace now starts with the app. */
@@ -47,6 +57,15 @@ export interface PlacesTogetherState {
   /** This computer's page while the switch is offered: whether the person's Clouds may run commands on this computer now,
    * as lending says it (the notice's second switch). */
   commands?: boolean;
+}
+
+/** One bot's place in the one list: its key (`computer:<id>` or `cloud:<id>`), its department ("" for none, or the mark
+ * for the place's own department, src/lib/one-list.ts LANDING_SECTION) and the key of the bot drawn just above it in that
+ * list (null at its top). */
+export interface ArrangedBot {
+  key: string;
+  section: string;
+  after: string | null;
 }
 
 /** `window.ogb.placesTogether`: this computer's page and My Cloud's own page. */
@@ -57,6 +76,8 @@ export interface PlacesTogetherBridge {
   /** Opens the other place at one of its listed bots. False when main does not list that bot. */
   open(botId: string): Promise<boolean>;
   onChanged(callback: () => void): () => void;
+  /** Keeps where the person moved bots in the one list; what main keeps now. Older apps lack it. */
+  arrange?(entries: ArrangedBot[]): Promise<ArrangedBot[]>;
   /** The other place as the ＋ shows it: how it is doing and the AIs ready there (null while it can't be asked). Null with the switch off. */
   newBotChoice(): Promise<NewBotChoice | null>;
   /** Opens the other place, which makes a new bot there by its own rules. False with the switch off, and for a place

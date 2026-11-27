@@ -18,6 +18,7 @@ import { basename, join } from "node:path";
 
 import { defaultBotPerson, type DefaultBotFields } from "../../shared/default-bot.ts";
 import type { AdminActionRow } from "../admin-activity.ts";
+import type { AttachmentReferences } from "../attachment-references.ts";
 import { memberAudience, type Audience } from "../audience.ts";
 import { forgetDefaultBot } from "../default-bot.ts";
 import { audienceHome } from "../engine-homes/layout.ts";
@@ -61,9 +62,10 @@ export interface TeamMemberLeftDeps {
   deleteTasks(botId: string, threadIds: string[]): { deleted: string[] } | null;
   /** The app's own deletion of a bot (its chats, notes and folder), MausBot included; false when it could not. */
   deleteBot(botId: string): Promise<boolean>;
-  /** Conversations whose messages still name this text (message-db.ts threadsReferencing). */
-  threadsReferencing(fragment: string): readonly string[];
-  deleteAttachment(name: string): void;
+  /** Which uploads no remaining message names: one pass over the transcripts for them all (attachment-references.ts). */
+  references: Pick<AttachmentReferences, "removeUnreferenced">;
+  /** Removes these stored uploads, by name (attachments.ts deleteAttachments). */
+  deleteAttachments(names: readonly string[]): void;
   eraseBrowsers(audience: Audience): Promise<boolean>;
   /** Their own connections, keys and MCP sign-ins (team-connections.ts). */
   forgetConnections(person: string): void | Promise<void>;
@@ -139,14 +141,19 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
     }
     // A file only their chats or private routines used, or that they never sent, goes too; one a bot's picture, another
     // conversation or a routine that stays uses stays.
-    const routineFiles = new Set(deps.routines().flatMap((routine) => routine.files));
-    let removed = 0;
-    for (const name of files) {
-      const url = `/api/attachments/${name}`;
-      if (name.includes("..") || !existsSync(join(attachments, name)) || routineFiles.has(name) || deps.threadsReferencing(name).length || deps.store.bots.some((bot) => bot.avatarUrl === url)) continue;
-      deps.deleteAttachment(basename(name));
-      removed++;
-    }
+    // Asked again for each batch just before it goes, since the pass over the transcripts gives the event loop back.
+    const removable = (names: Iterable<string>) => {
+      const routineFiles = new Set(deps.routines().flatMap((routine) => routine.files));
+      return [...names].filter((name) => !name.includes("..") && existsSync(join(attachments, name)) && !routineFiles.has(name) && !deps.store.bots.some((bot) => bot.avatarUrl === `/api/attachments/${name}`));
+    };
+    const removed = await deps.references.removeUnreferenced(removable(files), (names) => {
+      const going = removable(names);
+      deps.deleteAttachments(going.map((name) => basename(name)));
+      return going.length;
+    }).catch((error: unknown) => {
+      console.warn(`[team] a leaving member's files stayed: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    });
     let layers = 0;
     let entries: string[] = [];
     try { entries = readdirSync(workspaces); } catch {}

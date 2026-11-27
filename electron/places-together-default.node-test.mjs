@@ -272,6 +272,63 @@ test("the notice says this computer's workspace now starts with the app only to 
   assert.equal(computerHome.together.state("computer").profileHome, undefined);
 });
 
+test("both pages hear the same home place, so the one list keeps one order wherever the window is; none with the switch off", () => {
+  const computerHome = setup({ deps: { computer: () => "computer:/data" } });
+  assert.equal(computerHome.together.state("computer").home, "computer");
+  assert.equal(computerHome.together.state("cloud").home, "computer");
+  const cloudHome = setup({ deps: { computer: () => "profile:default" } });
+  assert.equal(cloudHome.together.state("computer").home, "cloud");
+  assert.equal(cloudHome.together.state("cloud").home, "cloud");
+  assert.equal(setup({ saved: { v: 1, on: false } }).together.state("computer").home, undefined);
+});
+
+test("where the person put bots in the one list is kept for their account, through the switch going off and a restart, and only main's own checks let an entry in", async () => {
+  const f = setup();
+  f.bots.cloud = [bot("scout", "Scout", { section: "Research" }), bot("nova", "Nova")];
+  f.together.state("computer");
+  await f.together.refresh("cloud");
+  const state = f.together.state("computer");
+  assert.deepEqual(state.arranged, [], "nothing moved yet");
+  assert.equal(state.other.bots[0].section, "Research", "a row says its department there, for the other page");
+  const kept = f.together.arrange("cloud", [
+    { key: "cloud:nova", section: "Finance", after: "computer:ledger" },
+    { key: "cloud:scout", section: "", after: null },
+    { key: "nova", section: "", after: null }, { key: "cloud:x", section: "\u0007", after: null }, { key: "cloud:y", section: "", after: "cloud:y" }, "junk",
+  ]);
+  assert.deepEqual(kept, [{ key: "cloud:nova", section: "Finance", after: "computer:ledger" }, { key: "cloud:scout", section: "", after: null }], "either page may arrange; a bad entry is dropped");
+  assert.deepEqual(f.together.arrange("computer", [{ key: "cloud:scout", section: "Finance", after: "cloud:nova" }]).map((entry) => entry.key), ["cloud:nova", "cloud:scout"], "a later move replaces that bot's entry");
+  assert.deepEqual(f.together.state("cloud").arranged, f.together.state("computer").arranged, "both pages hear the same arrangement");
+  f.together.set("computer", false);
+  assert.equal(f.together.state("computer").arranged, undefined, "off: no arrangement handed out");
+  assert.deepEqual(f.together.arrange("computer", [{ key: "cloud:nova", section: "", after: null }]), f.saved.arranged["acct-a"], "nor changed");
+  f.together.set("computer", true);
+  const restarted = setup({ saved: f.saved });
+  assert.deepEqual(restarted.together.state("computer").arranged, [{ key: "cloud:nova", section: "Finance", after: "computer:ledger" }, { key: "cloud:scout", section: "Finance", after: "cloud:nova" }], "kept through off and a restart");
+  restarted.cloud.account = "acct-b";
+  restarted.together.set("computer", true, { listOnly: true });
+  assert.deepEqual(restarted.together.state("computer").arranged, [], "another account has its own");
+  assert.deepEqual(f.asked.filter(([, , init]) => init?.method && init.method !== "GET"), [], "nothing is written to either place's server");
+});
+
+test("an arrangement keeps one entry per bot, the last one sent, and the same arrangement again writes nothing and tells no page", async () => {
+  const f = setup();
+  f.together.state("computer");
+  f.together.arrange("computer", [{ key: "cloud:nova", section: "", after: null }]);
+  const flood = Array.from({ length: 3_000 }, (_, index) => ({ key: "cloud:scout", section: index % 2 ? "Finance" : "", after: null }));
+  const kept = f.together.arrange("computer", flood);
+  assert.deepEqual(kept.map((entry) => entry.key), ["cloud:nova", "cloud:scout"], "one call repeating a key cannot push every other bot's entry out");
+  assert.equal(kept[1].section, "Finance", "the last entry given for a bot wins");
+  assert.deepEqual(f.together.arrange("computer", [{ key: "cloud:a", section: "\u0000landing", after: null }]).at(-1), { key: "cloud:a", section: "\u0000landing", after: null }, "the place's own department is kept as its mark");
+  const writes = [], changes = f.changes, saved = f.saved;
+  const again = setup({ saved, deps: { pref: { read: () => saved, write: (value) => { writes.push(value); } } } });
+  again.together.state("computer");
+  const before = again.changes;
+  assert.deepEqual(again.together.arrange("computer", [{ key: "cloud:nova", section: "", after: null }]), saved.arranged["acct-a"], "a drop where the bot already was");
+  assert.deepEqual(writes, [], "writes nothing");
+  assert.equal(again.changes, before, "and tells no page");
+  assert.ok(f.changes >= changes);
+});
+
 test("a switch file that is not JSON at all is off and quiet until the person turns the switch in Settings, which keeps the bad file beside it and writes a good one; a newer version's file stays untouched", async (t) => {
   const { mkdtempSync, readdirSync, readFileSync: read, rmSync, writeFileSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { APP_LIMITS, appBlockedText, appDoneOf, htmlFallbackText, htmlVisibleText, mcpAppFallbackText, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes, wrapHtmlFragment } from "./app.ts";
+import { APP_LIMITS, appBlockedText, appUsesList, appDoneOf, htmlFallbackText, htmlVisibleText, mcpAppFallbackText, parseShowHtmlInput, parseUpdateHtmlInput, utf8Bytes, wrapHtmlFragment } from "./app.ts";
 
 describe("parseShowHtmlInput", () => {
   it("keeps a whole document as written, trimmed", () => {
@@ -121,13 +121,16 @@ describe("htmlVisibleText numeric character references", () => {
   });
 });
 
+const USES_HELP = 'uses: a list of "data", "state" and connector tools by exact name: "gmail:GMAIL_FETCH_EMAILS" for a connected app, '
+  + '"mcp:<server>:<tool>" for an MCP server; no wildcards. E.g. ["data", "gmail:GMAIL_FETCH_EMAILS"].';
+
 describe("show_html uses", () => {
   it("reads a list of data and state, and the shapes models send for one", () => {
     expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: ["data", "state", "data"] })).toMatchObject({ ok: true, value: { uses: ["data", "state"] } });
     expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: "data" })).toMatchObject({ ok: true, value: { uses: ["data"] } });
     expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: '["State"]' })).toMatchObject({ ok: true, value: { uses: ["state"] } });
     expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: [] }).ok && "uses" in (parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: [] }) as { value: object }).value).toBe(false);
-    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: ["network"] })).toEqual({ ok: false, error: 'uses: a list of "data" and "state", e.g. ["data", "state"].' });
+    expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: ["network"] })).toEqual({ ok: false, error: USES_HELP });
     expect(parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses: [{ name: "data" }] }).ok).toBe(false);
   });
 
@@ -136,3 +139,52 @@ describe("show_html uses", () => {
     expect(parseUpdateHtmlInput({ app_id: "m1", html: "<p>x</p>" }).ok && "uses" in (parseUpdateHtmlInput({ app_id: "m1", html: "<p>x</p>" }) as { value: object }).value).toBe(false);
   });
 });
+
+describe("show_html uses: connector tools", () => {
+  const parse = (uses: unknown) => parseShowHtmlInput({ html: "<p>x</p>", title: "t", uses });
+  it.each([
+    ["one app tool", ["gmail:GMAIL_FETCH_EMAILS"], [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }]],
+    ["case as models vary it", ["Gmail:gmail_fetch_emails"], [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }]],
+    ["one app, several tools, a repeat", ["gmail:GMAIL_FETCH_EMAILS", "gmail:GMAIL_SEND_EMAIL", "gmail:GMAIL_FETCH_EMAILS"], [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"] }]],
+    ["an underscored app", ["bland_ai:BLAND_AI_LIST_CALLS"], [{ connector: "bland_ai", tools: ["BLAND_AI_LIST_CALLS"] }]],
+    ["an MCP server's tool, its case kept", ["mcp:Notes:searchNotes"], [{ server: "notes", tools: ["searchNotes"] }]],
+    ["the object shapes", [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }, { server: "notes", tools: "search,open" }], [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }, { server: "notes", tools: ["search", "open"] }]],
+    ["one string of several", "data, gmail:GMAIL_FETCH_EMAILS", [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }]],
+    ["a JSON list", '["gmail:GMAIL_FETCH_EMAILS"]', [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }]],
+  ])("reads %s", (_name, uses, connectors) => {
+    expect(parse(uses)).toMatchObject({ ok: true, value: { connectors } });
+  });
+
+  it("keeps data and state beside connector tools, and both are given together", () => {
+    expect(parse(["state", "gmail:GMAIL_FETCH_EMAILS"])).toMatchObject({ ok: true, value: { uses: ["state"], connectors: [{ connector: "gmail" }] } });
+    expect(parse(["data"])).toMatchObject({ ok: true, value: { uses: ["data"], connectors: [] } });
+    expect(parseUpdateHtmlInput({ app_id: "m1", html: "<p>x</p>", uses: ["data"] })).toMatchObject({ ok: true, value: { uses: ["data"], connectors: [] } });
+    expect(appUsesList(["data"], [{ connector: "gmail", tools: ["GMAIL_FETCH_EMAILS"] }, { server: "notes", tools: ["search"] }]))
+      .toEqual(["data", "gmail:GMAIL_FETCH_EMAILS", "mcp:notes:search"]);
+  });
+
+  it.each([
+    ["a wildcard", ["gmail:*"], "wildcards"],
+    ["a wildcard on a server", ["mcp:notes:*"], "wildcards"],
+    ["a tool of another app", ["gmail:SLACK_SEND_MESSAGE"], "is not one of gmail's tools"],
+    ["an app with no tool", ["gmail"], USES_HELP],
+    ["Composio's own tools", ["composio:COMPOSIO_MULTI_EXECUTE_TOOL"], "is not a connected app's name"],
+    ["a connection tool", ["gmail:GMAIL_MANAGE_CONNECTIONS"], "a page cannot call GMAIL_MANAGE_CONNECTIONS"],
+    ["a bad server name", ["mcp:no such:search"], "does not name an MCP server"],
+    ["an object with both", [{ connector: "gmail", server: "notes", tools: ["x"] }], USES_HELP],
+    ["an object with no tools", [{ connector: "gmail", tools: [] }], USES_HELP],
+  ])("refuses %s", (_name, uses, error) => {
+    const parsed = parse(uses);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain(error);
+  });
+
+  it("caps the apps and the tools a page names", () => {
+    const apps = Array.from({ length: APP_LIMITS.pageConnectors + 1 }, (_, i) => `app${i}:APP${i}_LIST`);
+    expect(parse(apps).ok).toBe(false);
+    const tools = Array.from({ length: APP_LIMITS.pageConnectorTools + 1 }, (_, i) => `gmail:GMAIL_T${i}`);
+    expect(parse(tools)).toEqual({ ok: false, error: `uses: at most ${APP_LIMITS.pageConnectors} connected apps or servers and ${APP_LIMITS.pageConnectorTools} tools in all.` });
+    expect(parse(tools.slice(1)).ok).toBe(true);
+  });
+});
+

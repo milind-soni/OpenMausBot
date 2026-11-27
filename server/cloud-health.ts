@@ -20,6 +20,7 @@ import { storageHealth, type StorageReport } from "./perf/disk-usage.ts";
 import type { PerfHealth } from "./perf/perf-report.ts";
 import type { RoutineHealth } from "./routine-health.ts";
 import type { ScheduleSection } from "./routine-schedule-report.ts";
+import type { SignInSummary } from "./sign-in-trace.ts";
 import type { Message, StoreChange } from "./store.ts";
 
 /** The report's largest JSON body; incidents past it wait for the next poll. */
@@ -282,6 +283,8 @@ export interface CloudHealthDeps {
   perf?: () => PerfHealth | null;
   /** What fills the volume (perf/disk-usage.ts), at most STORAGE_HEALTH_MAX_BYTES; the field is left out on a throw or null. */
   storage?: () => StorageReport | null;
+  /** Engine sign-in attempts and how they ended (server/sign-in-trace.ts): kinds, method names, codes and times; left out on a throw. */
+  signIns?: () => SignInSummary | null;
   log?: (line: string) => void;
   now?: () => number;
 }
@@ -325,6 +328,9 @@ export function createCloudHealth(deps: CloudHealthDeps) {
   const perf = () => {
     try { return deps.perf?.() ?? null; } catch (error) { leftOut("perf", error); return null; }
   };
+  const signIns = (): { signIns?: SignInSummary } => {
+    try { const summary = deps.signIns?.(); return summary ? { signIns: summary } : {}; } catch (error) { leftOut("signIns", error); return {}; }
+  };
   const storage = (): { storage?: StorageReport } => {
     try { const report = deps.storage?.(); return report ? { storage: storageHealth(report) } : {}; } catch (error) { leftOut("storage", error); return {}; }
   };
@@ -356,7 +362,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted, ...(browser.cloudComputer ? { cloudComputer: browser.cloudComputer } : {}) },
         box: boxSummary(deps.box?.()),
-        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(), ...storage(),
+        firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(), ...storage(), ...signIns(),
         // The data checks of this version's first start: check ids and counts (server/doctor/start.ts).
         doctor: doctorHealth(),
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },

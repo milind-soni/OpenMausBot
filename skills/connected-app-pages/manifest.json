@@ -1,0 +1,24 @@
+{
+  "id": "connected-app-pages",
+  "name": "Pages That Use Connected Apps",
+  "version": "1.0.0",
+  "description": "Build a page in the chat that reads from, and acts on, the person's connected apps through tools it declares.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "mini app",
+    "little app",
+    "small app",
+    "an app that",
+    "app for my",
+    "page that shows my",
+    "page that lists",
+    "page for my",
+    "page with my",
+    "page of my",
+    "inbox page",
+    "inbox app",
+    "triage app",
+    "connectors.call"
+  ],
+  "requiredCapabilities": []
+}

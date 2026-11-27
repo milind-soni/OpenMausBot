@@ -21,6 +21,7 @@ import { AppFrame, type AppFrameHandle } from "./AppFrame";
 import type { AppSelection } from "./app-frame-host";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_CHIP_PICKED, ASK_PRIMARY_BUTTON } from "../AskCard";
 import { serverFetch } from "@/lib/relay-server";
+import { SaveAsAppButton, type useSaveAsApp } from "./SaveAsApp";
 
 /** A page starts at this height in the chat and grows to its content up to the cap, then scrolls inside. */
 export const PAGE_HEIGHT = { start: 520, cap: 560 } as const;
@@ -210,10 +211,11 @@ export interface PageToolsProps {
   /** Shown in a room: the page acts for nobody, so no Share; Point sends the pick to the bot that made the page. */
   room?: boolean;
   pin?: ReturnType<typeof usePagePin>;
+  saveApp?: ReturnType<typeof useSaveAsApp>;
 }
 
 /** The card's toolbar: ‹ v2 › and Updated on the left; Point, Share, Open in new tab and Full screen on the right. */
-export function PageToolbar({ version, point, share, save, ready, fullScreen, room, pin, className }: PageToolsProps & { className?: string }) {
+export function PageToolbar({ version, point, share, save, ready, fullScreen, room, pin, saveApp, className }: PageToolsProps & { className?: string }) {
   const label = version.latest ? t("chat.preview.version", { n: version.rev + 1 }) : t("chat.preview.versionOf", { n: version.rev + 1, count: version.last + 1 });
   const busy = share.share.kind === "busy";
   return (
@@ -236,6 +238,7 @@ export function PageToolbar({ version, point, share, save, ready, fullScreen, ro
           <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
           </button>
+          {saveApp && <SaveAsAppButton app={saveApp} />}
           {pin?.show && (
             <button type="button" data-page-pin aria-pressed={pin.pinned} onClick={pin.toggle} disabled={pin.full}
               title={pin.full ? t("chat.preview.pinFull", { max: MAX_WEB_PANELS }) : t(pin.pinned ? "chat.preview.unpinHint" : "chat.preview.pinHint")}
@@ -257,6 +260,7 @@ export function PageToolbar({ version, point, share, save, ready, fullScreen, ro
           {fullScreen.open ? <X size={16} /> : <Maximize2 size={14} />}
         </button>
       </div>
+      {saveApp?.failed && <p role="alert" data-page-save-app-failed className="basis-full text-end text-xs text-danger">{t("localApps.page.saveFailed")}</p>}
       {!room && pin?.show && pin.full && <p data-page-pin-full className="basis-full text-end text-xs text-ink-secondary">{t("chat.preview.pinFull", { max: MAX_WEB_PANELS })}</p>}
     </div>
   );
