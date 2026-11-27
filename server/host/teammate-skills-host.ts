@@ -58,9 +58,16 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
   };
   const dropRecord = (requestId: string) => rmSync(recordPath(requestId), { force: true });
   const botName = (id: string) => store.bot(id)?.name ?? id;
-  const turnOne = (step: Step) => {
+  /** One step's result; a write that throws (a full disk) comes back as an error, so the batch can still be put back. */
+  const turnOne = (step: Step): object => {
     const bot = store.bot(step.botId);
-    return bot ? deps.turn(step.botId, step.name, step.on, deps.skill(bot, step.name)?.kind) : { error: "that bot no longer exists" };
+    if (!bot) return { error: "that bot no longer exists" };
+    try {
+      return deps.turn(step.botId, step.name, step.on, deps.skill(bot, step.name)?.kind);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      return { error: code ? `could not save the change (${code})` : "could not save the change" };
+    }
   };
 
   /** Turns every step, or, when one fails, turns back those already turned so nothing is changed. */
@@ -210,6 +217,11 @@ export function createTeammateSkillsHost(deps: TeammateSkillsHostDeps) {
     | { claimed: true; state: "invalid"; error: string; status: number; stale?: true } {
     const record = readRecord(request.requestId);
     const changes = record?.chiefId === botId ? record.changes : [];
+    const refused = changes.flatMap((change) => {
+      const why = deps.refusal(botId, change.botId);
+      return why ? [`${botName(change.botId)}: ${why}`] : [];
+    });
+    if (refused.length) return { claimed: true, state: "invalid", error: `Nothing was changed. ${[...new Set(refused)].join("; ")}`, status: 403 };
     const moved = changes.some((change) => {
       const target = store.bot(change.botId);
       const current = target ? deps.skill(target, change.name) : undefined;

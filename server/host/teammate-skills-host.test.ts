@@ -22,7 +22,7 @@ afterEach(async () => {
 
 type Skill = { kind: SwitchableSkill["kind"]; enabled: boolean; text: string };
 
-function setup(options: { chief?: boolean; refuse?: string[]; failTurn?: string; failBack?: string; room?: boolean } = {}) {
+function setup(options: { chief?: boolean; refuse?: string[]; failTurn?: string; throwTurn?: string; failBack?: string; room?: boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "teammate-skills-host-"));
   dirs.push(dataDir);
   const bots: Record<string, BotRecord> = {
@@ -55,6 +55,7 @@ function setup(options: { chief?: boolean; refuse?: string[]; failTurn?: string;
     },
     turn: (botId, name, on) => {
       if (options.failTurn === `${botId}/${name}`) return { error: "disk full" };
+      if (options.throwTurn === `${botId}/${name}`) throw Object.assign(new Error("ENOSPC: no space left on device, open '/data/skills/lint.md'"), { code: "ENOSPC" });
       if (options.failBack === `${botId}/${name}` && turns.includes(`${botId}/${name}=${!on}`)) return { error: "files changed" };
       skills.get(`${botId}/${name}`)!.enabled = on;
       turns.push(`${botId}/${name}=${on}`);
@@ -143,6 +144,17 @@ describe("a Chief of Staff changing its teammates' skills", () => {
     expect(t.messages).toEqual([]);
   });
 
+  it("puts back the ones already turned when a later one throws", () => {
+    const t = setup({ throwTurn: "coder/lint" });
+    const result = t.host.stage(t.bots.chief!, "t1", both, "self");
+    expect(result).toMatchObject({ status: 422, body: { state: "failed" } });
+    expect(result.body.error).toContain("could not save the change (ENOSPC)");
+    expect(result.body.error).not.toContain("/data/");
+    expect(result.body.error).toContain("Nothing was changed");
+    expect(t.enabled("writer/research")).toBe(false);
+    expect(t.records()).toHaveLength(0);
+  });
+
   it("names the skills it could not put back instead of saying nothing was changed", () => {
     const t = setup({ failTurn: "coder/lint", failBack: "writer/research" });
     const result = t.host.stage(t.bots.chief!, "t1", both, "self");
@@ -223,6 +235,20 @@ describe("a Chief of Staff changing its teammates' skills", () => {
     t.turns.length = 0;
     t.edit("writer/research", "---\nname: research\n---\nnew words\n");
     expect(t.undo()).toMatchObject({ claimed: true, state: "invalid", stale: true });
+    expect(t.turns).toEqual([]);
+    expect(t.enabled("writer/research")).toBe(true);
+    expect(t.enabled("coder/lint")).toBe(false);
+  });
+
+  it("refuses Undo, changing none, when the Chief no longer manages a listed teammate", () => {
+    const refuse: string[] = [];
+    const t = setup({ refuse });
+    t.host.stage(t.bots.chief!, "t1", both, "self");
+    t.turns.length = 0;
+    refuse.push("coder");
+    const result = t.undo();
+    expect(result).toMatchObject({ claimed: true, state: "invalid", status: 403 });
+    expect("error" in result && result.error).toContain("Coder");
     expect(t.turns).toEqual([]);
     expect(t.enabled("writer/research")).toBe(true);
     expect(t.enabled("coder/lint")).toBe(false);
