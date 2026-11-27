@@ -124,6 +124,14 @@ export function installServerLending({ ipcMain, guard, sharing, dialogs, validat
     await sharing().lendOwn(env, firstGrant);
     return view(env);
   });
+  /** Choose what it can use: This computer's Settings with that server's folders and terminal open, once it is lent. On a
+   * server's own page it is about that server only, as the switch is. */
+  ipcMain.handle("lend:choose", async (event, id) => {
+    const { env } = target(event, id);
+    if (!(await own(env)) || sharing().state(env.id).enabled !== true) return false;
+    openSettings(env.id);
+    return true;
+  });
   /** macOS's Accessibility and Screen Recording, the one step the system itself asks for. */
   ipcMain.handle("lend:allow-screen", async (event, id) => {
     const { env } = target(event, id);
