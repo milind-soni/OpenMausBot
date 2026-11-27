@@ -11627,6 +11627,7 @@
   "settings.browser.proxyInactive": "Saved, but active only with the built-in browser on supported hosts.",
   "settings.browser.proxySave": "Save",
   "settings.browser.proxyClear": "Remove",
+  "settings.browser.proxySavedPlaceholder": "Proxy saved. Enter a new address to replace it.",
   "together.onCloud": "On My Cloud",
   "together.onComputer": "On this computer",
   "together.state.asleep": "My Cloud is asleep. Open a bot to wake it.",
