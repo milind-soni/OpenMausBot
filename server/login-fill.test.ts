@@ -351,10 +351,22 @@ describe("one-time codes and fields", () => {
     expect(page.pressed).toEqual(["Enter"]);
   });
 
+  it("takes the only new-password box on a sign-in page whose path ends in a file name (login.html), as ccopyright's does", async () => {
+    const boxes = `<div><input type="text" placeholder="请输入用户名/手机号/邮箱" autocomplete="new-password"><input type="password" placeholder="请输入密码" autocomplete="new-password"></div>`;
+    for (const url of ["https://register.example.cn/login.html", "https://example.com/account/signin.php", "https://example.com/Sign-In.aspx", "https://example.com/login.servlet", "https://example.com/login.do"]) {
+      const { page, fill } = setup(url, boxes, [{ host: url.includes(".cn") ? "example.cn" : "example.com", username: "alice@example.com" }], { submit: false });
+      const outcome = await fill();
+      expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+      expect(page.field("input[type=text]").value).toBe("alice@example.com");
+      expect(page.field("input[type=password]").value).toBe(PASSWORD);
+      page.close();
+    }
+  });
+
   it("keeps new-password boxes empty on a sign-in page with two of them, or on a sign-up page under a sign-in path", async () => {
     const twoBoxes = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"><input name="again" type="password" autocomplete="new-password"></form>`;
     const oneBox = `<form><input name="email" type="email"><input name="new" type="password" autocomplete="new-password"></form>`;
-    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox], ["https://example.com/login/%72egistration", oneBox], ["https://example.com/login/%E0%A4%A", oneBox]]) {
+    for (const [url, html] of [["https://example.com/login", twoBoxes], ["https://example.com/login.html", twoBoxes], ["https://example.com/login/password.reset", oneBox], ["https://example.com/login.register", oneBox], ["https://example.com/login.signup", oneBox], ["https://example.com/login/signup.html", oneBox], ["https://example.com/login/signup", oneBox], ["https://example.com/signin/reset-password", oneBox], ["https://example.com/login/registration", oneBox], ["https://example.com/login/%72egistration", oneBox], ["https://example.com/login/%E0%A4%A", oneBox]]) {
       const { page, fill } = setup(url, html, [{ host: "example.com", username: "alice@example.com" }], { submit: false });
       const outcome = await fill();
       expect(outcome).toMatchObject({ ok: true, filled: ["username"] });
