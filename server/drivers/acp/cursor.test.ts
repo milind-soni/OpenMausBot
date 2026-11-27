@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { discoverAcpModels } from "./custom-model-catalog.ts";
 import type { RuntimeEvent } from "../../contracts.ts";
 import { ensureDirs } from "../../config.ts";
 import { recordEvents } from "../../testing/events.ts";
@@ -20,10 +21,16 @@ import {
   decodeCursorAuthText,
   decodeCursorModelCatalog,
   decodeCursorModelText,
+  fetchCursorModels,
   matchCursorAcpModel,
   STATIC_CURSOR_MODELS,
   resolveCursorAcpModelId,
 } from "./cursor.ts";
+
+vi.mock("./custom-model-catalog.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./custom-model-catalog.ts")>(),
+  discoverAcpModels: vi.fn(await importOriginal<typeof import("./custom-model-catalog.ts")>().then((real) => real.discoverAcpModels)),
+}));
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
 
@@ -1120,5 +1127,13 @@ describe("cursor ACP model namespace (NS: set_model wiring)", () => {
       delete process.env.FAKE_ACP_DUMP;
       await removeTempDir(scratch);
     }
+  });
+});
+
+describe("fetchCursorModels", () => {
+  it("gives the discovery session its own request budget, above the shared 8s default (#4371)", async () => {
+    await fetchCursorModels("cursor-agent-does-not-exist", {});
+    const options = vi.mocked(discoverAcpModels).mock.calls.at(-1)?.[3] as { requestTimeoutMs?: number } | undefined;
+    expect(options?.requestTimeoutMs).toBeGreaterThanOrEqual(15_000);
   });
 });
