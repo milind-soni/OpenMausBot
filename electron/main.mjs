@@ -801,7 +801,7 @@ function ensureCloudAccount() {
   cloudAccount = createCloudAccountClient({
     store: cloudAccountStore(),
     platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(), origin: cloudTarget(process.env).origin,
-    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(), warn: slog, attended: () => { try { return BrowserWindow.getFocusedWindow() !== null || oneHome.holding() !== null; } catch { return true; } },
+    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(), warn: slog, attended: () => { try { return BrowserWindow.getFocusedWindow() !== null || oneHome.underWay(); } catch { return true; } },
     onState: state => {
       cloudSync.accountChanged(state.account?.id ?? null); rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);

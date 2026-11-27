@@ -438,6 +438,15 @@ test("the move's own changes send the report by themselves, a moment later", asy
   } finally { f.main.close(); }
 });
 
+test("a move under way keeps the session read every minute (underWay); none, a finished one, a paused one or one come back does not", async () => {
+  const cases = [[null, false], [journalOf(), true], [journalOf({ phase: "wait" }), true], [journalOf({ phase: "keeping" }), true], [journalOf({ phase: "home-again" }), true],
+    [journalOf({ paused: true }), false], [journalOf({ phase: "done" }), false], [journalOf({ phase: "back" }), false]];
+  for (const [journal, under] of cases) {
+    const f = installed({ state: signedIn(), journal });
+    try { assert.equal(f.main.underWay(), under, JSON.stringify(journal?.phase ?? null)); } finally { f.main.close(); }
+  }
+});
+
 test("reporting never touches the move: a send that fails or never answers changes nothing and holds nothing up", async () => {
   for (const reportMoveStatus of [async () => { throw new Error("Cloud request failed."); }, () => new Promise(() => {}), () => { throw new Error("sync"); }]) {
     const f = installed({ state: signedIn({ machine: { status: "ready", origin: CLOUD } }), reportMoveStatus });

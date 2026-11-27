@@ -24,7 +24,7 @@ export const MOVE_STATUS_IDLE_HEARTBEAT_MS = 6 * 3_600_000;
 export const MOVE_STATUS_SETTLE_MS = 5_000;
 /** At most one report a minute, whatever changes. */
 export const MOVE_STATUS_GAP_MS = 60_000;
-/** An Admin that doesn't take reports yet (404) is asked again after this long. */
+/** An Admin that doesn't take reports yet (404) is asked again after this long (spread ±20%). */
 export const MOVE_STATUS_OFF_MS = 6 * 3_600_000;
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -153,7 +153,7 @@ export function createMoveStatusReport({ status, send, signIn, now = Date.now, l
       let next = every;
       try {
         if (await send(body)) sent = { key, who, at, every };
-        else { offUntil = at + MOVE_STATUS_OFF_MS; next = MOVE_STATUS_OFF_MS; }
+        else { next = jittered(MOVE_STATUS_OFF_MS, random); offUntil = at + next; }
         failing.ok();
       } catch (error) {
         next = failing.failed(error) - now();
