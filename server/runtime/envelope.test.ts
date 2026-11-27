@@ -357,6 +357,15 @@ describe("composeReport", () => {
     expect(composeReport(assignment({ ...done, evidence: {} }), names)).toContain("The harness observed nothing of this turn.");
   });
 
+  it("shows a whole report the record holds, and of a longer one its head and the offset to read on from", () => {
+    const whole = `${"A line of the teammate's report.\n".repeat(300)}Total: 1,240.00 US$`;
+    expect(composeReport(assignment({ ...done, result: whole }), names)).toContain(`What @Scout said: ${JSON.stringify(whole)}`);
+    const head = "x".repeat(12_000);
+    const text = composeReport(assignment({ ...done, result: head, resultChars: 131_100 }), names);
+    expect(text).toContain(`What @Scout said, its first 12000 of 131100 characters: ${JSON.stringify(head)}`);
+    expect(text).toContain('The rest is not shown here: call tool_result_read with id "as_7f3k" and offset 12000, then read on until it says the result ended.');
+  });
+
   it("lists at most eight changed files and counts the rest", () => {
     const files = Array.from({ length: 11 }, (_, i) => `src/f${i}.ts`);
     const text = composeReport(assignment({ ...done, evidence: { filesChanged: files } }), names);

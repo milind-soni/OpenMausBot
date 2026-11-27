@@ -161,7 +161,7 @@ describe("sharing out a session's budget", () => {
   it("logs one line when the session cannot fit, by how much, and which servers it did not count", () => {
     const logged: string[] = [];
     withSessionToolShares([agentsServer(FULLEST), ...["browser", "data", "computer", "email", "device"].map(harnessServer), notes], 40_000, (line) => logged.push(line));
-    expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's own MCP tools \(agents, browser, data, computer, email, device\) come to (\d+) bytes at their shortest, \d+ over the 40000-byte tool budget; the engine leaves out its largest tools first \(notes not counted\)$/)]);
+    expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's own MCP tools \(agents, browser, data, computer, email, device\) come to (\d+) bytes at their shortest, \d+ over the 40000-byte tool budget; each server leaves out its least important tools to fit its share \(notes not counted\)$/)]);
     expect(withSessionToolShares([notes], 40_000, (line) => logged.push(line))).toEqual([notes]);
     expect(logged).toHaveLength(1);
   });

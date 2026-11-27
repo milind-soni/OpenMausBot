@@ -94,6 +94,8 @@ export interface BeginTurnRequest {
 export interface HostTurnResult {
   ok: boolean;
   text: string;
+  /** The reply's own length when `text` is a cut of it (handoffReply): the kept result reports its end as lost. */
+  chars?: number;
   question?: string | null;
   evidence?: TurnEvidence;
   cap?: { note: string; handoffPath?: string };
@@ -204,6 +206,8 @@ export interface Coordinator {
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options?: HandoffOptions): { node: HandoffView; duplicate: boolean };
   status(id: string): StatusView | undefined;
+  /** Part of a result longer than its record holds, kept whole beside it; undefined when nothing was kept. */
+  resultPart(id: string, offset: number, limit: number): { text: string; total: number; kept: number } | undefined;
   /** Every assignment this conversation was given that was open at `since` or began after, with all handed out under it; rows oldest first. */
   job(threadId: string, since: number, botId?: string): { scopes: string[]; rows: Assignment[] };
   /** Undelivered inbox items for a polling requester, marked delivered. */

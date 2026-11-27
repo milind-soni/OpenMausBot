@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
 import { workspaceAppsLikeCatalog } from "./testing/workspace-apps-like-catalog.ts";
-import { definitionListBytes, type ListedTool } from "./tool-list-budget.ts";
+import {
+  ANTIGRAVITY_CLI_TOOL_BUDGET, ANTIGRAVITY_CLI_TOOL_LIMIT, definitionListBytes, fitToolListToShare, toolListLimit, type ListedTool,
+} from "./tool-list-budget.ts";
 import {
   readRecordedToolList, TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsForSessionShare, toolsListResultForSessionShare,
 } from "./tool-list-share.ts";
@@ -36,11 +38,22 @@ describe("a relayed server's share of the session's tool budget", () => {
     });
   });
 
-  it("says by how much a list is over its share at its shortest, and still lists every tool", () => {
+  it("says by how much a list is over its share at its shortest, and lists every tool while it is within the CLI's own limit", () => {
     const logged: string[] = [];
-    const fitted = toolsForSessionShare(apps, { [TOOL_LIST_SHARE_ENV]: "5000" }, (line) => logged.push(line));
+    const shortest = fitToolListToShare(apps as ListedTool[], 1).bytes;
+    const share = Math.ceil((shortest * ANTIGRAVITY_CLI_TOOL_BUDGET) / ANTIGRAVITY_CLI_TOOL_LIMIT);
+    const fitted = toolsForSessionShare(apps, { [TOOL_LIST_SHARE_ENV]: String(share) }, (line) => logged.push(line));
     expect(names(fitted)).toEqual(names(apps));
-    expect(logged).toEqual([expect.stringMatching(/^tool list is \d+ bytes at its shortest, \d+ over its 5000-byte share of the session's tool budget$/)]);
+    expect(logged).toEqual([`tool list is ${shortest} bytes at its shortest, ${shortest - share} over its ${share}-byte share of the session's tool budget`]);
+  });
+
+  it("past that, leaves out its largest tools itself and names them, so the CLI drops none of another server's", () => {
+    const logged: string[] = [];
+    const fitted = toolsForSessionShare(apps, { [TOOL_LIST_SHARE_ENV]: "5000" }, (line) => logged.push(line)) as ListedTool[];
+    expect(fitted.length).toBeLessThan(apps.length);
+    expect(definitionListBytes(fitted)).toBeLessThanOrEqual(toolListLimit(5_000));
+    expect(names(fitted)).toEqual(names(apps).filter((name) => names(fitted).includes(name)));
+    expect(logged).toEqual([expect.stringMatching(/^tool list is over its 5000-byte share of the session's tool budget even at its shortest: left out \d+ tool\(s\) so the engine does not choose, [A-Z_]+/)]);
   });
 
   it("records the list it relays, before its share, for the next session to size", () => {

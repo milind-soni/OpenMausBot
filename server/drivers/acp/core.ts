@@ -1123,14 +1123,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
-              let loaded = false;
+              let loaded = false; const sessionServers = () => acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget, (note) => { session.toolsLeftOut = note; });
               if (cursor && !brokenSessions.has(cursor) && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 try {
                   await loadUntilReplayQuiet({
                     link: session.acp, sessionId: cursor, quietMs: support.loadReplayQuietMs?.(turn), replayed: () => session.sessionConfigResult ?? {},
                     send: (receive) => request(
                       support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) },
+                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : sessionServers(), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) },
                       support.sessionSetupTimeoutMs ?? LOAD_SESSION_TIMEOUT, receive),
                     receive: (result) => {
                       if (result) {
@@ -1173,7 +1173,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await sessionNewRetried(() => request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init, support.takesUnadvertisedHttpMcp, support.sessionToolBudget), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
+              await sessionNewRetried(() => request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : sessionServers(), ...selectionParams, ...support.sessionSetupParams?.(init, heldSystem()) }, support.sessionSetupTimeoutMs ?? NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = liveSessionKey(sessionKey, heldSystem());
                 receiveModelVariants(result, true);
@@ -1281,11 +1281,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (expectedModeId !== undefined && readSessionModes(session.sessionConfigResult)?.currentModeId !== expectedModeId) throw new Error(`${support.displayName} changed mode before the prompt`);
             state.promptSent = true; clock.promptSent(Date.now());
             if (!support.promptUnreachedModel) acknowledge();
-            const promptIdleMs = promptIdleTimeoutMs();
+            const promptIdleMs = promptIdleTimeoutMs(); const leftOutNote = session.toolsLeftOut?.();
             const quiet = startQuietWatch(threadId, session, current);
             const result = await request(
               "session/prompt",
-              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(textOnlyModel ? [{ type: "text", text: TEXT_ONLY_PROMPT_NOTE }] : [])] },
+              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(leftOutNote ? [{ type: "text", text: leftOutNote }] : []), ...(textOnlyModel ? [{ type: "text", text: TEXT_ONLY_PROMPT_NOTE }] : [])] },
               undefined,
               undefined,
               promptIdleMs,

@@ -16,7 +16,7 @@ import { cliDrops } from "../testing/cli-tool-drop.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { workspaceAppsLikeCatalog } from "../testing/workspace-apps-like-catalog.ts";
 import {
-  ANTIGRAVITY_CLI_TOOL_BUDGET, definitionListBytes, toolListFloorBytes, toolsForShareProfile, type ListedTool,
+  ANTIGRAVITY_CLI_TOOL_BUDGET, ANTIGRAVITY_CLI_TOOL_LIMIT, COORDINATION_TOOLS, definitionListBytes, toolListFloorBytes, toolsForShareProfile, type ListedTool,
 } from "../tool-list-budget.ts";
 import { TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsForSessionShare } from "../tool-list-share.ts";
 import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfile } from "../tool-schema-profile.ts";
@@ -24,7 +24,7 @@ import { agentsToolList } from "./agents-mcp.ts";
 import { antigravityCliTakesHttpMcp, antigravityCliToolBudget } from "./antigravity-acp.ts";
 import { acpSessionMcpServers } from "./own-mcp-http.ts";
 import { withSessionToolShares } from "./own-mcp-session-budget.ts";
-import { SESSION_TOOL_BUDGET_ENV, UNKNOWN_LIST_RESERVE, withSessionToolBudget } from "./session-tool-budget.ts";
+import { leftOutToolsNote, SESSION_TOOL_BUDGET_ENV, UNKNOWN_LIST_RESERVE, withSessionToolBudget } from "./session-tool-budget.ts";
 import { acpMcpServers, type AcpMcpServer } from "./turn-mcp.ts";
 import type { SendTurnInput } from "../contracts.ts";
 
@@ -107,7 +107,7 @@ describe("the session's tool budget over every server", () => {
     }
   });
 
-  it("a session that cannot fit even at its shortest keeps every tool, says by how much, and leaves the CLI the largest to drop", () => {
+  it("a session that cannot fit even at its shortest leaves out its servers' least important tools itself, never a coordination tool", () => {
     const recordsDir = mkdtempSync(join(tmpdir(), "stb-"));
     const big = [...session, workspace];
     LISTS.workspace = fitToolList(whopLikeCatalog().slice(0, 120), gemini) as ListedTool[];
@@ -115,8 +115,12 @@ describe("the session's tool budget over every server", () => {
       shown(plan(big, recordsDir).planned);
       const { planned, logged } = plan(big, recordsDir);
       const lists = shown(planned);
-      expect(flat(lists)).toHaveLength(Object.values(OWN).flat().length + LISTS.composio!.length + LISTS.workspace.length);
-      expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's MCP tools \(agents, browser, data, composio, workspace\) come to \d+ bytes at their shortest, \d+ over the 55000-byte tool budget; the engine leaves out its largest tools first$/)]);
+      expect(flat(lists).length).toBeLessThan(Object.values(OWN).flat().length + LISTS.composio!.length + LISTS.workspace.length);
+      for (const name of COORDINATION_TOOLS) expect(lists.agents!.map((tool) => tool.name)).toContain(name);
+      const all = Object.values(lists).flat();
+      expect(definitionListBytes(all)).toBeLessThanOrEqual(ANTIGRAVITY_CLI_TOOL_LIMIT);
+      expect(cliDrops(all, ANTIGRAVITY_CLI_TOOL_LIMIT)).toEqual([]);
+      expect(logged).toEqual([expect.stringMatching(/^\[mcp\] this session's MCP tools \(agents, browser, data, composio, workspace\) come to \d+ bytes at their shortest, \d+ over the 55000-byte tool budget; each server leaves out its least important tools to fit its share$/)]);
     } finally {
       LISTS.workspace = fitToolList(whopLikeCatalog().slice(0, 30), gemini) as ListedTool[];
     }
@@ -195,5 +199,18 @@ describe("the session's tool budget over every server", () => {
     for (const [name, tools] of Object.entries(OWN)) expect(share(name)).toBeGreaterThanOrEqual(toolListFloorBytes(tools));
     expect(share("composio")).toBeGreaterThan(UNKNOWN_LIST_RESERVE);
     expect(["agents", "browser", "data", "composio"].reduce((sum, name) => sum + share(name), 0)).toBeLessThanOrEqual(ANTIGRAVITY_CLI_TOOL_BUDGET);
+  });
+});
+
+describe("the line naming what a session leaves out", () => {
+  it("names each tool left out, and each relay whose list is not known yet as a gap in the line", () => {
+    expect(leftOutToolsNote([])).toBeUndefined();
+    expect(leftOutToolsNote([{ server: "data", tools: [] }])).toBeUndefined();
+    const both = leftOutToolsNote([{ server: "data", tools: ["data_export", "data_show"] }, { server: "composio", tools: [], unknown: true }])!;
+    expect(both).toMatch(/^\[Tools left out\] .*does not list: data: data_export, data_show\. They cannot be called here\. /);
+    expect(both).toContain("This list may be incomplete: composio has not reported its tools yet");
+    const only = leftOutToolsNote([{ server: "composio", tools: [], unknown: true }, { server: "shop", tools: [], unknown: true }])!;
+    expect(only).not.toContain("does not list");
+    expect(only).toContain("This list may be incomplete: composio, shop have not reported their tools yet");
   });
 });

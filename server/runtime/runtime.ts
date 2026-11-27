@@ -52,7 +52,8 @@ export interface BeginRequest {
 }
 
 const BRIEF_MAX = 12_000;
-const RESULT_MAX = 12_000;
+/** What the record holds of a result; a longer one is kept whole beside it (keepResult) and read on with assignment_status. */
+export const RESULT_MAX = 12_000;
 const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
 /** Ticks a settlement the store refused is retried on; past them it is dropped, so the tree's own expiry ends it. */
@@ -583,7 +584,7 @@ export class Runtime {
     const root = n.parentId ? this.store.get(n.rootId) : n;
     if (result.kind === "continue") {
       // The count comes from events because dispatch deletes n.continuation.
-      n.result = clip(result.text, RESULT_MAX);
+      this.keepResult(n, result.text, result.chars);
       n.guard = nextGuard(n.guard, result.evidence);
       const stop = loopStop(n.guard, result.text);
       if (stop) {
@@ -616,7 +617,7 @@ export class Runtime {
       }
       return;
     }
-    n.result = clip(result.text, RESULT_MAX);
+    this.keepResult(n, result.text, result.chars);
     if (result.kind === "completed" && result.statusOnly) n.statusOnly = true;
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
@@ -799,9 +800,9 @@ export class Runtime {
     const now = this.clock.now();
     n.status = status; n.outcome = outcome; n.finishedAt = now; n.lastActivityAt = now;
     if (detail !== undefined) n.outcomeDetail = clip(detail, DETAIL_MAX); else delete n.outcomeDetail;
-    if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
-    if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
-    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) n.result = clip(detail, RESULT_MAX);
+    if (status !== "completed" && detail !== undefined && n.result === "") this.keepResult(n, detail);
+    if (outcome === "refused" && detail !== undefined) { this.keepResult(n, detail); delete n.evidence; }
+    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) this.keepResult(n, detail);
     delete n.question; delete n.decide; delete n.answer; delete n.answeredBy; delete n.restart; delete n.carrying;
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
@@ -946,6 +947,24 @@ export class Runtime {
   private names(n: Assignment, parent: Assignment | undefined): EnvelopeNames {
     const names = this.safe("names", () => this.runner.names(n, parent));
     return names ?? { requester: n.requester.botId ?? n.requester.kind, assignee: n.assignee.botId };
+  }
+
+  /** The record holds a result's head; a longer one is kept whole beside it, so its end is never lost. A failed keep
+   * leaves resultChars set with nothing beside it, which the reader reports as cut, never as the whole text. */
+  private keepResult(n: Assignment, said: string, saidChars?: number): void {
+    // Every result is masked, short or long, before it is cut or kept, so a secret is never stored or shown half kept.
+    const text = redactSecretsInText(said);
+    // saidChars: the reply was already cut before it got here (handoffReply); the reader must still say its end is lost.
+    const whole = Math.max(text.length, saidChars !== undefined && saidChars > said.length ? text.length + saidChars - said.length : 0);
+    const long = whole > RESULT_MAX;
+    n.result = clip(text, RESULT_MAX);
+    if (!long && n.resultChars === undefined) return;
+    if (long) n.resultChars = whole; else delete n.resultChars;
+    try {
+      this.store.keepResult(n.id, long ? text : undefined, whole);
+    } catch (error) {
+      this.log(`keep result threw: ${String(error)}`);
+    }
   }
 
   private safe<T>(what: string, fn: () => T): T | undefined {

@@ -15,6 +15,7 @@ import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySavedText, memorySearchText, threadReadText, threadsListText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
+import { assignmentResultLines, isAssignmentResultRead, readAssignmentResult, resultPartLines } from "./agents-assignment-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
@@ -78,7 +79,6 @@ const STATUS_WORDS: Record<string, string> = {
   failed: "failed",
   cancelled: "cancelled",
 };
-const RESULT_HEAD = 2_000;
 
 function assignmentLine(a: Json): string {
   const id = typeof a.id === "string" && a.id ? a.id : "?";
@@ -99,8 +99,9 @@ function renderAssignmentStatus(r: Json, id: string): string {
   if (question && (a.status === "needs_input" || a.outcome === "needs_input")) {
     lines.push(`It is parked on a question for the person: ${JSON.stringify(question)}. Nothing moves until the person answers it in that thread; tell them and do not keep checking.`);
   }
-  const result = typeof a.result === "string" ? a.result.trim() : "";
-  if (result) lines.push(`Result${result.length > RESULT_HEAD ? " (first part)" : ""}: ${result.slice(0, RESULT_HEAD)}`);
+  const part = jsonRecord(raw.resultPart) ? raw.resultPart : undefined;
+  if (part) return [lines[0], ...resultPartLines(part, id)].join("\n");
+  lines.push(...assignmentResultLines(a, id));
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
@@ -274,6 +275,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: JSON.stringify(result) };
   }
   if (name === "tool_result_read") {
+    if (isAssignmentResultRead(args)) return readAssignmentResult(args, context);
     if (typeof args.id !== "string" || !/^r-[0-9a-f-]{36}$/.test(args.id) ||
       (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0))) {
       return { text: "Use the saved result id and a non-negative integer offset from its notice.", isError: true };

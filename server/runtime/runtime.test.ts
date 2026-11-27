@@ -6,6 +6,9 @@ import { PROGRESS_WRITE_MS, RERUN_BURST, RERUN_GAP_MS, RERUN_HELD, RERUN_SUPERSE
 import { openRuntimeStore, type RuntimeStore } from "./store.ts";
 import { CUT_TWICE, INTERRUPTED_OUTWARD, loopStop, nextGuard, outwardDetail } from "./tree.ts";
 import type { Assignment, Clock, EnqueueRequest, Limits, RunInput, RunResult, TurnRunner } from "./types.ts";
+import { assignmentResultPart } from "../assignment-read.ts";
+import { resultPartLines } from "../drivers/agents-assignment-result.ts";
+import { handoffReply } from "../runtime-coordinator.ts";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -809,6 +812,77 @@ describe("access rechecked while work runs", () => {
     w.runtime.tick();
     const resume = w.runner.runs.find(r => r.a.id === root.id && r.input.resumed);
     expect(resume?.input.settled?.map(s => s.result)).toEqual(["Destination room setup is unfinished"]);
+    invariants(w);
+  });
+
+  it.each([20_480, 131_100])("keeps the head of a %i-character report in the record and the whole of it beside, read to its last line", async (size) => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const total = "Total spent this month: 1,240.00 US$";
+    const report = `${"A line of the teammate's report.\n".repeat(Math.ceil(size / 33))}${total}`;
+    expect(report.length).toBeGreaterThan(size);
+    await w.runner.release(child.id, { kind: "completed", text: report });
+    const row = w.store.get(child.id)!;
+    expect(row.result).toBe(report.slice(0, 12_000));
+    expect(row.resultChars).toBe(report.length);
+    let read = "";
+    for (;;) {
+      const part = w.store.resultPart(child.id, read.length, 16_000)!;
+      expect(part).toMatchObject({ total: report.length, kept: report.length });
+      if (!part.text) break;
+      read += part.text;
+    }
+    expect(read).toBe(report);
+    expect(read.endsWith("US$")).toBe(true);
+    invariants(w);
+  });
+
+  it("says a report cut before it reached the runtime lost its end: a 2,000,003-character reply reads as truncated", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const reply = handoffReply(`${"r".repeat(2_000_000)}US$`);
+    expect(reply).toMatchObject({ chars: 2_000_003 });
+    expect(reply.text).toHaveLength(2_000_000);
+    await w.runner.release(child.id, { kind: "completed", text: reply.text, chars: reply.chars });
+    const row = w.store.get(child.id)!;
+    expect(row.resultChars).toBe(2_000_003);
+    const last = assignmentResultPart(row, String(2_000_000), (...args) => w.store.resultPart(...args)).resultPart!;
+    expect(last).toMatchObject({ offset: 2_000_000, end: 2_000_000, total: 2_000_003, text: "", truncated: true });
+    expect(resultPartLines(last, child.id).join("\n")).toMatch(/\[truncated: only the first 2000000 of 2000003 characters.*Tell the person the end of the report is missing/);
+    invariants(w);
+  });
+
+  it("masks a secret in a short result too, before it is kept", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+    await w.runner.release(child.id, { kind: "completed", text: `Done. The key is ${secret}.` });
+    const row = w.store.get(child.id)!;
+    expect(row.result).not.toContain(secret);
+    expect(row.result).toMatch(/^Done\. The key is /);
+    expect(row.resultChars).toBeUndefined();
+    invariants(w);
+  });
+
+  it("drops a kept long result once the record's own result is short again", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    await w.runner.release(child.id, { kind: "continue", text: "x".repeat(30_000), note: "more to do" });
+    expect(w.store.get(child.id)?.resultChars).toBe(30_000);
+    expect(w.store.resultPart(child.id, 0, 10)?.total).toBe(30_000);
+    w.runtime.tick();
+    await w.runner.release(child.id, { kind: "completed", text: "Short final report." });
+    expect(w.store.get(child.id)).toMatchObject({ result: "Short final report." });
+    expect(w.store.get(child.id)?.resultChars).toBeUndefined();
+    expect(w.store.resultPart(child.id, 0, 10)).toBeUndefined();
     invariants(w);
   });
 

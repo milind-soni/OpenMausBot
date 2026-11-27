@@ -335,7 +335,7 @@ describe("a handed-on turn owns its question", () => {
   });
 });
 
-describe("questions carried separately from a bounded handoff summary", () => {
+describe("questions carried separately from a long handoff reply", () => {
   type ReplyCase = {
     label: string; text: string; question?: string; default?: string; full?: boolean; outside?: boolean;
     legacy?: boolean; privateReply?: boolean; ok?: boolean; approvalAsk?: string; earlierReply?: string;
@@ -406,12 +406,15 @@ describe("questions carried separately from a bounded handoff summary", () => {
       coordinator.tick();
       await settled;
       const cards = w.rows("work").filter((row) => row.card);
-      expect(sent.text.length).toBeLessThanOrEqual(12_000);
-      if (!fixture.privateReply) expect(sent.text).toBe(fixture.text.slice(0, 12_000));
+      // The reply goes whole to the runtime, which keeps its head in the record and the rest beside it.
+      if (!fixture.privateReply) expect(sent.text).toBe(fixture.text);
       if (fixture.question === undefined) {
         expect(parked).toEqual([]);
         expect(cards).toEqual([]);
         expect(coordinator.node(child.id)?.status).toBe(fixture.ok === false ? "failed" : "completed");
+        const row = coordinator.status(child.id)!.assignment;
+        expect(row.result).toBe(sent.text.slice(0, 12_000));
+        expect(row.resultChars).toBe(sent.text.length > 12_000 ? sent.text.length : undefined);
       } else {
         expect(parked).toHaveLength(1);
         expect(cards).toHaveLength(1);

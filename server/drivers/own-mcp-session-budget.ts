@@ -12,7 +12,7 @@ import { PHONE_TOOLS } from "../phones/tools.ts";
 import type { HarnessMcpKind } from "../harness-mcp-request.ts";
 import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
 import {
-  definitionListBytes, descriptionLevelFor, toolListShareProfile, withCompactSchemas, withDescriptionLevel, type ListedTool,
+  definitionListBytes, descriptionLevelFor, fitToolListWithinShare, toolListShareProfile, withCompactSchemas, withDescriptionLevel, type ListedTool,
 } from "../tool-list-budget.ts";
 import { agentsToolList } from "./agents-mcp.ts";
 import { ownMcpOverHttp, type AcpMcpServer } from "./turn-mcp.ts";
@@ -72,15 +72,23 @@ export function withOwnShare(server: AcpMcpServer, share: number): AcpMcpServer 
 }
 
 /** `servers` with each of OpenMausBot's own servers given its share of `budget`; every other server as it was. */
-export function withSessionToolShares(servers: AcpMcpServer[], budget: number, log: (line: string) => void = (line) => console.warn(line)): AcpMcpServer[] {
+export function withSessionToolShares(servers: AcpMcpServer[], budget: number, log: (line: string) => void = (line) => console.warn(line),
+  leftOut?: (left: () => Array<{ server: string; tools: string[] }>) => void): AcpMcpServer[] {
   const own = servers.map((server) => ({ server, tools: ownServerToolList(server) })).filter((entry) => entry.tools !== null);
-  if (!own.length) return servers;
+  if (!own.length) {
+    leftOut?.(() => []);
+    return servers;
+  }
   const { shares, bytes, fits } = sessionToolShares(own.map(({ tools }) => tools!), budget);
   if (!fits) {
     const others = servers.filter((server) => !own.some((entry) => entry.server === server)).map((server) => server.name);
-    log(`[mcp] this session's own MCP tools (${own.map(({ server }) => server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; the engine leaves out its largest tools first${others.length ? ` (${others.join(", ")} not counted)` : ""}`);
+    log(`[mcp] this session's own MCP tools (${own.map(({ server }) => server.name).join(", ")}) come to ${bytes} bytes at their shortest, ${bytes - budget} over the ${budget}-byte tool budget; each server leaves out its least important tools to fit its share${others.length ? ` (${others.join(", ")} not counted)` : ""}`);
   }
   const shareOf = new Map(own.map(({ server }, index) => [server, shares[index]!]));
+  leftOut?.(fits ? () => [] : () => own.flatMap(({ server, tools }) => {
+    const { left } = fitToolListWithinShare(tools!, shareOf.get(server)!);
+    return left.length ? [{ server: server.name, tools: left }] : [];
+  }));
   return servers.map((server) => {
     const share = shareOf.get(server);
     return share === undefined ? server : withOwnShare(server, share);

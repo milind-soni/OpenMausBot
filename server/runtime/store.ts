@@ -65,6 +65,7 @@ const assignmentSchema = z.object({
   lastActivityAt: z.number(),
   finishedAt: z.number().optional(),
   result: z.string(),
+  resultChars: z.number().int().nonnegative().optional(),
   evidence: evidenceSchema.optional(),
   statusOnly: z.boolean().optional(),
   reportedAt: z.number().optional(),
@@ -104,6 +105,11 @@ export interface RuntimeStore {
   addInbox(item: InboxItem): void;
   inbox(owner: Owner, undeliveredOnly?: boolean): InboxItem[];
   markDelivered(ids: string[], at: number): void;
+  /** A result longer than the record holds, kept beside it (up to RESULT_KEPT_MAX); undefined drops it. `total` is the
+   * result's own length when `text` is already a cut of it, so the reader still says the end was not kept. */
+  keepResult(assignmentId: string, text: string | undefined, total?: number): void;
+  /** Part of a kept result: `total` is the result's own length, `kept` how much of it was stored. */
+  resultPart(assignmentId: string, offset: number, limit: number): { text: string; total: number; kept: number } | undefined;
   prune(before: number): number;
   close(): void;
 }
@@ -159,7 +165,32 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS inbox_thread ON inbox(owner_thread_id, delivered_at);
   CREATE INDEX IF NOT EXISTS inbox_run ON inbox(owner_run_id, delivered_at);
   CREATE INDEX IF NOT EXISTS inbox_assignment ON inbox(assignment_id);
+  -- A result past the record's own 12 000 characters, whole, in parts of RESULT_CHUNK so a page reads only the parts it
+  -- covers. An older build never reads it and keeps the record's head.
+  CREATE TABLE IF NOT EXISTS assignment_result_parts (
+    assignment_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    start INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    kept INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    PRIMARY KEY (assignment_id, seq)
+  );
 `;
+
+/** At most `max` units of `text`, never ending on the first half of a surrogate pair. */
+function wholeCharacters(text: string, max: number): string {
+  const cut = text.slice(0, max);
+  const last = cut.charCodeAt(cut.length - 1);
+  return cut.length === max && text.length > max && last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/** The most of one result kept beside its record; past it the reader is told the rest was not kept. */
+export const RESULT_KEPT_MAX = 2_000_000;
+/** The most of one stored part of a kept result. Offsets are UTF-16 units as JavaScript counts them, so they match the
+ * record's head; a part never ends inside a surrogate pair, which SQLite would store as a replacement character. */
+const RESULT_CHUNK = 16_000;
 
 type Row = Record<string, unknown>;
 
@@ -255,7 +286,14 @@ export function openRuntimeStore(path: string): RuntimeStore {
       AND NOT EXISTS (SELECT 1 FROM assignments c WHERE c.root_id = r.id AND c.status NOT IN (${terminalList}))`),
     pruneEvents: db.prepare("DELETE FROM assignment_events WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
     pruneInbox: db.prepare("DELETE FROM inbox WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
+    pruneResults: db.prepare("DELETE FROM assignment_result_parts WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
     pruneRows: db.prepare("DELETE FROM assignments WHERE root_id = ?"),
+    // Rows an older build's prune left behind once their record was gone.
+    pruneOrphanResults: db.prepare("DELETE FROM assignment_result_parts WHERE assignment_id NOT IN (SELECT id FROM assignments)"),
+    keepResultPart: db.prepare("INSERT INTO assignment_result_parts (assignment_id, seq, start, size, total, kept, text) VALUES (?, ?, ?, ?, ?, ?, ?)"),
+    dropResult: db.prepare("DELETE FROM assignment_result_parts WHERE assignment_id = ?"),
+    resultSize: db.prepare("SELECT total, kept FROM assignment_result_parts WHERE assignment_id = ? AND seq = 0"),
+    resultParts: db.prepare("SELECT start, text FROM assignment_result_parts WHERE assignment_id = ? AND start < ? AND start + size > ? ORDER BY seq"),
   };
 
   let depth = 0;
@@ -372,10 +410,36 @@ export function openRuntimeStore(path: string): RuntimeStore {
         for (const rootId of roots) {
           statements.pruneEvents.run(rootId);
           statements.pruneInbox.run(rootId);
+          statements.pruneResults.run(rootId);
           removed += Number(statements.pruneRows.run(rootId).changes);
         }
+        if (roots.length) statements.pruneOrphanResults.run();
         return removed;
       });
+    },
+    keepResult(assignmentId, text, total) {
+      transaction(() => {
+        statements.dropResult.run(assignmentId);
+        if (text === undefined) return;
+        const kept = wholeCharacters(text, RESULT_KEPT_MAX);
+        const whole = Math.max(total ?? 0, text.length);
+        for (let seq = 0, at = 0; seq === 0 || at < kept.length; seq += 1) {
+          const part = wholeCharacters(kept.slice(at), RESULT_CHUNK);
+          statements.keepResultPart.run(assignmentId, seq, at, part.length, whole, kept.length, part);
+          at += part.length;
+        }
+      });
+    },
+    resultPart(assignmentId, offset, limit) {
+      const size = statements.resultSize.get(assignmentId) as Row | undefined;
+      if (!size) return undefined;
+      const kept = Number(size.kept), total = Number(size.total);
+      const start = Math.min(Math.max(0, offset), kept), end = Math.min(kept, start + Math.max(0, limit));
+      if (end <= start) return { text: "", total, kept };
+      const parts = statements.resultParts.all(assignmentId, end, start) as Row[];
+      const from = parts.length ? Number(parts[0]!.start) : start;
+      const text = parts.map(row => String(row.text)).join("").slice(start - from, end - from);
+      return { text, total, kept };
     },
     close() {
       db.close();

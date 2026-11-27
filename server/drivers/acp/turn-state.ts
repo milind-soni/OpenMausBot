@@ -61,6 +61,8 @@ export interface AcpSession {
   sessionKey: string | null;
   sessionId: string | null;
   sessionConfigResult: any;
+  /** The line each prompt carries while this session's tool lists leave tools out to fit the engine's budget, read per prompt. */
+  toolsLeftOut?: () => string | undefined;
   /** Monotonic counter incremented on live `current_mode_update` notifications so an in-flight `session/set_mode` response cannot overwrite a newer server update. */
   modeVersion: number;
   initResult: any;

@@ -6,7 +6,7 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { handoffLimits } from "./runtime/handoff-limits.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
-import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
+import { openRuntimeStore, RESULT_KEPT_MAX, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
 import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
@@ -94,8 +94,16 @@ export function needsInputQuestion(text: string): string | undefined {
   return question || undefined;
 }
 
-export function handoffReply(text: string): Pick<HostTurnResult, "text" | "question"> {
-  return { text: text.slice(0, BRIEF_MAX), question: needsInputQuestion(text) ?? null };
+/** The turn's reply whole, up to what the store keeps beside a record: the runtime keeps the record's head and the rest
+ * beside it. A longer reply is cut here and carries its own length (`chars`), so the reader says its end was lost. */
+export function handoffReply(text: string): Pick<HostTurnResult, "text" | "question" | "chars"> {
+  const question = needsInputQuestion(text) ?? null;
+  return text.length > RESULT_KEPT_MAX ? { text: text.slice(0, RESULT_KEPT_MAX), chars: text.length, question } : { text, question };
+}
+
+/** A reply's own length when its text is a cut of it. */
+function cutAt(result: Pick<HostTurnResult, "text" | "chars">): { chars?: number } {
+  return result.chars !== undefined && result.chars > result.text.length ? { chars: result.chars } : {};
 }
 
 export function handoffQuestion(result: Pick<HostTurnResult, "text" | "question">): string | undefined {
@@ -346,6 +354,12 @@ export class RuntimeCoordinator implements Coordinator {
   status(id: string): StatusView | undefined {
     this.ready();
     return this.runtime.status(id);
+  }
+
+  /** Part of a result longer than its record holds, kept whole beside it. */
+  resultPart(id: string, offset: number, limit: number): ReturnType<RuntimeStore["resultPart"]> {
+    this.ready();
+    return this.store.resultPart(id, offset, limit);
   }
 
   job(threadId: string, since: number, botId?: string): { scopes: string[]; rows: Assignment[] } {
@@ -718,13 +732,13 @@ export class RuntimeCoordinator implements Coordinator {
     const evidence = (result: HostTurnResult) => result.evidence ? { evidence: result.evidence } : {};
     const result = await this.host.run(node, resumed, signal,
       { text: `${input.restartNote}${body}`, note: `${input.restartNote}${note}`, restartNote: input.restartNote, turn: input.turn });
-    if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
-    if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
+    if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text, ...cutAt(result) };
+    if (result.cap) return { kind: "continue", text: result.text, ...cutAt(result), note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     const question = root ? undefined : handoffQuestion(result);
     if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
-    if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...cutAt(result), ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
+    if (question === undefined) return { kind: "completed", text: result.text, ...cutAt(result), ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
     return { kind: "needs_input", question, ...decide, ...evidence(result) };

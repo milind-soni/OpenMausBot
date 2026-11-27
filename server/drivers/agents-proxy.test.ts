@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { childEnv } from "../testing/omb-env.ts";
 import { ToolResults } from "../tool-results.ts";
 import { waitForExit } from "../testing/cleanup.ts";
+import { assignmentResultPart } from "../assignment-read.ts";
 import { fullInputSchema } from "./agents-catalog.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
@@ -261,7 +262,7 @@ beforeAll(async () => {
     if (req.method === "GET" && req.url?.startsWith("/api/internal/assignment-status")) {
       lastAssignmentStatusUrl = req.url;
       res.writeHead(assignmentStatusCode, { "content-type": "application/json" });
-      res.end(JSON.stringify(assignmentStatusResponse));
+      res.end(JSON.stringify(typeof assignmentStatusResponse === "function" ? assignmentStatusResponse(req.url) : assignmentStatusResponse));
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/models")) {
@@ -1415,13 +1416,55 @@ describe("agents-proxy MCP surface", () => {
     const text = res.result.content[0].text;
     expect(res.result.isError).toBeFalsy();
     expect(text).toContain("Assignment asg-9 → @Helper: failed (provider_error): the engine exited early");
-    expect(text).toContain(`Result (first part): ${"x".repeat(2_000)}`);
+    expect(text).toContain(`Result, characters 0-2000 of 2500: ${"x".repeat(2_000)}\n[The result goes on: call tool_result_read with id "asg-9" and offset 2000 to read the next part.]`);
     expect(text).not.toContain("x".repeat(2_001));
     expect(text).toContain("Its own hand-offs:\n- asg-9-1 → @Quill: completed");
     expect(text).not.toContain("not settled");
     expect(text).not.toMatch(/Deprecated/);
     expect(lastAssignmentStatusUrl).toBe("/api/internal/assignment-status?id=asg-9");
     assignmentStatusResponse = DONE_ASSIGNMENT;
+  });
+
+  it.each([20_480, 131_100])("assignment_status gives a %i-character result's head, and tool_result_read the rest to its last line", async (size) => {
+    const total = "Total spent this month: 1,240.00 US$";
+    const report = `${"A teammate's report line about the campaign plan.\n".repeat(Math.ceil(size / 50))}${total}`;
+    expect(report.length).toBeGreaterThan(size);
+    // The host's answer: the record's 12 000-character head, and with an offset a part of the whole text kept beside it.
+    const row = { id: "asg-20", result: report.slice(0, 12_000), resultChars: report.length };
+    const kept = (_id: string, offset: number, limit: number) => ({ text: report.slice(offset, offset + limit), total: report.length, kept: report.length });
+    assignmentStatusResponse = (url: string) => ({ assignment: { ...row, botId: "bot-helper", botName: "Helper", status: "completed", outcome: "done",
+      ...assignmentResultPart(row, new URL(url, "http://host").searchParams.get("offset"), kept) }, children: [], inbox: [] });
+    try {
+      const first = (await callTool("assignment_status", { id: "asg-20" })).result.content[0].text as string;
+      expect(first).toContain(`Result, characters 0-2000 of ${report.length}: ${report.slice(0, 2_000)}\n`);
+      let next: number | undefined = Number(first.match(/id "asg-20" and offset (\d+) to read the next part/)![1]);
+      let read = report.slice(0, next);
+      while (next !== undefined) {
+        const page = (await callTool("tool_result_read", { id: "asg-20", offset: next })).result.content[0].text as string;
+        const [, from, to] = page.match(/^Result, characters (\d+)-(\d+) of \d+: /m)!;
+        expect(Number(from)).toBe(next);
+        read += page.slice(page.indexOf(": ", page.indexOf("Result, characters")) + 2, page.lastIndexOf("\n["));
+        const more = page.match(/and offset (\d+) to read the next part\.\]$/);
+        next = more ? Number(more[1]) : undefined;
+        if (!more) { expect(page.endsWith("\n[End of the result: that was all of it.]")).toBe(true); expect(Number(to)).toBe(report.length); }
+      }
+      expect(read).toBe(report);
+      expect(read.endsWith("US$")).toBe(true);
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+    }
+  });
+
+  it("tool_result_read says truncated, and tells the bot, when less than an assignment's whole result was kept", async () => {
+    const row = { id: "asg-21", result: "h".repeat(12_000), resultChars: 50_000 };
+    assignmentStatusResponse = (url: string) => ({ assignment: { ...row, botId: "bot-helper", botName: "Helper", status: "completed",
+      ...assignmentResultPart(row, new URL(url, "http://host").searchParams.get("offset"), () => undefined) }, children: [], inbox: [] });
+    try {
+      const page = (await callTool("tool_result_read", { id: "asg-21", offset: 12_000 })).result.content[0].text as string;
+      expect(page).toContain("[truncated: only the first 12000 of 50000 characters of this result were kept; the rest is lost. Tell the person the end of the report is missing");
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+    }
   });
 
   it("assignment_status on a hand-off sent from another own chat says its result does not resume this one", async () => {

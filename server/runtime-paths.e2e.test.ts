@@ -283,6 +283,33 @@ it("R5 an external runtime delegates, long-polls assignment_status for the settl
   expect(pinned.filter((message: any) => message.role === "bot" && message.turnId && !message.from)).toEqual([]);
 }), hostTimeout(120_000));
 
+it("R5b a teammate's report past 131,080 characters is read through assignment_status to its last line", () => scenario(async (f) => {
+  const total = "Total spent this month: 1,240.00 US$";
+  const report = `R5B-REPORT\n${"A line of the teammate's long campaign report.\n".repeat(2_860)}${total}`;
+  expect(report.length).toBeGreaterThan(131_080);
+  f.script(f.peer.id, { key: "P1", match: ["R5B-BRIEF"], reply: report });
+  const gateway = { id: f.owner.id, threadId: f.owner.activeTaskId };
+  writeFileSync(join(f.dataDir, "external-runtimes.json"), JSON.stringify({ [gateway.id]: { token: TOKEN, threadId: gateway.threadId } }), { mode: 0o600 });
+  const handed = await f.api("POST", "/api/internal/coordinate-bots", { botIds: [f.peer.id], message: "R5B-BRIEF: write the long report." }, TOKEN);
+  expect(handed.status, JSON.stringify(handed.body)).toBe(200);
+  const requestId = handed.body.receipts[0].requestId;
+  const settled = await f.api("GET", `/api/internal/assignment-status?id=${requestId}&wait_ms=60000`, undefined, TOKEN);
+  expect(settled.body.assignment).toMatchObject({ status: "completed", resultChars: report.length });
+  expect(settled.body.assignment.result).toBe(report.slice(0, 12_000));
+  expect(f.raw(requestId)?.result).toHaveLength(12_000);
+  let read = "";
+  for (;;) {
+    const page = await f.api("GET", `/api/internal/assignment-status?id=${requestId}&offset=${read.length}`, undefined, TOKEN);
+    expect(page.status).toBe(200);
+    const part = page.body.assignment.resultPart;
+    expect(part).toMatchObject({ offset: read.length, total: report.length, truncated: false });
+    if (!part.text) break;
+    read += part.text;
+  }
+  expect(read).toBe(report);
+  expect(read.endsWith("US$")).toBe(true);
+}), hostTimeout(120_000));
+
 it("R6 a restart while a routine's teammate runs reruns the teammate once and the run still completes", () => scenario(async (f) => {
   const brief = "R6-BRIEF: rebuild the search index and report the document count.";
   f.script(f.owner.id,
