@@ -21,7 +21,7 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, CUT_REPLY_NOTE, cutReplyContinues, cutReplyWillContinue, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { ContinuedReply, MaskedDeltas, maskSecretHalves } from "./cut-reply-text.ts";
+import { anotherRequestFollows, ContinuedReply, MaskedDeltas, maskSecretHalves } from "./cut-reply-text.ts";
 import { ChatHttpError, completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
@@ -639,7 +639,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
           let resends = 0;
-          let completion: Completion, prefix = "", willContinue = false;
+          let completion: Completion, prefix = "", willContinue = false, willRequest = false;
           for (;;) {
             let streamed = false;
             let answerStreamed = false;
@@ -668,13 +668,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const rest = holdback?.rest();
                 if (rest) delta(rest, "assistant_text");
               }
-              willContinue = !completion.toolCalls.length
-                && cutReplyWillContinue(cutReplies, completion, Boolean(options.localModel && tools.definitions.length));
-              // Held text is flushed only when the turn's answer ends, so a credential prefix is never shown in halves.
-              const flushHeld = !willContinue && !completion.toolCalls.length;
-              delta("", "assistant_text", flushHeld);
-              delta("", "reasoning_text", flushHeld);
-              carried = willContinue ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willContinue ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
+              willContinue = !completion.toolCalls.length && cutReplyWillContinue(cutReplies, completion, Boolean(options.localModel && tools.definitions.length));
+              // The hold survives a reply another request may answer, so a credential is never shown in halves.
+              willRequest = anotherRequestFollows(completion, { unreadable, cut: willContinue,
+                corrective: toolFailed && !denials.length && correctiveRounds < Math.max(turn.toolErrorCorrectiveRounds ?? 0, options.localModel ? LOCAL_CORRECTIVE_ROUNDS : 0),
+                nudge: Boolean(options.nudgeAnnouncedAction) && tools.definitions.length > 0 && announcesAction(completion.text) && nudges < MAX_ANNOUNCEMENT_NUDGES && callsAtNudge !== seenCalls.size, asides: turnEntry.asides.length > 0 });
+              delta("", "assistant_text", !willRequest); delta("", "reasoning_text", !willRequest);
+              carried = willRequest ? maskSecrets(prefix + completion.text, false).held : ""; carriedReasoning = willRequest ? maskSecrets(carriedReasoning + completion.reasoning, false).held : "";
               break;
             } catch (value) {
               const error = asError(value);
@@ -742,7 +742,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           // Reasoning on a tool-call round belongs to the protocol, not a final reply.
           const reply = completion.text.trim() ? completion.text : completion.toolCalls.length || unreadable ? "" : completion.reasoning;
-          const shownReply = prefix || willContinue || completion.text.trim() ? maskSecrets(prefix + completion.text, !willContinue && !completion.toolCalls.length).visible : safeText(reply);
+          const shownReply = prefix || willContinue || completion.text.trim() ? maskSecrets(prefix + completion.text, !willRequest).visible : safeText(reply);
           if (reply.trim()) { spoke = true; answer.add(shownReply); }
           if (!willContinue) answer.end();
           abort.signal.throwIfAborted();
