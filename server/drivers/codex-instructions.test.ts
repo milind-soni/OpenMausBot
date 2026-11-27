@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "../config.ts";
-import { CODEX_LINUX_SANDBOX_NOTE, codexDeveloperInstructions, codexSandboxNote, syncCodexInstructions } from "./codex-instructions.ts";
+import { CODEX_INJECTED_CHAR_LIMIT, CODEX_LINUX_SANDBOX_NOTE, codexDeveloperInstructions, codexSandboxNote, syncCodexInstructions } from "./codex-instructions.ts";
 import { customApprovalParams, namedApprovalParams } from "./codex-approval-config.ts";
 
 const receiptPath = (key: string, nativeThreadId: string) =>
@@ -152,15 +152,55 @@ describe("Codex instruction receipts", () => {
     expect(first.deliverVolatile).toBe(true);
     const path = receiptPath(key, "native");
     const pending = JSON.parse(readFileSync(path, "utf8"));
-    expect(pending).toEqual({ instructions: expect.any(String) });
+    expect(pending).toEqual({ instructions: expect.any(String), injected: expect.any(Number) });
     const retry = await syncCodexInstructions(key, "native", "rules", "memory v1", true, request);
     expect(retry.deliverVolatile).toBe(true);
     expect(first.commitVolatile).toBeTypeOf("function");
     first.commitVolatile?.();
     const committed = JSON.parse(readFileSync(path, "utf8"));
-    expect(committed).toEqual({ instructions: pending.instructions, volatile: expect.any(String) });
+    expect(committed).toEqual({ instructions: pending.instructions, volatile: expect.any(String), injected: pending.injected });
     const after = await syncCodexInstructions(key, "native", "rules", "memory v1", true, request);
     expect(after.deliverVolatile).toBe(false);
     expect(after.commitVolatile).toBeNull();
+  });
+
+  it("counts each thread's developer blocks and fuses edits near the provider cap instead of growing the history unbounded", async () => {
+    const key = randomUUID();
+    const request = vi.fn().mockResolvedValue({});
+    const rules = "x".repeat(40_000);
+    await syncCodexInstructions(key, "native", rules, "", false, request);
+    const path = receiptPath(key, "native");
+    expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ injected: rules.length });
+    let resets = 0;
+    for (let edit = 1; edit <= 10; edit++) {
+      const result = await syncCodexInstructions(key, "native", `${rules}${"!".repeat(edit)}`, "", true, request);
+      resets += result.resetSession ? 1 : 0;
+    }
+    // One ~40k edit still fits under the 85,000-character provider bound; each later one would cross it.
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(resets).toBe(9);
+    const injected = request.mock.calls[0][1].items[0].content[0].text as string;
+    const receipt = JSON.parse(readFileSync(path, "utf8"));
+    expect(receipt).toEqual({
+      instructions: createHash("sha256").update(`${rules}!`).digest("hex"),
+      injected: rules.length + injected.length,
+    });
+    // A tripped sync acknowledges nothing, so the fresh session's own receipt starts from its initial block.
+    const tripped = await syncCodexInstructions(key, "native", `${rules}??`, "", true, request);
+    expect(tripped).toEqual({ deliverVolatile: false, hadVolatile: false, commitVolatile: null, resetSession: true });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for a fresh session even without a new edit once the accumulated blocks pass the provider cap", async () => {
+    const key = randomUUID();
+    const request = vi.fn().mockResolvedValue({});
+    await syncCodexInstructions(key, "native", "rules", "", false, request);
+    const path = receiptPath(key, "native");
+    const receipt = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...receipt, injected: CODEX_INJECTED_CHAR_LIMIT + 1 }), { mode: 0o600 });
+    const result = await syncCodexInstructions(key, "native", "rules", "", true, request);
+    expect(result).toEqual({ deliverVolatile: false, hadVolatile: false, commitVolatile: null, resetSession: true });
+    expect(request).not.toHaveBeenCalled();
+    expect(JSON.parse(readFileSync(path, "utf8")).injected).toBe(CODEX_INJECTED_CHAR_LIMIT + 1);
   });
 });
