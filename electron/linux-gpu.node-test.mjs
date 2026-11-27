@@ -11,8 +11,29 @@ test("NVIDIA keeps software rendering", () => {
   assert.equal(linuxDisablesGpu({ env: {}, exists: only("/sys/module/nvidia") }), true);
 });
 
-test("Intel, AMD and other drivers use the GPU", () => {
-  assert.equal(linuxDisablesGpu({ env: {}, exists: only() }), false);
+test("Intel, AMD and other drivers use the GPU on X11", () => {
+  assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" }, exists: only() }), false);
+});
+
+test("Intel iGPU on Wayland disables GPU (avoids Vulkan crash)", () => {
+  // Intel vendor ID 0x8086 at renderD128
+  const exists = only("/sys/class/drm/renderD128/device/vendor");
+  const readFile = (p) => p === "/sys/class/drm/renderD128/device/vendor" ? "0x8086" : "";
+  assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" }, exists, readFile }), true);
+  // Also triggered by WAYLAND_DISPLAY alone
+  assert.equal(linuxDisablesGpu({ env: { WAYLAND_DISPLAY: "wayland-0" }, exists, readFile }), true);
+});
+
+test("AMD on Wayland uses the GPU", () => {
+  const exists = only("/sys/class/drm/renderD128/device/vendor");
+  const readFile = (p) => p === "/sys/class/drm/renderD128/device/vendor" ? "0x1002" : "";
+  assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "wayland", WAYLAND_DISPLAY: "wayland-0" }, exists, readFile }), false);
+});
+
+test("Intel on X11 uses the GPU", () => {
+  const exists = only("/sys/class/drm/renderD128/device/vendor");
+  const readFile = (p) => p === "/sys/class/drm/renderD128/device/vendor" ? "0x8086" : "";
+  assert.equal(linuxDisablesGpu({ env: { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" }, exists, readFile }), false);
 });
 
 test("OMB_LINUX_GPU overrides detection either way", () => {
