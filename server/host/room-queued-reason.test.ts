@@ -22,9 +22,9 @@ describe("a queued room hand-off's reason", () => {
       .toBe("waiting for Alice to finish its turn in this room");
   });
 
-  it("names the room where the hand-off's own teammate is speaking, not a sibling thread's speaker", () => {
+  it("says another room, without naming it, when the hand-off's own teammate speaks there, not a sibling thread's speaker", () => {
     expect(roomQueuedReason(node(), fixture({ x1: speaker("bot-alice", "Alice"), y1: speaker("bot-bob", "Bob") })))
-      .toBe('waiting for Bob to finish its turn in the room "Room Y"');
+      .toBe("waiting for Bob to finish its turn in another room");
   });
 
   it("names the teammate's own turn in this room when it is another thread of the same room", () => {

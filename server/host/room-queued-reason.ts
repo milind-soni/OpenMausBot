@@ -35,9 +35,10 @@ export function roomQueuedReason(node: { groupId?: string; botId: string; thread
   for (const [threadId, speaker] of deps.speakers()) {
     if (speaker.botId !== node.botId) continue;
     const room = deps.roomOfThread(threadId);
+    // The other room's name stays out: whoever reads this line may not be in that room.
     return !room || room.id === group.id
       ? `waiting for ${speaker.name} to finish its turn in this room`
-      : `waiting for ${speaker.name} to finish its turn in the room ${JSON.stringify(room.name)}`;
+      : `waiting for ${speaker.name} to finish its turn in another room`;
   }
   return undefined;
 }
