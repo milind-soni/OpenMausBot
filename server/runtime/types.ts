@@ -60,6 +60,18 @@ export type Status =
 
 export const TERMINAL: readonly Status[] = ["completed", "failed", "cancelled"];
 
+/** A stop with no other cause is the person's own. */
+export const STOPPED_BY_USER = "Stopped by user";
+/** The cause a stop leaves on the work its stopped assignment had handed on. */
+export const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
+/** The causes a stopped requester leaves on the work it had queued: it never started, or was due to start again. Whose stop
+ * it was is the requester's. */
+export const STOPPED_BEFORE_START = "Stopped before it started";
+export const STOPPED_BEFORE_RESUME = "Stopped before it resumed";
+/** A coordinated turn's own abort. Within a stop under way it is that stop; with none it is a cut the system made, never
+ * the person's Stop. */
+export const TURN_CUT = "The coordinated turn was cut";
+
 /** Why it ended the way it did, typed so a requester can branch on it. */
 export type Outcome =
   | "done"

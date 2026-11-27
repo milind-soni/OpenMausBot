@@ -26,7 +26,7 @@ import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { STATUS_REPLY_TIMEOUT_MS } from "./runtime/status-reply.ts"; import { createCoordinator, sameTurnReturns, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, turnWaitedOnPerson, UnansweredApprovals } from "./waiting-on-person.ts";
-import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards, settleRequestCard } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { besideBusy, workThreadFor } from "./host/work-thread.ts"; import { finishHandedThread, keepHandedThread, reopenHandedThread } from "./host/finished-work.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
+import { createPersonWaits } from "./host/person-waits.ts"; import { askToolName, createAskCards, settleRequestCard } from "./host/ask-cards.ts"; import { createQuestionRouting } from "./host/question-routing.ts"; import { besideBusy, workThreadFor } from "./host/work-thread.ts"; import { createHandedClose, reopenHandedThread, SYSTEM_STOP } from "./host/finished-work.ts"; import { leaveThreadPost, postToThread, threadWaitsOn, unreadThreadPosts } from "./host/thread-posts.ts"; import { anyCardLive, closedByStop, resumableCards as cardsWaitedOn } from "./host/resumable-cards.ts"; import { createMcpChat } from "./host/mcp-chat.ts"; import { isCardOwnerLive, isMcpSignInCard } from "./host/mcp-sign-in-cards.ts"; import { createConnectCardSettle } from "./host/connect-card-settle.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -2260,7 +2260,7 @@ async function interruptAllDirectThreads(botId: string): Promise<void> {
     cancelDirectTurnDispatch(botId, task.threadId);
     revokeInternalCapabilitiesForThread(task.threadId);
   }
-  await Promise.all(threads.map((task) => interruptDirectThread(botId, task.threadId)));
+  await Promise.all(threads.map((task) => interruptDirectThread(botId, task.threadId, SYSTEM_STOP.bot)));
 }
 const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
@@ -3801,7 +3801,7 @@ function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, com
       done = true; signal.removeEventListener("abort", abort); resolve(outcome);
     };
     const abort = () => {
-      void interruptDirectThread(bot.id, node.threadId).catch(() => {});
+      void interruptDirectThread(bot.id, node.threadId, SYSTEM_STOP.turn).catch(() => {});
       finish({ ok: false, text: "The turn was stopped" });
     };
     signal.addEventListener("abort", abort, { once: true });
@@ -3841,7 +3841,7 @@ const questionRouting = createQuestionRouting({ store, handedInUnproven, active:
   steer: async (threadId, text) => canSteerThread(threadId) && (await steerThread(threadId, text)) !== "refused", mayReach: outsideLineage.mayReach });
 const remoteTeammates = new RemoteTeammates(); const remoteHandoff = createRemoteHandoff({ teammates: remoteTeammates, coordinator: () => coordinator, localBots: () => store.bots, botName: (id) => store.bot(id)?.name, outside: (threadId) => (outsideLineage.outsideDrivenThread(threadId) || outsideLineage.cloudGuestDriven(threadId) ? OUTSIDE_STAYS_HERE : undefined), file: join(DATA_DIR, "remote-teammate-work.json"), log: (line) => console.error(line) }); const handoffFiles = createHandoffFiles({ dataDir: DATA_DIR, attachmentsDir: ATTACHMENTS_DIR, botName: (id) => store.bot(id)?.name, node: (id) => coordinator.node(id), children: (id) => coordinator.children(id), discard: deleteAttachment, threadsReferencing, changes: (listener) => store.onChange(listener), log: (line) => console.error(line),
   worksInOwnFolder: (botId, threadId) => turnsRunInOwnFolder(botId, threadId, store.taskByThread(botId, threadId)?.cwd, store.bot(botId)?.cwd, Boolean(store.groupByThread(threadId))), vmHome: (botId) => localVmMode(cfg) === "per-bot" ? perBotLocalVmTarget(botId).workspaceDir : null, withheld: (child, parent) => Boolean(roomHandoffProblem(child, parent)) || keptPrivate({ child: teamHost.privateTo(child.threadId), parent: teamHost.privateTo(parent.threadId) }) });
-const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store, mainThread: (botId) => handedMainThread(store.bot(botId), (threadId) => store.taskByThread(botId, threadId)?.archivedAt !== undefined, () => botMainThread(botId) ?? store.bot(botId)?.threadId) }; const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, generate: generateThreadTitle }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: (groupId, threadId, botIds) => Object.assign(beginGroupTurnOperation(groupId, threadId, botIds), { farSide: true }), finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, ...(handedLines ? { handedLine: (input) => { postHandedLine(handedLines, input); } } : {}), refusal: (bot) => botMoveRefusal(bot) ?? botHolds.handoff(bot.id) ?? starterCaps.pausedText(bot.id, undefined), paused: (botId) => starterAwake.isPaused(botId) || botHolds.held(botId), acceptRefusal: (bot) => linkLimits.acceptRefusal(bot), language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const linkedRoster = createLinkedRoster({ link: botLink.link, bots: () => store.bots, active: () => coordinator.active() }); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
+const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store, mainThread: (botId) => handedMainThread(store.bot(botId), (threadId) => store.taskByThread(botId, threadId)?.archivedAt !== undefined, () => botMainThread(botId) ?? store.bot(botId)?.threadId) }; const titleHandedThread = createHandedThreadTitle({ store, gate: threadTitleGate, generate: generateThreadTitle }); const botLink = createBotLinkHost({ roomLine: (threadId, key, params) => serverLine(threadLanguage(threadId), key, params), roomWindow: (threadId, reader) => roomTranscript.window(threadId, userNameFor(threadId), undefined, reader), roomOpener: (botId, threadId) => handoffOpener({ botId, threadId }, threadId), roomChanged: (groupId) => { const room = store.group(groupId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); }, roomFollow: followRoomMentions<GroupTurnOperation>({ members: (groupId) => (store.group(groupId)?.memberIds ?? []).map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot)), mentioned: (text, members) => roomResponders(text, members, { kind: "mentions" }), begin: (groupId, threadId, botIds) => Object.assign(beginGroupTurnOperation(groupId, threadId, botIds), { farSide: true }), finish: finishGroupTurnOperation, queue: groupQueues, wait: waitForChatRoomMember, run: (groupId, threadId, botId, hop, spoken, operation) => runGroupMemberTurn(groupId, threadId, botId, hop, spoken, undefined, undefined, () => operation.cancelled, undefined, undefined, undefined, undefined, operation) }), dataDir: DATA_DIR, environmentId: ENVIRONMENT_ID, store, coordinator: () => coordinator, kick: () => handoffTicks.kick(), level: (bot) => approvalModeForTurn(bot, true, bot.threadId), titleHanded: titleHandedThread, ...(handedLines ? { handedLine: (input) => { postHandedLine(handedLines, input); } } : {}), refusal: (bot) => botMoveRefusal(bot) ?? botHolds.handoff(bot.id) ?? starterCaps.pausedText(bot.id, undefined), paused: (botId) => starterAwake.isPaused(botId) || botHolds.held(botId), acceptRefusal: (bot) => linkLimits.acceptRefusal(bot), language: (threadId) => threadLanguage(threadId), personName: personNameIn, sessions, power: () => cloudPower, files: handoffFiles, storeFile: (path, name, root) => saveBotAttachment({ path, name, roots: [root], byContent: true }), log: (line) => console.error(line), local: (auth) => auth.kind === "loopback" && auth.trust !== "service" && !CLOUD_HOME && !HOSTED_WORKSPACE, owner: (auth) => !sharedMembership() && !HOSTED_WORKSPACE && (ownHome.owner(auth) || (CLOUD_PERSONAL && cloudOwnerSession(auth))) }); ROUTES.push(botLink.routes); const linkedRoster = createLinkedRoster({ link: botLink.link, bots: () => store.bots, active: () => coordinator.active() }); const handedClose = createHandedClose({ store, working: (threadId) => coordinator.activeDirect(threadId), node: (id) => coordinator.node(id), waitArmed: (botId, threadId) => botWaits.all().some((wait) => wait.botId === botId && wait.threadId === threadId) }); const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoordinator({
   dataDir: DATA_DIR, restartCut: restartCutStop({ dataDir: DATA_DIR, lines: (threadId) => store.activePath(threadId) }),
   now: Date.now, wrote: () => { handoffTicks.kick(); handoffStatus.changed(); }, handoffLimit: { refusal: (botId, open, origin) => botHolds.handoff(botId) ?? starterCaps.handoffs.refusal(botId, open) ?? usageCapGate.handoff(botId, origin) },
   log: line => console.error("coordinator:", line),
@@ -3926,7 +3926,7 @@ const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store
         const source = store.bot(parent.botId);
         if (source) markTaskContextExternallyUpdated(source, parent.threadId);
       }
-      if (!child.groupId && child.status === "completed" && !problem && !coordinator.activeDirect(child.threadId)) finishHandedThread(store, child.botId, child.threadId, parent.botId, (threadId) => botWaits.list(child.botId).some((wait) => wait.threadId === threadId));
+      handedClose.ended(child, parent, Boolean(problem));
     },
     run: handoffFiles.around(async (node, resumed, signal, composed: ComposedTurn) => {
       const group = node.groupId ? store.group(node.groupId) : undefined;
@@ -3980,7 +3980,7 @@ const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store
           done = true; signal.removeEventListener("abort", abort); resolve(privateHandBack(outcome, { child: person, parent: parent ? teamHost.privateTo(parent.threadId) : null, bot: bot.name, person: (person && teamHost.personName(person)) || "them" }));
         };
         const abort = () => {
-          void interruptDirectThread(bot.id, node.threadId).catch(() => {});
+          void interruptDirectThread(bot.id, node.threadId, SYSTEM_STOP.turn).catch(() => {});
           finish({ ok: false, text: "Coordinated work was stopped" });
         };
         signal.addEventListener("abort", abort, { once: true });
@@ -7928,7 +7928,7 @@ async function beginTurn(
           resourceOwner.lazyClaimFailureReported = true;
         }
         opts?.onDispatchError?.(message);
-        void interruptDirectThread(bot.id, threadId).catch(() => {});
+        void interruptDirectThread(bot.id, threadId, SYSTEM_STOP.dispatch).catch(() => {});
       };
 
       /** A poller started after its own turn.completed would never stop: same still-running guard as dispatch. */
@@ -8578,7 +8578,7 @@ async function interruptRoutineGroupGoal(
   if (!groupId) {
     oneOnOneGoals.stop(threadId, outcome);
     const owner = store.botByThread(threadId);
-    if (owner && directRequestOwners.get(threadId)?.origin?.kind !== "user") await interruptDirectThread(owner.id, threadId);
+    if (owner && directRequestOwners.get(threadId)?.origin?.kind !== "user") await interruptDirectThread(owner.id, threadId, SYSTEM_STOP.goal);
     return;
   }
   const speaker = groupSpeakers.get(threadId);
@@ -8802,7 +8802,7 @@ calendarCalls = new CalendarCallManager({
   botExists: (botId) => Boolean(store.bot(botId)),
   onDue: deliverCalendarCall,
 });
-const checkBacks = createCheckBacks({ dataDir: DATA_DIR, alive: (botId, threadId) => directChatOf(botId, threadId), busy: (botId, threadId) => threadBusy(botId, threadId), line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)), start: async (record, prompt) => { await startTurn(record.botId, prompt, { threadId: record.threadId, cardContinuation: true, origin: record.origin }); }, paused: (error) => [BOT_HELD_CODE, BOT_PAUSED_CODE].includes(String((error as { code?: unknown } | null)?.code)) }); const botWaits = new WaitManager(createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines!.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) })); store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy) botWaits.noteBotBusy(change.botId); });
+const checkBacks = createCheckBacks({ dataDir: DATA_DIR, alive: (botId, threadId) => directChatOf(botId, threadId), busy: (botId, threadId) => threadBusy(botId, threadId), line: (record, line, messageId) => writeCheckBackLine(store, record, line, messageId, threadLanguage(record.threadId)), start: async (record, prompt) => { await startTurn(record.botId, prompt, { threadId: record.threadId, cardContinuation: true, origin: record.origin }); }, paused: (error) => [BOT_HELD_CODE, BOT_PAUSED_CODE].includes(String((error as { code?: unknown } | null)?.code)) }); const botWaits = new WaitManager({ ...createWaitHost({ store, directChat: directChatOf, threadBusy, wrote: markTaskContextExternallyUpdated, notify, enqueue: (input) => routines!.enqueueWebhook(input), cloudHome: Boolean(CLOUD_HOME) }), ended: (wait) => handedClose.look(wait.botId) }); store.onChange((change) => { if (change.type === "bot" && store.bot(change.botId)?.busy) botWaits.noteBotBusy(change.botId); });
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
   const recoveryThreads = [...new Set(recoveryOwners.map((owner) => owner.threadId))];
@@ -11727,7 +11727,7 @@ async function stopCompanyInstances(ids: string[]) {
     .map(task => ({ botId: bot.id, threadId: task.threadId, owner: turnResourceOwners.get(task.threadId), generation: directTurnGenerationByThread.get(task.threadId) })));
   // Mark stopping first: a turn's own end can settle its requester before the loop below.
   for (const { threadId } of direct) turnStops.stopping(threadId, liveTurnByThread.get(threadId), cause);
-  await Promise.all(direct.map(task => interruptDirectThread(task.botId, task.threadId)));
+  await Promise.all(direct.map(task => interruptDirectThread(task.botId, task.threadId, cause)));
   for (const { botId, threadId, owner, generation } of direct) {
     const interrupted = stoppedTurnText(threadId, liveTurnByThread.get(threadId), cause);
     releaseTurnResources(owner);
@@ -13679,7 +13679,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const callRun = activeRoutineRunForThread(internalCapability.threadId) ?? undefined, result = await handoffFiles.coordinate({ paths, answers, senderId: internalSender.id, recipients: botIds.length, saveOne: async (path) => saveTurnFile(internalCapability, internalSender.id, await attachmentVmForTurn(internalCapability), path, undefined, true),
           send: (files) => coordinateBots({ groupId, botIds, message, reason: reason || undefined, rework, thread, title: title || undefined, reply, consult, inMyFolder, doneWhen: doneWhen || undefined, ...(answers ? { answers } : {}), ...(files ? { files } : {}), ...(thread === "new" ? { oneShot: true as const } : {}) }) }); refusedHandoffs.settled(internalCapability.threadId, internalSender, botIds, result.status, callRun);
         return json(res, result.status, result.body);
-      } if (method === "POST" && path === "/api/internal/post-to-thread") { const posted = await postToThread(await readInternalBody(), { senderId: internalSender.id, fromThreadId: internalCapability.threadId, store, coordinateBots, kept: (botId, threadId) => keepHandedThread(store, botId, threadId), waitsOn: (threadId) => threadWaitsOn(coordinator, internalCapability.roomHandoffId ?? internalCapability.generation, threadId) }); return json(res, posted.status, posted.body); }
+      } if (method === "POST" && path === "/api/internal/post-to-thread") { const posted = await postToThread(await readInternalBody(), { senderId: internalSender.id, fromThreadId: internalCapability.threadId, store, coordinateBots, waitsOn: (threadId) => threadWaitsOn(coordinator, internalCapability.roomHandoffId ?? internalCapability.generation, threadId) }); return json(res, posted.status, posted.body); }
       if (method === "GET" && path === "/api/internal/room-targets") {
         const source = store.groupByThread(internalCapability.threadId);
         if (source && (source.dm || !source.memberIds.includes(internalSender.id))) {

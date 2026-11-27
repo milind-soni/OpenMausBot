@@ -7,7 +7,7 @@ import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
 import { answersSender, asking, awaited, childrenSince, settledSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
-import { DEFAULT_LIMITS, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
+import { DEFAULT_LIMITS, STOPPED_BEFORE_RESUME, STOPPED_BEFORE_START, STOPPED_BY_USER, STOPPED_WITH_REQUEST, type Answerer, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
 
@@ -53,7 +53,6 @@ export interface BeginRequest {
 
 const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
-const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
 /** progress() runs once per runtime event; lastActivityAt catches up at this cadence, not per event. */
 export const PROGRESS_WRITE_MS = 10_000;
@@ -665,29 +664,30 @@ export class Runtime {
     this.touch(n);
   }
 
-  /** Cancel this node and everything under it; abort running turns. */
-  cancel(id: string, reason = "Stopped by user", outcome: "stopped" | "failed" = "stopped"): void {
+  /** Cancel this node and everything under it; abort running turns. A stop ends the node before what it handed on, so
+   * each report under it already finds whose stop it was up the line. */
+  cancel(id: string, reason = STOPPED_BY_USER, outcome: "stopped" | "failed" = "stopped"): void {
     const n = this.store.get(id);
     if (!n) return;
-    this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.cancelTree(n, reason, "cancelled", "stopped"));
+    this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.stopTree(n, reason));
   }
 
   /** The person stopped the requester's conversation, and stop means stop: everything it handed out ends with it, work
    * that never started and teammates mid-turn alike (and what they handed on), and nothing resumes the stopped
    * conversation. */
-  stopRequester(owner: Owner, reason = "Stopped by user"): void {
+  stopRequester(owner: Owner, reason = STOPPED_BY_USER): void {
     this.withBatch(() => {
       for (const snapshot of this.store.all({ nonTerminal: true })) {
         if (!ownsConversation(snapshot, owner)) continue;
         const n = this.store.get(snapshot.id);
         if (!n || isTerminal(n)) continue;
-        for (const child of this.store.children(n.id)) {
-          if (isTerminal(child)) continue;
-          const unstarted = child.status === "queued" && (child.executions === 0 || child.restart === "rerun");
-          this.cancelTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? "Stopped before it resumed" : "Stopped before it started",
-            "cancelled", "stopped");
-        }
+        const children = this.store.children(n.id).filter(child => !isTerminal(child));
+        // The request ends first, so the report of each piece of its work already finds whose stop it was up the line.
         this.settle(n, "cancelled", "stopped", reason);
+        for (const child of children) {
+          const unstarted = child.status === "queued" && (child.executions === 0 || child.restart === "rerun");
+          this.stopTree(child, !unstarted ? STOPPED_WITH_REQUEST : child.restart === "rerun" ? STOPPED_BEFORE_RESUME : STOPPED_BEFORE_START);
+        }
       }
     });
   }
@@ -750,6 +750,15 @@ export class Runtime {
     }
     const fresh = this.store.get(n.id);
     if (fresh && !isTerminal(fresh)) this.settle(fresh, status, outcome, reason);
+  }
+
+  /** Stops `n`, then what it handed on, each down the line after the request it went down with. */
+  private stopTree(n: Assignment, reason: string): void {
+    const fresh = this.store.get(n.id);
+    if (!fresh || isTerminal(fresh)) return;
+    const children = this.store.children(n.id).filter(child => !isTerminal(child));
+    this.settle(fresh, "cancelled", "stopped", reason);
+    for (const child of children) this.stopTree(child, STOPPED_WITH_REQUEST);
   }
 
   private settle(n: Assignment, status: TerminalStatus, outcome: Outcome, detail?: string, ownTurn = false): void {

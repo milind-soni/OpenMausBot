@@ -11,6 +11,7 @@ import { personOnly, requesterDecides, withDefault } from "./runtime/questions.t
 import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
 import type { Answerer, Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { STOPPED_BY_USER, TURN_CUT } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
@@ -23,8 +24,6 @@ const TOTAL_BUDGET = /^Request budget exhausted: \d+ turns in all/;
 const totalRefusal = (limit: number): string => `This request has started ${limit} turns in all, the most one request may take, so this one was not sent. Nobody can reset that, the person included, so don't ask them to, and don't send it another way. Finish with what you have and say what is left undone.`;
 const budgetRefusal = (limit: number): string => `This request reached its limit of ${limit} hand-offs since any work last came back, so this one was not sent. The limit belongs to the request: nobody can reset it, the person included, so don't ask them to, and don't send it another way. If work is still out, end your turn: each result that comes back renews the limit and resumes you. If nothing is out, finish with what you have and say what is left undone.`;
 const NO_TURN = "The requesting turn has no root (no turn)";
-/** A stop with no other cause is the person's own. */
-const STOPPED_BY_USER = "Stopped by user";
 /** How long a person's stop holds against the same request coming back. */
 const STOP_MEMORY_MS = 24 * 60 * 60_000;
 const STOPPED_AGAIN = "The person stopped this teammate's work on this request. It isn't handed out again until the person asks again: tell them what you still wanted done, and don't send it another way.";
@@ -458,13 +457,15 @@ export class RuntimeCoordinator implements Coordinator {
     this.stopFor(reason, () => { for (const n of this.live()) if (this.direct(n, threadId)) this.runtime.cancel(n.id, reason, "stopped"); });
   }
 
-  /** With no reason given, the stop is the person's, unless it is part of a stop already under way: see stopFor. */
+  /** With no reason given, the stop is the person's, unless it is part of a stop already under way: see stopFor. TURN_CUT,
+   * a coordinated turn's own abort, is that stop too, and with none under way the system's cut. */
   stopAwaitingDirect(threadId: string, reason?: string): void {
     this.ready();
     // The host stops a teammate's whole thread when one of its turns is aborted; when that turn is one hand-off the person
     // stopped, the runtime already ends that hand-off and what it handed on, and other requests queued there go on.
-    if (reason === undefined && this.stoppingHandoff) return;
-    const cause = reason ?? this.stopCause ?? STOPPED_BY_USER;
+    const inner = reason === undefined || reason === TURN_CUT;
+    if (inner && this.stoppingHandoff) return;
+    const cause = (inner ? this.stopCause : undefined) ?? reason ?? STOPPED_BY_USER;
     const stopping = cause === STOPPED_BY_USER ? this.live().filter(n => n.assignee.destination.threadId === threadId) : [];
     const trees = stopping.map(n => ({ root: this.store.get(n.rootId), work: this.subtree(n).filter(a => !isTerminal(a)) }));
     this.stopFor(cause, () => this.runtime.stopRequester({ threadId }, cause));

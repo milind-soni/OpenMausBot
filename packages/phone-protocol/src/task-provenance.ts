@@ -8,8 +8,11 @@ export interface TaskOpenedBy {
    * result has been reported. */
   kind?: "pair" | "work";
   /** coordinate_bots opened it with thread "new" for one hand-off: it closes, and leaves the sidebar, once its result is
-   * back (server/host/finished-work.ts). start_thread never sets it, and a post_to_thread into the thread takes it off. */
+   * back (server/host/finished-work.ts). start_thread never sets it. */
   oneShot?: true;
+  /** Epoch ms this thread closes at, set when the person stopped the work handed to it: a new message there before then
+   * takes it off and keeps the thread open. Older servers ignore it. */
+  closesAt?: number;
   /** The burst this thread is one part of: it is listed under that burst's card. */
   burstId?: string;
   /** The opener's own conversation this "work" thread was opened from.

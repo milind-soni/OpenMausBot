@@ -99,16 +99,6 @@ describe("thread posts", () => {
       expect(calls).toHaveLength(3);
     });
 
-    it("keeps the thread a delivered post reached, and not one a refused post named", async () => {
-      const { deps: d } = deps("sender-kept");
-      const kept: string[] = [];
-      d.kept = (botId, threadId) => { kept.push(`${botId}/${threadId}`); };
-      expect((await postToThread({ toThreadId: "t-1", message: "hi", deliveryId: "kept-1" }, d)).status).toBe(200);
-      d.coordinateBots = async () => ({ status: 403, body: { error: "not reachable" } });
-      expect((await postToThread({ toThreadId: "t-2", message: "hi", deliveryId: "kept-2" }, d)).status).toBe(403);
-      expect(kept).toEqual(["bot-b/t-1"]);
-    });
-
     it("refuses a call made from a room", async () => {
       const { calls, deps: d } = deps("sender-room", ["from-run"]);
       expect((await postToThread({ toThreadId: "t-1", message: "hi" }, d)).status).toBe(409);

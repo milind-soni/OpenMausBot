@@ -80,9 +80,7 @@ const pending = new Map<string, string>();
 
 /** POST /api/internal/post-to-thread: checks the call and sends it through coordinate_bots as a post, so its reach rules hold. */
 export async function postToThread(body: unknown, deps: { senderId: string; fromThreadId: string; waitsOn: (threadId: string) => boolean;
-  store: Pick<Store, "botByThread" | "groupByThread" | "messagesFor">; coordinateBots: (call: CoordinateBotsCall) => Promise<Reply>;
-  /** A delivered post makes the thread one bots go on writing in, so it no longer closes on a hand-off's result. */
-  kept?: (botId: string, threadId: string) => void }): Promise<Reply> {
+  store: Pick<Store, "botByThread" | "groupByThread" | "messagesFor">; coordinateBots: (call: CoordinateBotsCall) => Promise<Reply> }): Promise<Reply> {
   const refuse = (status: number, error: string): Reply => ({ status, body: { error } });
   const parsed = PostBody.safeParse(body);
   if (!parsed.success) return refuse(400, `Give thread_id (from list_threads) and a message of 1-${THREAD_POST_MAX_CHARS} characters; wake is true or false.`);
@@ -112,7 +110,6 @@ export async function postToThread(body: unknown, deps: { senderId: string; from
     return refuse(result.status === 200 ? 409 : result.status, String(receipt?.detail ?? result.body.error ?? "Not delivered."));
   }
   deliveries.set(key, threadId);
-  deps.kept?.(owner.id, threadId);
   if (deliveries.size > 1_000) deliveries.delete(deliveries.keys().next().value!);
   return { status: 200, body: { deliveryId, threadId, botName: owner.name, woke: wake,
     message: wake ? `Delivered; that thread runs it ${receipt.outcome === "injected" ? "in its running turn" : "next"}. Nothing comes back to you.` : "Posted; nothing started there. That thread reads it on its next run." } };

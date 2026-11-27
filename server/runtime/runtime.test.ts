@@ -533,7 +533,8 @@ describe("Runtime: one tree, one lane", () => {
     expect(w.store.get(helper.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped with the request it was for" });
     expect(w.store.get(lead.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped by user" });
     expect(signals.every(s => s.aborted)).toBe(true);
-    expect(w.runner.reports.map(r => r.a.id)).toEqual([helper.id, lead.id]);
+    // The stopped node reports first, so the report of what it handed on finds whose stop it was up the line.
+    expect(w.runner.reports.map(r => r.a.id)).toEqual([lead.id, helper.id]);
     expect(w.runtime.liveEdges()).toEqual([]);
     const other = ok(w.runtime.enqueue(toBot("other", root.id)));
     w.runtime.cancel(other.id, "Provider reloaded", "failed");
