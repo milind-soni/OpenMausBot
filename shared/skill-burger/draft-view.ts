@@ -3,7 +3,7 @@
 // step repeats exactly or is the bot's to redo with judgement. Built on the server from the same draft a save writes,
 // so the step ids the person unticks are the ids that are saved. The person's choices (steps left out, inputs renamed
 // or given another value) are applied here too, the same way the save applies them.
-import { textLine, type Workflow, type WorkflowStep } from "./format.ts";
+import { textLine, workflowSchema, type Workflow, type WorkflowStep } from "./format.ts";
 import { askOf, type BurgerLayer, type LayerKind, type RunMessage } from "./layers.ts";
 
 const ASKED_MAX = 1_200;
@@ -123,21 +123,21 @@ export function dependents(steps: ReadonlyArray<{ id: string; needs: readonly st
   return [...out];
 }
 
-/** Renames an arg in references, prompt placeholders and the OMB_ARG_ variables in commands. */
-function renameArg(steps: WorkflowStep[], from: string, to: string): WorkflowStep[] {
-  const env = new RegExp(`OMB_ARG_${from.toUpperCase()}(?![A-Z0-9_])`, "g");
+/** Renames args in references, prompt placeholders and the OMB_ARG_ variables in commands. */
+function renameArgs(steps: WorkflowStep[], names: ReadonlyMap<string, string>): WorkflowStep[] {
+  const prompt = (text: string) => text.replace(/\{([a-z][a-z0-9_]{0,39})\}/g, (token, from: string) => names.has(from) ? `{${names.get(from)}}` : token);
   const walk = (node: unknown): unknown => {
     if (Array.isArray(node)) return node.map(walk);
     if (!node || typeof node !== "object") return node;
     const record = node as Record<string, unknown>;
-    if (record.$arg === from && Object.keys(record).length === 1) return { $arg: to };
+    if (typeof record.$arg === "string" && names.has(record.$arg) && Object.keys(record).length === 1) return { $arg: names.get(record.$arg) };
     return Object.fromEntries(Object.entries(record).map(([key, value]) => [key, walk(value)]));
   };
   return steps.map((step) => {
     const renamed = walk(step) as WorkflowStep;
-    if (renamed.kind === "shell") renamed.run = renamed.run.replace(env, `OMB_ARG_${to.toUpperCase()}`);
-    if ((renamed.kind === "ai" || renamed.kind === "decide") && renamed.prompt) renamed.prompt = renamed.prompt.replaceAll(`{${from}}`, `{${to}}`);
-    if (renamed.check && typeof renamed.check === "object") renamed.check.says = renamed.check.says.replaceAll(`{${from}}`, `{${to}}`);
+    if (renamed.kind === "shell") renamed.run = renamed.run.replace(/OMB_ARG_([A-Z][A-Z0-9_]*)/g, (token, from: string) => names.has(from.toLowerCase()) ? `OMB_ARG_${names.get(from.toLowerCase())!.toUpperCase()}` : token);
+    if ((renamed.kind === "ai" || renamed.kind === "decide") && renamed.prompt) renamed.prompt = prompt(renamed.prompt);
+    if (renamed.check && typeof renamed.check === "object") renamed.check.says = prompt(renamed.check.says);
     return renamed;
   });
 }
@@ -156,16 +156,34 @@ export function applyChoices(workflow: Workflow, choices: DraftChoices | undefin
     const missing = needsOf(step).find((id) => !kept.has(id) && workflow.steps.some((one) => one.id === id));
     if (missing) return { error: `"${step.label}" uses what "${workflow.steps.find((one) => one.id === missing)!.label}" returns; leave both out or keep both.` };
   }
-  const args: Workflow["args"] = {};
-  const used = (name: string) => JSON.stringify(steps).includes(`"$arg":"${name}"`) || JSON.stringify(steps).includes(`{${name}}`) || steps.some((step) => step.kind === "shell" && new RegExp(`OMB_ARG_${name.toUpperCase()}(?![A-Z0-9_])`).test(step.run));
-  for (const [name, arg] of Object.entries(workflow.args)) {
+  const names = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const name of Object.keys(workflow.args)) {
     const choice: { name?: string; value?: string } | undefined = choices.inputs?.[name];
     const to = choice?.name?.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_") || name;
     if (!ARG_NAME.test(to)) return { error: `"${choice?.name}" can't be an input's name: use letters, numbers and _ only, starting with a letter.` };
-    if (to !== name && (to in args || (to in workflow.args && !(choices.inputs?.[to]?.name)))) return { error: `There is already an input named ${to}.` };
-    if (to !== name) steps = renameArg(steps, name, to);
+    if (taken.has(to)) return { error: `There is already an input named ${to}.` };
+    names.set(name, to);
+    taken.add(to);
+  }
+  steps = renameArgs(steps, names);
+  const args: Workflow["args"] = {};
+  const used = (name: string) => JSON.stringify(steps).includes(`"$arg":"${name}"`) || JSON.stringify(steps).includes(`{${name}}`) || steps.some((step) => step.kind === "shell" && new RegExp(`OMB_ARG_${name.toUpperCase()}(?![A-Z0-9_])`).test(step.run));
+  for (const [name, arg] of Object.entries(workflow.args)) {
+    const to = names.get(name)!;
+    const choice = choices.inputs?.[name];
     if (!used(to)) continue;
     args[to] = { ...arg, ...(choice?.value !== undefined ? { default: choice.value } : {}) };
   }
-  return { ...workflow, args, steps };
+  const chosen = { ...workflow, args, steps };
+  const renamed = [...names].filter(([from, to]) => from !== to);
+  if (renamed.length) {
+    const parsed = workflowSchema.safeParse(chosen);
+    const limit = !parsed.success && parsed.error.issues.find((issue) => issue.code === "too_big" && issue.origin === "string" && issue.path[0] === "steps");
+    if (limit && limit.code === "too_big") {
+      const inputs = renamed.map(([from, to]) => `"${from}" to "${to}"`).join(", ");
+      return { error: `Renaming input names (${inputs}) makes "${steps[Number(limit.path[1])]!.label}" exceed its ${limit.maximum}-character limit.` };
+    }
+  }
+  return chosen;
 }
