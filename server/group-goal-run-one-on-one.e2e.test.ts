@@ -115,7 +115,6 @@ ${envelope({ status: "completed", detail: "Done." })}`]),
       USERPROFILE: home,
       OMB_PORT: String(port),
       OMB_WEBHOOK_PORT: String(port + 1),
-      OMB_GOAL_CONTROL_MISSES: "3",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

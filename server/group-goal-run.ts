@@ -7,13 +7,8 @@ import type { GroupDefaultResponder } from "./store.ts";
 export const GROUP_GOAL_MAX_TURNS = 13;
 export const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
-const GROUP_GOAL_CONTROL_MISSES = 3;
-const GROUP_GOAL_CONTROL_MISSES_MAX = 5;
-/** How many replies in a row may miss the control envelope before the run is blocked (OMB_GOAL_CONTROL_MISSES, 1-5). */
-export function goalControlMissLimit(raw = process.env.OMB_GOAL_CONTROL_MISSES): number {
-  const parsed = Number(raw);
-  return Number.isInteger(parsed) && parsed >= 1 ? Math.min(parsed, GROUP_GOAL_CONTROL_MISSES_MAX) : GROUP_GOAL_CONTROL_MISSES;
-}
+/** How many replies in a row may miss the control envelope before the run is blocked. */
+export const GROUP_GOAL_CONTROL_MISSES = 3;
 export const GROUP_GOAL_CONTROL_OPEN = "<openmaus-goal>";
 export const GROUP_GOAL_CONTROL_CLOSE = "</openmaus-goal>";
 /** A close tag the model sometimes escapes; it ends an envelope exactly like the plain one. */
@@ -368,7 +363,7 @@ export async function runGoalRun<Bot extends GoalRunMember>(deps: GoalRunDeps<Bo
     const decision = parseGroupGoalDecision(coordinatorResult.replyText).decision;
     if (!decision) {
       controlMisses += 1;
-      const limit = goalControlMissLimit();
+      const limit = GROUP_GOAL_CONTROL_MISSES;
       if (controlMisses >= limit || run.turnCount >= run.maxTurns) {
         deps.finish("blocked", `${coordinator.name} did not provide a valid next-step decision after ${controlMisses} ${controlMisses === 1 ? "reply" : "replies"}.`);
         return;

@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   GROUP_GOAL_CONTROL_CLOSE,
   GROUP_GOAL_CONTROL_OPEN,
+  GROUP_GOAL_CONTROL_MISSES,
   GROUP_GOAL_MAX_TURNS,
-  goalControlMissLimit,
   groupGoalAssignmentKey,
   groupGoalCompletionTurnId,
   groupGoalCoordinatorInstructions,
@@ -14,9 +14,6 @@ import {
   type GoalRunEnd,
   type GoalStepResult,
 } from "./group-goal-run.ts";
-
-beforeEach(() => { delete process.env.OMB_GOAL_CONTROL_MISSES; });
-afterEach(() => vi.unstubAllEnvs());
 
 const members = [
   { id: "scout-id", name: "Scout" },
@@ -97,13 +94,8 @@ describe("group goal runs", () => {
     expect(GROUP_GOAL_MAX_TURNS % 2).toBe(1);
   });
 
-  it("bounds how many malformed control envelopes are re-asked", () => {
-    expect(goalControlMissLimit(undefined)).toBe(3);
-    expect(goalControlMissLimit("")).toBe(3);
-    expect(goalControlMissLimit("0")).toBe(3);
-    expect(goalControlMissLimit("not-a-number")).toBe(3);
-    expect(goalControlMissLimit("2")).toBe(2);
-    expect(goalControlMissLimit("9")).toBe(5);
+  it("re-asks a malformed control envelope a bounded number of times", () => {
+    expect(GROUP_GOAL_CONTROL_MISSES).toBe(3);
   });
 });
 
@@ -258,14 +250,6 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
       "Solo's reply did not end with a valid control envelope. Asking again (1/3).",
     ]);
     expect(goal.finished).toEqual([{ status: "completed", detail: "Done." }]);
-  });
-
-  it("blocks at a configured miss limit", async () => {
-    vi.stubEnv("OMB_GOAL_CONTROL_MISSES", "2");
-    const goal = goalRun({ solo: true, steps: [settled("All done, trust me.")] });
-    await goal.done;
-    expect(goal.calls).toHaveLength(2);
-    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision after 2 replies." }]);
   });
 
   it("blocks a room of one that repeats the same next step", async () => {
