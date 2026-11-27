@@ -129,7 +129,8 @@ are never tracked. Titles of 17px and up keep `tracking-[-0.01em]`.
 | Menu item (`MENU_ITEM`) | 14 / 18px; the composer's menu 14 / 20px in 32px rows | 415 | `ink` |
 | Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 415 | `ink` or `ink-secondary` |
 | Names in lists (bots in the sidebar 14 / 20px) | 13 / 18px | 500 | `ink` |
-| Sidebar group labels ("Bots", "Tools", a department) | 13 / 18px | 415 | `ink-secondary` |
+| Sidebar group labels ("Bots", "Tools") | 13 / 18px | 415 | `ink-secondary` |
+| Department headings in the sidebar | 17 / 22px, `tracking-[-0.01em]` | 600 | `ink` |
 | Sidebar places (the rows under "Tools") | 14 / 20px | 415 | `ink` |
 | Pinned bot captions | 12 / 16px | 415 | `ink` |
 | Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
@@ -194,6 +195,10 @@ element's job and never a pixel value:
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
   in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
   pages never join them: a bot's pages are in its bot panel's Library tab.
+- **A department's heading is the landmark of a long list.** It leads with a
+  20px folder that is open while its rows show and closed once collapsed. In
+  Simple it is a 36px line with 12px of space above it, and the folder sits in
+  the avatar column, so the name lines up with the bot names under it.
 - **A room is a feed of its threads** (no switch; a home older than 0.1.181,
   which lacks the feed's routes, keeps the single transcript). Each row is a
   thread's first line, its reply count, who replied and when; a row, a room
@@ -239,7 +244,8 @@ element's job and never a pixel value:
   hand-drawn SVGs for things Lucide has. Product marks (the Maus, third-party
   logos) are the exception.
 - **Sizes:** 16px in menus, rows and toolbars, and in every 36px or 28px
-  button; 14px next to 12–13px text; 12px for disclosure chevrons.
+  button; 14px next to 12–13px text; 12px for disclosure chevrons; 20px for
+  the folder beside a department's 17px heading.
 - **Don't set `strokeWidth`.** The stylesheet draws every Lucide icon at 1.9,
   menus included. The only exceptions are a glyph on a filled control (the
   send arrow) and deliberately heavy marks (a check, a filled badge).
