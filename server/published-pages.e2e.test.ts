@@ -115,6 +115,44 @@ it("publishes a bot's page to a link shown inline, keeps the link and the card o
     .toEqual([["app", "[App] Bake sale\nBake sale, Saturday", "unpublished"]]);
 }, 120_000);
 
+it("keeps an owner-only page on this server, opens its stable link through a token folder, and never asks the Worker", async () => {
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const api = async (path: string, init: RequestInit = {}) => (await fetch(`${fixture.info.url}${path}`, { ...init, headers: { "content-type": "application/json" } })).json() as Promise<any>;
+  const bot = (await cli("new-bot", "--name", "Private publisher")).bot;
+  const site = join(fixture.info.dataDir, "workspaces", bot.id, "private-site");
+  mkdirSync(site, { recursive: true });
+  writeFileSync(join(site, "index.html"), "<!doctype html><h1>Traffic</h1>");
+  writeFileSync(join(site, "data.csv"), "day,hits\nmon,3\n");
+  const planPath = join(fixture.info.dataDir, "room-plan.json");
+  const before = { pages: stub.service.pages.size, mints: stub.service.minted.length };
+  writeFileSync(planPath, JSON.stringify({ [bot.id]: { steps: [{ tool: "publish_page", arguments: { path: "private-site", title: "Traffic", visibility: "owner" } }], reply: "Done." } }));
+  await cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Publish the traffic report for me only.");
+  expect((await cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30")).status).toBe("settled");
+  expect(stub.service.pages.size).toBe(before.pages);
+  expect(stub.service.minted.length).toBe(before.mints);
+
+  const thread = await api(`/api/threads/${bot.activeTaskId}/messages?limit=50`);
+  const card = thread.messages.find((message: any) => message.publishedPage?.visibility === "owner")?.publishedPage;
+  expect(card).toMatchObject({ state: "live", title: "Traffic" });
+  const link = new URL(card.url);
+  expect(link.pathname).toMatch(new RegExp(`^/api/published-pages/${card.pageId}/$`));
+
+  // The owner's own request is moved to the token folder; the token alone opens the page and its files.
+  const redirect = await fetch(`${fixture.info.url}${link.pathname}`, { redirect: "manual" });
+  expect(redirect.status).toBe(303);
+  const folder = redirect.headers.get("location")!;
+  expect(folder).toMatch(/^\/api\/owner-page-files\/[A-Za-z0-9_-]{43}\/$/);
+  const opened = await realFetch(new URL(folder, fixture.info.url));
+  expect(opened.status).toBe(200);
+  expect(await opened.text()).toContain("<h1>Traffic</h1>");
+  const csv = await realFetch(new URL(`${folder}data.csv`, fixture.info.url));
+  expect(csv.status).toBe(200);
+  expect(await csv.text()).toBe("day,hits\nmon,3\n");
+
+  expect(await api(`/api/published-pages/${card.pageId}/unpublish`, { method: "POST", body: "{}" })).toMatchObject({ ok: true, card: { state: "unpublished", visibility: "owner" } });
+  expect((await realFetch(new URL(folder, fixture.info.url))).status).toBe(404);
+}, 120_000);
+
 it.each([false, true])("keeps an Unpublish card when Stop aborts an upload whose Worker committed: %s", async (committed) => {
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
   const api = async (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>

@@ -1,7 +1,7 @@
 // A bot's page in the chat, artifact-style: its version stepper, Point, Share, Open in new tab and Full screen.
 import { createContext, useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Download, Globe, Loader2, Maximize2, Pin, PinOff, Share2, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronLeft, ChevronRight, Copy, Crosshair, Download, Globe, Loader2, Lock, Maximize2, Pin, PinOff, Share2, Trash2, X } from "lucide-react";
 import { useStore } from "@/state/store";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
@@ -14,7 +14,7 @@ import { latestWebPanels, setWebPanels, useWebPanels } from "@/lib/web-panel-pre
 import { findPinnedPage, MAX_WEB_PANELS, togglePinnedPage, type PinnedChatPage } from "@/lib/web-panels";
 import type { AppDocument, AppPayload } from "../../../shared/app";
 import { marksMessage, pointMessage, readPointEvent } from "../../../shared/app-frame/point";
-import type { PublishedPageCard } from "../../../shared/published-page";
+import type { PublishedPageCard, PublishedPageVisibility } from "../../../shared/published-page";
 import { canonicalDownloadFilename } from "../AttachmentPreview";
 import { appDownloadPath, publishAppPage, unpublishPage } from "./app-api";
 import { AppFrame, type AppFrameHandle } from "./AppFrame";
@@ -61,18 +61,24 @@ type Share =
   | { kind: "unpublishing" }
   | { kind: "unpublish-failed" };
 
-/** The page's public link, as the row's published card says (publish_page's, or this card's own Share), and Share and
- * Unpublish. The server patches the card, so every window sees the same link. */
+/** The page's link, as the row's published card says (publish_page's, or this card's own Share), who may open it, and
+ * Share and Unpublish. The server patches the card, so every window sees the same link. */
 export function usePageShare(threadId: string, messageId: string, published: PublishedPageCard | undefined) {
   const [share, setShare] = useState<Share>({ kind: "idle" });
   const [again, setAgain] = useState(false);
+  const [visibility, setVisibility] = useState<PublishedPageVisibility>(published?.visibility ?? "public");
+  useEffect(() => { setVisibility(published?.visibility ?? "public"); }, [published?.visibility]);
   const live = published?.state === "live" && published.url ? published : null;
-  const run = async (rev: number) => {
+  const run = async (rev: number, next: PublishedPageVisibility = visibility) => {
+    const sameLink = next === (published?.visibility ?? "public");
     setShare({ kind: "busy" });
-    const outcome = await publishAppPage(threadId, messageId, rev);
-    setAgain(Boolean(live) && outcome.ok);
-    if (outcome.ok) setShare({ kind: "idle" });
-    else setShare({ kind: "refused", text: outcome.card?.message ?? outcome.error, ...(outcome.card ? { card: outcome.card } : {}) });
+    const outcome = await publishAppPage(threadId, messageId, rev, next);
+    // A visibility switch publishes to a new link: "updated at the same link" would be false.
+    setAgain(Boolean(live) && outcome.ok && sameLink);
+    if (outcome.ok) {
+      setVisibility(next);
+      setShare({ kind: "idle" });
+    } else setShare({ kind: "refused", text: outcome.card?.message ?? outcome.error, ...(outcome.card ? { card: outcome.card } : {}) });
   };
   const unpublish = async () => {
     if (!live?.pageId) return;
@@ -80,7 +86,8 @@ export function usePageShare(threadId: string, messageId: string, published: Pub
     setShare(await unpublishPage(live.pageId) ? { kind: "idle" } : { kind: "unpublish-failed" });
     setAgain(false);
   };
-  return { share, url: live?.url, again, unpublished: published?.state === "unpublished", run, unpublish };
+  const toggleVisibility = () => setVisibility((current) => (current === "owner" ? "public" : "owner"));
+  return { share, url: live?.url, visibility, again, unpublished: published?.state === "unpublished", run, unpublish, toggleVisibility };
 }
 
 /** On a phone the OS share sheet (Save to Files, Share); elsewhere a download, which Electron turns into its save dialog. */
@@ -217,7 +224,7 @@ export interface PageToolsProps {
 /** The card's toolbar: ‹ v2 › and Updated on the left; Point, Share, Open in new tab and Full screen on the right. */
 export function PageToolbar({ version, point, share, save, ready, fullScreen, room, pin, saveApp, className }: PageToolsProps & { className?: string }) {
   const label = version.latest ? t("chat.preview.version", { n: version.rev + 1 }) : t("chat.preview.versionOf", { n: version.rev + 1, count: version.last + 1 });
-  const busy = share.share.kind === "busy";
+  const busy = share.share.kind === "busy", owner = share.visibility === "owner";
   return (
     <div data-page-tools className={cn("flex flex-wrap items-center gap-x-1.5 gap-y-2", className)}>
       <div className="flex items-center gap-0.5 text-[13px] text-ink-secondary">
@@ -235,6 +242,12 @@ export function PageToolbar({ version, point, share, save, ready, fullScreen, ro
           <Crosshair size={14} />{t("chat.preview.point")}
         </button>
         {!room && <>
+          {!share.url && (
+            <button type="button" data-page-visibility aria-pressed={owner} onClick={share.toggleVisibility} disabled={busy}
+              title={t(owner ? "chat.page.makePublicHint" : "chat.page.makeOwnerHint")} className={cn(ASK_CHIP, owner ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+              {owner ? <Lock size={14} /> : <Globe size={14} />}{t(owner ? "chat.page.ownerOnly" : "chat.page.anyoneLink")}
+            </button>
+          )}
           <button type="button" onClick={() => void share.run(version.rev)} disabled={busy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}{t("chat.preview.share")}
           </button>
@@ -271,18 +284,25 @@ export function PageToolbar({ version, point, share, save, ready, fullScreen, ro
 export function PageNotes({ version, point, share, save, room, className }: Pick<PageToolsProps, "version" | "point" | "share" | "save" | "room"> & { className?: string }) {
   const { dispatch } = useStore();
   const { state: copied, copy } = useCopyFeedback(share.url ?? "");
-  const state = share.share;
+  const state = share.share, owner = share.visibility === "owner";
   const rows: ReactNode[] = [];
   if (share.url) {
     rows.push(
       <div key="link" data-page-link className="flex min-w-0 flex-wrap items-center gap-2 rounded-2xl bg-inset px-3 py-2 text-[13px]">
-        <Globe size={14} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
-        <span className="shrink-0 font-medium text-ink">{share.again ? t("chat.preview.updatedLink") : t("chat.preview.published")}</span>
+        {owner ? <Lock size={14} className="shrink-0 text-ink-tertiary" aria-hidden="true" /> : <Globe size={14} className="shrink-0 text-ink-tertiary" aria-hidden="true" />}
+        <span className="shrink-0 font-medium text-ink">{share.again ? t("chat.preview.updatedLink") : t(owner ? "chat.page.ownerPublished" : "chat.preview.published")}</span>
         <a href={share.url} dir="ltr" onClick={(event) => { event.preventDefault(); void openExternalLink(share.url!); }}
           className="min-w-0 flex-1 truncate text-accent-text hover:underline">{share.url}</a>
         <button type="button" onClick={copy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {copied === "copied" ? <Check size={14} /> : <Copy size={14} />}{t(copied === "copied" ? "chat.page.copied" : "chat.page.copyLink")}
         </button>
+        {!room && (
+          <button type="button" data-page-visibility aria-pressed={owner} disabled={state.kind === "busy"}
+            title={t(owner ? "chat.page.makePublicHint" : "chat.page.makeOwnerHint")}
+            onClick={() => void share.run(version.rev, owner ? "public" : "owner")} className={cn(ASK_CHIP, owner ? ASK_CHIP_PICKED : ASK_CHIP_IDLE)}>
+            {owner ? <Lock size={14} /> : <Globe size={14} />}{t(owner ? "chat.page.ownerOnly" : "chat.page.anyoneLink")}
+          </button>
+        )}
         {!room && (
           <button type="button" onClick={() => void share.run(version.rev)} disabled={state.kind === "busy"} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
             {t("chat.preview.republish")}

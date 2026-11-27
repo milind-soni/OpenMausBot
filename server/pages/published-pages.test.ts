@@ -7,7 +7,7 @@ import { FAKE_DESKTOP_TOKEN, FAKE_HOME, FAKE_TOKEN_URL, fakePagesService } from 
 import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
 import { PageBundleError, readPageBundle, skippedNote } from "./bundle.ts";
 import * as bundle from "./bundle.ts";
-import { PublishedPagesStore } from "./store.ts";
+import { PagesStore, PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
 import { PASS } from "../routes/table.ts";
@@ -43,14 +43,17 @@ function setup(options: { home?: boolean; quota?: number; selfHosted?: boolean; 
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
   const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, selfHosted: options.selfHosted, fetch: (input, init) => service.fetch(input, init),
+    pageOrigin: () => "https://cloud.example.test",
     ...(options.liveRoots ? { liveRoots: options.liveRoots } : {}), ...(options.paused ? { paused: options.paused } : {}),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
-  const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
+  const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string; live?: boolean; visibility?: "public" | "owner" }) => pages.publisher.publish({
     botId: input.botId ?? "bot-1", threadId: input.threadId ?? "thread-1", path: input.path, title: input.title ?? "Bake sale",
-    ...(input.pageId ? { pageId: input.pageId } : {}), roots: [work], post: post(input.threadId ?? "thread-1") });
+    ...(input.pageId ? { pageId: input.pageId } : {}), ...(input.live !== undefined ? { live: input.live } : {}),
+    ...(input.visibility ? { visibility: input.visibility } : {}), roots: [work], post: post(input.threadId ?? "thread-1") });
   return { service, pages, work, data, cards, publish };
 }
+const ownerUrl = (pageId: string) => `https://cloud.example.test/api/published-pages/${pageId}/`;
 
 describe("publishing a page", () => {
   it("asks the person to sign in to MausBot when this app has no account, and publishes nothing", async () => {
@@ -287,6 +290,118 @@ describe("publishing a page", () => {
   });
 });
 
+describe("an owner-only published page", () => {
+  it("is kept on this server without asking the pages service for anything, even with no MausBot account", async () => {
+    const f = setup();
+    writeSite(join(f.work, "report"), { "index.html": "<!doctype html><h1>Traffic</h1>", "data.csv": "day,hits\nmon,3\n" });
+    const outcome = await f.publish({ path: "report", title: "Traffic", visibility: "owner" });
+    expect(outcome.status).toBe(200);
+    const [record] = f.pages.store.list();
+    const url = ownerUrl(record!.pageId);
+    expect(outcome.text).toContain(`Published “Traffic” for you only: ${url}`);
+    expect(outcome.text).toContain("Only you can open it");
+    expect(f.service.minted).toEqual([]);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.cards).toEqual([{ threadId: "thread-1", id: "m1", text: `“Traffic” is published for you: ${url}. Only you can open it.`,
+      card: { state: "live", title: "Traffic", pageId: record!.pageId, url, visibility: "owner" } }]);
+    expect(f.pages.files.read(record!.pageId, "")?.toString()).toBe("<!doctype html><h1>Traffic</h1>");
+    expect(f.pages.files.read(record!.pageId, "data.csv")?.toString()).toBe("day,hits\nmon,3\n");
+    expect(new PublishedPagesStore(join(f.data, "owner-pages.json")).get(record!.pageId)).toMatchObject({ url, visibility: "owner" });
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).list()).toEqual([]);
+  });
+
+  it("keeps its link when published again, and takes its files away with Unpublish", async () => {
+    const f = setup();
+    writeSite(join(f.work, "report"));
+    await f.publish({ path: "report", visibility: "owner" });
+    const [record] = f.pages.store.list();
+    writeFileSync(join(f.work, "report", "style.css"), "h1{color:blue}");
+    const again = await f.publish({ path: "report", visibility: "owner" });
+    expect(again.text).toContain(`Updated “Bake sale” at the same link: ${ownerUrl(record!.pageId)}`);
+    expect(f.pages.store.list()).toHaveLength(1);
+    expect(f.pages.files.read(record!.pageId, "style.css")?.toString()).toBe("h1{color:blue}");
+    expect(await f.pages.publisher.unpublish({ pageId: record!.pageId })).toMatchObject({ status: 200, card: { state: "unpublished", visibility: "owner" } });
+    expect(f.pages.files.has(record!.pageId)).toBe(false);
+    expect(f.pages.store.list()).toEqual([]);
+    expect(f.service.minted).toEqual([]);
+    expect(f.cards.map(({ card }) => [card.state, card.visibility])).toEqual([["unpublished", "owner"], ["unpublished", "owner"]]);
+  });
+
+  it("takes the public copy down when a published page becomes owner-only, and updates its cards", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "report"));
+    await f.publish({ path: "report" });
+    const [publicRecord] = f.pages.store.list();
+    expect(f.service.pages.size).toBe(1);
+    const switched = await f.publish({ path: "report", visibility: "owner" });
+    expect(switched.status).toBe(200);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "delete"]);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.get(publicRecord!.pageId)).toMatchObject({ visibility: "owner" });
+    expect(new PublishedPagesStore(join(f.data, "published-pages.json")).list()).toEqual([]);
+    // The card that showed the old public link now carries the owner-only one.
+    expect(f.cards.map(({ card }) => [card.pageId, card.visibility])).toEqual([[publicRecord!.pageId, "owner"], [publicRecord!.pageId, "owner"]]);
+    expect(f.cards[0]!.card).toMatchObject({ state: "live", visibility: "owner", url: ownerUrl(publicRecord!.pageId) });
+  });
+
+  it("publishes again to the pages Worker with a new link when an owner-only page becomes public", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "report"));
+    await f.publish({ path: "report", visibility: "owner" });
+    const [local] = f.pages.store.list();
+    const switched = await f.publish({ path: "report", visibility: "public" });
+    expect(switched.status).toBe(200);
+    const [remote] = [...f.service.pages.keys()];
+    expect(remote).not.toBe(local!.pageId);
+    expect(f.service.minted).toEqual([{ action: "create", caller: "desktop" }]);
+    expect(f.pages.files.has(local!.pageId)).toBe(false);
+    expect(new PublishedPagesStore(join(f.data, "owner-pages.json")).list()).toEqual([]);
+    expect(f.cards.map(({ card }) => [card.pageId, card.visibility])).toEqual([[remote, undefined], [remote, undefined]]);
+    expect(f.cards[0]!.card).toMatchObject({ state: "live", url: `https://${remote}.mausbot.page/` });
+  });
+
+  it("republishes a live owner-only page from its folder without touching the pages Worker", async () => {
+    const f = setup();
+    const site = writeSite(join(f.work, "report"));
+    await f.publish({ path: "report", visibility: "owner", live: true });
+    const [record] = f.pages.store.list();
+    writeFileSync(join(site, "style.css"), "h1{color:red}");
+    expect(await f.pages.publisher.refreshLive(Date.now() + 61_000)).toBe(1);
+    expect(f.pages.files.read(record!.pageId, "style.css")?.toString()).toBe("h1{color:red}");
+    expect(f.service.minted).toEqual([]);
+    expect(f.pages.store.get(record!.pageId)).toMatchObject({ live: true, visibility: "owner" });
+  });
+});
+
+describe("pages stored before the visibility setting", () => {
+  it("read as public, and keep no visibility once published again", async () => {
+    const data = join(dir, "legacy-data");
+    mkdirSync(data, { recursive: true });
+    const source = await bundle.pageSource(writeSite(join(dir, "legacy-work", "site")), [join(dir, "legacy-work")]);
+    const pageId = "a".repeat(32), url = `https://${pageId}.mausbot.page/`;
+    writeFileSync(join(data, "published-pages.json"), JSON.stringify({ version: 1, pages: [{ pageId, url, title: "Old report", botId: "bot-1", source,
+      cards: [], createdAt: 1, updatedAt: 2, live: true }] }));
+    const store = new PagesStore(data);
+    expect(store.get(pageId)).toMatchObject({ url, title: "Old report" });
+    expect(store.get(pageId)).not.toHaveProperty("visibility");
+    expect(store.list()).toHaveLength(1);
+    // A service opened on that data publishes the same folder to the Worker, exactly as before the setting existed.
+    const service = fakePagesService();
+    service.pages.set(pageId, { title: "Old report", files: new Map() });
+    signIn();
+    const pages = createPublishedPages({ dataDir: data, cloudHome: null, fetch: (input, init) => service.fetch(input, init),
+      pageOrigin: () => "https://cloud.example.test", patch: () => {} });
+    const outcome = await pages.publisher.publish({ botId: "bot-1", threadId: "thread-1", path: join(dir, "legacy-work", "site"), title: "Old report",
+      roots: [join(dir, "legacy-work")], post: () => "m1" });
+    expect(outcome.status).toBe(200);
+    expect(service.minted).toEqual([{ action: "update", pageId, caller: "desktop" }]);
+    expect(new PublishedPagesStore(join(data, "published-pages.json")).get(pageId)).not.toHaveProperty("visibility");
+    expect(new PublishedPagesStore(join(data, "owner-pages.json")).list()).toEqual([]);
+  });
+});
+
 describe("a page tool call whose turn ends", () => {
   function tool(f: ReturnType<typeof setup>, options: { stopDuringFolders?: boolean; stopAfterToken?: boolean; signal?: AbortSignal } = {}) {
     const turn = { active: true };
@@ -517,10 +632,15 @@ describe("unpublishing a page", () => {
     };
     const fromSite = f.publish({ path: "site" });
     await stored;
+    // The draft's folder is read before it queues, so its read resolving proves the update below is queued ahead of the
+    // unpublish.
+    const read = vi.spyOn(bundle, "readPageBundle");
     const fromDraft = f.publish({ path: "draft", pageId: page });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await vi.waitFor(() => expect(read).toHaveBeenCalled());
+    await read.mock.results[0]!.value;
+    await new Promise((resolve) => setTimeout(resolve));
+    read.mockRestore();
     const unpublished = f.pages.publisher.unpublish({ pageId: page });
-    await new Promise((resolve) => setTimeout(resolve, 20));
     release();
     expect((await Promise.all([fromSite, fromDraft, unpublished])).map((outcome) => outcome.status)).toEqual([200, 200, 200]);
     expect(f.service.pages.size).toBe(0);

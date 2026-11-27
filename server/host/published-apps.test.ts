@@ -114,6 +114,11 @@ describe("the list on a person's own server", () => {
     expect(listed.every((app) => app.canDelete)).toBe(true);
   });
 
+  it("lists an owner-only page as only the owner's, not as anyone with the link", async () => {
+    pages = [{ ...page(PAGE_ADA, "mira", "ada-chat", 400), visibility: "owner" }];
+    expect((await apps().list(visibleFor(OWNER, false), OWNER)).find((app) => app.source === "page")?.access).toBe("owner");
+  });
+
   it("lists a page whose bot is gone, without a name", async () => {
     pages = [page("orphanpage0000000000000", "deleted-bot", "gone-thread", 5)];
     expect((await apps().list(visibleFor(OWNER, false), OWNER)).find((app) => app.source === "page")?.bot).toEqual({ id: "deleted-bot", name: "" });

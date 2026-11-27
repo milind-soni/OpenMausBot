@@ -13,9 +13,9 @@ export interface PublishedApp {
   /** A conversation the viewer can read where the bot published it, when one is known. */
   threadId?: string;
   publishedAt: number;
-  /** `link`: anyone who has the link. `public`: the site answered without a login. `netlify-team`: it asked for a
-   * Netlify login when last checked. */
-  access: "link" | "public" | "netlify-team" | "unknown";
+  /** `link`: anyone who has the link. `owner`: only the owner's own signed-in devices. `public`: the site answered
+   * without a login. `netlify-team`: it asked for a Netlify login when last checked. */
+  access: "link" | "owner" | "public" | "netlify-team" | "unknown";
   /** The site's page in the person's Netlify account. */
   manageUrl?: string;
   /** An included app that can't be opened: `taken_down` by MausBot, or `not_live` because no publish of it has

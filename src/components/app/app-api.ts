@@ -1,7 +1,7 @@
 import { t } from "@/lib/i18n";
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
-import type { PublishedPageCard } from "../../../shared/published-page";
+import type { PublishedPageCard, PublishedPageVisibility } from "../../../shared/published-page";
 import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError, type PageRpcMethod } from "../../../shared/app-frame/bridge";
 import { randomUuid } from "@/lib/random-uuid";
 
@@ -121,10 +121,12 @@ export async function sendAppMessage(args: { botId: string; threadId: string; me
 
 export type PagePublishOutcome = { ok: true; card: PublishedPageCard } | { ok: false; error: string; card?: PublishedPageCard };
 
-/** Publishes the version on screen to a public link, the same link every time. */
-export async function publishAppPage(threadId: string, messageId: string, rev: number): Promise<PagePublishOutcome> {
+/** Publishes the version on screen to a public link, or one only the owner's signed-in devices can open, the same link
+ * every time while its visibility stays the same. */
+export async function publishAppPage(threadId: string, messageId: string, rev: number, visibility?: PublishedPageVisibility): Promise<PagePublishOutcome> {
   try {
-    const body = await api<{ card: PublishedPageCard }>(`${appDocumentPath(threadId, messageId)}/publish`, { method: "POST", body: JSON.stringify({ rev }) });
+    const body = await api<{ card: PublishedPageCard }>(`${appDocumentPath(threadId, messageId)}/publish`, {
+      method: "POST", body: JSON.stringify(visibility === "owner" ? { rev, visibility } : { rev }) });
     return { ok: true, card: body.card };
   } catch (error) {
     if (!(error instanceof ApiError)) return { ok: false, error: OFFLINE_ERROR.message };

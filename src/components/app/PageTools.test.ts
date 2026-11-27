@@ -33,6 +33,8 @@ const openExternal = vi.fn(async () => true);
 const store = { state: {}, dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) } as unknown as ReturnType<typeof useStore>;
 const LINK = "https://page000000000000000000001.mausbot.page/";
 const LIVE: PublishedPageCard = { state: "live", title: "Pricing", pageId: "page000000000000000000001", url: LINK, usage: { pages: 1, limit: 5 } };
+const OWNER: PublishedPageCard = { state: "live", title: "Pricing", pageId: "page000000000000000000001",
+  url: "https://cloud.example.test/api/published-pages/page000000000000000000001/", visibility: "owner" };
 
 let host: HTMLDivElement;
 let root: Root;
@@ -70,9 +72,12 @@ const PICK = { jsonrpc: "2.0", method: POINTED_METHOD, params: { tag: "button", 
 
 beforeEach(() => {
   fetchMock.mockReset();
-  fetchMock.mockImplementation(async (path) => {
+  fetchMock.mockImplementation(async (path, init) => {
     const url = new URL(path, "http://omb.test");
-    if (url.pathname.endsWith("/app/publish")) return json(200, { ok: true, card: LIVE });
+    if (url.pathname.endsWith("/app/publish")) {
+      const asked = JSON.parse(String(init?.body ?? "{}")) as { visibility?: string };
+      return json(200, { ok: true, card: asked.visibility === "owner" ? OWNER : LIVE });
+    }
     if (url.pathname.endsWith("/unpublish")) return json(200, { ok: true, card: { ...LIVE, state: "unpublished" } });
     const rev = url.searchParams.get("rev");
     return json(200, botHtmlDocument({ messageId: "a1", rev: rev === null ? 0 : Number(rev), html: `<p>${rev === null ? "newest" : `version ${Number(rev) + 1}`}</p>` }));
@@ -186,6 +191,32 @@ describe("a bot's page in the chat", () => {
     expect(card().querySelector("[data-page-link]")).toBeNull();
     expect(card().textContent).toContain("Unpublished. The link no longer opens.");
     expect(button("Open in new tab", card()).disabled).toBe(true);
+  });
+
+  it("chooses only you before sharing, and shares it that way", async () => {
+    await render(row(payload()));
+    await click("Anyone with the link", card());
+    expect(button("Only you", card()).getAttribute("aria-pressed")).toBe("true");
+    await click("Share", card());
+    await settle();
+    expect(posts("/app/publish")).toEqual([{ rev: 0, visibility: "owner" }]);
+  });
+
+  it("switches a published page between anyone with the link and only you", async () => {
+    await render(row(payload(), LIVE));
+    const chip = () => card().querySelector<HTMLElement>("[data-page-visibility]")!;
+    expect(chip().textContent).toContain("Anyone with the link");
+    expect(chip().getAttribute("aria-pressed")).toBe("false");
+    await click("Anyone with the link", card());
+    await settle();
+    expect(posts("/app/publish")).toEqual([{ rev: 0, visibility: "owner" }]);
+    expect(chip().textContent).toContain("Only you");
+    expect(chip().getAttribute("aria-pressed")).toBe("true");
+    await render(row(payload(), OWNER));
+    expect(card().querySelector("[data-page-link]")?.textContent).toContain("Published for you");
+    await click("Only you", card());
+    await settle();
+    expect(posts("/app/publish")).toEqual([{ rev: 0, visibility: "owner" }, { rev: 0 }]);
   });
 
   it("shows publish_page's link on the page it published", async () => {

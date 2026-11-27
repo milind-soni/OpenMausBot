@@ -1,9 +1,11 @@
-import { PAGE_ID, type PublishedPageCard } from "../../shared/published-page.ts";
+import { randomBytes } from "node:crypto";
+import { PAGE_ID, type PublishedPageCard, type PublishedPageVisibility } from "../../shared/published-page.ts";
 import { redactSecretsInText } from "../../shared/redact.ts";
 import { PageBundleError, pageSignature, pageSource, readPageBundle, skippedNote, stillReadable, type PageBundle } from "./bundle.ts";
 import { liveFiles } from "./live.ts";
 import type { PagesCall, PagesClient, PagesFailure, PageUsage } from "./client.ts";
-import type { PublishedPagesStore } from "./store.ts";
+import type { PublishedPageFiles } from "./owner-files.ts";
+import type { PagesStore } from "./store.ts";
 
 /** What a publish or unpublish comes to: the sentence for the bot (or the person's card), and whether it failed. */
 export interface PageOutcome { status: number; text: string; card?: PublishedPageCard }
@@ -24,6 +26,8 @@ export interface PublishInput {
   call?: PagesCall;
   /** Publish it again by itself whenever its folder changes; kept as it was for a page published before when omitted. */
   live?: boolean;
+  /** Who may open it; kept as it was for a page published before when omitted, and public for a new page. */
+  visibility?: PublishedPageVisibility;
 }
 
 const TITLE_MAX = 200;
@@ -36,11 +40,15 @@ export function cardText(card: PublishedPageCard): string {
   if (card.state === "limit") return card.message ?? "This account's pages are used up.";
   if (card.state === "unpublished") return `Unpublished “${card.title}”. Its link no longer opens.`;
   if (card.uncertain) return `“${card.title}” may be live: ${card.url}. Unpublish it to remove it.`;
+  if (card.visibility === "owner") return `“${card.title}” is published for you: ${card.url}. Only you can open it.`;
   return `Published “${card.title}”: ${card.url}${card.usage ? ` (${usageWords(card.usage)})` : ""}`;
 }
 
 /** A publish, with the folder's fingerprint when a live republish took it before reading the files. */
-type LivePublish = Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call" | "live"> & { signature?: string | null; refresh?: true };
+type LivePublish = Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call" | "live" | "visibility"> & { signature?: string | null; refresh?: true };
+
+/** Owner-only pages are kept on this server, under the owner's sign-in, instead of being uploaded to the pages Worker. */
+const ownerPageId = () => randomBytes(16).toString("hex");
 
 /** A live page is published again at most this often, however often its folder changes. */
 const LIVE_MIN_MS = 60_000;
@@ -51,7 +59,11 @@ const failureStatus: Record<PagesFailure["reason"], number> = { sign_in: 403, li
 
 export function createPagePublisher(deps: {
   client: PagesClient;
-  store: PublishedPagesStore;
+  store: PagesStore;
+  /** The owner-only pages' files, kept on this server. */
+  files: PublishedPageFiles;
+  /** The address this server answers at, which an owner-only page's link names; a path alone when there is none. */
+  pageOrigin?: () => string | null;
   /** Re-draws a card already in a conversation (an unpublished page's). */
   patch: (threadId: string, messageId: string, text: string, card: PublishedPageCard) => void;
   /** The folders the bot may read in the conversation of the page's latest card; null once the bot is gone. */
@@ -80,7 +92,8 @@ export function createPagePublisher(deps: {
   const markUnpublished = (pageId: string, usage: PageUsage | null): PublishedPageCard | null => {
     const record = store.forget(pageId);
     if (!record) return null;
-    const card: PublishedPageCard = { state: "unpublished", title: record.title, pageId, url: record.url, ...(usage ? { usage } : {}) };
+    const card: PublishedPageCard = { state: "unpublished", title: record.title, pageId, url: record.url,
+      ...(record.visibility ? { visibility: record.visibility } : {}), ...(usage ? { usage } : {}) };
     for (const shown of record.cards) {
       try { deps.patch(shown.threadId, shown.messageId, cardText(card), card); } catch { /* A conversation deleted since keeps nothing to re-draw. */ }
     }
@@ -107,7 +120,7 @@ export function createPagePublisher(deps: {
 
     /** A page built here rather than read from a folder (a chat page the person publishes from the preview); `source`
      * keeps its link across publishes. */
-    async publishFiles(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post"> & { source: string; files: PageBundle["files"] }): Promise<PageOutcome> {
+    async publishFiles(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "visibility"> & { source: string; files: PageBundle["files"] }): Promise<PageOutcome> {
       return publishBundle(input, { source: input.source, files: input.files, bytes: input.files.reduce((sum, file) => sum + file.data.byteLength, 0), skipped: [] });
     },
 
@@ -128,9 +141,56 @@ export function createPagePublisher(deps: {
     // A republish that waited its turn behind an unpublish, or a publish that turned live off, is no longer wanted.
     if (input.refresh && !(input.pageId && store.get(input.pageId)?.live)) return { status: 409, text: "The page is no longer live." };
     const remembered = target ? store.get(target) : null;
+    const visibility = input.visibility ?? remembered?.visibility ?? "public";
     const live = input.live ?? remembered?.live === true;
     const signature = live ? input.signature ?? null : null;
     const files = live ? liveFiles(bundle.files) : bundle.files;
+    const ownerUrl = (pageId: string) => `${(deps.pageOrigin?.() ?? "").replace(/\/+$/, "")}/api/published-pages/${pageId}/`;
+    // A page whose link moved (a visibility switch, or a public page that was replaced) updates every card that shows it.
+    const patchOtherCards = (card: PublishedPageCard, messageId: string | null) => {
+      for (const shown of remembered?.cards ?? []) {
+        if (shown.threadId === input.threadId && shown.messageId === messageId) continue;
+        try { deps.patch(shown.threadId, shown.messageId, cardText(card), card); } catch { /* A conversation deleted since keeps nothing to re-draw. */ }
+      }
+    };
+    if (visibility === "owner") {
+      const pageId = target ?? ownerPageId(), url = ownerUrl(pageId);
+      try {
+        deps.files.save(pageId, files);
+      } catch {
+        return { status: 500, text: "The page couldn't be saved on this server. Check that its data folder has room, then ask again." };
+      }
+      // A public page becomes owner-only only once its public copy is gone; until then the request is refused and the page
+      // stays as it was.
+      if (remembered && remembered.visibility !== "owner") {
+        let taken: Awaited<ReturnType<PagesClient["unpublish"]>>;
+        try {
+          taken = await client.unpublish(remembered.pageId, input.call);
+        } catch (error) {
+          deps.files.remove(pageId);
+          throw error;
+        }
+        if (!taken.ok && taken.reason !== "gone") {
+          deps.files.remove(pageId);
+          return { status: failureStatus[taken.reason], text: `The page could not be made owner-only: ${taken.message}` };
+        }
+        store.forgetPublic(remembered.pageId);
+      }
+      const card: PublishedPageCard = { state: "live", title, pageId, url, visibility: "owner" };
+      const messageId = input.post(cardText(card), card, bundle);
+      store.published({ pageId, url, title, botId: remembered?.botId ?? input.botId, source: bundle.source,
+        card: messageId ? { threadId: input.threadId, messageId } : null, visibility: "owner", live, signature });
+      if (remembered?.pageId !== pageId || remembered?.visibility !== "owner") patchOtherCards(card, messageId);
+      const updated = Boolean(target) && remembered?.visibility === "owner";
+      const lines = [
+        updated ? `Updated “${title}” at the same link: ${url}` : `Published “${title}” for you only: ${url}`,
+        "Only you can open it, on a device signed in to this server; anyone else who asks finds nothing. It is not on the public web and doesn't use this account's page limit.",
+        "A card with the link, Copy link and Unpublish is in the chat. Publishing the same file or folder again updates this same link.",
+        ...(live ? ["It is live: when a file in its folder changes, it is published again by itself (at most once a minute)."] : []),
+        skippedNote(bundle.skipped),
+      ];
+      return { status: 200, text: lines.filter(Boolean).join("\n"), card };
+    }
     // A page that may be public is recorded before its upload, so it can always be taken down. Its old fingerprint
     // stays, so a live page whose upload is uncertain is published again.
     const uncertainRecord = (page: { pageId: string; url: string }, card: { threadId: string; messageId: string } | null) => store.published({
@@ -141,10 +201,12 @@ export function createPagePublisher(deps: {
       uncertainRecord(page, null);
       pending = page.pageId;
     };
-    let result = await client.publish({ title, files, ...(target ? { pageId: target } : {}), beforeUpload }, input.call);
+    // An owner-only page's id means nothing to the pages Worker: it is a public page from here on, with a new link.
+    const remoteTarget = remembered?.visibility === "owner" ? undefined : target;
+    let result = await client.publish({ title, files, ...(remoteTarget ? { pageId: remoteTarget } : {}), beforeUpload }, input.call);
     // The page this folder was published to before is gone (unpublished, or taken down): it gets a new link.
-    if (!result.ok && result.reason === "gone" && !input.pageId && target) {
-      store.forget(target);
+    if (!result.ok && result.reason === "gone" && !input.pageId && remoteTarget) {
+      store.forget(remoteTarget);
       result = await client.publish({ title, files, beforeUpload }, input.call);
     }
     if (!result.ok) {
@@ -170,6 +232,12 @@ export function createPagePublisher(deps: {
     const messageId = input.post(cardText(card), card, bundle);
     store.published({ pageId: result.pageId, url: result.url, title, botId: remembered?.botId ?? input.botId, source: bundle.source,
       card: messageId ? { threadId: input.threadId, messageId } : null, live, signature });
+    // The local copy of a page that was owner-only is gone now that the public page is live.
+    if (remembered?.visibility === "owner" && target) {
+      deps.files.remove(target);
+      store.forgetOwner(target);
+      patchOtherCards(card, messageId);
+    }
     const updated = Boolean(target) && result.pageId === target;
     const lines = [
       updated ? `Updated “${title}” at the same link: ${result.url}` : `Published “${title}” at ${result.url}`,
@@ -183,7 +251,14 @@ export function createPagePublisher(deps: {
   }
 
   async function unpublishNow(pageId: string, call: PagesCall | undefined): Promise<PageOutcome> {
-    const title = store.get(pageId)?.title;
+    const record = store.get(pageId);
+    if (record?.visibility === "owner" || (!record && deps.files.has(pageId))) {
+      deps.files.remove(pageId);
+      const card = markUnpublished(pageId, null)
+        ?? { state: "unpublished" as const, title: pageId, pageId, visibility: "owner" as const };
+      return { status: 200, text: `Unpublished${record ? ` “${record.title}”` : ""}. Its link no longer opens.`, card };
+    }
+    const title = record?.title;
     const result = await client.unpublish(pageId, call);
     if (!result.ok && result.reason !== "gone") return { status: failureStatus[result.reason], text: result.message };
     const card = markUnpublished(pageId, result.ok ? result.usage : null)
