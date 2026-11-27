@@ -22,7 +22,8 @@ export function draftBodyText(card: Pick<EmailDraftCardData, "body" | "html">): 
   for (let node = words.nextNode(); node; node = words.nextNode()) if (!node.parentElement?.closest("pre")) node.nodeValue = (node.nodeValue ?? "").replace(/\s+/g, " ");
   for (const element of body.querySelectorAll("br")) element.replaceWith("\n");
   for (const element of body.querySelectorAll(LINES)) element.after("\n");
-  for (const element of body.querySelectorAll(PARAGRAPHS)) element.after("\n\n");
+  // A block starts its own paragraph after text before it as well as before text after it: <div>Hi<p>Ana</p></div>.
+  for (const element of body.querySelectorAll(PARAGRAPHS)) { element.before("\n\n"); element.after("\n\n"); }
   return (body.textContent ?? "").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 

@@ -2,7 +2,7 @@
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
 import { startFailureText } from "./start-failure-text.ts";
 import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
-import { createEmailDraftRoutes, DraftRefused, showDraftAnswer } from "./email-draft-card.ts";
+import { createDraftGuard, createEmailDraftRoutes, draftIdsIn, DraftRefused, showDraftAnswer } from "./email-draft-card.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -11920,7 +11920,8 @@ let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes();
 
 // `workspaceAccess` is assigned at boot, after this line: read it per request.
-ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes()); ROUTES.push(createEmailDraftRoutes({ store, language: conversationLanguage, sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), inRoom: (threadId) => Boolean(store.groupByThread(threadId)), mayChat: (auth, botId) => ["chat", "edit"].includes(levelOf(auth, botId)), connection: async (auth, botId, calls) => {
+const draftGuard = createDraftGuard();
+ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") })); ROUTES.push(createStopLineRoutes()); ROUTES.push(createEmailDraftRoutes({ store, guard: draftGuard, language: conversationLanguage, sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), inRoom: (threadId) => Boolean(store.groupByThread(threadId)), mayChat: (auth, botId) => ["chat", "edit"].includes(levelOf(auth, botId)), connection: async (auth, botId, calls) => {
   const bot = store.bot(botId);
   if (!bot || bot.composio === false || !composio.configured(cfg)) return { ok: false, refusal: userError("serverError.emailDraft.appsOff") };
   // Where each person connects Gmail themselves, the person pressing uses their own; the draft is only in the mailbox that saved it.
@@ -14278,7 +14279,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw new Error(text);
         };
         let upstream: Awaited<ReturnType<typeof composio.relayMcp>>;
-        try { upstream = await composio.relayMcp(
+        // A bot call that changes or sends a draft waits for a Save or Send on that draft card, and the other way round.
+        try { upstream = await draftGuard.run(draftIdsIn(connectorCalls), async () => { const answer = await composio.relayMcp(
           teamConnections.via(actor.access)[0],
           body,
           Array.isArray(req.headers["mcp-session-id"])
@@ -14310,7 +14312,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             const sent = files.upload ? await files.upload().catch((error: unknown) => refuseDispatch(error instanceof Error ? error.message : String(error))) : undefined; requireActiveInternalCapability(); for (const key of nextDrafts) reservedDrafts.add(key); return sent as typeof body | undefined;
           }, undefined, teamConnections.via(actor.access)[1],
-        ); } catch (error) {
+        ); if (answer.status === 200 && connectorCalls.length) showDraftAnswer(store, internalCapability.threadId, internalCapability.botId, connectorCalls, answer.bytes, rpc?.id, conversationLanguage(internalCapability.threadId), draftGuard); return answer; }); } catch (error) {
           if (dispatchRefusal) return refuseOutbound(dispatchRefusal);
           throw error;
         }
@@ -14319,7 +14321,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           "cache-control": "no-store",
         };
         if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId; if (connectorCalls.length) connectionHealth.appCall({ ...(internalCapability.connectorsFor ? { person: internalCapability.connectorsFor } : {}), slugs: connectorCalls.map((one) => one.slug), status: upstream.status, bytes: upstream.bytes, contentType: upstream.contentType });
-        if (upstream.status === 200 && connectorCalls.length) showDraftAnswer(store, internalCapability.threadId, internalCapability.botId, connectorCalls, upstream.bytes, rpc?.id, conversationLanguage(internalCapability.threadId));
         res.writeHead(upstream.status, headers);
         return res.end(Buffer.from(await withAccountHint(withMissingFileHint(withScopeHint(proactive.fence.confines(internalCapability.threadId) ? recordsAnswer(upstream.bytes, upstream.contentType) : upstream.bytes, upstream.contentType, connectorCalls.map((call) => call.slug)), upstream.contentType, connectorCalls.map((call) => call.slug)), upstream.contentType, connectorCalls.map((call) => call.slug), () => composio.connectedServices(...teamConnections.via(actor.access)).then(accountsByApp))));
       }

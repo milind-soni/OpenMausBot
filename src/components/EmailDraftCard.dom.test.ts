@@ -86,6 +86,7 @@ describe("the Gmail draft card", () => {
   it("keeps an HTML body's lines and paragraphs", async () => {
     const { draftBodyText } = await import("./EmailDraftCard");
     expect(draftBodyText({ html: true, body: "<p>Hello</p>\n  <p>Ana<br>Ready?</p><ul><li>One</li><li>Two</li></ul>" })).toBe("Hello\n\nAna\nReady?\n\nOne\nTwo");
+    expect(draftBodyText({ html: true, body: "<div>Hello<p>Ana</p></div>" })).toBe("Hello\n\nAna");
     expect(draftBodyText({ body: "Plain\n  text" })).toBe("Plain\n  text");
   });
 

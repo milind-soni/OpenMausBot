@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { draftRevision, type EmailDraftCardData } from "../shared/email-draft.ts";
 import type { ConnectorCall } from "../shared/outbound.ts";
 import {
-  createEmailDraftRoutes, draftCardFrom, DraftRefused, showDraftAnswer, showDraftCard,
+  createDraftGuard, createEmailDraftRoutes, draftCardFrom, DraftRefused, showDraftAnswer, showDraftCard,
   type DraftCardStore, type DraftConnection, type EmailDraftRouteDeps,
 } from "./email-draft-card.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -60,7 +60,7 @@ describe("draftCardFrom", () => {
   });
 
   it("keeps the draft id of an update that answers without one", () => {
-    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", recipient_email: "ana@example.com", cc: [], bcc: [], subject: "Launch v2", body: "New", is_html: false } };
+    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", recipient_email: "ana@example.com", extra_recipients: [], cc: [], bcc: [], subject: "Launch v2", body: "New", is_html: false } };
     expect(draftCardFrom([update], answer("GMAIL_UPDATE_DRAFT", { successful: true, data: {} }), "b")).toMatchObject({ draftId: "r-123", subject: "Launch v2", body: "New" });
   });
 
@@ -71,6 +71,16 @@ describe("draftCardFrom", () => {
     expect(draftCardFrom([update], done, "b", (id) => (id === "r-123" ? before : undefined))).toEqual({ ...before, subject: "Launch v2" });
     expect(draftCardFrom([update], done, "b")).toBeNull();
     expect(draftCardFrom([update], done, "b", () => undefined)).toBeNull();
+  });
+
+  it("keeps the recipients an update leaves out when it names only the first or only the others", () => {
+    const before = draftCardFrom([createCall], created(), "b")!;
+    const shownBefore = (id: string) => (id === "r-123" ? before : undefined);
+    const done = answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } });
+    const firstOnly: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", recipient_email: "dee@example.com" } };
+    expect(draftCardFrom([firstOnly], done, "b", shownBefore)?.to).toEqual(["dee@example.com", "ben@example.com"]);
+    const othersOnly: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { draft_id: "r-123", extra_recipients: ["eve@example.com"] } };
+    expect(draftCardFrom([othersOnly], done, "b", shownBefore)?.to).toEqual(["ana@example.com", "eve@example.com"]);
   });
 });
 
@@ -151,14 +161,15 @@ function relayed(reply: (slug: string) => Record<string, unknown>, gate?: Promis
 
 function setup(over: Partial<EmailDraftRouteDeps> = {}, connection: DraftConnection = relayed(() => ({ successful: true, data: { id: "r-123" } })).connection) {
   const store = memoryStore();
+  const guard = createDraftGuard();
   const card: EmailDraftCardData = draftCardFrom([createCall], created(), "bot-1")!;
   const row = showDraftCard(store, "t1", card)!;
   const checked: ConnectorCall[][] = [];
   const route = createEmailDraftRoutes({
-    store, sees: () => true, inRoom: () => false, mayChat: () => true,
+    store, guard, sees: () => true, inRoom: () => false, mayChat: () => true,
     connection: async (_auth, _bot, calls) => { checked.push(calls); return connection; }, ...over,
   });
-  return { store, row, route, checked };
+  return { store, row, route, checked, guard };
 }
 
 const edit = { to: ["ana@example.com"], cc: [], bcc: ["boss@example.com"], subject: "Launch (final)", body: "Ready to go." };
@@ -215,11 +226,14 @@ describe("POST /api/email-draft", () => {
 
   it("runs nothing for someone who can't see the conversation or write to the bot, or in a room", async () => {
     for (const over of [{ sees: () => false }, { mayChat: () => false }, { inRoom: () => true }]) {
-      const { row, route, checked } = setup(over);
-      const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
-      await route(context);
-      expect(sent.status).toBe(404);
-      expect(checked).toHaveLength(0);
+      for (const press of [{ action: "send", revision: confirmed }, { action: "save", draft: edit }]) {
+        const { store, row, route, checked } = setup(over);
+        const { context, sent } = request({ threadId: "t1", messageId: row.id, ...press });
+        await route(context);
+        expect(sent.status).toBe(404);
+        expect(checked).toHaveLength(0);
+        expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, draftId: "r-123" });
+      }
     }
   });
 
@@ -234,13 +248,86 @@ describe("POST /api/email-draft", () => {
     expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
   });
 
-  it("sends nothing when the bot's permissions change right before the call goes out", async () => {
+  it("saves and sends nothing when the bot's permissions change right before the call goes out", async () => {
     const refusal = { error: "Bot may not save or send Gmail drafts." };
-    const { store, row, route } = setup({}, { ok: true, relay: async () => { throw new DraftRefused(refusal); } });
+    for (const press of [{ action: "send", revision: confirmed }, { action: "save", draft: edit }]) {
+      // Allowed when the press is checked, then taken away while the call is being set up: the check right before the
+      // tool call goes out refuses it, the way the server's relay does.
+      let allowed = true;
+      let checkedBeforeDispatch = 0;
+      const { connection: gmail, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+      const connection: DraftConnection = { ok: true, relay: async (payload, session, signal) => {
+        if ((payload as { method: string }).method === "initialize") allowed = false;
+        if ((payload as { method: string }).method === "tools/call") { checkedBeforeDispatch++; if (!allowed) throw new DraftRefused(refusal); }
+        return (gmail as Extract<DraftConnection, { ok: true }>).relay(payload, session, signal);
+      } };
+      const { store, row, route } = setup({}, connection);
+      const { context, sent } = request({ threadId: "t1", messageId: row.id, ...press });
+      await route(context);
+      expect(sent).toEqual({ status: 403, body: refusal });
+      expect(checkedBeforeDispatch).toBe(1);
+      expect(ran).toHaveLength(0);
+      expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, draftId: "r-123" });
+      expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
+    }
+  });
+
+  it("sends nothing the bot changed in Gmail while Send was waiting for the draft", async () => {
+    const { connection, ran } = relayed(() => ({ successful: true, data: {} }));
+    const { store, row, route, guard } = setup({}, connection);
+    let finish!: () => void;
+    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { user_id: "me", draft_id: "r-123", recipient_email: "eve@example.com" } };
+    // The bot's own update to the same draft is on its way to Gmail when the person presses Send.
+    const botCall = guard.run(["r-123"], async () => {
+      await new Promise<void>((resolve) => { finish = resolve; });
+      showDraftAnswer(store, "t1", "bot-1", [update], new TextEncoder().encode(JSON.stringify(answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } }))), 7, undefined, guard);
+    });
     const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
-    await route(context);
-    expect(sent).toEqual({ status: 403, body: refusal });
-    expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
+    const pressing = route(context);
+    await Promise.resolve();
+    expect(ran).toHaveLength(0);
+    finish();
+    await Promise.all([botCall, pressing]);
+    expect(sent.status).toBe(409);
+    expect((sent.body as { errorKey: string }).errorKey).toBe("serverError.emailDraft.changed");
+    expect(ran).toHaveLength(0);
+    expect(store.rows[0]!.emailDraft?.to).toEqual(["eve@example.com", "ben@example.com"]);
+  });
+
+  it("lets the bot's change to the draft wait until a Send already going out is done", async () => {
+    let open!: () => void;
+    const { connection, ran, calling } = relayed(() => ({ successful: true, data: {} }), new Promise((resolve) => { open = resolve; }));
+    const { store, row, route, guard } = setup({}, connection);
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
+    const pressing = route(context);
+    await calling;
+    // The bot's call sees the card already sent, so it never changes the draft while Send is going out.
+    const botCall = guard.run(["r-123"], async () => store.rows[0]!.emailDraft?.sentAt);
+    open();
+    await pressing;
+    expect(await botCall).toEqual(expect.any(Number));
+    expect(sent.status).toBe(200);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_SEND_DRAFT"]);
+    expect(store.rows[0]!.emailDraft?.sentAt).toEqual(expect.any(Number));
+  });
+
+  it("sends nothing after the bot changed the draft in Gmail but its card couldn't be updated, until the card shows it", async () => {
+    const { connection, ran } = relayed(() => ({ successful: true, data: {} }));
+    const { store, row, route, guard } = setup({}, connection);
+    const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { user_id: "me", draft_id: "r-123", subject: "Changed" } };
+    const updated = new TextEncoder().encode(JSON.stringify(answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } })));
+    const broken = { ...store, patchMessage: () => { throw new Error("disk full"); } };
+    await guard.run(["r-123"], async () => showDraftAnswer(broken, "t1", "bot-1", [update], updated, 7, undefined, guard));
+    const first = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
+    await route(first.context);
+    expect(first.sent.status).toBe(409);
+    expect((first.sent.body as { errorKey: string }).errorKey).toBe("serverError.emailDraft.changed");
+    expect(ran).toHaveLength(0);
+    await guard.run(["r-123"], async () => showDraftAnswer(store, "t1", "bot-1", [update], updated, 7, undefined, guard));
+    const again = request({ threadId: "t1", messageId: row.id, action: "send", revision: draftRevision({ ...shownDraft, subject: "Changed" }) });
+    await route(again.context);
+    expect(again.sent.status).toBe(200);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_SEND_DRAFT"]);
   });
 
   it("says why when the Rules or the bot's app permissions refuse, and changes nothing", async () => {
