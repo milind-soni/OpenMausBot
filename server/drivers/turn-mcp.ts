@@ -3,6 +3,7 @@
 import type { SendTurnInput } from "../contracts.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
+import { TEXT_ONLY_TOOLS_ENV } from "../mcp-text-only.ts";
 import { appMountFor, gateServer, mcpStdioServer, type AppMount } from "../mcp-gate-config.ts";
 import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH, TOOL_SHARE_HEADER } from "../routes/own-mcp-http-path.ts";
 import { toolListShare } from "../tool-list-budget.ts";
@@ -112,11 +113,16 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
 /** The turn's MCP servers as ACP session/new takes them. stdio is the baseline every ACP agent supports; an agent that
  * reaches servers by URL (`http`) gets OpenMausBot's own as endpoints of this server instead of a proxy process each.
  * `engine` is the driver kind, whose provider may limit each tool's schema; `toolBudget`, how many MCP tools the model's
- * provider takes in all. */
-export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string; toolBudget?: number } = {}): AcpMcpServer[] {
+ * provider takes in all; `textOnlyTools`, that the model reads text only, so every server's tool results replace images
+ * with a note — and the URL form is not used, whose endpoints strip nothing. */
+export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string; toolBudget?: number; textOnlyTools?: boolean } = {}): AcpMcpServer[] {
   const schemaProfile = toolSchemaProfileFor({ engine: options.engine })?.id;
-  const servers: AcpMcpServer[] = turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => ({ ...server, env: pairs(server.env) }));
-  return options.http ? acpOwnServersOverHttp(servers) : servers;
+  const servers = turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget })
+    .map((server) => options.textOnlyTools === true
+      ? { ...server, env: { ...server.env, [TEXT_ONLY_TOOLS_ENV]: "1" } }
+      : server)
+    .map((server) => ({ ...server, env: pairs(server.env) }));
+  return options.http && options.textOnlyTools !== true ? acpOwnServersOverHttp(servers) : servers;
 }
 
 /** `servers` with each of OpenMausBot's own stdio proxies as its endpoint on this server; every other server as it was. */

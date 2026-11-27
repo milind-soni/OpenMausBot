@@ -6,10 +6,13 @@ import { join } from "node:path";
 import { afterAll, afterEach } from "vitest";
 
 import { removeTempDir } from "./cleanup.ts";
+import { noHostContainerEnv } from "./container-env.ts";
 
 const home = mkdtempSync(join(tmpdir(), "omb-test-home-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
+// A test server with the host's PATH can adopt and recreate the installed app's Local VM.
+Object.assign(process.env, noHostContainerEnv(home));
 // A provider that answers 5xx retries with backoff: no test should wait out real seconds.
 process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE ??= "0.001";
 // OMB_DATA_DIR must never escape the throwaway home the suite deletes.
@@ -22,6 +25,8 @@ delete process.env.HERMES_HOME;
 delete process.env.CODEX_HOME;
 // Pi turns copy from the person's Pi agent folder ($PI_CODING_AGENT_DIR or ~/.pi/agent): keep it in the throwaway home.
 delete process.env.PI_CODING_AGENT_DIR;
+// The canonical event log's bounds are server settings; a developer's shell must not shrink a test bus's queue.
+for (const name of ["OMB_EVENT_LOG_BATCH_LINES", "OMB_EVENT_LOG_QUEUE_BYTES", "OMB_EVENT_LOG_QUEUE_EVENTS", "OMB_EVENT_LOG_DRAIN_THREADS"]) delete process.env[name];
 // No server in a test downloads the project's announcement cards; its tests hand the store a fake fetch.
 process.env.OMB_DISABLE_ANNOUNCEMENTS = "1";
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.

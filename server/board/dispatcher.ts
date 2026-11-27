@@ -24,7 +24,7 @@ export type BoardBrief = { kind: "take"; item: BoardItem; botId: string } | { ki
 
 export interface BoardDispatchDeps {
   board: Pick<Board, "list" | "get" | "move" | "onChange">;
-  /** A Team Cloud with `features.teamBoard` on. */
+  /** A Team Cloud. */
   on(): boolean;
   now?: () => number;
   /** The room's member bots, in the room's order; null for no such room. */

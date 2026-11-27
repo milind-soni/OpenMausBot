@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AppState, Bot, Group } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
-  values: [] as unknown[], index: 0, effects: [] as EffectCallback[], advanced: false,
+  values: [] as unknown[], index: 0, effects: [] as EffectCallback[], advanced: false, owner: true,
   state: {} as AppState, dispatch: vi.fn(), storage: new Map<string, string>(),
 }));
 vi.mock("react", async (original) => ({
@@ -27,7 +27,7 @@ vi.mock("react", async (original) => ({
   useLayoutEffect: () => {},
 }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.owner }));
 vi.mock("./MenuMotion", () => ({
   useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "", exitProps: {} }),
   useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
@@ -89,6 +89,7 @@ const labelled = (tree: ReactElement<Props>[], label: string) => tree.some((node
 beforeEach(() => {
   fixture.values = [];
   fixture.advanced = false;
+  fixture.owner = true;
   fixture.storage = new Map();
   fixture.dispatch.mockClear();
   fixture.state = {
@@ -225,6 +226,9 @@ describe("Simple-mode sidebar layout", () => {
   });
 
   it("starts from the shared order for the departments, and a Simple move is saved for Simple only", () => {
+    // This device's own department order: a person who may not change the workspace's (an owner's departments follow
+    // the workspace's order instead; SidebarSections.test.ts).
+    fixture.owner = false;
     fixture.state = { ...fixture.state, sections: ["Work", "Home"] };
     const saved = [userSectionId("Home"), CHANNELS_SECTION_ID, BOTS_SECTION_ID, userSectionId("Work")];
     fixture.storage.set(SIDEBAR_SECTION_ORDER_KEY, JSON.stringify(saved));

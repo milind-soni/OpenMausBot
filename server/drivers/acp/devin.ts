@@ -23,6 +23,8 @@ const MODELS: ModelCatalog = { default: AGENT_DEFAULT.id, options: [AGENT_DEFAUL
 const SPAWN_ARGS = ["acp"];
 const SIGN_IN = "devin auth login";
 const API_KEY_ENV = "WINDSURF_API_KEY";
+/** What initialize advertises on 3000.12.x; 3000.15+ keeps the method but refuses session/new until authenticate carries the key. */
+const AUTH_METHOD = "devin-browser";
 const LOGIN_NOTE = `Devin is not signed in. Run ${SIGN_IN} in a terminal, or set ${API_KEY_ENV}, then check again.`;
 export const DEVIN_MODE = { ask: "accept-edits", full: "bypass" } as const;
 
@@ -43,10 +45,25 @@ export function devinSignedIn(env: Record<string, string | undefined>, platform:
   return Boolean(env[API_KEY_ENV]?.trim()) || devinCredentialsFiles(env, platform).some((file) => existsSync(file));
 }
 
+function devinAuthMethod(methods: Array<{ id?: string }>, env: Record<string, string | undefined>): string | null {
+  if (!env[API_KEY_ENV]?.trim()) return null;
+  const offered = methods.find((method) => method.id === AUTH_METHOD || String(method.id ?? "").startsWith("devin-"));
+  return offered?.id ?? null;
+}
+
+/** The key goes to the CLI's authenticate request, never to argv, logs or events. */
+function devinAuthMeta(env: Record<string, string | undefined>): Record<string, unknown> | undefined {
+  const key = env[API_KEY_ENV]?.trim();
+  return key ? { api_key: key } : undefined;
+}
+
 /** No exit grace: devin 3000.12.57 exits on EOF but orphans the MCP servers it started from its own config, which then
  * hold the discovery folder for seconds where the tree kill would have stopped them. A Devin Pro account advertises
  * 145 models, past discovery's default cap of 128; above 128 the per-model variant switches are skipped, as for OMP. */
-const DISCOVERY: AcpDiscoveryOptions = { passthrough: AGENT_DEFAULT, variantLimit: 128, maxModels: 4096 };
+const DISCOVERY: AcpDiscoveryOptions = {
+  passthrough: AGENT_DEFAULT, variantLimit: 128, maxModels: 4096,
+  authMethod: devinAuthMethod, authMeta: devinAuthMeta,
+};
 
 export function resolveDevinModels(env: Record<string, string | undefined>, config: Pick<AcpConfig, "cli">): Promise<ModelCatalog> {
   return discoverAcpModels(env, config.cli, SPAWN_ARGS, DISCOVERY);
@@ -114,7 +131,8 @@ const SUPPORT: AcpSupport = {
   resolveModelsOnCreate: false,
   selectModel: { configId: "model", agentDefault: AGENT_DEFAULT.id },
   modelVariants: true,
-  pickAuthMethod: () => null,
+  pickAuthMethod: devinAuthMethod,
+  authMeta: devinAuthMeta,
   authFailure: "continue",
   isAuthenticated: (env) => devinSignedIn(env),
   classifyError: classifyDevinError,

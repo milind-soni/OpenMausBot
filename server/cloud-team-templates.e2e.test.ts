@@ -59,6 +59,8 @@ beforeAll(async () => {
   expect(seeded.status, JSON.stringify(seeded.body)).toBe(201);
   reporter = seeded.body.bots[0];
   expect((await as("olive", "PUT", `/api/bots/${reporter.id}/access`, { everyone: "chat", people: {} })).status).toBe(200);
+  // Skills from a template arrive switched off, and a template carries only switched-on ones.
+  expect((await as("olive", "PATCH", `/api/bots/${reporter.id}/skills/report`, { enabled: true })).status).toBe(200);
   const skills = (await as("olive", "GET", `/api/bots/${reporter.id}/skills`)).body.skills;
   expect(skills).toEqual([expect.objectContaining({ name: "report", files: ["scripts/report.py"] })]);
 }, hostTimeout(240_000));

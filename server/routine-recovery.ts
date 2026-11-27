@@ -79,7 +79,7 @@ const BUSY_CODES = new Set(["thread_busy", "thread_limit", "workspace_busy", "se
  * repeat it. */
 const NOT_RETRIED_STOPS = new Set(["cancelled", "interrupted", "refusal", "tool_error"]);
 /** What the provider answered for a reason a second start would meet again. */
-const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count"]);
+const REFUSED_KINDS = new Set(["refused", "tool_schema", "tool_count", "image_content"]);
 const OWNER_CAUSES = new Set<RoutineOwnerCause>(["signed_out", "credits", "usage_limit", "setup"]);
 
 const OWNER_ACTION: Record<Exclude<RoutineOwnerCause, "setup">, string> = {

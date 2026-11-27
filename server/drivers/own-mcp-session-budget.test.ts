@@ -36,7 +36,7 @@ const HARNESS = "http://127.0.0.1:8799";
 const CHIEF = { OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
 const NON_CHIEF = { OMB_CHIEF_OF_STAFF: "0", OMB_COMPUTER_SELECTION: "1" };
 const FULLEST = { ...CHIEF, OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1",
-  OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1" };
+  OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1" };
 const agentsList = (env: Record<string, string>) => agentsToolList(env).listed as ListedTool[];
 const catalog = (tools: unknown) => tools as readonly ListedTool[];
 

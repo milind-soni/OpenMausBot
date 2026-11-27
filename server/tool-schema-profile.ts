@@ -207,14 +207,29 @@ function withTypedMixedEnums(schema: Json): Json {
   return changed ? copy : schema;
 }
 
-function typesOf(node: Json, root: Json, hops = 0): string[] {
+function typesOf(node: Json, root: Json, hops = 0, visits?: TypeVisits): string[] {
   if (hops > 16) return [];
+  if (visits?.spent) return [];
+  if (visits) {
+    if (visits.left <= 0) {
+      visits.spent = true;
+      return [];
+    }
+    visits.left -= 1;
+  }
   if (typeof node.type === "string") return [node.type];
   if (Array.isArray(node.type)) return node.type.filter((type): type is string => typeof type === "string");
   const target = typeof node.$ref === "string" ? pointer(root, node.$ref) : undefined;
-  if (isObject(target)) return typesOf(target, root, hops + 1);
+  if (isObject(target)) return typesOf(target, root, hops + 1, visits);
   const branches = ALTERNATIVE_LISTS.flatMap((slot) => Array.isArray(node[slot]) ? node[slot].filter(isObject) : []);
-  if (branches.length) return [...new Set(branches.flatMap((branch) => typesOf(branch, root, hops + 1)))];
+  if (branches.length) {
+    const found = new Set<string>();
+    for (const branch of branches) {
+      if (visits?.spent) break;
+      for (const type of typesOf(branch, root, hops + 1, visits)) found.add(type);
+    }
+    return [...found];
+  }
   if (Array.isArray(node.enum) && node.enum.length) return [...new Set(node.enum.map(valueType))];
   if ("const" in node) return [valueType(node.const)];
   if (isObject(node.properties) || "additionalProperties" in node || Array.isArray(node.required)) return ["object"];
@@ -222,18 +237,58 @@ function typesOf(node: Json, root: Json, hops = 0): string[] {
   return [];
 }
 
+const ITEM_HOPS = 8;
+/** A hop limit is only a depth. Shared `anyOf` `$ref`s multiply visits, so past this many the item type is a string. */
+const ITEM_TYPE_VISITS = 4_096;
+
+type TypeVisits = { left: number; spent: boolean };
+
+function includesArray(type: string | readonly unknown[]): boolean {
+  return type === "array" || (Array.isArray(type) && type.includes("array"));
+}
+
+/** The `items` Gemini's GenerateContentRequest requires on every array (Antigravity CLI 1.5.x). The item's type only,
+ * and `items` again when that type is array. A tuple, a boolean, or a missing, cyclic, unresolvable, or over-visited item schema is a string. */
+export function itemsOf(node: Json, root: Json): Json {
+  return projectedItems(node, root, new Set(), 0, { left: ITEM_TYPE_VISITS, spent: false });
+}
+
+function projectedItems(node: Json, root: Json, seen: Set<string>, hops: number, visits: TypeVisits): Json {
+  if (hops > ITEM_HOPS || visits.spent) return { type: "string" };
+  const items = schemaItems(node, root, seen, hops);
+  if (!isObject(items)) return { type: "string" };
+  const types = [...new Set(typesOf(items, root, 0, visits).filter((type) => JSON_TYPES.includes(type)))];
+  if (visits.spent || types.length !== 1) return { type: "string" };
+  const type = types[0]!;
+  return type === "array" ? { type, items: projectedItems(items, root, seen, hops + 1, visits) } : { type };
+}
+
+function schemaItems(node: Json, root: Json, seen: Set<string>, hops: number): unknown {
+  if ("items" in node) return node.items;
+  const ref = node.$ref;
+  if (typeof ref !== "string" || seen.has(ref) || hops > ITEM_HOPS) return undefined;
+  const target = pointer(root, ref);
+  if (!isObject(target)) return undefined;
+  seen.add(ref);
+  return schemaItems(target, root, seen, hops + 1);
+}
+
 /** A subschema's type and nothing inside it, valid where Moonshot wants every subschema typed; a free-form object names
- * additionalProperties because a bare `{"type":"object"}` reads there as recursion without end. */
+ * additionalProperties because a bare `{"type":"object"}` reads there as recursion without end. An array names `items`
+ * because Gemini rejects an array without one. */
 function placeholder(node: Json, root: Json): Json {
   const types = typesOf(node, root).filter((type) => JSON_TYPES.includes(type));
   const unique = [...new Set(types.map((type) => (type === "integer" && types.includes("number") ? "number" : type)))];
-  if (unique.length !== 1) return { type: unique.length ? unique : JSON_TYPES };
-  const type = unique[0]!;
-  if (type === "object") return { type, additionalProperties: true };
-  const choices = Array.isArray(node.enum) ? node.enum : "const" in node ? [node.const] : undefined;
-  const sameType = (value: unknown) => valueType(value) === type || (type === "number" && valueType(value) === "integer");
-  const keep = type !== "array" && choices && choices.length <= 64 && choices.every(sameType) && schemaBytes(choices) <= 1_024;
-  return keep ? { type, enum: choices } : { type };
+  const declared = unique.length === 1 ? unique[0]! : unique.length ? unique : JSON_TYPES;
+  const withItems = (result: Json): Json => includesArray(declared) ? { ...result, items: itemsOf(node, root) } : result;
+  if (declared === "object") return { type: declared, additionalProperties: true };
+  if (typeof declared === "string") {
+    const choices = Array.isArray(node.enum) ? node.enum : "const" in node ? [node.const] : undefined;
+    const sameType = (value: unknown) => valueType(value) === declared || (declared === "number" && valueType(value) === "integer");
+    const keep = declared !== "array" && choices && choices.length <= 64 && choices.every(sameType) && schemaBytes(choices) <= 1_024;
+    return withItems(keep ? { type: declared, enum: choices } : { type: declared });
+  }
+  return withItems({ type: declared });
 }
 
 /** Each subschema at `depth` becomes its placeholder; its parent keeps every field name and `required`. */
@@ -257,7 +312,7 @@ function topLevelOnly(schema: Json, descriptionChars: number): Json {
   const declared = isObject(schema.properties) ? schema.properties : {};
   const properties: Json = {};
   for (const [key, child] of Object.entries(declared)) {
-    const flat = isObject(child) ? placeholder(child, schema) : { type: JSON_TYPES };
+    const flat = placeholder(isObject(child) ? child : {}, schema);
     const description = isObject(child) ? shortened(child.description, descriptionChars) : undefined;
     properties[key] = description ? { ...flat, description } : flat;
   }
@@ -319,7 +374,8 @@ export function fitToolListForBudget<Tool extends { name: string; inputSchema?: 
     Buffer.byteLength(JSON.stringify({ ...item, inputSchema: schemas.get(item as Tool) ?? item.inputSchema }) ?? "");
   // Each tool's size is measured again only when its own schema changes, so a long list is not re-measured per step.
   const sizes = new Map(list.map((tool) => [tool, bytesOf(tool)]));
-  let total = [...sizes.values()].reduce((sum, bytes) => sum + bytes, 0);
+  const arrayFramingBytes = 2 + Math.max(0, list.length - 1);
+  let total = arrayFramingBytes + [...sizes.values()].reduce((sum, bytes) => sum + bytes, 0);
   const from = total;
   if (from <= profile.maxListBytes) return list;
   const budget: number = profile.maxListBytes;

@@ -91,4 +91,23 @@ describe("an Antigravity account's limits when it runs the native CLI", () => {
     expect(fiveHourUsed(back)).toEqual([["antigravity", 50]]);
     expect(antigravityNativePlanUsage).toHaveBeenCalledTimes(1);
   });
+
+  it("skips reading Antigravity's stored login and quota endpoints when config sets usageMeter to false", async () => {
+    const load = (config: Record<string, unknown>) => loadPlanUsage({
+      accounts: planAccountsFromInstances({ antigravity: { driver: "antigravityAgent", environment: { HOME: "/Users/person" }, config } }),
+      now: NOW,
+    });
+    const optedOut = planAccountsFromInstances({ antigravity: { driver: "antigravityAgent", config: { cli: "antigravity", usageMeter: false } } });
+    expect(optedOut).toEqual([{ id: "antigravity", name: "Antigravity", driver: "antigravity", environment: {}, noUsage: true }]);
+
+    expect((await load({ cli: "antigravity", usageMeter: false })).providers).toEqual([]);
+    expect(antigravityNativePlanUsage).not.toHaveBeenCalled();
+    expect(antigravityPlanUsage).not.toHaveBeenCalled();
+
+    // Toggling usageMeter back on is not masked by the 45 s cache.
+    expect(fiveHourUsed(await load({ cli: "antigravity" }))).toEqual([["antigravity", 80]]);
+    expect(antigravityNativePlanUsage).toHaveBeenCalledTimes(1);
+    expect((await load({ cli: "antigravity", usageMeter: false })).providers).toEqual([]);
+    expect(antigravityNativePlanUsage).toHaveBeenCalledTimes(1);
+  });
 });

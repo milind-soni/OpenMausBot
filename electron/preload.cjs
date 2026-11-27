@@ -782,6 +782,8 @@ const bridge = {
       ? ipcRenderer.invoke("lend:set", isLocalPage ? id : null, on === true) : Promise.reject(new Error("Use the switch to change this.")),
     allowScreen: id => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("lend:allow-screen", isLocalPage ? id : null) : Promise.reject(new Error("Use the button to allow this.")),
+    choose: id => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("lend:choose", isLocalPage ? id : null) : Promise.reject(new Error("Use the button to choose this.")),
     wish: isLocalPage ? (address, on) => ipcRenderer.invoke("lend:wish", String(address ?? ""), on === true) : undefined,
   },
   confirm: message => ipcRenderer.invoke("dialog:confirm", message),

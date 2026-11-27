@@ -32,6 +32,7 @@ import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { toolsListResultForSessionShare } from "./tool-list-share.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 import { readStdioLines } from "./stdio-lines.ts";
+import { textOnlyToolsFromEnv, withoutResultImages } from "./mcp-text-only.ts";
 import { APP_EXTENSION_KEY } from "../shared/app.ts";
 
 type Json = Record<string, unknown>;
@@ -113,6 +114,7 @@ const HANDSHAKE = observer?.mount.extension ? { extensions: { [APP_EXTENSION_KEY
 const appOnly = new Set<string>();
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const TOOL_LIMIT = toolLimitFromEnv(process.env);
+const TEXT_ONLY_TOOLS = textOnlyToolsFromEnv(process.env);
 const logFit = (line: string) => { process.stderr.write(`mcp-remote-proxy: ${line}\n`); };
 
 const REMOTE_ERROR_CHARS = 1_000;
@@ -342,6 +344,9 @@ async function handle(message: Json): Promise<void> {
   try {
     const result = directory ? await directed(message, signal) : await upstream(message.method, message.params, signal);
     if (message.method === "initialize") initialized = true;
+    if (message.method === "tools/call" && TEXT_ONLY_TOOLS && withoutResultImages(result)) {
+      logFit("replaced an image in the tool's result with a note: this model reads text only");
+    }
     send({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? toolsListResultForSessionShare(capToolListResult(fitToolListResult(result, SCHEMA_PROFILE, logFit), TOOL_LIMIT, logFit), process.env, logFit) : result });
   } catch (failure) {
     // Transport failures may carry URLs or header values: never relayed.

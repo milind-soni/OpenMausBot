@@ -19,6 +19,8 @@ export interface BoardItemQuestion {
   askedAt: number;
   /** The person key of whoever was asked; absent when anyone who sees the room may answer. */
   person?: string;
+  /** That person's name when they were asked, for showing whom the item waits on. */
+  name?: string;
 }
 
 /** Its bot set the item aside to look again at `at` (board_update later): the item stays `working` and keeps its holder,
@@ -115,6 +117,8 @@ export interface BoardItemPatchBody {
 /** GET /api/board (`?groupId=` for one room): the items the caller can see, oldest first. */
 export interface BoardListResponse {
   items: BoardItem[];
+  /** The caller's person key, as an item's `question.person` names whoever was asked. */
+  you?: string;
 }
 
 export interface BoardItemResponse {

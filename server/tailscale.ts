@@ -62,7 +62,7 @@ function run(cli: string, args: string[], timeoutMs: number): Promise<{ ok: bool
     execFile(
       cli,
       args,
-      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, env: tailscaleEnvironment() },
+      { timeout: timeoutMs, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024, windowsHide: true, env: tailscaleEnvironment() },
       (error, stdout, stderr) => {
         const code = error && "code" in error && typeof error.code === "number" ? error.code : error ? null : 0;
         resolve({ ok: !error, stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), code });
@@ -152,7 +152,7 @@ export async function tailscaleServe(
   if (!status.httpsEnabled) return { failure: "https-not-enabled" };
   const origin = httpsPort === 443 ? `https://${status.dnsName}` : `https://${status.dnsName}:${httpsPort}`;
   if (await (options.otherServer ?? (() => Promise.resolve(false)))(origin)) return { failure: "other-server" };
-  const child = (options.spawnImpl ?? spawn)(status.cli, ["serve", `--https=${httpsPort}`, `http://127.0.0.1:${localPort}`], { stdio: ["ignore", "ignore", "pipe"], env: tailscaleEnvironment() });
+  const child = (options.spawnImpl ?? spawn)(status.cli, ["serve", `--https=${httpsPort}`, `http://127.0.0.1:${localPort}`], { stdio: ["ignore", "ignore", "pipe"], env: tailscaleEnvironment(), windowsHide: true });
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer) => { stderr = (stderr + chunk.toString()).slice(-4096); });
   const exited = new Promise<number | null>((done) => { child.once("exit", (code) => done(code)); child.once("error", () => done(-1)); });

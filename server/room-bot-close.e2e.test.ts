@@ -40,6 +40,8 @@ it("closes its room thread with its final reply, and a person's next line opens 
     expect((await cli("wait", "--channel", room.id, "--timeout", "45")).status).toBe("settled");
     const turn = evidence().find((record) => record.planKey === "W1");
     expect(turn.system).toContain("When the work in this thread is finished, close it with your final reply");
+    // Splitting work and the work view are a Team Cloud's: no board tools here, so no line about them.
+    expect(turn.system).not.toMatch(/board_add|board_list/);
     expect((turn.evidence[0].result.tools as Array<{ name: string; inputSchema: { required?: string[] } }>).find((tool) => tool.name === "close_thread")?.inputSchema.required ?? []).not.toContain("thread_id");
     const closeAnswer = turn.evidence.at(-1).response.result;
     expect(closeAnswer.isError ?? false, JSON.stringify(closeAnswer)).toBe(false);
