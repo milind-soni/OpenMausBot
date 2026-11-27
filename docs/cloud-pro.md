@@ -2409,8 +2409,8 @@ launch: What's new comes first, and the Boat card waits for a later one.
      **Open apps**, which opens Published apps. The words about opening an
      app in its own window and installing it are only on this computer's
      page of the desktop app, which can do both.
-   - **Publish your bots**, for everyone: Share as template in the bot's
-     Share or ⋯ menu, then Publish. It only tells; it has no button.
+   - **Publish your bots**, for everyone: Publish in the bot's ⋯ menu, then
+     Publish to community. It only tells; it has no button.
    - **Meet the new MausBot Cloud**: on this computer's page of a desktop that
      sells the Cloud and no organization runs, for someone with no Cloud plan
      (signed out, or signed in with none). Whoever has a Cloud (a plan of
