@@ -6,7 +6,7 @@ import { DATA_TOOLS } from "./data/tools.ts";
 import bridgedAgents from "./drivers/agents-catalog-goldens/bridged.tools-list.json" with { type: "json" };
 import fullAgents from "./drivers/agents-catalog-goldens/full.tools-list.json" with { type: "json" };
 import { createPageSchema, wideSchema } from "./testing/oversized-tool-schema.ts";
-import { fitToolListForBudget, fitToolSchema, schemaBytes, toolSchemaProfile, toolSchemaProfileFor, type ToolSchemaProfile } from "./tool-schema-profile.ts";
+import { fitToolListForBudget, fitToolSchema, itemsOf, schemaBytes, toolSchemaProfile, toolSchemaProfileFor, type ToolSchemaProfile } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 const MOONSHOT = toolSchemaProfile("moonshot")!;
@@ -259,6 +259,18 @@ describe("fitting one tool schema to Gemini's per-tool limit", () => {
       flag: { type: "array", items: { type: "string" } },
       tree: { type: "array", items: { type: "array", items: { type: "string" } } },
     } } } });
+  });
+
+  it("falls back to a string item when shared anyOf refs fan out past the visit budget", () => {
+    const $defs: Json = { D7: { type: "integer" } };
+    for (let level = 6; level >= 0; level -= 1) {
+      $defs[`D${level}`] = { anyOf: Array.from({ length: 20 }, () => ({ $ref: `#/$defs/D${level + 1}` })) };
+    }
+    const schema: Json = { $defs, properties: { values: { type: "array", items: { $ref: "#/$defs/D0" } } } };
+    const values = (schema.properties as Json).values as Json;
+    const started = performance.now();
+    expect(itemsOf(values, schema)).toEqual({ type: "string" });
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 
   it("names items when a top-level value has no schema to copy", () => {

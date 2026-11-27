@@ -207,14 +207,29 @@ function withTypedMixedEnums(schema: Json): Json {
   return changed ? copy : schema;
 }
 
-function typesOf(node: Json, root: Json, hops = 0): string[] {
+function typesOf(node: Json, root: Json, hops = 0, visits?: TypeVisits): string[] {
   if (hops > 16) return [];
+  if (visits?.spent) return [];
+  if (visits) {
+    if (visits.left <= 0) {
+      visits.spent = true;
+      return [];
+    }
+    visits.left -= 1;
+  }
   if (typeof node.type === "string") return [node.type];
   if (Array.isArray(node.type)) return node.type.filter((type): type is string => typeof type === "string");
   const target = typeof node.$ref === "string" ? pointer(root, node.$ref) : undefined;
-  if (isObject(target)) return typesOf(target, root, hops + 1);
+  if (isObject(target)) return typesOf(target, root, hops + 1, visits);
   const branches = ALTERNATIVE_LISTS.flatMap((slot) => Array.isArray(node[slot]) ? node[slot].filter(isObject) : []);
-  if (branches.length) return [...new Set(branches.flatMap((branch) => typesOf(branch, root, hops + 1)))];
+  if (branches.length) {
+    const found = new Set<string>();
+    for (const branch of branches) {
+      if (visits?.spent) break;
+      for (const type of typesOf(branch, root, hops + 1, visits)) found.add(type);
+    }
+    return [...found];
+  }
   if (Array.isArray(node.enum) && node.enum.length) return [...new Set(node.enum.map(valueType))];
   if ("const" in node) return [valueType(node.const)];
   if (isObject(node.properties) || "additionalProperties" in node || Array.isArray(node.required)) return ["object"];
@@ -223,25 +238,29 @@ function typesOf(node: Json, root: Json, hops = 0): string[] {
 }
 
 const ITEM_HOPS = 8;
+/** A hop limit is only a depth. Shared `anyOf` `$ref`s multiply visits, so past this many the item type is a string. */
+const ITEM_TYPE_VISITS = 4_096;
+
+type TypeVisits = { left: number; spent: boolean };
 
 function includesArray(type: string | readonly unknown[]): boolean {
   return type === "array" || (Array.isArray(type) && type.includes("array"));
 }
 
 /** The `items` Gemini's GenerateContentRequest requires on every array (Antigravity CLI 1.5.x). The item's type only,
- * and `items` again when that type is array. A tuple, a boolean, or a missing, cyclic, or unresolvable item schema is a string. */
+ * and `items` again when that type is array. A tuple, a boolean, or a missing, cyclic, unresolvable, or over-visited item schema is a string. */
 export function itemsOf(node: Json, root: Json): Json {
-  return projectedItems(node, root, new Set(), 0);
+  return projectedItems(node, root, new Set(), 0, { left: ITEM_TYPE_VISITS, spent: false });
 }
 
-function projectedItems(node: Json, root: Json, seen: Set<string>, hops: number): Json {
-  if (hops > ITEM_HOPS) return { type: "string" };
+function projectedItems(node: Json, root: Json, seen: Set<string>, hops: number, visits: TypeVisits): Json {
+  if (hops > ITEM_HOPS || visits.spent) return { type: "string" };
   const items = schemaItems(node, root, seen, hops);
   if (!isObject(items)) return { type: "string" };
-  const types = [...new Set(typesOf(items, root).filter((type) => JSON_TYPES.includes(type)))];
-  if (types.length !== 1) return { type: "string" };
+  const types = [...new Set(typesOf(items, root, 0, visits).filter((type) => JSON_TYPES.includes(type)))];
+  if (visits.spent || types.length !== 1) return { type: "string" };
   const type = types[0]!;
-  return type === "array" ? { type, items: projectedItems(items, root, seen, hops + 1) } : { type };
+  return type === "array" ? { type, items: projectedItems(items, root, seen, hops + 1, visits) } : { type };
 }
 
 function schemaItems(node: Json, root: Json, seen: Set<string>, hops: number): unknown {
