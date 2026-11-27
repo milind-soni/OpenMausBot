@@ -149,16 +149,17 @@ const keyName = () => held && held.source !== "env" ? "license.key" : "OMB_LICEN
  * license.last-good are; server/index.ts leaves it out on a desktop, a Cloud home and a hosted workspace, which read
  * OMB_LICENSE_KEY alone. */
 export async function loadEnterpriseLayer(
-  options: { dir?: string; licenseKey?: string; env?: NodeJS.ProcessEnv; serverRoot?: string; dataDir?: string } = {},
+  options: { dir?: string; licenseKey?: string; env?: NodeJS.ProcessEnv; serverRoot?: string; dataDir?: string; serverInstall?: boolean } = {},
 ): Promise<EditionStatus> {
   workspaceAccessFactory = undefined;
   lastProblem = undefined;
+  lastChangeLog = Number.NEGATIVE_INFINITY;
   const dirs = options.dir ? [options.dir] : enterpriseLayerDirs(options.env, options.serverRoot);
   const envKey = options.licenseKey ?? process.env.OMB_LICENSE_KEY;
   const entry = dirs.map(layerEntry).find((candidate) => candidate !== undefined);
   const reads = await readSources(options.dataDir);
   const keyGiven = reads.file.state !== "absent" || reads.lastGood.state !== "absent" || Boolean(envKey);
-  loaded = { entry, dataDir: options.dataDir, envKey, keyAtStart: keyGiven };
+  loaded = { entry, dataDir: options.dataDir, envKey, keyAtStart: keyGiven || options.serverInstall === true };
   if (!entry) {
     const named = reads.file.state !== "absent" ? `${licenseFilePath(options.dataDir!)} holds a licence` : "OMB_LICENSE_KEY is set";
     return oss(keyGiven ? `${named} but no enterprise layer exists at ${dirs.join(" or ")}` : undefined);
@@ -173,8 +174,8 @@ export async function loadEnterpriseLayer(
   return grant(reads, false, (line) => console.warn(line));
 }
 
-/** Whether server/index.ts starts the re-read: a layer, a data folder, and a licence (file, environment or kept copy)
- * at start. A server that started with none picks up its first licence at the next restart. */
+/** Whether server/index.ts starts the re-read: a layer, a data folder, and either a licence at start (file, environment
+ * or kept copy) or a server install (license-source.ts licensePlace), whose first licence may arrive after it starts. */
 export function licenseRefreshWanted(): boolean {
   return Boolean(loaded?.entry && loaded.dataDir && loaded.keyAtStart);
 }
@@ -306,10 +307,11 @@ export function refreshLicense(log: (line: string) => void = (line) => console.w
         return current;
       }
     }
-    const before = JSON.stringify([current, held]);
+    // Which licence is in force, not where it was read from: the same licence kept or read again is no change.
+    const before = JSON.stringify([current, held?.layer]);
     const status = await grant(reads, true, log);
     const now = Date.now();
-    if (JSON.stringify([current, held]) !== before && status.edition === "enterprise" && now - lastChangeLog >= CHANGE_LOG_GAP_MS) {
+    if (JSON.stringify([current, held?.layer]) !== before && status.edition === "enterprise" && now - lastChangeLog >= CHANGE_LOG_GAP_MS) {
       lastChangeLog = now;
       log(`licence changed: ${describeEdition(status)}`);
     }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { editionStatus, entitled, issuedOrder, licenseRefreshWanted, licenseServerRefusal, licenseState, loadEnterpriseLayer, refreshLicense } from "./enterprise.ts";
-import { LICENSE_CHECK_MS, LICENSE_REREAD_MS, startLicenseRefresh } from "./license-source.ts";
+import { LICENSE_CHECK_MS, LICENSE_MIN_GAP_MS, LICENSE_REREAD_MS, licensePlace, startLicenseRefresh } from "./license-source.ts";
 
 const dirs: string[] = [];
 const temp = (prefix: string) => {
@@ -153,6 +153,50 @@ describe("reading the licence again while the server runs", () => {
     expect(licenseRefreshWanted()).toBe(false);
     await loadEnterpriseLayer({ dir: layer, dataDir: data, licenseKey: licence("Env") });
     expect(licenseRefreshWanted()).toBe(true);
+  });
+
+  it("on a server install that started with no licence, loads one written later without a restart", async () => {
+    // The bought server's real order: installed first, enrolled, and only then does the connector write the licence.
+    expect(await loadEnterpriseLayer({ dir: layer, dataDir: data, serverInstall: true, licenseKey: undefined }))
+      .toMatchObject({ edition: "oss" });
+    expect(licenseRefreshWanted()).toBe(true);
+    let last: Promise<unknown> = Promise.resolve();
+    const refresh = startLicenseRefresh({ dataDir: data, refresh: () => (last = refreshLicense(log)), stamp: contents });
+    try {
+      await vi.advanceTimersByTimeAsync(LICENSE_CHECK_MS * 2);
+      expect(entitled("budgets")).toBe(false);
+      writeFileSync(keyFile(), licence("Bought", { seats: 20, plan: "business-server" }));
+      await vi.advanceTimersByTimeAsync(LICENSE_CHECK_MS + LICENSE_MIN_GAP_MS);
+      await last;
+      expect(entitled("budgets")).toBe(true);
+      expect(licenseState()).toMatchObject({ valid: true, source: "file", customer: "Bought", seats: 20 });
+    } finally {
+      refresh.stop();
+    }
+  });
+
+  it("uses licence files on a server install and any other server, never on a desktop, a Cloud home or a hosted workspace", () => {
+    const docker = (path: string) => path === "/.dockerenv";
+    const nothing = () => false;
+    const base = { desktopManaged: false, cloudHome: false, hostedWorkspace: false, serverRoot: join(data, "dist-server"), env: {} };
+    expect(licensePlace({ ...base, exists: docker })).toBe("server");
+    expect(licensePlace({ ...base, exists: nothing, env: { OMB_PODMAN_SERVICE: "1" } })).toBe("server");
+    expect(licensePlace({ ...base, exists: (path) => path === "/run/.containerenv" })).toBe("server");
+    expect(licensePlace({ ...base, exists: nothing })).toBe("files");
+    for (const where of [{ desktopManaged: true }, { cloudHome: true }, { hostedWorkspace: true }]) {
+      expect(licensePlace({ ...base, ...where, exists: docker }), JSON.stringify(where)).toBe("none");
+    }
+  });
+
+  it("does nothing on a desktop or a Cloud home: no files read or kept, no re-read started", async () => {
+    // server/index.ts passes no data folder there (licensePlace "none"), so only OMB_LICENSE_KEY counts, as before.
+    writeFileSync(keyFile(), licence("Ignored file"));
+    const status = await loadEnterpriseLayer({ dir: layer, licenseKey: licence("Desktop env") });
+    expect(status.customer).toBe("Desktop env");
+    expect(licenseRefreshWanted()).toBe(false);
+    expect(() => readFileSync(lastGood())).toThrow();
+    await loadEnterpriseLayer({ dir: layer, licenseKey: undefined });
+    expect(licenseRefreshWanted()).toBe(false);
   });
 
   it("takes a renewed file on the next minute check, and reads hourly besides", async () => {

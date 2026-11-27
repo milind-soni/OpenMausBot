@@ -7,6 +7,9 @@ import { constants } from "node:fs";
 import { open, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { SERVER_ROOT } from "./proxy-paths.ts";
+import { installKind } from "./update-check.ts";
+
 export const LICENSE_FILE = "license.key";
 export const LAST_GOOD_FILE = "license.last-good";
 export const LICENSE_REREAD_MS = 60 * 60_000;
@@ -16,6 +19,26 @@ export const LICENSE_CHECK_MS = 60_000;
 export const LICENSE_MIN_GAP_MS = 30_000;
 /** A licence is well under 1 KB; anything bigger than this is not one, and is not read past it. */
 export const MAX_LICENSE_BYTES = 64 * 1024;
+
+/** Where licence files are used. `none`: a desktop, a Cloud home or a hosted workspace, which read OMB_LICENSE_KEY alone,
+ * as before licence files existed. `server`: the Docker image or the rootless Podman service, as the installer sets a
+ * server up (installKind, the same marker the Update server button goes by): the minute check runs even before any
+ * licence exists, because a bought server's first licence arrives through the connector after it is installed. `files`:
+ * any other server (a checkout, npm): the files are read, and the minute check runs only when there was a licence at
+ * start. */
+export type LicensePlace = "none" | "files" | "server";
+export function licensePlace(input: {
+  desktopManaged: boolean;
+  cloudHome: boolean;
+  hostedWorkspace: boolean;
+  serverRoot?: string;
+  exists?: (path: string) => boolean;
+  env?: NodeJS.ProcessEnv;
+}): LicensePlace {
+  if (input.desktopManaged || input.cloudHome || input.hostedWorkspace) return "none";
+  const kind = installKind({ desktopManaged: false, managed: false, serverRoot: input.serverRoot ?? SERVER_ROOT, exists: input.exists, env: input.env });
+  return kind === "docker" || kind === "podman" || kind === "podman-service" ? "server" : "files";
+}
 
 /** `last-good`: the copy this server keeps of the last licence it accepted. */
 export type LicenseSource = "file" | "env" | "last-good";

@@ -34,9 +34,11 @@ While it runs, the server checks `license.key` once a minute (size, change
 time, inode) and reads everything every hour, at most once in 30 seconds. A
 licence in force is never replaced by one issued before it, nor dropped for a
 broken or missing file, until its grace ends; each such problem is logged
-once. The re-read starts only on a server install that had a licence at
-start; a server that started with none takes its first licence at the next
-restart. A desktop, a Cloud home and a hosted workspace (licensed by its
+once. The re-read runs on a server set up from the Docker image or the
+Podman service (as the installer sets one up), even before it has a licence,
+so a bought server's first licence, written later by the connector, loads
+without a restart; on another server (a checkout, npm) it runs when there
+was a licence at start. A desktop, a Cloud home and a hosted workspace (licensed by its
 operator's environment) read `OMB_LICENSE_KEY` alone, once at start, as before.
 
 Keys may also carry `seats`, `plan`, `sub` (subscription), `server` and `iat`
