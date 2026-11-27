@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openRuntimeStore, type RuntimeStore } from "./store.ts";
+import { openRuntimeStore, RESULT_KEPT_MAX, type RuntimeStore } from "./store.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { TERMINAL, type Assignment } from "./types.ts";
 
@@ -271,5 +271,31 @@ describe("runtime store: evidence fields and the loop guard", () => {
     expect(() => store.get("bad-guard")).toThrow(/does not match the record schema/);
     store.insert(assignment("bad-outward", { evidence: { outward: "git push" as unknown as string[] } }), { kind: "enqueued", at: 4_000 });
     expect(() => store.get("bad-outward")).toThrow(/does not match the record schema/);
+  });
+});
+
+describe("runtime store: a result kept beside its record", () => {
+  it("keeps it whole, reads it by part, drops it, and cuts one past the most it keeps", () => {
+    const store = open();
+    store.insert(assignment("root"), { kind: "enqueued", at: 1_000 });
+    const whole = `${"y".repeat(131_100)}US$`;
+    store.keepResult("root", whole);
+    expect(store.resultPart("root", whole.length - 3, 16_000)).toEqual({ text: "US$", total: whole.length, kept: whole.length });
+    store.keepResult("root", undefined);
+    expect(store.resultPart("root", 0, 10)).toBeUndefined();
+    store.keepResult("root", "z".repeat(RESULT_KEPT_MAX + 5));
+    expect(store.resultPart("root", RESULT_KEPT_MAX, 10)).toEqual({ text: "", total: RESULT_KEPT_MAX + 5, kept: RESULT_KEPT_MAX });
+  });
+
+  it("prunes it with its tree, and any an older build's prune left behind", () => {
+    const store = open();
+    const root = assignment("root", { status: "completed", finishedAt: 100 });
+    store.insert(root, { kind: "enqueued", at: 100 });
+    store.insert(child("kid", root, { status: "completed", finishedAt: 100 }), { kind: "enqueued", at: 100 });
+    store.keepResult("kid", "k".repeat(20_000));
+    store.keepResult("gone", "g".repeat(20_000));
+    expect(store.prune(500)).toBe(2);
+    expect(store.resultPart("kid", 0, 1)).toBeUndefined();
+    expect(store.resultPart("gone", 0, 1)).toBeUndefined();
   });
 });

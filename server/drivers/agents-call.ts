@@ -91,7 +91,7 @@ function assignmentLine(a: Json): string {
   return `${id} → ${who}: ${STATUS_WORDS[status] ?? status}${outcome}${detail}`;
 }
 
-async function renderAssignmentStatus(r: Json, id: string, context: ToolCallContext): Promise<string> {
+function renderAssignmentStatus(r: Json, id: string): string {
   const raw = jsonRecord(r.assignment) ? r.assignment : r;
   const a: Json = { id, ...raw, botName: raw.botName ?? r.toBotName };
   const lines = [`Assignment ${assignmentLine(a)}`];
@@ -99,13 +99,38 @@ async function renderAssignmentStatus(r: Json, id: string, context: ToolCallCont
   if (question && (a.status === "needs_input" || a.outcome === "needs_input")) {
     lines.push(`It is parked on a question for the person: ${JSON.stringify(question)}. Nothing moves until the person answers it in that thread; tell them and do not keep checking.`);
   }
-  const result = typeof a.result === "string" ? a.result.trim() : "";
-  if (result) lines.push(`Result: ${await boundedAgentResult(result, saveToolResult(context), { over: RESULT_HEAD, shown: RESULT_HEAD })}`);
+  const part = jsonRecord(raw.resultPart) ? raw.resultPart : undefined;
+  if (part) return [lines[0], ...resultPartLines(part, id)].join("\n");
+  const result = typeof a.result === "string" ? a.result : "";
+  const total = typeof a.resultChars === "number" ? a.resultChars : result.length;
+  if (result.trim() && total <= RESULT_HEAD) lines.push(`Result: ${result.trim()}`);
+  else if (result.trim()) {
+    lines.push(`Result, characters 0-${RESULT_HEAD} of ${total}: ${result.slice(0, RESULT_HEAD)}`,
+      readOn(id, RESULT_HEAD));
+  }
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
   if (!settled) lines.push(`It is not settled. ${r.sentElsewhere === true ? "It was sent from another of your chats, so its result returns there and does not resume you here" : "Its result resumes you on its own"}; do not wait on it in this turn.`);
   return lines.join("\n");
+}
+
+/** A long result is read on with tool_result_read, given the assignment's own id: it is kept with the assignment, not in
+ * the hour-long saved results, so the tool list stays as it is. */
+const readOn = (id: string, offset: number) => `[The result goes on: call tool_result_read with id "${id}" and offset ${offset} to read the next part.]`;
+
+/** One part of a long result, and where the next starts; past the end of what was kept, whether it was all of it. */
+function resultPartLines(part: Json, id: string): string[] {
+  const text = typeof part.text === "string" ? part.text : "";
+  const offset = Number(part.offset) || 0;
+  const end = Number(part.end) || offset;
+  const total = Number(part.total) || end;
+  const lines = [`Result, characters ${offset}-${end} of ${total}: ${text}`];
+  if (text && end < total) lines.push(readOn(id, end));
+  else if (part.truncated === true) {
+    lines.push(`[truncated: only the first ${end} of ${total} characters of this result were kept; the rest is lost. Tell the person the end of the report is missing; do not present what you read as the whole report.]`);
+  } else lines.push("[End of the result: that was all of it.]");
+  return lines;
 }
 
 function handoffIds(r: Json): string[] {
@@ -136,13 +161,11 @@ function forgetText(passage: string, r: Json): string {
   return `Forgotten everywhere it was saved${aboutMe.length ? ", About me included, which all their bots read" : ""}: ${shown}${more}. Confirm to the person in one plain line what you forgot.`;
 }
 
-const saveToolResult = (context: ToolCallContext) => async (retained: string, truncated: boolean) => {
+export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, (retained, truncated) => {
   if (context.externalRuntime) throw new Error("External runtime results are not cached");
   return context.client.api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
     body: JSON.stringify({ text: retained, truncated }) });
-};
-
-export const capResult = (text: string, context: ToolCallContext) => boundedAgentResult(text, saveToolResult(context));
+});
 
 function ordinal(n: number): string {
   const rem100 = n % 100;
@@ -276,6 +299,13 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: JSON.stringify(result) };
   }
   if (name === "tool_result_read") {
+    const offsetOk = args.offset === undefined || (Number.isSafeInteger(args.offset) && Number(args.offset) >= 0);
+    if (typeof args.id === "string" && !args.id.startsWith("r-") && /^[\w-]{4,64}$/.test(args.id) && offsetOk) {
+      const { ok, status, body: r } = await apiResponse(`/api/internal/assignment-status?id=${encodeURIComponent(args.id)}&offset=${Number(args.offset ?? 0)}`);
+      const part = ok && jsonRecord(r.assignment) && jsonRecord(r.assignment.resultPart) ? r.assignment.resultPart : undefined;
+      if (!part) return { text: status === 404 ? `No assignment ${args.id} is known here: use the id the last notice gave.` : String(r.error ?? `HTTP ${status}`), isError: true };
+      return { text: resultPartLines(part, args.id).join("\n") };
+    }
     if (typeof args.id !== "string" || !/^r-[0-9a-f-]{36}$/.test(args.id) ||
       (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0))) {
       return { text: "Use the saved result id and a non-negative integer offset from its notice.", isError: true };
@@ -350,7 +380,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       if (r.sentThisTurn === true) return { text: why };
       return { text: why, isError: true };
     }
-    if (id) return { text: await renderAssignmentStatus(r, id, context) };
+    if (id) return { text: renderAssignmentStatus(r, id) };
     const outstanding = Array.isArray(r.outstanding) ? r.outstanding.filter(jsonRecord) : [];
     if (!outstanding.length) return { text: "Nothing outstanding: no assignment of this conversation is still open." };
     return {

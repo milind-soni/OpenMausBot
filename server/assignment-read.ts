@@ -22,3 +22,22 @@ export function assignmentReadRefusal(fromThreadId: string, sentFromThreadId: st
   }
   return null;
 }
+
+/** How much of a long result one assignment_status call gives. */
+export const RESULT_PART_CHARS = 16_000;
+
+type KeptPart = { text: string; total: number; kept: number } | undefined;
+
+/** A result's whole length when its record holds only the head, and with `offset` the part from there, read from the
+ * whole text kept beside the record. `truncated` is true when less than the whole was kept: the reader must say so. */
+export function assignmentResultPart(a: { id: string; result: string; resultChars?: number }, offsetParam: string | null,
+  read: (id: string, offset: number, limit: number) => KeptPart) {
+  if (a.resultChars === undefined && offsetParam === null) return {};
+  const total = a.resultChars ?? a.result.length;
+  if (offsetParam === null) return { resultChars: total };
+  const offset = Math.max(0, Math.trunc(Number(offsetParam)) || 0);
+  const kept = a.resultChars === undefined ? undefined : read(a.id, offset, RESULT_PART_CHARS);
+  const text = kept ? kept.text : a.result.slice(offset, offset + RESULT_PART_CHARS);
+  const keptChars = kept ? kept.kept : a.result.length;
+  return { resultChars: total, resultPart: { offset, end: offset + text.length, total, text, truncated: keptChars < total } };
+}

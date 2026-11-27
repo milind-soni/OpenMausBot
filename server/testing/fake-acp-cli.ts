@@ -1638,7 +1638,7 @@ function handle(msg: any) {
         fakeLog("branch: wokeFromDelegation");
         const failed = promptText.includes("[A delegated task failed]")
           || (runtimeReport !== null && runtimeReport[1] !== "done" && runtimeReport[1] !== "completed");
-        const sawResult = promptText.includes("replied to the delegated task") || /\nWhat @\S+ said: "/.test(promptText);
+        const sawResult = promptText.includes("replied to the delegated task") || /\nWhat @\S+ said(?:, its first \d+ of \d+ characters)?: "/.test(promptText);
         const redelegateFile = process.env.FAKE_ACP_REDELEGATE_FILE;
         if (mode === "delegate-peer" && agentsMcp && sawResult && redelegateFile && !existsSync(redelegateFile)) {
           writeFileSync(redelegateFile, "1");

@@ -13,12 +13,10 @@ export function apiAnswer(accepted: boolean, status: number, body: Json): ToolCa
 
 /** The operation already happened. Saving overflow must never retry it or
  * turn a successful operation into a failed MCP call. Only cache I/O is timed. */
-export async function boundedAgentResult(
-  text: string, save: (text: string, truncated: boolean) => Promise<unknown>, { over = 24_000, shown = TOOL_RESULT_PREVIEW_CHARS } = {},
-): Promise<string> {
-  if (text.length <= over) return text;
+export async function boundedAgentResult(text: string, save: (text: string, truncated: boolean) => Promise<unknown>): Promise<string> {
+  if (text.length <= 24_000) return text;
   const redacted = redactSecretsInText(text);
-  const prefix = toolResultPrefix(redacted, shown);
+  const prefix = toolResultPrefix(redacted, TOOL_RESULT_PREVIEW_CHARS);
   const retained = toolResultPrefix(redacted, TOOL_RESULT_MAX_CHARS);
   const truncated = retained.length < redacted.length;
   try {

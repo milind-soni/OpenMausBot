@@ -119,6 +119,8 @@ export interface Assignment {
   finishedAt?: number;
   /** What the assignee last said or how it ended (at most 12 000 characters). */
   result: string;
+  /** Set when `result` is the head of a longer text: its whole length. The whole text is kept beside the record (store.resultPart). */
+  resultChars?: number;
   /** What the harness observed of the turn (commands, files, tool counts),
    * attached to the report as evidence. Never model text. */
   evidence?: TurnEvidence;

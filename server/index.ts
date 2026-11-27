@@ -70,7 +70,7 @@ import {
   messageAttachmentName,
   messageFileRoots,
 } from "./message-file.ts";
-import { avatarImageStatus } from "./avatar-image.ts"; import { assignmentReadRefusal } from "./assignment-read.ts";
+import { avatarImageStatus } from "./avatar-image.ts"; import { assignmentReadRefusal, assignmentResultPart } from "./assignment-read.ts";
 import { imageGenerationReady } from "./image-generation.ts"; import { configureHiggsfield, createHiggsfieldBackend } from "./higgsfield-mcp.ts";
 import { createImageToolRoutes } from "./routes/image-tools.ts"; import { createMeetingsHost } from "./host/meetings-host.ts"; import { meetingsUnavailablePrompt } from "./meetings/prompt.ts";
 import { createImageSettingsRoutes } from "./routes/image-settings.ts";
@@ -13661,7 +13661,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               for (const lane of lanes.values()) coordinator.poll(lane);
             }
             const current = coordinator.status(id) ?? status;
-            return json(res, 200, { assignment: shape(current.assignment), children: current.children.map(shape), inbox: current.inbox, ...(sentHere ? {} : { sentElsewhere: true }) });
+            return json(res, 200, { assignment: { ...shape(current.assignment), ...assignmentResultPart(current.assignment, url.searchParams.get("offset"), (...part) => coordinator.resultPart(...part)) }, children: current.children.map(shape), inbox: current.inbox, ...(sentHere ? {} : { sentElsewhere: true }) });
           }
           await new Promise((wake) => setTimeout(wake, 500));
         }

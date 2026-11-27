@@ -65,6 +65,7 @@ const assignmentSchema = z.object({
   lastActivityAt: z.number(),
   finishedAt: z.number().optional(),
   result: z.string(),
+  resultChars: z.number().int().nonnegative().optional(),
   evidence: evidenceSchema.optional(),
   statusOnly: z.boolean().optional(),
   reportedAt: z.number().optional(),
@@ -104,6 +105,10 @@ export interface RuntimeStore {
   addInbox(item: InboxItem): void;
   inbox(owner: Owner, undeliveredOnly?: boolean): InboxItem[];
   markDelivered(ids: string[], at: number): void;
+  /** A result longer than the record holds, kept whole beside it (up to RESULT_KEPT_MAX); undefined drops it. */
+  keepResult(assignmentId: string, text: string | undefined): void;
+  /** Part of a kept result: `total` is the result's own length, `kept` how much of it was stored. */
+  resultPart(assignmentId: string, offset: number, limit: number): { text: string; total: number; kept: number } | undefined;
   prune(before: number): number;
   close(): void;
 }
@@ -159,7 +164,16 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS inbox_thread ON inbox(owner_thread_id, delivered_at);
   CREATE INDEX IF NOT EXISTS inbox_run ON inbox(owner_run_id, delivered_at);
   CREATE INDEX IF NOT EXISTS inbox_assignment ON inbox(assignment_id);
+  -- A result past the record's own 12 000 characters, whole. An older build never reads it and keeps the record's head.
+  CREATE TABLE IF NOT EXISTS assignment_results (
+    assignment_id TEXT PRIMARY KEY,
+    total INTEGER NOT NULL,
+    text TEXT NOT NULL
+  );
 `;
+
+/** The most of one result kept beside its record; past it the reader is told the rest was not kept. */
+export const RESULT_KEPT_MAX = 2_000_000;
 
 type Row = Record<string, unknown>;
 
@@ -255,7 +269,13 @@ export function openRuntimeStore(path: string): RuntimeStore {
       AND NOT EXISTS (SELECT 1 FROM assignments c WHERE c.root_id = r.id AND c.status NOT IN (${terminalList}))`),
     pruneEvents: db.prepare("DELETE FROM assignment_events WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
     pruneInbox: db.prepare("DELETE FROM inbox WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
+    pruneResults: db.prepare("DELETE FROM assignment_results WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
     pruneRows: db.prepare("DELETE FROM assignments WHERE root_id = ?"),
+    // Rows an older build's prune left behind once their record was gone.
+    pruneOrphanResults: db.prepare("DELETE FROM assignment_results WHERE assignment_id NOT IN (SELECT id FROM assignments)"),
+    keepResult: db.prepare("INSERT OR REPLACE INTO assignment_results (assignment_id, total, text) VALUES (?, ?, ?)"),
+    dropResult: db.prepare("DELETE FROM assignment_results WHERE assignment_id = ?"),
+    result: db.prepare("SELECT total, text FROM assignment_results WHERE assignment_id = ?"),
   };
 
   let depth = 0;
@@ -372,10 +392,22 @@ export function openRuntimeStore(path: string): RuntimeStore {
         for (const rootId of roots) {
           statements.pruneEvents.run(rootId);
           statements.pruneInbox.run(rootId);
+          statements.pruneResults.run(rootId);
           removed += Number(statements.pruneRows.run(rootId).changes);
         }
+        if (roots.length) statements.pruneOrphanResults.run();
         return removed;
       });
+    },
+    keepResult(assignmentId, text) {
+      if (text === undefined) statements.dropResult.run(assignmentId);
+      else statements.keepResult.run(assignmentId, text.length, text.slice(0, RESULT_KEPT_MAX));
+    },
+    resultPart(assignmentId, offset, limit) {
+      const row = statements.result.get(assignmentId) as Row | undefined;
+      if (!row) return undefined;
+      const text = String(row.text);
+      return { text: text.slice(offset, offset + limit), total: Number(row.total), kept: text.length };
     },
     close() {
       db.close();

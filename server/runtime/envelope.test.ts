@@ -357,16 +357,13 @@ describe("composeReport", () => {
     expect(composeReport(assignment({ ...done, evidence: {} }), names)).toContain("The harness observed nothing of this turn.");
   });
 
-  it("shows a whole 20 KB report, and of a longer one its head and where to read the rest", () => {
-    const budget = "Budget: US$ 1,240.00 for the month.";
-    const whole = `${"A line of the teammate's report.\n".repeat(650)}${budget}`;
-    expect(whole.length).toBeGreaterThan(20_000);
-    expect(composeReport(assignment({ ...done, result: whole }), names)).toContain(JSON.stringify(whole));
-    const longer = `${"x".repeat(30_000)}${budget}`;
-    const text = composeReport(assignment({ ...done, result: longer }), names);
-    expect(text).toContain(`What @Scout said, its first 24000 of ${longer.length} characters: ${JSON.stringify("x".repeat(24_000))}`);
-    expect(text).toContain('The rest is not shown here: call assignment_status with id "as_7f3k" and read on from where its result stops.');
-    expect(text).not.toContain(budget);
+  it("shows a whole report the record holds, and of a longer one its head and the offset to read on from", () => {
+    const whole = `${"A line of the teammate's report.\n".repeat(300)}Total: 1,240.00 US$`;
+    expect(composeReport(assignment({ ...done, result: whole }), names)).toContain(`What @Scout said: ${JSON.stringify(whole)}`);
+    const head = "x".repeat(12_000);
+    const text = composeReport(assignment({ ...done, result: head, resultChars: 131_100 }), names);
+    expect(text).toContain(`What @Scout said, its first 12000 of 131100 characters: ${JSON.stringify(head)}`);
+    expect(text).toContain('The rest is not shown here: call tool_result_read with id "as_7f3k" and offset 12000, then read on until it says the result ended.');
   });
 
   it("lists at most eight changed files and counts the rest", () => {

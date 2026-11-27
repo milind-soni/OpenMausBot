@@ -786,15 +786,43 @@ describe("access rechecked while work runs", () => {
     invariants(w);
   });
 
-  it("keeps a teammate's long report whole, its last line included, for the resume turn and assignment_status", async () => {
+  it.each([20_480, 131_100])("keeps the head of a %i-character report in the record and the whole of it beside, read to its last line", async (size) => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());
     const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
     w.runtime.tick();
-    const report = `${"A line of the teammate's report.\n".repeat(650)}Budget: US$ 1,240.00 for the month.`;
-    expect(report.length).toBeGreaterThan(20_000);
+    const total = "Total spent this month: 1,240.00 US$";
+    const report = `${"A line of the teammate's report.\n".repeat(Math.ceil(size / 33))}${total}`;
+    expect(report.length).toBeGreaterThan(size);
     await w.runner.release(child.id, { kind: "completed", text: report });
-    expect(w.store.get(child.id)?.result).toBe(report);
+    const row = w.store.get(child.id)!;
+    expect(row.result).toBe(report.slice(0, 12_000));
+    expect(row.resultChars).toBe(report.length);
+    let read = "";
+    for (;;) {
+      const part = w.store.resultPart(child.id, read.length, 16_000)!;
+      expect(part).toMatchObject({ total: report.length, kept: report.length });
+      if (!part.text) break;
+      read += part.text;
+    }
+    expect(read).toBe(report);
+    expect(read.endsWith("US$")).toBe(true);
+    invariants(w);
+  });
+
+  it("drops a kept long result once the record's own result is short again", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    await w.runner.release(child.id, { kind: "continue", text: "x".repeat(30_000), note: "more to do" });
+    expect(w.store.get(child.id)?.resultChars).toBe(30_000);
+    expect(w.store.resultPart(child.id, 0, 10)?.total).toBe(30_000);
+    w.runtime.tick();
+    await w.runner.release(child.id, { kind: "completed", text: "Short final report." });
+    expect(w.store.get(child.id)).toMatchObject({ result: "Short final report." });
+    expect(w.store.get(child.id)?.resultChars).toBeUndefined();
+    expect(w.store.resultPart(child.id, 0, 10)).toBeUndefined();
     invariants(w);
   });
 

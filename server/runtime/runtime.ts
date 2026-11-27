@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import { redactSecretsInText } from "../../shared/redact.ts";
 
 import { hostFaultOf, retryCannotFix } from "../host-fault.ts";
-import { TOOL_RESULT_MAX_CHARS } from "../tool-results.ts";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -53,8 +52,8 @@ export interface BeginRequest {
 }
 
 const BRIEF_MAX = 12_000;
-/** A teammate's whole report, up to what a saved tool result holds, so assignment_status can still give its end. */
-const RESULT_MAX = TOOL_RESULT_MAX_CHARS;
+/** What the record holds of a result; a longer one is kept whole beside it (keepResult) and read on with assignment_status. */
+export const RESULT_MAX = 12_000;
 const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
 /** Ticks a settlement the store refused is retried on; past them it is dropped, so the tree's own expiry ends it. */
@@ -582,7 +581,7 @@ export class Runtime {
     const root = n.parentId ? this.store.get(n.rootId) : n;
     if (result.kind === "continue") {
       // The count comes from events because dispatch deletes n.continuation.
-      n.result = clip(result.text, RESULT_MAX);
+      this.keepResult(n, result.text);
       n.guard = nextGuard(n.guard, result.evidence);
       const stop = loopStop(n.guard, result.text);
       if (stop) {
@@ -615,7 +614,7 @@ export class Runtime {
       }
       return;
     }
-    n.result = clip(result.text, RESULT_MAX);
+    this.keepResult(n, result.text);
     if (result.kind === "completed" && result.statusOnly) n.statusOnly = true;
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
@@ -798,9 +797,9 @@ export class Runtime {
     const now = this.clock.now();
     n.status = status; n.outcome = outcome; n.finishedAt = now; n.lastActivityAt = now;
     if (detail !== undefined) n.outcomeDetail = clip(detail, DETAIL_MAX); else delete n.outcomeDetail;
-    if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
-    if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
-    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) n.result = clip(detail, RESULT_MAX);
+    if (status !== "completed" && detail !== undefined && n.result === "") this.keepResult(n, detail);
+    if (outcome === "refused" && detail !== undefined) { this.keepResult(n, detail); delete n.evidence; }
+    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) this.keepResult(n, detail);
     delete n.question; delete n.decide; delete n.answer; delete n.answeredBy; delete n.restart; delete n.carrying;
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
@@ -945,6 +944,22 @@ export class Runtime {
   private names(n: Assignment, parent: Assignment | undefined): EnvelopeNames {
     const names = this.safe("names", () => this.runner.names(n, parent));
     return names ?? { requester: n.requester.botId ?? n.requester.kind, assignee: n.assignee.botId };
+  }
+
+  /** The record holds a result's head; a longer one is kept whole beside it, so its end is never lost. A failed keep
+   * leaves resultChars set with nothing beside it, which the reader reports as cut, never as the whole text. */
+  private keepResult(n: Assignment, said: string): void {
+    const long = said.length > RESULT_MAX;
+    // Masked before the cut, as an answer is, so a secret is never kept half shown at the record's edge.
+    const text = long ? redactSecretsInText(said) : said;
+    n.result = clip(text, RESULT_MAX);
+    if (!long && n.resultChars === undefined) return;
+    if (long) n.resultChars = text.length; else delete n.resultChars;
+    try {
+      this.store.keepResult(n.id, long ? text : undefined);
+    } catch (error) {
+      this.log(`keep result threw: ${String(error)}`);
+    }
   }
 
   private safe<T>(what: string, fn: () => T): T | undefined {
