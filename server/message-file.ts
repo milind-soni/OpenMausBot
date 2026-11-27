@@ -10,6 +10,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
 import { linkPlainPaths } from "../shared/markdown-plain-paths.ts";
 import { PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
+import { outsideFileRefused } from "./outside-file-guard.ts";
 import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 import { userErrorThrown } from "./user-errors.ts";
 
@@ -478,7 +479,8 @@ export async function openMessageFile(
   throw statusError(404, "the linked file is unavailable");
 }
 
-/** True when an owner's explicit single-file open could succeed without granting any folder or secret/app-data path. */
+/** True when an owner's explicit single-file open could succeed without granting any folder, hidden path, secret store,
+ * key-like file or app-data path (server/outside-file-guard.ts). */
 export async function canOpenOutsideWorkspaceMessageFile(href: string, refusedRoots: readonly string[]): Promise<boolean> {
   let candidate: string;
   try {
@@ -493,7 +495,7 @@ export async function canOpenOutsideWorkspaceMessageFile(href: string, refusedRo
   } catch {
     return false;
   }
-  if (inSecretFolder(canonical)) return false;
+  if (inSecretFolder(canonical) || outsideFileRefused(candidate) || outsideFileRefused(canonical)) return false;
   const canonicalRefused = await resolveCanonicalRoots(refusedRoots, false);
   return !canonicalRefused.some((dir) => containedBy(dir, canonical));
 }
@@ -512,13 +514,15 @@ export async function openOutsideWorkspaceMessageFile(
   } catch {
     throw statusError(404, "the linked file is unavailable");
   }
-  if (canonicalRefused.some((dir) => containedBy(dir, canonicalBefore))) throw outsideWorkspace();
+  if (outsideFileRefused(candidate) || outsideFileRefused(canonicalBefore) || canonicalRefused.some((dir) => containedBy(dir, canonicalBefore))) {
+    throw outsideWorkspace();
+  }
   try {
     return await openCanonicalMessageFile(
       candidate,
       canonicalBefore,
       maxBytes,
-      (canonicalAfter) => !canonicalRefused.some((dir) => containedBy(dir, canonicalAfter)),
+      (canonicalAfter) => !outsideFileRefused(canonicalAfter) && !canonicalRefused.some((dir) => containedBy(dir, canonicalAfter)),
     );
   } catch (error) {
     if (error && typeof error === "object" && "status" in error) throw error;
