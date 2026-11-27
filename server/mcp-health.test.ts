@@ -86,6 +86,22 @@ describe("checking that command servers start", () => {
     expect(again.usable("paul", servers), "kept across a restart").toEqual(servers);
   });
 
+  it("counts a server whose check runs out of time three times in a row as not starting", async () => {
+    const { deps, servers, told, tick } = fixture({ servers: { notes } });
+    const health = createMcpHealth({ ...deps, start: async () => ({ ok: false, error: "The server did not answer in time.", timeout: true }) });
+    for (let round = 0; round < 2; round += 1) {
+      await health.prepare("paul", ["notes"]);
+      await health.settled();
+      expect(health.usable("paul", servers)).toEqual(servers);
+      tick(60_000);
+    }
+    await health.prepare("paul", ["notes"]);
+    await health.settled();
+    expect(health.usable("paul", servers)).toEqual({});
+    expect(health.off("paul", ["notes"])).toEqual([{ name: "notes", error: "The server did not answer in time." }]);
+    expect(told).toHaveLength(1);
+  });
+
   it("names the bot whose own server does not start", async () => {
     const { health, told } = fixture({ startsFor: (name) => name !== "blender" });
     await health.prepare("iris", ["blender"]);

@@ -16,11 +16,13 @@ import type { McpServerSpec, StdioMcpSpec } from "./contracts.ts";
 export const RECHECK_FAILED_MS = 30 * 60_000;
 export const RECHECK_STARTED_MS = 6 * 60 * 60_000;
 export const RECHECK_TIMEOUT_MS = 60_000;
+/** Checks that ran out of time in a row before the server counts as not starting: one that hangs is not tried for ever. */
+export const TIMEOUTS_FOR_A_VERDICT = 3;
 const CHECKS_AT_ONCE = 2;
 /** The check of a server that is no bot's own. */
 const EVERY_BOT = "*";
 
-export interface McpStartCheck { ok: boolean; at: number; error?: string; timeout?: true }
+export interface McpStartCheck { ok: boolean; at: number; error?: string; timeout?: true; timeouts?: number }
 interface ServerHealth { key: string; checks: Record<string, McpStartCheck>; told?: string }
 type Bot = { id: string; name: string };
 type CommandServer = StdioMcpSpec & { bot?: string };
@@ -76,17 +78,21 @@ export function createMcpHealth(deps: McpHealthDeps) {
     const health = state[name];
     return health && health.key === startKey(server) ? health.checks?.[standsFor(server, botId)] : undefined;
   };
-  /** A check that ran out of time proves nothing: the server is not said to be off and is not left out of turns. */
-  const provenFailure = (check: McpStartCheck | undefined): boolean => !!check && !check.ok && check.timeout !== true;
+  /** A check that ran out of time proves nothing, until it has done so TIMEOUTS_FOR_A_VERDICT times in a row: till then
+   * the server is not said to be off and is not left out of turns. */
+  const provenFailure = (check: McpStartCheck | undefined): boolean =>
+    !!check && !check.ok && (check.timeout !== true || (check.timeouts ?? 1) >= TIMEOUTS_FOR_A_VERDICT);
   const due = (check: McpStartCheck | undefined) =>
-    !check || now() - check.at >= (check.ok ? RECHECK_STARTED_MS : check.timeout ? RECHECK_TIMEOUT_MS : RECHECK_FAILED_MS);
+    !check || now() - check.at >= (check.ok ? RECHECK_STARTED_MS : check.timeout && !provenFailure(check) ? RECHECK_TIMEOUT_MS : RECHECK_FAILED_MS);
 
   const record = (name: string, server: CommandServer, botId: string, key: string, generation: number, result: { ok: true } | { ok: false; error: string; timeout?: true }) => {
     const current = deps.servers()[name];
     if (!current || (generations.get(name) ?? 0) !== generation || current.bot !== server.bot || startKey(current) !== key) return;
     const health = state[name]?.key === key && state[name]!.checks ? state[name]! : (state[name] = { key, checks: {} });
+    const prior = health.checks[standsFor(server, botId)];
+    const timeouts = (prior?.timeout ? prior.timeouts ?? 1 : 0) + 1;
     health.checks[standsFor(server, botId)] = result.ok ? { ok: true, at: now() }
-      : { ok: false, at: now(), error: result.error, ...(result.timeout ? { timeout: true } : {}) };
+      : { ok: false, at: now(), error: result.error, ...(result.timeout ? { timeout: true, timeouts } : {}) };
     const tell = provenFailure(health.checks[standsFor(server, botId)]) && health.told !== key;
     if (tell) health.told = key;
     save();
