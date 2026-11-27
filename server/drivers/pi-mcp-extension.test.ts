@@ -8,6 +8,7 @@ import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 import { mcpStdioServer } from "../mcp-gate-config.ts";
+import { agentsStartupMs } from "./chat-mcp-tools.ts";
 
 import extension, {
   allocateToolName,
@@ -266,6 +267,59 @@ describe("Pi MCP startup budgets", () => {
     } finally {
       vi.useRealTimers();
       await remote.close();
+    }
+  });
+
+  /** A command server that answers initialize only once the test creates `<name>.answer` in `dir`. */
+  function slowToStart(dir: string, name: string): string {
+    const asked = JSON.stringify(join(dir, `${name}.asked`)), answer = JSON.stringify(join(dir, `${name}.answer`));
+    return fakeMcpScript(`
+      import { existsSync, writeFileSync } from "node:fs";
+      let buffer = "";
+      process.stdin.setEncoding("utf8");
+      const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+      process.stdin.on("data", (chunk) => {
+        buffer += chunk;
+        let newline;
+        while ((newline = buffer.indexOf("\\n")) !== -1) {
+          const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
+          if (!line.trim()) continue;
+          const msg = JSON.parse(line);
+          if (msg.method === "initialize") {
+            writeFileSync(${asked}, "");
+            const wait = setInterval(() => {
+              if (!existsSync(${answer})) return;
+              clearInterval(wait);
+              send({ jsonrpc: "2.0", id: msg.id, result: { capabilities: { tools: {} } } });
+            }, 10);
+          } else if (msg.method === "tools/list") send({ jsonrpc: "2.0", id: msg.id, result: { tools: [{ name: "coordinate_bots", inputSchema: { type: "object" } }] } });
+        }
+      });
+    `);
+  }
+
+  it("gives the agents server the start time other engines give it, a plain command server 8 seconds", async () => {
+    const { startupMs } = buildMcpServers({ threadId: "t", text: "hi", integrations: { agents: { command: "node", args: ["agents"], env: {} } } })!.agents as { startupMs?: number };
+    expect(startupMs).toBe(agentsStartupMs());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const dir = tempDir();
+      const agents = new StdioMcp({ command: process.execPath, args: [slowToStart(dir, "agents")], startupMs });
+      const plain = new StdioMcp({ command: process.execPath, args: [slowToStart(dir, "plain")] });
+      clients.push(agents, plain);
+      const mounting = watch(agents.init().then(() => agents.listTools()));
+      const failing = watch(plain.init().then(() => plain.listTools()));
+      await untilReal(() => existsSync(join(dir, "agents.asked")) && existsSync(join(dir, "plain.asked")));
+      await vi.advanceTimersByTimeAsync(12_000);
+      await untilReal(() => failing.done);
+      expect(String(failing.error)).toMatch(/timed out/);
+      expect(mounting.done).toBe(false);
+      writeFileSync(join(dir, "agents.answer"), "");
+      await untilReal(() => mounting.done);
+      expect(mounting.error).toBeUndefined();
+      expect(mounting.value!.map((tool) => tool.name)).toEqual(["coordinate_bots"]);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
