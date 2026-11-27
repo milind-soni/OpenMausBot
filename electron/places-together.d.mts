@@ -75,6 +75,10 @@ export interface PlacesTogetherBridge {
   set(on: boolean, from?: "notice"): Promise<PlacesTogetherState>;
   /** Opens the other place at one of its listed bots. False when main does not list that bot. */
   open(botId: string): Promise<boolean>;
+  /** This computer's page only: gets one of My Cloud's listed bots ready to open in this window (main opens the session
+   * this computer's server forwards it with, waking My Cloud first if it sleeps). `ok` false: open it with `open` instead.
+   * Older apps lack it. */
+  openInPlace?(botId: string): Promise<{ ok: boolean }>;
   onChanged(callback: () => void): () => void;
   /** Keeps where the person moved bots in the one list; what main keeps now. Older apps lack it. */
   arrange?(entries: ArrangedBot[]): Promise<ArrangedBot[]>;
@@ -121,6 +125,7 @@ export interface PlacesTogether {
   commandsChanged(on: boolean): void;
   switchedOff(): boolean;
   chosen(): boolean | null;
+  openInPlace(asking: BotHome, botId: string): Promise<{ ok: boolean }>;
   close(): void;
 }
 export function createPlacesTogether(deps: Record<string, unknown>): PlacesTogether;
