@@ -1,11 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, Cloud, Copy, Download, LayoutTemplate, Monitor, MoreHorizontal, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Cloud, Copy, Download, Monitor, MoreHorizontal, Search, Upload, X } from "lucide-react";
 import appsClip from "@/assets/whats-new/apps-dark.mp4";
 import appsStill from "@/assets/whats-new/apps-dark.webp";
-import cloudDark from "@/assets/whats-new/cloud-dark.mp4";
-import cloudDarkStill from "@/assets/whats-new/cloud-dark.webp";
-import cloudLight from "@/assets/whats-new/cloud-light.mp4";
-import cloudLightStill from "@/assets/whats-new/cloud-light.webp";
 import teamDark from "@/assets/whats-new/team-dark.mp4";
 import teamDarkStill from "@/assets/whats-new/team-dark.webp";
 import teamLight from "@/assets/whats-new/team-light.mp4";
@@ -32,7 +28,7 @@ function body(slide: WhatsNewSlide, view: WhatsNewView): string {
   switch (slide) {
     case "apps": return t(view.apps?.install ? "whatsNew.apps.body" : "whatsNew.apps.bodyHere",
       { screen: t("publishedApps.title"), section: t(view.apps?.place === "cloud" ? "localApps.section.cloud" : "localApps.section.computer") });
-    case "publish": return t("whatsNew.publish.body", { item: t("template.shareAsTemplate"), share: t("chat.export.heading"), publish: t("template.publish") });
+    case "publish": return t("whatsNew.publish.body", { item: t("template.publish"), publish: t("template.publishToCommunity") });
     case "pro": return t("whatsNew.cloud.body");
     case "cloudNews": return t("whatsNew.cloudNews.body");
     case "team": return t("whatsNew.team.bodyInbox");
@@ -48,9 +44,8 @@ type Clips = { label: LocaleKey; focus: string; dark: Clip; light: Clip };
 const TEAM_CLIP: Clips = { label: "whatsNew.team.videoLabel", focus: "object-[40%_50%]", dark: { video: teamDark, still: teamDarkStill }, light: { video: teamLight, still: teamLightStill } };
 /** The apps screen was filmed in the dark look only. */
 const APPS_CLIP: Clip = { video: appsClip, still: appsStill };
-const PICTURES: Record<"apps" | "pro" | "team" | "teamNews", Clips> = {
+const PICTURES: Record<"apps" | "team" | "teamNews", Clips> = {
   apps: { label: "whatsNew.apps.videoLabel", focus: "object-[6%_50%]", dark: APPS_CLIP, light: APPS_CLIP },
-  pro: { label: "whatsNew.cloud.videoLabel", focus: "object-[50%_50%]", dark: { video: cloudDark, still: cloudDarkStill }, light: { video: cloudLight, still: cloudLightStill } },
   team: TEAM_CLIP, teamNews: TEAM_CLIP,
 };
 const TEAM_POINTS: readonly LocaleKey[] = ["whatsNew.team.apps", "whatsNew.team.groupChats", "whatsNew.team.memory", "whatsNew.team.handoff", "whatsNew.team.accessUse"];
@@ -66,22 +61,22 @@ const controls = (popup: Element | null) => [...(popup?.querySelectorAll<HTMLEle
 function Picture({ slide, active }: { slide: WhatsNewSlide; active: boolean }) {
   if (slide === "together") return <TogetherPicture />;
   if (slide === "publish") return <PublishPicture />;
-  if (slide === "cloudNews") return <CloudPicture />;
+  if (slide === "cloudNews" || slide === "pro") return <CloudPicture slide={slide} />;
   return <ClipPicture slide={slide} active={active} />;
 }
 
 const DRAWN = "relative grid aspect-[2/1] shrink-0 grow place-items-center overflow-hidden bg-ink/[0.035] [@media(max-height:600px)]:hidden";
 const DRAWN_CARD = "rounded-xl border-[0.5px] border-ink/10 bg-app shadow-sm";
 
-/** The bot's menu with Share as template, drawn from the app's own labels. */
-const PUBLISH_ROWS = [[Search, "chat.find"], [LayoutTemplate, "template.shareAsTemplate"], [Copy, "chat.export.copy"], [Download, "chat.export.download"]] as const;
+/** The bot's menu with Publish, drawn from the app's own labels. */
+const PUBLISH_ROWS = [[Search, "chat.find"], [Upload, "template.publish"], [Copy, "chat.export.copy"], [Download, "chat.export.download"]] as const;
 function PublishPicture() {
   return <div data-whats-new-picture="publish" aria-hidden="true" className={DRAWN}>
     <div className="flex w-[58%] min-w-[220px] flex-col items-end gap-1.5">
       <span className={cn(DRAWN_CARD, "grid size-8 place-items-center rounded-full text-ink")}><MoreHorizontal size={16} /></span>
       <div className={cn(DRAWN_CARD, "flex w-full flex-col gap-0.5 p-1.5")}>
         {PUBLISH_ROWS.map(([Icon, label]) => <div key={label} className={cn("flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px]",
-          label === "template.shareAsTemplate" ? "bg-ink/[0.06] font-medium text-ink" : "text-ink-secondary")}>
+          label === "template.publish" ? "bg-ink/[0.06] font-medium text-ink" : "text-ink-secondary")}>
           <Icon size={15} className="shrink-0" /><span className="min-w-0 truncate">{t(label)}</span>
         </div>)}
       </div>
@@ -89,9 +84,9 @@ function PublishPicture() {
   </div>;
 }
 
-/** My Cloud, drawn: the Cloud slide's clip shows the plans as they were sold, so the slide that only tells has none. */
-function CloudPicture() {
-  return <div data-whats-new-picture="cloudNews" aria-hidden="true" className={DRAWN}>
+/** My Cloud, drawn: a picture of the plans would go stale with each change to how they are sold. */
+function CloudPicture({ slide }: { slide: "pro" | "cloudNews" }) {
+  return <div data-whats-new-picture={slide} aria-hidden="true" className={DRAWN}>
     <div className="flex flex-col items-center gap-2.5">
       <span className="grid size-14 place-items-center rounded-2xl bg-accent/10 text-accent"><Cloud size={26} /></span>
       <span className="text-[13px] font-medium text-ink">{t("cloudSetup.myCloud")}</span>

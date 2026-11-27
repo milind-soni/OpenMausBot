@@ -61,32 +61,40 @@ describe("the What's new popup", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("the first slide: the new Cloud's loop of the app, its words and price, Get Pro and See the new Cloud", async () => {
+  it("the first slide: My Cloud drawn, the new Cloud's words and price with no trial, Get Pro and See the new Cloud", async () => {
     await show();
     const slide = live();
     expect(slide.textContent).toContain("Your bots keep working when this computer is off. The new Cloud website puts your Clouds, team, billing and usage in one place.");
     expect(slide.textContent).toContain("Pro · $49/month + tax · 14-day money-back");
-    const clip = slide.querySelector("video")!;
-    expect(clip.getAttribute("aria-label")).toBe("The app's Cloud plans: the pointer picks Pro's free trial.");
-    expect(clip.getAttribute("src"), "dark skins get the dark loop").toMatch(/cloud-dark\.mp4/);
-    expect(clip.getAttribute("poster")).toMatch(/cloud-dark\.webp/);
+    expect(slide.textContent).not.toMatch(/trial/i);
+    expect(slide.querySelector('[data-whats-new-picture="pro"]')!.textContent).toBe("My Cloud");
+    expect(host.querySelectorAll("video"), "no plans clip on the Cloud slide").toHaveLength(0);
+    expect(host.querySelector('[data-whats-new-picture="team"] img')!.getAttribute("src"), "the others show their still").toMatch(/team-dark\.webp/);
+    expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Get Pro", "See the new Cloud"]);
+  });
+
+  it("the slide on screen plays its loop: muted, looping, inline, the dark one on a dark skin", async () => {
+    await show();
+    await click("Next");
+    const clip = live().querySelector("video")!;
+    expect(clip.getAttribute("src")).toMatch(/team-dark\.mp4/);
+    expect(clip.getAttribute("poster")).toMatch(/team-dark\.webp/);
     for (const flag of ["autoplay", "loop", "playsinline"]) expect(clip.hasAttribute(flag), flag).toBe(true);
     expect(clip.muted).toBe(true);
     expect(host.querySelectorAll("video"), "only the slide on screen plays").toHaveLength(1);
-    expect(host.querySelector('[data-whats-new-picture="team"] img')!.getAttribute("src"), "the others show their still").toMatch(/team-dark\.webp/);
-    expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Get Pro", "See the new Cloud"]);
   });
 
   it("a light skin gets the light loops; reduced motion gets each slide's still, never a video", async () => {
     document.documentElement.style.setProperty("--code-color-scheme", "light");
     await show();
-    expect(live().querySelector("video")!.getAttribute("src")).toMatch(/cloud-light\.mp4/);
+    await click("Next");
+    expect(live().querySelector("video")!.getAttribute("src")).toMatch(/team-light\.mp4/);
     await act(async () => root.render(null));
     document.documentElement.dataset.reducedMotion = "true";
     await show();
+    await click("Next");
     expect(host.querySelector("video")).toBeNull();
-    expect(live().querySelector("img")!.getAttribute("src")).toMatch(/cloud-light\.webp/);
-    expect(live().querySelector("img")!.getAttribute("alt")).toBe("The app's Cloud plans: the pointer picks Pro's free trial.");
+    expect(live().querySelector("img")!.getAttribute("src")).toMatch(/team-light\.webp/);
   });
 
   it("Next, Back, the dots and the arrow keys move between the slides; each slide is counted seen once, and each move from where it was", async () => {
@@ -215,14 +223,14 @@ describe("the What's new popup", () => {
     await click("Next");
     const slide = live();
     expect(title()).toBe(PUBLISH);
-    expect(slide.textContent).toContain("Share a bot as a template others can add to their own MausBot. Choose “Share as template” in the bot's Share or ⋯ menu, then “Publish”.");
-    expect(slide.querySelector('[data-whats-new-picture="publish"]')!.textContent, "the menu drawn from the app's own labels").toContain("Share as template");
+    expect(slide.textContent).toContain("Share a bot as a template others can add to their own MausBot. Choose “Publish” in the bot's ⋯ menu, then “Publish to community”.");
+    expect(slide.querySelector('[data-whats-new-picture="publish"]')!.textContent, "the menu drawn from the app's own labels").toContain("Publish");
     expect(slide.querySelector("video"), "a drawn picture, no clip").toBeNull();
     expect([...slide.querySelectorAll("button")]).toHaveLength(0);
     expect(button("Not now")).toBeUndefined(); expect(button("Got it")).toBeUndefined();
     await click("Next");
     expect(title()).toBe(CLOUD_NEWS);
-    expect(live().querySelector("video"), "the Cloud's clip shows the plans as sold; this slide draws My Cloud").toBeNull();
+    expect(live().querySelector("video"), "this slide draws My Cloud").toBeNull();
     expect(live().querySelector('[data-whats-new-picture="cloudNews"]')!.textContent).toBe("My Cloud");
     expect(button("Not now")).toBeUndefined(); expect(button("Got it")).toBeUndefined();
     await click("Next");
