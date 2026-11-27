@@ -768,9 +768,10 @@ export function createHomeWindow(deps) {
     /** The place the window was last sent to: My Cloud, or a team's or another own Cloud (`{ kind: "team" | "own", id, name, origin }`). */
     shown: () => shown,
     /** The screen asked again (as it opens, back online, or the window focused); `pressed`: the person pressed Try again, which
-     * no wait holds except the Admin's own 429, and which reads the session again first when its last read began a minute ago. */
+     * no wait holds except the Admin's own 429, and which also reads the session when its last read began a minute ago. */
     async retry({ pressed = false } = {}) {
-      if (pressed) { waits.pressed(); await Promise.resolve(account()?.freshen?.()).catch(() => {}); }
+      // The screen is drawn at once; a session read that was due draws it again when it lands, however long it takes.
+      if (pressed) { waits.pressed(); const reading = account()?.freshen?.(); if (reading) void Promise.resolve(reading).then(() => show(), () => {}).catch(() => {}); }
       return show();
     },
     /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens

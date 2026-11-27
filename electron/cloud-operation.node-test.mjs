@@ -152,3 +152,20 @@ test("a team's Cloud's own page is told its name with what has it down", async (
 test("a rollback is its own kind", () => {
   assert.deepEqual(parseCloudOperation({ kind: "rollback", since: 5, until: 9, expectedAt: 7 }), { kind: "rollback", since: 5, until: 9, expectedAt: 7 });
 });
+
+test("Try again draws the screen at once, never after a session read that hangs, and again when that read lands", async () => {
+  const w = world({ state: { status: "signed-out" } });
+  await w.home.show();
+  await w.home.retry();
+  assert.equal(w.freshens ?? 0, 0, "only a press reads the sign-in");
+  let land, timer;
+  w.freshRead = new Promise((resolve) => { land = resolve; });
+  const drawn = await Promise.race([w.home.retry({ pressed: true }).then(() => "drawn"), new Promise((resolve) => { timer = setTimeout(resolve, 5_000, "waited for the read"); })]);
+  clearTimeout(timer);
+  assert.equal(drawn, "drawn");
+  assert.equal(w.freshens, 1);
+  const reads = w.stateReads;
+  land(w.state);
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(w.stateReads > reads, "drawn again once the read lands");
+});

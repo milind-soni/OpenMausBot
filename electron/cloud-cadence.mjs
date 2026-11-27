@@ -54,11 +54,12 @@ export function retryWait(failures, { steps = ASK_RETRY_MS, retryAfter, retryAft
 
 /** The wait before a failed session read is tried again: 15 s, 30 s, then each minute while someone is looking (`attended`),
  * every 15 s while a sleeping Cloud is awaited (`waking`), else longer each time up to five minutes. Never before the Admin's
- * Retry-After (held to five minutes), never past the sign-in's expiry (`expiresIn`), and always with a last try 20 s before
- * the verified answer stops counting (`verifiedIn`). */
+ * Retry-After, held to five minutes, and to a minute while someone is looking; never past the sign-in's expiry (`expiresIn`),
+ * and always with a last try 20 s before the verified answer stops counting (`verifiedIn`). */
 export function sessionRetryWait(failures, { retryAfter, expiresIn = Infinity, verifiedIn = 0, attended = false, waking = false, random = Math.random } = {}) {
   const left = verifiedIn - 20_000, steps = waking ? WAKE_RETRY_MS : attended ? ATTENDED_RETRY_MS : SESSION_RETRY_MS;
-  return Math.min(retryWait(failures, { steps, retryAfter, retryAfterMax: SESSION_RETRY_AFTER_MAX_MS, below: waking || attended, random }), expiresIn, left > 0 ? left : Infinity);
+  const wait = retryWait(failures, { steps, retryAfter, retryAfterMax: SESSION_RETRY_AFTER_MAX_MS, below: waking || attended, random });
+  return Math.min(attended ? Math.min(wait, REFRESH_MS) : wait, expiresIn, left > 0 ? left : Infinity);
 }
 
 /**

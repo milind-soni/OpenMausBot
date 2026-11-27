@@ -189,9 +189,9 @@ test("coming to the front reads the session at once when its answer is a minute 
 });
 
 // The session's own waits, against the loopback fixture (fixtures/cloud-account.mjs).
-test("a failing check never asks before the Admin's Retry-After, held to five minutes and spread only later, with a last try before the answer stops counting", async t => {
+test("nobody looking, a failing check never asks before the Admin's Retry-After, held to five minutes and spread only later, with a last try before the answer stops counting", async t => {
   let draw = 0.5;
-  const f = await fixture(t, { random: () => draw }); await f.connect();
+  const f = await fixture(t, { random: () => draw, attended: () => false }); await f.connect();
   f.sessionError = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "60" } };
   for (const [drawn, delay] of [[0, 60_000], [0.5, 66_000], [1, 72_000]]) { draw = drawn; await f.client.refresh(); assert.equal(f.delay, delay, "the Admin's own wait, not 15 s, spread up to a fifth later"); }
   f.sessionError.headers["retry-after"] = "3600"; draw = 0;
@@ -264,4 +264,39 @@ test("nobody looking and nothing under way: the session every 5 minutes, spread 
   const ended = f.requests.length;
   f.now += 120_000; f.client.freshen();
   assert.equal(f.requests.length, ended);
+});
+
+test("while someone looks, a Retry-After an hour long still leaves a read each minute, as before", async t => {
+  const f = await fixture(t, { attended: () => true }); await f.connect();
+  f.sessionError = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "3600" } };
+  await f.client.refresh();
+  assert.equal(f.delay, 60_000);
+});
+
+test("coming to the front never moves the next read later than it was", async t => {
+  const f = await fixture(t, { attended: () => true, random: () => 0 }); await f.connect();
+  assert.equal(f.delay, 48_000, "in front, spread sooner");
+  f.now += 20_000;
+  assert.equal(f.client.freshen(), null);
+  assert.equal(f.delay, 48_000, "already due before a minute after the last read: left as it is");
+});
+
+test("triggers at the same moment (focus, show, wake, Try again) make one session read", async t => {
+  const f = await fixture(t); await f.connect();
+  f.now += 61_000;
+  const before = f.requests.filter((row) => row.route.endsWith("/session")).length;
+  await Promise.all([0, 1, 2, 3, 4].map(() => f.client.freshen()));
+  assert.equal(f.requests.filter((row) => row.route.endsWith("/session")).length, before + 1);
+});
+
+test("while another account takes over, neither token is asked for with the sign-in before", async t => {
+  const f = await fixture(t); await f.connect();
+  f.pages = { status: 200, body: { cloudContractVersion: 1, url: `${f.origin}/api/pages/token`, token: `omb_pd_${"P".repeat(43)}` } };
+  f.x = { status: 200, body: { cloudContractVersion: 1, url: `${f.origin}/api/x`, token: `omb_xd_${"X".repeat(43)}` } };
+  assert.ok(await f.client.pagesAccess(), "signed in: the token comes");
+  const before = f.requests.length;
+  f.client.quiesce();
+  await assert.rejects(f.client.pagesAccess(), /another account/i);
+  await assert.rejects(f.client.xResearchAccess(), /another account/i);
+  assert.equal(f.requests.length, before, "nothing reached the Admin");
 });

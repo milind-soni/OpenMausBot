@@ -21,6 +21,7 @@ test("a Retry-After is kept, spread only later, and held to its cap (an hour, fi
   for (const bad of [0, -5, Number.NaN, undefined, "600"]) assert.equal(retryWait(1, { retryAfter: bad, random: () => 0.5 }), 60_000, String(bad));
   assert.equal(sessionRetryWait(1, { retryAfter: 3_600, verifiedIn: 900_000, random: low }), SESSION_RETRY_AFTER_MAX_MS, "the session's is held to five minutes");
   assert.equal(sessionRetryWait(1, { retryAfter: 3_600, verifiedIn: 140_000, random: low }), 120_000, "and never past 20 s before the verified answer stops counting");
+  assert.equal(sessionRetryWait(1, { retryAfter: 3_600, verifiedIn: 900_000, attended: true, random: () => 1 }), 60_000, "and to a minute while someone looks");
 });
 
 test("the session's failure waits: who is looking decides how long", () => {
