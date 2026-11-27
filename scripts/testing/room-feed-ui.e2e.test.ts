@@ -115,7 +115,8 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await revisitRoom();
     await until(() => evaluate(`Boolean(document.querySelector('[data-thread-panel="${opened}"]'))`), "the last viewed thread beside the feed");
     expect(await current()).toBe(room.threadId);
-    await browse("click", "[data-thread-panel] button[aria-label='Close thread']");
+    await evaluate("document.querySelector(`[data-thread-panel] button[aria-label='Close thread']`).click(); true");
+    await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the thread panel to close");
     await revisitRoom();
     expect(await evaluate("Boolean(document.querySelector('[data-thread-panel]'))")).toBe(false);
 
