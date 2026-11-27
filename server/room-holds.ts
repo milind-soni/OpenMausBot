@@ -101,7 +101,7 @@ export function isStopCommand(text: string, ownName?: string): boolean {
     if (!isMentionBoundary(line, at)) return false;
     const name = names.find((candidate) => {
       const tail = line.slice(at + 1 + candidate.length);
-      return line.startsWith(candidate, at + 1) && !isMentionNameContinuation(tail) && !/^[.-][\p{L}\p{M}\p{N}_]/u.test(tail);
+      return line.startsWith(candidate, at + 1) && !isMentionNameContinuation(tail) && !/^[.+-][\p{L}\p{M}\p{N}_]/u.test(tail);
     });
     if (!name) return false;
     parts.push(line.slice(start, at));
