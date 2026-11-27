@@ -2387,36 +2387,49 @@ a later launch, in the list's order. A new notice is one entry in `NOTICES` and
 its fact in AppNotices. So What's new and Boat's credit offer never share a
 launch: What's new comes first, and the Boat card waits for a later one.
 
-1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11b`):
-   one centered popup with up to three slides, **Next** and **Back**, its dots
+1. **What's new** (`whats-new/WhatsNewPopup`, campaign id `whats-new-2026-11c`):
+   one centered popup with its slides, **Next** and **Back**, its dots
    and the arrow keys, each slide with a short loop of the app itself (its
-   still where motion is reduced), once per person: a close is kept in the
+   still where motion is reduced) or a picture drawn from the app's own
+   labels, once per person: a close is kept in the
    workspace record (on a Team Cloud, the person's own), in the page's storage
    and in this desktop's own record (`electron/desktop-prefs.mjs`), so every
    port the app's page is served on agrees. A close also counts as seeing the
-   earlier What's new (`whats-new-2026-11`), the Teams popup and ModelGo's
-   sponsor card, so nobody sees those again; a new campaign id shows it once
-   more to everyone who closed them. It is the launch's notice, centred, on
-   every page but a branded build's, never during setup (the welcome, the
-   tour), before a new install's first reply, a call, a move, another dialog,
-   busy work or an update being offered, and never in the launch MausBot's
-   first-launch card took. In the launch a new install's welcome finished, it
-   comes once the first chat has had its first reply. `lib/whats-new.ts`
-   decides the slides (`whatsNewCarousel`), in this order:
+   earlier What's new (`whats-new-2026-11b`, `whats-new-2026-11`), the Teams
+   popup and ModelGo's sponsor card, so nobody sees those again; a new campaign
+   id shows it once more to everyone who closed them. It is the launch's notice,
+   centred, on every page but a branded build's, never during setup (the
+   welcome, the tour), before a new install's first reply, a call, a move,
+   another dialog, busy work or an update being offered, and never in the
+   launch MausBot's first-launch card took. In the launch a new install's
+   welcome finished, it comes once the first chat has had its first reply.
+   `lib/whats-new.ts` decides the slides (`whatsNewCarousel`), in this order:
+   - **Your apps have a home**, for everyone: where the apps the bots build
+     are (Published apps, under the section that page lists them in), and
+     **Open apps**, which opens Published apps. The words about opening an
+     app in its own window and installing it are only on this computer's
+     page of the desktop app, which can do both.
+   - **Publish your bots**, for everyone: Share as template in the bot's
+     Share or ⋯ menu, then Publish. It only tells; it has no button.
    - **Meet the new MausBot Cloud**: on this computer's page of a desktop that
      sells the Cloud and no organization runs, for someone with no Cloud plan
-     (signed out, or signed in with none).
+     (signed out, or signed in with none). Whoever has a Cloud (a plan of
+     their own or a team's, or this page is a Cloud's) gets **What's new in
+     MausBot Cloud** instead, which only tells.
    - **Team**: for anyone who can start a team (on the website, or in the
      app's Add a Cloud for a plan of one's own on this desktop) and a Team
-     Cloud's Owner and Admins (**Invite your team**, the team's People page);
-     never someone already in a team or a Team Cloud's member, who keep the
-     Teams popup's **Got it**.
-   - **ModelGo**, the sponsor: wherever `modelgoOfferable` allows it, on a Team
-     Cloud only for its Owner and Admins. **Get a ModelGo key** opens the
-     sponsor's exact address; **Add key** opens Settings → AI, where its key
-     goes, for whoever may change this place's settings.
+     Cloud's Owner and Admins (**Invite your team**, the team's People page).
+     Someone already in a team, or a Team Cloud's member, gets **What's new
+     for your team** instead, which only tells and sells nothing.
+   - **Your bots are in one list now**, last: the notice of This computer and
+     My Cloud together, with its switches, where its corner notice would show
+     and main calls it due and it was never drawn. Main hears that it was
+     shown, which turns the default on, only once that slide is on screen;
+     someone who closes What's new before it gets the corner notice on a
+     later launch.
 
-   No slide for someone: no popup.
+   A slide that only tells has no **Not now**; the last slide, when it only
+   tells, ends with **Got it**.
 
    A plan slide shows only while the Admin's offer sells its plan, with that
    plan's price from the offer (the Team plan's free trial when it has one);

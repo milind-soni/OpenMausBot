@@ -39,7 +39,8 @@ it("saves a shown page as an app that follows its newest version and outlives it
   const saved = await api("/api/local-apps", { method: "POST", body: JSON.stringify({ botId: bot.id, threadId, messageId: page.id }) });
   expect(saved.status, JSON.stringify(saved.body)).toBe(201);
   const id = saved.body.app.id as string;
-  expect((await api("/api/local-apps")).body.apps.map((app: any) => app.id)).toEqual([id]);
+  // A fresh server already lists the starter apps, after the one just saved.
+  expect((await api("/api/local-apps")).body.apps.map((app: any) => app.sample ? "sample" : app.id)).toEqual([id, "sample", "sample", "sample", "sample"]);
 
   plan([{ tool: "update_html", arguments: { app_id: page.id, html: "<h1>Sales v2</h1>" } }]);
   await cli("send", "--bot", bot.id, "--task", threadId, "--text", "Bigger heading please.");

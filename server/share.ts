@@ -100,6 +100,7 @@ const SKIP_WORDS: Record<string, string> = {
   picture_too_large: "a picture over 64 KB", picture_invalid: "a picture that couldn't be read", files_not_shared: "files attached to a routine",
   lead_not_in_group_chat: "a group chat goal whose lead isn't in the chat", skill_changed: "a skill that changed while it was being shared",
   skill_conflict: "a skill two bots have in different versions", bot_skill_limit: "skills past a bot's limit", team_skill_limit: "skills past the department's limit",
+  skill_off: "skills switched off on the bot",
 };
 /** The line a template gets when its bot or department has no words of its own; a card leaves it out. */
 const plainTagline = (scope: TemplateScope) => `A ${scope === "bot" ? "bot" : "department"} shared from ${productName()}.`;
@@ -364,6 +365,13 @@ export function createShareHost(deps: ShareHostDeps) {
     if (!bots.length) throw new ShareError("This department has no bots to share.");
     const skills = deps.collectTeamSkills(bots, "all");
     if (!skills.ok) throw new ShareError(skills.error);
+    const skipped = [...skills.skipped];
+    for (const bot of bots) {
+      const list = skills.skillsByBot.get(bot.id) ?? [];
+      const where = target.scope === "bot" ? "" : `${bot.name}: `;
+      for (const skill of list) if (skill.enabled === false) skipped.push({ part: `${where}skills[${skill.name}]`, reason: "skill_off" });
+      skills.skillsByBot.set(bot.id, list.filter((skill) => skill.enabled !== false));
+    }
     const fileSkips = new Set<string>();
     for (const bot of bots) {
       for (const skill of skills.skillsByBot.get(bot.id) ?? []) {
@@ -402,7 +410,7 @@ export function createShareHost(deps: ShareHostDeps) {
         skillSelection: "all",
         avatars,
         mcpServers: {},
-        skipped: skills.skipped,
+        skipped,
         // Connections never travel in a template, so a key in one doesn't keep it from being published.
         beforeRedaction: (definition) => { credential = scrubTree({ ...definition, connections: undefined }).counts.secrets > 0; },
       });

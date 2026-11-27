@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { mentionedBots, normalizeGroupDefaultResponder, roomResponders } from "./store.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { noHostContainerEnv } from "./testing/container-env.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { workerPort } from "./testing/worker-port.ts";
 
@@ -364,6 +365,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       USERPROFILE: home,
       OMB_PORT: String(PORT),
       OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
+      ...noHostContainerEnv(home),
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     // Without SystemRoot, winsock fails to initialize in the child.

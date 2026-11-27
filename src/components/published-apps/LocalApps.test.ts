@@ -37,6 +37,7 @@ const app = (id: string, name: string, more: Partial<LocalApp> = {}): LocalApp =
 });
 const BOARD = app("la_board0000000000000", "Sales board", { versions: [{ rev: 0, at: NOW }, { rev: 1, at: NOW }, { rev: 2, at: NOW }], rev: 2 });
 const ROTA = app("la_rota00000000000000", "Staff rota", { chat: false, botId: "gone", bot: null });
+const SAMPLE = app("la_starter_ledger__", "Ledger", { chat: false, botId: "", threadId: "", messageId: "la_starter_ledger__", bot: null, sample: true });
 
 let root: Root;
 let host: HTMLElement;
@@ -122,6 +123,24 @@ describe("saved apps on the apps page", () => {
     expect(card(BOARD.id).textContent).toContain("Mira · 2 hr ago");
     expect(card(ROTA.id).textContent).toContain("Bot removed");
     expect(button(card(BOARD.id), "Open in its own window")).toBeUndefined();
+  });
+
+  it("labels a starter app Sample, with no chat to go to, in its card and its view", async () => {
+    saved = [BOARD, SAMPLE];
+    await show();
+    expect(card(SAMPLE.id).textContent).toContain("Sample · 2 hr ago");
+    expect(card(SAMPLE.id).textContent).not.toContain("Bot removed");
+    act(() => button(card(SAMPLE.id), "More for Ledger").click());
+    expect(menuItem("Go to chat")).toBeUndefined();
+    expect(menuItem("Remove")).toBeDefined();
+    act(() => button(card(SAMPLE.id), "Open Ledger").click());
+    await settle();
+    const header = host.querySelector("header")!.textContent;
+    expect(header).toContain("Sample");
+    expect(header).not.toContain("By ");
+    expect(button(host, "Go to chat")).toBeUndefined();
+    expect(host.textContent).not.toContain("chat it came from");
+    expect(host.querySelector(`[data-local-app-view="${SAMPLE.id}"]`)?.getAttribute("data-local-app-state")).toBe("live");
   });
 
   it("opens an app in its own window on the desktop", async () => {
@@ -258,6 +277,16 @@ describe("installing a saved app on this computer", () => {
     expect(bridge.install).toHaveBeenCalledWith({ id: ROTA.id, name: "Staff rota" });
     expect(card(ROTA.id).querySelector("[data-local-app-installed]")).not.toBeNull();
     expect(document.querySelector("[role=dialog], [role=alertdialog]")).toBeNull();
+  });
+
+  it("installs a starter app like any saved one", async () => {
+    saved = [BOARD, SAMPLE];
+    await show();
+    act(() => button(card(SAMPLE.id), "More for Ledger").click());
+    await act(async () => menuItem("Install on this computer").click());
+    await settle();
+    expect(bridge.install).toHaveBeenCalledWith({ id: SAMPLE.id, name: "Ledger" });
+    expect(card(SAMPLE.id).querySelector("[data-local-app-installed]")).not.toBeNull();
   });
 
   it("says so in one line when a launcher couldn't be written", async () => {

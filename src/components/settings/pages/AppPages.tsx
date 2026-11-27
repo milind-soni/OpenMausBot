@@ -94,6 +94,8 @@ function PlacesFromHere() {
   const { place, ctx } = useSettingsShell();
   const others = useOtherPlaces("app");
   const workspaces = window.ogb?.workspaces;
+  const lend = window.ogb?.lendComputer;
+  const choose = lend?.choose;
   if (!workspaces) return null;
   return <>
     <SettingsGroup label={t("settings.app.computers")} description={t("settings.app.computersLine")} block="your-computers">
@@ -102,7 +104,7 @@ function PlacesFromHere() {
           <span className="text-[13px] leading-5 text-ink-secondary">{t("servers.current")}</span>
         </SettingRow>
         {/* On a server's own page: the same switch its row has on This computer's page. */}
-        {window.ogb?.lendComputer && <LendComputerSwitch id={null} className="mx-4 mb-3 ms-[60px]" />}
+        {lend && <LendComputerSwitch id={null} className="mx-4 mb-3 ms-[60px]" onChoose={choose && (() => void choose(null).catch(() => {}))} />}
         {others.map((other) => (
           <SettingRow key={other.key} title={other.name} leading={<PlaceBadge place={{ kind: other.kind === "computer" ? "computer" : "cloud", name: other.name, color: other.color }} size={24} />}
             subtitle={other.kind === "computer" ? t("servers.localHint") : undefined}>

@@ -33,6 +33,11 @@ export function lastMessageId(threadId: string): string | null {
   return (prepared(LAST_MESSAGE).get(threadId) as { id: string } | undefined)?.id ?? null;
 }
 
+/** The newest message's id without loading the thread: the cached copy when one is loaded, else one indexed row. */
+export function newestMessageId(threadId: string, cached: ThreadState | undefined): string | undefined {
+  return cached ? cached.messages.at(-1)?.id : lastMessageId(threadId) ?? undefined;
+}
+
 export function messagesBefore(
   threadId: string,
   before: string,

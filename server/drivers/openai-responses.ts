@@ -169,6 +169,7 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
   let usage: Completion["usage"] = null;
   const streamed = new Set<unknown>();
   const done = new Map<number, ResponseItem>();
+  const finishedItems = new Set<string>();
   const calls = new ChatToolCalls();
   let callCount = 0;
 
@@ -188,6 +189,7 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
   };
   const finishItem = (item: ResponseItem, position: number) => {
     done.set(position, item);
+    if (typeof item.id === "string") finishedItems.add(item.id);
     if (item.type === "function_call") {
       calls.add([{ index: callCount++, id: item.call_id, type: "function", function: { name: item.name, arguments: item.arguments } }], true);
     } else if (item.type === "message" && !streamed.has(item.id)) {
@@ -197,8 +199,14 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
     }
   };
   const finish = (response: Record<string, unknown> | undefined) => {
-    if (!done.size && Array.isArray(response?.output)) {
-      for (const [position, item] of response.output.entries()) if (object(item)) finishItem(item as ResponseItem, position);
+    if (Array.isArray(response?.output)) {
+      // Items the stream never finished (a cut message) join from the final output; one without an id only when nothing
+      // finished, so a call already finished under another position can never run twice.
+      const none = !done.size;
+      for (const [position, item] of response.output.entries()) {
+        const known = object(item) ? (item as ResponseItem).id : undefined;
+        if (object(item) && !done.has(position) && (typeof known === "string" ? !finishedItems.has(known) : none)) finishItem(item as ResponseItem, position);
+      }
     }
     const used = object(response?.usage);
     const cachedInput = object(used?.input_tokens_details)?.cached_tokens;

@@ -127,7 +127,7 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     const keyedStart = deps.keys ? deps.keys.resolve(name, server) : { ok: true as const, server };
     if (!keyedStart.ok) return { ok: false, error: keyedStart.why };
     const result = await probeMcpServer({ ...keyedStart.server, enabled: true }, startCheckTimeout(server.command), undefined, { asBot: asBot(botId) });
-    return result.ok ? { ok: true } : { ok: false, error: result.error };
+    return result.ok ? { ok: true } : { ok: false, error: result.error, ...(result.reason === "timeout" ? { timeout: true as const } : {}) };
   });
   const checks = createMcpHealth({
     file: join(deps.dataDir, "mcp-health.json"),

@@ -11,6 +11,7 @@ import { providerToolAllowKey } from "../provider-tool-allow.ts";
 import { VaultStore } from "../vault-store.ts";
 import { createMcpKeys } from "../vault/mcp-keys.ts";
 import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
+import * as probeModule from "../mcp-probe.ts";
 import type { BrokerPath } from "../bot-box/broker-probe.ts";
 import { notMcpError, type UrlAnswer } from "./mcp-url-checks.ts";
 
@@ -125,6 +126,30 @@ it("never makes a server the own of a deleted bot whose folder was left behind",
 
 it("says it in one plain line per bot", () => {
   expect(claimedNotice("Iris", ["blender"])).toBe("The Blender tool only works for Iris, so it's off for your other bots.");
+});
+
+it("a start check that only runs out of time is no verdict: the server stays in turns and is not announced", async () => {
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-timeout-"));
+  dirs.push(data);
+  const cfg = { mcpServers: { notes: { command: "npx", args: ["-y", "@x/notes-mcp"], enabled: true } } } as AppConfig;
+  const told: Array<{ text: string; about: string }> = [];
+  const host = createMcpServersHost({
+    dataDir: data,
+    cfg: () => cfg,
+    persist: (next) => { cfg.mcpServers = next; },
+    bots: () => [IRIS],
+    startsServers: () => true,
+    boxed: () => true,
+    policy: (servers) => servers,
+    tell: (text, about) => told.push({ text, about: about.id }),
+  });
+  const probe = vi.spyOn(probeModule, "probeMcpServer").mockResolvedValue({ ok: false, error: "The server did not answer in time.", reason: "timeout" });
+  try {
+    await host.prepare(IRIS);
+    expect(Object.keys(host.mounted(IRIS)), "a timed-out probe is not a failed start").toEqual(["notes"]);
+    expect(host.off(IRIS)).toEqual([]);
+    expect(told).toEqual([]);
+  } finally { probe.mockRestore(); }
 });
 
 it("tests a command server as its bot's turns start it, from that bot's own folder, and any other as any bot's", () => {

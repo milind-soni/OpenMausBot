@@ -1,7 +1,9 @@
-import { useRef, useState, type DragEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type DragEvent, type RefObject } from "react";
+import type { DepartmentOrder } from "./bot-sections";
 import { FOLDER_DRAG_TYPE } from "@/lib/folder-order";
 import { t } from "@/lib/i18n";
 import {
+  departmentsIn,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
@@ -11,6 +13,7 @@ import {
   sidebarSectionCollapsed,
   simpleOrderedSections,
   userSectionId,
+  withDepartmentOrder,
   type SectionDropPlace,
 } from "@/lib/sidebar-layout";
 import {
@@ -27,14 +30,17 @@ import {
 const SECTION_DRAG_TYPE = "application/x-openmausbot-sidebar-section";
 
 /** The sidebar's sections on this device: which are collapsed, their saved order, and dragging or Alt+Up/Down a
- * heading to reorder them. Simple and Advanced each keep their own order, so a move in one leaves the other as it was. */
-export function useSidebarSections({ simple, rail, density, query, label, sidebarRef }: {
+ * heading to reorder them. Simple and Advanced each keep their own order, so a move in one leaves the other as it was.
+ * With `departments`, the departments among them follow the workspace's order, the same on every device, and a move
+ * saves it there; the built-in sections keep this device's places. */
+export function useSidebarSections({ simple, rail, density, query, label, sidebarRef, departments = null }: {
   simple: boolean;
   rail: boolean;
   density: SidebarDensity;
   query: string;
   label: (id: string) => string;
   sidebarRef: RefObject<HTMLElement | null>;
+  departments?: DepartmentOrder | null;
 }) {
   const [collapsedIds, setCollapsedIds] = useState<string[]>(() => loadCollapsedSections());
   const [savedOrder, setSavedOrder] = useState<string[]>(() => loadSectionOrder());
@@ -44,6 +50,18 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
   const [announcement, setAnnouncement] = useState("");
   const drag = useRef<{ from: string | null; over: { id: string; place: SectionDropPlace } | null }>({ from: null, over: null });
   const interactive = sidebarLayoutInteractive(density, query);
+  const ownOrder = simple || rail;
+  const shared = (ids: string[]) => (departments ? withDepartmentOrder(ids, departments.order) : ids);
+
+  // Once per start: the order this device shows (Simple's in Simple or the rail) is offered to the workspace, which
+  // takes it only while nobody has set one, so the first device to update keeps its departments where they were.
+  const offered = useRef(false);
+  useEffect(() => {
+    if (!departments || offered.current || departments.order.length < 2) return;
+    offered.current = true;
+    const advanced = orderedSidebarSections(departments.order.map(userSectionId), savedOrder);
+    departments.offer(departmentsIn(ownOrder ? simpleOrderedSections(advanced, simpleOrder) : advanced));
+  }, [departments, savedOrder, simpleOrder, ownOrder]);
 
   const focusHeader = (name: string) => requestAnimationFrame(() => {
     const header = [...(sidebarRef.current?.querySelectorAll<HTMLElement>("[data-section]") ?? [])].find((element) => element.dataset.section === name);
@@ -76,9 +94,8 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
       focusHeader(to);
     },
     arrange(natural: string[]) {
-      const orderedIds = orderedSidebarSections(natural, savedOrder);
-      const ownOrder = simple || rail;
-      const sectionIds = ownOrder ? simpleOrderedSections(orderedIds, simpleOrder) : orderedIds;
+      const orderedIds = shared(orderedSidebarSections(natural, savedOrder));
+      const sectionIds = ownOrder ? shared(simpleOrderedSections(orderedIds, simpleOrder)) : orderedIds;
       const reorder = (id: string, next: string[]) => {
         if (sameSectionOrder(next, sectionIds)) return;
         const saved = ownOrder ? simpleOrder : savedOrder;
@@ -87,6 +104,7 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
           (ownOrder ? setSimpleOrder : setSavedOrder)(merged);
           (ownOrder ? saveSimpleSectionOrder : saveSectionOrder)(merged);
         }
+        if (interactive && departments) void departments.save(departmentsIn(next).filter((name) => departments.order.includes(name)));
         const position = next.indexOf(id);
         if (position >= 0) setAnnouncement(t("sidebar.section.moved", { name: label(id), position: position + 1, count: next.length }));
       };

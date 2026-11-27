@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Code2, Download, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
-import { OutsideWorkspacePreview, refusedAsOutsideWorkspace } from "./OutsideWorkspacePreview";
+import { OutsideWorkspacePreview, canOpenOutsideWorkspace, refusedAsOutsideWorkspace } from "./OutsideWorkspacePreview";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { previewHeight } from "./HtmlFilePreview";
 import { readTableResponse } from "./TableFilePreview";
@@ -16,19 +16,24 @@ const AUTO_RENDER_MAX_CHARS = 2 * 1024 * 1024;
  * paths written in the file stay plain text instead of becoming links that fetch other files. plain: a plain text
  * file, always shown as its raw text. */
 export default function MarkdownFileContent({ path, shownPath = path, name, message, fill = false, plain = false }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext; fill?: boolean; plain?: boolean }) {
+  const fileKey = `${message.threadId}:${message.messageId}:${path}`;
   const [attempt, setAttempt] = useState(0);
   const [source, setSource] = useState<string | null>(null);
   const [error, setError] = useState<"size" | "load" | "encoding" | "outside" | { reason: string } | null>(null);
+  const [canOpenOutside, setCanOpenOutside] = useState(false);
+  const [allowOutsideFor, setAllowOutsideFor] = useState<string | null>(null);
+  const allowOutside = allowOutsideFor === fileKey;
   const [showSource, setShowSource] = useState(false);
   const save = useLocalFileSave(path, name, message);
   useEffect(() => {
     const controller = new AbortController();
     setError(null);
+    setCanOpenOutside(false);
     setSource(null);
     void (async () => {
       let answered = false;
       try {
-        const response = await requestMessageFile(path, message, controller.signal);
+        const response = await requestMessageFile(path, message, controller.signal, allowOutside ? { allowOutsideWorkspace: true } : undefined);
         answered = true;
         // Notes saved by Windows apps are often Windows-1252, not UTF-8.
         const text = await readTableResponse(response, controller.signal, PREVIEW_MAX_BYTES, "windows-1252");
@@ -39,23 +44,26 @@ export default function MarkdownFileContent({ path, shownPath = path, name, mess
       } catch (reason) {
         if (controller.signal.aborted) return;
         // A refusal from the server says why; only a request that got no answer (TypeError) is the connection.
-        if (refusedAsOutsideWorkspace(reason)) setError("outside");
+        if (refusedAsOutsideWorkspace(reason)) {
+          setCanOpenOutside(canOpenOutsideWorkspace(reason));
+          setError("outside");
+        }
         else if (!answered && reason instanceof Error && !(reason instanceof TypeError)) setError({ reason: reason.message });
         else setError(reason instanceof Error && (reason.message === "size" || reason.message === "encoding") ? reason.message : "load");
       }
     })();
     return () => controller.abort();
-  }, [path, message.threadId, message.messageId, attempt]);
+  }, [path, message.threadId, message.messageId, attempt, allowOutside]);
   // Save and Retry stay on screen while loading too, so a stalled request never leaves only a spinner; they wrap so a long name can't push Retry off a narrow dialog.
-  const recovery = <><div className="mt-3 flex flex-wrap justify-center gap-2"><button type="button" className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 hover:bg-raised" disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} className="shrink-0" /><span className="min-w-0 break-all">{t("attach.saveAria", { name })}</span></button><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>{save.state === "failed" && <p role="alert" className="mt-2 text-[12px] text-danger">{save.reason}</p>}</>;
-  if (error === "outside") return <OutsideWorkspacePreview filePath={shownPath} />;
+  const recovery = <><div className="mt-3 flex flex-wrap justify-center gap-2"><button type="button" className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 hover:bg-raised" disabled={save.state === "saving"} onClick={() => void save.save(allowOutside ? { allowOutsideWorkspace: true } : undefined)}><Download size={14} className="shrink-0" /><span className="min-w-0 break-all">{t("attach.saveAria", { name })}</span></button><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>{save.state === "failed" && <p role="alert" className="mt-2 text-[12px] text-danger">{save.reason}</p>}</>;
+  if (error === "outside") return <OutsideWorkspacePreview filePath={shownPath} onOpenOutside={canOpenOutside ? () => setAllowOutsideFor(fileKey) : undefined} />;
   if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="text-ink-secondary">{typeof error === "object" ? t("markdown.refused", { reason: error.reason }) : t(error === "size" ? "attach.fileTooLarge" : error === "encoding" ? "markdown.notText" : "markdown.loadFailed")}</p>{recovery}</div>;
   if (source === null) return <div className="p-12 text-center text-sm text-ink-secondary"><span role="status" className="inline-flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</span>{recovery}</div>;
   return <div className={cn("flex flex-col gap-2", fill && "min-h-0 flex-1")}>
     <div className="flex items-center justify-end gap-1">
       {!plain && <button type="button" className="table-action" aria-pressed={showSource} aria-label={t(showSource ? "markdown.rendered" : "html.source")} title={t(showSource ? "markdown.rendered" : "html.source")} disabled={source.length > AUTO_RENDER_MAX_CHARS} onClick={() => setShowSource(!showSource)}>{showSource ? <Eye size={14} /> : <Code2 size={14} />}</button>}
       <button type="button" className="table-action" aria-label={t("html.reload")} title={t("html.reload")} onClick={() => setAttempt(attempt + 1)}><RotateCcw size={14} /></button>
-      <button type="button" className="table-action" aria-label={t("attach.saveAria", { name })} title={t("attach.saveAria", { name })} disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} /></button>
+      <button type="button" className="table-action" aria-label={t("attach.saveAria", { name })} title={t("attach.saveAria", { name })} disabled={save.state === "saving"} onClick={() => void save.save(allowOutside ? { allowOutsideWorkspace: true } : undefined)}><Download size={14} /></button>
     </div>
     {save.state === "failed" && <p role="alert" className="text-end text-[12px] text-danger">{save.reason}</p>}
     <MarkdownFileView source={source} showSource={showSource} fill={fill} />
