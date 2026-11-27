@@ -87,7 +87,7 @@ import { usePhoneBack } from "@/hooks/use-phone-back";
 import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
 import { closeSidePanels } from "@/lib/page-open";
 import { phoneBackStep, phoneBackSteps } from "@/lib/phone-back";
-import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together"; import { isPlaceId } from "@/lib/place-chat"; import { PlacedBotPanel } from "@/components/PlacedBotMenu";
+import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together"; import { isPlaceId } from "@/lib/place-chat"; import { PlaceChatKeeper, PlacedBotPanel } from "@/components/PlacedBotMenu";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence"; import { useFeature } from "@/lib/use-feature";
@@ -490,7 +490,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         </main>
       )}
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
-      {(state.settingsOpen || state.computerOpen) && bot && isPlaceId(bot.id) && <PlacedBotPanel key={`placed:${bot.id}`} bot={bot} />}{state.settingsOpen && bot && !isPlaceId(bot.id) && (
+      <PlaceChatKeeper />{(state.settingsOpen || state.computerOpen) && bot && isPlaceId(bot.id) && <PlacedBotPanel key={`placed:${bot.id}`} bot={bot} />}{state.settingsOpen && bot && !isPlaceId(bot.id) && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
           : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />

@@ -73,7 +73,7 @@ import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
-import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceLine } from "./OtherPlaceBots"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, otherPlaceDispatch, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots } from "@/lib/place-rows"; import { openPlacedMenu, PlaceChatKeeper, PlacedBotMenuHost, PlacedRowActions } from "./PlacedBotMenu"; import { isPlaceId } from "@/lib/place-chat"; import { useOneList } from "./one-list-sidebar"; const NO_SECTIONS: string[] = []; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
+import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceLine } from "./OtherPlaceBots"; import { BotPlaceBadge, BotPlaceMark } from "./BotPlaceMark"; import { isPlacedBot, otherPlaceDispatch, placedLine, rowPlaceMark, useOneListHere, useOtherPlaceBots } from "@/lib/place-rows"; import { openPlacedMenu, PlacedBotMenuHost, PlacedRowActions } from "./PlacedBotMenu"; import { isPlaceId } from "@/lib/place-chat"; import { useOneList } from "./one-list-sidebar"; const NO_SECTIONS: string[] = []; import type { BotHome } from "@/lib/places-together"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerPickerHost } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople"; import { SidebarInboxRow } from "./SidebarInboxRow"; import { TeamSideSwitch, useTeamSideLists } from "./TeamSideSwitch"; import { SidebarActiveThreads } from "./SidebarActiveThreads"; import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned"; import { useInboxSupport } from "@/state/inbox";
 import { TeamMenuItems } from "./SidebarTeamMenu";
@@ -1457,7 +1457,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               </div>
             );
           })}
-          <OtherPlaceLine query={query} icons={density === "icons"} /><PlacedBotMenuHost /><PlaceChatKeeper /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
+          <OtherPlaceLine query={query} icons={density === "icons"} /><PlacedBotMenuHost /><MovedBotRows bots={state.bots} /><MovedToMyCloudRow bots={state.bots} /><SearchResults query={query} onLanded={() => { setQuery(""); setSearchOpen(false); }} />
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}
