@@ -728,7 +728,7 @@ it("continues one recipient thread for every follow-up from the same conversatio
   const leadTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
   await send("Ask Engineering to build the CSV export.");
   const first = (await leadTasks()).find((task: any) => task.threadId !== f.lead.activeTaskId);
-  expect(first.title).toBe("@Clive · work");
+  expect(first.title).toBe("@Clive · Implement the CSV export");
   expect(first.openedBy).toMatchObject({ botId: f.chief.id, name: "Clive", kind: "work", threadId: f.chief.activeTaskId });
   expect(first.closedBy).toMatchObject({ botId: f.chief.id });
   expect(first).not.toHaveProperty("archivedAt");
@@ -736,7 +736,7 @@ it("continues one recipient thread for every follow-up from the same conversatio
   await send("Now ask them to document it.");
   const tasks = await leadTasks();
   expect(tasks).toHaveLength(2);
-  expect(tasks.find((task: any) => task.threadId === first.threadId)).toMatchObject({ title: "@Clive · work", closedBy: { botId: f.chief.id } });
+  expect(tasks.find((task: any) => task.threadId === first.threadId)).toMatchObject({ title: first.title, closedBy: { botId: f.chief.id } });
   expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
   const briefs = ["Implement the CSV export", "Add the header row to that export", "Document the export you just built"];
   const transcript = (await f.messages(first.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
@@ -750,7 +750,7 @@ it("continues one recipient thread for every follow-up from the same conversatio
   for (const brief of briefs) expect(leadTurns.every((turn: any) => !turn.system.includes(brief))).toBe(true);
   const receipts = sendReceipts(f, f.chief.id);
   expect(receipts.map((receipt: any) => receipt.threadId)).toEqual([first.threadId, first.threadId, first.threadId]);
-  for (const receipt of receipts) expect(receipt.detail).toBe('sent to "@Clive · work"; it runs after anything still running there');
+  for (const receipt of receipts) expect(receipt.detail).toBe(`sent to "${first.title}"; it runs after anything still running there`);
   const chips = (await f.messages(f.chief.activeTaskId)).filter((message: any) => message.threadRef?.threadId === first.threadId);
   expect(chips.filter((message: any) => message.tool?.name === "Sent to Engineering lead")).toHaveLength(3);
   expect((await leadTasks()).find((task: any) => task.threadId === f.lead.activeTaskId)).not.toHaveProperty("closedBy");
@@ -807,7 +807,7 @@ it("runs two assignments to one teammate from one turn in its thread, one after 
   const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
   expect(tasks).toHaveLength(2);
   const work = tasks.find((task: any) => task.openedBy?.kind === "work");
-  expect(work).toMatchObject({ title: "@Clive · work", closedBy: { botId: f.chief.id } });
+  expect(work).toMatchObject({ title: "@Clive · Implement the CSV export", closedBy: { botId: f.chief.id } });
   expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId)).toEqual([work.threadId, work.threadId]);
   expect(f.evidence().filter((turn: any) => turn.botId === f.lead.id).map((turn: any) => [turn.turnIndex, turn.threadId]))
     .toEqual([[0, work.threadId], [1, work.threadId]]);
@@ -839,7 +839,8 @@ it("starts a later send in a parallel work thread while the teammate's standing 
     await expect.poll(() => leadNodes().map((node: any) => node.status), { timeout: 15_000 }).toEqual(["completed", "completed"]);
     const work = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks.filter((task: any) => task.openedBy?.kind === "work");
     expect(work.map((task: any) => task.threadId).sort()).toEqual([first.threadId, second.threadId].sort());
-    for (const task of work) expect(task).toMatchObject({ title: "@Clive · work", openedBy: { botId: f.chief.id, threadId: f.chief.activeTaskId } });
+    expect(work.map((task: any) => task.title).sort()).toEqual(["@Clive · Export the invoices", "@Clive · Implement the CSV export"]);
+    for (const task of work) expect(task).toMatchObject({ openedBy: { botId: f.chief.id, threadId: f.chief.activeTaskId } });
     expect(sendReceipts(f, f.chief.id).map((receipt: any) => receipt.threadId)).toEqual([first.threadId, second.threadId]);
   } finally {
     writeFileSync(gate, "go");
@@ -1039,7 +1040,7 @@ it("runs a teammate's hand-off to the Chief in the Chief's work thread for that 
   const note = f.evidence().find((turn: any) => turn.planKey === "note");
   expect(note.threadId).not.toBe(f.chief.activeTaskId);
   const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
-  expect(chief.tasks.find((task: any) => task.threadId === note.threadId)).toMatchObject({ title: "@Ops · work", openedBy: { botId: ops.id, kind: "work" } });
+  expect(chief.tasks.find((task: any) => task.threadId === note.threadId)).toMatchObject({ title: "@Ops · Nightly note: confirm the export owner.", openedBy: { botId: ops.id, kind: "work" } });
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.peerAsk?.botId === ops.id || String(message.text ?? "").includes("Nightly note"))).toBe(false);
   expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
 

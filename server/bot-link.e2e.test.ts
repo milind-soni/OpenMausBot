@@ -145,6 +145,7 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     const there = (await home.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === atlas.id);
     const work = there.tasks.find((task: any) => /Writer/.test(task.title ?? ""));
     expect(work, JSON.stringify(there.tasks)).toBeTruthy();
+    expect(work.title).toBe("@Writer · Count this week's orders.");
     const worked = await home.messages(work.threadId);
     expect(worked.some((message) => /Count this week's orders\./.test(message.text ?? ""))).toBe(true);
     expect(worked.some((message) => message.text === "Atlas counted 42 orders.")).toBe(true);

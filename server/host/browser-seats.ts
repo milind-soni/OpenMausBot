@@ -28,7 +28,7 @@ export interface BrowserSeatDeps {
   active(owner: TurnOwner): boolean;
   /** A bot call, or a person's hands, in this browser right now. */
   working(session: string): boolean;
-  holderOf(owner: TurnOwner): { holder?: ComputerHolder; threadRef?: { botId: string; threadId: string; title: string } };
+  holderOf(owner: TurnOwner, waitingThreadId: string): { holder?: ComputerHolder; threadRef?: { botId: string; threadId: string; title: string } };
   row(threadId: string, name: string, threadRef?: { botId: string; threadId: string; title: string }): void;
   language(threadId: string): string | undefined;
   /** Why the watchdog does not read a long wait as a stall. */
@@ -64,7 +64,7 @@ export function createBrowserSeats(deps: BrowserSeatDeps) {
     const work = (async () => {
       const position = deps.resources.startWaiting(resource, owner);
       const blocker = deps.resources.blocker(resource, owner);
-      const { holder, threadRef } = blocker ? deps.holderOf(blocker) : { holder: undefined, threadRef: undefined };
+      const { holder, threadRef } = blocker ? deps.holderOf(blocker, owner.threadId) : { holder: undefined, threadRef: undefined };
       const language = deps.language(owner.threadId);
       deps.row(owner.threadId, holder?.task
         ? serverLine(language, "server.browser.waitingTask", { name: holder.name, task: holder.task })

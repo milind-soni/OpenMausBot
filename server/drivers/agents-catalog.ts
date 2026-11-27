@@ -183,7 +183,7 @@ const TOOL_DEFINITIONS = [
       reason: { type: "string", maxLength: 200, description: "Optional one line for the person on why (shown as a chip)." },
       rework: { type: "boolean", description: "True only to resend finished or failed work: a fix, a re-check or a retry." },
       thread: { type: "string", description: "standing (default), new (its own history and run), or a threadId from your receipts or list_threads." },
-      title: { type: "string", maxLength: 80, description: "With thread \"new\": its short sidebar name." }, in_my_folder: { type: "boolean", description: "Default true." },
+      title: { type: "string", maxLength: 80, description: "A short sidebar name for a local handoff that opens a work thread." }, in_my_folder: { type: "boolean", description: "Default true." },
       reply: { type: "string", enum: ["resume", "none"], description: "none: a one-way notice; nothing comes back." },
       consult: { type: "boolean", description: "True for a question answered from what they know, acting on nothing." },
       done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it." },

@@ -157,7 +157,7 @@
           "title": {
             "type": "string",
             "maxLength": 80,
-            "description": "With thread \"new\": its short sidebar name."
+            "description": "A short sidebar name for a local handoff that opens a work thread."
           },
           "in_my_folder": {
             "type": "boolean",

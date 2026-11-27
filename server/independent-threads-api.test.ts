@@ -129,7 +129,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       botId: peer.id,
       botName: "Mailbox Peer",
       outcome: "queued",
-      detail: "sent to \"@Mailbox Chief · work\"; it runs after anything still running there",
+      detail: 'sent to "@Mailbox Chief · MAILBOX_REVIEW: check the release notes."; it runs after anything still running there',
       requestId: expect.any(String),
       threadId: expect.any(String),
     }]);

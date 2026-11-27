@@ -130,7 +130,7 @@ describe("a hand-off held a while", () => {
       { over: busy, at: QUEUED_NOTE_AFTER_MS - 1, row: node },
       { over: busy, at: QUEUED_NOTE_AFTER_MS, row: { ...node, groupId: "g" } as HandoffView },
       { over: { ...busy, waitsForComputer: () => true }, at: QUEUED_NOTE_AFTER_MS, row: node },
-      { over: { ...busy, behindPerson: () => ({ kind: "question" as const, title: "Pick" }) }, at: QUEUED_NOTE_AFTER_MS, row: node },
+      { over: { ...busy, behindPerson: () => ({ threadId: "card-thread", kind: "question" as const, title: "Pick" }) }, at: QUEUED_NOTE_AFTER_MS, row: node },
     ]) {
       const { note, posted } = notes(over, at);
       note(row);

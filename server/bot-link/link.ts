@@ -27,6 +27,7 @@ import { basename, join } from "node:path";
 import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
+import { standingWorkTitle } from "../host/handed-thread-title.ts";
 import { foldName, withTargetsHere, type CoordinateResult, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
@@ -510,7 +511,7 @@ export function createBotLink(deps: BotLinkDeps) {
       const key = `${peer}:${frame.thread}`;
       let threadId = state.threads[key]?.threadId;
       if (!threadId || !deps.hasThread(bot.id, threadId)) {
-        const opened = deps.openThread(bot, `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId }, frame.text);
+        const opened = deps.openThread(bot, frame.thread.slice(frame.thread.indexOf(":") + 1) === frame.from.threadId ? standingWorkTitle(frame.from.name, frame.text) : `@${frame.from.name} · work`, { botId: address.botId, name: frame.from.name, threadId: address.threadId }, frame.text);
         if (!opened) throw new Error("That bot is no longer here.");
         threadId = opened;
       }

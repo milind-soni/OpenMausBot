@@ -19,9 +19,11 @@ describe("why a queued handoff has not started", () => {
     expect(reason()(node(), () => false)).toBe(full);
   });
 
-  it("keeps the person's open card first, as before", () => {
-    expect(reason({ behindPerson: () => ({ kind: "question", title: "Pick a date" }) })(node()))
-      .toBe('waiting for a free slot: that teammate is waiting on the person\'s answer in its thread "Pick a date"; tell the person to open it');
+  it("names the blocking card only when the caller can read its thread", () => {
+    const explain = reason({ behindPerson: () => ({ threadId: "card-thread", kind: "question", title: "Pick a date" }) });
+    expect(explain(node(), undefined, (threadId) => threadId === "card-thread")).toContain('"Pick a date"');
+    expect(explain(node(), undefined, () => false)).toBe(full);
+    expect(explain(node())).toBe(full);
   });
 
   it("says when it waits for a computer, an earlier turn in its thread, or a room turn", () => {

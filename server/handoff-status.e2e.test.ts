@@ -21,7 +21,7 @@ it("moves the Sent-to row through claimed, working, waiting on a teammate and do
     const writer = (await cli("new-bot", "--name", "Writer", "--section", "Team")).bot;
     await api(`/api/bots/${lead.id}`, { method: "PATCH", body: { chiefOfStaff: true, managedSections: ["Team"], acknowledgePeerScope: true } });
     writeFileSync(plan, JSON.stringify({
-      [lead.id]: { steps: [{ arguments: { bot_ids: [coder.id], message: "Build the page" } }], reply: "Asked Coder", resumeReply: "All done" },
+      [lead.id]: { steps: [{ arguments: { bot_ids: [coder.id], message: "Build the page", title: "Landing page" } }], reply: "Asked Coder", resumeReply: "All done" },
       [coder.id]: { steps: [{ arguments: { bot_ids: [writer.id], message: "Write the copy" } }], gateFile: coderGate, reply: "Asked Writer", resumeReply: "Page built" },
       [writer.id]: { gateFile: writerGate, reply: "Copy written" },
     }));
@@ -41,7 +41,7 @@ it("moves the Sent-to row through claimed, working, waiting on a teammate and do
 
     await cli("send", "--bot", lead.id, "--task", lead.activeTaskId, "--text", "Get the landing page built.");
     await expect.poll(async () => (await sentRow()).state, { timeout: 30_000, interval: 100 }).toBe("working");
-    expect((await coderTask())?.handoff).toMatchObject({ state: "working" });
+    expect(await coderTask()).toMatchObject({ title: "@Lead · Landing page", handoff: { state: "working" } });
 
     writeFileSync(coderGate, "go");
     await expect.poll(async () => (await sentRow()).state, { timeout: 30_000, interval: 100 }).toBe("waiting:Writer");

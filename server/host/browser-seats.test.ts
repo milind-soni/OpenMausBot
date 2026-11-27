@@ -8,18 +8,18 @@ const SESSION = "bot-1", RESOURCE = browserResource(SESSION);
 
 function seats(options: { working?: boolean; idleHandoverMs?: number; callWaitMs?: number } = {}) {
   const resources = new TurnResources(), rows: Array<{ threadId: string; name: string }> = [], events: string[] = [];
-  const ended = new Set<string>();
+  const ended = new Set<string>(), audiences: string[] = [];
   const state = { working: options.working ?? false, clock: 1_000 };
   const seat = createBrowserSeats({
     resources, claim: (owner, resource) => resources.claim(resource, owner), active: (owner) => !ended.has(owner.generation), working: () => state.working,
-    holderOf: (owner) => ({ holder: { name: "Scout", task: `job ${owner.threadId}` } }), language: () => undefined,
+    holderOf: (owner, waitingThreadId) => { audiences.push(waitingThreadId); return { holder: { name: "Scout", task: `job ${owner.threadId}` } }; }, language: () => undefined,
     row: (threadId, name) => { rows.push({ threadId, name }); },
     waitStarted: (threadId, resource, position) => { events.push(`started ${threadId} ${resource} ${position}`); },
     waitEnded: (threadId, _resource, outcome) => { events.push(`${outcome} ${threadId}`); },
     callWaitMs: options.callWaitMs ?? 20, actWithinMs: 1_000_000, idleHandoverMs: options.idleHandoverMs ?? 1_000_000, pollMs: 2, now: () => state.clock,
   });
   const end = (owner: TurnOwner) => { ended.add(owner.generation); resources.release(owner); };
-  return { seat, resources, rows, events, state, end };
+  return { seat, resources, rows, events, state, end, audiences };
 }
 const until = (check: () => boolean) => vi.waitFor(() => expect(check()).toBe(true), { timeout: 2_000, interval: 2 });
 
@@ -27,12 +27,13 @@ describe("one bot's browser between its conversations", () => {
   afterEach(() => { vi.useRealTimers(); });
 
   it("lets the same turn keep calling, and answers another turn's call with why, naming the wait in its chat", async () => {
-    const { seat, resources, rows, events, end } = seats();
+    const { seat, resources, rows, events, end, audiences } = seats();
     expect(await seat.take(A, SESSION)).toBeNull();
     expect(await seat.take(A, SESSION)).toBeNull();
     expect(await seat.take(B, SESSION)).toBe(browserBusyText(20));
     expect(rows).toEqual([{ threadId: "b", name: "Waiting for the browser: Scout is using it for job a. This continues by itself when it is free." }]);
     expect(events).toEqual([`started b ${RESOURCE} 1`]);
+    expect(audiences).toEqual([B.threadId]);
     expect(await seat.take(B, SESSION), "a second call joins the wait already under way").toBe(browserBusyText(20));
     expect(rows).toHaveLength(1);
     end(A);

@@ -333,7 +333,7 @@ import { buildRecoveryText, buildTurnContext, replaysNatively } from "./turn-con
 import { Handoffs, isContextMessage, recordHanded, renderUnseen, sessionStart, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
-import { generateThreadTitle } from "./thread-title-generate.ts"; import { createHandedThreadTitle } from "./host/handed-thread-title.ts"; import { handedMainThread, postHandedLine, writeHandedLine, type HandedLineDeps } from "./host/handed-line.ts";
+import { generateThreadTitle } from "./thread-title-generate.ts"; import { createHandedThreadTitle, standingWorkTitle } from "./host/handed-thread-title.ts"; import { handedMainThread, postHandedLine, writeHandedLine, type HandedLineDeps } from "./host/handed-line.ts";
 import { engineCommandCpuMs, engineProcessExited, engineProcessGone, ENGINE_EXIT_STALL_MS, stallLimitMs, stallNotice, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts"; import { createDispatchClaims } from "./host/dispatch-claims.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import { createPhoneHold } from "./phone-screen/hold.ts"; import { createPhoneGate } from "./routes/phone-gate.ts";
@@ -2091,8 +2091,8 @@ function waitEventBase(threadId: string) {
   return { eventId: newId(), provider: instance?.driverKind ?? "harness", ...(instance && selection ? { providerInstanceId: selection.instanceId } : {}), threadId, createdAt: new Date().toISOString() };
 }
 
-function holderOfTurn({ threadId }: TurnOwner): { holder?: ComputerHolder; threadRef?: { botId: string; threadId: string; title: string } } {
-  const bot = store.botByThread(threadId), task = bot && store.taskByThread(bot.id, threadId), room = !bot ? store.groupByThread(threadId) : null;
+function holderOfTurn({ threadId }: TurnOwner, waitingThreadId: string): { holder?: ComputerHolder; threadRef?: { botId: string; threadId: string; title: string } } {
+  if (!threadReadableFrom(waitingThreadId)(threadId)) return {}; const bot = store.botByThread(threadId), task = bot && store.taskByThread(bot.id, threadId), room = !bot ? store.groupByThread(threadId) : null;
   return { holder: bot ? { name: bot.name, ...(task?.title ? { task: task.title } : {}) } : room ? { name: room.name } : undefined, threadRef: bot && task?.title ? { botId: bot.id, threadId: task.threadId, title: task.title } : undefined };
 }
 
@@ -2140,7 +2140,7 @@ async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = 
         const position = turnResources.startWaiting(resource, owner);
         const estimateMs = turnResources.waitEstimateMs(resource);
         const blocker = turnResources.blocker(resource, owner);
-        ({ holder, threadRef: holderThreadRef } = blocker ? holderOfTurn(blocker) : { holder: sharedVm.personHolds(resource) ? { name: "A person" } : undefined, threadRef: undefined });
+        ({ holder, threadRef: holderThreadRef } = blocker ? holderOfTurn(blocker, owner.threadId) : { holder: sharedVm.personHolds(resource) ? { name: "A person" } : undefined, threadRef: undefined });
         waitingMessage = store.appendMessage(owner.threadId, {
           role: "bot", kind: "activity",
           tool: { name: computerWaitingText(holder, { position, estimateMs }) },
@@ -3706,9 +3706,9 @@ function coordinationSystemInstructions(): string {
 const threadReadableFrom = (threadId: string) => (other: string): boolean => !proactive.fence.confines(other) && !botApiThread(other) && (CLOUD_TEAM ? teamHost.readableFrom(threadId)(other) : !CLOUD_HOME || cloudOwnerOnlyThread(other));
 const queuedDeps = { botName: (id: string) => store.bot(id)?.name, threadBusy, groupTurn: (id: string) => Boolean(activeGroupTurnForBot(id)), behindPerson: queuedBehindPerson,
   waitsForComputer: (node: HandoffView) => parkedSeatTaken(node.id),
-  slots: (id: string) => ({ busy: store.tasks(id).filter((task) => threadBusy(id, task.threadId)).map(({ threadId, title }) => ({ threadId, title })), limit: maxConcurrentChildThreads(cfg, botThreadsHost(cloudPlanTier.starter())) }) }; const queuedStatus = createQueuedReason(queuedDeps), queuedNotes = createQueuedNotes({ ...queuedDeps, now: Date.now, language: (threadId) => threadLanguage(threadId), parent: (node) => node.parentId ? coordinator.node(node.parentId) : undefined, node: (id) => coordinator.node(id), post: (parent, node, line) => { const bot = store.bot(node.botId), title = store.taskByThread(node.botId, node.threadId)?.title; store.appendMessage(parent.threadId, { role: "bot", kind: "activity", ...(bot ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}), tool: { name: line, ok: true }, ...(title ? { threadRef: { botId: node.botId, threadId: node.threadId, title } } : {}) }); } });
+  slots: (id: string) => ({ busy: store.tasks(id).filter((task) => threadBusy(id, task.threadId)).map(({ threadId, title }) => ({ threadId, title })), limit: maxConcurrentChildThreads(cfg, botThreadsHost(cloudPlanTier.starter())) }) }; const queuedStatus = createQueuedReason(queuedDeps), queuedNotes = createQueuedNotes({ ...queuedDeps, behindPerson: (node) => { const card = queuedBehindPerson(node), parent = node.parentId ? coordinator.node(node.parentId) : undefined; return card && parent && threadReadableFrom(parent.threadId)(card.threadId) ? card : undefined; }, now: Date.now, language: (threadId) => threadLanguage(threadId), parent: (node) => node.parentId ? coordinator.node(node.parentId) : undefined, node: (id) => coordinator.node(id), post: (parent, node, line) => { const bot = store.bot(node.botId), title = threadReadableFrom(parent.threadId)(node.threadId) ? store.taskByThread(node.botId, node.threadId)?.title : undefined; store.appendMessage(parent.threadId, { role: "bot", kind: "activity", ...(bot ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}), tool: { name: line, ok: true }, ...(title ? { threadRef: { botId: node.botId, threadId: node.threadId, title } } : {}) }); } });
 const asksActingPerson = createAsksActingPerson({ team: Boolean(CLOUD_TEAM), requester: (threadId, generation) => actingPeople.requester(threadId, generation), askedPerson: (botId, threadId) => teamOwners.routing.askedPerson(botId, threadId) });
-const teammatePrompts = createTeammatePrompts({ store, asksActingPerson, outstandingDirect: (threadId) => coordinator.outstandingDirect(threadId), openPersonCard, queuedStatus, isUnattended, fullAccess: fullAccessForSource, startedOutside, guestDriven: cloudGuestDriven, confined: (threadId) => proactive.fence.confines(threadId), readableFrom: threadReadableFrom, waitingForPerson: (chief, teammates, readable) => questionRouting.waitingForPerson(chief, teammates, readable) });
+const teammatePrompts = createTeammatePrompts({ store, asksActingPerson, outstandingDirect: (threadId) => coordinator.outstandingDirect(threadId), openPersonCard, queuedStatus: (node, threadId) => queuedStatus(node, undefined, threadReadableFrom(threadId)), isUnattended, fullAccess: fullAccessForSource, startedOutside, guestDriven: cloudGuestDriven, confined: (threadId) => proactive.fence.confines(threadId), readableFrom: threadReadableFrom, waitingForPerson: (chief, teammates, readable) => questionRouting.waitingForPerson(chief, teammates, readable) });
 
 function queuedBehindPerson(node: HandoffView): { threadId: string; kind: PersonWaitKind; title: string } | undefined {
   if (node.groupId || node.status !== "queued" || threadBusy(node.botId, node.threadId) || !botAtThreadCapacity(node.botId, undefined, true)) return undefined;
@@ -3727,7 +3727,7 @@ function noteQueuedBehindPerson(node: HandoffView): void {
   const card = queuedBehindPerson(node);
   const parent = node.parentId ? coordinator.node(node.parentId) : undefined;
   const bot = store.bot(node.botId);
-  if (!card || !parent || !bot) return;
+  if (!card || !parent || !bot || !threadReadableFrom(parent.threadId)(card.threadId)) return;
   for (const id of queuedBehindPersonNoted) if (coordinator.node(id)?.status !== "queued") queuedBehindPersonNoted.delete(id);
   queuedBehindPersonNoted.add(node.id);
   store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
@@ -3918,7 +3918,7 @@ const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store
         },
         ...(child.groupId ? { comm: { groupId: child.groupId, threadId: child.threadId, withBotId: child.botId,
           withName: bot?.name ?? "Teammate", withColor: bot?.color ?? "blue" } }
-          : { threadRef: { botId: child.botId, threadId: child.threadId, title: store.taskByThread(child.botId, child.threadId)?.title ?? "Teammate work" } }),
+          : { threadRef: { botId: child.botId, threadId: child.threadId, title: (threadReadableFrom(parent.threadId)(child.threadId) ? store.taskByThread(child.botId, child.threadId)?.title : undefined) ?? "Teammate work" } }),
       });
       if (group) store.markGroupThreadUnread(group.id, child.threadId, true);
       else {
@@ -3969,7 +3969,7 @@ const handedLines: HandedLineDeps | undefined = CLOUD_TEAM ? undefined : { store
       if (node.restart === "rerun" && !group && parent && !parent.groupId) store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
         tool: noticeTool("chat.notice.cutOffByRestart", { name: bot.name }, { ok: true }),
-        threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work" } });
+        threadRef: { botId: bot.id, threadId: node.threadId, title: (threadReadableFrom(parent.threadId)(node.threadId) ? store.taskByThread(bot.id, node.threadId)?.title : undefined) ?? "Teammate work" } });
       if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
       if (!group) return new Promise<HostTurnResult>(resolve => {
         let done = false;
@@ -13016,7 +13016,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
         ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)), mainThreadTasks,
         shown: (id) => !proactive.fence.confines(id) && !botApiThread(id) && (CLOUD_TEAM ? teamHost.readableFrom(internalCapability.threadId)(id) : cloudLendingView(internalCapability) ? cloudOwnerOnlyThread(id) : true),
-        threadBusy, queuedThreadPosition, queuedReason: queuedStatus, readBody: readInternalBody,
+        threadBusy, queuedThreadPosition, queuedReason: (node, showTitle) => queuedStatus(node, showTitle, threadReadableFrom(internalCapability.threadId)), readBody: readInternalBody,
       }), createToolTimingRoute(usageTrace, internalCapability.threadId)], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/attach-file") {
         const from = internalSender;
@@ -13547,7 +13547,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               const opened = { botId: internalSender.id, name: internalSender.name, threadId: address.threadId, at: Date.now(), ...(lends ? { forOwner: true as const } : {}) }, startedFor = (created: { threadId: string }) => threadStarters.set(created.threadId, opener), level = call.ownThread ? call.ownThread.approvalMode : EXTERNAL || mode === "consult" ? undefined : ownThreads.levelFor(recipient, undefined, address);
               const task = continued ?? (fresh
                 ? store.createTask(target.botId, call.title ?? (call.message.replace(/\s+/g, " ").trim().slice(0, 60) || `From ${internalSender.name}`), false, call.projectId, call.oneShot ? { ...opened, oneShot: true as const } : opened, level, call.ownThread?.modelSelection, folder.cwd, startedFor)
-                : store.createTask(target.botId, `@${internalSender.name} · work`, false, undefined, { ...opened, kind: "work" }, level, undefined, folder.cwd, startedFor));
+                : store.createTask(target.botId, standingWorkTitle(internalSender.name, call.message, call.title), false, undefined, { ...opened, kind: "work" }, level, undefined, folder.cwd, startedFor));
               if (!task) throw new Error("The recipient no longer exists");
               target.threadId = task.threadId;
               if (!continued) createdThread = task.threadId;
@@ -13563,11 +13563,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!duplicate && call.files?.length) handoffFiles.sent(node.id, { botId: internalSender.id, name: internalSender.name }, call.files);
             if (!duplicate && continued) reopenHandedThread(store, target.botId, continued); if (duplicate && createdThread) store.deleteTask(target.botId, createdThread);
             else if (createdThread) {
-              threadStarters.set(createdThread, opener); if (via === "direct" && !(fresh && call.title)) titleHandedThread(target.botId, createdThread, call.message, fresh ? "" : `@${internalSender.name} · `);
+              threadStarters.set(createdThread, opener); if (via === "direct" && !call.title) titleHandedThread(target.botId, createdThread, call.message, fresh ? undefined : internalSender.name);
               if (fresh && !EXTERNAL) internalCapability.openedThreads += 1;
             }
             createdThread = undefined;
-            const title = via === "room" ? undefined : store.taskByThread(node.botId, node.threadId)?.title;
+            const title = via === "room" || !threadReadableFrom(address.threadId)(node.threadId) ? undefined : store.taskByThread(node.botId, node.threadId)?.title;
             const finished: Partial<Record<HandoffView["status"], string>> = {
               completed: "it already finished and its result stands; send it with rework=true to run it again",
               failed: "it failed; send it with rework=true to retry", cancelled: "it was cancelled; send it with rework=true to retry",
@@ -13591,7 +13591,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (!duplicate) {
               if (!EXTERNAL) delegatedThisTurn(node.id); if (handedLines && via === "direct" && !post && !call.answers && recipient.id !== internalSender.id) writeHandedLine(() => postHandedLine(handedLines, { botId: recipient.id, threadId: node.threadId, from: { botId: internalSender.id, name: internalSender.name }, text: call.message, ...(call.title ? { title: call.title } : {}) }), (line) => console.error(line));
               const sentRowId = post ? undefined : store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via, language: threadLanguage(address.threadId),
-                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title, ...handoffFiles.sentWith(node.id) })).id; if (sentRowId && via !== "room") handoffStatus.track(node.id, address.threadId, sentRowId);
+                reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title, ...handoffFiles.sentWith(node.id) })).id; if (sentRowId && via !== "room") handoffStatus.track(node.id, address.threadId, sentRowId);
             }
           } catch (error) {
             if (createdThread) store.deleteTask(target.botId, createdThread);
@@ -13616,7 +13616,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const fromThreadId = internalCapability.threadId;
         if (!connectorThread(internalSender.id, fromThreadId)) return json(res, 403, { error: "source conversation does not belong to sender" });
         type Row = NonNullable<ReturnType<Coordinator["status"]>>["assignment"];
-        const queuedWaiting = (id: string) => { const node = coordinator.node(id); return node?.status === "queued" ? { waiting: queuedStatus(node) } : {}; };
+        const queuedWaiting = (id: string) => { const node = coordinator.node(id); return node?.status === "queued" ? { waiting: queuedStatus(node, undefined, threadReadableFrom(fromThreadId)) } : {}; };
         const shape = (a: Row) => ({
           id: a.id, botId: a.assignee.botId, botName: store.bot(a.assignee.botId)?.name ?? a.assignee.botId, status: a.status,
           ...(a.outcome !== undefined ? { outcome: a.outcome } : {}), ...(a.outcomeDetail !== undefined ? { outcomeDetail: a.outcomeDetail } : {}),

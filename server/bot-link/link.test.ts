@@ -407,7 +407,7 @@ describe("the link between a computer and its Cloud", () => {
     await computer.handOff("local-writer", call(["Analyst"], "Now the refunds"));
     await until(() => computer.results.length === 2, "the second result is back");
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst").map((run) => run.threadId)).toEqual(["cloud-analyst-work-1", "cloud-analyst-work-1"]);
-    expect(cloud.opened).toEqual([{ threadId: "cloud-analyst-work-1", title: "@Writer · work", from: "Writer", brief: "Count the orders" }]);
+    expect(cloud.opened).toEqual([{ threadId: "cloud-analyst-work-1", title: "@Writer · Count the orders", from: "Writer", brief: "Count the orders" }]);
     // One line per hand-off in the Cloud bot's main chat, each pointing at the thread its work ran in.
     expect(cloud.handed).toEqual([
       { botId: "cloud-analyst", threadId: "cloud-analyst-work-1", from: { botId: expect.stringContaining("local-writer"), name: "Writer" }, text: "Count the orders" },

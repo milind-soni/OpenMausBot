@@ -14,7 +14,7 @@ export interface TeammatePromptDeps {
   store: Pick<Store, "bots" | "bot">;
   outstandingDirect(threadId: string): readonly HandoffView[];
   openPersonCard(threadId: string): Pick<PersonWait, "kind" | "label"> | undefined;
-  queuedStatus(node: HandoffView): string;
+  queuedStatus(node: HandoffView, threadId: string): string;
   isUnattended(botId: string, threadId: string): boolean;
   fullAccess(botId: string, threadId: string): boolean;
   /** The work in this thread was started by an outside event. */
@@ -60,7 +60,7 @@ export function createTeammatePrompts(deps: TeammatePromptDeps) {
     const listed = pending.map((node) => {
       const card = node.status === "queued" ? undefined : deps.openPersonCard(node.threadId);
       return { requestId: node.id, bot: store.bot(node.botId)?.name ?? "Teammate", threadId: node.threadId, assignment: node.text.slice(0, 1_000),
-        status: node.status === "queued" ? deps.queuedStatus(node)
+        status: node.status === "queued" ? deps.queuedStatus(node, threadId)
           : card?.kind === "question" ? "stopped on its question in that teammate's thread; once you have the answer, send it there with coordinate_bots, or tell the person to open it"
           : card ? "stopped on a card waiting for the person in that teammate's thread; tell the person to open it" : "working on it now",
         ...(card?.kind === "question" && card.label ? { question: escapeNotes(card.label).slice(0, 400) } : {}) };

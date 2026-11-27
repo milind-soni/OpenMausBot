@@ -281,7 +281,7 @@ it("gives work her own message hands to another bot her own Gmail, and never wor
 
 it("runs work her group-chat line hands on in the receiving bot's chat with her, and the room gets only where the result is", async () => {
   // What her Gmail brought back: the handed-on work's reply holds it (the envelope it is sent in opens "Brief from @Scout:").
-  const SECRET = "Q3 salary review 7731";
+  const SECRET = "Q3 salary review 7731", TITLE_SECRET = "Private title marker 9418";
   writeFileSync(join(team.home, "marker-replies.json"), JSON.stringify({ "Brief from @Scout:": `Ada's latest email: ${SECRET}.` }));
   try {
     const created = await team.as(owner, "POST", "/api/bots", { name: "Clerk", visibility: "everyone" });
@@ -293,7 +293,7 @@ it("runs work her group-chat line hands on in the receiving bot's chat with her,
     const clerkReplied = async () => ((await messages(ada, roomThread)).body.messages as Array<{ roomRequest?: { phase?: string }; tool?: { name?: string } }>)
       .filter((message) => message.roomRequest?.phase === "result" && message.tool?.name === "Clerk replied").length;
     const before = gmailCallsBy(adaUser), teamBefore = gmailCallsBy(teamUser);
-    const handOn = { name: "coordinate_bots", server: "agents", input: { bot_ids: [clerk.id], message: "Fetch Ada's latest email." } };
+    const handOn = { name: "coordinate_bots", server: "agents", input: { bot_ids: [clerk.id], message: `Fetch Ada's latest email. ${TITLE_SECRET}` } };
     await turn(ada, roomThread, "@Scout have Clerk fetch my latest email", { room: roomId, calls: [handOn, gmailCall("own_apps")] });
     // Clerk's work is done once Scout, resumed with it in the room, has finished too: everyone idle two polls running.
     let quiet = false;
@@ -319,16 +319,26 @@ it("runs work her group-chat line hands on in the receiving bot's chat with her,
     expect(room.status, "Cleo reads the group chat").toBe(200);
     expect(JSON.stringify(room.body)).toContain(`Done. The result is in Clerk's chat with ${ADA.email}.`);
     expect(JSON.stringify(room.body)).not.toContain(SECRET);
+    const workTitleRefs = (body: { messages: Array<{ threadRef?: { title?: string } }> }) => body.messages.map((message) => message.threadRef?.title);
+    expect(workTitleRefs(room.body).some((title) => title?.includes(TITLE_SECRET))).toBe(false);
+    const adaBots = (await team.as(ada, "GET", "/api/bots?messages=0")).body;
+    const adaWork = (adaBots.bots as Array<{ tasks?: Array<{ threadId: string; title: string }> }>).flatMap((entry) => entry.tasks ?? []).find((task) => task.threadId === work);
+    expect(adaWork?.title).toContain(TITLE_SECRET);
 
     // Cleo sees it in no thread and no list; the admins see what they always did, which is none of Ada's chats.
     for (const token of [cleo, admin, owner]) expect((await messages(token, work!)).status).toBe(404);
     const chatsOf = (body: { bots: Array<{ id: string; tasks?: Array<{ threadId: string }> }> }) => body.bots.find((entry) => entry.id === clerk.id)?.tasks?.map((task) => task.threadId) ?? [];
-    const listed = await team.as(cleo, "GET", "/api/bots");
+    const listed = await team.as(cleo, "GET", "/api/bots?messages=0");
     expect(chatsOf(listed.body), "not among Clerk's chats Cleo is shown").not.toContain(work);
-    expect(chatsOf((await team.as(ada, "GET", "/api/bots")).body), "among Ada's").toContain(work);
+    expect(chatsOf(adaBots), "among Ada's").toContain(work);
     expect(JSON.stringify(listed.body)).not.toContain(SECRET);
+    expect(JSON.stringify(listed.body)).not.toContain(TITLE_SECRET);
     const threads = (listed.body.bots as Array<{ tasks?: Array<{ threadId: string }> }>).flatMap((entry) => (entry.tasks ?? []).map((task) => task.threadId));
-    for (const threadId of new Set([...threads, roomThread])) expect(JSON.stringify((await messages(cleo, threadId)).body), threadId).not.toContain(SECRET);
+    for (const threadId of new Set([...threads, roomThread])) {
+      const { body } = await messages(cleo, threadId);
+      expect(JSON.stringify(body), threadId).not.toContain(SECRET);
+      expect(workTitleRefs(body).some((title) => title?.includes(TITLE_SECRET)), threadId).toBe(false);
+    }
     expect(JSON.stringify((await team.as(cleo, "GET", "/api/inbox")).body)).not.toContain(SECRET);
     expect(JSON.stringify((await team.as(cleo, "GET", "/api/groups")).body)).not.toContain(SECRET);
   } finally {

@@ -603,7 +603,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       expect(replied.tool.output).toBe("hello from fake acp");
       expect(chip(askerBot.messages, "Resumed with Helper results, reviewing")).toBeTruthy();
 
-      expect(helperBot.tasks.find((task: any) => task.threadId === work.threadId)?.title).toBe("@Asker · work");
+      expect(helperBot.tasks.find((task: any) => task.threadId === work.threadId)?.title).toBe("@Asker · delegated task");
       const workMessages = await threadMessages(work.threadId);
       const inbound = workMessages.find((m: any) => m.roomRequest?.id === work.id && m.roomRequest.phase === "request");
       expect(inbound.from?.botId).toBe(asker.id);

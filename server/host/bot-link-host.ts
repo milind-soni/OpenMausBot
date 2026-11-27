@@ -34,7 +34,7 @@ export interface BotLinkHostDeps {
   kick(): void;
   level(bot: BotRecord): Level;
   /** A work thread a far bot opened here is named from the job it handed, behind "@Sender · ". */
-  titleHanded?(botId: string, threadId: string, brief: string, prefix: string): void;
+  titleHanded?(botId: string, threadId: string, brief: string, sender?: string): void;
   /** One line in the receiving bot's main chat for each hand-off the other place sends it (server/host/handed-line.ts). */
   handedLine?(input: { botId: string; threadId: string; from: { botId: string; name: string }; text: string }): void;
   refusal(bot: BotRecord): string | null;
@@ -108,7 +108,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     level: (bot) => deps.level(bot as BotRecord),
     openThread: (bot, title, opener, brief) => {
       const threadId = store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId;
-      if (threadId) deps.titleHanded?.(bot.id, threadId, brief, `@${opener.name} · `);
+      if (threadId) deps.titleHanded?.(bot.id, threadId, brief, opener.name);
       return threadId;
     },
     hasThread: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),

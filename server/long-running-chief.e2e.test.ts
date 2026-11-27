@@ -459,12 +459,8 @@ it("lets a card hold only its own job: other jobs run beside it, or say once who
   const jobK = await f.newJob("Changelog");
   await f.say(jobK, "PHASE-K-JOB: have Mira update the changelog.");
   await expect.poll(() => f.child(jobK, f.mira.id, "CHANGELOG")?.status, { timeout: 20_000 }).toBe("queued");
-  const behind = 'Queued for @Mira behind your approval in “@Clive · work”';
-  await expect.poll(async () => (await f.rows(jobK)).filter((name: string) => name === behind).length, { timeout: 20_000 }).toBe(1);
-  const notice = (await f.messages(jobK)).find((message: any) => message.tool?.name === behind);
-  expect(notice.tool.ok).toBe(true);
-  expect(notice.threadRef).toMatchObject({ botId: f.mira.id, threadId: cardThread });
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  const approvalNotices = async () => (await f.messages(jobK)).filter((message: any) => message.kind === "activity" && message.threadRef?.threadId === cardThread);
+  await expect.poll(approvalNotices, { timeout: 20_000 }).toMatchObject([{ tool: { ok: true }, threadRef: { botId: f.mira.id } }]);
   expect(f.child(jobK, f.mira.id, "CHANGELOG").status).toBe("queued");
 
   await f.respond(f.mira.id, cardThread, card, "allow");
@@ -473,7 +469,7 @@ it("lets a card hold only its own job: other jobs run beside it, or say once who
   expect(f.child(jobK, f.mira.id, "CHANGELOG")).toMatchObject({ status: "completed", result: "CHANGELOG-RESULT: updated." });
   expect((await f.rows(jobG)).filter((name: string) => name.includes("@Mira"))).toEqual(["@Mira got your approval"]);
   for (const threadId of [jobG, jobH]) expect((await f.rows(threadId)).filter((name: string) => name.startsWith("Queued for"))).toEqual([]);
-  expect((await f.rows(jobK)).filter((name: string) => name.startsWith("Queued for"))).toEqual([behind]);
+  expect(await approvalNotices()).toHaveLength(1);
   expect(f.turns(f.clive.id).map((record: any) => record.planKey).sort()).toEqual(["G0", "G1", "H0", "H1", "K0", "K1"]);
 }), hostTimeout(90_000));
 
