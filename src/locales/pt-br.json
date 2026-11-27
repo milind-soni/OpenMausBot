@@ -10841,7 +10841,7 @@
   "remote.diagnosis.route.off": "Nenhuma forma de acesso está ligada.",
   "remote.diagnosis.next.internet": "Verifique a conexão com a internet deste computador. O {app} tenta novamente sozinho.",
   "remote.diagnosis.next.vpn": "Uma VPN ou um firewall neste computador pode bloquear o {app} Relay.",
-  "remote.diagnosis.next.signIn": "Faça login novamente.",
+  "remote.diagnosis.next.signIn": "Entre em De qualquer lugar, pelo {app} em Celular e dispositivos. É um login separado de Sua conta.",
   "remote.diagnosis.next.wait": "Aguarde alguns minutos. O {app} tenta novamente sozinho.",
   "remote.diagnosis.next.removeComputer": "Remova da sua conta um computador que você não usa mais e tente novamente.",
   "remote.diagnosis.next.update": "Atualize o {app} e tente novamente.",

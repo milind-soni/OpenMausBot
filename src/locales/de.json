@@ -3549,6 +3549,7 @@
   "devices.route.wifi": "Gleiches WLAN",
   "devices.route.wifiDetail": "Geräte in diesem Netzwerk. Ende-zu-Ende-verschlüsselt.",
   "devices.route.relay": "Überall, über {app}",
+  "remote.diagnosis.next.signIn": "Melde dich unter Überall, über {app} in Telefon & Geräte an. Das ist eine eigene Anmeldung, getrennt von Dein Konto.",
   "devices.route.relayDetail": "Ende-zu-Ende-verschlüsselt. {app} kann es nicht lesen.",
   "devices.route.https": "HTTPS-Adresse",
   "devices.route.httpsDetail": "Eine kostenlose {app}-Webadresse, für Browser und andere Computer.",
