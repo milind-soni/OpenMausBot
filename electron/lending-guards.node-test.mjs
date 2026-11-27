@@ -474,9 +474,10 @@ test("another name for a hidden home entry (an 8.3 alias such as APPDAT~1, here 
   const home = await realpath(await mkdtemp(path.join(tmpdir(), "omb-alias-home-")));
   t.after(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, ".vimrc"), "set number\n");
-  await link(path.join(home, ".vimrc"), path.join(home, "VIMRC~1"));
+  // Windows gives .vimrc the short name VIMRC~1 itself, so the hard link takes a number it never hands out first.
+  await link(path.join(home, ".vimrc"), path.join(home, "VIMRC~7"));
   await mkdir(path.join(home, "Documents"));
   await writeFile(path.join(home, "notes.txt"), "plain\n");
-  for (const relative of ["VIMRC~1", "./VIMRC~1", ".bashrc", "AppData/Roaming/x.json"]) assert.equal(await homeSettingsTarget(home, relative), true, relative);
+  for (const relative of ["VIMRC~7", "./VIMRC~7", ".bashrc", "AppData/Roaming/x.json"]) assert.equal(await homeSettingsTarget(home, relative), true, relative);
   for (const relative of ["notes.txt", "Documents/plan.txt", "NEW~1/x.txt", ""]) assert.equal(await homeSettingsTarget(home, relative), false, relative);
 });
