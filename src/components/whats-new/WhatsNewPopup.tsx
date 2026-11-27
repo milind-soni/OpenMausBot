@@ -49,7 +49,7 @@ const TEAM_CLIP: Clips = { label: "whatsNew.team.videoLabel", focus: "object-[40
 /** The apps screen was filmed in the dark look only. */
 const APPS_CLIP: Clip = { video: appsClip, still: appsStill };
 const PICTURES: Record<"apps" | "pro" | "team" | "teamNews", Clips> = {
-  apps: { label: "whatsNew.apps.videoLabel", focus: "object-[50%_50%]", dark: APPS_CLIP, light: APPS_CLIP },
+  apps: { label: "whatsNew.apps.videoLabel", focus: "object-[6%_50%]", dark: APPS_CLIP, light: APPS_CLIP },
   pro: { label: "whatsNew.cloud.videoLabel", focus: "object-[50%_50%]", dark: { video: cloudDark, still: cloudDarkStill }, light: { video: cloudLight, still: cloudLightStill } },
   team: TEAM_CLIP, teamNews: TEAM_CLIP,
 };
