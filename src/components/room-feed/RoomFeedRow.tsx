@@ -7,6 +7,7 @@ import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { opensRowMenuFromKey } from "@/lib/bulk-select";
 import { intlLocale, t } from "@/lib/i18n";
 import { MAUS_COLOR_NAMES } from "@/lib/mascot";
+import { WORK_INK, type WorkStatus } from "@/lib/room-work";
 import type { Bot, ThreadCloser } from "@/state/store";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { BotAvatar } from "../Avatar";
@@ -37,6 +38,8 @@ export interface FeedRowData {
   archived?: boolean;
   /** Its work was marked finished; a new line opens it again. */
   closedBy?: ThreadCloser;
+  /** Where its piece of work stands, when a bot split it off as one. */
+  work?: WorkStatus | null;
 }
 
 /** What a thread row's menu does, the same as the sidebar's room thread rows. */
@@ -121,7 +124,9 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, groupId, bots, you, 
   const workingBot = row.workingBotId ? bots.find((bot) => bot.id === row.workingBotId) : undefined;
   const replies = row.replies === 1 ? t("room.feed.replyOne") : t("room.feed.replyMany", { count: row.replies });
   const markLabel = row.mark === "waiting" ? t("sidebar.preview.waiting") : row.mark === "unread" ? t("task.unread") : null;
-  const label = [speaker.name, text || t("room.feed.attachment"), row.replies > 0 ? replies : t("room.feed.noReplies"), row.closedBy ? t("task.closed") : null, markLabel].filter(Boolean).join(", ");
+  // A work status stands where "Closed" would; a bot working on it now is already said by the line under it.
+  const work = row.work && !row.archived && !(row.work.kind === "working" && row.working) ? row.work : null;
+  const label = [speaker.name, text || t("room.feed.attachment"), row.replies > 0 ? replies : t("room.feed.noReplies"), work ? work.label : row.closedBy ? t("task.closed") : null, markLabel].filter(Boolean).join(", ");
   const quiet = row.archived || Boolean(row.closedBy);
   const openMenuAt = (x: number, y: number) => setMenu(threadMenuAt(x, y));
   const rename = (title: string | null) => {
@@ -148,7 +153,8 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, groupId, bots, you, 
             className="shrink-0 text-[12px] font-medium leading-4 text-ink-tertiary tabular-nums">{threadUpdatedLabel(row.at, now)}</time>
           {row.pinned && <Pin size={11} data-feed-pinned="" className="shrink-0 self-center text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
           {row.archived ? <span className="min-w-0 truncate text-[12px] leading-4 text-ink-tertiary">{t("task.archived")}</span>
-            : row.closedBy && <span data-feed-closed="" className="min-w-0 truncate text-[12px] leading-4 text-ink-tertiary">{t("task.closed")}</span>}
+            : work ? <span data-feed-work={work.kind} className={cn("min-w-0 truncate text-[12px] leading-4", WORK_INK[work.kind])}>{work.label}</span>
+              : row.closedBy && <span data-feed-closed="" className="min-w-0 truncate text-[12px] leading-4 text-ink-tertiary">{t("task.closed")}</span>}
           {markLabel && <span aria-hidden="true" data-feed-mark={row.mark} title={markLabel}
             className={cn("size-2 shrink-0 self-center rounded-full", row.mark === "waiting" ? "bg-warning" : "bg-accent")} />}
         </div>

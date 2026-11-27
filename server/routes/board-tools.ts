@@ -1,6 +1,6 @@
 // The Team Board's bot tools (board_add, board_list, board_update), inside index.ts's /api/internal/ block, after the
-// capability bearer is checked: the bot and its thread are the capability's, never a body field. On a Team Cloud with
-// the board on only; anywhere else they answer 404 like an unknown path.
+// capability bearer is checked: the bot and its thread are the capability's, never a body field. On a Team Cloud only;
+// anywhere else they answer 404 like an unknown path.
 //   POST /api/internal/board/add      new room threads, each an item, needs given by keys of the same call
 //   POST /api/internal/board/list     the items of the rooms the bot is in
 //   POST /api/internal/board/update   the bot settles, asks about, sets aside, hands back or labels an item
@@ -23,7 +23,7 @@ export interface BoardRoom {
 
 export interface BoardToolDeps {
   board: Pick<Board, "list" | "get" | "create" | "patch" | "move">;
-  /** A Team Cloud with `features.teamBoard` on. */
+  /** A Team Cloud. */
   on(): boolean;
   requireActive(): void;
   botId(): string;
@@ -36,8 +36,8 @@ export interface BoardToolDeps {
   roomOf(threadId: string): BoardRoom | null;
   /** Opens a room thread without making it the room's current one, with `text` as the bot's first line there. */
   openThread(groupId: string, title: string, text: string, botId: string): string;
-  /** Posts the question as the bot's line in the thread and reaches the person's inbox; `person` is the asked person's key. */
-  ask(botId: string, threadId: string, question: string, to: { name?: string; key?: string }): { ok: boolean; text: string; person?: string };
+  /** Posts the question as the bot's line in the thread and reaches the person's inbox; `person` is the asked person's key and `name` their name. */
+  ask(botId: string, threadId: string, question: string, to: { name?: string; key?: string }): { ok: boolean; text: string; person?: string; name?: string };
   /** The result an item gets when its bot sets it aside once too often. */
   tooManyLaters(threadId: string): string;
   /** A minute; tests shorten it. */
@@ -105,6 +105,8 @@ export function createBoardToolRoutes(deps: BoardToolDeps): RouteHandler {
   }
 
   function add(botId: string, threadId: string, body: z.infer<typeof addSchema>): { status: number; text: string } {
+    // A piece of work is never split again from inside: a bot handed one cannot turn it into more billed turns.
+    if (deps.board.get(threadId)) return { status: 409, text: "This thread is already one piece of work: do it and finish with board_update instead of splitting it." };
     const room = roomFor(botId, threadId, body.room);
     if (typeof room === "string") return { status: 404, text: room };
     if (!room.memberIds.includes(botId)) return { status: 403, text: "You can add items only in a room you are in." };
@@ -200,7 +202,7 @@ export function createBoardToolRoutes(deps: BoardToolDeps): RouteHandler {
       if (item.state !== "working" || item.holder?.botId !== botId) return { status: 409, text: `This item is ${item.state.replace("_", " ")} and not yours to ask about now.` };
       const to = body.person?.trim() ? { name: body.person.trim() } : item.createdBy.kind === "person" ? { key: item.createdBy.id } : {};
       const reached = deps.ask(botId, item.threadId, text, to);
-      deps.board.patch(item.threadId, { move: { move: "ask", question: text, ...(reached.person ? { person: reached.person } : {}) }, ...(body.labels !== undefined ? { labels: body.labels } : {}) }, actor);
+      deps.board.patch(item.threadId, { move: { move: "ask", question: text, ...(reached.person ? { person: reached.person, ...(reached.name ? { name: reached.name } : {}) } : {}) }, ...(body.labels !== undefined ? { labels: body.labels } : {}) }, actor);
       return { status: 200, text: `${reached.text} The item waits on a person; end your turn now. When they answer in this thread you are started again here.` };
     }
     if (move === "later") {
@@ -232,7 +234,7 @@ export function createBoardToolRoutes(deps: BoardToolDeps): RouteHandler {
 
   return async ({ res, path, method, json }) => {
     if (path !== BOARD_TOOL_PATH && !path.startsWith(`${BOARD_TOOL_PATH}/`)) return PASS;
-    if (!deps.on()) return json(res, 404, { error: "The board is off here. Ask an Owner or Admin to turn on Board in Settings → Features." });
+    if (!deps.on()) return json(res, 404, { error: "Work items exist only on a Team Cloud." });
     if (method !== "POST") return json(res, 405, { error: "method not allowed" });
     deps.requireActive();
     const botId = deps.botId(), threadId = deps.threadId();

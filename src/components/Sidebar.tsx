@@ -1236,7 +1236,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       )}
     >
       <GlassScrollFrame className="flex-1" fade><PlaceTint />
-      <GlassBar edge="top">
+      <GlassBar edge="top" className="z-20">
       <div
         data-sidebar-top-row={corner ? "corner" : simpleDesk ? "simple" : true}
         className={cn(
@@ -1519,8 +1519,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           }}>
           <TeamMenuItems
             department={oneList?.virtual(teamMotion.value!.name) ? undefined : teamMotion.value!.name} onRead={closeTeamMenu} onAddBots={() => { closeTeamMenu(); const name = teamMotion.value!.name; void (oneList?.realize(name) ?? Promise.resolve()).then(() => setMoveToTeam(name), () => {}); }}
-            onMoveUp={sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(-1); } : undefined}
-            onMoveDown={sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(1); } : undefined}
+            onMoveUp={phone && sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(-1); } : undefined}
+            onMoveDown={phone && sections.interactive ? () => { layout.header(userSectionId(teamMotion.value!.name)).onMove(1); } : undefined}
             onRename={() => { closeTeamMenu(); (advanced && !oneList?.virtual(teamMotion.value!.name) ? setRenameTeam : botDrag.startRename)(teamMotion.value!.name); }}
             onShare={oneList?.virtual(teamMotion.value!.name) ? undefined : () => { closeTeamMenu(); setShareTeam(teamMotion.value!.name); }}
             onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMotion.value!.name); }}

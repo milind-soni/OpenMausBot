@@ -18,10 +18,8 @@ const BRIEF_TEXT_MAX = 2_000;
 
 export interface TeamBoardDeps {
   dataDir: string;
-  /** A Team Cloud. */
+  /** A Team Cloud: the board exists only there. */
   team: boolean;
-  /** `features.teamBoard`, read on every request. */
-  enabled(): boolean;
   store: Pick<Store, "group" | "groups" | "groupByThread" | "groupTaskByThread" | "createGroupTask" | "patchGroupTask" | "appendMessage" | "messagesFor" | "bot" | "onChange">;
   visible(auth: RequestAuth): VisibleSet;
   person(auth: RequestAuth): BoardPerson | null;
@@ -39,7 +37,7 @@ export interface TeamBoardDeps {
   /** startGroupTurn with this text, a non-person trigger and the bot as the one mentioned. */
   startTurn(groupId: string, threadId: string, botId: string, text: string, sender: ResolvedSender): void;
   /** Reaches the person's inbox with a bot's question (team-messages.ts `ask`). */
-  askPerson(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): { status: number; text: string; person?: string };
+  askPerson(botId: string, threadId: string, to: { name?: string; key?: string }, question: string, title: string): { status: number; text: string; person?: string; name?: string };
   /** A card in this thread waits on a person (person-waits.ts), which owns the thread's waiting state while it does. */
   cardWaiting(threadId: string): boolean;
   /** Multiplies the dispatcher's waits and a later's minute; only tests set it (OMB_BOARD_TIME_SCALE, up to 1,000). */
@@ -48,7 +46,7 @@ export interface TeamBoardDeps {
 
 export function createTeamBoard(deps: TeamBoardDeps) {
   const { store } = deps;
-  const on = () => deps.team && deps.enabled();
+  const on = () => deps.team;
   const scale = deps.timeScale && deps.timeScale > 0 && deps.timeScale <= 1_000 ? deps.timeScale : 1;
   const memberBots = (groupId: string) => {
     const room = store.group(groupId);
@@ -164,7 +162,7 @@ export function createTeamBoard(deps: TeamBoardDeps) {
         if (bot) store.appendMessage(threadId, { role: "bot", kind: "text", text: question, from: { botId: bot.id, name: bot.name, color: bot.color } });
         if (!to.name && !to.key) return { ok: false, text: "Nobody made this item to ask, so the question waits in this thread for anyone who sees it." };
         const asked = deps.askPerson(botId, threadId, to, question, line(threadId, "server.board.askTitle", { bot: bot?.name ?? botId, title: item?.title ?? "" }));
-        return { ok: asked.status === 200, text: asked.text, ...(asked.person ? { person: asked.person } : {}) };
+        return { ok: asked.status === 200, text: asked.text, ...(asked.person ? { person: asked.person, ...(asked.name ? { name: asked.name } : {}) } : {}) };
       },
       tooManyLaters: (threadId) => line(threadId, "server.board.tooManyLaters", { count: BOARD_LIMITS.latersMax }),
     }),
