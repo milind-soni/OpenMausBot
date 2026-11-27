@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs before every push, in seconds: lint on the files this push changes, the locale check when a catalog changed, and
+# the size and vocabulary guards when a source they read changed (scripts/pre-push-check.mjs). The typecheck and the
+# suite stay in CI. A checkout without dependencies, as an agent's worktree often is, checks nothing and lets the push go.
+#
+# Installed by `pnpm install` through scripts/install-git-hooks.mjs (sets core.hooksPath). Skip once with
+# `git push --no-verify`, or for a session with OMB_SKIP_HOOKS=1.
+if [ -n "$OMB_SKIP_HOOKS" ]; then
+  echo "pre-push: skipped (OMB_SKIP_HOOKS is set)"
+  exit 0
+fi
+cd "$(git rev-parse --show-toplevel)" || exit 0
+if [ ! -x node_modules/.bin/oxlint ] || [ ! -f scripts/pre-push-check.mjs ] || ! command -v node >/dev/null 2>&1; then
+  echo "pre-push: no dependencies in this checkout, so CI will check this push"
+  exit 0
+fi
+exec node scripts/pre-push-check.mjs

@@ -1,0 +1,200 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+:root {
+  --omb-bg: #ffffff;
+  --omb-raised: #f7f8f8;
+  --omb-ink: #0a0a0b;
+  --omb-muted: #5f6570;
+  --omb-line: #e5e7ea;
+  --omb-accent: #009957;
+  --omb-accent-soft: #eaf8f1;
+
+  --color-fd-background: var(--omb-bg);
+  --color-fd-foreground: var(--omb-ink);
+  --color-fd-muted: var(--omb-raised);
+  --color-fd-muted-foreground: var(--omb-muted);
+  --color-fd-border: var(--omb-line);
+  --color-fd-primary: var(--omb-accent);
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-card: var(--omb-bg);
+  --color-fd-card-foreground: var(--omb-ink);
+  --color-fd-secondary: var(--omb-raised);
+  --color-fd-secondary-foreground: var(--omb-ink);
+  --color-fd-accent: var(--omb-accent-soft);
+  --color-fd-accent-foreground: #006b3d;
+}
+
+.dark {
+  --omb-bg: #070708;
+  --omb-raised: #131315;
+  --omb-ink: #f4f4f5;
+  --omb-muted: #9a9aa4;
+  --omb-line: #232327;
+  --omb-accent: #3fae6e;
+  --omb-accent-soft: #10271a;
+
+  --color-fd-primary-foreground: #07130c;
+  --color-fd-accent-foreground: #7bd69e;
+}
+
+html {
+  scrollbar-gutter: stable;
+  background: var(--omb-bg);
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0 !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+body {
+  background:
+    radial-gradient(circle at 75% -20%, color-mix(in srgb, var(--omb-accent) 8%, transparent), transparent 32rem),
+    var(--omb-bg);
+  color: var(--omb-ink);
+  letter-spacing: -0.012em;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--omb-accent) 24%, transparent);
+}
+
+.omb-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.9rem;
+  font-weight: 660;
+  letter-spacing: -0.02em;
+}
+
+.omb-brand img {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 0.5rem;
+}
+
+.omb-brand-docs {
+  border-left: 1px solid var(--omb-line);
+  color: var(--omb-muted);
+  font-size: 0.78rem;
+  font-weight: 520;
+  letter-spacing: 0;
+  margin-left: 0.1rem;
+  padding-left: 0.7rem;
+}
+
+.omb-product-shot {
+  margin: 2rem 0;
+}
+
+.omb-product-shot-frame {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--omb-line) 88%, transparent);
+  border-radius: 1.25rem;
+  background: #0a0a0b;
+  box-shadow:
+    0 1px 1px color-mix(in srgb, var(--omb-ink) 5%, transparent),
+    0 22px 60px color-mix(in srgb, var(--omb-ink) 10%, transparent);
+}
+
+.omb-product-shot img {
+  display: block;
+  width: 100%;
+  max-height: 38rem;
+  object-fit: cover;
+}
+
+.omb-product-shot figcaption {
+  color: var(--omb-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin-top: 0.65rem;
+  text-align: center;
+}
+
+.omb-kicker {
+  color: var(--omb-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.omb-lede {
+  color: var(--omb-muted);
+  font-size: 1.08rem;
+  line-height: 1.75;
+  max-width: 44rem;
+}
+
+.omb-stat-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 1.75rem 0;
+}
+
+.omb-stat {
+  border: 1px solid var(--omb-line);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--omb-raised) 78%, transparent);
+  padding: 1rem;
+}
+
+.omb-stat strong,
+.omb-stat span {
+  display: block;
+}
+
+.omb-stat strong {
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.omb-stat span {
+  color: var(--omb-muted);
+  font-size: 0.78rem;
+  margin-top: 0.2rem;
+}
+
+#nd-sidebar,
+#nd-subnav {
+  background: color-mix(in srgb, var(--omb-bg) 92%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+#nd-sidebar {
+  border-right-color: var(--omb-line);
+}
+
+#nd-subnav {
+  border-bottom-color: var(--omb-line);
+}
+
+.prose :where(h2, h3, h4) {
+  letter-spacing: -0.035em;
+}
+
+.prose :where(a:not([data-card])) {
+  text-decoration-color: color-mix(in srgb, var(--omb-accent) 45%, transparent);
+  text-underline-offset: 0.2em;
+}
+
+.prose :where(table) {
+  overflow: hidden;
+  border: 1px solid var(--omb-line);
+  border-radius: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .omb-stat-row {
+    grid-template-columns: 1fr;
+  }
+
+  .omb-product-shot-frame {
+    border-radius: 0.9rem;
+  }
+}

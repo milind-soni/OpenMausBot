@@ -1,0 +1,135 @@
+import type { YourComputerCall } from "../shared/your-computer.ts";
+
+export interface AutoVmClaimOwner {
+  threadId: string;
+  generation: string;
+}
+
+export interface AutoVmClaimSlot {
+  owner: AutoVmClaimOwner;
+  /** Bind, lease, boot; again only after a network failure. `call` is what the first screen call would open. */
+  claim: (call?: YourComputerCall) => Promise<void>;
+  /** Set by startAutoVmClaim; presence means the claim already fired. */
+  begin?: Promise<void>;
+  /** The fired claim rejected; the slot stays so the gate keeps refusing screen calls instead of forwarding them to an unclaimed VM. */
+  failed?: boolean;
+  failure?: string;
+  /** What went wrong in the computer's own words, when `failure` is the line the person sees. */
+  cause?: string;
+  /** The plan's limit that turned the computer away, as one sentence for the bot: said in place of `cause`. */
+  limit?: string;
+  /** The claim waited out the computer wait ceiling: what the screen calls hear instead of a start failure. */
+  parked?: string;
+  /** The failure took the conversation's automatic pick off this computer. */
+  backOnAuto?: boolean;
+  /** The last claim failed on the network; the next screen call claims again. */
+  retryReason?: string;
+  attempts?: number;
+  claimed?: boolean;
+  /** Dispatch mounted the computer tools without claiming, so the gate fires the claim on the first screen call. */
+  lazy?: boolean;
+  label?: string;
+  localVm?: boolean;
+  /** A Self-hosted VPS desktop: where vm_exec runs its commands once the claim holds it. */
+  vps?: { sshAlias: string; container: string };
+  pendingReason?: string;
+  boxId?: string;
+  startsComputer?: true;
+  /** Called once after the slot is marked failed, unless the person declined; the fail-closed refusal does not depend on it firing. */
+  onRejected?: (failure: string, error?: unknown) => void;
+}
+
+export type AutoVmClaimTable = Map<string, AutoVmClaimSlot>;
+
+export const MAX_CLAIM_ATTEMPTS = 3;
+const NETWORK_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT"]);
+
+/** A claim that never got an answer: marked `transient`, a fetch timeout, or Node's fetch failing on a socket error (its `cause`). */
+export function transientClaimFailure(error: unknown): boolean {
+  for (let current = error, depth = 0; current && typeof current === "object" && depth < 4; current = (current as { cause?: unknown }).cause, depth++) {
+    const failure = current as { transient?: unknown; name?: unknown; code?: unknown };
+    if (failure.transient === true || failure.name === "TimeoutError" || (typeof failure.code === "string" && NETWORK_CODES.has(failure.code))) return true;
+  }
+  return false;
+}
+
+/** Keeps a claim's network failure recognizable through a wrapper that rewords it for the person. */
+export function keepTransient(original: unknown, shown: unknown): unknown {
+  return shown instanceof Error && transientClaimFailure(original) ? Object.assign(shown, { transient: true }) : shown;
+}
+
+/** Once per dispatch generation, or again after a network failure, at most MAX_CLAIM_ATTEMPTS times. Any other rejection keeps
+ * its slot marked failed, and a rejection mutates only the slot it fired from, so a stale claim never touches a newer generation's. */
+export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, generation: string, call?: YourComputerCall): void {
+  const slot = table.get(threadId);
+  if (!slot || slot.owner.threadId !== threadId || slot.owner.generation !== generation || slot.begin || slot.failed) return;
+  const attempt = (slot.attempts ?? 0) + 1;
+  slot.attempts = attempt;
+  slot.retryReason = undefined;
+  const begin: Promise<void> = slot.claim(call).then(
+    () => { slot.claimed = true; },
+    (error: unknown) => {
+      const failure = error instanceof Error ? error.message : String(error);
+      // A computer MausBot keeps bringing back by itself (`keepsTrying`) is never given up on for the turn.
+      if (transientClaimFailure(error) && (attempt < MAX_CLAIM_ATTEMPTS || (error as { keepsTrying?: unknown } | null)?.keepsTrying === true)) {
+        slot.retryReason = failure;
+        if (slot.begin === begin) slot.begin = undefined;
+        return;
+      }
+      slot.failed = true;
+      slot.failure = failure;
+      const parked = (error as { parkedRefusal?: unknown } | null)?.parkedRefusal;
+      if (typeof parked === "string") slot.parked = parked;
+      // A person's No is an answer, not a failure: the screen calls say so, and nothing reports a broken turn.
+      if ((error as { declined?: unknown } | null)?.declined !== true) slot.onRejected?.(slot.failure, error);
+    },
+  );
+  slot.begin = begin;
+}
+
+/** The turn's cloud computer `replacedBoxId` was replaced: the slot claims again, which starts the owner's new computer,
+ * and this waits for that until `until`. The new computer's id once it answers; null while it is still starting (the
+ * claim goes on, and the turn's next call waits for it), or when the claim failed or this slot never claimed one. */
+export async function reclaimAutoVm(table: AutoVmClaimTable, owner: AutoVmClaimOwner, replacedBoxId: string, until: number, signal?: AbortSignal): Promise<string | null> {
+  const slot = table.get(owner.threadId);
+  if (!slot || slot.owner.generation !== owner.generation || !slot.lazy || !slot.startsComputer) return null;
+  // Only the first call to see the replacement starts the claim again; later ones wait on that same claim.
+  if (slot.claimed && slot.boxId === replacedBoxId) {
+    Object.assign(slot, { claimed: false, begin: undefined, attempts: 0, boxId: undefined, retryReason: undefined });
+  }
+  startAutoVmClaim(table, owner.threadId, owner.generation);
+  if (!slot.claimed) await settledWithin(slot.begin ?? null, until - Date.now(), signal);
+  return slot.claimed && slot.boxId && slot.boxId !== replacedBoxId ? slot.boxId : null;
+}
+
+/** What every screen call hears for the rest of a turn whose computer could not be claimed. */
+export function lazyClaimFailedText(slot: Pick<AutoVmClaimSlot, "label" | "failure" | "cause" | "limit" | "startsComputer" | "backOnAuto" | "parked">): string {
+  if (slot.parked) return slot.parked;
+  const label = slot.label ?? "this computer";
+  const why = (slot.cause ?? slot.failure)?.trim().replace(/[\s.]+$/, "");
+  if (!slot.startsComputer) {
+    return `This turn could not claim ${label}${why ? ` (${why})` : ""}. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do.`;
+  }
+  const started = `${label.charAt(0).toUpperCase()}${label.slice(1)} could not be started`;
+  return `${slot.limit ? `${started}. ${slot.limit}` : `${started}${why ? `: ${why}` : ""}.`} This call was not performed.` +
+    `${slot.backOnAuto ? " This conversation is back on Auto." : ""} Do not retry computer work in this turn; tell the person what you could not do.`;
+}
+
+export function lazyClaimRetryText(slot: Pick<AutoVmClaimSlot, "label" | "retryReason">): string {
+  return `This turn could not reach ${slot.label ?? "this computer"} just now (${slot.retryReason}). This call was not performed; try it again in a moment.`;
+}
+
+export function settledWithin(work: Promise<unknown> | null, ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); signal?.removeEventListener("abort", done); resolve(); };
+    const timer = setTimeout(done, Math.max(0, ms));
+    signal?.addEventListener("abort", done, { once: true });
+    work?.then(done, done);
+  });
+}
+
+export function withinBudget<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  return Promise.race([work, expired]).finally(() => clearTimeout(timer));
+}

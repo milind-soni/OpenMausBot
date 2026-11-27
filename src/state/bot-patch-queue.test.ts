@@ -1,0 +1,500 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
+import type { Bot, BotAnnouncement } from "./store";
+
+const bot = (overrides: Partial<Bot> = {}): Bot => ({
+  id: "bot-1",
+  threadId: "thread-1",
+  name: "Maus",
+  title: "Helper",
+  description: "",
+  notifications: true,
+  color: "green",
+  unread: false,
+  modelSelection: { instanceId: "fixture", model: "default" },
+  messages: [],
+  ...overrides,
+});
+
+interface DeferredBot {
+  promise: Promise<BotAnnouncement>;
+  resolve: (value: BotAnnouncement) => void;
+  reject: (error: Error) => void;
+}
+
+const deferredBot = (): DeferredBot => {
+  let resolve!: DeferredBot["resolve"];
+  let reject!: DeferredBot["reject"];
+  const promise = new Promise<BotAnnouncement>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+};
+
+describe("bot patch queue", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("starts approval, model and connector grant changes immediately instead of debouncing execution settings", async () => {
+    const send = vi.fn(async () => bot());
+    const queue = createBotPatchQueue({
+      send,
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { approvalMode: "ask" }, bot({ approvalMode: "auto" }));
+    await vi.runAllTicks();
+    expect(send).toHaveBeenCalledWith(
+      "bot-1",
+      { approvalMode: "ask" },
+      expect.any(AbortSignal),
+      expect.objectContaining({ approvalMode: "auto" }),
+      false,
+    );
+
+    await queue.flush("bot-1");
+    queue.enqueue(
+      "bot-1",
+      { modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" } },
+      bot(),
+    );
+    await vi.runAllTicks();
+    expect(send).toHaveBeenLastCalledWith(
+      "bot-1",
+      { modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" } },
+      expect.any(AbortSignal),
+      expect.objectContaining({ id: "bot-1" }),
+      false,
+    );
+
+    await queue.flush("bot-1");
+    queue.enqueue(
+      "bot-1",
+      { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } } },
+      bot(),
+    );
+    await vi.runAllTicks();
+    expect(send).toHaveBeenLastCalledWith(
+      "bot-1",
+      { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } } },
+      expect.any(AbortSignal),
+      expect.objectContaining({ id: "bot-1" }),
+      false,
+    );
+  });
+
+  it("aborts an in-flight trusted grant when a newer approval level arrives", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const signals: AbortSignal[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch, signal) => {
+        sent.push(patch);
+        signals.push(signal);
+        if (sent.length === 1) {
+          await new Promise<never>((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("superseded", "AbortError")),
+              { once: true },
+            );
+          });
+        }
+        return bot({ approvalMode: patch.approvalMode });
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue(
+      "bot-1",
+      { approvalMode: "full" },
+      bot({ approvalMode: "ask" }),
+    );
+    await vi.runAllTicks();
+    expect(signals[0]?.aborted).toBe(false);
+
+    queue.enqueue("bot-1", { approvalMode: "ask" }, bot({ approvalMode: "full" }));
+    expect(signals[0]?.aborted).toBe(true);
+    await vi.runAllTicks();
+    await queue.flush("bot-1");
+
+    expect(sent).toEqual([
+      { approvalMode: "full" },
+      { approvalMode: "ask" },
+    ]);
+  });
+
+  it("flush waits for the PATCH and returns the server-authoritative computer selection", async () => {
+    const request = deferredBot();
+    const send = vi.fn(async () => request.promise);
+    const queue = createBotPatchQueue({
+      send,
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { computer: "cloud", cloudBackend: "vps" }, bot());
+    const flushed = queue.flush("bot-1");
+    let settled = false;
+    void flushed.then(() => { settled = true; });
+    await Promise.resolve();
+
+    expect(send).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+
+    request.resolve(bot({ computer: "cloud", cloudBackend: "vps" }));
+    await expect(flushed).resolves.toMatchObject({ computer: "cloud", cloudBackend: "vps" });
+  });
+
+  it("coalesces upload then remove so an older avatar can never resurrect", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const authoritative = vi.fn();
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot({
+          ...patch,
+          computer: patch.computer ?? undefined,
+          connectorTools: patch.connectorTools ?? undefined,
+          connectorScopes: patch.connectorScopes ?? undefined,
+          phoneApps: patch.phoneApps ?? undefined,
+          defaultBot: patch.defaultBot ?? undefined,
+        });
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: authoritative,
+      onError: vi.fn(),
+    });
+
+    queue.enqueue(
+      "bot-1",
+      { avatarUrl: "/api/attachments/avatar.webp", avatarCrop: "circle" },
+      bot(),
+    );
+    await vi.advanceTimersByTimeAsync(200);
+    queue.enqueue("bot-1", { avatarUrl: null, avatarCrop: "mascot" }, bot());
+    await vi.advanceTimersByTimeAsync(399);
+    expect(sent).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(sent).toEqual([{ avatarUrl: null, avatarCrop: "mascot" }]);
+    expect(authoritative).toHaveBeenLastCalledWith(
+      expect.objectContaining({ avatarUrl: null, avatarCrop: "mascot" }),
+      {},
+    );
+  });
+
+  it("serializes in-flight profile edits and overlays only the later values", async () => {
+    const first = deferredBot();
+    const second = deferredBot();
+    const sent: BotUpdatePatch[] = [];
+    const authoritative = vi.fn();
+    const queue = createBotPatchQueue({
+      send: (_botId, patch) => {
+        sent.push(patch);
+        return sent.length === 1 ? first.promise : second.promise;
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: authoritative,
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { name: "First" }, bot());
+    await vi.advanceTimersByTimeAsync(400);
+    queue.enqueue(
+      "bot-1",
+      {
+        name: "Second",
+        title: "Updated title",
+        description: "Updated description",
+        notifications: false,
+        voice: "voice-2",
+        speakReplies: true,
+      },
+      bot(),
+    );
+    await vi.advanceTimersByTimeAsync(400);
+    expect(sent).toEqual([{ name: "First" }]);
+
+    first.resolve(bot({ name: "First" }));
+    await vi.runAllTicks();
+    await Promise.resolve();
+    expect(authoritative).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: "First" }),
+      expect.objectContaining({ name: "Second", voice: "voice-2", speakReplies: true }),
+    );
+    expect(sent[1]).toMatchObject({
+      name: "Second",
+      title: "Updated title",
+      description: "Updated description",
+      notifications: false,
+      voice: "voice-2",
+      speakReplies: true,
+    });
+
+    second.resolve(bot({ name: "Second", voice: "voice-2", speakReplies: true }));
+    await vi.runAllTicks();
+    await queue.flush("bot-1");
+    expect(authoritative).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: "Second", voice: "voice-2", speakReplies: true }),
+      {},
+    );
+  });
+
+  it("reconciles a rejected optimistic profile value to the server bot", async () => {
+    const authoritative = vi.fn();
+    const onError = vi.fn();
+    const serverBot = bot({ name: "Server name" });
+    const queue = createBotPatchQueue({
+      send: async () => {
+        throw new Error("name must be at most 100 characters");
+      },
+      reconcile: async () => serverBot,
+      onAuthoritative: authoritative,
+      onError,
+    });
+
+    queue.enqueue("bot-1", { name: "x".repeat(101) }, bot());
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(authoritative).toHaveBeenCalledWith(serverBot, {});
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "name must be at most 100 characters" }),
+    );
+  });
+
+  it("does not restore a bot whose queued mutation was cancelled for deletion", async () => {
+    const request = deferredBot();
+    const authoritative = vi.fn();
+    const queue = createBotPatchQueue({
+      send: async () => request.promise,
+      reconcile: async () => null,
+      onAuthoritative: authoritative,
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { name: "Pending" }, bot());
+    await vi.advanceTimersByTimeAsync(400);
+    queue.cancel("bot-1");
+    request.resolve(bot({ name: "Pending" }));
+    await vi.runAllTicks();
+    await Promise.resolve();
+
+    expect(authoritative).not.toHaveBeenCalled();
+    expect(queue.overlayFor("bot-1")).toEqual({});
+  });
+
+  it("does not restore a bot cancelled while a failed mutation is reconciling", async () => {
+    const reconciliation = deferredBot();
+    const authoritative = vi.fn();
+    const onError = vi.fn();
+    const reconcile = vi.fn(async () => reconciliation.promise);
+    const queue = createBotPatchQueue({
+      send: async () => {
+        throw new Error("patch failed");
+      },
+      reconcile,
+      onAuthoritative: authoritative,
+      onError,
+    });
+
+    queue.enqueue("bot-1", { name: "Pending" }, bot());
+    await vi.advanceTimersByTimeAsync(400);
+    expect(reconcile).toHaveBeenCalledOnce();
+
+    queue.cancel("bot-1");
+    reconciliation.resolve(bot({ name: "Server name" }));
+    await vi.runAllTicks();
+    await Promise.resolve();
+
+    expect(authoritative).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+    expect(queue.overlayFor("bot-1")).toEqual({});
+  });
+
+  it("sends the shown thread with a bot model change but never folds it into bot state", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const overlays: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: (_bot, overlay) => overlays.push(overlay),
+      onError: vi.fn(),
+    });
+    const modelSelection = { instanceId: "claude", model: "claude-opus-5-5" };
+
+    queue.enqueue("bot-1", { modelSelection, threadId: "shown" }, bot());
+    expect(queue.overlayFor("bot-1")).toEqual({ modelSelection });
+    await queue.flush("bot-1");
+
+    expect(sent).toEqual([{ modelSelection, threadId: "shown" }]);
+    for (const overlay of overlays) expect(overlay).not.toHaveProperty("threadId");
+  });
+
+  it("shows a pending main-thread choice as mainThreadId and keeps the choice itself on the wire only", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { mainThreadChoice: "thread-2" }, bot());
+    expect(queue.overlayFor("bot-1")).toEqual({ mainThreadId: "thread-2" });
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+    expect(sent).toEqual([{ mainThreadChoice: "thread-2" }]);
+  });
+
+  it("carries acknowledgeLocalAuto to the wire but never into a state overlay", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const overlays: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: (_bot, overlay) => overlays.push(overlay),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { computer: "local", acknowledgeLocalAuto: true }, bot());
+    queue.enqueue("bot-1", { title: "Ops" }, bot());
+    expect(queue.overlayFor("bot-1")).toEqual({ computer: "local", title: "Ops" });
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+
+    expect(sent).toEqual([{ computer: "local", acknowledgeLocalAuto: true, title: "Ops" }]);
+    for (const overlay of overlays) expect(overlay).not.toHaveProperty("acknowledgeLocalAuto");
+  });
+
+  it("keeps the all-threads scope out of optimistic bot state", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const overlays: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: (_bot, overlay) => overlays.push(overlay),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue(
+      "bot-1",
+      { approvalMode: "full", applyToAllThreads: true },
+      bot(),
+    );
+    queue.enqueue("bot-1", { title: "Ops" }, bot());
+    expect(queue.overlayFor("bot-1")).toEqual({ approvalMode: "full", title: "Ops" });
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+
+    expect(sent).toEqual([
+      { approvalMode: "full", applyToAllThreads: true },
+      { title: "Ops" },
+    ]);
+    for (const overlay of overlays) expect(overlay).not.toHaveProperty("applyToAllThreads");
+  });
+
+  it("never widens a quick switch from Full back to Ask to every thread", async () => {
+    const sent: BotUpdatePatch[] = [];
+    let release!: () => void;
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        if (sent.length === 1) await new Promise<void>((resolve) => { release = resolve; });
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+    queue.enqueue("bot-1", { title: "Ops" }, bot());
+    await vi.advanceTimersByTimeAsync(400);
+    queue.enqueue("bot-1", { approvalMode: "full", applyToAllThreads: true }, bot());
+    queue.enqueue("bot-1", { approvalMode: "ask" }, bot());
+    release();
+    await queue.flush("bot-1");
+    expect(sent).toEqual([{ title: "Ops" }, { approvalMode: "ask" }]);
+  });
+
+  it("sends null to select Auto but normalizes it to an absent state field", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const overlays: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: (_bot, overlay) => overlays.push(overlay),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { computer: null }, bot({ computer: "cloud" }));
+    expect(queue.overlayFor("bot-1")).toEqual({ computer: undefined });
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+
+    expect(sent).toEqual([{ computer: null }]);
+    expect(overlays).toEqual([{ computer: undefined }]);
+  });
+
+  it("sends null to drop a grants record but keeps bot state on the legacy boolean", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const overlays: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: (_bot, overlay) => overlays.push(overlay),
+      onError: vi.fn(),
+    });
+
+    queue.enqueue("bot-1", { connectorTools: null }, bot({ connectorTools: { gmail: { tools: "*" } } }));
+    expect(queue.overlayFor("bot-1")).toEqual({ connectorTools: undefined });
+    await vi.runAllTicks();
+    await queue.flush("bot-1");
+
+    expect(sent).toEqual([{ connectorTools: null }]);
+    expect(overlays).toEqual([{ connectorTools: undefined }]);
+  });
+
+  it("revive undoes a dispose, so StrictMode's dev probe cannot kill saving", async () => {
+    const sent: BotUpdatePatch[] = [];
+    const queue = createBotPatchQueue({
+      send: async (_botId, patch) => {
+        sent.push(patch);
+        return bot();
+      },
+      reconcile: async () => bot(),
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    queue.dispose();
+    queue.revive();
+    queue.enqueue("bot-1", { title: "still saves" }, bot());
+    await vi.advanceTimersByTimeAsync(400);
+    await queue.flush("bot-1");
+    expect(sent).toEqual([{ title: "still saves" }]);
+  });
+});

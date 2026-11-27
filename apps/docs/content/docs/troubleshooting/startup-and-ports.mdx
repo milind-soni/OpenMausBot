@@ -1,0 +1,40 @@
+---
+title: App startup and ports
+description: Diagnose launch failures and local server conflicts.
+icon: Power
+---
+
+The Electron app starts a local harness and serves the interface from the same machine. The normal port is `8799`. If another process already owns it, packaged builds may select a fallback port automatically.
+
+## Loading screen and system tray
+
+A loading screen appears while the desktop workspace starts. It gives way to the main window after the interface mounts.
+
+On Windows, **X** hides MausBot to the system tray, including during startup. Bots and scheduled routines can continue running. To reopen it, click its tray icon (which Windows may place behind the **Show hidden icons** arrow), choose **Open OpenMaus Bot** from the tray menu, or launch MausBot again. To exit completely, right-click the tray icon and choose **Quit OpenMaus Bot**.
+
+Closing the loading screen on macOS or Linux quits startup. Their existing main-window close behavior is unchanged.
+
+## App opens but never becomes ready
+
+1. Quit MausBot. On Windows, use **Quit OpenMaus Bot** in the system tray; closing the window only hides it.
+2. Confirm no old OpenMausBot process remains.
+3. Start the app once and wait for the local harness.
+4. If it still fails, inspect the desktop log.
+
+On macOS, packaged logs are under `~/Library/Logs/OpenMausBot`. On Windows they are in `%APPDATA%\OpenMausBot\logs`. See [Where are my logs?](/docs/troubleshooting/logs), or open them from **Settings → General → Diagnostics → Open logs folder**.
+
+## Windows computer-control helper
+
+Packaged Windows builds run the computer-control helper in the background
+without opening a command window. If the desktop log reports that the
+background CUA driver is missing, reinstall the complete application package.
+Custom developer executables selected with `CUA_DRIVER_PATH` keep their own
+console behavior.
+
+## Development port overrides
+
+Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
+
+## Isolate a test profile
+
+Developers can set `OMB_DATA_DIR` to run against a clean MausBot data directory. This is useful for reproduction and screenshots without touching a real workspace.

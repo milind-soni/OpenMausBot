@@ -1,0 +1,32 @@
+import { useSyncExternalStore } from "react";
+
+export function useMediaQuery(query: string, fallback = false): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const media = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(query) : null;
+      if (!media) return () => {};
+      media.addEventListener("change", onChange);
+      return () => media.removeEventListener("change", onChange);
+    },
+    () => (typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia(query).matches : fallback),
+    () => fallback,
+  );
+}
+
+export const TWO_SIDE_PANELS_FIT = "(min-width: 1536px)";
+
+/** The open sidebar, a chat of at least 440 and any side panel (the widest are up to 460). */
+export const SIDEBAR_AND_PANEL_FIT = "(min-width: 1280px)";
+
+/** The open sidebar (280), a chat of at least 440 and a side panel of 320 or less (sidebar-fold.ts). */
+export const SIDEBAR_AND_NARROW_PANEL_FIT = "(min-width: 1040px)";
+
+/** The open sidebar (280), a chat of at least 320 and Simple's bot panel (320); narrower, that panel floats over the
+ * chat instead of folding the sidebar (sidebar-fold.ts). */
+export const SIDEBAR_AND_BOT_PANEL_FIT = "(min-width: 920px)";
+
+/** Tailwind's md breakpoint. */
+export const SIDEBAR_INLINE = "(min-width: 768px)";
+
+/** Below Tailwind's md breakpoint: the phone layout, where the sidebar is a full-screen bot list. */
+export const PHONE_LAYOUT = "(max-width: 767.98px)";

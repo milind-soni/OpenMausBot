@@ -1,0 +1,67 @@
+name: Connector image
+
+# The MausBot connector (connector/), published with every OpenMausBot release as
+# ghcr.io/milind-soni/mausbot-connector for linux/amd64 and linux/arm64. The
+# Admin pins it by digest; the summary prints it. Only a release tag publishes:
+# no pull request starts this, and a manual run on a branch builds nothing.
+on:
+  # release.yml dispatches this on the tag it just published: a tag created
+  # with the workflow token never fires push events on its own.
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: publish to GHCR
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove the image runs before it is published
+        run: |
+          set -euo pipefail
+          docker build -t mausbot-connector:release connector
+          test "$(docker run --rm mausbot-connector:release version)" = "$(sed -n 's/^export const CONNECTOR_VERSION = "\(.*\)";$/\1/p' connector/src/settings.ts)"
+          docker run --rm --entrypoint sh mausbot-connector:release -c 'bwrap --version && test -s /app/profiles/seccomp-omb-home.json && test -s /app/profiles/omb-home-narrow.apparmor && test -s /app/install.sh'
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: repo
+        # Image references must be lowercase; the owner's name need not be.
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ steps.repo.outputs.owner }}/mausbot-connector
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: connector
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=connector
+          cache-to: type=gha,scope=connector,mode=max
+      - name: Connector image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE: ghcr.io/${{ steps.repo.outputs.owner }}/mausbot-connector
+        run: echo "MAUSBOT_CONNECTOR_IMAGE=${IMAGE}@${DIGEST}" | tee -a "$GITHUB_STEP_SUMMARY"

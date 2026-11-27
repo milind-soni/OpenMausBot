@@ -1,0 +1,199 @@
+import { join, sep } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+
+import { createUpdateChecker, installKind, isNewerVersion, LATEST_RELEASE_URL, STABLE_CHANNEL_URL, updateChannel, updateCommand } from "./update-check.ts";
+
+const release = (tag: string) =>
+  ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: `https://github.com/milind-soni/OpenMausBot/releases/tag/${tag}` }) }) as Response;
+
+const promoted = (version: string) =>
+  ({ ok: true, status: 200, json: async () => ({ channel: "stable", version, image: `ghcr.io/milind-soni/openmausbot@sha256:${"a".repeat(64)}`, releaseUrl: `https://github.com/milind-soni/OpenMausBot/releases/tag/v${version}` }) }) as Response;
+const missing = { ok: false, status: 404, json: async () => ({}) } as Response;
+/** GitHub's newest release is `newest`; the stable channel names `stable`, or does not exist yet. */
+const github = (newest: string, stable: string | null) => vi.fn(async (url: string | URL | Request) =>
+  String(url) === STABLE_CHANNEL_URL ? (stable ? promoted(stable) : missing) : release(newest));
+
+describe("server update check", () => {
+  it("tells how this server was installed", () => {
+    const none = () => false;
+    const root = ["", "srv", "OpenMausBot", "server"].join(sep);
+    expect(installKind({ desktopManaged: true, managed: false, serverRoot: root, exists: () => true })).toBe("desktop");
+    expect(installKind({ desktopManaged: false, managed: true, serverRoot: root, exists: () => true })).toBe("managed");
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/.dockerenv" })).toBe("docker");
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/run/.containerenv" })).toBe("podman");
+    expect(installKind({
+      desktopManaged: false, managed: false, exists: none,
+      serverRoot: ["", "usr", "lib", "node_modules", "openmausbot", "dist-server"].join(sep),
+    })).toBe("npm");
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === join(root, "..", ".git") })).toBe("git");
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: none })).toBe("unknown");
+  });
+
+  it("knows the rootless Podman service by its unit's mark, and gives its own update.sh, not the Compose recipe", () => {
+    const root = ["", "app", "dist-server"].join(sep);
+    const env = { OMB_PODMAN_SERVICE: "~/.local/share/openmausbot" };
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/run/.containerenv", env })).toBe("podman-service");
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/run/.containerenv", env: {} })).toBe("podman");
+    expect(installKind({ desktopManaged: false, managed: true, serverRoot: root, exists: () => false, env })).toBe("managed");
+    expect(updateCommand("podman-service", undefined, env)).toEqual({ command: "~/.local/share/openmausbot/update.sh", restart: false });
+    expect(updateCommand("podman-service", { version: "0.1.170", stable: false }, env)?.command).toBe("~/.local/share/openmausbot/update.sh --version 0.1.170");
+    expect(updateCommand("podman-service", { version: "0.1.170", stable: true }, { OMB_PODMAN_SERVICE: "/srv/omb@corp/" })?.command).toBe("/srv/omb@corp/update.sh");
+    // Anything but a plain path stands for nothing: the installer's own folder.
+    for (const bad of ["1", "~/x; rm -rf /", "/srv/../etc", "relative/dir", "$(id)"]) {
+      expect(updateCommand("podman-service", undefined, { OMB_PODMAN_SERVICE: bad })?.command, bad).toBe("~/.local/share/openmausbot/update.sh");
+    }
+    expect(updateCommand("docker", { version: "0.1.170", stable: false })?.command).toBe("git pull && ./update.sh --version 0.1.170");
+    expect(updateCommand("docker", { version: "0.1.170", stable: true })?.command).toBe("git pull && ./update.sh");
+  });
+
+  it("compares release versions numerically and never reports a malformed one", () => {
+    expect(isNewerVersion("v0.1.93", "0.1.92")).toBe(true);
+    expect(isNewerVersion("0.1.10", "0.1.9")).toBe(true);
+    expect(isNewerVersion("v0.2.0", "0.1.99")).toBe(true);
+    expect(isNewerVersion("v0.1.92", "0.1.92")).toBe(false);
+    expect(isNewerVersion("v0.1.91", "0.1.92")).toBe(false);
+    expect(isNewerVersion("nightly", "0.1.92")).toBe(false);
+    expect(isNewerVersion("v0.1.93", "unknown")).toBe(false);
+    expect(isNewerVersion("v0.1.93", "0.1.93-rc.1")).toBe(true);
+    expect(isNewerVersion("v0.1.93-rc.2", "0.1.93-rc.1")).toBe(true);
+    expect(isNewerVersion("v0.1.93-rc.10", "0.1.93-rc.9")).toBe(true);
+    expect(isNewerVersion("v0.1.93-rc.1", "0.1.93")).toBe(false);
+    expect(isNewerVersion("v0.1.93-rc.1", "0.1.93-rc.1")).toBe(false);
+    expect(isNewerVersion("v0.1.93-rc.1.1", "0.1.93-rc.1")).toBe(true);
+  });
+
+  it("follows the stable channel, not the newest release, and gives the update command for this install", async () => {
+    const fetch = github("v0.1.95", "0.1.93");
+    const check = createUpdateChecker({ current: "0.1.92", install: "docker", fetch });
+    expect(await check()).toEqual({
+      current: "0.1.92",
+      install: "docker",
+      channel: "stable",
+      latest: "0.1.93",
+      available: true,
+      releaseUrl: "https://github.com/milind-soni/OpenMausBot/releases/tag/v0.1.93",
+      command: "git pull && ./update.sh",
+      restart: false,
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(STABLE_CHANNEL_URL, expect.anything());
+    expect(await createUpdateChecker({ current: "0.1.92", install: "npm", fetch })()).toMatchObject({ latest: "0.1.93", command: "npm install -g openmausbot@0.1.93", restart: true });
+  });
+
+  it("offers nothing to a server that is already on the stable version or past it", async () => {
+    expect(await createUpdateChecker({ current: "0.1.93", install: "docker", fetch: github("v0.1.95", "0.1.93") })()).toMatchObject({ channel: "stable", latest: "0.1.93", available: false });
+    expect(await createUpdateChecker({ current: "0.1.95", install: "docker", fetch: github("v0.1.95", "0.1.93") })()).toMatchObject({ available: false });
+  });
+
+  it("goes by the newest release until a first version has been promoted, or when the owner asked for every release", async () => {
+    const unpromoted = github("v0.1.93", null);
+    expect(await createUpdateChecker({ current: "0.1.92", install: "docker", fetch: unpromoted })()).toMatchObject({
+      channel: "newest", latest: "0.1.93", available: true, command: "git pull && ./update.sh --version 0.1.93",
+    });
+    expect(unpromoted).toHaveBeenLastCalledWith(LATEST_RELEASE_URL, expect.anything());
+    const fetch = github("v0.1.95", "0.1.93");
+    expect(await createUpdateChecker({ current: "0.1.92", install: "docker", channel: "newest", fetch })()).toMatchObject({ channel: "newest", latest: "0.1.95" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(updateChannel({})).toBe("stable");
+    expect(updateChannel({ OMB_UPDATE_CHANNEL: " Newest " })).toBe("newest");
+    expect(updateChannel({ OMB_UPDATE_CHANNEL: "latest" })).toBe("stable");
+  });
+
+  it("does not take a broken channel record for a version, or fall back past it", async () => {
+    const fetch = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ version: "0.1.93-rc.1" }) }) as Response);
+    await expect(createUpdateChecker({ current: "0.1.92", install: "docker", fetch })()).rejects.toThrow("The stable channel named no version");
+    fetch.mockImplementation(async () => ({ ok: false, status: 500, json: async () => ({}) }) as Response);
+    await expect(createUpdateChecker({ current: "0.1.92", install: "docker", fetch })()).rejects.toThrow("The stable channel answered 500");
+  });
+
+  it("gives the last answer while the channel cannot be read, for a day, and never the newest release instead", async () => {
+    let now = 0;
+    let down = false;
+    const fetch = vi.fn(async (url: string | URL | Request) => {
+      if (down) return { ok: false, status: 503, json: async () => ({}) } as Response;
+      return String(url) === STABLE_CHANNEL_URL ? promoted("0.1.93") : release("v0.1.99");
+    });
+    const check = createUpdateChecker({ current: "0.1.92", install: "docker", fetch, now: () => now });
+    expect(await check()).toMatchObject({ channel: "stable", latest: "0.1.93", available: true });
+    down = true;
+    now = 2 * 60 * 60_000;
+    expect(await check()).toMatchObject({ channel: "stable", latest: "0.1.93", available: true });
+    expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain(LATEST_RELEASE_URL);
+    now = 25 * 60 * 60_000;
+    await expect(check()).rejects.toThrow("The stable channel answered 503");
+  });
+
+  it("says up to date, and asks at most once an hour", async () => {
+    let now = 0;
+    const fetch = github("v0.1.92", "0.1.92");
+    const check = createUpdateChecker({ current: "0.1.92", install: "npm", fetch, now: () => now });
+    expect(await check()).toMatchObject({ available: false, latest: "0.1.92", command: "npm install -g openmausbot@0.1.92", restart: true });
+    now = 59 * 60_000;
+    await check();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    now = 61 * 60_000;
+    await check();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("looks again when someone presses Check for updates, unless the last lookup is under five minutes old", async () => {
+    let now = 0;
+    let newest = "v0.1.177";
+    const fetch = vi.fn(async () => release(newest));
+    const check = createUpdateChecker({ current: "0.1.177", install: "docker", channel: "newest", fetch, now: () => now });
+    expect(await check()).toMatchObject({ available: false, latest: "0.1.177" });
+    newest = "v0.1.178";
+    now = 34 * 60_000;
+    expect(await check()).toMatchObject({ available: false, latest: "0.1.177" });
+    expect(await check({ fresh: true })).toMatchObject({ available: true, latest: "0.1.178" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    now += 4 * 60_000;
+    await check({ fresh: true });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("tells a press of Check for updates that the lookup failed, instead of giving the old answer", async () => {
+    let now = 0;
+    const fetch = vi.fn(async () => release("v0.1.177"));
+    const check = createUpdateChecker({ current: "0.1.177", install: "docker", channel: "newest", fetch, now: () => now });
+    await check();
+    fetch.mockImplementation(async () => ({ ok: false, status: 403, json: async () => ({}) }) as Response);
+    now = 10 * 60_000;
+    await expect(check({ fresh: true })).rejects.toThrow("GitHub answered 403");
+    now = 2 * 60 * 60_000;
+    expect(await check()).toMatchObject({ available: false, latest: "0.1.177" });
+  });
+
+  it("keeps presses of Check for updates to one lookup per five minutes after a failed one too", async () => {
+    let now = 0;
+    const fetch = vi.fn(async () => release("v0.1.177"));
+    const check = createUpdateChecker({ current: "0.1.177", install: "docker", channel: "newest", fetch, now: () => now });
+    await check();
+    fetch.mockImplementation(async () => ({ ok: false, status: 403, json: async () => ({}) }) as Response);
+    now = 10 * 60_000;
+    await expect(check({ fresh: true })).rejects.toThrow("GitHub answered 403");
+    now += 4 * 60_000;
+    await expect(check({ fresh: true })).rejects.toThrow("GitHub answered 403");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    now += 2 * 60_000;
+    fetch.mockImplementation(async () => release("v0.1.178"));
+    expect(await check({ fresh: true })).toMatchObject({ available: true, latest: "0.1.178" });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not look anything up for a desktop or hosted server", async () => {
+    const fetch = vi.fn();
+    for (const install of ["desktop", "managed"] as const) {
+      expect(await createUpdateChecker({ current: "0.1.92", install, fetch })()).toEqual({ current: "0.1.92", install, available: false });
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("fails clearly when GitHub cannot be reached, and tries again next time", async () => {
+    const fetch = vi.fn(async () => ({ ok: false, status: 403, json: async () => ({}) }) as Response);
+    const check = createUpdateChecker({ current: "0.1.92", install: "git", channel: "newest", fetch });
+    await expect(check()).rejects.toThrow("GitHub answered 403");
+    fetch.mockImplementation(async () => release("v0.1.93"));
+    expect(await check()).toMatchObject({ available: true, command: "git pull && pnpm install", restart: true });
+  });
+});

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-server",
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "exclude": [
+    "server/**/*.test.ts",
+    "server/testing",
+    "server/drivers/pi-mcp-extension.ts"
+  ],
+  "include": [
+    "server"
+  ]
+}

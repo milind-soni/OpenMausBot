@@ -1,0 +1,427 @@
+# Contributing to OpenMausBot
+
+Thanks for wanting to help — community PRs have already shipped in this repo, and more are welcome.
+This file tells you how to get a working dev setup, what the codebase expects from a change, and what
+makes a PR easy to merge. Read it once before opening anything; it's short on purpose.
+
+## Ground rules
+
+- **Small, focused PRs.** One concern per PR. A PR that ports a platform *and* adds a feature *and*
+  refactors will be asked to split. Big changes: open an issue first and agree on the approach.
+- **Match the altitude.** This codebase is deliberately small and direct — plain Node, no frameworks
+  on the server, one store, one event bus. Don't introduce a dependency where thirty lines of code
+  will do. New runtime dependencies need a reason in the PR description.
+- **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
+- **UI changes follow [`DESIGN.md`](DESIGN.md).** Tokens, type, spacing, components, words and
+  states. Before/after screenshots in Midnight and Daylight go in the PR body; video for anything animated.
+  With `pnpm dev` running, `pnpm shots '/room-card-preview.html?state=memory' --name before` saves them at
+  390, 768 and 1440 wide in both skins to `shots/`.
+
+## Dev setup
+
+Requirements: **Node 24+**, **pnpm**, and for actually chatting with a bot, at least one agent CLI
+([`claude`](https://claude.com/claude-code) or [`codex`](https://github.com/openai/codex)) installed
+and logged in. macOS is the primary release platform and Ubuntu 24.04 x64 is the Linux desktop beta;
+the harness server itself is portable Node and the test suite runs on macOS, Linux, and Windows.
+
+```sh
+git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot
+pnpm install
+
+pnpm dev:server    # harness server → 127.0.0.1:8799
+pnpm dev           # app → http://127.0.0.1:5199
+pnpm dev:desktop   # Electron shell (macOS/Ubuntu; keep server + Vite running)
+
+pnpm typecheck     # app + server
+pnpm test          # vitest suite (server unit + driver contract + API smoke)
+pnpm test:watch    # same, in watch mode
+pnpm check:electron # syntax-check the plain JS Electron entrypoints
+
+pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
+pnpm package:linux # Linux x64 .deb + .rpm + AppImage; no Swift required
+```
+
+To reproduce a failing CI test job, follow [Vitest shards](docs/ci.md#vitest-shards).
+Use the job's checkout revision, OS, file filters, shard fraction, and
+`OMB_VITEST_E2E` value; the same shard number alone does not select the same files.
+
+`pnpm dev:desktop` downloads and verifies the pinned Cloudflare Tunnel connector for the current
+platform and architecture before Electron starts. Later launches re-verify and reuse the staged
+binary. Packaging continues to use `pnpm build:cloudflared`, which stages every architecture the
+host's desktop package build requires. To stage only the current development target without
+launching Electron, run `node scripts/prepare-cloudflared.mjs --current`.
+
+For Ubuntu installation and real desktop checks, see [`docs/linux-desktop.md`](docs/linux-desktop.md).
+
+## Ubuntu release checklist
+
+Ubuntu release packages must come from the manual **Package Ubuntu** workflow on an exact release commit or tag,
+not from a developer workstation. The Ubuntu 24.04 runner builds and verifies both formats, launches the unpacked
+app and AppImage, routes `click` and `type_text` through the overlay-free bundled Cua runtime on Xorg, runs the
+fail-closed Wayland CUA smoke,
+and produces one release artifact containing:
+
+- the versioned `.deb`, `.rpm` and AppImage;
+- stable `OpenMausBot-amd64.deb`, `OpenMausBot-x86_64.rpm` and `OpenMausBot.AppImage` copies used by the latest-download links;
+- `SHA256SUMS-ubuntu-x64.txt` covering both versioned and stable names.
+
+Before publishing, confirm that `package.json` has the release version and dispatch the workflow against the same
+commit used for the other platforms. Attach all seven Linux files to the matching release in the separate
+[OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases). Then verify the checksum
+file and install the `.deb` plus launch the AppImage in a clean Ubuntu 24.04 x86_64 GNOME environment. Never combine
+packages built from different commits under one version.
+
+## Repo map
+
+| Path | What lives there |
+|---|---|
+| `server/contracts.ts` | The driver SPI and canonical runtime event types. The whole architecture in one file — read it first. |
+| `server/drivers/` | One file per provider (Claude, Codex, Grok, cloud computer). Adding a provider = one file + one registration line in `builtIn.ts`. |
+| `server/harness/` | Registry (configs → live instances, unknown → shadow) and the fan-in event bus. |
+| `server/index.ts` | The HTTP + SSE API the app talks to. |
+| `server/testing/` | Test fakes: an in-memory driver, plus scripted fake `claude` / `codex` CLIs. |
+| `src/` | The React chat app. No transports of its own — HTTP commands out, one SSE stream in. |
+| `electron/` | Desktop shell: dictation, screen capture, local computer-use daemon. macOS-specific code lives here, gated. |
+| `dist-server/` | **Build output.** Never hand-edit, never include in PRs — it's regenerated by `pnpm build:server` at release time. |
+
+Data lives in `~/.openmausbot/` (bots, transcripts, per-thread NDJSON event logs, config with keys).
+
+## Tests
+
+The suite is colocated (`server/**/*.test.ts`) and runs with `pnpm test`. Three layers:
+
+- **Unit** — registry, bus, store. Pure in-process, use the fake driver in
+  [`server/testing/fake-driver.ts`](server/testing/fake-driver.ts).
+- **Driver contract** — [`claude.test.ts`](server/drivers/claude.test.ts) and
+  [`codex.test.ts`](server/drivers/codex.test.ts) spawn the scripted fake CLIs in `server/testing/`
+  and assert the canonical event stream, argv/env hygiene, interrupts, and the permission broker.
+  Failure modes are toggled by env var (`FAKE_CLAUDE_MODE=exit-early`, etc.) — extend those fakes
+  rather than mocking `child_process`.
+- **API smoke** — [`index.test.ts`](server/index.test.ts) boots the real server against a throwaway
+  home directory and exercises the HTTP surface.
+
+House rules for tests:
+
+- **No sleeps.** Wait on the event that proves the behavior (see `server/testing/events.ts`'s
+  `recordEvents(...).until(...)`). A test that needs a timeout to pass is wrong.
+- **Never touch the real `~/.openmausbot`.** The setup file points `HOME` at a temp dir; keep it
+  that way.
+- Fake CLI shebang scripts must be launched through `spawnCli`/`execCli`, which resolve them through
+  Node on Windows. Only gate a test when the behavior itself is genuinely platform-specific.
+
+## Changing how data is stored
+
+**The rule: what version N writes, version N-1 can read.** A self-hosted server
+is updated with a way back: the updater keeps a copy of the data, and when the
+new version does not come up it puts the old version and the copy back. A
+server that was rolled back by hand, or a Cloud moved back one release, starts
+the old version on data the new one has already touched. That must work.
+
+The data folder says which format it is in: `data-format.json`
+(`{ "format": 1, "writtenBy": "0.1.152", … }`), written at start by
+[`server/data-format.ts`](server/data-format.ts). Two numbers in that file
+describe a version: `writes`, the format it leaves the folder in, and `reads`,
+the newest format it understands. A server whose `reads` is below the folder's
+format refuses to start, before it creates, migrates or locks anything, with
+one line that says which version wrote the data and what to do. A folder with
+no marker is format 1.
+
+Most changes need no new format. These are fine in one release, and are how
+every migration so far works:
+
+- a new file, table, index or nullable column; a new optional field in a JSON
+  file whose older readers ignore fields they do not know;
+- a one-time fill of a new field, guarded by a marker file or by the field
+  being absent.
+
+A change needs a new format when the previous release, started on the changed
+data, would fail, lose something, or quietly undo it. Typical cases: a file or
+folder moves or is renamed; a field older code relies on changes meaning or
+goes away; a value older code deletes because it does not recognise it (the
+store's start-up clean-up of `bots.json` does this); the `version` of a JSON
+store goes up (older code treats a higher version as unreadable and starts
+empty); a table changes in a way an older `INSERT` or `SELECT` breaks on.
+
+Such a change ships in **two releases**:
+
+1. **Read it first.** Add the code that reads the new format beside the old,
+   keep writing the old one, and raise `reads` by one. Release.
+2. **Write it one release later.** Start writing the new format and raise
+   `writes` to match. The release before can already read it.
+
+**Clouds need one more step.** The Cloud Admin keeps its own list of data
+formats (`DATA_FORMATS` in the `openmaus-cloud` repo's
+`server/cloud-home-image.ts`): for each format, its first reader and first
+writer release. With it, a Cloud below the reader updates to the reader first,
+and a failed update never rolls a Cloud back to a version that refuses its
+data. Add the new format there, and deploy the Admin, **before** the release
+that raises `writes` is published.
+
+For Vault values over 4 KiB, **Prepare next release** advances `writes` to 2
+when the preceding published release's tag confirms format 2 read support.
+
+The rule is between one release and the next. The stable channel may skip
+releases, so going back from one stable version to the one before it can cross
+both steps; there the updater's copy of the data is the way back, and the
+marker makes the old version say so instead of running on data it would
+damage.
+
+`server/data-format.test.ts` fails the build on any other step. It compares
+the two numbers with `server/data-format-released.json`, the numbers of the
+last release, which **Prepare next release** records with the version bump
+(`scripts/record-data-format.mjs`); do not edit that file by hand. Raising
+`writes` past what the last release reads fails with the two steps spelled
+out.
+
+What exists today, all of it format 1: the server has no numbered migrations.
+Each store repairs or extends its own files when it opens them, and decides
+by looking (a column that is missing, a legacy file that is still there, a
+marker file such as `thread-model-copies-cleared`), so every one of them is
+safe to run twice. Most are additive: the SQLite `ADD COLUMN`s and
+`CREATE … IF NOT EXISTS` in `server/message-db.ts`, `server/cloud-sync-store.ts`
+and `server/runtime/store.ts`, and the field fills in `server/store.ts`. A few
+are one-way moves from formats that predate every supported version (JSON
+transcripts into `messages.db`, per-bot skills into the library, engine
+sessions into `engine-homes/`, the old data folder's rename). They stay as
+they are. The marker does not replace them; it adds the one thing they cannot
+do, which is to stop an older version at the door.
+
+**What the marker protects.** Once a release writes format 2, it stops
+older servers that cannot read it. Unrecorded format changes can still
+cause data loss on rollback:
+
+- Many JSON stores accept only `"version": 1` and throw, or start empty, on
+  anything else: among them `server/command-allowlist.ts`, `server/fleet.ts`,
+  `server/bot-directory.ts`, `server/data/sheet.ts`, `server/pages/store.ts`,
+  `server/sentinel/store.ts` and `server/boat-delete-journal.ts`. A release
+  that raised one of those versions without raising `writes` would pass every
+  check here, and the release before it would start on that data and drop it.
+- The SQLite databases (`messages.db`, `runtime.db`, the cloud-sync store)
+  have no `PRAGMA user_version`. Their schema is judged by looking for
+  columns, so a change an older `INSERT` or `SELECT` breaks on is not seen.
+- Nothing ties a store's `version` or a schema change to `DATA_FORMAT`. The
+  rule holds only when whoever makes the change raises the numbers; review is
+  the only check.
+- The marker is one number for the whole folder. A workspace backup does not
+  carry it (it describes the folder it is in), so a backup a newer version
+  made, restored into an older server, is not stopped by it.
+- A marker that cannot be read (empty or full of NULs after a power loss, not
+  readable by the server's user) counts as format 1 while `writes` is 1, and
+  a marker that cannot be written is said in the log and skipped: while a
+  version writes nothing newer, the check must never be the reason a healthy
+  install does not start. Once `writes` is 2, an unreadable marker, or one
+  that cannot be written, stops startup before any store opens.
+
+For the rule to hold by itself, these would have to change:
+
+1. A test that fails when a store's `version`, a JSON store's shape or a
+   database's tables change without a change to `DATA_FORMAT`: every store's
+   version and every table's columns, recorded in the tree and compared.
+2. A store that meets a `version` higher than it knows refuses to start, with
+   the same plain line, instead of starting empty, so a missed bump stops the
+   server rather than losing the data.
+3. `PRAGMA user_version` on each SQLite database, raised with its schema and
+   checked when it opens.
+4. A workspace backup that records the format it was made in, and a restore
+   that refuses it in a server whose `reads` is lower.
+
+## Adding a provider driver
+
+The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A driver PR should:
+
+1. Add `server/drivers/<name>.ts` implementing `ProviderDriver` and register it in
+   [`builtIn.ts`](server/drivers/builtIn.ts).
+2. `decodeConfig` **throws** on invalid config; `create` **rejects** (never throws synchronously) on
+   failure — the registry downgrades both to an unavailable shadow instead of crashing the fleet.
+   Do not remove or work around that behavior; it's what makes configs forward/backward compatible.
+3. Emit only canonical `RuntimeEvent`s carrying your own `driverKind` — the bus drops cross-driver
+   events on the floor.
+4. A missing/broken CLI must surface as `snapshot() → { state: "unavailable", reason }`, and a
+   failed spawn as a failed turn — never a hang, never a crash.
+5. Bring a contract test following the fake-CLI pattern (scripted fake process + `recordEvents`).
+
+## Agent-facing control CLIs
+
+Before claiming a server or conversation change works, use the isolated flow
+in [`docs/verification/README.md`](docs/verification/README.md). For new CLIs
+intended for automation:
+
+- Reuse an existing MCP or API operation; keep the CLI to argument parsing and
+  result formatting.
+- Mutating commands require an explicit target or an isolated launcher. Never
+  silently target the user's live app.
+- Return JSON for success and failure, use non-zero exit codes for failure, and
+  provide `--help`.
+- Errors name the failed action and the next valid step.
+- Commands that delete or overwrite data provide `--dry-run`; test that it
+  leaves state unchanged.
+- Prefer task-level subcommands and add one smoke test for the main workflow.
+
+The verification feature map is intentionally incomplete. Add an entry only
+when the shared control surface can exercise it and a permanent test proves it.
+
+## MCP tool schemas
+
+Tool `inputSchema`s travel through every engine's own MCP-to-provider conversion before a model
+sees them, and those converters are lossy: composition keywords get flattened, dropped, or pruned
+by size-compaction passes (codex only began preserving `oneOf` in mid-2026; others simplify
+harder). A model that never saw your schema's branches guesses shapes forever — that is exactly
+how chat routine proposals failed in the field hours after 0.1.38 shipped (#544).
+
+- **Never use `oneOf`, `anyOf`, `allOf`, `const`, or `format` in a tool `inputSchema`.** Advertise
+  one flat object; put per-variant rules in `description`s. `enum` on plain strings is fine.
+- **Coerce before you reject.** Models stringify nested objects, shorten enum values, and vary
+  case. If an input has one obvious meaning, accept it and normalize on the wire.
+- **Errors must teach.** When you refuse an input, the message states the supported shapes with a
+  literal example the model can copy. "Invalid discriminator value" burns a turn; an example
+  fixes the next call.
+- A schema test should assert the tool surface stays flat
+  (see `server/drivers/agents-proxy.test.ts` — it regexp-guards the serialized schema).
+- The agents tools live in `server/drivers/agents-catalog.ts`, and their serialized `tools/list`
+  is pinned byte for byte and size-budgeted by `server/drivers/agents-catalog-wire.test.ts`.
+  After changing one on purpose, run that file once with `UPDATE_AGENTS_CATALOG_GOLDENS=1`,
+  review the golden diff, and move its `BUDGET_BASELINE` by hand.
+
+## Adding a language
+
+The renderer's strings live in JSON catalogs under `src/locales/`. English
+(`src/locales/en.json`) is the source of truth (typing still flows from it). A
+language is one file plus a one-line registration, exactly like a provider
+driver:
+
+1. Copy `src/locales/en.json` to `src/locales/<code>.json`. Filenames use a
+   lowercase BCP-47 tag (`de.json`, `pt-br.json`). Translate the values; keys
+   you leave out fall back to English, so partial community packs are fine.
+2. Register it in `src/locales/index.ts`.
+3. Run `pnpm i18n:check`, then select the language in **Settings → General**.
+
+An authenticated local Claude CLI can produce a first draft; it never runs in
+CI and its output still needs human review:
+
+```sh
+# Uses the locally logged-in Claude CLI
+node scripts/generate-locale.mjs it "Italian"
+```
+
+The helper runs the model without repository access, custom instructions, or
+write-capable tools. It accepts only one complete JSON object. Do not edit
+`src/locales/source-hashes.json` for new keys: the release records their
+English source hashes. See
+[`docs/localization.md`](docs/localization.md) for the workflow and safety rules.
+
+Only a slice of the UI is extracted so far. Move strings into the catalog
+with `t("…")` as you touch components — never in big sweeps, which conflict
+with everything.
+
+## Platform rules
+
+- The harness (`server/`) must stay portable Node. Anything macOS-only (TCC, Swift helpers,
+  `~/Library` paths) belongs in `electron/` behind a `process.platform === "darwin"` gate.
+- Renderer code must consume the desktop capability contract rather than infer support from Electron,
+  the user agent, or the presence of a preload bridge. Screen preview, dictation, and local control are
+  independent capabilities.
+- Test Ubuntu platform claims on a real GNOME session. Xvfb proves packaging and fake-driver orchestration, not
+  Wayland portal behavior or real CUA inspection/input delivery.
+- Linux local control is enabled only on GNOME/Xorg after explicit opt-in. The owned daemon must start with
+  `--no-overlay`: the decorative full-screen Cua cursor surface is not part of the product contract and must never
+  sit between the person and their desktop. GNOME/Wayland must clear a legacy durable opt-in, report
+  `linux-wayland-seat-safety-blocked`, and never start Cua until it independently passes the real-seat matrix in
+  #345. Xvfb proves the overlay-free arguments, lifecycle, and input routing; it does not waive real-seat evidence.
+  An unrelated app must remain clickable/typeable before any approved action. Global opt-in plus per-bot
+  **This computer** remains mandatory; Linux Auto, full-auto/bypass modes, remembered grants, and cloud approvals
+  must never authorize the user's desktop.
+- Keep CUA discovery shell-free and pin accepted archive, inner-file, manifest, and driver contracts. Packaged Linux
+  builds must prefer their reviewed outside-ASAR runtime and fail closed instead of executing ambient PATH code;
+  source/dev builds may use the validated explicit/user-local paths. Never add a runtime downloader/self-updater or
+  silently install GNOME extensions. GNOME/Wayland readiness must require its exact compositor/helper/portal health
+  contract; never infer it from `WAYLAND_DISPLAY` or XWayland.
+- Native release changes must update the checked-in Cua license report/SBOM, preserve MIT/OFL/MPL notices, pass the
+  malicious-archive tests, and prove identical hashes in `linux-unpacked`, `.deb`, and AppImage artifacts. AppImage
+  must additionally prove post-copy hashing in its private `0700` execution stage; never weaken the general path
+  validator to accept a root-owned group-writable SquashFS path when its toolchain emits `0775` rather than `0755`.
+- **Never build command strings for a shell.** No `shell: true`, no spawning through `cmd.exe` with
+  quoted strings — model names, personas, and MCP config JSON travel through argv, and cmd.exe
+  metacharacter expansion is a real injection class. On Windows, resolve `.cmd` shims to their JS
+  entry and spawn `process.execPath` instead.
+- POSIX-only calls (`process.kill(-pid)`, unix sockets) need a gated Windows equivalent
+  (`taskkill /T`, named pipes) — not a silent failure.
+
+## Secrets
+
+API keys are write-only: they land in `~/.openmausbot/config.json` via `PUT /api/config` and the API
+only ever reports `configured` booleans. Keep it that way — no logging keys, no echoing them in
+responses or events, no baking them into argv where another local process could read them.
+
+## Downstream forks and release ownership
+
+Changes prepared in a downstream fork should keep provenance in the pull request, not add
+fork-specific branding or ownership claims to the upstream source tree. Record the exact upstream
+commit used as the comparison base, the head branch, and the checks run after the final rebase.
+
+Fork maintainers own the binaries and update channels they publish. Before distributing a fork,
+review the application name and identifiers, signing configuration, update metadata, and every
+`electron-builder` publish target. Never upload fork artifacts or update metadata to the official
+OpenMausBot release repository, and never change the upstream publish target in a feature PR unless
+that release migration was explicitly agreed with the maintainer.
+
+An upstream PR should contain only the portable product change. Keep local build paths, account
+names, credentials, private endpoints, machine-specific configuration, and fork-only release notes
+out of its commits and screenshots.
+
+## Contribution licensing
+
+- No DCO sign-off is required. Submit only code you wrote or have the right
+  to contribute under the applicable project license.
+- Changes under `enterprise/` (source-available, see [LICENSING.md](LICENSING.md))
+  need the [CLA](CLA.md), signed once by commenting on the pull request
+  when the bot asks. Changes outside `enterprise/` do not require a CLA.
+- `enterprise/`, the cloud seam and the licensing files have code owners; a
+  maintainer review is required there.
+
+## CI, in one glance
+
+Every PR runs locale validation (`pnpm i18n:check`), lint, CI-selection tests,
+verification-documentation checks, and the required `CI` gate. The changed files
+select the remaining checks; see [CI job selection](docs/ci.md). Documentation-only
+PRs run the docs tests, while translation-only PRs run the locale subset. Runtime
+changes select broader tests and smokes.
+
+- **preflight** — the static job always runs the checks above, in under a minute, before the dependent jobs.
+- **typecheck + build** — when selected, typecheck, Electron syntax checks and a production UI build, beside the shards.
+- **vitest (os, part)** — full platform suites use eight Linux or Windows shards and four macOS shards; subset jobs have their own file lists and shard counts. Windows jobs run on PRs whose changes can affect Windows or carry the `windows` label. macOS Vitest shards run in the nightly/manual full lane. Files run serially within each shard, balanced by recorded platform time. Use the [reproduction steps](docs/ci.md#vitest-shards) for the failing job.
+- **packaged server smoke (os)** — when selected, the server bundle is copied out of the repo and started with no `node_modules` in reach.
+- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — when selected, real Electron utility processes run against disposable homes; never the live app.
+- **CI** — the required aggregate gate checks that selected jobs passed and unselected jobs were skipped. Its log names any failing dependency.
+
+For eligible owner runs on Boat, the static job also runs the selected Linux
+test lanes; their logs appear in groups named for each lane. Fork PRs use
+GitHub-hosted jobs. See [Linux on Boat](docs/ci.md#linux-on-boat).
+
+A `pre-push` hook installed by `pnpm install` checks the files a push changes, in seconds: lint, the locale check when a catalog changed, and the size and vocabulary guards when a source they read changed. Typecheck and the suite stay in CI. A checkout without dependencies checks nothing and lets the push go. `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
+
+Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they run as bare subprocesses and at least one is copied out of the repo by a test, so a relative import from the repo dies at link time. `server/testing/fakes-self-contained.test.ts` enforces it.
+
+## Before you open the PR
+
+- [ ] `pnpm typecheck` and `pnpm test` pass
+- [ ] `pnpm lint` passes
+- [ ] Locale changes pass `pnpm i18n:check` and have been reviewed by a speaker
+- [ ] `pnpm check:electron` passes for desktop-shell changes
+- [ ] Ubuntu packaging changes pass `pnpm package:linux` and `node scripts/verify-linux-package.mjs`
+- [ ] New server behavior has a test; driver changes keep the contract tests green
+- [ ] No `dist-server/` churn, no lockfile churn beyond your actual dependency change
+- [ ] macOS-only code is platform-gated; nothing breaks the packaged app
+- [ ] UI changes follow [`DESIGN.md`](DESIGN.md) and include before/after screenshots
+
+By contributing you agree your contributions are licensed under the
+[Apache License, Version 2.0](LICENSE).
+
+## Moving code out of server/index.ts
+
+The host is being split into modules under `server/host/` (rules in
+`server/host/README.md`) and `server/routes/` (`server/routes/README.md`).
+Two tests keep it from growing back: `scripts/testing/file-size-ratchet.test.ts`
+lists every source file over 1,000 lines and only lets a count go down, and
+`scripts/testing/index-route-ratchet.test.ts` counts the route guards left in
+index.ts. A move changes no behaviour (review it with
+`git diff --color-moved=dimmed-zebra`); a behaviour change is its own PR.

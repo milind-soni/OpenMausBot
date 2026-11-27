@@ -1,0 +1,238 @@
+import { describe, expect, it } from "vitest";
+
+import { narrateTool, speakable, toUtterances } from "./speech-text.ts";
+
+describe("speakable", () => {
+  it("names a code block instead of reading it", () => {
+    const out = speakable("Here's the fix:\n\n```ts\nconst x: number = 1;\nif (x) throw new Error('no');\n```\n\nThat's it.");
+    expect(out).toContain("TypeScript code block");
+    expect(out).not.toContain("const x");
+    expect(out).not.toContain("throw");
+    expect(out).toContain("That's it.");
+  });
+
+  it("closes an unterminated fence rather than swallowing the rest", () => {
+    // a streamed reply can be mid-fence when we're asked to speak it
+    const out = speakable("Working on it:\n\n```sh\nnpm test");
+    expect(out).toContain("Working on it");
+    expect(out).toContain("code block");
+    expect(out).not.toContain("npm test");
+  });
+
+  it("keeps a link's words and drops its URL", () => {
+    expect(speakable("See [the README](https://example.com/a/b?c=d) for more")).toBe(
+      "See the README for more",
+    );
+  });
+
+  it("turns a bare URL into a noun", () => {
+    expect(speakable("Deployed to https://openmausbot.example.com/status now")).toBe(
+      "Deployed to a link now",
+    );
+  });
+
+  it("says the file, not the path to it", () => {
+    expect(speakable("I changed server/drivers/acp/core.ts today")).toBe("I changed core.ts today");
+  });
+
+  it("keeps short inline code but not long snippets", () => {
+    expect(speakable("Run `pnpm test` first")).toBe("Run pnpm test first");
+    const long = speakable(`Use \`${"x".repeat(60)}\` here`);
+    expect(long).toBe("Use that snippet here");
+  });
+
+  it("strips list scaffolding but keeps the pause between items", () => {
+    const out = speakable("- first thing\n- second thing\n- third thing");
+    expect(out).toBe("first thing. second thing. third thing");
+  });
+
+  it("reads a table as rows, not pipes", () => {
+    const out = speakable("| Name | State |\n| --- | --- |\n| Scout | idle |");
+    expect(out).not.toContain("|");
+    expect(out).not.toContain("---");
+    expect(out).toContain("Scout, idle");
+  });
+
+  it("drops emphasis markers, emoji and checkboxes", () => {
+    expect(speakable("**Done** ✅ — [x] shipped the _thing_")).toBe("Done — shipped the thing");
+  });
+
+  it.each([
+    ["Set API_KEY and API_URL before running the command.", "Set API_KEY and API_URL before running the command."],
+    ["Open my_config_file.json.", "Open my_config_file.json."],
+    ["Use snake_case here and _emphasis_ there.", "Use snake_case here and emphasis there."],
+    ["Set **API_KEY** and **API_URL**.", "Set API_KEY and API_URL."],
+    ["Run `npm run build_app` and set `API_KEY`.", "Run npm run build_app and set API_KEY."],
+    ["Use `*.ts` and `*.js` to match files.", "Use *.ts and *.js to match files."],
+    ["***Important***: __do _not_ change__ the name.", "Important: do not change the name."],
+  ])("removes only Markdown emphasis from %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
+  it.each([
+    ["See ![*diagram*](x.png).", "See. (image: diagram)."],
+    ["See ![**API_KEY**](x.png).", "See. (image: API_KEY)."],
+    ["See ![API_KEY](x.png).", "See. (image: API_KEY)."],
+    ["See ![](x.png).", "See. (an image)."],
+  ])("prepares the image description in %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
+  it("gives a heading a full stop so the voice breathes", () => {
+    expect(speakable("## Results\nAll green")).toBe("Results. All green");
+  });
+
+  it("collapses the punctuation its own substitutions create", () => {
+    expect(speakable("Done.\n\n\n- one\n\n- two")).toBe("Done. one. two");
+  });
+
+  it("is empty for empty input", () => {
+    expect(speakable("")).toBe("");
+    expect(speakable("   \n\n  ")).toBe("");
+  });
+});
+
+describe("toUtterances", () => {
+  it("splits on sentences", () => {
+    const out = toUtterances("The tests pass now. I changed two files. Want me to push it?");
+    expect(out).toHaveLength(3);
+    expect(out[0]).toBe("The tests pass now.");
+    expect(out[2]).toBe("Want me to push it?");
+  });
+
+  it("does not split inside a decimal or an abbreviation", () => {
+    const out = toUtterances("It dropped to 11.7 seconds per step, i.e. about half of what it was before.");
+    expect(out).toHaveLength(1);
+  });
+
+  it("glues a fragment onto its neighbour", () => {
+    const out = toUtterances("Yes. The whole suite is green and nothing else changed.");
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain("Yes.");
+  });
+
+  it("breaks a runaway sentence at a clause, never mid-word", () => {
+    const long = `I looked at ${Array.from({ length: 40 }, (_, i) => `item ${i}`).join(", ")} and finished.`;
+    const out = toUtterances(long, { maxChars: 120 });
+    expect(out.length).toBeGreaterThan(1);
+    for (const piece of out) expect(piece.length).toBeLessThanOrEqual(140);
+    expect(out.join(" ")).toContain("item 39");
+  });
+
+  it("runs its input through the spoken register first", () => {
+    const out = toUtterances("Fixed it.\n\n```js\nconsole.log(1)\n```\n\nShipped.");
+    expect(out.join(" ")).not.toContain("console.log");
+  });
+
+  it("is empty for text that speaks to nothing", () => {
+    expect(toUtterances("```\ncode only\n```")).not.toContain("code only");
+    expect(toUtterances("")).toEqual([]);
+  });
+
+  it("caps a long first block at firstBlockMaxChars without losing or emptying text", () => {
+    const long = `I looked at ${Array.from({ length: 30 }, (_, i) => `item ${i}`).join(", ")} and finished.`;
+    const out = toUtterances(long, { firstBlockMaxChars: 90 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(90);
+    for (const piece of out) expect(piece.length).toBeGreaterThan(0);
+    expect(out.join(" ")).toBe(toUtterances(long).join(" "));
+  });
+
+  it("leaves a first block at exactly the cap untouched", () => {
+    const text = `${Array.from({ length: 18 }, () => "word").join(" ")}. Second sentence here.`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped[0]!.length).toBe(90);
+    expect(capped).toEqual(toUtterances(text));
+  });
+
+  it("leaves a short first block and every later block on today's rules", () => {
+    const tail = `${Array.from({ length: 63 }, () => "word").join(" ")}.`;
+    const text = `The tests pass now. ${tail}`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped[0]!.length).toBeLessThanOrEqual(90);
+    expect(capped.at(-1)!.length).toBe(315);
+    expect(capped).toEqual(toUtterances(text));
+  });
+
+  it("keeps a short remainder from the capped block as its own block", () => {
+    const text = `${Array.from({ length: 18 }, () => "word").join(" ")} plus.`;
+    const out = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(out).toEqual([Array.from({ length: 18 }, () => "word").join(" "), "plus."]);
+    expect(out.join(" ")).toBe(toUtterances(text).join(" "));
+  });
+
+  it("keeps an unbreakable first token whole rather than slicing mid-word", () => {
+    const text = `${"a".repeat(95)} and then more words here.`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped).toEqual(toUtterances(text));
+    expect(capped[0]).toContain("a".repeat(95));
+  });
+
+  it.each(["漢".repeat(325), "日本語の文章を読み上げます。".repeat(40)])("bounds unspaced speech without dropping text", (text) => {
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 90 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(90);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320)).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps supplementary Unicode letters intact at an odd speech boundary", () => {
+    const text = "𠮷".repeat(95);
+    const out = toUtterances(text, { firstBlockMaxChars: 91 });
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => Buffer.from(piece).toString("utf8") === piece)).toBe(true);
+    expect(out.join("")).toBe(text);
+  });
+  it("keeps a terminal period attached to a word at either speech cap", () => {
+    const long = `${"a".repeat(320)}.`;
+    expect(toUtterances(long)).toEqual([long]);
+    const first = `${"a".repeat(90)}.`;
+    expect(toUtterances(first, { firstBlockMaxChars: 90 })).toEqual([first]);
+  });
+
+  it("does not turn punctuation around an indivisible word into an utterance", () => {
+    const text = `(${"a".repeat(320)}).`;
+    expect(toUtterances(text)).toEqual([text]);
+  });
+
+  it("caps a decomposed Katakana word without splitting its graphemes", () => {
+    const text = "カ\u3099".repeat(321);
+    const out = toUtterances(text, { maxChars: 320, firstBlockMaxChars: 91 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(91);
+    expect(out.every((piece) => piece.length > 0 && piece.length <= 320 && /^(?:カ\u3099)+$/u.test(piece))).toBe(true);
+    expect(out.join("")).toBe(speakable(text));
+  });
+
+  it("keeps Latin words with combining marks indivisible", () => {
+    const text = `${"e\u0301".repeat(200)}.`;
+    expect(toUtterances(text, { firstBlockMaxChars: 91 })).toEqual([text]);
+  });
+
+});
+
+describe("narrateTool", () => {
+  it("turns tool names into something worth hearing", () => {
+    expect(narrateTool("Bash")).toBe("running a command");
+    expect(narrateTool("Read")).toBe("reading a file");
+    expect(narrateTool("Edit")).toBe("editing a file");
+    expect(narrateTool("WebSearch")).toBe("searching the web");
+    expect(narrateTool("screenshot")).toBe("looking at the screen");
+  });
+
+  it("sees through an MCP tool prefix", () => {
+    expect(narrateTool("mcp__computer__click")).toBe("using the computer");
+    expect(narrateTool("mcp__agents__ask_bot")).toBe("asking a teammate");
+  });
+
+  it("stays quiet for chips the user is already told about another way", () => {
+    expect(narrateTool("auto-approved Bash:git (always allowed)")).toBeNull();
+    expect(narrateTool("error: claude exited 1")).toBeNull();
+    expect(narrateTool("")).toBeNull();
+  });
+
+  it("falls back to naming an unknown tool, without reading its argv", () => {
+    expect(narrateTool("deploy_thing")).toBe("running deploy_thing");
+    expect(narrateTool('curl -X POST "https://x/y" --data @{}')).toBeNull();
+  });
+});

@@ -1,0 +1,5 @@
+{
+  "title": "Troubleshooting",
+  "icon": "Wrench",
+  "pages": ["index", "logs", "startup-and-ports", "updates", "connected-apps", "google-sign-in-cloud-browser"]
+}

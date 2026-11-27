@@ -1,0 +1,340 @@
+# Chat turns
+
+## Sub-features
+
+- Create a bot through the normal profile boundary.
+- Send to its selected task or an explicitly pinned owned task.
+- Run two bot tasks independently, with separate models and approval modes.
+- Keep waits, approval responses, and Stop pinned while task selection changes.
+- Distinguish settled, failed, stalled, timed-out, and needs-user outcomes.
+- Read a bounded, redacted transcript.
+
+## User path
+
+Create or select a bot in the sidebar, type in the composer, and send.
+Starting or selecting another bot task does not stop the previous one.
+
+## Driving it
+
+```sh
+pnpm control:omb new-bot --name Probe --url http://127.0.0.1:PORT
+# Copy bot.id from the JSON above as BOT_ID.
+pnpm control:omb send --bot BOT_ID --text "hello" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 30 --url http://127.0.0.1:PORT
+pnpm control:omb messages --bot BOT_ID --limit 10 --url http://127.0.0.1:PORT
+```
+
+The wait result must be `settled`, and the messages result must contain the
+fake engine's bot response. Use `--dry-run` on `send` when checking a target or
+command without starting a turn.
+
+## Uploaded images used by file tools
+
+Upload a product photo in a chat, then ask the bot to pass that photo to a
+media-upload CLI. The engine needs both native vision input and a file reference;
+being able to describe the image does not prove that a file tool can read it.
+
+```sh
+pnpm exec vitest run server/turn-images.test.ts server/box-attachments.test.ts server/box-attachments.linux.test.ts server/bot-api.test.ts server/host/handoff-files.test.ts
+pnpm exec vitest run server/index.test.ts -t "keeps a channel image|sends an earlier image"
+```
+
+For an end-to-end check, launch the isolated fixture above, upload a synthetic
+PNG to its `POST /api/attachments` endpoint with `Content-Type: image/png`, then
+send `Use this photo with a media-upload CLI` followed by a standalone
+`<attached-image path="RETURNED_PATH" name="mug.png" />` through `control:omb send`.
+Use only the fixture's explicit URL. Wait for `settled` and save `messages`.
+In the fixture's `fake-claude-dump.json`, inspect only `prompt`: it must contain
+native image content and an `<attached-file>` reference for `mug.png`, with no
+remaining `<attached-image>` tag. Read the referenced file and compare its bytes
+with the uploaded PNG.
+
+The regression test also passes the extracted prompt through `attachmentsForBox`
+with confinement on and off and reads the resulting path in a real child process, including an
+admitted path spelled with a nonexistent `missing/../` segment.
+It checks that Codex still receives the same inline image bytes and that unrelated
+uploads are not copied into the conversation's uploads directory. This is not a
+kernel sandbox test; the Linux bubblewrap test supplies that coverage when the
+host supports it.
+
+Last exercised on Linux with Node 24.22.3 against an isolated fake-engine server:
+the turn settled with both native image content and a readable file reference.
+The focused suite passed 74 tests, and both selected server image workflow tests
+passed. The bubblewrap test was skipped because this container cannot run its sandbox. No real model or marketplace upload was used.
+
+## Gotchas
+
+- Omitting `--task` snapshots the selected task before sending, waiting,
+  reading, or stopping. Pass `--task THREAD_ID` to target another owned bot task
+  without changing the selection. A channel send still requires its active task.
+- `set-model --bot BOT_ID --task THREAD_ID --instance INSTANCE_ID --model MODEL_ID`
+  changes only that idle task. Get exact available IDs from `control:omb models`.
+  Without `--task`, the legacy model operation updates the bot default and its
+  selected idle task, leaving other tasks unchanged.
+- A bot working inside a channel must be awaited through that channel.
+- `needs-user`, `failed`, and `stalled` are results, not successful settlement.
+
+## Surface gating: one place per turn
+
+A turn mounts one place. An explicit Works on mounts only that computer, and
+web work happens in its own browser; Browser mounts only the built-in browser;
+Auto pins the conversation to whatever its first turn reached. A conversation
+pinned from the composer chip wins over the bot's Works on, except Off.
+
+```sh
+node --experimental-strip-types scripts/control-omb.ts launch
+pnpm control:omb new-bot --name Orbit --url http://127.0.0.1:PORT
+curl -s -X PATCH "http://127.0.0.1:PORT/api/bots/BOT_ID" \
+  -H 'content-type: application/json' -d '{"computer":"cloud"}'
+pnpm control:omb send --bot BOT_ID --text "compare shipping prices on two sites" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 40 --url http://127.0.0.1:PORT
+# pin this conversation to the browser, the way the composer chip does
+curl -s -X PATCH "http://127.0.0.1:PORT/api/bots/BOT_ID/tasks/THREAD_ID" \
+  -H 'content-type: application/json' -d '{"surface":"browser"}'
+pnpm control:omb send --bot BOT_ID --text "compare shipping prices on two sites" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 40 --url http://127.0.0.1:PORT
+```
+
+In `fake-claude-dump.json` the Cloud turn's `systemPrompt` must say everything
+on screen happens on the cloud computer, web pages included, carry the
+restate-first sentence, and hold no agent_browser paragraph; the pinned turn's
+prompt must name the built-in browser tab and no computer, and its `mcpConfig`
+must hold no computer server. The task in `GET /api/bots?messages=0` carries
+`surface: "browser"` after the pin and loses it after `{"surface": null}`.
+
+### Last exercised
+
+Not yet exercised against a live fixture. Covered by `server/surface.test.ts`
+and the `pins where a conversation works` case in `server/index.test.ts`.
+
+## Surface gating: Works on = Off
+
+Off withholds both surfaces. No other path may hand that bot the built-in
+browser, and the turn must tell the model it has no screen rather than leave
+it to narrate a browser it cannot call.
+
+```sh
+node --experimental-strip-types scripts/control-omb.ts launch
+# second terminal, using the printed URL
+pnpm control:omb new-bot --name Orbit --url http://127.0.0.1:PORT
+pnpm control:omb send --bot BOT_ID --text "list my calendar events" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 40 --url http://127.0.0.1:PORT
+# the fixture's own API sets the destination the Works on picker sets
+curl -s -X PATCH "http://127.0.0.1:PORT/api/bots/BOT_ID" \
+  -H 'content-type: application/json' -d '{"computer":"off"}'
+pnpm control:omb send --bot BOT_ID --text "open a browser and check my calendar" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 40 --url http://127.0.0.1:PORT
+```
+
+After each settled turn read `fake-claude-dump.json` in the fixture's printed
+`dataDir`: it holds the exact `systemPrompt` and `mcpConfig` that engine run
+received. The Auto turn must carry no Works-on sentence. The Off turn's prompt
+must say the setting is Off and that no computer and no built-in browser are
+mounted. Repeat through a channel — the room path resolves its surface
+separately — and mention a second Auto bot in the same room as the control.
+
+Proving the browser server's own absence from `mcpConfig` needs a fixture with
+a real browser engine; see [Live browser and profiles](browser-live.md). The
+dump above proves what the model was told, not what a native browser would do.
+
+### Last exercised
+
+2026-09-12, isolated macOS fixture on port 21008. A bot on Auto settled with
+`mcpConfig` servers `agents` and `ogb` and no Works-on sentence. The same bot
+patched to `computer: "off"` settled with the Works-on-Off sentence in its
+system prompt. A channel send to that bot carried the same sentence in the room
+prompt; an Auto bot mentioned in the same room did not. The fixture and its
+temporary data directory were removed with Ctrl-C afterwards.
+
+Maintainer review, 2026-09-12: repeated against an isolated fixture with the
+native agent-browser 0.37.0 and Chrome for Testing explicitly installed. The
+fake model's captured MCP configuration included `browser` for Auto and
+Browser-only direct turns, and omitted it for Off direct and Off room turns.
+All four turns settled and the fixture was closed. This proves tool mounting
+with an available engine; it does not claim a browser navigation or a real
+provider response. Only server names and bounded fixture messages were retained,
+not the capability tokens in the raw MCP configuration.
+
+## Queued follow-up recovery
+
+Accepted bot and channel follow-ups are committed to the transcript database
+before acknowledgement. A normal restart restores only work whose dispatch has
+not begun. A claimed dispatch has an uncertain outcome: retain the user's words
+and a visible review notice instead of automatically repeating the action.
+Cancellation receipts survive restart. Importing a workspace backup pauses all
+of its queued work for review, even when restoring to the original directory.
+
+```sh
+pnpm exec vitest run server/chat-followups.test.ts server/chat-followups-restart.test.ts server/workspace-backup.test.ts
+```
+
+The restart test launches an isolated real server with the fake engine, accepts
+queued bot/channel sends, kills only that fixture server, and starts a replacement
+against the same disposable home. It checks original receipts, native image
+content, reply targets, cancellation conflicts, one uncertain-dispatch notice,
+and a second restart without replay. It records the fixture log and a retained
+`.log.chat-followups-restart.json` receipt before removing the temporary home.
+This does not prove resumption or cleanup of real provider sessions after a crash.
+
+## Concurrent-task regression
+
+### Hand-offs on the job runtime
+
+Every hand-off between bots is an assignment on the job runtime
+(docs/runtime-contract.md §9): `coordinate_bots` from a chat, a room, a
+routine run, a webhook run, a goal run, a Cloud guest's turn or a standing
+external runtime. There is no mailbox: a queued assignment is bounded by
+the runtime's queue clock (§6, 24 hours, `failed(expired)` and reported), its
+windows restart at boot, and nothing outside `server/runtime/` holds hand-off
+state. The ledger the mailbox kept (`delegations.json`,
+`delegation-receipts.json`) is imported once at boot and renamed `*.migrated`
+(`server/runtime/import-legacy.ts`). A routine run waiting on teammates is
+`waiting` while the runtime has outstanding assignments for its thread; the
+run's resume is a routine turn; a restart reruns a cut teammate turn once (§5)
+and keeps the run waiting instead of failing it. `assignment_status` reads an
+assignment's status, outcome and result, or everything a conversation still
+waits on; it is read-only and refuses an id handed out in the same turn.
+
+```sh
+pnpm exec vitest run server/runtime-paths.e2e.test.ts server/runtime-coordinator.test.ts server/runtime/import-legacy.test.ts
+pnpm exec vitest run server/independent-threads-api.test.ts -t "holds coordinated work behind a peer's approval"
+pnpm exec vitest run server/independent-threads-api.test.ts -t "unanswered|what became of each teammate approval"
+pnpm exec vitest run server/comms.test.ts server/thread-capacity-api.test.ts -t "free slot"
+```
+
+The approval fixtures use the isolated launcher and per-model fake-engine
+gates. A peer waits on a real approval-broker card. A card holds only its own
+thread: fresh coordinated work waits only while the card's thread holds the
+peer's last free slot, and then the Chief's conversation says once, in a
+notice that never reads as running, whose card it waits behind and where, as
+does the Chief's prompt. With a slot free, the work starts beside the open
+card. Approving the card lets its own turn go on, and one attributed result
+returns to the Chief without another user prompt. The approval cases follow a
+teammate's cards through the broker's own course: the Chief's chip says
+denied, or that nobody answered and the step did not run, never "got your
+approval". The fixture fires the broker's fifteen-minute deadline through a
+marker file (`server/testing/approval-clock-hooks.mjs`, loaded only when
+`OMB_TEST_APPROVAL_CLOCK=1` reaches the isolated launcher). The result a
+Chief's coordination, a routine run's hand-off and a room's coordinator each
+read then leads with the action that did not run; a failed teammate turn
+carries it after its failure, and an action the model asked again and was
+allowed is not named. Exact control commands, waits, transcripts and the
+server log path are retained in the fixture's `.log.json` evidence, without
+capability tokens. The runtime's own suite (`server/runtime/*.test.ts`) covers
+the queue clock, restart reconciliation and the invariants. These tests do not
+claim real-provider performance.
+
+### Independent tasks
+
+```sh
+pnpm exec vitest run server/independent-threads-api.test.ts
+```
+
+This test launches a fresh `control-omb` fixture for each case, wraps only its
+fake engine with per-model completion gates, and uses the shared MCP/CLI surface
+for pinned sends, waits, model changes, reads, and interrupts. It verifies two
+tasks running under one bot, switching and creating while busy, separate model
+and approval settings, stopping A without stopping B, transcript isolation, and
+an unattended task remaining approval-blocked while its attended sibling runs.
+It also exercises live provider capabilities against the memory-update route:
+both sibling appends survive, stale replacements conflict, foreign ownership is
+refused, and stopped-turn tokens expire without revoking the running sibling.
+Provider working directories are checked against each task's private directory;
+an explicitly shared project folder cannot launch a second engine until its
+owner stops. On macOS, an inert computer descriptor inside the disposable home
+checks lazy first-use ownership and exact-generation release through the real
+control gate. It does not launch a desktop driver or prove actual UI actions.
+The fixture prints its server log and a retained `.log.json` evidence path with
+the exact control commands, wait results, and bounded transcripts. Its temporary
+home is removed after the test.
+
+See the [Threads renderer recipe](threads.md) for the real sidebar, composer,
+optional folders, and group-history navigation checks.
+
+## CLI Stop regression
+
+```sh
+pnpm exec vitest run server/kill-tree.test.ts server/engine-install.test.ts server/cli-stop.e2e.test.ts
+```
+
+The Stop fixture wraps only the isolated launcher's fake Claude CLI with an
+owned helper that ignores TERM. It covers both a root that exits first and a
+root that also ignores TERM: the task stays busy during the grace period,
+settles only after both PIDs are gone, and accepts a subsequent message.
+The printed `.log.json` retains exact control commands, waits, transcripts,
+and PID checks. No real engine, account, or user's app data is used.
+
+Focused process checks also cover concurrent stops, denied signals, unrelated
+process safety, and bounded npm timeout errors. Codex's driver tests retain
+task ownership after an uncertain stop until a verified retry; Antigravity's
+lifecycle tests retain the verification profile on the same failure.
+POSIX group escalation and the
+new server cases are skipped on Windows; its existing `taskkill /T /F` path
+remains covered by the cross-platform child-tree test when run on Windows.
+Windows event-order regressions also run on every host in
+`server/kill-tree-windows.test.ts`: successful `taskkill` alone is not proof
+that Node observed the child's exit. Both orders (exit before or after the
+command callback) must settle without waiting for inherited pipes to close;
+an unobserved exit still times out as uncertain. The native Antigravity
+`closeAndWait` test in Windows CI verifies that callers cannot rename an
+executable while its process is still running. Local mocked Windows tests
+do not substitute for that native check.
+Processes that intentionally detach into a different group are not owned by
+this POSIX group-based cancellation.
+
+## The person's message during a long tool call
+
+```sh
+pnpm exec vitest run server/person-first.e2e.test.ts server/host/person-first.test.ts
+```
+
+A message from the person in their own chat never waits behind a long tool
+call. The e2e test launches the isolated fixture as the desktop app runs it
+(the owner capability makes the send the person's own), scripts one Bash call
+that holds like a CI poll, and sends a second message, which is steered into
+the turn and stays unread. `OMB_PERSON_FIRST_MS=1500` stands in for the minute a
+tool call may hold it. The turn must be stopped with the row "Stopped a step
+that had run for N s, to answer you first", the person's message must stay one
+row, and the next turn must lead with their words and the note naming the
+stopped step, so the bot's reply answers them. A message from a room, a
+routine, a teammate or an app never stops a turn this way, and neither does
+one sent while the turn waits on the person or a computer
+(`server/host/person-first.test.ts`).
+
+### Last exercised
+
+2026-10-30, macOS, isolated fixture from the e2e test: the scripted CI poll
+was stopped 1.5 s after the steered question, and the fake engine answered the
+question in the next turn. With the steered message's watch removed, the
+question stayed unanswered for 30 s and the test failed.
+
+## Several people in one shared chat
+
+```sh
+pnpm exec vitest run server/cloud-team-asker-owns.e2e.test.ts server/host/run-owner.test.ts src/components/SharedQueueLine.test.ts
+```
+
+On a Team Cloud, whoever asked owns the run ([team-cloud.md](../team-cloud.md#whoever-asked-owns-the-run)). The
+e2e test pairs an Owner and three members, holds Priya's request in the same scripted CI poll, and checks with
+`OMB_PERSON_FIRST_MS=1500`: Tom's line is queued (never steered, never cut short to be answered first) and runs after
+hers as his own turn; everyone sees the waiting lines with their writers, in order; only a line's writer removes it
+and nobody joins someone else's run; Tom's Stop and typed stop answer 403 "Only Priya or an admin can stop this.",
+while Priya and the Owner stop it; Priya's own addition is steered and answered first, in the shared chat and in her
+private chat; and a routine run started mid-run leaves its report between her answer and Tom's line.
+
+## Threads of one bot at the same time
+
+Different threads of one bot run at once. A saved `threads.maxConcurrentPerBot` sets how many. With none saved, a Cloud
+runs up to 16 and its memory gate decides; a machine without the gate runs one per 2 GB of memory, 3 to 16. The bot's main
+chat always starts, and takes a slot. On a Starter Cloud a person's or routine's work runs one thread per bot whatever is
+saved; work a bot's own turn started goes through, so a turn can never wait on a child queued behind itself.
+`server/parallel-threads.e2e.test.ts` holds a turn open in each thread with a gate only
+the test releases, as a desktop, personal Cloud and Team Cloud server, on the Claude CLI, ACP and OpenAI-compatible
+engines. What stays one at a time, and what the person sees:
+
+- One thread's own turns stay in order: a later send queues or steers.
+- One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
+  to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
+- One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
+- Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory", with what runs and what is ahead of it, and starts by itself. `OMB_TEST_MEMORY_GATE=1` runs the gate in a fixture on any OS, on the memory `<data dir>/host-memory.json` says; `server/memory-order.e2e.test.ts` shows whose turn goes next.
+- A Cloud that just woke: a hand-off starts at once. `OMB_TEST_RESUME_CLOCK=1` lets a fixture move `Date.now()` on as a wake does, by writing milliseconds to `<data dir>/resume-clock-ms`; `server/handoff-wake.e2e.test.ts` uses it.

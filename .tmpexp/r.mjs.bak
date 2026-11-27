@@ -1,0 +1,20 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { toHast } from "mdast-util-to-hast";
+import { windowsPathDestinations } from "./ext.mjs";
+const md = String.raw`[Report](C:\Users\Maus\.openmausbot\release notes.md) ![c](C:\Users\Maus\chart.png)`;
+const md2 = String.raw`[Report](<C:\Users\Maus\.openmausbot\release notes.md>)`;
+for (const m of [md, md2]) {
+  const tree = fromMarkdown(m, { mdastExtensions: [windowsPathDestinations] });
+  const h = toHast(tree);
+  const out = [];
+  const walk = (n) => { if (n.properties?.href) out.push(["href", n.properties.href]); if (n.properties?.src) out.push(["src", n.properties.src]); (n.children||[]).forEach(walk); };
+  walk(h);
+  console.log(JSON.stringify(m), out);
+}
+// markdownImageName behaviour
+const name = (src) => {
+  try { const p = decodeURIComponent(new URL(src, "https://openmausbot.invalid").pathname); return [p, p.split(/[\\/]/).filter(Boolean).at(-1), p.split("/").filter(Boolean).at(-1)]; } catch (e) { return ["THREW", String(e)]; }
+};
+console.log("name C:\\..\\chart.png ->", name("C:\\Users\\Maus\\chart.png"));
+console.log("name C:\\..\\my chart.png ->", name("C:\\Users\\Maus\\my%20chart.png"));
+console.log("name D:\\.hidden\\a.png ->", name("D:\\.hidden\\a.png"));

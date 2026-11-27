@@ -1,0 +1,54 @@
+import { beforeEach, describe, expect, it } from "vitest";
+
+import { briefCrossingLabel, claimRecallCrossings, forgetRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
+
+import "./server-line-packs.ts";
+
+beforeEach(() => forgetRecallCrossings());
+
+describe("claimRecallCrossings", () => {
+  it("claims a crossing the first time a source is recalled into a room", () => {
+    expect(claimRecallCrossings("room-1", ["dm-1", "dm-1", "task-2"])).toEqual({
+      threadIds: ["dm-1", "task-2"],
+      count: 3,
+    });
+  });
+
+  it("stays quiet when the room has already been told about that thread", () => {
+    claimRecallCrossings("room-1", ["dm-1"]);
+    expect(claimRecallCrossings("room-1", ["dm-1", "dm-1"])).toEqual({ threadIds: [], count: 0 });
+  });
+
+  it("announces a source the room has not seen, even alongside one it has", () => {
+    claimRecallCrossings("room-1", ["dm-1"]);
+    expect(claimRecallCrossings("room-1", ["dm-1", "task-2"])).toEqual({ threadIds: ["task-2"], count: 1 });
+  });
+
+  it("keeps rooms apart: telling one room discloses nothing in another", () => {
+    claimRecallCrossings("room-1", ["dm-1"]);
+    expect(claimRecallCrossings("room-2", ["dm-1"])).toEqual({ threadIds: ["dm-1"], count: 1 });
+  });
+
+  it("claims nothing when nothing crossed", () => {
+    expect(claimRecallCrossings("room-1", [])).toEqual({ threadIds: [], count: 0 });
+  });
+
+  it("re-announces after the ledger is forgotten, because silence is the worse failure", () => {
+    claimRecallCrossings("room-1", ["dm-1"]);
+    forgetRecallCrossings("room-1");
+    expect(claimRecallCrossings("room-1", ["dm-1"])).toEqual({ threadIds: ["dm-1"], count: 1 });
+  });
+});
+
+describe("the crossing notices", () => {
+  it("says what crossed in the room's language, with singular and plural counts", () => {
+    expect(recallCrossingLabel("Cia", 1)).toBe("Cia recalled 1 message from its private chat with you");
+    expect(recallCrossingLabel("Cia", 3)).toBe("Cia recalled 3 messages from its private chat with you");
+    expect(briefCrossingLabel("Cia", 1)).toBe("Cia's recent-work brief covers 1 private chat with you");
+    expect(briefCrossingLabel("Cia", 2)).toBe("Cia's recent-work brief covers 2 private chats with you");
+    expect(recallCrossingLabel("Cia", 1, "pt-br")).toBe("Cia relembrou 1 mensagem da conversa privada com você");
+    expect(recallCrossingLabel("Cia", 3, "pt-br")).toBe("Cia relembrou 3 mensagens da conversa privada com você");
+    expect(briefCrossingLabel("Cia", 1, "pt-br")).toBe("O resumo do trabalho recente de Cia inclui 1 conversa privada com você");
+    expect(briefCrossingLabel("Cia", 2, "pt-br")).toBe("O resumo do trabalho recente de Cia inclui 2 conversas privadas com você");
+  });
+});

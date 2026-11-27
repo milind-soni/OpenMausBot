@@ -1,0 +1,65 @@
+# omb-home-narrow: omb-home, plus a refusal of every filesystem type a user namespace may mount that bubblewrap
+# never does (it mounts only tmpfs, proc and devpts, and binds). Overlay and FUSE in user namespaces are where most
+# unprivileged-namespace kernel bugs have been; a bot cannot reach them through this container.
+abi <abi/3.0>,
+include <tunables/global>
+
+profile omb-home-narrow flags=(attach_disconnected,mediate_deleted) {
+  include <abstractions/base>
+
+  network,
+  deny network alg,
+  deny network vsock,
+  capability,
+  file,
+  umount,
+  # The bot box: tmpfs, proc, devpts and bind mounts in its own namespaces, then pivot_root into them.
+  mount,
+  pivot_root,
+  deny mount fstype=overlay,
+  deny mount fstype=fuse,
+  deny mount fstype=fuseblk,
+  deny mount fstype=sysfs,
+  deny mount fstype=mqueue,
+  deny mount fstype=cgroup,
+  deny mount fstype=cgroup2,
+  deny mount fstype=ramfs,
+  deny mount fstype=binfmt_misc,
+  deny mount fstype=bpf,
+
+  signal (receive) peer=unconfined,
+  signal (receive) peer=runc,
+  signal (receive) peer=crun,
+  signal (send,receive) peer=omb-home-narrow,
+
+  deny @{PROC}/* w,
+  deny @{PROC}/{[^1-9/],[^1-9/][^0-9/],[^1-9s/][^0-9y/][^0-9s/],[^1-9/][^0-9/][^0-9/][^0-9/]*}/** w,
+  deny @{PROC}/sys/[^k]** w,
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  # systempaths=unconfined lifts Docker's masks over /proc and /sys; these put back what the masks hid.
+  deny @{PROC}/acpi/{,**} rwklx,
+  deny @{PROC}/asound/{,**} rwklx,
+  deny @{PROC}/interrupts rwklx,
+  deny @{PROC}/keys rwklx,
+  deny @{PROC}/latency_stats rwklx,
+  deny @{PROC}/sched_debug rwklx,
+  deny @{PROC}/scsi/{,**} rwklx,
+  deny @{PROC}/timer_list rwklx,
+  deny @{PROC}/timer_stats rwklx,
+  deny @{PROC}/sys/** w,
+  deny /sys/devices/system/cpu/cpu*/thermal_throttle/** rwklx,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/{,**} rwklx,
+  deny /sys/devices/virtual/powercap/{,**} rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  ptrace (trace,tracedby,read,readby) peer=omb-home-narrow,
+}

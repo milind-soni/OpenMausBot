@@ -1,0 +1,194 @@
+// A self-hosted server cannot replace itself, so this only says whether a newer version exists and how this install is updated.
+import { existsSync } from "node:fs";
+import { join, sep } from "node:path";
+
+export const LATEST_RELEASE_URL = "https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
+/** Written by .github/workflows/promote-stable.yml: the released version our own Clouds have run for 48 hours. */
+export const STABLE_CHANNEL_URL = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json";
+const CACHE_MS = 60 * 60_000;
+/** A press of Check for updates looks again unless the last lookup is younger than this. Any session may press it, and
+ * GitHub allows a server 60 lookups an hour without a token: presses keep to 12 of them. */
+const FRESH_MS = 5 * 60_000;
+/** How long the last answer stands in when the channel cannot be read: an outage of GitHub is no reason to say nothing. */
+const STALE_MS = 24 * 60 * 60_000;
+
+/** "managed" is a hosted or Cloud server that is updated for its owner. "podman" is deploy/podman's Compose recipe;
+ * "podman-service" the rootless service deploy/podman/install.sh writes, whose unit sets OMB_PODMAN_SERVICE. */
+export type InstallKind = "desktop" | "managed" | "docker" | "podman" | "podman-service" | "npm" | "git" | "unknown";
+
+/** Where deploy/podman/install.sh puts the install unless told otherwise. */
+export const PODMAN_SERVICE_DIR = "~/.local/share/openmausbot";
+
+/** The install's folder on the host, as the unit gives it in OMB_PODMAN_SERVICE (`~/…` or an absolute path). */
+export function podmanServiceDir(env: NodeJS.ProcessEnv = process.env): string {
+  const dir = env.OMB_PODMAN_SERVICE?.trim() ?? "";
+  return /^(?:~\/|\/)[A-Za-z0-9/._@-]+$/.test(dir) && !dir.split("/").includes("..") ? dir.replace(/\/+$/, "") : PODMAN_SERVICE_DIR;
+}
+
+/** `stable` follows the promoted version; `newest` follows every release, as soon as it is published. */
+export type UpdateChannel = "stable" | "newest";
+
+/** OMB_UPDATE_CHANNEL: `newest` to hear of every release; anything else is `stable`. */
+export function updateChannel(env: NodeJS.ProcessEnv = process.env): UpdateChannel {
+  return env.OMB_UPDATE_CHANNEL?.trim().toLowerCase() === "newest" ? "newest" : "stable";
+}
+
+/**
+ * As docs/self-hosting.md and deploy/podman/README.md give them. `version` is the one the channel names: an npm install
+ * is pinned to it, and a Docker install passes it to deploy/update.sh unless that is the stable one update.sh takes anyway.
+ */
+export function updateCommand(install: InstallKind, target?: { version: string; stable: boolean }, env: NodeJS.ProcessEnv = process.env): { command: string; restart: boolean } | undefined {
+  const version = target && !target.stable ? ` --version ${target.version}` : "";
+  switch (install) {
+    case "docker": return { command: `git pull && ./update.sh${version}`, restart: false };
+    case "podman-service": return { command: `${podmanServiceDir(env)}/update.sh${version}`, restart: false };
+    case "podman": return { command: "git pull && cd deploy/podman && PODMAN_COMPOSE_PROVIDER=podman-compose podman compose --env-file .env -f compose.yaml up -d --build", restart: false };
+    case "npm": return { command: `npm install -g openmausbot@${target?.version ?? "latest"}`, restart: true };
+    case "git": return { command: "git pull && pnpm install", restart: true };
+    default: return undefined;
+  }
+}
+
+export function installKind(input: {
+  desktopManaged: boolean;
+  managed: boolean;
+  serverRoot: string;
+  exists?: (path: string) => boolean;
+  env?: NodeJS.ProcessEnv;
+}): InstallKind {
+  const exists = input.exists ?? existsSync;
+  if (input.desktopManaged) return "desktop";
+  if (input.managed) return "managed";
+  if ((input.env ?? process.env).OMB_PODMAN_SERVICE?.trim()) return "podman-service";
+  if (exists("/.dockerenv")) return "docker";
+  if (exists("/run/.containerenv")) return "podman";
+  if (input.serverRoot.split(sep).includes("node_modules")) return "npm";
+  if (exists(join(input.serverRoot, "..", ".git"))) return "git";
+  return "unknown";
+}
+
+/** Semver order on tags such as "v0.1.92"; a prerelease sorts before its release, and anything unparseable is never an update. */
+export function isNewerVersion(latest: string, current: string): boolean {
+  const parse = (version: string) => {
+    const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version.trim());
+    return match ? { core: match.slice(1, 4).map(Number), pre: match[4]?.split(".") ?? [] } : null;
+  };
+  const a = parse(latest);
+  const b = parse(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) {
+    if (a.core[i]! !== b.core[i]!) return a.core[i]! > b.core[i]!;
+  }
+  if (!a.pre.length || !b.pre.length) return !a.pre.length && b.pre.length > 0;
+  for (let i = 0; i < Math.max(a.pre.length, b.pre.length); i++) {
+    const x = a.pre[i];
+    const y = b.pre[i];
+    if (x === undefined || y === undefined) return y === undefined;
+    if (x === y) continue;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) return Number(x) > Number(y);
+    if (xn !== yn) return yn;
+    return x > y;
+  }
+  return false;
+}
+
+export interface UpdateCheck {
+  current: string;
+  install: InstallKind;
+  /** Where `latest` came from. `stable` falls back to `newest` until a first version has been promoted. */
+  channel?: UpdateChannel;
+  latest?: string;
+  available: boolean;
+  releaseUrl?: string;
+  command?: string;
+  restart?: boolean;
+}
+
+type Found = { version: string; releaseUrl?: string };
+
+/** One cached lookup an hour, shared by every caller. */
+export function createUpdateChecker(options: {
+  current: string;
+  install: InstallKind;
+  channel?: UpdateChannel;
+  fetch?: typeof fetch;
+  now?: () => number;
+}) {
+  const fetchJson = options.fetch ?? fetch;
+  const now = options.now ?? Date.now;
+  const channel = options.channel ?? "stable";
+  let cached: { at: number; result: UpdateCheck } | undefined;
+  /** The last answer that was read, kept past the hour for a channel that cannot be read for a while. */
+  let lastGood: { at: number; result: UpdateCheck } | undefined;
+  /** The last lookup, when it failed: a press of Check for updates within FRESH_MS gets this error, not a new lookup. */
+  let failed: { at: number; error: unknown } | undefined;
+  let inflight: Promise<UpdateCheck> | undefined;
+  const base = (): UpdateCheck => ({
+    current: options.current,
+    install: options.install,
+    available: false,
+    ...updateCommand(options.install),
+  });
+  const ask = (url: string) => fetchJson(url, {
+    headers: { accept: "application/vnd.github+json", "user-agent": "openmausbot-update-check" },
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  /** Null until a first version has been promoted: the record does not exist yet. */
+  async function stable(): Promise<Found | null> {
+    const response = await ask(STABLE_CHANNEL_URL);
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`The stable channel answered ${response.status}`);
+    const record = await response.json() as { version?: unknown; releaseUrl?: unknown };
+    if (typeof record.version !== "string" || !/^\d+\.\d+\.\d+$/.test(record.version)) throw new Error("The stable channel named no version");
+    return { version: record.version, ...(typeof record.releaseUrl === "string" ? { releaseUrl: record.releaseUrl } : {}) };
+  }
+
+  async function newest(): Promise<Found> {
+    const response = await ask(LATEST_RELEASE_URL);
+    if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+    const release = await response.json() as { tag_name?: unknown; html_url?: unknown };
+    if (typeof release.tag_name !== "string") throw new Error("GitHub sent no release tag");
+    return { version: release.tag_name.replace(/^v/, ""), ...(typeof release.html_url === "string" ? { releaseUrl: release.html_url } : {}) };
+  }
+
+  /** `fresh`: someone pressed Check for updates, so an answer from up to an hour ago is not good enough. */
+  return async function check({ fresh = false }: { fresh?: boolean } = {}): Promise<UpdateCheck> {
+    if (options.install === "desktop" || options.install === "managed") return base();
+    if (cached && now() - cached.at < (fresh ? FRESH_MS : CACHE_MS)) return cached.result;
+    if (fresh && failed && now() - failed.at < FRESH_MS) throw failed.error;
+    inflight ??= (async () => {
+      try {
+        const promoted = channel === "stable" ? await stable() : null;
+        const found = promoted ?? await newest();
+        const result: UpdateCheck = {
+          ...base(),
+          channel: promoted ? "stable" : "newest",
+          latest: found.version,
+          available: isNewerVersion(found.version, options.current),
+          ...(found.releaseUrl ? { releaseUrl: found.releaseUrl } : {}),
+          ...updateCommand(options.install, { version: found.version, stable: promoted !== null }),
+        };
+        cached = lastGood = { at: now(), result };
+        failed = undefined;
+        return result;
+      } catch (error) {
+        failed = { at: now(), error };
+        throw error;
+      } finally {
+        inflight = undefined;
+      }
+    })();
+    try {
+      return await inflight;
+    } catch (error) {
+      // Never a fall back to the newest release, which the stable channel has not taken yet: the last answer it gave,
+      // when there is one from the last day, else the error. A press of Check for updates gets the error: an old
+      // answer there reads as "up to date".
+      if (!fresh && lastGood && now() - lastGood.at < STALE_MS) return lastGood.result;
+      throw error;
+    }
+  };
+}

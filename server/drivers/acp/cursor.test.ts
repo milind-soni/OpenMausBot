@@ -1,0 +1,1124 @@
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+import type { RuntimeEvent } from "../../contracts.ts";
+import { ensureDirs } from "../../config.ts";
+import { recordEvents } from "../../testing/events.ts";
+import { removeTempDir } from "../../testing/cleanup.ts";
+import { classifyRoutineFailure } from "../../routine-recovery.ts";
+import {
+  classifyCursorError,
+  createCursorAgentDriver,
+  cursorCatalogFromSession,
+  cursorReplyFailure,
+  CursorAgentDriver,
+  decodeCursorAuthStatus,
+  decodeCursorAuthText,
+  decodeCursorModelCatalog,
+  decodeCursorModelText,
+  matchCursorAcpModel,
+  STATIC_CURSOR_MODELS,
+  resolveCursorAcpModelId,
+} from "./cursor.ts";
+
+const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
+
+describe("decodeCursorAuthStatus", () => {
+  it("reads isAuthenticated from live CLI JSON", () => {
+    expect(decodeCursorAuthStatus({ isAuthenticated: true })).toBe(true);
+    expect(decodeCursorAuthStatus({ isAuthenticated: false })).toBe(false);
+  });
+
+  it("accepts sibling field names without inventing a yes from a missing flag", () => {
+    expect(decodeCursorAuthStatus({ authenticated: true })).toBe(true);
+    expect(decodeCursorAuthStatus({ loggedIn: false })).toBe(false);
+    expect(decodeCursorAuthStatus({ auth: { isAuthenticated: true } })).toBe(true);
+    expect(decodeCursorAuthStatus({ email: "user@example.com" })).toBeNull();
+    expect(decodeCursorAuthStatus("logged in")).toBeNull();
+  });
+});
+
+describe("decodeCursorAuthText", () => {
+  it("recognizes the documented status output without confusing logged-out text", () => {
+    expect(decodeCursorAuthText("✓ Login successful! Logged in")).toBe(true);
+    expect(decodeCursorAuthText("Not logged in")).toBe(false);
+    expect(decodeCursorAuthText("Cursor Agent CLI")).toBeNull();
+  });
+});
+
+describe("decodeCursorModelCatalog", () => {
+  it("merges live ids onto the static cloud set", () => {
+    const catalog = decodeCursorModelCatalog({
+      default: "composer-2.5",
+      models: [
+        { id: "composer-2.5", name: "Composer 2.5" },
+        { id: "cursor-live", displayName: "Cursor Live" },
+        { id: "bad id" },
+        "gpt-5.3-codex",
+      ],
+    });
+    expect(catalog?.default).toBe("composer-2.5");
+    expect(catalog?.options.slice(0, STATIC_CURSOR_MODELS.options.length)).toEqual(STATIC_CURSOR_MODELS.options);
+    expect(catalog?.options).toContainEqual({ id: "cursor-live", label: "Cursor Live" });
+    expect(catalog?.options.some((option) => option.id === "bad id")).toBe(false);
+  });
+
+  it("reads { data: [...] } and a bare array", () => {
+    expect(decodeCursorModelCatalog({ data: [{ id: "extra-one", label: "Extra One" }] })?.options).toContainEqual({
+      id: "extra-one",
+      label: "Extra One",
+    });
+    expect(decodeCursorModelCatalog(["composer-2.5", "brand-new"])?.options).toContainEqual({
+      id: "brand-new",
+      label: "Brand New",
+    });
+  });
+
+  it("returns null for an unusable payload so the static fallback can win", () => {
+    expect(decodeCursorModelCatalog(null)).toBeNull();
+    expect(decodeCursorModelCatalog({ models: [] })).toBeNull();
+    expect(decodeCursorModelCatalog({ hello: "world" })).toBeNull();
+  });
+});
+
+describe("decodeCursorModelText", () => {
+  it("parses slug-label lines and (default)/(current) markers", () => {
+    const catalog = decodeCursorModelText(`
+Available models
+
+auto - Auto (default)
+composer-2.5 - Composer 2.5 (current)
+cursor-text - Cursor Text
+`);
+    expect(catalog?.default).toBe("auto");
+    expect(catalog?.options).toContainEqual({ id: "cursor-text", label: "Cursor Text" });
+    expect(catalog?.options).toContainEqual({ id: "composer-2.5", label: "Composer 2.5" });
+  });
+
+  it("falls back to the first parsed id when static default is absent", () => {
+    const catalog = decodeCursorModelText("cursor-only - Cursor Only");
+    expect(catalog?.default).toBe("cursor-only");
+  });
+});
+
+describe("cursorCatalogFromSession", () => {
+  it("offers one flat slug per base, names default[] auto, and keeps only the static entries the session offers", () => {
+    expect(cursorCatalogFromSession([
+      { id: "default[]", label: "Auto" },
+      { id: "grok-4.7[reasoning_effort=high,fast=true]", label: "grok-4.7" },
+      { id: "grok-4.7[reasoning_effort=high,fast=false]", label: "grok-4.7" },
+      { id: "gpt-5.3-codex[reasoning=medium]", label: "Codex 5.3" },
+    ])).toEqual({
+      default: "auto",
+      options: [
+        { id: "auto", label: "Auto" },
+        { id: "gpt-5.3-codex", label: "Codex 5.3" },
+        { id: "grok-4.7", label: "Grok 4.7" },
+      ],
+    });
+  });
+
+  it("returns null when the session advertises nothing, so the text list can answer", () => {
+    expect(cursorCatalogFromSession([])).toBeNull();
+  });
+});
+
+describe("classifyCursorError", () => {
+  it("maps auth and subscription failures onto provider codes", () => {
+    expect(classifyCursorError({ code: -32000, message: "Authentication required" })).toBe("invalid_credentials");
+    expect(classifyCursorError(new Error("not logged in"))).toBe("invalid_credentials");
+    expect(classifyCursorError(new Error("upgrade your subscription"))).toBe("inactive_subscription");
+    expect(classifyCursorError(new Error("model not found"))).toBeUndefined();
+  });
+});
+
+describe("cursorReplyFailure", () => {
+  it("reads the chunk Cursor sends for a failed model call", () => {
+    expect(cursorReplyFailure("\n\nError: RetriableError: [unavailable] HTTP 503")).toBe("[unavailable] HTTP 503");
+    expect(cursorReplyFailure("\n\nError: NonRetriableError: model not available\n")).toBe("model not available");
+    expect(cursorReplyFailure("\n\nError: [unauthenticated] Backend rejected authentication.")).toBe("[unauthenticated] Backend rejected authentication.");
+  });
+
+  it("leaves a chunk that carries the model's own words", () => {
+    expect(cursorReplyFailure("The log ended with:\n\nError: RetriableError: [unavailable] HTTP 503")).toBeNull();
+    expect(cursorReplyFailure("Error: RetriableError: [unavailable] HTTP 503")).toBeNull();
+    expect(cursorReplyFailure("\n\nError: RetriableError: [unavailable] HTTP 503\n\nIt recovered.")).toBeNull();
+    expect(cursorReplyFailure("\n\nError: ")).toBeNull();
+  });
+});
+
+describe("CursorAgentDriver", () => {
+  const scratchDirs: string[] = [];
+  // The fake answers --version the way cursor-agent does: another answer is another program behind the CLI path.
+  beforeAll(() => { process.env.FAKE_ACP_VERSION = "2026.10.22-27dcf5f"; });
+  afterAll(() => { delete process.env.FAKE_ACP_VERSION; });
+
+  afterEach(async () => {
+    delete process.env.FAKE_ACP_DUMP;
+    delete process.env.FAKE_ACP_AUTH;
+    delete process.env.FAKE_ACP_AUTH_METHOD;
+    delete process.env.FAKE_ACP_RPC_APPEND_FILE;
+    delete process.env.CURSOR_API_KEY;
+    delete process.env.CURSOR_AUTH_TOKEN;
+    delete process.env.XAI_API_KEY;
+    for (const dir of scratchDirs.splice(0)) await removeTempDir(dir);
+  });
+
+  it("defaults to the unambiguous cursor-agent binary and declares cross-platform setup", () => {
+    expect(CursorAgentDriver.decodeConfig(undefined)).toEqual({
+      cli: "cursor-agent",
+      fullAuto: false,
+      workspace: undefined,
+    });
+    expect(CursorAgentDriver.driverKind).toBe("cursorAgent");
+    expect(CursorAgentDriver.install?.command).toMatchObject({
+      darwin: expect.stringContaining("cursor.com/install"),
+      linux: expect.stringContaining("cursor.com/install"),
+      win32: expect.stringContaining("cursor.com/install"),
+    });
+    expect(CursorAgentDriver.install?.signInCommand).toBe("cursor-agent login");
+  });
+
+  it("refreshes the catalog from `cursor-agent models` on the instance CLI", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const driver = createCursorAgentDriver();
+    const instance = await driver.create({
+      instanceId: "cursor-catalog",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      expect(instance.models.options.some((option) => option.id === "cursor-live")).toBe(true);
+      expect(instance.models.default).toBe("auto");
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("lists every model the ACP session advertises when `cursor-agent models` lists only auto", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-acp-catalog-"));
+    scratchDirs.push(scratch);
+    const dump = join(scratch, "dump.json");
+    const rpc = join(scratch, "rpc.jsonl");
+    // Cursor CLI 2026.10.22-27dcf5f: `models` prints only `auto`, session/new lists 32.
+    process.env.FAKE_ACP_MODELS_LIST = "auto-only";
+    process.env.FAKE_ACP_SESSION_MODELS = [
+      "auto-smart[optimize_for=balanced]|Auto Balance",
+      "grok-4.7[context=256k,reasoning_effort=high,fast=true]|grok-4.7",
+      "composer-2.5[fast=true]|composer-2.5",
+      "gpt-5.6-sol[context=272k,reasoning=medium,fast=false]|gpt-5.6-sol",
+      "gpt-5.3-codex[reasoning=medium,fast=false]|gpt-5.3-codex",
+      "kimi-k3[reasoning=max]|kimi-k3",
+      "glm-5.2[reasoning=high]|glm-5.2",
+    ].join(",");
+    process.env.FAKE_ACP_RPC_APPEND_FILE = rpc;
+
+    const instance = await createCursorAgentDriver().create({
+      instanceId: "cursor-acp-catalog",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      expect(instance.models.default).toBe("auto");
+      expect(instance.models.options.map((option) => option.id)).toEqual([
+        "auto", "composer-2.5", "composer-2.5-fast", "gpt-5.3-codex",
+        "auto-smart", "grok-4.7", "gpt-5.6-sol", "kimi-k3", "glm-5.2",
+      ]);
+      expect(instance.models.options.find((option) => option.id === "auto-smart")?.label).toBe("Auto Balance");
+      const methods = readFileSync(rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
+      expect(methods).toContain("session/new");
+      expect(methods).not.toContain("session/prompt");
+      expect(methods).not.toContain("session/set_model");
+
+      process.env.FAKE_ACP_DUMP = dump;
+      const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-acp-catalog", text: "hi", model: "gpt-5.6-sol" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
+        { method: "session/set_model", params: { sessionId: expect.any(String), modelId: "gpt-5.6-sol[context=272k,reasoning=medium,fast=false]" } },
+      ]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODELS_LIST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
+  it("treats CURSOR_API_KEY as signed in without asking the CLI", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-key",
+      displayName: "Cursor",
+      environment: { CURSOR_API_KEY: "key-from-env" },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      expect((await instance.snapshot()).authenticated).toBe(true);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("reads isAuthenticated from `cursor-agent status --format json`", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_ACP_AUTH = "0";
+    const loggedOut = await CursorAgentDriver.create({
+      instanceId: "cursor-status-out",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      expect((await loggedOut.snapshot()).authenticated).toBe(false);
+    } finally {
+      await loggedOut.dispose();
+    }
+
+    delete process.env.FAKE_ACP_AUTH;
+    const loggedIn = await CursorAgentDriver.create({
+      instanceId: "cursor-status-in",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      expect((await loggedIn.snapshot()).authenticated).toBe(true);
+    } finally {
+      await loggedIn.dispose();
+    }
+  });
+
+  it("spawns `agent [--force|--auto-review] --approve-mcps [--model …] acp` and keeps Cursor credentials", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-"));
+    scratchDirs.push(scratch);
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.CURSOR_API_KEY = "cursor-should-keep";
+    process.env.XAI_API_KEY = "xai-should-not-leak";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-argv",
+      displayName: "Cursor",
+      environment: { CURSOR_API_KEY: "cursor-should-keep" },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor", text: "hi", model: "gpt-5.3-codex", approvalMode: "full" });
+      await recorder.until((e) => e.type === "turn.completed");
+
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.argv).toEqual(["--force", "--approve-mcps", "--model", "gpt-5.3-codex", "acp"]);
+      expect(seen.env.CURSOR_API_KEY).toBe("cursor-should-keep");
+      expect(seen.env.XAI_API_KEY).toBeUndefined();
+
+      const applied = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
+      expect(applied).toEqual([
+        { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: "gpt-5.3-codex" } },
+      ]);
+      for (const approvalMode of ["auto", "ask"] as const) {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-cursor", text: "continue", approvalMode, resumeCursor: "fake-acp-session" });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(
+          approvalMode === "auto" ? ["--auto-review", "--approve-mcps", "acp"] : ["--approve-mcps", "acp"],
+        );
+      }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("mounts OpenMausBot team tools over HTTP and respawns when their bearer changes", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-agents-"));
+    scratchDirs.push(scratch);
+    const dump = join(scratch, "dump.json");
+    const launches = join(scratch, "launches");
+    process.env.FAKE_ACP_DUMP = dump;
+    const harness = "http://127.0.0.1:8799";
+    const agents = (token: string) => ({
+      command: process.execPath,
+      args: ["/app/dist-server/agents-proxy.js"],
+      env: {
+        OMB_HARNESS_URL: harness,
+        OMB_COMMS_TOKEN: token,
+        OMB_BOT_ID: "chief",
+        OMB_THREAD_ID: "t-agents",
+        OMB_CHIEF_OF_STAFF: "1",
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+    });
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-agents",
+      displayName: "Cursor",
+      // Catalog/auth probes share this counter; assert turn deltas, not absolute process starts.
+      environment: { FAKE_ACP_LAUNCH_COUNT_FILE: launches },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    expect(instance.adapter.capabilities.agentsMcp).toBe(true);
+    const recorder = recordEvents(instance.adapter);
+    const launchCount = () => Number(readFileSync(launches, "utf8"));
+    const afterCreate = launchCount();
+    try {
+      const first = await instance.adapter.sendTurn({
+        threadId: "t-agents",
+        text: "ping teammates",
+        approvalMode: "ask",
+        integrations: { agents: agents("token-one") },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "acp"]);
+      expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))).toEqual([
+        {
+          type: "http",
+          name: "agents",
+          url: `${harness}/api/internal/mcp-http/agents`,
+          headers: [
+            { name: "authorization", value: "Bearer token-one" },
+            {
+              name: "x-omb-agents-env",
+              value: Buffer.from(JSON.stringify({
+                OMB_BOT_ID: "chief",
+                OMB_THREAD_ID: "t-agents",
+                OMB_CHIEF_OF_STAFF: "1",
+              })).toString("base64url"),
+            },
+          ],
+        },
+      ]);
+      expect(launchCount()).toBe(afterCreate + 1);
+
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-agents",
+        text: "create a bot",
+        approvalMode: "ask",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: agents("token-two") },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "acp"]);
+      expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"))[0].headers)
+        .toContainEqual({ name: "authorization", value: "Bearer token-two" });
+      expect(launchCount()).toBe(afterCreate + 2);
+
+      const reused = await instance.adapter.sendTurn({
+        threadId: "t-agents",
+        text: "same bearer",
+        approvalMode: "ask",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: agents("token-two") },
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === reused.turnId);
+      expect(launchCount()).toBe(afterCreate + 2);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("sends cursor_login only when no Cursor key is in the agent's env", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-auth-"));
+    scratchDirs.push(scratch);
+    process.env.FAKE_ACP_AUTH_METHOD = "cursor_login";
+    const authenticateCalls = async (environment: Record<string, string>) => {
+      const rpcFile = join(scratch, `rpc-${Object.keys(environment).join("-") || "none"}.jsonl`);
+      process.env.FAKE_ACP_RPC_APPEND_FILE = rpcFile;
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-auth",
+        displayName: "Cursor",
+        environment,
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-cursor-auth", text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+      return readFileSync(rpcFile, "utf8").trim().split("\n")
+        .map((line) => JSON.parse(line) as { method: string })
+        .filter((entry) => entry.method === "authenticate").length;
+    };
+
+    expect(await authenticateCalls({})).toBe(1);
+    expect(await authenticateCalls({ CURSOR_API_KEY: "key-from-env" })).toBe(0);
+    expect(await authenticateCalls({ CURSOR_AUTH_TOKEN: "token-from-env" })).toBe(0);
+  });
+
+  it("omits --force when fullAuto is off, still approves MCP, and completes a turn", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-safe-"));
+    scratchDirs.push(scratch);
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-safe",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-cursor-safe", text: "hi" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "acp"]);
+      expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "cursorAgent")).toBe(true);
+      expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  describe("cursor/ask_question", () => {
+    // cursor-agent 2026.10.01's wire shape: no sessionId, a prompt per question, option ids, allowMultiple.
+    const TWO_QUESTIONS = {
+      toolCallId: "ask-1",
+      title: "Setup",
+      questions: [
+        { id: "color", prompt: "Which color?", options: [{ id: "blue-id", label: "Blue" }, { id: "green-id", label: "Green" }], allowMultiple: false },
+        { id: "sizes", prompt: "Which sizes?", options: [{ id: "s-id", label: "Small" }, { id: "m-id", label: "Medium, roomy" }, { id: "l-id", label: "Large" }], allowMultiple: true },
+      ],
+    };
+    let scratch: string;
+    let instance: Awaited<ReturnType<typeof CursorAgentDriver.create>>;
+    let recorder: ReturnType<typeof recordEvents>;
+
+    const start = async (threadId: string, env: Record<string, string> = {}) => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      scratch = mkdtempSync(join(tmpdir(), "omb-cursor-ask-"));
+      Object.assign(process.env, { FAKE_ACP_MODE: "ask-question", FAKE_ACP_ASK_ANSWER: join(scratch, "answer.json"), ...env });
+      instance = await CursorAgentDriver.create({
+        instanceId: "cursor-ask",
+        displayName: "Cursor",
+        environment: {},
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hi" });
+      return turnId;
+    };
+    const reply = () => JSON.parse(readFileSync(join(scratch, "answer.json"), "utf8"));
+
+    afterEach(async () => {
+      recorder?.stop();
+      await instance?.dispose();
+      for (const key of ["FAKE_ACP_MODE", "FAKE_ACP_ASK_ANSWER", "FAKE_ACP_ASK_PARAMS", "FAKE_ACP_ASK_METHOD", "FAKE_ACP_ASK_TIMING"]) delete process.env[key];
+      if (scratch) await removeTempDir(scratch);
+    });
+
+    it("opens one question card and answers single and multi-select picks by option id", async () => {
+      const turnId = await start("t-cursor-ask", { FAKE_ACP_ASK_PARAMS: JSON.stringify(TWO_QUESTIONS) });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({
+        requestType: "question",
+        tool: "ask_user",
+        summary: "Which color? (+1 more question)",
+        questions: [
+          { question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] },
+          { question: "Which sizes?", multiSelect: true, options: [{ label: "Small" }, { label: "Medium, roomy" }, { label: "Large" }] },
+        ],
+      });
+      // two questions cannot be answered by one flat button
+      expect(opened).not.toHaveProperty("choices");
+      const outcome = await instance.adapter.respondToRequest("t-cursor-ask", (opened as { requestId: string }).requestId, {
+        behavior: "answer",
+        message: "The user answered your questions.\n\nQ: Which color?\nA: Green\n\nQ: Which sizes?\nA: Medium, roomy, Large",
+      });
+      expect(outcome).toBe("answered");
+      expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ behavior: "answer", source: "user" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [
+        { questionId: "color", selectedOptionIds: ["green-id"] },
+        { questionId: "sizes", selectedOptionIds: ["m-id", "l-id"] },
+      ] } } });
+    });
+
+    it("offers flat choices for one question and maps a bare label", async () => {
+      await start("t-cursor-ask-flat");
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({ summary: "Which color?", choices: ["Blue", "Green"] });
+      await instance.adapter.respondToRequest("t-cursor-ask-flat", (opened as { requestId: string }).requestId, { behavior: "answer", message: "Blue" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [{ questionId: "color", selectedOptionIds: ["blue-id"] }] } } });
+    });
+
+    it("skips with every answer as the reason when the person typed their own words", async () => {
+      await start("t-cursor-ask-own", { FAKE_ACP_ASK_PARAMS: JSON.stringify(TWO_QUESTIONS) });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      const outcome = await instance.adapter.respondToRequest("t-cursor-ask-own", (opened as { requestId: string }).requestId, {
+        behavior: "answer",
+        message: "The user answered your questions.\n\nQ: Which color?\nA: Blue\n\nQ: Which sizes?\nA: Small, one in XXL too",
+      });
+      expect(outcome).toBe("answered");
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: { outcome: "skipped", reason:
+        "The user answered your questions.\n\nQ: Which color?\nA: Blue\n\nQ: Which sizes?\nA: Small, one in XXL too" } } });
+    });
+
+    it("cancels the request when the turn settles with the card still open", async () => {
+      await start("t-cursor-ask-settle", { FAKE_ACP_ASK_TIMING: "with-result" });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({
+        requestId: (opened as { requestId: string }).requestId, behavior: "deny", source: "system",
+      });
+      for (let i = 0; i < 80 && !existsSync(join(scratch, "answer.json")); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+    });
+
+    it("cancels a request that arrives between turns without opening a card", async () => {
+      await start("t-cursor-ask-idle", { FAKE_ACP_ASK_TIMING: "after-result" });
+      await recorder.until((e) => e.type === "turn.completed");
+      for (let i = 0; i < 80 && !existsSync(join(scratch, "answer.json")); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses malformed params with invalid params instead of leaving Cursor blocked", async () => {
+      await start("t-cursor-ask-bad", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ questions: [{ question: "Which color?", options: ["Blue"] }] }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses more questions than one card holds instead of answering only some", async () => {
+      const seven = Array.from({ length: 7 }, (_, i) => ({ id: `q${i}`, prompt: `Question ${i}?`, options: [{ id: `o${i}`, label: "Yes" }] }));
+      await start("t-cursor-ask-many", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-7", questions: seven }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 distinct questions with question text" } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses two questions with the same text, whose answers a card could not tell apart", async () => {
+      const twins = [0, 1].map((i) => ({ id: `q${i}`, prompt: "Which color?", options: [{ id: `o${i}`, label: "Blue" }] }));
+      await start("t-cursor-ask-twins", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-twins", questions: twins }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("keeps an unanswered card open for days and still takes the person's answer", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let opened: RuntimeEvent;
+      try {
+        await start("t-cursor-ask-no-timeout");
+        opened = await recorder.until((e) => e.type === "request.opened");
+        await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+        expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+      await instance.adapter.respondToRequest("t-cursor-ask-no-timeout", opened.requestId!, { behavior: "answer", message: "Blue" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [{ questionId: "color", selectedOptionIds: ["blue-id"] }] } } });
+    });
+  });
+
+  // cursor-agent 2026.10.22's session/prompt catches a failed model call, sends `\n\nError: ${String(error)}` as one
+  // message chunk and still answers end_turn.
+  describe("a failed model call Cursor sends as its last chunk", () => {
+    const turn = async (threadId: string, last: string, before: string[] = []) => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-reply-failure-"));
+      scratchDirs.push(scratch);
+      process.env.FAKE_ACP_UPDATES_FILE = join(scratch, "updates.json");
+      writeFileSync(process.env.FAKE_ACP_UPDATES_FILE, JSON.stringify(before.map((text) => ({
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+      }))));
+      process.env.FAKE_ACP_TEXT_REPLY = last;
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-reply-failure", displayName: "Cursor", environment: {}, enabled: true, config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId, text: "go" });
+        const done = await recorder.until((e) => e.type === "turn.completed");
+        const replies = recorder.events.flatMap((e) => e.type === "item.completed" && e.itemType === "assistant_text" ? [e.text] : []);
+        const errors = recorder.events.flatMap((e) => e.type === "runtime.error" ? [e] : []);
+        return { done, replies, errors };
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+        delete process.env.FAKE_ACP_TEXT_REPLY;
+        delete process.env.FAKE_ACP_UPDATES_FILE;
+      }
+    };
+
+    it("fails the turn on a 503, so a routine run is retried as a temporary AI error", async () => {
+      const { done, replies, errors } = await turn("t-cursor-503", "\n\nError: RetriableError: [unavailable] HTTP 503");
+      expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(replies).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toMatch(/^Cursor had a temporary server problem \(HTTP 503/);
+      expect(classifyRoutineFailure(errors[0]!.message, { stopReason: "rpc_error" })).toEqual({ kind: "retry", cause: "provider" });
+    });
+
+    it("fails the turn on a dropped stream and keeps what was said before it", async () => {
+      const dropped = "Stream ended without turnEnded — connection likely dropped mid-stream";
+      const { done, replies, errors } = await turn("t-cursor-dropped", `\n\nError: RetriableError: ${dropped}`, ["Checking the queue now."]);
+      expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(replies).toEqual(["Checking the queue now."]);
+      expect(errors).toEqual([expect.objectContaining({ message: dropped })]);
+      expect(classifyRoutineFailure(errors[0]!.message, { stopReason: "rpc_error" }).kind).toBe("retry");
+    });
+
+    it("asks for Cursor's sign-in when the backend rejected its authentication", async () => {
+      const { done, errors } = await turn("t-cursor-unauthenticated", "\n\nError: [unauthenticated] Backend rejected authentication.");
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(errors).toEqual([expect.objectContaining({ setup: true })]);
+    });
+
+    it("sends the stable instructions again on the next turn, as the failed call may not be in Cursor's history", async () => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-reply-receipt-"));
+      scratchDirs.push(scratch);
+      const updates = join(scratch, "updates.json");
+      const dump = join(scratch, "dump.json");
+      Object.assign(process.env, { FAKE_ACP_UPDATES_FILE: updates, FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1" });
+      writeFileSync(updates, JSON.stringify([{ update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "\n\nError: RetriableError: [unavailable] HTTP 503" } } }]));
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-reply-receipt", displayName: "Cursor", environment: {}, enabled: true, config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      const input = { threadId: `t-cursor-reply-receipt-${randomUUID()}`, text: "go", system: "STABLE RULES\n\ntoday", systemStable: "STABLE RULES", systemVolatile: "today" };
+      const sentPrompt = () => JSON.stringify(JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")));
+      try {
+        const first = await instance.adapter.sendTurn(input);
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toMatchObject({ ok: false });
+        expect(sentPrompt()).toContain("STABLE RULES");
+        writeFileSync(updates, "[]");
+        const second = await instance.adapter.sendTurn(input);
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true });
+        expect(sentPrompt()).toContain("STABLE RULES");
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+        delete process.env.FAKE_ACP_UPDATES_FILE;
+        delete process.env.FAKE_ACP_DUMP_PROMPT;
+      }
+    });
+
+    // Cursor's prompt handler waits on backgrounded shells after the failure line, shown as a "Watching: …" tool call.
+    const scripted = async (threadId: string, updates: Array<Record<string, unknown>>) => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-reply-held-"));
+      scratchDirs.push(scratch);
+      process.env.FAKE_ACP_UPDATES_FILE = join(scratch, "updates.json");
+      writeFileSync(process.env.FAKE_ACP_UPDATES_FILE, JSON.stringify(updates.map((update) => ({ update }))));
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-reply-held", displayName: "Cursor", environment: {}, enabled: true, config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId, text: "go" });
+        const done = await recorder.until((e) => e.type === "turn.completed");
+        const replies = recorder.events.flatMap((e) => e.type === "item.completed" && e.itemType === "assistant_text" ? [e.text] : []);
+        const streamed = recorder.events.flatMap((e) => e.type === "content.delta" && e.streamKind === "assistant_text" ? [e.delta] : []).join("");
+        return { done, replies, streamed, errors: recorder.events.filter((e) => e.type === "runtime.error") };
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+        delete process.env.FAKE_ACP_UPDATES_FILE;
+      }
+    };
+    const text = (chunk: string) => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: chunk } });
+    const watching = [
+      { sessionUpdate: "tool_call", toolCallId: "watch-1", title: "Watching: wait until 06:15", kind: "other" },
+      { sessionUpdate: "tool_call_update", toolCallId: "watch-1", status: "completed" },
+    ];
+
+    it("fails the turn when a tool call follows the failure line, and never streams or sends the line as a reply", async () => {
+      const { done, replies, streamed, errors } = await scripted("t-cursor-503-watching", [text("\n\nError: RetriableError: [unavailable] HTTP 503"), ...watching]);
+      expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(replies.some((reply) => reply.includes("RetriableError"))).toBe(false);
+      expect(streamed).not.toContain("RetriableError");
+      expect(errors).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Cursor had a temporary server problem \(HTTP 503/) })]);
+    });
+
+    it("puts the line back in the reply when the agent goes on writing after it", async () => {
+      const line = "\n\nError: RetriableError: [unavailable] HTTP 503";
+      const { done, replies, streamed, errors } = await scripted("t-cursor-503-went-on", [text(line), ...watching, text(" Retried, and it went through.")]);
+      expect(done).toMatchObject({ ok: true, stopReason: null });
+      expect(streamed.endsWith(`${line} Retried, and it went through.`)).toBe(true);
+      expect(replies.at(-1)).toBe("Error: RetriableError: [unavailable] HTTP 503 Retried, and it went through.");
+      expect(errors).toEqual([]);
+    });
+
+    it("keeps a reply whose own words end by quoting such a line", async () => {
+      const quoted = "The log ended with:\n\nError: RetriableError: [unavailable] HTTP 503";
+      const { done, replies, errors } = await turn("t-cursor-quoted", quoted);
+      expect(done).toMatchObject({ ok: true, stopReason: null });
+      expect(replies).toEqual([quoted]);
+      expect(errors).toEqual([]);
+    });
+  });
+
+  it("keeps going when session/set_model is missing and argv already pinned the model", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_ACP_MODE = "no-session-config";
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-old",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-old", text: "hi", model: "gpt-5.3-codex" });
+      const done = await recorder.until((e) => e.type === "turn.completed");
+      expect(done).toMatchObject({ type: "turn.completed", ok: true });
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODE;
+    }
+  });
+});
+
+describe("resolveCursorAcpModelId", () => {
+  // Real payload shape from `session/new` against cursor-agent 2026.08.11.
+  const ADVERTISED = [
+    { modelId: "default[]", name: "Auto" },
+    { modelId: "grok-4.6[effort=high,fast=true]", name: "grok-4.6" },
+    { modelId: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "gpt-5.3-codex" },
+  ];
+
+  it("maps the argv slug `auto` onto Cursor's `default[]` entry", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "auto")).toBe("default[]");
+  });
+
+  it("maps a bare slug onto its parameterised id", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "gpt-5.3-codex")).toBe(
+      "gpt-5.3-codex[reasoning=medium,fast=false]",
+    );
+  });
+
+  it("maps a display name onto its parameterised id", () => {
+    expect(
+      resolveCursorAcpModelId(
+        [{ modelId: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "Codex 5.3" }],
+        "Codex 5.3",
+      ),
+    ).toBe("gpt-5.3-codex[reasoning=medium,fast=false]");
+  });
+
+  it("passes an already-parameterised id straight through", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "grok-4.6[effort=high,fast=true]")).toBe(
+      "grok-4.6[effort=high,fast=true]",
+    );
+  });
+
+  describe("when one base is advertised with and without fast", () => {
+    const FAST_FIRST = [
+      { modelId: "composer-2.5[fast=true]", name: "Composer 2.5 Fast" },
+      { modelId: "composer-2.5[fast=false]", name: "Composer 2.5" },
+    ];
+
+    it("resolves the plain slug to the non-fast variant even when fast is listed first", () => {
+      expect(resolveCursorAcpModelId(FAST_FIRST, "composer-2.5")).toBe("composer-2.5[fast=false]");
+    });
+
+    it("resolves the plain slug to the non-fast variant when it is listed first", () => {
+      expect(resolveCursorAcpModelId([...FAST_FIRST].reverse(), "composer-2.5")).toBe(
+        "composer-2.5[fast=false]",
+      );
+    });
+
+    it("resolves the `-fast` slug to the fast=true variant", () => {
+      expect(resolveCursorAcpModelId(FAST_FIRST, "composer-2.5-fast")).toBe("composer-2.5[fast=true]");
+    });
+
+    it("falls back to the only advertised variant for the plain slug", () => {
+      expect(resolveCursorAcpModelId([FAST_FIRST[0]], "composer-2.5")).toBe("composer-2.5[fast=true]");
+    });
+
+    it("does not map a `-fast` slug onto a non-fast variant", () => {
+      expect(resolveCursorAcpModelId([FAST_FIRST[1]], "composer-2.5-fast")).toBeNull();
+    });
+  });
+
+  it("returns null when the agent advertised no models, so the caller keeps the argv slug", () => {
+    expect(resolveCursorAcpModelId([], "auto")).toBeNull();
+  });
+
+  it("returns null for a model this session does not offer", () => {
+    expect(resolveCursorAcpModelId(ADVERTISED, "no-such-model")).toBeNull();
+  });
+
+  describe("effort slugs from `cursor-agent models`", () => {
+    // Real payload from `session/new` on cursor-agent 2026.09.28: one variant per base.
+    const ADVERTISED_EFFORT = [
+      { modelId: "default[]", name: "Auto" },
+      { modelId: "grok-4.7[context=256k,reasoning_effort=high,fast=true]", name: "grok-4.7" },
+      { modelId: "grok-4.6[effort=high,fast=true]", name: "grok-4.6" },
+      { modelId: "gpt-5.3-codex[reasoning=medium,fast=false]", name: "gpt-5.3-codex" },
+      { modelId: "composer-2.5[fast=false]", name: "Composer 2.5" },
+    ];
+
+    it("maps an effort slug onto the variant with that effort", () => {
+      expect(matchCursorAcpModel(ADVERTISED_EFFORT, "grok-4.7-high-fast")).toEqual({
+        modelId: "grok-4.7[context=256k,reasoning_effort=high,fast=true]",
+        exact: true,
+      });
+      expect(resolveCursorAcpModelId(ADVERTISED_EFFORT, "grok-4.6-high-fast")).toBe("grok-4.6[effort=high,fast=true]");
+      expect(resolveCursorAcpModelId(ADVERTISED_EFFORT, "gpt-5.3-codex-medium")).toBe(
+        "gpt-5.3-codex[reasoning=medium,fast=false]",
+      );
+    });
+
+    it("settles for the advertised variant of the base and marks it inexact", () => {
+      expect(matchCursorAcpModel(ADVERTISED_EFFORT, "grok-4.7-medium-fast")).toEqual({
+        modelId: "grok-4.7[context=256k,reasoning_effort=high,fast=true]",
+        exact: false,
+      });
+      expect(matchCursorAcpModel(ADVERTISED_EFFORT, "grok-4.7-high")).toEqual({
+        modelId: "grok-4.7[context=256k,reasoning_effort=high,fast=true]",
+        exact: false,
+      });
+    });
+
+    it("does not map a `-fast` effort slug onto a non-fast variant", () => {
+      expect(matchCursorAcpModel(ADVERTISED_EFFORT, "composer-2.5-high-fast")).toBeNull();
+    });
+
+    it("returns null for an effort slug of a base this session does not offer", () => {
+      expect(matchCursorAcpModel(ADVERTISED_EFFORT, "no-such-model-high-fast")).toBeNull();
+    });
+  });
+});
+
+describe("cursor ACP model namespace (NS: set_model wiring)", () => {
+  it("does not reselect a session already on the parameterised id, and still spawns with the argv slug", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-acpid-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    // What cursor-agent 2026.08.11 really advertises: `auto` is `default[]`.
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,gpt-5.3-codex[reasoning=medium,fast=false]|gpt-5.3-codex";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-acpid",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-acpid", text: "hi", model: "auto" });
+      await recorder.until((e) => e.type === "turn.completed");
+      // The session already reports currentModelId default[], which is what `auto` resolves to.
+      expect(existsSync(`${dump}.config.json`)).toBe(false);
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(["--approve-mcps", "--model", "auto", "acp"]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      // A stale FAKE_ACP_DUMP makes the next test's fake CLI die on ENOENT.
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("declares the parameterized picker and turns Fast off for a plain slug, on for a -fast slug", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-fast-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_CURSOR_FAST = "1";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,composer-2.5|Composer 2.5";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-fast",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      for (const [model, fast] of [["composer-2.5", "false"], ["composer-2.5-fast", "true"]]) {
+        const turn = await instance.adapter.sendTurn({ threadId: `t-cursor-${model}`, text: "hi", model });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+        expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
+          { method: "session/set_model", params: { sessionId: expect.any(String), modelId: "composer-2.5" } },
+          { method: "session/set_config_option", params: { sessionId: expect.any(String), configId: "fast", value: fast } },
+        ]);
+      }
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_CURSOR_FAST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("fails the turn before prompting when Cursor keeps Fast on after being asked to turn it off", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-fast-stuck-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_CURSOR_FAST = "stuck";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,composer-2.5|Composer 2.5";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-fast-stuck",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-fast-stuck", text: "hi", model: "composer-2.5" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: false });
+      expect(JSON.stringify(recorder.events)).toContain('Cursor did not confirm Fast off (fast is \\"true\\")');
+      expect(recorder.events.some((e) => e.type === "content.delta")).toBe(false);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_CURSOR_FAST;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+
+  it("completes the turn when set_model answers -32602 and says which model runs instead", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_ACP_MODE = "set-model-invalid-params";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,gpt-5.3-codex[reasoning=medium,fast=false]|gpt-5.3-codex";
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-invalid",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-invalid", text: "hi", model: "gpt-5.3-codex" });
+      const done = await recorder.until((e) => e.type === "turn.completed");
+      expect(done).toMatchObject({ type: "turn.completed", ok: true });
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([
+        expect.objectContaining({ message: expect.stringContaining("did not accept gpt-5.3-codex in this session, so it runs Auto") }),
+      ]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODE;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
+  it("does not pin a model the session already accepted, so a repeated setter is not rejected", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    process.env.FAKE_ACP_MODE = "set-model-invalid-after-first";
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,grok-4.7[reasoning_effort=high,fast=true]|Grok";
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-pooled-rejection", displayName: "Cursor", environment: {}, enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      for (const text of ["first", "second"]) {
+        const turn = await instance.adapter.sendTurn({ threadId: "t-cursor-pooled-rejection", text, model: "grok-4.7-high-fast" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === turn.turnId)).toMatchObject({ ok: true });
+      }
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_MODE;
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+    }
+  });
+
+  it("sets the advertised variant for an effort slug and says when it differs", async () => {
+    ensureDirs();
+    chmodSync(FAKE_CLI, 0o755);
+    const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-effort-"));
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_SESSION_MODELS = "default[]|Auto,grok-4.7[context=256k,reasoning_effort=high,fast=true]|grok-4.7";
+
+    const instance = await CursorAgentDriver.create({
+      instanceId: "cursor-effort",
+      displayName: "Cursor",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-cursor-effort", text: "hi", model: "grok-4.7-medium-fast" });
+      await recorder.until((e) => e.type === "turn.completed");
+      const applied = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
+      expect(applied).toEqual([
+        {
+          method: "session/set_model",
+          params: { sessionId: "fake-acp-session", modelId: "grok-4.7[context=256k,reasoning_effort=high,fast=true]" },
+        },
+      ]);
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([
+        expect.objectContaining({
+          message: expect.stringContaining("rather than grok-4.7-medium-fast"),
+        }),
+      ]);
+      const second = await instance.adapter.sendTurn({ threadId: "t-cursor-effort", text: "again", model: "grok-4.7-medium-fast" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual(applied);
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toHaveLength(1);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      delete process.env.FAKE_ACP_SESSION_MODELS;
+      delete process.env.FAKE_ACP_DUMP;
+      await removeTempDir(scratch);
+    }
+  });
+});

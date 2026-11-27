@@ -1,0 +1,14 @@
+OpenMausBot ui/screen-reader, AFTER (commit ebd132b3). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
+
+initial (system en-US) html lang="en" dir=ltr
+choice de              html lang="de" dir=ltr
+choice es              html lang="es" dir=ltr
+choice fr              html lang="fr" dir=ltr
+choice hi              html lang="hi" dir=ltr
+choice ja              html lang="ja" dir=ltr
+choice pt-br           html lang="pt-BR" dir=ltr
+choice zh              html lang="zh" dir=ltr
+choice zh-tw           html lang="zh-TW" dir=ltr
+choice uk              html lang="uk" dir=ltr
+choice en              html lang="en" dir=ltr
+choice (system)        html lang="en" dir=ltr

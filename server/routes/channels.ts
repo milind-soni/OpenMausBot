@@ -1,0 +1,750 @@
+import { z } from "zod";
+import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
+import type { ResolvedSender, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, WireGroup } from "../../shared/wire.ts";
+import { admit } from "../admission.ts";
+import {
+  cancelChannelMessage,
+  channelQueueItem,
+  headChannelGroup,
+  holdChannelQueue,
+  queueChannelMessage,
+  queuedChannelMessage,
+  resolveHeldReplyTarget,
+  restoreHeldChannelQueue,
+  settleHeldChannelQueueHead,
+} from "../channel-queue.ts";
+import { DATA_DIR, type AppConfig } from "../config.ts";
+import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
+import { cancelledChatFollowup } from "../message-db.ts";
+import { roomThreadSummaries } from "../message-db-thread-summaries.ts";
+import type { RoomThreadCloser, RoomThreadSummariesResponse } from "../../shared/room-threads.ts";
+import { messageTextRefusal } from "../message-text.ts";
+import { prepareRoomPointed, roomPickBots, type RoomPick } from "../room-pointed.ts";
+import { refusalBody } from "../user-errors.ts";
+import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
+import { personOf, promptWithReply, type PersonName } from "../replies.ts";
+import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
+import type { RoomContextTracker } from "../room-context.ts";
+import { parseConversationTurnTimeout } from "../room-turn-timeout.ts";
+import type { RoutineManager } from "../routines.ts";
+import { acceptedSendMatch, parseSendId, parseStopId, sendFingerprint, StopReceipts, type SendSequencer } from "../send-idempotency.ts";
+import type { SkillReview } from "../skill-review.ts";
+import { assertWithinBudget } from "../spend.ts";
+import { mentionedBots, type BotRecord, type GroupRecord, type GroupTaskPatch, type Message, type Store } from "../store.ts";
+import { roomLeadId, steerMeantForSpeaker } from "../room-steer-addressee.ts";
+import type { ThreadStarters } from "../thread-starters.ts";
+import { extractSteerImages } from "../turn-images.ts";
+import type { UsageTrigger } from "../usage-ledger.ts";
+import { parseMentionPicks } from "../../shared/room-mentions.ts";
+import { sameNameRefusal, sameNameRefusalForBots } from "../same-name-mentions.ts";
+import { conversationLanguage } from "../server-lines.ts";
+import { bulkDeleteThreadIds, outsideClosedScope, type BulkDeleteRefusal } from "./bulk-delete.ts";
+import { FORK_BUSY, FORK_NO_TEXT, parseForkRequest } from "./fork-request.ts";
+import { PASS, type RouteHandler } from "./table.ts";
+import { sawThread } from "../thread-presence.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
+
+export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
+
+export interface ChannelRouteDeps {
+  /** Whoever asked owns the run, where several people write. */
+  runOwners?: RouteRunOwners;
+  runActor?(auth: RequestAuth): Actor;
+  store: Pick<Store,
+    | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "markGroupThreadUnread" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
+    | "createGroupTask" | "forkGroupTask" | "appendMessage">;
+  cfg: Pick<AppConfig, "budgets">;
+  /** What people's lines are called in this conversation (replies.ts PersonName). */
+  userName(threadId: string): PersonName;
+  /** The desktop app owns this server, so a loopback caller is its owner. */
+  desktopManaged: boolean;
+  routines(): Pick<RoutineManager, "disableForGroup"> | null;
+  broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
+  actorKey(auth: RequestAuth & { kind: "session" }): string;
+  threadStarters: Pick<ThreadStarters, "set">;
+  phoneSecretSubmissions: Pick<PhoneSecretSubmissionRegistry, "hasGroup" | "hasThread">;
+  sendSequencer: Pick<SendSequencer, "run">;
+  roomMemberContexts: Pick<RoomContextTracker, "request">;
+  skillReview: Pick<SkillReview, "dropThread">;
+  groupSpeakers: ReadonlyMap<string, { botId: string }>;
+  groupTurnOperations: ReadonlyMap<string, ReadonlySet<{ threadId: string; cancelled: boolean }>>;
+  lastReply: Pick<Map<string, string>, "delete">;
+  cloudThreadRefusal(auth: RequestAuth, threadId: string): string | null;
+  messageSender(auth: RequestAuth): ResolvedSender | undefined;
+  usageTriggerFor(auth: RequestAuth): UsageTrigger;
+  publicGroupState(record: GroupRecord): WireGroup;
+  groupWithThread(group: GroupRecord): WireGroup;
+  updateChannel(groupId: string, value: unknown): GroupRecord;
+  groupIsWorking(group: GroupRecord): boolean;
+  groupThreadIsWorking(groupId: string, threadId: string): boolean;
+  readCursor(threadId: string): { lastReadMessageId?: string };
+  /** A person opened this room (a Team Cloud's Needs you lines for them there are done). */
+  threadRead?(auth: RequestAuth, threadId: string): void;
+  /** A Team Cloud: marks the room read or unread for this person alone and answers the room as they see it; null where a
+   * room is read once for everyone. */
+  personMarkRoom?(auth: RequestAuth, room: GroupRecord, unread: boolean, threadId?: string): WireGroup | null;
+  /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
+  groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
+  /** Whether this person may read the conversation; a room's threads all show where nobody's reading is narrowed. */
+  threadShown?(auth: RequestAuth, threadId: string): boolean;
+  pageSize(raw: string | null): number | null | undefined;
+  messagePage(threadId: string, limit: number | undefined): MessagePage;
+  resolveReplyTarget(threadId: string, value: unknown): Message | undefined;
+  runningTurnInstance(bot: BotRecord | null | undefined, threadId: string): ProviderInstance | null;
+  engineSteersImages(instance: ProviderInstance | null | undefined): boolean;
+  startGroupTurn(
+    groupId: string,
+    text: string,
+    replyTo: Message | undefined,
+    sendId: string | undefined,
+    channelMode: "chat" | "goal",
+    queueId: undefined,
+    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[]; pointed?: RoomPick },
+  ): Message;
+  applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void;
+  /** A person's chat line in a thread whose board item waits on a person: the line addressed to the bot that asked, and
+   * the move that takes the item back to work once it is sent. Null for every other thread (board/wiring.ts). */
+  boardReply?(groupId: string, threadId: string, text: string): { text: string; botId: string; resume(): void } | null;
+  /** What a resent line may have been saved as by `boardReply`. */
+  boardAddressed?(groupId: string, threadId: string, text: string): string | null;
+  cancelGroupTurnOperations(groupId: string, threadId: string): void;
+  /** Whether this bot's live turn in the thread is a job another bot handed it. */
+  speakerOnHandedWork(threadId: string, botId: string): boolean;
+  drainQueuedChannelSends(): void;
+  clearTurnDigestState(threadId: string): void;
+  closeOpenApprovals(threadId: string): void;
+  revokeInternalCapabilitiesForThread(threadId: string): void;
+  stagedSkillCleanupsForThread(threadId: string): Array<{ botId: string; stagedId: string }>;
+  rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
+}
+
+const createGroupTaskRequestSchema = z.object({ title: z.string().optional(), activate: z.boolean().optional() });
+/** The most threads one read request may name. */
+const MAX_READ_THREADS = 500;
+
+type StopAnswer = { status: 200 | 403 | 409; body: { ok: true } | { error: string; code?: "stop_not_yours" } };
+
+export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
+  const {
+    store, cfg, broadcast, notificationListed, actorKey, threadStarters, phoneSecretSubmissions, sendSequencer, roomMemberContexts, skillReview,
+    groupSpeakers, groupTurnOperations, lastReply, cloudThreadRefusal, messageSender, usageTriggerFor, publicGroupState,
+    groupWithThread, updateChannel, groupIsWorking, groupThreadIsWorking, readCursor, pageSize, messagePage,
+    resolveReplyTarget, runningTurnInstance, startGroupTurn, engineSteersImages, applyRoomHoldsFromMessage, cancelGroupTurnOperations,
+    drainQueuedChannelSends, clearTurnDigestState, closeOpenApprovals, revokeInternalCapabilitiesForThread,
+    stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages, speakerOnHandedWork,
+  } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
+  const DESKTOP_MANAGED = deps.desktopManaged;
+  const roomStops = new StopReceipts<StopAnswer>();
+  const deleteRefusal = (auth: RequestAuth, groupId: string, threadId: string): { status: 403 | 404 | 409; error: string } | null => {
+    if (phoneSecretSubmissions.hasThread(threadId)) {
+      return { status: 409, error: "this task is securely saving a credential — try again when it finishes" };
+    }
+    if (groupThreadIsWorking(groupId, threadId)) return { status: 409, error: "this task is running — stop it first" };
+    if (!store.groupTaskByThread(groupId, threadId)) return { status: 404, error: "no such channel task" };
+    const notYours = cloudThreadRefusal(auth, threadId);
+    return notYours ? { status: 403, error: notYours } : null;
+  };
+  const deleteGroupTasks = (groupId: string, threadIds: string[]) => {
+    const stagedSkillCleanups = new Map(threadIds.map((threadId) => [threadId, stagedSkillCleanupsForThread(threadId)]));
+    const result = store.deleteGroupTasks(groupId, threadIds);
+    for (const threadId of result?.deleted ?? []) {
+      lastReply.delete(threadId);
+      clearTurnDigestState(threadId);
+      skillReview.dropThread(threadId);
+      revokeInternalCapabilitiesForThread(threadId);
+      rejectDeletedThreadSkillStages(stagedSkillCleanups.get(threadId) ?? []);
+    }
+    return result;
+  };
+  const personCloser = (auth: RequestAuth, threadId: string): RoomThreadCloser => {
+    const sender = messageSender(auth);
+    return { kind: "person", id: sender?.id ?? "owner", name: sender?.name ?? personOf(deps.userName(threadId), {}) };
+  };
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
+    const own = (group: WireGroup) => deps.groupFor?.(auth, group) ?? group;
+    let m: RegExpMatchArray | null = null;
+    const routines = deps.routines();
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/([\w-]+)\/forks$/);
+    if (m && method === "POST") {
+      const group = store.group(m[1]);
+      if (!group || group.dm || !store.groupTaskByThread(group.id, m[2])) return json(res, 404, { error: "no such conversation" });
+      const fork = parseForkRequest(await readBody(req));
+      if (!fork) return json(res, 400, { error: "Provide a string messageId or set latest to true" });
+      const notYours = cloudThreadRefusal(auth, m[2]);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (groupThreadIsWorking(group.id, m[2])) return json(res, 409, FORK_BUSY);
+      const task = store.forkGroupTask(group.id, m[2], fork.messageId);
+      if (!task) return json(res, 404, fork.messageId === undefined ? FORK_NO_TEXT : { error: "no such completed message in this conversation" });
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
+      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task } satisfies RoomTaskCreateResponse);
+    }
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/tasks$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such channel" });
+      if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      if (phoneSecretSubmissions.hasGroup(group.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const request = createGroupTaskRequestSchema.safeParse(body);
+      if (!request.success) return json(res, 400, { error: "title must be text" });
+      const task = store.createGroupTask(group.id, request.data.title, request.data.activate !== false);
+      if (!task) return json(res, 500, { error: "couldn't create that task" });
+      // Who opened it decides who may answer its cards on a shared workspace.
+      if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));
+      return json(res, 201, { group: own(groupWithThread(store.group(group.id)!)), task } satisfies RoomTaskCreateResponse);
+    }
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/threads\/summary$/);
+    if (m && method === "GET") {
+      const group = store.group(m[1]);
+      if (!group || group.dm) return json(res, 404, { error: "no such room" });
+      const archived = url.searchParams.get("archived") === "1";
+      const threadIds = (group.tasks ?? [{ threadId: group.threadId, archivedAt: undefined }]).filter((task) => (archived || task.archivedAt === undefined) && (deps.threadShown?.(auth, task.threadId) ?? true))
+        .map((task) => task.threadId);
+      return json(res, 200, { threads: roomThreadSummaries(threadIds) } satisfies RoomThreadSummariesResponse);
+    }
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/delete$/);
+    if (m && method === "POST") {
+      const parsed = bulkDeleteThreadIds(await readBody(req));
+      if (!parsed.ok) return json(res, 400, { error: parsed.error });
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such channel" });
+      if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      const allowed: string[] = [];
+      const refused: BulkDeleteRefusal[] = [];
+      for (const threadId of parsed.threadIds) {
+        const refusal = deleteRefusal(auth, group.id, threadId);
+        if (refusal) refused.push({ threadId, reason: refusal.status === 409 ? "busy" : "not-found" });
+        else if (parsed.scope === "closed" && outsideClosedScope(store.groupTaskByThread(group.id, threadId))) refused.push({ threadId, reason: "not-closed" });
+        else allowed.push(threadId);
+      }
+      if (allowed.length >= (group.tasks?.length ?? 1)) return json(res, 400, { error: "a channel keeps at least one task" });
+      const result = deleteGroupTasks(group.id, allowed);
+      if (!result) return json(res, 400, { error: "a channel keeps at least one task" });
+      return json(res, 200, { group: own(groupWithThread(result.group)), deleted: result.deleted, refused });
+    }
+
+    m = path.match(/^\/api\/groups\/([\w-]+)\/tasks\/([\w-]+)$/);
+    if (m && method === "POST") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such channel" });
+      if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      if (phoneSecretSubmissions.hasGroup(group.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
+      // Parsed before the switch: a rejected parameter must not leave the channel on another thread.
+      const requestedMessages = url.searchParams.get("messages");
+      const switchLimit = pageSize(requestedMessages);
+      if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      const switched = store.switchGroupTask(group.id, m[2]);
+      if (!switched) return json(res, 404, { error: "no such channel task" });
+      deps.threadRead?.(auth, switched.threadId);
+      readThreadNotifications(switched.threadId, broadcast, notificationListed(auth));
+      const personal = deps.personMarkRoom?.(auth, switched, false, switched.threadId);
+      const read = personal ? switched : store.markGroupThreadUnread(switched.id, switched.threadId, false, readCursor(switched.threadId).lastReadMessageId)!;
+      const switchedSettings = personal ?? own(publicGroupState(read));
+      // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
+      const responseGroup = requestedMessages === "0"
+        ? switchedSettings
+        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
+      return json(res, 200, { group: responseGroup });
+    }
+    if (m && method === "PATCH") {
+      const body = await readBody(req);
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such channel" });
+      if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const allowed = new Set(["title", "pinned", "turnTimeoutMinutes", "archivedAt", "closed"]);
+      if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported channel thread setting" });
+      const existing = store.groupTaskByThread(group.id, m[2]);
+      if (!existing) return json(res, 404, { error: "no such channel task" });
+      const pinning = body.pinned !== undefined;
+      const renaming = body.title !== undefined;
+      const limiting = Object.prototype.hasOwnProperty.call(body, "turnTimeoutMinutes");
+      const archiving = body.archivedAt !== undefined;
+      const closing = body.closed !== undefined;
+      if (!pinning && !renaming && !limiting && !archiving && !closing) return json(res, 400, { error: "unsupported channel thread setting" });
+      if (closing && typeof body.closed !== "boolean") return json(res, 400, { error: "closed must be true or false" });
+      if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
+      if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
+      if (archiving && body.archivedAt !== null && !(typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0)) {
+        return json(res, 400, { error: "archivedAt must be a timestamp, or null to unarchive" });
+      }
+      const parsedLimit = limiting ? parseConversationTurnTimeout(body.turnTimeoutMinutes) : null;
+      if (parsedLimit && !parsedLimit.ok) return json(res, 400, { error: parsedLimit.error });
+      // Echoing the current title is not a rename: newer clients send it so an older server keeps the title.
+      const titleChange = renaming && body.title !== existing.title;
+      const notYours = titleChange ? cloudThreadRefusal(auth, m[2]) : null;
+      if (notYours) return json(res, 403, { error: notYours });
+      if (titleChange && groupThreadIsWorking(group.id, m[2])) {
+        return json(res, 409, { error: "this task is running — stop it first" });
+      }
+      const patch: GroupTaskPatch = {
+        ...(parsedLimit?.ok ? { turnTimeoutMinutes: parsedLimit.minutes } : {}),
+        ...(pinning ? { pinned: body.pinned === true } : {}),
+        ...(archiving ? { archivedAt: body.archivedAt as number | null } : {}),
+        ...(titleChange ? { title: body.title } : {}),
+        // Anyone who may post in the room may close or reopen any of its threads; who did comes from the session, never the body.
+        ...(closing && body.closed !== (existing.closedAt !== undefined) ? { closed: body.closed ? { at: Date.now(), by: personCloser(auth, m[2]) } : null } : {}),
+      };
+      const task = Object.keys(patch).length ? store.patchGroupTask(group.id, m[2], patch) : existing;
+      if (!task) return json(res, 404, { error: "no such channel task" });
+      return json(res, 200, { task } satisfies RoomTaskUpdateResponse);
+    }
+    if (m && method === "DELETE") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such channel" });
+      if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
+      const refusal = deleteRefusal(auth, group.id, m[2]);
+      if (refusal) return json(res, refusal.status, { error: refusal.error });
+      const updated = deleteGroupTasks(group.id, [m[2]]);
+      if (!updated?.deleted.length) return json(res, 400, { error: "a channel keeps at least one task" });
+      return json(res, 200, { group: own(groupWithThread(updated.group)) });
+    }
+
+    m = path.match(/^\/api\/groups\/([\w-]+)$/);
+    if (m && method === "PATCH") {
+      const body = await readBody(req);
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        const field = clientGroupPatchViolation(body);
+        if (field) return json(res, 403, { error: `forbidden: this session may rename or mark a room, not change "${field}" (needs the admin scope)` });
+      }
+      const renamed = store.group(m[1]);
+      if (renamed && body && typeof body === "object" &&
+        ((body.name !== undefined && body.name !== renamed.name) || (body.bulletin !== undefined && body.bulletin !== (renamed.bulletin ?? "")))) {
+        const notYours = cloudThreadRefusal(auth, renamed.threadId);
+        if (notYours) return json(res, 403, { error: notYours });
+      }
+      if (deps.personMarkRoom && auth.kind === "session" && renamed && typeof body?.unread === "boolean") {
+        const { unread, ...shared } = body;
+        const group = Object.keys(shared).length ? updateChannel(m[1], shared) : renamed;
+        return json(res, 200, { group: deps.personMarkRoom(auth, group, unread) ?? own(publicGroupState(group)) } satisfies RoomUpdateResponse);
+      }
+      const group = updateChannel(m[1], body);
+      return json(res, 200, { group: own(publicGroupState(group)) } satisfies RoomUpdateResponse);
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);
+    if (m && method === "POST") {
+      const room = store.group(m[1]);
+      if (!room) return json(res, 404, { error: "no such room" });
+      const body = await readBody(req);
+      // Several of the room's threads in one request and one frame: the feed reads marks older than itself this way.
+      if (Array.isArray(body?.threadIds)) {
+        const asked: unknown[] = body.threadIds;
+        if (room.dm || asked.length > MAX_READ_THREADS || asked.some((id) => typeof id !== "string")) return json(res, 400, { error: "threadIds must be up to 500 of the room's threads" });
+        const threadIds = [...new Set(asked as string[])].filter((id) => store.groupTaskByThread(room.id, id));
+        let personal: WireGroup | null = null;
+        let shared: GroupRecord | null = null;
+        for (const id of threadIds) {
+          sawThread(id);
+          deps.threadRead?.(auth, id);
+          personal = deps.personMarkRoom?.(auth, room, false, id) ?? null;
+          if (!personal) shared = store.markGroupThreadUnread(room.id, id, false, readCursor(id).lastReadMessageId);
+          readThreadNotifications(id, broadcast, notificationListed(auth));
+        }
+        if (personal) return json(res, 200, { group: personal, read: threadIds.length });
+        const group = shared ?? store.group(room.id)!;
+        if (shared) broadcast({ kind: "group", group: publicGroupState(group) });
+        return json(res, 200, { group: own(publicGroupState(group)), read: threadIds.length });
+      }
+      const threadId = body?.threadId ?? room.threadId;
+      if (typeof threadId !== "string" || (room.dm
+        ? threadId !== room.threadId
+        : !store.groupTaskByThread(room.id, threadId))) {
+        return json(res, 404, { error: "no such channel task" });
+      }
+      sawThread(threadId);
+      deps.threadRead?.(auth, threadId);
+      const personal = deps.personMarkRoom?.(auth, room, false, threadId);
+      if (personal) {
+        readThreadNotifications(threadId, broadcast, notificationListed(auth));
+        return json(res, 200, { group: personal });
+      }
+      const group = room.dm
+        ? store.patchGroup(room.id, { unread: false, ...readCursor(threadId) })!
+        : store.markGroupThreadUnread(room.id, threadId, false, readCursor(threadId).lastReadMessageId)!;
+      readThreadNotifications(threadId, broadcast, notificationListed(auth));
+      broadcast({ kind: "group", group: publicGroupState(group) });
+      return json(res, 200, { group: own(publicGroupState(group)) });
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      if (phoneSecretSubmissions.hasGroup(group.id)) {
+        return json(res, 409, { error: "this channel is securely saving a credential — try again when it finishes" });
+      }
+      if (groupIsWorking(group)) {
+        return json(res, 409, { error: "this channel is working — stop that turn first" });
+      }
+      const threadIds = new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]);
+      const stagedSkillCleanups = [...threadIds].flatMap(stagedSkillCleanupsForThread);
+      for (const threadId of threadIds) {
+        lastReply.delete(threadId);
+        clearTurnDigestState(threadId);
+        skillReview.dropThread(threadId);
+      }
+      routines!.disableForGroup(group.id);
+      store.deleteGroup(group.id);
+      rejectDeletedThreadSkillStages(stagedSkillCleanups);
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/messages$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const textRefused = messageTextRefusal(body.text);
+      if (textRefused) return json(res, 400, { error: textRefused });
+      const text = String(body.text ?? "").trim();
+      if (!text) return json(res, 400, { error: "text required" });
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such group" });
+      if (body.mode !== undefined && body.mode !== "chat" && body.mode !== "goal") {
+        return json(res, 400, { error: "mode must be chat or goal" });
+      }
+      const channelMode: "chat" | "goal" = body.mode === "goal" ? "goal" : "chat";
+      if (group.dm && channelMode === "goal") {
+        return json(res, 400, { error: "goal mode is available in team channels, not bot-to-bot channels" });
+      }
+      if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
+        return json(res, 400, { error: "threadId must be a task id" });
+      }
+      const mentions = parseMentionPicks(body.mentions);
+      if (mentions === null) return json(res, 400, { error: "mentions must be a list of up to 20 bot ids" });
+      const threadId = body.threadId ?? group.threadId;
+      const trigger = usageTriggerFor(auth);
+      try {
+        assertWithinBudget(cfg, DATA_DIR);
+      } catch (error) {
+        return json(res, 409, { error: error instanceof Error ? error.message : String(error), code: "spend_cap" });
+      }
+      const ownsThread = group.dm
+        ? group.threadId === threadId
+        : Boolean(store.groupTaskByThread(group.id, threadId));
+      if (!ownsThread) {
+        return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
+      }
+      // What the person pointed at in a member's page: only a typed chat line carries it, and it goes to the page's bot.
+      const pointing = body.pointed !== undefined && body.pointed !== null;
+      if (pointing && channelMode === "goal") return json(res, 400, { error: "a goal is a plain typed message" });
+      const pointed = pointing ? prepareRoomPointed(store, threadId, body.pointed) : null;
+      if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
+      const pick = pointed?.pick;
+      const sendId = parseSendId(body.sendId);
+      const replyTo = resolveReplyTarget(threadId, body.replyToId);
+      // A bot's shell is a loopback caller too: with no paired session and no browser origin the message
+      // is stamped, not trusted as typed (readers, posting budget and transcript see the stamp), and logged.
+      const browserOrigin = typeof req.headers.origin === "string" && req.headers.origin.trim() !== "";
+      const via: "api" | undefined =
+        auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin ? "api" : undefined;
+      if (via) {
+        console.warn(`room message from ${requestSource(req)} through the local API (no session, no browser origin) into "${group.name}"`);
+      }
+      const receipt = await sendSequencer.run(
+        sendId ? `group:${group.id}:${threadId}:${sendId}` : undefined,
+        sendFingerprint(text, replyTo?.id, channelMode),
+        async () => {
+          if (sendId) {
+            if (cancelledChatFollowup("channel", group.id, threadId, sendId)) {
+              throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
+            }
+            let accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id, channelMode);
+            const addressed = accepted.kind === "conflict" ? deps.boardAddressed?.(group.id, threadId, text) : null;
+            if (addressed) accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, addressed, replyTo?.id, channelMode);
+            if (accepted.kind === "conflict") {
+              throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
+            }
+            if (accepted.kind === "match") {
+              return { ok: true as const, threadId, message: accepted.message };
+            }
+            const queued = queuedChannelMessage(group.id, threadId, sendId);
+            if (queued) {
+              if (
+                (queued.text !== text && queued.text !== deps.boardAddressed?.(group.id, threadId, text)) ||
+                queued.replyToId !== replyTo?.id ||
+                queued.mode !== channelMode
+              ) {
+                throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
+              }
+              return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+            }
+          }
+          const current = store.group(group.id);
+          if (!current) throw Object.assign(new Error("no such group"), { status: 404 });
+          const ownsTarget = current.threadId === threadId || store.groupTasks(current.id).some((task) => task.threadId === threadId);
+          if (!ownsTarget) {
+            throw Object.assign(new Error("no such thread in channel"), {
+              status: 404,
+            });
+          }
+          const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
+          // A new pick only (a retry above keeps its receipt): every page bot must still be here and free to answer.
+          const pageBotIds = roomPickBots(pick);
+          if (!pageBotIds.every((id) => current.memberIds.includes(id) && store.bot(id))) {
+            throw Object.assign(new Error("the bot that made this page is no longer in this room"), { status: 409 });
+          }
+          if (!current.dm && pageBotIds.some((id) => current.holds?.[id])) {
+            throw Object.assign(new Error("the bot that made this page is on hold in this room; let it answer again first"), { status: 409 });
+          }
+          // A program on this machine (a bot's shell, a script) reads the ids it can send again with; a person never sees them.
+          const sameName = auth.kind === "loopback" && !browserOrigin
+            ? sameNameRefusalForBots(text, members, mentions, current.name, "sent")
+            : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
+          if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
+          if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
+          const board = channelMode === "chat" && !via && (trigger.kind === "user" || trigger.kind === "owner") ? deps.boardReply?.(current.id, threadId, text) ?? null : null;
+          const lineText = board?.text ?? text, lineMentions = board ? [...new Set([...(mentions ?? []), board.botId])] : mentions;
+          const threadWorking = groupThreadIsWorking(current.id, threadId);
+          const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
+          if (decision.action === "queue") {
+            const queued = queueChannelMessage(current.id, threadId, lineText, {
+              replyToId: replyTo?.id,
+              sendId,
+              mode: channelMode,
+              via,
+              sender: messageSender(auth),
+              trigger,
+              mentions: lineMentions,
+              ...(pick ? { pointed: pick } : {}),
+            });
+            board?.resume();
+            return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+          }
+          const message = startGroupTurn(current.id, lineText, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions: lineMentions, ...(pick ? { pointed: pick } : {}) });
+          board?.resume();
+          return { ok: true as const, threadId, message };
+        },
+      );
+      return json(res, 202, receipt);
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/queue\/([\w-]+)$/);
+    if (m && method === "DELETE") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such group" });
+      const waiting = channelQueueItem(group.id, m[2]);
+      const notYours = waiting && owners.removeRefusal(auth, waiting.threadId, waiting.item.sender);
+      if (notYours) return json(res, 403, { error: notYours, code: "queued_not_yours" });
+      if (!cancelChannelMessage(group.id, m[2])) {
+        return json(res, 404, { error: "no such queued message" });
+      }
+      return json(res, 200, { ok: true });
+    }
+
+    // Steers the queued head into the running room turn without interrupting it; a driver that cannot steer keeps the queue.
+    m = path.match(/^\/api\/groups\/([\w-]+)\/queue\/([\w-]+)\/steer$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (body !== null && (typeof body !== "object" || Array.isArray(body))) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const threadId = typeof body?.threadId === "string" ? body.threadId : undefined;
+      if (threadId !== undefined && !/^[\w-]+$/.test(threadId)) {
+        return json(res, 400, { error: "threadId must be a task id" });
+      }
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      const targetThreadId = threadId ?? group.threadId;
+      const ownsThread = group.dm
+        ? group.threadId === targetThreadId
+        : Boolean(store.groupTaskByThread(group.id, targetThreadId));
+      if (!ownsThread) {
+        return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
+      }
+      const current = store.group(group.id);
+      if (!current) return json(res, 404, { error: "no such room" });
+      const speakerBotId =
+        groupSpeakers.get(targetThreadId)?.botId ??
+        (targetThreadId === current.threadId ? current.busyBotId : undefined);
+      const speaker = speakerBotId ? store.bot(speakerBotId) : undefined;
+      const instance = speaker ? runningTurnInstance(speaker, targetThreadId) : undefined;
+      // Hold the queue atomically: the room's settle drains it or this request steers its head, never both.
+      const held = holdChannelQueue(current.id, targetThreadId, m[2]);
+      if (!held) return json(res, 404, { error: "no such queued message" });
+      const headGroup = headChannelGroup(held.items);
+      const [head] = headGroup;
+      const waitsItsTurn = owners.joinRefusal(auth, targetThreadId, headGroup.map((item) => item.sender));
+      if (waitsItsTurn) {
+        restoreHeldChannelQueue(held);
+        return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
+      }
+      const steerInput = extractSteerImages(headGroup.map((item) => item.text));
+      const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
+      const mentioned = [...new Set(headGroup.flatMap((item) => mentionedBots(item.text, members, item.mentions ?? []).map((bot) => bot.id)))];
+      const decision = admit("room-steer", {
+        speakerPresent: Boolean(speaker),
+        speakerAddressed: !speaker || steerMeantForSpeaker({
+          speakerId: speaker.id,
+          mentioned,
+          leadId: roomLeadId(current.defaultResponder),
+          speakerOnHandedWork: speakerOnHandedWork(targetThreadId, speaker.id),
+        }),
+        engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+        carriesImages: !steerInput || steerInput.images.length > 0,
+        engineCanSteerImages: Boolean(steerInput) && engineSteersImages(instance),
+        isQueueHead: Boolean(head && head.id === m[2]),
+      });
+      if (decision.action === "refuse") {
+        restoreHeldChannelQueue(held);
+        return json(res, 409, { error: "only the first queued message can steer" });
+      }
+      if (decision.action === "queue" || !steerInput || headGroup.some((item) => item.pointed)) {
+        restoreHeldChannelQueue(held);
+        return json(res, 200, {
+          ok: true,
+          queued: true,
+          threadId: targetThreadId,
+          ...(decision.action === "queue" && decision.blockedBy ? { blockedBy: decision.blockedBy } : {}),
+        });
+      }
+      const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
+      const speakerName = deps.userName(targetThreadId);
+      let foldedPrompt: string;
+      try {
+        foldedPrompt = headGroup
+          .map((item, index) =>
+            promptWithReply(
+              steerInput.texts[index] ?? item.text,
+              index === 0
+                ? replyTo
+                : item.replyToId
+                  ? resolveReplyTarget(targetThreadId, item.replyToId)
+                  : undefined,
+              speakerName,
+            ),
+          )
+          .join("\n\n");
+      } catch (error) {
+        restoreHeldChannelQueue(held);
+        throw error;
+      }
+      const steered: SteerOutcome = instance?.adapter.steer
+        ? await (steerInput.images.length > 0
+            ? instance.adapter.steer(targetThreadId, foldedPrompt, steerInput.images)
+            : instance.adapter.steer(targetThreadId, foldedPrompt))
+            .catch((): SteerOutcome => "indeterminate")
+        : "refused";
+      // The steer awaited adapter work: re-read every ownership invariant before writing anything.
+      const after = store.group(current.id);
+      const afterSpeakerBotId = after
+        ? groupSpeakers.get(targetThreadId)?.botId ??
+          (targetThreadId === after.threadId ? after.busyBotId : undefined)
+        : undefined;
+      // "indeterminate" never restores: the words may already be in the live turn, and a replay would run them twice.
+      const delivered = steered !== "refused";
+      if (after && delivered && (steered === "indeterminate" || afterSpeakerBotId === speakerBotId)) {
+        const messages = headGroup.map((item) => store.appendMessage(targetThreadId, {
+          role: "user",
+          kind: "text",
+          text: item.text,
+          replyToId: item.replyToId,
+          sendId: item.sendId,
+          channelMode: item.mode,
+          queueId: item.id,
+          via: item.via,
+          steered: true,
+          sender: item.sender,
+        }));
+        settleHeldChannelQueueHead(held);
+        return json(res, 200, {
+          ok: true,
+          steered: true,
+          threadId: targetThreadId,
+          messages,
+          queueIds: headGroup.map((item) => item.id),
+        });
+      }
+      if (steered === "indeterminate" && !after) {
+        // Settle the head so a restart cannot replay words the dead turn may have run.
+        settleHeldChannelQueueHead(held);
+        return json(res, 404, { error: "no such room" });
+      }
+      restoreHeldChannelQueue(held);
+      if (after && !groupThreadIsWorking(after.id, targetThreadId)) drainQueuedChannelSends();
+      return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/members\/([\w-]+)\/compact$/);
+    if (m && method === "POST") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      if (!group.memberIds.includes(m[2])) return json(res, 404, { error: "that bot is not in this room" });
+      const notYours = cloudThreadRefusal(auth, group.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (!roomMemberContexts.request(group.threadId, m[2])) {
+        return json(res, 409, { error: "this bot has no measured context in this room yet" });
+      }
+      const visible = publicGroupState(store.group(group.id) ?? group);
+      broadcast({ kind: "group", group: visible });
+      return json(res, 202, { ok: true, threadId: group.threadId, group: own(visible) });
+    }
+    m = path.match(/^\/api\/groups\/([\w-]+)\/interrupt$/);
+    if (m && method === "POST") {
+      const group = store.group(m[1]);
+      if (!group) return json(res, 404, { error: "no such room" });
+      const rawBody = await readBody(req);
+      if (rawBody !== null && (typeof rawBody !== "object" || Array.isArray(rawBody))) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const body = rawBody ?? {};
+      if (body.threadId !== undefined && (typeof body.threadId !== "string" || !/^[\w-]+$/.test(body.threadId))) {
+        return json(res, 400, { error: "threadId must be a task id" });
+      }
+      const stopId = parseStopId(body.stopId);
+      if (stopId === null) return json(res, 400, { error: "stopId must be a client-generated id" });
+      const answer = await roomStops.run(stopId && `${group.id}:${stopId}`, async (): Promise<StopAnswer> => {
+        if (body.threadId !== undefined) {
+          const ownsThread = group.dm
+            ? body.threadId === group.threadId
+            : Boolean(store.groupTaskByThread(group.id, body.threadId));
+          if (!ownsThread) {
+            return { status: 409, body: { error: "the channel switched tasks before it could be interrupted" } };
+          }
+        }
+        const activeOperations = [...(groupTurnOperations.get(group.id) ?? [])]
+          .filter((operation) => !operation.cancelled);
+        const targetThreadIds: string[] = body.threadId !== undefined
+          ? [body.threadId]
+          : activeOperations.length > 0
+            ? [...new Set(activeOperations.map((operation) => operation.threadId))]
+            : [group.threadId];
+        const interruptTargets = targetThreadIds.map((threadId) => {
+          const speaker = groupSpeakers.get(threadId);
+          const busy = speaker
+            ? store.bot(speaker.botId)
+            : threadId === group.threadId && group.busyBotId
+              ? store.bot(group.busyBotId)
+              : undefined;
+          return {
+            threadId,
+            instance: busy ? runningTurnInstance(busy, threadId) : undefined,
+          };
+        });
+        const refusal = targetThreadIds.map((threadId) => owners.stopRefusal(auth, threadId)).find(Boolean);
+        if (refusal) return { status: 403, body: { error: refusal, code: "stop_not_yours" } };
+        // Abort every queued operation before the first provider round trip, so none begins while Stop awaits.
+        for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
+        for (const { threadId, instance } of interruptTargets) {
+          revokeInternalCapabilitiesForThread(threadId);
+          await instance?.adapter.interruptTurn(threadId).catch(() => {});
+          closeOpenApprovals(threadId);
+        }
+        return { status: 200, body: { ok: true } };
+      });
+      return json(res, answer.status, answer.body);
+    }
+    return PASS;
+  };
+}

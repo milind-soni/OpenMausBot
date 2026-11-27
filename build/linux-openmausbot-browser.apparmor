@@ -1,0 +1,8 @@
+abi <abi/4.0>,
+include <tunables/global>
+
+# Only the packaged, root-owned executable can create its browser sandbox.
+# Never widen this to a home directory or the portable AppImage mount path.
+profile openmausbot-browser /opt/OpenMausBot/resources/browser-engine/chrome/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+  userns,
+}

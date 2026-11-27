@@ -1,0 +1,743 @@
+// Windows differences for agent CLIs: CreateProcess cannot exec .cmd/.bat shims or shebang scripts (env-path
+// resolves them without a shell), there is no process-group kill (taskkill /T), GUI-spawned consoles flash without
+// windowsHide, and the command line is capped at 32,767 characters (prompts go on stdin or in files).
+import {
+  spawn,
+  execFile,
+  execFileSync,
+  type ChildProcess,
+  type ChildProcessByStdio,
+  type ExecFileOptions,
+  type SpawnOptions,
+} from "node:child_process";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import type { Readable, Writable } from "node:stream";
+import { basename, dirname, join, resolve } from "node:path";
+import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
+import { type BoxRequest, under } from "./bot-box/plan.ts";
+import { homeProgramsDistrusted, serverMayRunFrom, serverPath } from "./bot-box/program-trust.ts";
+import { engineMemory } from "./engine-memory.ts";
+import { engineOwners } from "./engine-owners.ts";
+import { ENGINE_TAG_ENV, engineRunTag, engineStopped, recordEngine } from "./engine-records.ts";
+import { engineHomes } from "./engine-homes/engine-homes.ts";
+import { currentTurn } from "./crash-guard.ts";
+import type { HomedSpawn } from "./engine-homes/layout.ts";
+import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
+import { spawnBotWork } from "./oom-score.ts";
+import { noticeFailure } from "./chat-notices.ts";
+import { processBudget } from "./process-room.ts";
+import { shortageCode } from "./process-shortage.ts";
+import { inconclusiveMark } from "./harness/probe-hold.ts";
+import { unboxedGitCredential } from "./github/git-credential.ts";
+
+export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
+  return resolveCliSpawn(cli, args, env);
+}
+
+/** Headroom below CreateProcess' 32,767 UTF-16 code-unit limit for libuv's quoting and executable expansion. */
+export const WINDOWS_SAFE_COMMAND_LINE_CHARS = 30_000;
+
+export function estimatedWindowsCommandLineChars(resolved: ResolvedSpawn): number {
+  return [resolved.command, ...resolved.args].reduce(
+    (total, value) => total + JSON.stringify(value).length + 1,
+    0,
+  );
+}
+
+export function assertSafeCliArgv(
+  resolved: ResolvedSpawn,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (platform !== "win32") return;
+  if (estimatedWindowsCommandLineChars(resolved) <= WINDOWS_SAFE_COMMAND_LINE_CHARS) return;
+  const error = new Error(
+    "agent CLI launch arguments exceed Windows' safe command-line limit; pass large prompts through stdin or a file",
+  ) as NodeJS.ErrnoException;
+  error.code = "ENAMETOOLONG";
+  throw error;
+}
+
+// Only spawnCli makes a private POSIX group; a plain child may share ours, so never signal its group.
+const cliGroups = new WeakSet<ChildProcess>();
+const stopping = new WeakMap<ChildProcess, Promise<boolean>>();
+
+type LinuxProcess = { pid: number; parent: number; start: string; state: string; session?: number };
+const linuxTrees = new WeakMap<ChildProcess, Map<number, string>>();
+
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/;
+
+/** macOS has no /proc: `ps` gives the same pid, parent, state and start time (`lstart`, the identity that survives PID reuse). */
+function psProcesses(pids?: readonly number[]): Map<number, LinuxProcess> {
+  const rows = new Map<number, LinuxProcess>();
+  if (pids?.length === 0) return rows;
+  let out: string;
+  try {
+    out = execFileSync("/bin/ps", [...(pids ? ["-p", pids.join(",")] : ["-A"]), "-o", "pid=,ppid=,stat=,lstart="], { encoding: "utf8", timeout: 2_000, windowsHide: true, env: { ...process.env, LC_ALL: "C" } });
+  } catch (error) {
+    if (pids && (error as { status?: number }).status === 1) return rows;
+    throw error;
+  }
+  for (const line of out.split(/\r?\n/)) {
+    const match = PS_ROW.exec(line);
+    if (match) rows.set(Number(match[1]), { pid: Number(match[1]), parent: Number(match[2]), state: match[3][0], start: match[4].replace(/\s+/g, " ") });
+  }
+  return rows;
+}
+
+/** Reads the tracked pids: on macOS one `ps` for them all, not one per pid on each pass of a stop loop. */
+function treeReader(pids: readonly number[]): (pid: number) => LinuxProcess | null {
+  if (process.platform !== "darwin") return (pid) => linuxProcess(pid);
+  const rows = psProcesses(pids);
+  return (pid) => rows.get(pid) ?? null;
+}
+
+function linuxProcess(pid: number, file = `/proc/${pid}/stat`): LinuxProcess | null {
+  if (process.platform === "darwin") return psProcesses([pid]).get(pid) ?? null;
+  let stat: string;
+  try {
+    stat = readFileSync(file, "utf8");
+  } catch (error) {
+    if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
+    throw error;
+  }
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  const start = fields[19];
+  const state = fields[0];
+  const parent = Number(fields[1]);
+  if (!start || !state || !Number.isInteger(parent)) throw new Error("Unreadable Linux process identity");
+  return { pid, parent, start, state, session: Number(fields[3]) };
+}
+
+/** /proc/<pid>/task/<tid>/children needs CONFIG_PROC_CHILDREN (CONFIG_CHECKPOINT_RESTORE before Linux 4.2); a kernel built without it, or gVisor, has no such file. */
+function linuxChildrenFiles(): boolean {
+  return existsSync(`/proc/self/task/${process.pid}/children`);
+}
+
+/** Every thread's children, or null when the list may miss one: Linux hides /proc/<pid>/task once the main thread has
+ * exited while others run, and a thread that exits hands its children to a sibling thread, after which its own
+ * children file reads empty. */
+function linuxChildren(pid: number): number[] | null {
+  let tasks: string[];
+  try { tasks = readdirSync(`/proc/${pid}/task`); } catch { return null; }
+  if (tasks.length === 0) return null;
+  const children: number[] = [];
+  for (const task of tasks) {
+    let listed: string;
+    try { listed = readFileSync(`/proc/${pid}/task/${task}/children`, "utf8"); } catch { return null; }
+    let thread: LinuxProcess | null;
+    try { thread = linuxProcess(pid, `/proc/${pid}/task/${task}/stat`); } catch { return null; }
+    if (!thread || thread.state === "Z" || thread.state === "X") return null;
+    for (const entry of listed.split(" ")) if (/^\d+$/.test(entry)) children.push(Number(entry));
+  }
+  return children;
+}
+
+/** A daemon a CLI starts on purpose to outlive it, in a session of its own: Hermes' shared gateway, which every other
+ * conversation's `hermes acp` on the same profile attaches to. A stop leaves it and its own children out of the tree. */
+function outlivesLauncher({ pid, session }: LinuxProcess): boolean {
+  if (session !== pid) return false;
+  try {
+    const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    if (!argv.some((word, at) => word === "gateway" && argv[at + 1] === "run")) return false;
+    return readFileSync(`/proc/${pid}/environ`, "utf8").split("\0").includes("HERMES_GATEWAY_DETACHED=1");
+  } catch {
+    return false;
+  }
+}
+
+/** Such a daemon, or a process in its session: its own children, even one recorded before the daemon's exec. */
+function leftRunning(current: LinuxProcess): boolean {
+  if (process.platform !== "linux") return false;
+  const { session } = current;
+  if (session === undefined || session === current.pid) return outlivesLauncher(current);
+  try {
+    const leader = linuxProcess(session);
+    return leader !== null && outlivesLauncher(leader);
+  } catch {
+    return false;
+  }
+}
+
+/** A child recorded between its fork and its exec still showed its launcher's command line and environment, so a
+ * gateway and its children can already be in the tree: forget them before walking the tree. */
+function forgetOutliving(tree: Map<number, string>): void {
+  for (const [pid, start] of tree) {
+    let current: LinuxProcess | null;
+    try { current = linuxProcess(pid); } catch { continue; }
+    if (current?.start === start && leftRunning(current)) tree.delete(pid);
+  }
+}
+
+function isLinuxProcess(pid: number, start: string): boolean {
+  try { return linuxProcess(pid)?.start === start; } catch { return false; }
+}
+
+/** Linux sandbox helpers can leave the CLI's process group and reparent during a protocol interrupt. */
+export function captureCliTree(child: ChildProcess): void {
+  if ((process.platform !== "linux" && process.platform !== "darwin") || !child.pid) return;
+  let tree = linuxTrees.get(child);
+  if (!tree && !cliGroups.has(child)) return;
+  if (!tree) {
+    tree = new Map();
+    linuxTrees.set(child, tree);
+  }
+  if (process.platform === "linux") forgetOutliving(tree);
+  if (process.platform === "darwin" || !linuxChildrenFiles() || !addLinuxDescendants(tree)) {
+    try { addDescendantsFromEveryProcess(tree); } catch {}
+  }
+}
+
+/** False when the walk may have missed a descendant; those it confirmed stay in the tree. A children file can skip a
+ * live child while a sibling listed before it is reaped (docs.kernel.org/filesystems/proc.html,
+ * "/proc/<pid>/task/<tid>/children"), and that sibling is then gone or reparented when its stat is read. */
+function addLinuxDescendants(tree: Map<number, string>): boolean {
+  const queue = [...tree].filter(([pid, start]) => isLinuxProcess(pid, start));
+  for (let next = 0; next < queue.length; next += 1) {
+    const [parent, parentStart] = queue[next];
+    const children = linuxChildren(parent);
+    if (!children || !isLinuxProcess(parent, parentStart)) return false;
+    for (const pid of children) {
+      if (pid === process.pid) continue;
+      let current: LinuxProcess | null;
+      try { current = linuxProcess(pid); } catch { return false; }
+      if (!current || current.parent !== parent) return false;
+      if (tree.get(pid) === current.start || leftRunning(current)) continue;
+      tree.set(pid, current.start);
+      queue.push([pid, current.start]);
+    }
+  }
+  return true;
+}
+
+function addDescendantsFromEveryProcess(tree: Map<number, string>): void {
+  let snapshot = new Map<number, LinuxProcess>();
+  if (process.platform === "darwin") snapshot = psProcesses();
+  else {
+    let entries: string[];
+    try { entries = readdirSync("/proc"); } catch { return; }
+    for (const entry of entries) {
+      if (!/^\d+$/.test(entry)) continue;
+      const pid = Number(entry);
+      try {
+        const current = linuxProcess(pid);
+        if (current) snapshot.set(pid, current);
+      } catch {}
+    }
+  }
+  const parents = new Set([...tree].filter(([pid, start]) => snapshot.get(pid)?.start === start).map(([pid]) => pid));
+  let discovered: boolean;
+  do {
+    discovered = false;
+    for (const current of snapshot.values()) {
+      if (current.pid === process.pid || !parents.has(current.parent) || tree.get(current.pid) === current.start) continue;
+      if (leftRunning(current)) continue;
+      tree.set(current.pid, current.start);
+      parents.add(current.pid);
+      discovered = true;
+    }
+  } while (discovered);
+}
+
+function linuxDescendantsStopped(child: ChildProcess): boolean {
+  const tree = [...linuxTrees.get(child) ?? []].filter(([pid]) => pid !== child.pid);
+  let read: (pid: number) => LinuxProcess | null;
+  try { read = treeReader(tree.map(([pid]) => pid)); } catch { return false; }
+  for (const [pid, start] of tree) {
+    try {
+      const current = read(pid);
+      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !leftRunning(current)) return false;
+    } catch { return false; }
+  }
+  return true;
+}
+
+/** Whether every process still in this group has exited and only waits to be collected. Where nothing collects orphans
+ * (Node as a container's process 1) such members stay for good, and kill(-pgid, 0) goes on succeeding for them. False
+ * when a member runs, when none is found, or when /proc can't say. */
+export function linuxGroupOnlyExited(group: number, list: () => string[] = () => readdirSync("/proc"), stat: (pid: number) => string = (pid) => readFileSync(`/proc/${pid}/stat`, "utf8")): boolean {
+  let entries: string[];
+  try { entries = list(); } catch { return false; }
+  let members = 0;
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    let fields: string[];
+    try { const text = stat(Number(entry)); fields = text.slice(text.lastIndexOf(")") + 2).split(" "); } catch { continue; }
+    if (Number(fields[2]) !== group) continue;
+    if (fields[0] !== "Z" && fields[0] !== "X") return false;
+    members += 1;
+  }
+  return members > 0;
+}
+
+function linuxRootIdentityMatches(child: ChildProcess): boolean | undefined {
+  const start = child.pid && linuxTrees.get(child)?.get(child.pid);
+  if (!child.pid || process.platform !== "linux" || !cliGroups.has(child)) return true;
+  if (!start) return undefined;
+  try {
+    const current = linuxProcess(child.pid);
+    return !current || current.start === start;
+  } catch { return undefined; }
+}
+
+function signalLinuxDescendants(child: ChildProcess, value: NodeJS.Signals): void {
+  const tree = [...(linuxTrees.get(child) ?? [])].reverse().filter(([pid]) => pid !== child.pid && pid > 1 && pid !== process.pid);
+  let read: (pid: number) => LinuxProcess | null;
+  try { read = treeReader(tree.map(([pid]) => pid)); } catch { return; }
+  for (const [pid, start] of tree) {
+    try {
+      const current = read(pid);
+      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !leftRunning(current)) process.kill(pid, value);
+    } catch {}
+  }
+}
+
+const MAX_ENDED_SESSIONS = 4_096;
+const engineSessions = { live: new Set<number>(), ended: new Set<number>() };
+
+/** POSIX session ids of the engines that run bots' turns (each leads its own session). A server opened by any
+ * process in one counts as the bot's, even after the shell that started it exits. */
+export function botEngineSessions(): { live: ReadonlySet<number>; ended: ReadonlySet<number> } {
+  return engineSessions;
+}
+
+function rememberEngineSession(child: ChildProcess): void {
+  const pid = child.pid;
+  if (!pid) return;
+  engineSessions.live.add(pid);
+  child.once("exit", () => {
+    engineSessions.live.delete(pid);
+    engineSessions.ended.add(pid);
+    if (engineSessions.ended.size > MAX_ENDED_SESSIONS) engineSessions.ended.delete(engineSessions.ended.values().next().value!);
+  });
+}
+
+const liveSpawns = new Set<readonly string[]>();
+
+/** The command line of every process spawnCli started that has not exited yet. */
+export function liveCliCommands(): Iterable<readonly string[]> {
+  return liveSpawns;
+}
+
+function rememberLiveSpawn(child: ChildProcess, line: readonly string[]): void {
+  if (!child.pid) return;
+  liveSpawns.add(line);
+  child.once("exit", () => liveSpawns.delete(line));
+}
+
+/** `bot`: an engine running bots' turns, whose own servers that bot's browser may open on a server host.
+ * `openmausbot`: everything else (logins, probes, the browser engine itself). */
+export type CliOwner = "bot" | "openmausbot";
+
+/** The bot box (server/bot-box): a `bot` spawn runs in it where it is on; `box` asks for one for another owner, with more
+ * paths or the host's network, and `false` keeps a spawn out of it. */
+export interface BoxSpawnOptions {
+  box?: boolean | Pick<BoxRequest, "rw" | "ro" | "net" | "botId" | "botThreads" | "allowEnv" | "relay" | "configured" | "engine">;
+  /** On a Team Cloud, runs in its conversation's engine home though it is not a bot's engine (a keep-warm ping). */
+  engineHome?: boolean;
+  /** A bot's own work that is not its engine (its browser, a helper engine): memory runs out on it first, as on a `bot`
+   * spawn (oom-score.ts), with no box and no engine tracking. */
+  botWork?: boolean;
+}
+export type CliSpawnOptions = SpawnOptions & BoxSpawnOptions;
+
+/** The box for this spawn, or null when it runs as is. A spawn in an engine home has that home in place of HOME. */
+export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner: CliOwner, homed: HomedSpawn | null = null): WrappedSpawn | null {
+  if (opts.box === false || (owner !== "bot" && !opts.box)) return null;
+  const request = typeof opts.box === "object" ? opts.box : {};
+  const home = homed ? { home: homed.home, shared: homed.shared } : {};
+  const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
+  const cwd = typeof opts.cwd === "string" ? opts.cwd : undefined;
+  const turn = projectFolderTurn(cwd);
+  return botBox.wrap({ command: resolved.command, args: resolved.args, cwd, env: opts.env ?? process.env, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}), ...turn, ...request, ...home });
+}
+
+/** A configured project folder can lie inside another bot's folder, so a turn working there still needs its own bot's
+ * folder and conversation folder in its box. A turn in its bot's own folder (a room's) needs its conversation's too, for
+ * that conversation's uploads (server/box-attachments.ts). */
+function projectFolderTurn(cwd: string | undefined): { botId: string; conversationFolder: string } | null {
+  const dataDir = botBox.startOptions()?.dataDir, turn = currentTurn();
+  if (!cwd || !dataDir || !turn?.botId) return null;
+  const full = resolve(cwd), workspaces = join(resolve(dataDir), "workspaces"), conversations = join(resolve(dataDir), "task-workspaces");
+  if (under(full, conversations) || (dirname(full) === workspaces && basename(full) !== turn.botId) || full === workspaces) return null;
+  return { botId: turn.botId, conversationFolder: join(conversations, turn.botId, turn.threadId) };
+}
+
+/** What the audience rule gives a box in `cwd` now, as a key (null off a team or with the box off): a process kept
+ * between turns is started again when it changes, such as a bot's "Can edit team files". */
+export function boxAudienceKey(cwd: string): string | null {
+  if (!botBox.enabled()) return null;
+  const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
+  return botBox.audienceKey({ cwd, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}) });
+}
+
+/** What a process several conversations share must be boxed with to serve `cwd` (null with the box off): all of the bot's
+ * conversation folders for a conversation folder (task-workspaces/<bot>/<thread>, BoxRequest.botThreads), on a Team
+ * Cloud only those its audience may read (BoxAudience.threads), else `cwd`. */
+export function sharedBoxScope(cwd: string): string | null {
+  if (!botBox.enabled()) return null;
+  const parent = dirname(resolve(cwd));
+  if (basename(dirname(parent)) !== "task-workspaces") {
+    // Another bot's turn in the same project folder has that bot's folder in its box, so it never shares this process;
+    // nor does another conversation's turn in the bot's own folder, whose box has only its own conversation's uploads.
+    const turn = projectFolderTurn(cwd);
+    if (!turn) return resolve(cwd);
+    return `${resolve(cwd)}#${basename(resolve(cwd)) === turn.botId ? turn.conversationFolder : turn.botId}`;
+  }
+  const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
+  const threads = botBox.sharedThreadsKey({ cwd, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}) });
+  return threads ? `${parent}#${createHash("sha256").update(threads).digest("hex").slice(0, 16)}` : parent;
+}
+
+/** Security (bot-box/program-trust.ts): a spawn outside the box neither starts a program from a folder a boxed bot can
+ * write nor looks one up there. */
+export function outsideBoxOptions<T extends { env?: NodeJS.ProcessEnv; cwd?: string | URL }>(command: string, opts: T): T {
+  if (!homeProgramsDistrusted()) return opts;
+  if (/[/\\]/.test(command)) {
+    const path = resolve(typeof opts.cwd === "string" ? opts.cwd : process.cwd(), command);
+    let real = path;
+    try { real = realpathSync(path); } catch {}
+    if (!serverMayRunFrom(path) || !serverMayRunFrom(real)) {
+      throw Object.assign(new Error(`${command} is in a folder the bots can write, so the server does not run it outside the bot box.`), { code: "EACCES" });
+    }
+  }
+  const env = opts.env ?? process.env;
+  return { ...opts, env: { ...env, PATH: serverPath(env.PATH) } };
+}
+
+export function spawnCli(
+  cli: string,
+  args: string[],
+  opts: CliSpawnOptions,
+  owner: CliOwner = "openmausbot",
+): ChildProcessByStdio<Writable, Readable, Readable> {
+  const resolved = resolveCli(cli, args);
+  assertSafeCliArgv(resolved);
+  const homed = owner === "bot" || opts.engineHome ? engineHomes.forSpawn(opts.env ?? process.env) : null;
+  const env = homed?.env ?? opts.env;
+  const options: CliSpawnOptions = resolved.env
+    ? { ...opts, env: { ...(env ?? process.env), ...resolved.env } }
+    : homed ? { ...opts, env } : opts;
+  const boxed = boxedSpawn(resolved, options, owner, homed);
+  const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
+  // An unboxed bot's git gets this server's GitHub sign-in after the person's own credentials (git-credential.ts).
+  const github = !boxed && owner === "bot" ? unboxedGitCredential(spawnOpts.env ?? process.env) : null;
+  if (github) spawnOpts.env = github.env as NodeJS.ProcessEnv;
+  // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
+  const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
+  // A server that restarts in place stops what an earlier one left by this tag (engine-records.ts).
+  const tag = process.platform === "win32" ? null : engineRunTag();
+  const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
+    ...spawnOpts,
+    ...(boxed ? { env: boxed.env, stdio } : {}),
+    ...(tag ? { env: { ...(boxed?.env ?? spawnOpts.env ?? process.env), [ENGINE_TAG_ENV]: tag } } : {}),
+    // POSIX: own group so kill(-pid) reaps child MCP servers; Windows: taskkill /T does it.
+    ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
+  }) as ChildProcessByStdio<Writable, Readable, Readable>;
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  const refused = (code: string | undefined) => { processBudget.spawnFailed(code); engineMemory.spawnRefused(code, owner === "bot"); };
+  try {
+    child = owner === "bot" || botWork ? spawnBotWork(start) : start();
+  } catch (error) {
+    // Node throws some refusals (ENOMEM) at once rather than reporting them on the child.
+    if (shortageCode(error)) refused((error as NodeJS.ErrnoException).code);
+    github?.release();
+    throw error;
+  } finally {
+    for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
+  }
+  rememberLiveSpawn(child, [resolved.command, ...resolved.args]);
+  // Node reports most refused spawns (EAGAIN, EMFILE, ENOENT) on the child, a tick later, with no pid.
+  child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) refused(error.code); });
+  // The broker token minted for this process dies with it.
+  if (boxed?.token) child.once("exit", boxed.release);
+  if (github) { child.once("exit", github.release); child.once("error", () => { if (!child.pid) github.release(); }); }
+  if (process.platform !== "win32") cliGroups.add(child);
+  if ((process.platform === "linux" || process.platform === "darwin") && child.pid) {
+    const tree = new Map<number, string>();
+    try {
+      const root = linuxProcess(child.pid);
+      if (root) tree.set(root.pid, root.start);
+    } catch {}
+    linuxTrees.set(child, tree);
+  }
+  if (process.platform !== "win32") recordEngine(child, child.pid ? linuxTrees.get(child)?.get(child.pid) ?? null : null);
+  if (process.platform !== "win32" && owner === "bot") {
+    rememberEngineSession(child);
+    engineMemory.track(child);
+    // The perf sampler's rows carry a start tick only on Linux: elsewhere the engine is recorded without one, as before.
+    engineOwners.track(child, child.pid && process.platform === "linux" ? linuxTrees.get(child)?.get(child.pid) ?? null : null);
+  }
+
+  // On Windows a stdin write between taskkill and pipe close errors asynchronously; unlistened, that crashes the harness.
+  child.stdin?.on("error", () => {});
+  return child;
+}
+
+/** execCli's answer for a spawn that runs in the bot box where it is on (`box`), as a bot's own would: an engine's
+ * status or catalog read that loads the engine's settings, extensions or MCP servers from a HOME a bot can write. */
+export function execCliBoxed(
+  cli: string,
+  args: string[],
+  opts: { env: NodeJS.ProcessEnv | Record<string, string | undefined>; cwd?: string; timeout: number; maxBuffer?: number; box: NonNullable<BoxSpawnOptions["box"]> },
+  cb: (err: (Error & { code?: number | string | null; killed?: boolean }) | null, stdout: string, stderr: string) => void,
+): void {
+  const limit = opts.maxBuffer ?? 1024 * 1024;
+  let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  try {
+    child = spawnCli(cli, args, { env: opts.env as NodeJS.ProcessEnv, cwd: opts.cwd, stdio: ["pipe", "pipe", "pipe"], box: opts.box });
+  } catch (error) {
+    queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
+    return;
+  }
+  child.stdin.end();
+  let stdout = "", stderr = "", done = false, timedOut = false;
+  const finish = (err: (Error & { code?: number | string | null; killed?: boolean }) | null) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    cb(err, stdout, stderr);
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => { if (stdout.length < limit) stdout += chunk.slice(0, limit - stdout.length); });
+  child.stderr.on("data", (chunk: string) => { if (stderr.length < limit) stderr += chunk.slice(0, limit - stderr.length); });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void killCliTree(child, 0);
+  }, opts.timeout);
+  timer.unref?.();
+  child.once("error", (error) => finish(error));
+  child.once("close", (code) => {
+    if (timedOut) finish(cutOffError(cli, opts.timeout));
+    else finish(code === 0 ? null : Object.assign(new Error(`${cli} exited with code ${code}`), { code }));
+  });
+}
+
+const EXEC_KILL_GRACE_MS = 2_000;
+
+export function execCli(
+  cli: string,
+  args: string[],
+  opts: ExecFileOptions,
+  cb: (err: Error | null, stdout: string, stderr?: string) => void,
+): void {
+  const resolved = resolveCli(cli, args);
+  try {
+    assertSafeCliArgv(resolved);
+    opts = outsideBoxOptions(resolved.command, opts);
+  } catch (error) {
+    queueMicrotask(() => cb(error instanceof Error ? error : new Error(String(error)), "", ""));
+    return;
+  }
+  let escalate: NodeJS.Timeout | undefined;
+  let deadline: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  const env = resolved.env ? { ...(opts.env ?? process.env), ...resolved.env } : opts.env;
+  const child = execFile(resolved.command, resolved.args, { ...opts, env, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) => {
+    clearTimeout(escalate);
+    clearTimeout(deadline);
+    cb(err ?? (timedOut ? cutOffError(cli, opts.timeout) : null), stdout, stderr);
+  });
+  // Node (24) calls back only once the child exits, and a CLI wrapper that traps SIGTERM outlives the timeout's signal.
+  // execFile starts no process group: the child's descendants are tracked and signalled one by one.
+  // When its timeout fires after the child exited but before Node saw the exit, Node (24) drops the output and still
+  // reports success; this timer is queued just after Node's, so it marks that run as timed out.
+  if (opts.timeout) {
+    if (child.pid && (process.platform === "linux" || process.platform === "darwin")) {
+      try {
+        const root = linuxProcess(child.pid);
+        if (root) linuxTrees.set(child, new Map([[root.pid, root.start]]));
+      } catch {}
+    }
+    escalate = setTimeout(() => void killCliTree(child, 0), opts.timeout + EXEC_KILL_GRACE_MS);
+    escalate.unref?.();
+    deadline = setTimeout(() => {
+      timedOut = true;
+    }, opts.timeout);
+    deadline.unref?.();
+  }
+}
+
+function cutOffError(cli: string, timeout: number | undefined): Error {
+  return Object.assign(new Error(`${cli} timed out after ${timeout} ms`), { killed: true, code: null, signal: null });
+}
+
+export const CLI_VERSION_TIMEOUT_MS = 30_000;
+
+/** `busy`: the check could not finish (probe-hold.ts), which says nothing about whether the CLI is installed. */
+export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string; busy?: true } {
+  let last: string | null = null;
+  return (err, stdout) => {
+    const version = err ? "" : stdout.trim();
+    if (version) return { version: (last = version) };
+    const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+    const timedOut = failure?.killed === true && typeof failure.code !== "string";
+    if (failure?.code === "ENOENT") {
+      last = null;
+      return { reason: `\`${cli}\` CLI not found` };
+    }
+    if (failure?.code === "EACCES" || failure?.code === "EPERM") {
+      last = null;
+      return { reason: `\`${cli}\` could not run --version. Check its file permissions.` };
+    }
+    if (last && (timedOut || !err || typeof failure?.code === "number")) return { version: last };
+    return { reason: timedOut
+      ? `\`${cli}\` took longer than ${CLI_VERSION_TIMEOUT_MS / 1000} seconds to answer --version. The machine may be busy; check again.`
+      : !err ? `\`${cli}\` returned no version. Check again.` : `\`${cli}\` could not report its version. Check that it starts in a terminal, then check again.`, ...inconclusiveMark(err) };
+  };
+}
+
+/** Node reports a missing cwd as the CLI's own ENOENT, so pass `cwd` to tell a moved folder from a missing CLI. */
+type SpawnFailure = { message: string; setup: boolean; text?: ReturnType<typeof noticeFailure>["text"] };
+
+export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string, cwd?: string): SpawnFailure {
+  const shortage = shortageCode(err);
+  if (shortage) return { ...noticeFailure("chat.notice.outOfProcesses", { code: shortage }), setup: false };
+  if (err.code === "ENOENT") {
+    if (cwd && !existsSync(cwd))
+      return { message: `This chat's working folder no longer exists: ${cwd}. Choose another folder in the bot's settings, or create it again.`, setup: false };
+    return { message: `\`${cli}\` isn't installed, or isn't on this app's PATH`, setup: true };
+  }
+  if (err.code === "EACCES" || err.code === "EPERM")
+    return { message: `\`${cli}\` isn't executable — check its file permissions`, setup: true };
+  if (err.code === "ENAMETOOLONG")
+    return {
+      message: `\`${cli}\` received too much launch data for Windows; update this provider or pass its prompt through stdin/a file`,
+      setup: false,
+    };
+  return { message: `spawn failed: ${err.message}`, setup: false };
+}
+
+/** timeoutMs is the TERM grace; SIGKILL gets one more second. Linux also stops captured detached descendants. */
+export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boolean> {
+  const existing = stopping.get(child);
+  if (existing) return existing;
+  const pid = child.pid;
+  if (!pid) return Promise.resolve(true);
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return Promise.resolve(false);
+
+  captureCliTree(child);
+  const run = stopCliTree(child, pid, Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 5_000);
+  stopping.set(child, run);
+  // Remember success, so a delayed caller cannot signal a reused PID/group.
+  void run.then((stopped) => { if (!stopped) stopping.delete(child); else engineStopped(child); });
+  return run;
+}
+
+async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number): Promise<boolean> {
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  if (process.platform !== "win32") {
+    const group = cliGroups.has(child);
+    const settled = () => {
+      if (!exited() || !linuxDescendantsStopped(child)) return false;
+      if (!group || linuxRootIdentityMatches(child) === false) return true;
+      if (linuxRootIdentityMatches(child) === undefined) return false;
+      try {
+        process.kill(-pid, 0);
+        return process.platform === "linux" && linuxGroupOnlyExited(pid);
+      } catch (error) {
+        // EPERM and other failures do not prove that the group is gone.
+        return (error as NodeJS.ErrnoException).code === "ESRCH";
+      }
+    };
+    const signal = (value: NodeJS.Signals) => {
+      captureCliTree(child);
+      signalLinuxDescendants(child, value);
+      try {
+        if (group && (!exited() || linuxRootIdentityMatches(child) === true)) process.kill(-pid, value);
+        else if (!group && !exited()) child.kill(value);
+      } catch {
+        if (!exited()) {
+          try { child.kill(value); } catch {}
+        }
+      }
+    };
+    const wait = async (ms: number) => {
+      const deadline = Date.now() + ms;
+      while (!settled()) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          // Timers run before libuv's poll phase reads SIGCHLD: a blocked loop reaches the deadline with the exit unread.
+          await new Promise((resolve) => setImmediate(resolve));
+          return settled();
+        }
+        await exitOrDelay(child, Math.min(25, remaining));
+      }
+      return true;
+    };
+    if (settled()) return true;
+    if (exited()) processBudget.noteLateReaped();
+    signal("SIGTERM");
+    if (await wait(timeoutMs)) return true;
+    processBudget.noteForceKilled();
+    signal("SIGKILL");
+    return wait(1_000);
+  }
+
+  if (exited()) return true;
+
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout;
+    let finished = false;
+    const done = (stopped: boolean) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      child.off("close", closed);
+      child.off("exit", closed);
+      resolve(stopped);
+    };
+    const closed = () => done(true);
+    child.once("close", closed);
+    timer = setTimeout(() => done(false), timeoutMs);
+    timer.unref?.();
+
+    execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
+      if (finished) return;
+      if (!err) {
+        // taskkill can finish before Node sees the exit, and callers may rename the executable at once: wait for both, not for inherited pipes.
+        if (exited()) done(true);
+        else child.once("exit", closed);
+        return;
+      }
+      try {
+        child.kill();
+      } catch {
+      }
+      // taskkill /T also fails when one process in the tree could not be stopped; that one may still hold the pipes the CLI
+      // inherited, so "close" never comes. The CLI itself exiting is what counts.
+      if (exited()) done(true);
+      else child.once("exit", closed);
+    });
+  });
+}
+
+function exitOrDelay(child: ChildProcess, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      child.off("exit", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    child.once("exit", done);
+  });
+}
+
+/** True once the process itself has exited, within `ms`; members it left in its group are not counted. */
+export async function waitForExit(child: ChildProcess, ms: number): Promise<boolean> {
+  const exited = () => child.exitCode !== null || child.signalCode !== null;
+  const deadline = Date.now() + ms;
+  while (!exited() && Date.now() < deadline) await exitOrDelay(child, Math.min(250, deadline - Date.now()));
+  if (!exited()) await new Promise((resolve) => setImmediate(resolve));
+  return exited();
+}
+
+/** Unix socket on POSIX, named pipe on Windows (Node cannot listen on a filesystem socket path there: EACCES). */
+export function brokerSocketPath(dataDir: string, tag: string): string {
+  return process.platform === "win32"
+    // Named pipes share a global namespace that DATA_DIR cannot isolate.
+    ? `\\\\.\\pipe\\openmausbot-perm-${process.pid}-${tag}`
+    : join(dataDir, `perm-${tag}.sock`);
+}

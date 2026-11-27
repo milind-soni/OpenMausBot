@@ -1,0 +1,30 @@
+// The sidebar attention popover geometry fixture: the real Sidebar pinned to the
+// ?density= before the first render, since Sidebar reads its density from
+// localStorage once, at mount, as it shows on a server with no inbox, the only
+// place the popover still opens.
+import { createRoot } from "react-dom/client";
+import { saveSidebarDensity } from "../../src/lib/sidebar-preferences";
+import { Sidebar } from "../../src/components/Sidebar";
+import { setInboxSupport } from "../../src/state/inbox";
+import { StoreProvider } from "../../src/state/store";
+import { applySkin, readSkin } from "../../src/lib/skins";
+import "../../src/styles.css";
+
+const density = new URLSearchParams(window.location.search).get("density");
+if (density === "comfortable" || density === "icons") {
+  saveSidebarDensity(density);
+}
+
+setInboxSupport("no");
+
+function Fixture() {
+  return <div className="flex h-screen">
+    <Sidebar open onClose={() => {}} />
+    <main className="p-8">
+      <h1>Isolated sidebar attention verification</h1>
+      <p>Nothing is selected; the attention popover opens from the header.</p>
+    </main>
+  </div>;
+}
+applySkin(readSkin());
+createRoot(document.getElementById("root")!).render(<StoreProvider><Fixture /></StoreProvider>);

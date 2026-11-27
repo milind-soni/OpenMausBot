@@ -1,0 +1,149 @@
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
+
+import { landOnSearchHit } from "@/lib/focus-message";
+import { t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
+import type { SearchHit } from "@/lib/search-hit";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { api, useStore } from "@/state/store";
+
+export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { threadId: string; onClose: () => void; inForkPanel?: boolean }) {
+  const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const requestRef = useRef(0);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [index, setIndex] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    const request = ++requestRef.current;
+    if (!trimmed) {
+      setHits([]);
+      setIndex(0);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const timer = window.setTimeout(() => {
+      void api(`/api/search?q=${encodeURIComponent(trimmed)}&limit=100&threadId=${encodeURIComponent(threadId)}`)
+        .then((body) => {
+          if (request !== requestRef.current) return;
+          setHits(Array.isArray(body?.hits) ? body.hits : []);
+          setIndex(0);
+        })
+        .catch((error) => {
+          if (request !== requestRef.current) return;
+          setHits([]);
+          dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.failed") });
+        })
+        .finally(() => {
+          if (request === requestRef.current) setLoading(false);
+        });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [dispatch, query, threadId]);
+
+  const land = (next: number) => {
+    const hit = hits[next];
+    if (!hit) return;
+    setIndex(next);
+    const panel = state.forkPanel;
+    const landing = inForkPanel
+      ? (async () => {
+        if (panel?.threadId !== hit.threadId) throw new Error(t("chat.find.unavailable"));
+        if (panel.kind === "bot" && !hit.onActivePath) {
+          const branch = await api(`/api/bots/${panel.ownerId}/active-branch`, {
+            method: "POST",
+            body: JSON.stringify({ messageId: hit.messageId, threadId: hit.threadId }),
+          });
+          if (branch?.activeLeafId) dispatch({ type: "forkPanelActive", threadId: hit.threadId, activeLeafId: branch.activeLeafId });
+        }
+        dispatch({ type: "focusMessage", threadId: hit.threadId, messageId: hit.messageId,
+          matchText: hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength) });
+      })()
+      : landOnSearchHit(hit, state, dispatch, showThreads);
+    void landing.catch((error) =>
+      dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.unavailable") }),
+    );
+  };
+  const move = (delta: number) => {
+    if (!hits.length) return;
+    land((index + delta + hits.length) % hits.length);
+  };
+
+  useEffect(() => {
+    if (hits[0]) land(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hits]);
+
+  return (
+    <div className="w-full px-5 pb-2">
+      <div className="flex items-center gap-1.5 rounded-xl border border-hairline/50 bg-panel px-2 py-1.5 shadow-sm focus-within:border-focus">
+        <Search size={15} className="shrink-0 text-ink-secondary" />
+        <input
+          ref={inputRef}
+          dir="auto"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onClose();
+            } else if (event.key === "Enter") {
+              event.preventDefault();
+              move(event.shiftKey ? -1 : 1);
+            }
+          }}
+          placeholder={t("chat.find.placeholder")}
+          aria-label={t("chat.find.placeholder")}
+          className="min-w-0 flex-1 bg-transparent px-1 text-[13px] text-ink outline-none placeholder:text-ink-tertiary"
+        />
+        <span className="min-w-[58px] text-right text-[12px] tabular-nums text-ink-secondary">
+          {loading
+            ? t("chat.find.searching")
+            : query.trim()
+              ? hits.length
+                ? t("chat.find.position", { index: index + 1, count: hits.length })
+                : t("chat.find.noResults")
+              : ""}
+        </span>
+        <button
+          type="button"
+          onClick={() => move(-1)}
+          disabled={!hits.length}
+          aria-label={t("chat.find.previous")}
+          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-30"
+        >
+          <ChevronUp size={15} />
+        </button>
+        <button
+          type="button"
+          onClick={() => move(1)}
+          disabled={!hits.length}
+          aria-label={t("chat.find.next")}
+          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-30"
+        >
+          <ChevronDown size={15} />
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("chat.find.close")}
+          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <X size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}

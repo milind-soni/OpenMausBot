@@ -1,0 +1,636 @@
+{
+  "source": "_plans/jev-omb-2026-09-28/bench (datasets.mjs ROOMS + ROOM_HARD_ITEMS), scored 53/53 with a nobody option",
+  "rooms": {
+    "launch": {
+      "name": "#launch",
+      "humans": [
+        "Milind (owner)",
+        "Priya (product manager, human)"
+      ],
+      "members": [
+        {
+          "id": "maya",
+          "name": "Maya",
+          "title": "Product Designer",
+          "description": "Owns UI mockups, visual design, the brand look, icons and illustrations, and layout/spacing feedback. Works in Figma and hands finished designs to engineering."
+        },
+        {
+          "id": "theo",
+          "name": "Theo",
+          "title": "Frontend Engineer",
+          "description": "Builds and fixes the web app and landing pages in React/Next.js and CSS: buttons, navbars, responsive layout bugs, browser-specific front-end issues."
+        },
+        {
+          "id": "ravi",
+          "name": "Ravi",
+          "title": "Backend Engineer",
+          "description": "Owns APIs, the database, Stripe billing and webhooks, authentication, and server performance or errors."
+        },
+        {
+          "id": "nora",
+          "name": "Nora",
+          "title": "Copywriter",
+          "description": "Writes and edits marketing copy, headlines, launch emails, announcements and help text; keeps tone consistent."
+        },
+        {
+          "id": "quinn",
+          "name": "Quinn",
+          "title": "QA",
+          "description": "Tests builds end to end, reproduces reported bugs, files clear bug reports, and verifies fixes before a release."
+        },
+        {
+          "id": "chief",
+          "name": "Chief of Staff",
+          "description": "Coordinates the team: plans, schedules, deadlines, status updates, who is doing what, and re-planning when priorities change."
+        }
+      ]
+    },
+    "salesops": {
+      "name": "#sales-ops",
+      "humans": [
+        "Milind (owner)",
+        "Arjav (co-founder, human)"
+      ],
+      "members": [
+        {
+          "id": "sol",
+          "name": "Sol",
+          "title": "Sales",
+          "description": "Prospecting, lead lists, first-touch and follow-up outreach emails, booking demos with prospects, and keeping the CRM pipeline stages up to date."
+        },
+        {
+          "id": "ada",
+          "name": "Ada",
+          "title": "Accounting",
+          "description": "Invoices and their payment status, bookkeeping, expenses, reconciling Stripe payouts with the bank, and tax documents."
+        },
+        {
+          "id": "kai",
+          "name": "Kai",
+          "title": "Customer Support",
+          "description": "Answers customer questions and complaints, handles customer refund requests, and keeps help-centre articles accurate."
+        },
+        {
+          "id": "lex",
+          "name": "Lex",
+          "title": "Legal",
+          "description": "Reviews contracts and NDAs, drafts terms of service and privacy policy language, and flags regulatory issues."
+        }
+      ]
+    },
+    "infra": {
+      "name": "#infra",
+      "humans": [
+        "Milind (owner)"
+      ],
+      "members": [
+        {
+          "id": "ops",
+          "name": "Ops",
+          "title": "DevOps",
+          "description": "Deployments, servers, DNS, CI pipelines, uptime monitoring and infrastructure changes."
+        },
+        {
+          "id": "sec",
+          "name": "Sec",
+          "title": "Security",
+          "description": "Vulnerability reports and dependency advisories, leaked secrets and key rotation, access reviews and permissions."
+        },
+        {
+          "id": "data",
+          "name": "Data",
+          "title": "Analytics",
+          "description": "SQL queries, product metrics, dashboards and one-off analyses of usage numbers."
+        },
+        {
+          "id": "doc",
+          "name": "Doc",
+          "title": "Documentation",
+          "description": "Writes technical docs, READMEs, changelogs and release notes."
+        }
+      ]
+    }
+  },
+  "items": [
+    {
+      "id": "r01",
+      "set": "clean",
+      "room": "launch",
+      "message": "@Maya can you make the pricing cards less cramped?",
+      "gold": [
+        "maya"
+      ]
+    },
+    {
+      "id": "r02",
+      "set": "clean",
+      "room": "launch",
+      "message": "The signup button overlaps the footer on Safari mobile, the CSS is off.",
+      "gold": [
+        "theo"
+      ]
+    },
+    {
+      "id": "r03",
+      "set": "clean",
+      "room": "launch",
+      "message": "Stripe webhooks have been returning 500 since the last deploy.",
+      "gold": [
+        "ravi"
+      ]
+    },
+    {
+      "id": "r04",
+      "set": "clean",
+      "room": "launch",
+      "message": "We need a punchier headline for the hero section.",
+      "gold": [
+        "nora"
+      ]
+    },
+    {
+      "id": "r05",
+      "set": "clean",
+      "room": "launch",
+      "message": "Before we ship tonight, can someone run through checkout end to end and confirm nothing regressed?",
+      "gold": [
+        "quinn"
+      ]
+    },
+    {
+      "id": "r06",
+      "set": "clean",
+      "room": "launch",
+      "message": "Who's working on what for Friday's launch?",
+      "gold": [
+        "chief"
+      ]
+    },
+    {
+      "id": "r07",
+      "set": "clean",
+      "room": "launch",
+      "message": "Priya, are you joining the 3pm call?",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "r08",
+      "set": "clean",
+      "room": "launch",
+      "recent": [
+        {
+          "from": "Priya",
+          "text": "this week has been insane"
+        }
+      ],
+      "message": "lol same",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "r09",
+      "set": "clean",
+      "room": "launch",
+      "recent": [
+        {
+          "from": "Theo (bot)",
+          "text": "Pushed the new navbar to staging: https://staging.example.com"
+        }
+      ],
+      "message": "Thanks Theo, looks great!",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "r10",
+      "set": "clean",
+      "room": "launch",
+      "message": "Can we get a new icon for the Slack integration tile?",
+      "gold": [
+        "maya"
+      ]
+    },
+    {
+      "id": "r11",
+      "set": "clean",
+      "room": "launch",
+      "message": "The /api/usage endpoint takes like 4 seconds to respond.",
+      "gold": [
+        "ravi"
+      ]
+    },
+    {
+      "id": "r12",
+      "set": "clean",
+      "room": "launch",
+      "message": "Rewrite the launch email so it's under 120 words.",
+      "gold": [
+        "nora"
+      ]
+    },
+    {
+      "id": "r13",
+      "set": "clean",
+      "room": "launch",
+      "message": "Theo, when you have a sec, the navbar still shows the old logo.",
+      "gold": [
+        "theo"
+      ]
+    },
+    {
+      "id": "r14",
+      "set": "clean",
+      "room": "launch",
+      "message": "Let's move the launch to Monday. Update the plan and make sure everyone knows the new dates.",
+      "gold": [
+        "chief"
+      ]
+    },
+    {
+      "id": "r15",
+      "set": "clean",
+      "room": "launch",
+      "message": "Found a bug: the coupon field accepts negative discounts. Please reproduce it and file it properly.",
+      "gold": [
+        "quinn"
+      ]
+    },
+    {
+      "id": "r16",
+      "set": "clean",
+      "room": "launch",
+      "from": "Milind",
+      "recent": [
+        {
+          "from": "Priya",
+          "text": "Milind, did you see the investor update I sent?"
+        }
+      ],
+      "message": "Yes, reading it now",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "r17",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Draft outreach emails to the 20 fintech leads from yesterday's list.",
+      "gold": [
+        "sol"
+      ]
+    },
+    {
+      "id": "r18",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Invoice #1043 for Acme still isn't paid, what's the status?",
+      "gold": [
+        "ada"
+      ]
+    },
+    {
+      "id": "r19",
+      "set": "clean",
+      "room": "salesops",
+      "message": "A customer wants a refund because they were double charged.",
+      "gold": [
+        "kai"
+      ]
+    },
+    {
+      "id": "r20",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Can someone review this NDA from Globex before I sign it?",
+      "gold": [
+        "lex"
+      ]
+    },
+    {
+      "id": "r21",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Book a demo with the Initech folks next week.",
+      "gold": [
+        "sol"
+      ]
+    },
+    {
+      "id": "r22",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Reconcile last month's Stripe payouts against the bank statement.",
+      "gold": [
+        "ada"
+      ]
+    },
+    {
+      "id": "r23",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Arjav, can you send me the deck when you get a chance?",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "r24",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Our privacy policy needs a section on AI data processing.",
+      "gold": [
+        "lex"
+      ]
+    },
+    {
+      "id": "r25",
+      "set": "clean",
+      "room": "salesops",
+      "message": "A customer says the help-centre article on SSO setup is outdated.",
+      "gold": [
+        "kai"
+      ]
+    },
+    {
+      "id": "r26",
+      "set": "clean",
+      "room": "salesops",
+      "message": "Update the CRM: Hooli moved to the negotiation stage.",
+      "gold": [
+        "sol"
+      ]
+    },
+    {
+      "id": "r27",
+      "set": "clean",
+      "room": "infra",
+      "message": "Deploy the new worker image to production.",
+      "gold": [
+        "ops"
+      ]
+    },
+    {
+      "id": "r28",
+      "set": "clean",
+      "room": "infra",
+      "message": "Dependabot flagged a critical vulnerability in lodash.",
+      "gold": [
+        "sec"
+      ]
+    },
+    {
+      "id": "r29",
+      "set": "clean",
+      "room": "infra",
+      "message": "What was our weekly active users count last week?",
+      "gold": [
+        "data"
+      ]
+    },
+    {
+      "id": "r30",
+      "set": "clean",
+      "room": "infra",
+      "message": "Write the release notes for v0.1.88.",
+      "gold": [
+        "doc"
+      ]
+    },
+    {
+      "id": "r31",
+      "set": "clean",
+      "room": "infra",
+      "message": "DNS for docs.openmaus.com isn't resolving.",
+      "gold": [
+        "ops"
+      ]
+    },
+    {
+      "id": "r32",
+      "set": "clean",
+      "room": "infra",
+      "message": "Rotate the Stripe API key, I think it leaked into a log file.",
+      "gold": [
+        "sec"
+      ]
+    },
+    {
+      "id": "r33",
+      "set": "clean",
+      "room": "infra",
+      "message": "Build a dashboard of signups by country.",
+      "gold": [
+        "data"
+      ]
+    },
+    {
+      "id": "r34",
+      "set": "clean",
+      "room": "infra",
+      "message": "The README install steps are wrong for Windows.",
+      "gold": [
+        "doc"
+      ]
+    },
+    {
+      "id": "r35",
+      "set": "clean",
+      "room": "infra",
+      "message": "ok cool, heading out for the day 👋",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "rh01",
+      "set": "hard",
+      "room": "launch",
+      "message": "Theo mentioned the usage API is slow. Ravi, can you dig in?",
+      "gold": [
+        "ravi"
+      ]
+    },
+    {
+      "id": "rh02",
+      "set": "hard",
+      "room": "launch",
+      "recent": [
+        {
+          "from": "Nora (bot)",
+          "text": "Here's the draft launch email (240 words): Big news! ..."
+        }
+      ],
+      "message": "shorter please, and less salesy",
+      "gold": [
+        "nora"
+      ]
+    },
+    {
+      "id": "rh03",
+      "set": "hard",
+      "room": "launch",
+      "recent": [
+        {
+          "from": "Ravi (bot)",
+          "text": "The 500s come from the new webhook signature check. Should I roll back the deploy?"
+        }
+      ],
+      "message": "yes, go ahead",
+      "gold": [
+        "ravi"
+      ]
+    },
+    {
+      "id": "rh04",
+      "set": "hard",
+      "room": "launch",
+      "message": "Priya, I think Maya's new mockups are great. What do you think?",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "rh05",
+      "set": "hard",
+      "room": "launch",
+      "message": "Can someone fix the checkout bug Quinn found and then write the announcement for Friday?",
+      "gold": [
+        "chief"
+      ]
+    },
+    {
+      "id": "rh06",
+      "set": "hard",
+      "room": "launch",
+      "message": "Does anyone know what's blocking the launch right now?",
+      "gold": [
+        "chief"
+      ]
+    },
+    {
+      "id": "rh07",
+      "set": "hard",
+      "room": "launch",
+      "message": "Maya, not you this time. Theo, the modal close button is misaligned on Firefox.",
+      "gold": [
+        "theo"
+      ]
+    },
+    {
+      "id": "rh08",
+      "set": "hard",
+      "room": "salesops",
+      "message": "Arjav and I will handle the Globex contract ourselves, no need for Lex on this one.",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "rh09",
+      "set": "hard",
+      "room": "salesops",
+      "message": "Globex's lawyer sent back a redline on the indemnity clause.",
+      "gold": [
+        "lex"
+      ]
+    },
+    {
+      "id": "rh10",
+      "set": "hard",
+      "room": "salesops",
+      "message": "Which prospects haven't heard from us in two weeks?",
+      "gold": [
+        "sol"
+      ]
+    },
+    {
+      "id": "rh11",
+      "set": "hard",
+      "room": "salesops",
+      "message": "How much did we spend on AWS last quarter?",
+      "gold": [
+        "ada"
+      ]
+    },
+    {
+      "id": "rh12",
+      "set": "hard",
+      "room": "infra",
+      "message": "Who has admin access to the production database right now?",
+      "gold": [
+        "sec"
+      ]
+    },
+    {
+      "id": "rh13",
+      "set": "hard",
+      "room": "infra",
+      "message": "The deploy guide is out of date since we moved to Fly.",
+      "gold": [
+        "doc"
+      ]
+    },
+    {
+      "id": "rh14",
+      "set": "hard",
+      "room": "infra",
+      "message": "Signups dropped 30% yesterday. Is that real or a tracking bug?",
+      "gold": [
+        "data"
+      ]
+    },
+    {
+      "id": "rh15",
+      "set": "hard",
+      "room": "infra",
+      "recent": [
+        {
+          "from": "Ops (bot)",
+          "text": "Deploy of worker v2.3 finished, all health checks green."
+        }
+      ],
+      "message": "🙏",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "rh16",
+      "set": "hard",
+      "room": "infra",
+      "message": "Cloudflare keeps emailing me about an expiring certificate for api.openmaus.com.",
+      "gold": [
+        "ops"
+      ]
+    },
+    {
+      "id": "rh17",
+      "set": "hard",
+      "room": "launch",
+      "message": "nm, figured it out",
+      "gold": [
+        "nobody"
+      ]
+    },
+    {
+      "id": "rh18",
+      "set": "hard",
+      "room": "salesops",
+      "recent": [
+        {
+          "from": "Sol (bot)",
+          "text": "Drafted 20 outreach emails. Send them now, or wait for your review?"
+        }
+      ],
+      "message": "wait, I'll review tonight",
+      "gold": [
+        "sol"
+      ]
+    }
+  ]
+}

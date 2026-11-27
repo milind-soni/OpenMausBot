@@ -1,0 +1,160 @@
+import { describe, expect, it } from "vitest";
+
+import { HELD_SECRET_MASK } from "./redact.ts";
+import { COMMAND_SUMMARY_MAX, askInputSummary, commandSummary, previewIsPartial, toolDetailPreview } from "./tool-summary.ts";
+
+describe("toolDetailPreview", () => {
+  it("keeps useful input and results while removing nested credentials and binary data", () => {
+    const preview = toolDetailPreview({ command: "echo hello", password: "short", headers: { Cookie: "session=private", Authorization: "Bearer secret" }, result: [{ type: "text", text: "hello" }, { type: "image", data: "private-base64" }] });
+    expect(preview).toContain("echo hello");
+    expect(preview).toContain("hello");
+    for (const secret of ["short", "session=private", "Bearer secret", "private-base64"]) expect(preview).not.toContain(secret);
+    expect(preview).toContain("[redacted]");
+    expect(preview).toContain("[binary content omitted]");
+  });
+  it("redacts before shortening and bounds recursive or oversized payloads", () => {
+    const token = `ghp_${"a".repeat(36)}`;
+    const preview = toolDetailPreview(`${"x".repeat(5998)} ${token}`)!;
+    expect(preview).not.toContain("ghp_");
+    expect(preview).toContain("preview shortened");
+    expect(preview.length).toBeLessThan(6050);
+    expect(toolDetailPreview("x".repeat(256001))).toBe("[large content omitted]");
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    expect(toolDetailPreview(cycle)).toContain("additional data omitted");
+    expect(toolDetailPreview(Array.from({ length: 100 }, () => "item"))).toContain("additional items omitted");
+    expect(toolDetailPreview({ first: " ".repeat(255_999), second: `ghp_${"a".repeat(36)}` })).not.toContain("ghp_");
+    expect(toolDetailPreview({ url: "data:image/png;base64,private-pixels", blob: "more-pixels" })).not.toContain("pixels");
+  });
+  it("does not invent output and preserves failure text or primitive results", () => {
+    expect(toolDetailPreview(undefined)).toBeUndefined();
+    expect(toolDetailPreview({})).toBeUndefined();
+    expect(toolDetailPreview("permission denied")).toBe("permission denied");
+    expect(toolDetailPreview(false)).toBe("false");
+    expect(toolDetailPreview({ api_key: 1234 })).not.toContain("1234");
+    expect(toolDetailPreview(1234n)).toBe("1234");
+  });
+  it("keeps a failed call's error readable when the rest of the payload is omitted", () => {
+    // The issue's shape: a deep or wide payload whose error field was elided with the rest.
+    const wide: Record<string, unknown> = { tool_slug: "GOOGLESHEETS_VALUES_GET", index: 0, error: "row must be a list of lists" };
+    wide.response = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`field_${i}`, "x".repeat(40)]));
+    const preview = toolDetailPreview(wide)!;
+    expect(preview).toContain("row must be a list of lists");
+    expect(JSON.parse(preview).error).toBe("row must be a list of lists");
+    // An error past the depth limit keeps its cause too.
+    const deep: Record<string, unknown> = {};
+    let node: Record<string, unknown> = deep;
+    for (let i = 0; i < 8; i++) { node.child = {}; node = node.child as Record<string, unknown>; }
+    node.error = "connection refused after 30s";
+    expect(toolDetailPreview(deep)!).toContain("connection refused after 30s");
+    // A long error is kept as a redacted prefix, not dropped whole.
+    const long = JSON.parse(toolDetailPreview({ ok: false, error: `${"cause ".repeat(200)}` })!);
+    expect(long.error.length).toBeLessThanOrEqual(500);
+    expect(toolDetailPreview({ ok: false, error: `boom ghp_${"a".repeat(36)}` })).not.toContain("ghp_");
+    expect(toolDetailPreview({ ok: false, error: { message: "denied", password: "tiny" } })).not.toContain("tiny");
+    expect(toolDetailPreview({ ok: false, error: JSON.stringify({ message: "denied", password: "tiny" }) })).not.toContain("tiny");
+    expect(toolDetailPreview({ ok: false, errorToken: "tiny" })).not.toContain("tiny");
+    expect(toolDetailPreview({ ok: false, error: { message: "denied", api_key: 1234 } })).not.toContain("1234");
+    const row = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`f${i}`, "x"]));
+    const pastBudget = (tail: Record<string, unknown>) => ({ response: Array.from({ length: 6 }, () => row), tail });
+    expect(toolDetailPreview(pastBudget({ error: "connection refused" }))).toContain("connection refused");
+    expect(toolDetailPreview(pastBudget({ errorToken: "tiny" }))).not.toContain("tiny");
+    expect(toolDetailPreview(pastBudget({ token: { error: "tiny" } }))).not.toContain("tiny");
+    expect(toolDetailPreview(pastBudget({ error: { message: "denied", api_key: 1234 } }))).toContain("denied");
+    expect(toolDetailPreview(pastBudget({ error: { message: "denied", api_key: 1234 } }))).not.toContain("1234");
+  });
+  it("scrubs structured JSON inside native text results without changing ordinary prose", () => {
+    const preview = toolDetailPreview([{ type: "text", text: JSON.stringify({ message: "request completed", password: "tiny", headers: { Cookie: "sid=x" }, env: [{ name: "API_KEY", value: "small" }] }) }]);
+    expect(preview).toContain("request completed");
+    for (const secret of ["tiny", "sid=x", "small"]) expect(preview).not.toContain(secret);
+    expect(toolDetailPreview("[1,2 invalid json")).toBe("[1,2 invalid json");
+    expect(toolDetailPreview("plain output\nsecond line")).toBe("plain output\nsecond line");
+  });
+});
+
+describe("commandSummary", () => {
+  it("is the shell command, cut at 200", () => {
+    expect(commandSummary({ command: "pnpm control:omb doctor --url http://127.0.0.1:1", url: "x" }))
+      .toBe("pnpm control:omb doctor --url http://127.0.0.1:1");
+    expect(commandSummary({ command: "x".repeat(260) })).toBe("x".repeat(200));
+  });
+
+  it("says nothing for a call that runs no command — a Read, an Edit, a fetch", () => {
+    expect(commandSummary({ file_path: "/tmp/notes.md" })).toBeUndefined();
+    expect(commandSummary({ file_path: "scripts/control-omb.ts", old_string: "a", new_string: "b" })).toBeUndefined();
+    expect(commandSummary({ url: "https://example.com/docs" })).toBeUndefined();
+    expect(commandSummary({ question: "Which one?" })).toBeUndefined();
+    expect(commandSummary({})).toBeUndefined();
+    expect(commandSummary(undefined)).toBeUndefined();
+    expect(commandSummary(null)).toBeUndefined();
+    expect(commandSummary("ls")).toBeUndefined();
+    expect(commandSummary(["ls"])).toBeUndefined();
+  });
+
+  it("collapses a multi-line command onto one line", () => {
+    expect(commandSummary({ command: "cd repo &&\n  pnpm test \\\n  --run" })).toBe("cd repo && pnpm test \\ --run");
+  });
+
+  it("redacts credentials before cutting, so a sliced key cannot slip through", () => {
+    // The token starts at column 186: cutting first would leave "ghp_" plus ten characters, too short for the github shape.
+    const token = `ghp_${"a".repeat(36)}`;
+    const summary = commandSummary({ command: `${"x".repeat(180)} curl ${token} https://api` });
+    expect(summary).not.toContain("ghp_");
+    expect(summary).toContain("«redacted 40 chars»".slice(0, 14));
+    expect(summary!.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("askInputSummary", () => {
+  it("prefers a question, at its longer limit", () => {
+    const question = "Which of these should I keep? ".repeat(12);
+    expect(askInputSummary({ question, command: "ls" })).toBe(question.trim());
+  });
+
+  it("keeps a multi-line command multi-line — the card shows it as it will run", () => {
+    expect(askInputSummary({ command: "cd repo &&\n  pnpm test \\\n  --run" })).toBe("cd repo &&\n  pnpm test \\\n  --run");
+    expect(askInputSummary({ command: "x".repeat(260) })).toBe("x".repeat(200));
+  });
+
+  it("falls back to a url, then to the arguments as JSON, then to nothing", () => {
+    expect(askInputSummary({ url: "https://example.com/docs" })).toBe("https://example.com/docs");
+    expect(askInputSummary({ file_path: "/tmp/notes.md" })).toBe('{"file_path":"/tmp/notes.md"}');
+    expect(askInputSummary({})).toBeUndefined();
+    expect(askInputSummary(undefined)).toBeUndefined();
+    expect(askInputSummary(["ls"])).toBeUndefined();
+  });
+
+  it("redacts a key in a url", () => {
+    expect(askInputSummary({ url: `https://h/?api_key=${"k".repeat(24)}` })).toBe("https://h/?api_key=«redacted 24 chars»");
+  });
+});
+
+describe("previewIsPartial", () => {
+  it("is false for arguments shown whole", () => {
+    expect(previewIsPartial(toolDetailPreview({ command: "git status", description: "Show the tree" })!)).toBe(false);
+    expect(previewIsPartial(commandSummary({ command: "pnpm exec vitest run server/a.test.ts" })!)).toBe(false);
+    expect(previewIsPartial("ls [a-z]* && echo redacted")).toBe(false);
+  });
+
+  it("is true wherever a preview left something out, masked it or cut it", () => {
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    const partial = [
+      toolDetailPreview({ command: "curl x", password: "short" }),
+      toolDetailPreview({ result: [{ type: "image", data: "private-base64" }] }),
+      toolDetailPreview("x".repeat(256_001)),
+      toolDetailPreview(cycle),
+      toolDetailPreview(Array.from({ length: 100 }, () => "item")),
+      toolDetailPreview(Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`field${index}`, index]))),
+      toolDetailPreview("x".repeat(7_000)),
+      toolDetailPreview({ command: `curl -H "x: ghp_${"a".repeat(36)}" https://api` }),
+      commandSummary({ command: `curl ghp_${"a".repeat(36)} https://api` }),
+      `login ${HELD_SECRET_MASK}`,
+    ];
+    for (const preview of partial) expect(previewIsPartial(preview!), preview).toBe(true);
+  });
+
+  it("names the cut a command summary gets", () => {
+    expect(commandSummary({ command: "x".repeat(260) })).toHaveLength(COMMAND_SUMMARY_MAX);
+  });
+});

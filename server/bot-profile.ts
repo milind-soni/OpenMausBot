@@ -1,0 +1,149 @@
+import { z } from "zod";
+
+import {
+  AVATAR_ZOOM_MAX,
+  AVATAR_ZOOM_MIN,
+  BOT_AVATAR_CROPS,
+  botAvatarCropSchema,
+  botAvatarUrlSchema,
+  mascotBodyColorSchema,
+  mascotFaceColorSchema,
+  mascotMaterialSchema,
+  MASCOT_MATERIALS,
+} from "../shared/bot-avatar.ts";
+import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
+import { REPLY_STYLES } from "../shared/reply-style.ts";
+import { BOT_BODY_IDS, botBodySchema } from "../shared/bot-body.ts";
+
+import type { BotRecord } from "./store.ts";
+
+export { fitsOnOneLine } from "../shared/bot-profile.ts";
+
+export const BOT_PROFILE_PATCH_FIELDS = [
+  "name",
+  "title",
+  "description",
+  "soul",
+  "notifications",
+  "avatarUrl",
+  "avatarCrop",
+  "avatarZoom",
+  "avatarFocusX",
+  "avatarFocusY",
+  "mascotBody",
+  "mascotFaceColor",
+  "mascotBodyColor",
+  "mascotMaterial",
+  "voice",
+  "speakReplies",
+  "replyStyle",
+] as const;
+
+export const profilePatchSchema = z.object({
+  name: z
+    .string({ error: "name must be a string" })
+    .max(BOT_PROFILE_LIMITS.name, { error: "name must be at most 100 characters" })
+    .refine((value) => Boolean(value.trim()), { error: "name must not be empty" })
+    .refine(fitsOnOneLine, { error: "name must fit on one line" })
+    .optional(),
+  title: z
+    .string({ error: "title must be a string" })
+    .max(BOT_PROFILE_LIMITS.title, { error: "title must be at most 200 characters" })
+    .refine(fitsOnOneLine, { error: "title must fit on one line" })
+    .optional(),
+  description: z
+    .string({ error: "description must be a string" })
+    .max(BOT_PROFILE_LIMITS.description, { error: "description must be at most 4000 characters" })
+    .optional(),
+  soul: z
+    .string({ error: "soul must be a string" })
+    .refine((value) => Buffer.byteLength(value, "utf8") <= BOT_PROFILE_LIMITS.soul, {
+      error: "standing instructions must be at most 24000 bytes",
+    })
+    .optional(),
+  notifications: z.boolean({ error: "notifications must be true or false" }).optional(),
+  avatarUrl: z
+    .union([botAvatarUrlSchema, z.literal(""), z.null()], {
+      error: "avatarUrl must be a stored PNG, JPEG, GIF, or WebP attachment",
+    })
+    .optional(),
+  avatarCrop: botAvatarCropSchema.optional(),
+  avatarZoom: z.number({ error: "avatarZoom must be a number from 1 to 3" }).finite().min(AVATAR_ZOOM_MIN).max(AVATAR_ZOOM_MAX).optional(),
+  avatarFocusX: z.number({ error: "avatarFocusX must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
+  avatarFocusY: z.number({ error: "avatarFocusY must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
+  mascotBody: botBodySchema.optional(),
+  mascotFaceColor: mascotFaceColorSchema.nullable().optional(),
+  mascotBodyColor: mascotBodyColorSchema.nullable().optional(),
+  mascotMaterial: mascotMaterialSchema.nullable().optional(),
+  voice: z
+    .string({ error: "voice must be a string" })
+    .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
+    .optional(),
+  speakReplies: z.boolean({ error: "speakReplies must be true or false" }).optional(),
+  replyStyle: z.enum(REPLY_STYLES, { error: "replyStyle must be default or conversational" }).optional(),
+});
+
+export type BotProfilePatchInput = z.input<typeof profilePatchSchema>;
+
+export type BotProfilePatch = Partial<
+  Pick<
+    BotRecord,
+    | "name"
+    | "title"
+    | "description"
+    | "soul"
+    | "notifications"
+    | "avatarUrl"
+    | "avatarCrop"
+    | "avatarZoom"
+    | "avatarFocusX"
+    | "avatarFocusY"
+    | "mascotBody"
+    | "mascotFaceColor"
+    | "mascotBodyColor"
+    | "mascotMaterial"
+    | "voice"
+    | "speakReplies"
+    | "replyStyle"
+  >
+>;
+
+export type BotProfilePatchResult =
+  | { ok: true; patch: BotProfilePatch }
+  | { ok: false; error: string };
+
+/** Paired clients use strict=true, so a future bot field never silently becomes remotely writable. A cleared avatarUrl is
+ * `undefined` here (persistence omits it) and goes to clients as null, so Codable and object-spread clients both clear it. */
+export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false): BotProfilePatchResult {
+  const parsed = (strict ? profilePatchSchema.strict() : profilePatchSchema).safeParse(input);
+  if (!parsed.success) {
+    const unsupported = parsed.error.issues.find((issue) => issue.code === "unrecognized_keys");
+    if (unsupported?.code === "unrecognized_keys") {
+      return { ok: false, error: `unsupported profile field: ${unsupported.keys[0] ?? "unknown"}` };
+    }
+    const issue = parsed.error.issues[0];
+    if (issue?.path[0] === "avatarCrop") {
+      const options = `${BOT_AVATAR_CROPS.slice(0, -1).join(", ")}, or ${BOT_AVATAR_CROPS.at(-1)}`;
+      return { ok: false, error: `avatarCrop must be ${options}` };
+    }
+    if (issue?.path[0] === "mascotBody") {
+      const options = `${BOT_BODY_IDS.slice(0, -1).join(", ")}, or ${BOT_BODY_IDS.at(-1)}`;
+      return { ok: false, error: `mascotBody must be ${options}` };
+    }
+    if (issue?.path[0] === "mascotFaceColor") {
+      return { ok: false, error: "mascotFaceColor must be white, black, or null" };
+    }
+    if (issue?.path[0] === "mascotBodyColor") {
+      return { ok: false, error: "mascotBodyColor must be a #rrggbb hex colour or null" };
+    }
+    if (issue?.path[0] === "mascotMaterial") {
+      return { ok: false, error: `mascotMaterial must be ${MASCOT_MATERIALS.join(", ")}, or null` };
+    }
+    return { ok: false, error: issue?.message ?? "invalid profile patch" };
+  }
+
+  const { avatarUrl, ...fields } = parsed.data;
+  const patch: BotProfilePatch = fields;
+  if (avatarUrl !== undefined) patch.avatarUrl = avatarUrl || undefined;
+  return { ok: true, patch };
+}

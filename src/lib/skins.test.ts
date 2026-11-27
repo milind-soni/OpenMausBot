@@ -1,0 +1,118 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { SKINS, SKIN_IDS, DEFAULT_SKIN_CHOICE, PRIOR_INSTALL_SKIN, THEME_SKINS, resolveSkin } from "./skins";
+import en from "@/locales/en.json";
+
+const css = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
+  "utf8",
+);
+
+const blocks = new Set(
+  [...css.matchAll(/\[data-skin="([a-z-]+)"\]/g)].map(([, id]) => id),
+);
+
+describe("skins", () => {
+  it("gives every registered skin a stylesheet block", () => {
+    for (const id of SKIN_IDS) expect(blocks).toContain(id);
+  });
+
+  it("gives every skin a tagline in the catalog", () => {
+    expect(SKINS.map((skin) => `skins.tagline.${skin.id}`).filter((key) => !Object.hasOwn(en, key))).toEqual([]);
+  });
+
+  it("registers every stylesheet block", () => {
+    for (const id of blocks) expect(SKIN_IDS).toContain(id as (typeof SKIN_IDS)[number]);
+  });
+
+  it("defines the same tokens in every skin", () => {
+    const tokensOf = (id: string) => {
+      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+      return new Set([...body.matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name));
+    };
+    const reference = tokensOf(PRIOR_INSTALL_SKIN);
+    expect(reference.size).toBeGreaterThan(15);
+    expect(reference).toContain("--color-composer-ring");
+    for (const id of SKIN_IDS) {
+      expect([...reference].filter((t) => !tokensOf(id).has(t))).toEqual([]);
+    }
+  });
+
+  it("tints a hovered menu row with ink at 6% in Midnight and Daylight, and with raised at 70% in every other skin", () => {
+    for (const id of SKIN_IDS) {
+      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+      const token = (name: string) => body.match(new RegExp(`(?:^|\\s)${name}:\\s*([^;]+);`))?.[1]?.trim();
+      const expected = id === "midnight" || id === "daylight"
+        ? `${token("--color-ink")}0f`
+        : "color-mix(in srgb, var(--color-raised) 70%, transparent)";
+      expect(token("--color-menu-hover"), id).toBe(expected);
+    }
+  });
+
+  it("selects a code-only light or dark palette in every nearest skin", () => {
+    for (const id of SKIN_IDS) {
+      const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+      const scheme = ["atelier", "lagoon", "linen", "daylight", "meadow", "pop"].includes(id) ? "light" : "dark";
+      expect(body).toContain(`--code-color-scheme: ${scheme};`);
+    }
+    expect(css).toMatch(/\.chat-md \.shiki\s*\{\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}/);
+    expect(css).toMatch(/@supports \(-webkit-touch-callout: none\) \{\s*html\s*\{\s*background-color:\s*var\(--color-app\);\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}\s*\}/);
+  });
+
+  it("adds Meadow without moving or replacing the original eight", () => {
+    expect(SKIN_IDS).toContain("meadow");
+    expect(SKIN_IDS.slice(0, 8)).toEqual([
+      "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "daylight",
+    ]);
+    expect(PRIOR_INSTALL_SKIN).toBe("midnight");
+  });
+
+  it("follows the computer between Daylight and Midnight by default", () => {
+    expect(DEFAULT_SKIN_CHOICE).toBe("system");
+    expect(THEME_SKINS).toEqual({ light: "daylight", dark: "midnight" });
+    expect(resolveSkin("system", false)).toBe("daylight");
+    expect(resolveSkin("system", true)).toBe("midnight");
+    expect(resolveSkin("meadow", true)).toBe("meadow");
+  });
+
+  it("keeps Meadow's own bubble light, in the page's ink", () => {
+    expect(css).not.toMatch(/@scope \(\[data-skin="meadow"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{/);
+    expect(css).toMatch(/\[data-skin="meadow"\] \{[^}]*--color-bubble-user-ink: #0f1a13;/);
+  });
+
+  it("adds Pop after Meadow with its own inverted bubble and sticker scope", () => {
+    expect(SKIN_IDS.slice(0, 9)).toEqual([
+      "midnight", "atelier", "foundry", "lagoon", "graphite", "linen", "dusk", "daylight", "meadow",
+    ]);
+    expect(SKIN_IDS[9]).toBe("pop");
+    expect(css).toMatch(/@scope \(\[data-skin="pop"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{/);
+    expect(css).toMatch(/@scope \(\[data-skin="pop"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)/);
+  });
+
+  it.each([["halloween", "Halloween"], ["diwali", "Diwali"]] as const)(
+    "adds the %s festival skin after Pop, with its atmosphere kept off the picker miniature",
+    (id, name) => {
+      expect(SKIN_IDS.slice(10, 12)).toEqual(["halloween", "diwali"]);
+      expect(SKINS.find((s) => s.id === id)?.name).toBe(name);
+      expect(css).toMatch(new RegExp(`@scope \\(\\[data-skin="${id}"\\]:not\\(\\[data-skin-preview\\]\\)\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*main\\.bg-app\\s*\\{`));
+      expect(css).toMatch(new RegExp(`@media \\(prefers-reduced-motion: reduce\\)\\s*\\{\\s*\\[data-skin="${id}"\\] main\\.bg-app::before`));
+    },
+  );
+
+  it("adds Aurora last, dark, with its light field kept off the picker miniature", () => {
+    expect(SKIN_IDS.at(-1)).toBe("aurora");
+    expect(SKINS.find((s) => s.id === "aurora")?.name).toBe("Aurora");
+    expect(css).toMatch(/\[data-skin="aurora"\] \{[^}]*--code-color-scheme: dark;/);
+    expect(css).toMatch(/@scope \(\[data-skin="aurora"\]:not\(\[data-skin-preview\]\)\) to \(\[data-skin\]\)\s*\{\s*main\.bg-app\s*\{/);
+  });
+
+  it("describes each skin exactly once", () => {
+    expect(SKINS.map((s) => s.id).sort()).toEqual([...SKIN_IDS].sort());
+    for (const skin of SKINS) {
+      expect(skin.name.length).toBeGreaterThan(0);
+      expect(skin.tagline.length).toBeGreaterThan(0);
+    }
+  });
+});

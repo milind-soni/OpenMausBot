@@ -1,0 +1,28 @@
+{
+  "id": "data-dashboards",
+  "name": "Data Dashboards",
+  "version": "1.1.0",
+  "description": "Build fast, good-looking pages and data dashboards, in the chat or at a public link.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "dashboard",
+    "chart",
+    "visualiz",
+    "visualis",
+    "kpi",
+    "data viz",
+    "dataviz",
+    "a graph",
+    "graph of",
+    "graph it",
+    "landing page",
+    "pricing page",
+    "web page",
+    "webpage",
+    "a page",
+    "mock-up",
+    "mockup",
+    "prototype"
+  ],
+  "requiredCapabilities": []
+}

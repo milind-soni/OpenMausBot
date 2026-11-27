@@ -1,0 +1,801 @@
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  truncateSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { link, unlink } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, link: vi.fn(fs.link), unlink: vi.fn(fs.unlink) };
+});
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync), writeFileSync: vi.fn(fs.writeFileSync) };
+});
+const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
+const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
+const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
+const realWriteFileSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).writeFileSync;
+afterEach(() => {
+  vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
+  vi.mocked(link).mockReset().mockImplementation(realLink);
+  vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
+  vi.mocked(writeFileSync).mockReset().mockImplementation(realWriteFileSync);
+});
+
+// The module reads DATA_DIR at import time, so the env var must be set
+// before the import is evaluated.
+const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-attachments-"));
+process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
+
+const {
+  ATTACHMENTS_DIR,
+  ATTACHMENTS_MAX_BYTES,
+  ATTACHMENT_CLEAR_MIN_AGE_MS,
+  ATTACHMENT_PARTIAL_MAX_AGE_MS,
+  DEFAULT_ATTACHMENTS_MAX_BYTES,
+  FILE_MAX_BYTES,
+  IMAGE_MAX_BYTES,
+  PREVIEW_MAX_BYTES,
+  __resetAttachmentAccountingForTests,
+  attachmentStorageUsage,
+  attachmentsMaxBytes,
+  clearAttachments,
+  keptAttachmentNames,
+  offerAttachmentClear,
+  cleanupStaleAttachmentPartials,
+  deleteAttachment,
+  extensionForFileMime,
+  extensionForMime,
+  parseAudioRange,
+  readAttachment,
+  sanitizeSharedFileName,
+  saveAudio,
+  saveFile,
+  saveImage,
+  saveImageUpload,
+  validateAttachmentUploadId,
+} = await import("./attachments.ts");
+
+// Anything that mutates ATTACHMENTS_DIR on disk must reset the in-memory quota cache, or the next check trusts stale counts.
+function resetDir() {
+  rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
+  __resetAttachmentAccountingForTests();
+}
+
+const UPLOAD_A = "11111111-1111-4111-8111-111111111111";
+const UPLOAD_B = "22222222-2222-4222-8222-222222222222";
+
+describe("extensionForMime", () => {
+  it("maps the accepted image mimes to extensions", () => {
+    expect(extensionForMime("image/png")).toBe(".png");
+    expect(extensionForMime("image/jpeg")).toBe(".jpg");
+    expect(extensionForMime("image/gif")).toBe(".gif");
+    expect(extensionForMime("image/webp")).toBe(".webp");
+  });
+
+  it("tolerates parameters and casing", () => {
+    expect(extensionForMime("Image/PNG; charset=binary")).toBe(".png");
+    expect(extensionForMime("  image/webp  ")).toBe(".webp");
+  });
+
+  it("refuses everything else — including svg, which executes script", () => {
+    expect(extensionForMime("image/svg+xml")).toBeNull();
+    expect(extensionForMime("text/plain")).toBeNull();
+    expect(extensionForMime(undefined)).toBeNull();
+  });
+});
+
+describe("saveImage", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("persists bytes under the attachments dir with a generated name", () => {
+    const saved = saveImage(Buffer.from("png-bytes"), "image/png");
+    expect(saved.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.path.endsWith(".png")).toBe(true);
+    expect(saved.bytes).toBe(9);
+    expect(saved.mime).toBe("image/png");
+    if (process.platform !== "win32") {
+      expect(statSync(ATTACHMENTS_DIR).mode & 0o777).toBe(0o700);
+      expect(statSync(saved.path).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it("round-trips through readAttachment with the right mime", () => {
+    const saved = saveImage(Buffer.from("gif!"), "image/gif");
+    const name = saved.path.split(/[\\/]/).pop()!;
+    const back = readAttachment(name);
+    expect(back?.bytes.toString()).toBe("gif!");
+    expect(back?.mime).toBe("image/gif");
+  });
+
+  it("rejects unsupported mimes, empty bodies, and oversize bodies", () => {
+    expect(() => saveImage(Buffer.from("x"), "image/svg+xml")).toThrow(/unsupported image type/);
+    expect(() => saveImage(Buffer.alloc(0), "image/png")).toThrow(/empty/);
+    expect(() => saveImage(Buffer.alloc(IMAGE_MAX_BYTES + 1), "image/png")).toThrow(/exceeds/);
+  });
+
+  it("makes UUID-keyed image retries idempotent without changing legacy callers", () => {
+    const first = saveImage(Buffer.from("same"), "image/png", UPLOAD_A);
+    const retry = saveImage(Buffer.from("same"), "image/png", UPLOAD_A.toUpperCase());
+    expect(retry).toEqual(first);
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => !name.startsWith("."))).toEqual([`${UPLOAD_A}.png`]);
+
+    expect(() => saveImage(Buffer.from("different"), "image/png", UPLOAD_A)).toThrow(/different image bytes/);
+    expect(() => saveImage(Buffer.from("same"), "image/jpeg", UPLOAD_A)).toThrow(/another content type/);
+
+    const legacyOne = saveImage(Buffer.from("same"), "image/png");
+    const legacyTwo = saveImage(Buffer.from("same"), "image/png");
+    expect(legacyOne.path).not.toBe(legacyTwo.path);
+  });
+
+  it("validates upload IDs before they can become filenames", () => {
+    expect(validateAttachmentUploadId(UPLOAD_A.toUpperCase())).toBe(UPLOAD_A);
+    for (const value of ["", "short", "../../escape", `${UPLOAD_A}.png`, "00000000-0000-0000-0000-000000000000"]) {
+      expect(() => validateAttachmentUploadId(value)).toThrow(/UUID/);
+    }
+  });
+});
+
+describe("saveAudio", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("persists an mp3 under the attachments dir with a generated name", () => {
+    const saved = saveAudio(Buffer.from("mp3-bytes"), "audio/mpeg");
+    expect(saved.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.path.endsWith(".mp3")).toBe(true);
+    expect(saved.bytes).toBe(9);
+    expect(saved.mime).toBe("audio/mpeg");
+    if (process.platform !== "win32") expect(statSync(saved.path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(saved.path).toString()).toBe("mp3-bytes");
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([saved.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("serves a saved note back through readAttachment as audio/mpeg", () => {
+    const saved = saveAudio(Buffer.from("mp3-note!"), "audio/mpeg");
+    const name = saved.path.split(/[\\/]/).pop()!;
+    const back = readAttachment(name);
+    expect(back?.bytes.toString()).toBe("mp3-note!");
+    expect(back?.mime).toBe("audio/mpeg");
+  });
+
+  it("normalizes mime parameters and casing", () => {
+    const saved = saveAudio(Buffer.from("x"), "Audio/MPEG; charset=binary");
+    expect(saved.mime).toBe("audio/mpeg");
+    expect(saved.path.endsWith(".mp3")).toBe(true);
+  });
+
+  it("keeps a WAV note as .wav and serves it back as audio/wav", () => {
+    for (const mime of ["audio/wav", "audio/x-wav", "Audio/Wave"]) {
+      const saved = saveAudio(Buffer.from(`RIFF-${mime}`), mime);
+      expect(saved.mime).toBe("audio/wav");
+      expect(saved.path.endsWith(".wav")).toBe(true);
+      const back = readAttachment(saved.path.split(/[\\/]/).pop()!);
+      expect(back?.bytes.toString()).toBe(`RIFF-${mime}`);
+      expect(back?.mime).toBe("audio/wav");
+    }
+  });
+
+  it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
+    expect(() => saveAudio(Buffer.from("x"), "audio/ogg")).toThrow(/unsupported audio type/);
+    expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
+    expect(() => saveAudio(Buffer.alloc(PREVIEW_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
+  });
+
+  it("rejects at the aggregate ceiling without leaving partials and releases its reservation", () => {
+    const referenced = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(referenced.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+
+    try {
+      saveAudio(Buffer.from("y"), "audio/mpeg");
+      throw new Error("expected quota rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ status: 507 });
+      expect(error).toHaveProperty("message", expect.stringMatching(/storage is full/));
+    }
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+
+    truncateSync(referenced.path, 4);
+    __resetAttachmentAccountingForTests();
+    const note = saveAudio(Buffer.from("note"), "audio/mpeg");
+    expect(statSync(note.path).size).toBe(4);
+  });
+
+  it("cleans up its partial and reservation when the write fails", () => {
+    vi.mocked(writeFileSync).mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+    expect(() => saveAudio(Buffer.from("note"), "audio/mpeg")).toThrow(/disk full/);
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+    expect(() => saveAudio(Buffer.from("note"), "audio/mpeg")).not.toThrow();
+  });
+});
+
+describe("attachmentsMaxBytes", () => {
+  it("keeps 512 MB unless OMB_ATTACHMENTS_MAX_BYTES is a positive whole number of bytes", () => {
+    expect(ATTACHMENTS_MAX_BYTES).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    expect(attachmentsMaxBytes({})).toBe(512 * 1024 * 1024);
+    expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: " 4294967296 " })).toBe(4 * 1024 * 1024 * 1024);
+    for (const bad of ["", "0", "-1", "2GB", "1.5", "NaN"]) {
+      expect(attachmentsMaxBytes({ OMB_ATTACHMENTS_MAX_BYTES: bad })).toBe(DEFAULT_ATTACHMENTS_MAX_BYTES);
+    }
+  });
+});
+
+describe("aggregate attachment storage", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("rejects new data at the aggregate ceiling without pruning committed attachments", () => {
+    const referenced = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(referenced.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+
+    try {
+      saveImage(Buffer.from("y"), "image/png");
+      throw new Error("expected quota rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ status: 507 });
+      expect(error).toHaveProperty("message", "attachments storage is full (512 MB limit). Clear old attachments in Settings → General.");
+    }
+    expect(existsSync(referenced.path)).toBe(true);
+    expect(statSync(referenced.path).size).toBe(ATTACHMENTS_MAX_BYTES);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([referenced.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("counts concurrent reservations so uploads cannot race past the ceiling", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    __resetAttachmentAccountingForTests();
+
+    const first = saveFile((async function* () {
+      yield Buffer.from("four");
+    })(), "first.txt", "text/plain", { expectedBytes: 4 });
+
+    expect(() => saveImage(Buffer.from("xx"), "image/png")).toThrow(/storage is full/);
+    await expect(first).resolves.toMatchObject({ bytes: 4 });
+  });
+
+  it("lets an unknown-length stream use the exact space left below a reservation increment", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+
+    const saved = await saveFile((async function* () {
+      yield Buffer.from("a");
+    })(), "last-byte.txt", "text/plain");
+    expect(saved.bytes).toBe(1);
+    expect(() => saveImage(Buffer.from("b"), "image/png")).not.toThrow();
+  });
+
+  it("releases reservations and removes partials after failed uploads", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+
+    await expect(saveFile((async function* () {})(), "empty.txt", "text/plain", { expectedBytes: 3 }))
+      .rejects.toThrow(/empty file/);
+    expect(() => saveImage(Buffer.from("123"), "image/png")).not.toThrow();
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+  });
+
+  it("cleans only stale upload partials, never committed or active-looking files", () => {
+    saveImage(Buffer.from("kept"), "image/png", UPLOAD_A);
+    const stale = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
+    const fresh = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_B}-${UPLOAD_A}.partial`;
+    const unrelated = `${ATTACHMENTS_DIR}/notes.partial`;
+    writeFileSync(stale, "stale");
+    writeFileSync(fresh, "fresh");
+    writeFileSync(unrelated, "not ours");
+    const now = Date.now();
+    const old = new Date(now - ATTACHMENT_PARTIAL_MAX_AGE_MS - 1_000);
+    utimesSync(stale, old, old);
+
+    expect(cleanupStaleAttachmentPartials(now)).toBe(1);
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
+    expect(existsSync(`${ATTACHMENTS_DIR}/${UPLOAD_A}.png`)).toBe(true);
+  });
+
+  it("counts fresh crash leftovers against quota, then reclaims them once a cleanup sweep runs", () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    const orphan = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
+    writeFileSync(orphan, "xx");
+
+    expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
+    const old = new Date(Date.now() - ATTACHMENT_PARTIAL_MAX_AGE_MS - 1_000);
+    utimesSync(orphan, old, old);
+    expect(cleanupStaleAttachmentPartials()).toBe(1);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("reclaims an inactive partial immediately when its upload ID retries", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    const orphan = `${ATTACHMENTS_DIR}/.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`;
+    writeFileSync(orphan, "old");
+
+    const saved = await saveFile((async function* () {
+      yield Buffer.from("new");
+    })(), "retry.txt", "text/plain", { uploadId: UPLOAD_A, expectedBytes: 3 });
+    expect(saved.path.endsWith(`${UPLOAD_A}.txt`)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("frees quota after deleteAttachment, without a rescan, for a file the cache already knows about", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    deleteAttachment(first.path);
+    expect(existsSync(first.path)).toBe(false);
+    const second = saveImage(Buffer.from("yyy"), "image/png");
+    expect(second.bytes).toBe(3);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("frees quota for a file deleted outside the app once the store looks full", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    realUnlinkSync(first.path);
+    expect(saveImage(Buffer.from("yyy"), "image/png").bytes).toBe(3);
+  });
+
+  it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    const cleanupError = Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+    for (let attempt = 0; attempt < failures; attempt++) {
+      vi.mocked(unlink).mockRejectedValueOnce(cleanupError);
+    }
+    const chunks = async function* () { yield Buffer.from("xx"); };
+
+    await expect(saveFile(chunks(), "retry.txt", "text/plain", { uploadId: UPLOAD_A }))
+      .rejects.toThrow("partial file is locked");
+    expect(readFileSync(join(ATTACHMENTS_DIR, `${UPLOAD_A}.txt`), "utf8")).toBe("xx");
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => name.endsWith(".partial"))).toHaveLength(failures - 1);
+
+    await expect(saveFile(chunks(), "retry.txt", "text/plain", { uploadId: UPLOAD_A }))
+      .resolves.toMatchObject({ bytes: 2 });
+    expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it.each([1, 2])("counts an image after %i partial-cleanup failures and an idempotent retry", async (failures) => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
+    __resetAttachmentAccountingForTests();
+    for (let attempt = 0; attempt < failures; attempt++) {
+      vi.mocked(unlinkSync).mockImplementationOnce(() => {
+        throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+      });
+    }
+
+    expect(() => saveImage(Buffer.from("xx"), "image/png", UPLOAD_A)).toThrow("partial file is locked");
+    expect(readFileSync(join(ATTACHMENTS_DIR, `${UPLOAD_A}.png`), "utf8")).toBe("xx");
+    expect(readdirSync(ATTACHMENTS_DIR).filter((name) => name.endsWith(".partial"))).toHaveLength(failures - 1);
+    await expect(saveImageUpload(Buffer.from("xx"), "image/png", UPLOAD_A)).resolves.toMatchObject({ bytes: 2 });
+    expect(readdirSync(ATTACHMENTS_DIR).some((name) => name.endsWith(".partial"))).toBe(false);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it("does not count an in-flight commit twice when cleanup failure causes a rescan", async () => {
+    const existing = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 5);
+    __resetAttachmentAccountingForTests();
+    let markLinked!: () => void;
+    let finishCommit!: () => void;
+    const linked = new Promise<void>((resolve) => { markLinked = resolve; });
+    const finishing = new Promise<void>((resolve) => { finishCommit = resolve; });
+    vi.mocked(link).mockImplementationOnce(async (...args) => {
+      await realLink(...args);
+      markLinked();
+      await finishing;
+    });
+    const pending = saveFile((async function* () { yield Buffer.from("xx"); })(), "pending.txt", "text/plain", {
+      uploadId: UPLOAD_A, expectedBytes: 2,
+    });
+    try {
+      await linked;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        vi.mocked(unlinkSync).mockImplementationOnce(() => {
+          throw Object.assign(new Error("partial file is locked"), { code: "EPERM" });
+        });
+      }
+      expect(() => saveImage(Buffer.from("x"), "image/png", UPLOAD_B)).toThrow("partial file is locked");
+      // This scan sees the linked file while its commit callback is pending.
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/storage is full/);
+    } finally {
+      finishCommit();
+      await pending;
+    }
+    await saveImageUpload(Buffer.from("x"), "image/png", UPLOAD_B);
+    expect(() => saveImage(Buffer.from("yy"), "image/png")).not.toThrow();
+    expect(() => saveImage(Buffer.from("z"), "image/png")).toThrow(/storage is full/);
+  });
+
+  it("initializes correctly on a fresh process against a directory that already has files", () => {
+    // No save has happened yet in this test, so the cache is cold, as after a restart that finds attachments on disk.
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const preexisting = join(ATTACHMENTS_DIR, "11111111-1111-4111-8111-111111111111.png");
+    writeFileSync(preexisting, "x");
+    truncateSync(preexisting, ATTACHMENTS_MAX_BYTES - 2);
+
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+    expect(() => saveImage(Buffer.from("y"), "image/png")).not.toThrow();
+  });
+});
+
+describe("readAttachment name lock", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("refuses traversal, dotfiles, and names the saver never writes", () => {
+    expect(readAttachment("..%2F..%2Fconfig.json")).toBeNull();
+    expect(readAttachment(".env")).toBeNull();
+    expect(readAttachment("a/b.png")).toBeNull();
+    expect(readAttachment("no-extension")).toBeNull();
+    expect(readAttachment("uuid.jpeg")).toBeNull(); // saved as .jpg
+    expect(readAttachment("note.wav")).toBeNull(); // only .mp3 audio is written
+  });
+});
+
+describe("parseAudioRange", () => {
+  const SIZE = 1000;
+
+  it("parses bounded, open-ended, and suffix ranges", () => {
+    expect(parseAudioRange("bytes=0-499", SIZE)).toEqual({ kind: "range", start: 0, end: 499 });
+    expect(parseAudioRange("bytes=500-999", SIZE)).toEqual({ kind: "range", start: 500, end: 999 });
+    expect(parseAudioRange("bytes=400-", SIZE)).toEqual({ kind: "range", start: 400, end: 999 });
+    expect(parseAudioRange("bytes=-100", SIZE)).toEqual({ kind: "range", start: 900, end: 999 });
+    // a suffix longer than the file is the whole file
+    expect(parseAudioRange("bytes=-9999", SIZE)).toEqual({ kind: "range", start: 0, end: 999 });
+  });
+
+  it("clamps an end past EOF to the last byte", () => {
+    expect(parseAudioRange("bytes=990-5000", SIZE)).toEqual({ kind: "range", start: 990, end: 999 });
+  });
+
+  it("answers unsatisfiable for a start at or past EOF and a zero suffix", () => {
+    expect(parseAudioRange("bytes=1000-", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=1000-1200", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=0-", 0)).toEqual({ kind: "unsatisfiable" });
+  });
+
+  it("ignores absent, malformed, multi-range, and non-bytes headers", () => {
+    expect(parseAudioRange(undefined, SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=-", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=0-99,200-299", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=a-b", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=99-0", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=0 - 99", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("chunks=0-99", SIZE)).toEqual({ kind: "none" });
+    // surrounding OWS is legal per RFC 9110 and common from proxies
+    expect(parseAudioRange("  bytes=0-99  ", SIZE)).toEqual({ kind: "range", start: 0, end: 99 });
+  });
+
+  it("distinguishes an empty suffix from a zero suffix", () => {
+    // no bounds at all is malformed input: answer with the full 200 body
+    expect(parseAudioRange("bytes=-", SIZE)).toEqual({ kind: "none" });
+    // a real zero-length suffix is valid but unsatisfiable, per RFC 9110
+    expect(parseAudioRange("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
+  });
+});
+
+describe("shared files", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("allows useful document and archive mimes but not executables or active markup", () => {
+    expect(extensionForFileMime("text/plain; charset=utf-8")).toBe(".txt");
+    expect(extensionForFileMime("application/pdf")).toBe(".pdf");
+    expect(extensionForFileMime("application/vnd.openxmlformats-officedocument.wordprocessingml.document")).toBe(".docx");
+    expect(extensionForFileMime("application/zip")).toBe(".zip");
+    expect(extensionForFileMime("application/x-compressed-tar")).toBe(".tgz");
+    expect(extensionForFileMime("application/x-zip-compressed")).toBe(".zip");
+    expect(extensionForFileMime("Application/X-RAR-Compressed")).toBe(".rar");
+    expect(extensionForFileMime("application/x-gzip")).toBe(".gz");
+    expect(extensionForFileMime("application/x-msdownload")).toBeNull();
+    expect(extensionForFileMime("application/octet-stream")).toBeNull();
+    expect(extensionForFileMime("text/html")).toBeNull();
+    expect(extensionForFileMime("image/svg+xml")).toBeNull();
+  });
+
+  it("sanitizes the display name and derives its extension from the mime", () => {
+    expect(sanitizeSharedFileName("  Quarterly: report.exe  ", "application/pdf")).toBe("Quarterly_ report.pdf");
+    expect(sanitizeSharedFileName("notes", "text/markdown")).toBe("notes.md");
+    expect(() => sanitizeSharedFileName("../../secret.txt", "text/plain")).toThrow(/filename, not a path/);
+    expect(() => sanitizeSharedFileName("..\\..\\secret.txt", "text/plain")).toThrow(/filename, not a path/);
+    expect(() => sanitizeSharedFileName("..%2F..%2Fsecret.txt", "text/plain")).toThrow(/filename, not a path/);
+    expect(sanitizeSharedFileName("logs.tar.gz", "application/gzip")).toBe("logs.tar.gz");
+    expect(sanitizeSharedFileName("Setup Tool.EXE", "application/x-msdownload")).toBe("Setup Tool.exe");
+    expect(sanitizeSharedFileName("Makefile", "")).toBe("Makefile");
+    expect(sanitizeSharedFileName("odd.name~", "application/octet-stream")).toBe("odd.name~");
+  });
+
+  it.each([
+    ["script.py", "text/x-python", "script.py"],
+    ["Setup.exe", "application/x-msdownload", "Setup.exe"],
+    ["page.html", "text/html", "page.html"],
+    ["logo.svg", "image/svg+xml", "logo.svg"],
+    ["Makefile", "", "Makefile"],
+    ["photo.png", "application/octet-stream", "photo.png"],
+  ])("keeps %s (%s) as an inert download", async (original, mime, name) => {
+    const saved = await saveFile((async function* () { yield Buffer.from("<b>x</b>"); })(), original, mime, { uploadId: UPLOAD_A });
+    expect(saved).toMatchObject({ name, mime: "application/octet-stream", bytes: 8 });
+    expect(saved.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}.bin`));
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.bin`]);
+    await expect(saveFile((async function* () { yield Buffer.from("x"); })(), "../evil.sh", mime)).rejects.toThrow(/filename, not a path/);
+  });
+
+  it("streams a file under a generated name with private permissions", async () => {
+    async function* chunks() {
+      yield Buffer.from("first ");
+      yield Buffer.from("second");
+    }
+    const saved = await saveFile(chunks(), "Meeting notes.md", "Text/Markdown; charset=utf-8");
+    expect(saved.name).toBe("Meeting notes.md");
+    expect(saved.mime).toBe("text/markdown");
+    expect(saved.bytes).toBe(12);
+    expect(saved.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.path).toMatch(/[0-9a-f-]+\.md$/);
+    expect(readFileSync(saved.path, "utf8")).toBe("first second");
+    if (process.platform !== "win32") {
+      expect(statSync(ATTACHMENTS_DIR).mode & 0o777).toBe(0o700);
+      expect(statSync(saved.path).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it.each([
+    ["audio/opus", ".opus"], ["audio/ogg; codecs=opus", ".ogg"],
+    ["audio/mpeg", ".mp3"], ["audio/mp4", ".m4a"],
+    ["audio/x-wav", ".wav"], ["audio/aac", ".aac"],
+    ["audio/flac", ".flac"], ["audio/webm", ".webm"],
+  ])("stores %s audio privately and retries without duplicating it", async (mime, extension) => {
+    const bytes = Buffer.from([0, 255, 1, 128, 79, 103, 103, 83]);
+    const chunks = async function* () { yield bytes.subarray(0, 3); yield bytes.subarray(3); };
+    const first = await saveFile(chunks(), "Voice note.opus", mime, { uploadId: UPLOAD_A });
+    const again = await saveFile(chunks(), "Voice note.opus", mime, { uploadId: UPLOAD_A });
+    expect(again.path).toBe(first.path);
+    expect(first.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}${extension}`));
+    expect(first.name).toBe(`Voice note${extension}`);
+    expect(readFileSync(first.path)).toEqual(bytes);
+    if (process.platform !== "win32") expect(statSync(first.path).mode & 0o777).toBe(0o600);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}${extension}`]);
+  });
+
+  it.each([
+    ["Project.ZIP", "application/x-zip-compressed", ".zip", "Project.zip"],
+    ["logs.tar.gz", "application/x-gzip", ".gz", "logs.tar.gz"],
+    ["dump.rar", "application/x-rar-compressed", ".rar", "dump.rar"],
+  ])("stores %s sent as %s unchanged, under its archive extension", async (name, mime, extension, shown) => {
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 1, 2]);
+    const saved = await saveFile((async function* () { yield bytes; })(), name, mime, { uploadId: UPLOAD_A });
+    expect(saved.path).toBe(join(ATTACHMENTS_DIR, `${UPLOAD_A}${extension}`));
+    expect(saved.name).toBe(shown);
+    expect(readFileSync(saved.path)).toEqual(bytes);
+  });
+
+  it("rejects empty and oversized streams without leaving partial files", async () => {
+    await expect(saveFile((async function* () {})(), "empty.txt", "text/plain")).rejects.toThrow(/empty file/);
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
+
+    async function* tooLarge() {
+      yield Buffer.from("partial");
+      yield Buffer.alloc(FILE_MAX_BYTES);
+    }
+    await expect(saveFile(tooLarge(), "large.pdf", "application/pdf")).rejects.toMatchObject({ status: 413 });
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([]);
+  });
+
+  it("keeps a file larger than a preview: only what is read whole stays at the preview size", async () => {
+    const bytes = PREVIEW_MAX_BYTES + 1;
+    async function* reel() {
+      yield Buffer.alloc(PREVIEW_MAX_BYTES);
+      yield Buffer.from("x");
+    }
+    const saved = await saveFile(reel(), "reel.mp4", "video/mp4", { expectedBytes: bytes });
+    expect(saved).toMatchObject({ name: "reel.mp4", mime: "video/mp4", bytes });
+    expect(statSync(saved.path).size).toBe(bytes);
+    expect(FILE_MAX_BYTES).toBeGreaterThan(PREVIEW_MAX_BYTES);
+  });
+
+  it("deduplicates concurrent and later file retries by upload ID", async () => {
+    const makeChunks = async function* () {
+      yield Buffer.from("same ");
+      await Promise.resolve();
+      yield Buffer.from("document");
+    };
+    const [first, concurrentRetry] = await Promise.all([
+      saveFile(makeChunks(), "Report.pdf", "application/pdf", { uploadId: UPLOAD_A, expectedBytes: 13 }),
+      saveFile(makeChunks(), "Report.pdf", "application/pdf", { uploadId: UPLOAD_A, expectedBytes: 13 }),
+    ]);
+    expect(concurrentRetry.path).toBe(first.path);
+    expect(readFileSync(first.path, "utf8")).toBe("same document");
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.pdf`]);
+
+    await expect(saveFile((async function* () {
+      yield Buffer.from("other bytes");
+    })(), "Report.pdf", "application/pdf", { uploadId: UPLOAD_A }))
+      .rejects.toMatchObject({ status: 409 });
+    expect(readFileSync(first.path, "utf8")).toBe("same document");
+  });
+
+  it("serializes the upload ID namespace across image and document routes", async () => {
+    let started!: () => void;
+    let finish!: () => void;
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    const mayFinish = new Promise<void>((resolve) => { finish = resolve; });
+    const document = saveFile((async function* () {
+      yield Buffer.from("first");
+      started();
+      await mayFinish;
+      yield Buffer.from("second");
+    })(), "race.pdf", "application/pdf", { uploadId: UPLOAD_A, expectedBytes: 11 });
+
+    await didStart;
+    const image = saveImageUpload(Buffer.from("image"), "image/png", UPLOAD_A);
+    finish();
+    await expect(document).resolves.toMatchObject({ bytes: 11 });
+    await expect(image).rejects.toMatchObject({ status: 409 });
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([`${UPLOAD_A}.pdf`]);
+  });
+});
+
+describe("clearing attachments from Settings", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  const nameOf = (path: string) => path.split(/[\\/]/).pop()!;
+
+  it("keeps pictures by their url and files by their path, on any platform", () => {
+    const kept = keptAttachmentNames(
+      ["/api/attachments/bot.png", null, undefined, "https://example.com/face.png"],
+      ["banner.webp", "C:\\Users\\me\\data\\attachments\\routine.pdf", "/home/me/data/attachments/run.png", undefined],
+    );
+    expect([...kept].sort()).toEqual(["banner.webp", "bot.png", "routine.pdf", "run.png"]);
+  });
+
+  const age = (path: string, ms: number) => {
+    const at = new Date(Date.now() - ms);
+    utimesSync(path, at, at);
+  };
+
+  it("frees a full store so the next upload works, keeping pictures, routine files and fresh uploads", () => {
+    const old = saveImage(Buffer.from("old"), "image/png");
+    const picture = saveImage(Buffer.from("avatar"), "image/png");
+    const fresh = saveImage(Buffer.from("fresh"), "image/png");
+    truncateSync(old.path, ATTACHMENTS_MAX_BYTES - 64);
+    age(old.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(picture.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).toThrow(/storage is full.*Settings/);
+
+    const cleared = clearAttachments(new Set([nameOf(picture.path)]));
+
+    expect(cleared).toEqual({ removed: 1, freedBytes: ATTACHMENTS_MAX_BYTES - 64, failed: 0 });
+    expect(existsSync(old.path)).toBe(false);
+    expect(existsSync(picture.path)).toBe(true);
+    expect(existsSync(fresh.path)).toBe(true);
+    expect(attachmentStorageUsage()).toEqual({ usedBytes: "avatar".length + "fresh".length, maxBytes: ATTACHMENTS_MAX_BYTES });
+    expect(() => saveImage(Buffer.from("x".repeat(100)), "image/png")).not.toThrow();
+  });
+
+  it("removes a deleted or cleared upload from every conversation's box uploads folder too, so no box can still read it", () => {
+    const deleted = saveImage(Buffer.from("deleted"), "image/png");
+    const cleared = saveImage(Buffer.from("cleared"), "image/png");
+    const kept = saveImage(Buffer.from("kept"), "image/png");
+    const boxUploads = join(dirname(ATTACHMENTS_DIR), "box-uploads");
+    const shown = [join(boxUploads, "bot-a", "thread-1"), join(boxUploads, "bot-b", "thread-2")];
+    for (const dir of shown) {
+      mkdirSync(dir, { recursive: true });
+      for (const upload of [deleted, cleared, kept]) writeFileSync(join(dir, nameOf(upload.path)), "copy");
+    }
+    deleteAttachment(deleted.path);
+    age(cleared.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    clearAttachments(new Set([nameOf(kept.path)]));
+    for (const dir of shown) expect(readdirSync(dir)).toEqual([nameOf(kept.path)]);
+    rmSync(boxUploads, { recursive: true, force: true });
+  });
+
+  it("keeps an upload's box copies while the upload itself could not be deleted", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const dir = join(dirname(ATTACHMENTS_DIR), "box-uploads", "bot-a", "thread-1");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, nameOf(busy.path)), "copy");
+    vi.mocked(unlinkSync).mockImplementationOnce(() => {
+      throw Object.assign(new Error("resource busy"), { code: "EBUSY" });
+    });
+    deleteAttachment(busy.path);
+    expect(existsSync(busy.path)).toBe(true);
+    expect(readdirSync(dir)).toEqual([nameOf(busy.path)]);
+    rmSync(join(dirname(ATTACHMENTS_DIR), "box-uploads"), { recursive: true, force: true });
+  });
+
+  it("does not point a Team Cloud, which has no clear, to Settings", () => {
+    const full = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(full.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+    offerAttachmentClear(false);
+    try {
+      expect(() => saveImage(Buffer.from("y"), "image/png")).toThrow(/^attachments storage is full \(512 MB limit\)$/);
+    } finally {
+      offerAttachmentClear(true);
+    }
+  });
+
+  it("counts files it could not remove instead of hiding them", () => {
+    const busy = saveImage(Buffer.from("busy"), "image/png");
+    const gone = saveImage(Buffer.from("gone"), "image/png");
+    age(busy.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    age(gone.path, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+    vi.mocked(unlinkSync).mockImplementation((path) => {
+      throw Object.assign(new Error("failed"), { code: String(path) === busy.path ? "EBUSY" : "ENOENT" });
+    });
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 1 });
+  });
+
+  it("leaves upload partials to their own cleanup", () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const partial = join(ATTACHMENTS_DIR, `.openmaus-upload-${UPLOAD_A}-${UPLOAD_B}.partial`);
+    writeFileSync(partial, "part");
+    age(partial, ATTACHMENT_CLEAR_MIN_AGE_MS + 1_000);
+
+    expect(clearAttachments(new Set())).toEqual({ removed: 0, freedBytes: 0, failed: 0 });
+    expect(existsSync(partial)).toBe(true);
+  });
+});

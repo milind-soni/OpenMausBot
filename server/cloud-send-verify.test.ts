@@ -1,0 +1,61 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { connectionFingerprints } from "./cloud-connections.ts";
+import { fingerprint, loginFingerprints } from "./cloud-send-verify.ts";
+import type { AppConfig } from "./config.ts";
+import { VaultStore } from "./vault-store.ts";
+import { parseTotpKey } from "./totp.ts";
+
+// Obvious fakes only.
+const PASSWORD = "fake-verify-Passw0rd";
+const KEY = "sk-or-v1-fakeverify0000";
+const NONCE = "x".repeat(43);
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+const store = () => { const dir = mkdtempSync(join(tmpdir(), "omb-verify-")); dirs.push(dir); return new VaultStore({ dataDir: dir }); };
+
+describe("credential fingerprints a move checks by", () => {
+  it("are equal for the same login and token saved on two servers, and change with the secret or the nonce", () => {
+    const totp = parseTotpKey("otpauth://totp/x?secret=JBSWY3DPEHPK3PXP")!;
+    const [here, there] = [store(), store()];
+    for (const side of [here, there]) {
+      side.create({ site: "example.test", hosts: ["accounts.example.test"], exactHost: false, username: "alice", password: PASSWORD, totp, source: "settings", bots: "all" });
+      side.setOnePasswordToken("ops_fake-verify");
+    }
+    expect(loginFingerprints(NONCE, there)).toEqual(loginFingerprints(NONCE, here));
+    expect(Object.keys(loginFingerprints(NONCE, here)).sort()).toEqual(["1password", "login:example.test|alice"]);
+    const login = there.list()[0]!;
+    there.update(login.id, { password: `${PASSWORD}-2` });
+    expect(loginFingerprints(NONCE, there)["login:example.test|alice"]).not.toBe(loginFingerprints(NONCE, here)["login:example.test|alice"]);
+    expect(loginFingerprints("y".repeat(43), here)["login:example.test|alice"]).not.toBe(loginFingerprints(NONCE, here)["login:example.test|alice"]);
+    const other = store();
+    other.create({ site: "example.test", hosts: ["accounts.example.test"], exactHost: false, username: "alice", password: PASSWORD, totp: parseTotpKey("otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ")!, source: "settings", bots: "all" });
+    expect(loginFingerprints(NONCE, other)["login:example.test|alice"], "another 2FA key is another login").not.toBe(loginFingerprints(NONCE, here)["login:example.test|alice"]);
+    expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain(PASSWORD);
+  });
+
+  it("cover saved secrets by value under the key they travel by, never the value itself", () => {
+    const [here, there] = [store(), store()];
+    const id = "66666666-6666-4666-8666-666666666666";
+    here.receiveSecret({ id, name: "Stripe", value: "sk_fake-fingerprinted", source: "card", bots: ["a"] });
+    there.receiveSecret({ id, name: "Stripe (renamed there)", value: "sk_fake-fingerprinted", source: "settings", bots: "all" });
+    expect(loginFingerprints(NONCE, there)[`secret:${id}`]).toBe(loginFingerprints(NONCE, here)[`secret:${id}`]);
+    there.updateSecret(id, { value: "sk_fake-other" });
+    expect(loginFingerprints(NONCE, there)[`secret:${id}`]).not.toBe(loginFingerprints(NONCE, here)[`secret:${id}`]);
+    expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain("sk_fake");
+  });
+
+  it("cover keys, MCP servers' own secrets and the person's own connected-apps project, never a sign-in that moves once", () => {
+    const config = { openrouter: { key: KEY }, composio: { apiKey: "fake-composio-key", userId: "u1" },
+      mcpServers: { docs: { type: "http", url: "https://mcp.docs.example.test/mcp", headers: { Authorization: "Bearer fake-docs" }, enabled: true },
+        dodo: { command: "node", args: ["server.js"], env: { DODO_KEY: "fake-dodo" }, enabled: true } } } as unknown as AppConfig;
+    const seen = connectionFingerprints(NONCE, { config });
+    expect(Object.keys(seen).sort()).toEqual(["composio", "key:openrouter", "mcp:docs", "mcp:dodo"]);
+    expect(seen["key:openrouter"]).toBe(fingerprint(NONCE, { openrouter: { key: KEY } }));
+    const changed = connectionFingerprints(NONCE, { config: { ...config, mcpServers: { ...config.mcpServers, docs: { ...(config.mcpServers!.docs as object), headers: { Authorization: "Bearer other" } } } } as AppConfig });
+    expect(changed["mcp:docs"]).not.toBe(seen["mcp:docs"]);
+    expect(JSON.stringify(seen)).not.toMatch(/fake-|sk-or/u);
+  });
+});

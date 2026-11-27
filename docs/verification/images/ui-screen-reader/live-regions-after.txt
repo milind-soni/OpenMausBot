@@ -1,0 +1,12 @@
+OpenMausBot ui/screen-reader, AFTER (commit dfff227c). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
+
+Counted: text changes of any live region (nearest aria-live wins, off = silent; else role=log/status/alert), deduplicated per region per mutation batch.
+
+Live-region text changes during one reply (send "hello", turn held 8000 ms, then settle + 2.5 s)
+total: 2
+  1	span[role=status]
+  1	p[role=status aria-live=polite]
+
+events (ms after send, region, tail of region text):
++    76  span[role=status]  …Working…
++  8155  p[role=status aria-live=polite]  …Pepper replied: reply to: hello

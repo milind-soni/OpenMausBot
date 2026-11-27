@@ -1,0 +1,312 @@
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
+import type { WorkspaceBackupExportStatus, WorkspaceBackupSummary } from "../../shared/workspace-backup";
+import { api } from "@/state/store";
+import { intlLocale, t } from "@/lib/i18n";
+import { randomUuid } from "@/lib/random-uuid";
+import { serverErrorText } from "@/lib/server-error";
+import { collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
+import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsRows } from "./SettingsPrimitives";
+import { SettingsDialog } from "./settings/SettingsDialog";
+import { WorkspaceBackupRestartNotice, type BackupStatus } from "./WorkspaceBackupRecovery";
+
+export { WorkspaceBackupRecovery, WorkspaceBackupRestartNotice } from "./WorkspaceBackupRecovery";
+
+const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
+const EXPORT_REQUEST = "omb-backup-export-request";
+const exportJobPath = (id: string) => `/api/workspace-backup/export-jobs/${encodeURIComponent(id)}`;
+const downloadPath = (id: string) => `/api/workspace-backup/download/${encodeURIComponent(id)}`;
+
+function savedExportRequest(): string | null {
+  try { return sessionStorage.getItem(EXPORT_REQUEST); } catch { return null; }
+}
+
+function rememberExportRequest(id: string | null): void {
+  try {
+    if (id === null) sessionStorage.removeItem(EXPORT_REQUEST);
+    else sessionStorage.setItem(EXPORT_REQUEST, id);
+  } catch {}
+}
+
+function retryableExportRequest(error: unknown): boolean {
+  const status = (error as { status?: number } | null)?.status;
+  return status === undefined || status === 408 || status === 429 || status >= 500;
+}
+
+export function WorkspaceBackupSummaryView({ summary }: { summary: WorkspaceBackupSummary }) {
+  return <div className="rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu p-3">
+    <h3 className="text-[14px] font-medium text-ink">{t("backup.preview")}</h3>
+    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[13px]">
+      <dt className="text-ink-secondary">{t("backup.date")}</dt><dd className="break-words text-ink">{new Date(summary.createdAt).toLocaleString(intlLocale())}</dd>
+      <dt className="text-ink-secondary">{t("backup.version")}</dt><dd className="text-ink">{summary.appVersion}</dd>
+      <dt className="text-ink-secondary">{t("backup.bots")}</dt><dd className="text-ink">{summary.bots}</dd>
+      <dt className="text-ink-secondary">{t("backup.groups")}</dt><dd className="text-ink">{summary.groups}</dd>
+      <dt className="text-ink-secondary">{t("backup.threads")}</dt><dd className="text-ink">{summary.threads}</dd>
+      <dt className="text-ink-secondary">{t("backup.messages")}</dt><dd className="text-ink">{summary.messages}</dd>
+      <dt className="text-ink-secondary">{t("backup.files")}</dt><dd className="text-ink">{summary.files}</dd>
+      <dt className="text-ink-secondary">{t("backup.bytes")}</dt><dd className="text-ink">{summary.bytes.toLocaleString(intlLocale())}</dd>
+    </dl>
+    {summary.warnings.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-4 text-[12px] text-warning">{summary.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+    {summary.exclusions.length > 0 && <div className="mt-3 text-[12px] text-ink-secondary"><p className="font-medium">{t("backup.exclusions")}</p><ul className="mt-1 list-disc space-y-1 pl-4">{summary.exclusions.map((exclusion, index) => <li key={index}>{exclusion}</li>)}</ul></div>}
+  </div>;
+}
+
+type BackupRows = { exportRow: ReactNode; importRow: ReactNode };
+const BOTH_ROWS = ({ exportRow, importRow }: BackupRows) => <SettingsRows>{exportRow}{importRow}</SettingsRows>;
+
+/** `layout` places the two rows (a page with a section for each); one instance still owns their state and dialogs. */
+export function WorkspaceBackupSettings({ layout = BOTH_ROWS }: { layout?: (rows: BackupRows) => ReactNode } = {}) {
+  const [status, setStatus] = useState<BackupStatus | null>(null);
+  const [busy, setBusy] = useState<"export" | "preview" | "restore" | null>(null);
+  const lock = useRef(false);
+  const alive = useRef(true);
+  const [error, setError] = useState<string | null>(null);
+  const [exportPassword, setExportPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [importPassword, setImportPassword] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadedId, setUploadedId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ id: string; summary: WorkspaceBackupSummary } | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [exportRequest, setExportRequest] = useState(savedExportRequest);
+  const [exportJob, setExportJob] = useState<WorkspaceBackupExportStatus | null>(null);
+  const [exportReconnecting, setExportReconnecting] = useState(false);
+  const currentExport = useRef(exportRequest);
+  const autoDownload = useRef<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [more, setMore] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const result: BackupStatus = await api("/api/workspace-backup/status");
+      if (alive.current) { setStatus(result); setError(null); }
+    } catch (cause) {
+      if (alive.current) { setStatus(null); setError(cause instanceof Error ? cause.message : String(cause)); }
+    }
+  }, []);
+  useEffect(() => {
+    alive.current = true;
+    void refresh();
+    return () => { alive.current = false; };
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!exportRequest) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    let timer: ReturnType<typeof setTimeout>;
+    let retryMissing = true;
+    const poll = async () => {
+      try {
+        const job = await api<WorkspaceBackupExportStatus>(exportJobPath(exportRequest), { background: true, timeoutMs: 10_000, signal });
+        if (signal.aborted || currentExport.current !== exportRequest) return;
+        if (job.state !== "running" && job.state !== "ready" && job.state !== "failed") throw new Error("Invalid backup export status.");
+        retryMissing = false;
+        setExportJob(job);
+        setExportReconnecting(false);
+        if (job.state === "running") {
+          timer = setTimeout(() => void poll(), 2_000);
+          return;
+        }
+        if (autoDownload.current === exportRequest) {
+          autoDownload.current = null;
+          if (job.state === "ready") {
+            const link = document.createElement("a");
+            link.href = downloadPath(job.id);
+            link.download = job.filename;
+            document.body.append(link);
+            link.click();
+            link.remove();
+          }
+        }
+        if (job.state === "ready") timer = setTimeout(() => void poll(), Math.max(1_000, job.expiresInMs));
+        void refresh();
+      } catch (cause) {
+        if (signal.aborted || currentExport.current !== exportRequest) return;
+        const missing = (cause as { status?: number } | null)?.status === 404;
+        if (retryableExportRequest(cause) || (missing && retryMissing)) {
+          if (missing) retryMissing = false;
+          setExportReconnecting(true);
+          timer = setTimeout(() => void poll(), 3_000);
+          return;
+        }
+        if (savedExportRequest() === exportRequest) rememberExportRequest(null);
+        currentExport.current = null;
+        setExportRequest(null);
+        setExportReconnecting(false);
+        if (autoDownload.current === exportRequest) autoDownload.current = null;
+        setExportJob({ state: "failed", error: missing
+          ? t("backup.exportUnavailable")
+          : cause instanceof Error ? cause.message : t("backup.exportUnavailable") });
+        void refresh();
+      }
+    };
+    void poll();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [exportRequest, refresh]);
+
+  const exportPending = Boolean(exportRequest) && (exportJob === null || exportJob.state === "running");
+  const perform = async (operation: NonNullable<typeof busy>, work: () => Promise<void>) => {
+    if (lock.current || exportPending || !status || status.busy || status.pendingRestore) return;
+    lock.current = true;
+    setBusy(operation);
+    setError(null);
+    try { await work(); }
+    catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { lock.current = false; if (alive.current) setBusy(null); }
+  };
+
+  const exportBackup = () => perform("export", async () => {
+    if (!validPassword(exportPassword) || exportPassword !== confirmPassword) return;
+    const id = randomUuid();
+    rememberExportRequest(id);
+    try {
+      await api(exportJobPath(id), {
+        method: "POST", timeoutMs: 10_000,
+        body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState() }),
+      });
+    } catch (cause) {
+      if (!retryableExportRequest(cause)) {
+        if (savedExportRequest() === id) rememberExportRequest(exportRequest);
+        throw cause;
+      }
+    }
+    if (!alive.current) return;
+    autoDownload.current = id;
+    currentExport.current = id;
+    setExportJob(null);
+    setExportReconnecting(false);
+    setExportRequest(id);
+    closeExport();
+  });
+
+  const previewBackup = () => perform("preview", async () => {
+    if (!file || !importPassword) return;
+    setPreview(null);
+    setConfirmation("");
+    let id = uploadedId;
+    if (!id) {
+      const result: { id: string } = await api("/api/workspace-backup/upload", {
+        method: "POST", headers: { "content-type": "application/octet-stream" }, body: file,
+      });
+      id = result.id;
+      if (alive.current) setUploadedId(id);
+    }
+    const result: { id: string; summary: WorkspaceBackupSummary } = await api("/api/workspace-backup/preview", {
+      method: "POST", body: JSON.stringify({ id, password: importPassword }),
+    }).catch((cause: unknown) => {
+      if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) setUploadedId(null);
+      throw cause;
+    });
+    if (alive.current) { setPreview({ id: result.id, summary: result.summary }); setUploadedId(null); setImportPassword(""); }
+  });
+
+  const restoreBackup = () => perform("restore", async () => {
+    if (!preview || confirmation !== "REPLACE") return;
+    // The stage ID is the restore ID: persist it before the request so a lost response still lets this browser recover
+    // its drafts at boot.
+    localStorage.setItem(WORKSPACE_RESTORE_MARKER, preview.id);
+    let restarting = false;
+    try {
+      ({ restarting = false } = await api("/api/workspace-backup/restore", {
+        method: "POST", body: JSON.stringify({ id: preview.id, confirmation: "REPLACE" }),
+      }) as { restarting?: boolean });
+    } catch (cause) {
+      if (cause instanceof Error && "status" in cause && cause.status === 404 && alive.current) {
+        setPreview(null); setUploadedId(null); setConfirmation("");
+      }
+      throw cause;
+    }
+    if (alive.current) { setStatus({ busy: false, pendingRestore: true, restarts: restarting }); setPreview(null); setConfirmation(""); }
+  });
+
+  const disabled = busy !== null || exportPending || !status || status.busy || Boolean(status.pendingRestore);
+  const closeExport = () => { setExporting(false); setExportPassword(""); setConfirmPassword(""); };
+  const closeImport = () => { setImporting(false); setFile(null); setUploadedId(null); setPreview(null); setConfirmation(""); setImportPassword(""); };
+  if (status?.pendingRestore) {
+    return layout({ exportRow: null, importRow: <div className="px-4 py-3"><WorkspaceBackupRestartNotice serverRestarts={status.restarts === true} /></div> });
+  }
+  return <>
+    {layout({
+      exportRow: <SettingRow title={t("backup.export")} subtitle={<>{t("backup.exportShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} /></>}
+        message={<>
+          {more && <span data-backup-more="" className="flex flex-col gap-1"><span>{t("backup.scope")}</span><span>{t("backup.excluded")}</span><span>{t("backup.privacy")}</span></span>}
+          {exportJob?.state === "ready" && <a href={downloadPath(exportJob.id)} download={exportJob.filename} className="break-all text-accent-text hover:underline">{t("backup.downloadAgain", { filename: exportJob.filename })}</a>}
+          {exportReconnecting && <span role="status">{t("backup.exportReconnecting")}</span>}
+          {exportPending && !exportReconnecting && <span role="status">{t("backup.exporting")}</span>}
+          {exportJob?.state === "failed" && <span role="alert" className="block break-words text-danger">{serverErrorText(exportJob, exportJob.error)}</span>}
+          {!exportPending && (!status || status.busy) && <span role="status">{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}{" "}<button type="button" onClick={() => void refresh()} className="cursor-pointer text-accent-text hover:underline">{t("connectors.action.retry")}</button></span>}
+          {error && <span role="alert" className="block break-words text-danger">{error}</span>}
+        </>}>
+        <button type="button" className="ui-button" disabled={disabled} data-backup-export="" onClick={() => setExporting(true)}>{t("backup.exportAction")}</button>
+      </SettingRow>,
+      importRow: <SettingRow title={t("backup.import")} subtitle={t("backup.importShort")}>
+        <button type="button" className="ui-button" disabled={disabled} data-backup-import="" onClick={() => setImporting(true)}>{t("backup.chooseFile")}</button>
+      </SettingRow>,
+    })}
+    {exporting && (
+      <SettingsDialog title={t("backup.export")} onClose={closeExport}>
+        <form id="backup-export" className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
+          <p className="text-[13px] leading-[18px] text-ink-secondary">{t("backup.passwordHint")}</p>
+          <SettingsField label={t("backup.exportPassword")}>
+            <input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={SETTINGS_INPUT} />
+          </SettingsField>
+          <SettingsField label={t("backup.confirmPassword")}>
+            <input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={SETTINGS_INPUT} />
+          </SettingsField>
+          {error && <p role="alert" className="break-words text-[12px] leading-4 text-danger">{error}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" className="ui-button" onClick={closeExport}>{t("common.cancel")}</button>
+            <button type="submit" className="ui-button ui-button-primary gap-1.5" disabled={disabled || !validPassword(exportPassword) || exportPassword !== confirmPassword}>
+              {busy === "export" && <Loader2 aria-hidden="true" size={14} className="animate-spin" />}{busy === "export" ? t("backup.exporting") : t("backup.exportAction")}
+            </button>
+          </div>
+        </form>
+      </SettingsDialog>
+    )}
+    {importing && (
+      <SettingsDialog title={t("backup.import")} onClose={closeImport}>
+        <form id="backup-import" className="flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); void previewBackup(); }}>
+          <p className="text-[13px] leading-[18px] text-ink-secondary">{t("backup.importHint")}</p>
+          <SettingsField label={t("backup.file")}>
+            <span className="flex items-center gap-3">
+              <input ref={fileInput} type="file" accept=".ombbackup" className="sr-only" tabIndex={-1} disabled={disabled}
+                onChange={(event) => { setFile(event.target.files?.[0] ?? null); setUploadedId(null); setPreview(null); setConfirmation(""); setImportPassword(""); setError(null); }} />
+              <button type="button" className="ui-button shrink-0" disabled={disabled} onClick={() => fileInput.current?.click()}>{t("backup.chooseFile")}</button>
+              <span className="min-w-0 truncate text-[13px] leading-5 text-ink-secondary">{file?.name ?? t("backup.noFile")}</span>
+            </span>
+          </SettingsField>
+          {!preview && (
+            <SettingsField label={t("backup.importPassword")}>
+              <input type="password" autoComplete="off" maxLength={1024} required disabled={disabled || !file} value={importPassword} onChange={(event) => setImportPassword(event.target.value)} className={SETTINGS_INPUT} />
+            </SettingsField>
+          )}
+          {!preview && error && <p role="alert" className="break-words text-[12px] leading-4 text-danger">{error}</p>}
+          {!preview && (
+            <div className="flex items-center justify-end gap-2">
+              <button type="button" className="ui-button" onClick={closeImport}>{t("common.cancel")}</button>
+              <button type="submit" disabled={disabled || !file || !importPassword} className="ui-button ui-button-primary gap-1.5">
+                {busy === "preview" && <Loader2 aria-hidden="true" size={14} className="animate-spin" />}{busy === "preview" ? t("backup.validating") : t("backup.validate")}
+              </button>
+            </div>
+          )}
+        </form>
+        {preview && <>
+          <WorkspaceBackupSummaryView summary={preview.summary} />
+          <p className="text-[13px] leading-[18px] text-danger">{t("backup.replaceWarning")} {t("backup.trustWarning")}</p>
+          <SettingsField label={t("backup.confirmReplace")}>
+            <input value={confirmation} autoComplete="off" spellCheck={false} disabled={disabled} onChange={(event) => setConfirmation(event.target.value)} className={SETTINGS_INPUT} />
+          </SettingsField>
+          {error && <p role="alert" className="break-words text-[12px] leading-4 text-danger">{error}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" className="ui-button" onClick={closeImport}>{t("common.cancel")}</button>
+            <button type="button" disabled={disabled || confirmation !== "REPLACE"} onClick={() => void restoreBackup()}
+              className="ui-button !bg-danger !text-danger-ink disabled:opacity-40">{busy === "restore" ? t("backup.restoring") : t("backup.replace")}</button>
+          </div>
+        </>}
+      </SettingsDialog>
+    )}
+  </>;
+}

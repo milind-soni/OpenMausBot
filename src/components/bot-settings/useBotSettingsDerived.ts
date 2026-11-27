@@ -1,0 +1,113 @@
+import { useDesktopCapabilities } from "../DesktopCapabilities";
+import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
+import { stateForBot } from "@/lib/mascot";
+import { type Bot } from "@/state/store";
+import { approvalModeFor } from "../../../shared/approval-mode";
+import { connectorGrantsState, type ConnectorGrantsState } from "@/lib/connector-grants";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useBotApartFromTurns } from "@/state/apart-from-turns";
+
+export type BotPatch = Partial<
+  Pick<
+    Bot,
+    | "name"
+    | "title"
+    | "description"
+    | "soul"
+    | "notifications"
+    | "cloudBackend"
+    | "autoStartVps"
+    | "vpsAlias"
+    | "color"
+    | "mascotExpression"
+    | "mascotBody"
+    | "mascotFaceColor"
+    | "mascotBodyColor"
+    | "mascotMaterial"
+    | "avatarUrl"
+    | "avatarCrop"
+    | "avatarZoom"
+    | "avatarFocusX"
+    | "avatarFocusY"
+    | "alwaysAllow"
+    | "autoApprove"
+    | "approvalMode"
+    | "outbound"
+    | "fallback"
+    | "speakReplies"
+    | "replyStyle"
+    | "memoryEnabled"
+    | "xResearch"
+    | "teamFilesEdit"
+    | "toolsOff"
+    | "voice"
+    | "liveVoice"
+    | "chiefOfStaff"
+    | "managedSections"
+    | "composio"
+    | "browser"
+    | "recordBrowserSteps"
+    | "mcpServers"
+    | "modelSelection"
+  >
+> & {
+  computer?: Bot["computer"] | null;
+  connectorTools?: Bot["connectorTools"] | null;
+  connectorScopes?: Bot["connectorScopes"] | null;
+  phoneApps?: Bot["phoneApps"] | null;
+  acknowledgeLocalAuto?: boolean;
+  acknowledgePeerScope?: boolean;
+};
+
+export function useBotSettingsDerived(bot: Bot) {
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances, routines: s.routines }), sameFields), dispatch = useStoreDispatch();
+  const currentChief = useBotApartFromTurns((bots) => bots.find(
+    (candidate) =>
+      candidate.chiefOfStaff &&
+      (candidate.section?.trim() || "") === (bot.section?.trim() || ""),
+  ));
+  const { capabilities } = useDesktopCapabilities();
+  const patch = (p: BotPatch) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
+  const activeState = stateForBot(bot);
+  const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const approvalMode = approvalModeFor(bot);
+  const trustedModesAvailable = Boolean(window.ogb?.approvals && capabilities.host.packaged);
+  const canCoordinate = engine?.capabilities?.agentsMcp === true;
+  // Connected apps reach a bot through Composio's MCP or the native Email one; either lets the switch work.
+  const canUseConnectedApps = engine?.capabilities?.composioMcp === true || engine?.capabilities?.emailMcp === true;
+  const connectedAppsConfigured = state.config?.composio?.configured === true;
+  const connectedAppsEnabled = bot.composio !== false;
+  const connectorGrantState: ConnectorGrantsState = connectorGrantsState(bot);
+  const canUseBrowser = engine?.capabilities?.browserMcp === true;
+  const desktopBrowser = browserAvailable(state.config);
+  const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser;
+  const browserFeature = builtInBrowserEnabled(state.config);
+  const browserAllowed = bot.browser !== false;
+  const browserEnabled = browserFeature && browserAllowed;
+  const sectionName = bot.section?.trim() || "General";
+  const botRoutines = state.routines.filter((routine) => routine.botId === bot.id);
+  const activeBotRoutines = botRoutines.filter((routine) => routine.enabled).length;
+
+  return {
+    patch,
+    engine,
+    approvalMode,
+    trustedModesAvailable,
+    canCoordinate,
+    canUseConnectedApps,
+    connectedAppsConfigured,
+    connectedAppsEnabled,
+    connectorGrantState,
+    canUseBrowser,
+    desktopBrowser,
+    browserBlockedOnWindows,
+    browserFeature,
+    browserAllowed,
+    browserEnabled,
+    sectionName,
+    currentChief,
+    botRoutines,
+    activeBotRoutines,
+    activeState,
+  };
+}

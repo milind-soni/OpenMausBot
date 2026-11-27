@@ -1,0 +1,22 @@
+{
+    admin off
+    auto_https off
+}
+
+http://:{$OMB_HTTP_PORT:8080} {
+    bind 127.0.0.1
+    map {host} {upstream_scheme} {
+        {$OMB_HTTPS_HOST:https-disabled.invalid} https
+        default http
+    }
+    encode zstd gzip
+    handle /hooks/* {
+        reverse_proxy 127.0.0.1:{$OMB_WEBHOOK_PORT:8800}
+    }
+    handle {
+        reverse_proxy 127.0.0.1:{$OMB_PORT:8799} {
+            header_up X-Forwarded-Proto {upstream_scheme}
+            flush_interval -1
+        }
+    }
+}

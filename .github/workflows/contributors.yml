@@ -1,0 +1,53 @@
+# CLA checks for outside pull requests that change enterprise/ (LICENSING.md).
+# Runs on pull_request_target so it can comment and set statuses on fork pull
+# requests; it never checks out or executes pull-request code.
+name: contributors
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  cla:
+    name: CLA for enterprise/ changes
+    if: >-
+      (github.event_name == 'pull_request_target' && !contains(fromJSON('["OWNER","MEMBER"]'), github.event.pull_request.author_association))
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Does this pull request touch enterprise/?
+        id: changes
+        if: github.event_name == 'pull_request_target'
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            enterprise:
+              - 'enterprise/**'
+      - name: CLA
+        if: github.event_name == 'issue_comment' || steps.changes.outputs.enterprise == 'true'
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: '.github/cla-signatures.json'
+          path-to-document: 'https://github.com/milind-soni/OpenMausBot/blob/main/CLA.md'
+          branch: 'cla-signatures'
+          allowlist: 'milind-soni,dependabot[bot],renovate[bot],github-actions[bot]'
+          custom-notsigned-prcomment: >-
+            This pull request changes files under `enterprise/`, which is under the
+            OpenMausBot Enterprise License (see LICENSING.md). Before it can be merged,
+            please sign the [CLA](https://github.com/milind-soni/OpenMausBot/blob/main/CLA.md)
+            by commenting exactly: **I have read the CLA Document and I hereby sign the CLA**.
+            Changes outside `enterprise/` do not require a CLA or DCO sign-off.
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-allsigned-prcomment: 'Thank you: the CLA is signed for everyone who changed `enterprise/` here.'

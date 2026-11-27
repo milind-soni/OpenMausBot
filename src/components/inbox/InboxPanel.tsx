@@ -1,0 +1,212 @@
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
+import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
+import type { InboxRow } from "../../../shared/inbox";
+import { cn } from "@/lib/cn";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { t } from "@/lib/i18n";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
+import { closeInbox, markAllInboxRead, readInboxLine, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
+import { sameJson } from "@/state/same-json";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useActiveLocale } from "@/lib/use-active-locale";
+import { useTeamPeople } from "@/state/team-people";
+import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads } from "./InboxActive";
+import { attentionUnpinAction, botFaces } from "../SidebarBotActivity";
+import { InboxReading } from "./InboxReading";
+import { InboxGroups } from "./InboxGroups";
+import { FINISHED_LIMIT, FinishedThreads, finishedThreads } from "./FinishedThreads";
+import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
+import { matchesSearch, nextAfter } from "./inbox-answer";
+import { forYouCount, groupRows, inboxFixes, listedRows, rowsIn, type QuickAction } from "./inbox-view";
+import { InboxRowItem } from "./InboxRow";
+import { useInboxActions, useInboxJump } from "./use-inbox-actions";
+import { useInboxHold } from "./use-inbox-hold";
+import { roundButtonCls } from "../bot-panel/rows";
+import { matchesThreadFilter, threadFilterOn, threadOwners, type ThreadFilter } from "./thread-filter";
+import { ThreadFilterBar } from "./ThreadFilterBar";
+
+
+export const InboxPanel = memo(function InboxPanel() {
+  const view = useInboxView();
+  const dispatch = useStoreDispatch();
+  useActiveLocale();
+  const panel = useInboxPanel();
+  const markingAll = useInboxMarkingAll();
+  const phone = useMediaQuery(PHONE_LAYOUT);
+  const simple = !useAdvancedMode();
+  const { run, openInChat } = useInboxActions(view), jump = useInboxJump();
+  const [now, setNow] = useState(() => Date.now());
+  const [query, setQuery] = useState("");
+  const [showDone, setShowDone] = useState(false);
+  const [filter, setFilter] = useState<ThreadFilter>({});
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    event.preventDefault();
+    if (panel.reading) readInboxLine(null);
+    else closeInbox();
+  };
+  const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
+  const { held, marked, pick, undo } = useInboxHold(view, panel.reading);
+  /** An ask waits for an answer here and a message waits for a reply, so those open in the panel; finished work opens
+   * the conversation it came from, at the message it is about. */
+  const open = (row: InboxRow) => {
+    pick(row);
+    if (row.tab === "needs-you" || row.replies) { readInboxLine(row.id); return; }
+    openInChat(row);
+  };
+  const act = (row: InboxRow, action: QuickAction) => {
+    if (action === "open") pick(row);
+    run(row, action);
+  };
+  // Finished work the person has read leaves the list for the Done line at the foot; its conversation moves to Finished.
+  const listed = listedRows(view, held);
+  const groups = groupRows(listed.filter((row) => matchesSearch(row, query)));
+  const rows = [...groups["for-you"], ...groups.activity];
+  const done = rowsIn(view, "done").filter((row) => row.id !== held && matchesSearch(row, query)).sort((a, b) => b.at - a.at);
+  const ids = rows.map((row) => row.id);
+  const at = reading ? ids.indexOf(reading.id) : -1;
+
+  const order = useRef<string[]>([]);
+  if (at >= 0) order.current = ids;
+  const waited = useRef<string | null>(null);
+  useEffect(() => {
+    if (!reading) { waited.current = null; return; }
+    if (reading.tab !== "done") { waited.current = reading.id; return; }
+    if (waited.current !== reading.id) return;
+    waited.current = null;
+    const next = nextAfter(order.current.filter((id) => id === reading.id || ids.includes(id)), reading.id);
+    const row = next ? view?.rows.find((one) => one.id === next) : undefined;
+    if (row) pick(row);
+    readInboxLine(row ? row.id : null);
+  }, [reading, ids, view, pick]);
+
+  const step = (by: -1 | 1) => {
+    const row = rows[at + by];
+    if (row) open(row);
+  };
+  const faces = useStoreSelector((state) => botFaces(state.bots), sameJson);
+  const pinnedRows = useStoreSelector((state) => pinnedThreadRows(state.bots, state.groups, state.pendingQueued), sameJson);
+  const pinnedThreads = useMemo(() => new Set(pinnedRows.map((row) => row.task.threadId)), [pinnedRows]);
+  // The filter picks from every finished conversation before the list keeps its newest ten.
+  const threads = useStoreSelector((state) => {
+    const entries = inboxAttentionEntries(state, view);
+    const active = entries.filter((entry) => !pinnedThreads.has(entry.task.threadId));
+    const finished = finishedThreads(state.bots, state.groups, state.pendingQueued, Infinity, readNewsThreads(view), pinnedThreads);
+    const finishedRows = finished.filter((row) => matchesThreadFilter(row, filter)).slice(0, FINISHED_LIMIT);
+    return {
+      owners: threadOwners([...active, ...finished], filter.owner), finishedRows,
+      any: finishedRows.length > 0 || active.some((entry) => matchesThreadFilter(entry, filter)),
+    };
+  }, sameJson);
+  const team = useTeamPeople();
+  const fixes = inboxFixes(team?.needsYou, view).length;
+  const count = forYouCount(view) + fixes;
+  const openThread = useStoreSelector((state) => inboxOpenThread(state), sameJson);
+  const body = (
+    <>
+      <div className="flex h-[50px] shrink-0 items-start gap-2.5 px-[13px] pt-[13px]">
+        <div data-inbox-tab-chip className="flex h-[34px] min-w-0 flex-1 items-center gap-2 ps-1 text-[14px]">
+          <Inbox size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
+          <span className="min-w-0 truncate font-medium text-ink">{t("inbox.panel.title")}</span>
+          {count > 0 && <span data-inbox-tab-count className="shrink-0 tabular-nums text-ink-tertiary">{count}</span>}
+        </div>
+        {view?.rows.some((row) => row.unread) && (
+          <button type="button" data-inbox-mark-all onClick={markAllInboxRead} disabled={markingAll}
+            className="mt-[9px] shrink-0 whitespace-nowrap text-[12px] text-accent hover:underline disabled:opacity-50 disabled:hover:no-underline">
+            {t("inbox.markAllRead")}
+          </button>
+        )}
+        {!phone && (
+          <button type="button" onClick={() => widenInbox(!panel.wide)} aria-pressed={Boolean(panel.wide)} aria-label={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")}
+            title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={roundButtonCls}>
+            {panel.wide ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+          </button>
+        )}
+        <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={roundButtonCls}>
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {reading && view ? (
+          <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
+        ) : (
+          <>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {/* The conversations each bot and room pinned, at the top of the list. */}
+              {!query.trim() && <PinnedThreads rows={pinnedRows} faces={faces} now={now} current={openThread} onOpen={jump} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
+              {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
+                <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
+                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
+                  className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
+              </label>}
+              <div data-inbox-list className="px-1.5 pb-1.5">
+                {rows.length === 0
+                  ? query.trim() && listed.length
+                    ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
+                    : (
+                      <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                        <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
+                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
+                        <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
+                      </div>
+                    )
+                  : <InboxGroups groups={groups} now={now} current={held} onOpen={open} onAction={act} moreForYou={fixes > 0} />}
+              </div>
+              {!query.trim() && threads.owners.length > 0 && <ThreadFilterBar owners={threads.owners} filter={filter} onChange={setFilter} />}
+              {!query.trim() && threadFilterOn(filter) && !threads.any && (
+                <div data-inbox-filter-empty className="flex flex-col items-center gap-1 px-4 py-6 text-center">
+                  <p className="text-[13px] text-ink-secondary">{t("inbox.filter.noMatch")}</p>
+                  <button type="button" onClick={() => setFilter({})} className="text-[12px] text-accent hover:underline">{t("inbox.filter.clear")}</button>
+                </div>
+              )}
+              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} faces={faces} filter={filter} />}
+              {/* The finished, already-read conversations. */}
+              {!query.trim() && <FinishedThreads rows={threads.finishedRows} faces={faces} now={now} current={openThread} onOpen={jump} />}
+              {done.length > 0 && (
+                <section data-inbox-done className="px-1.5 pb-1.5">
+                  <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary hover:bg-raised/70 hover:text-ink-secondary">
+                    <Check size={13} aria-hidden="true" className="shrink-0" />
+                    <span className="font-medium">{t("common.done")}</span>
+                    <span className="tabular-nums">{done.length}</span>
+                  </button>
+                  {showDone && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={act} />)}
+                </section>
+              )}
+            </div>
+          </>
+        )}
+        {marked && (
+          <p role="status" data-inbox-marked className="flex shrink-0 items-center justify-center gap-1.5 border-t border-hairline/40 px-3 py-2 text-[12px] text-ink-tertiary">
+            {t("inbox.markedRead")}<span aria-hidden="true">·</span>
+            <button type="button" data-inbox-undo onClick={undo} className="font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">{t("common.undo")}</button>
+          </p>
+        )}
+      </div>
+    </>
+  );
+  if (phone) {
+    return createPortal(
+      <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40" onMouseDown={(event) => { if (event.target === event.currentTarget) closeInbox(); }}>
+        <section role="dialog" aria-modal="true" aria-label={t("inbox.panel.title")} data-inbox-panel="sheet" onKeyDown={onKeyDown}
+          className="animate-pop-in motion-reduce:animate-none flex max-h-[85dvh] min-h-[50dvh] flex-col overflow-hidden rounded-t-2xl border-t border-hairline/50 bg-panel pb-[env(safe-area-inset-bottom)]">
+          {body}
+        </section>
+      </div>,
+      document.body,
+    );
+  }
+  return (
+    <aside aria-label={t("inbox.panel.title")} data-inbox-panel="side" data-look="inbox" data-wide={panel.wide ? "" : undefined} onKeyDown={onKeyDown}
+      className={cn("animate-panel-in motion-reduce:animate-none flex h-full max-w-full shrink-0 flex-col max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30",
+        simple ? "border-l-[0.5px] border-ink/[0.06] bg-app" : "border-l border-hairline/40 bg-panel",
+        panel.wide ? "w-[min(640px,60vw)]" : simple ? "w-[320px]" : "w-[380px]")}>
+      {body}
+    </aside>
+  );
+});

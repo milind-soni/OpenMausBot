@@ -1,0 +1,44 @@
+---
+title: iOS companion
+description: Pair an iPhone directly with the MausBot instance running on your computer.
+icon: Smartphone
+---
+
+The native iOS companion is a thin client. Your computer remains the only machine that owns agent processes, credentials, transcripts, SQLite data, and computers.
+
+## What it can do
+
+- Discover and pair on the same LAN, connect through Tailscale, or use an
+  optional account-provisioned HTTPS address
+- List bots and rooms, read paged transcripts, send messages, and interrupt work
+- Answer approvals and questions, including narrow always-allow grants
+- Search, manage tasks, react, share, and navigate message versions
+- Follow resumable live updates and optionally view a bot's managed Boat cloud computer. The loopback-only VPS SSH viewer currently opens in the desktop app.
+
+## Pairing
+
+The desktop opens a two-minute pairing window with a high-entropy QR credential and a six-digit manual fallback. Redeeming either closes the window and returns a separate per-device token stored in iOS Keychain.
+
+The computer stores only a digest of the device token. Revoking the phone from desktop Settings invalidates future requests.
+
+## Network options
+
+- **Same trusted Wi-Fi:** Bonjour discovery and direct HTTP.
+- **Away from home:** Tailscale on both devices with the computer's MagicDNS name.
+- **Hosted HTTPS:** sign in by email on the desktop to provision a private
+  Cloudflare Tunnel address; the phone still pairs to that specific computer.
+
+LAN and Tailscale remain available without a MausBot account. The hosted
+control plane stores account/installation metadata, not transcripts; Cloudflare
+proxies phone traffic to the user's computer. Bonjour does not cross Tailscale,
+so that direct remote option uses manual address entry.
+
+Your computer must remain on, awake, and running MausBot. In desktop Companion Settings, **Keep this computer awake** can prevent system sleep while Companion is enabled; it is off by default, allows the screen to turn off, and may use more battery. A sleeping or powered-off computer cannot be reached even through hosted HTTPS.
+
+## Security boundary
+
+The companion sidecar uses a default-deny route allowlist. Provider keys, pairing administration, Local VM lifecycle, webhook secrets, team import/export, and internal peer-agent routes remain unreachable from the phone.
+
+<Callout type="warn" title="Foreground-oriented connection">
+  Live and replayed events can produce alerts while the companion is connected. A closed app is not woken yet: closed-app push is not available in the phone app.
+</Callout>

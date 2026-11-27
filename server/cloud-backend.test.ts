@@ -1,0 +1,63 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  BOAT_ACCOUNT_RESOURCES_ERROR,
+  CLOUD_BACKEND_CHANGE_ERROR,
+  VPS_ALIAS_RESOURCES_ERROR,
+  VPS_BOT_ALIAS_CHANGE_ERROR,
+  boatAccountResourceChangeError,
+  cloudBackendChangeError,
+  vpsAliasResourceChangeError,
+  vpsBotAliasChangeError,
+  vpsNotChosenReason,
+} from "./cloud-backend.ts";
+
+describe("cloud backend switching", () => {
+  const activeTurnCases: Array<[string, boolean, boolean]> = [
+    ["a busy bot", true, false],
+    ["an active VPS thread", false, true],
+  ];
+
+  it.each(activeTurnCases)("rejects changes during %s", (_reason, busy, activeVpsThread) => {
+    expect(cloudBackendChangeError(busy, activeVpsThread)).toBe(CLOUD_BACKEND_CHANGE_ERROR);
+  });
+
+  it("allows changes while idle", () => {
+    expect(cloudBackendChangeError(false, false)).toBeNull();
+  });
+
+  it("allows Boat token rotation only when the replacement sees the same resources", () => {
+    const current = [{ boxId: "bx_23456789", name: "ogb-scope-bot-hash" }];
+    expect(boatAccountResourceChangeError(current, [...current])).toBeNull();
+    expect(boatAccountResourceChangeError(current, null)).toBe(BOAT_ACCOUNT_RESOURCES_ERROR);
+    expect(boatAccountResourceChangeError(current, [{ ...current[0]!, boxId: "bx_3456789a" }]))
+      .toBe(BOAT_ACCOUNT_RESOURCES_ERROR);
+    expect(boatAccountResourceChangeError([], null)).toBeNull();
+  });
+
+  it("keeps an SSH alias attached while its VPS still has local computers", () => {
+    expect(vpsAliasResourceChangeError(1)).toBe(VPS_ALIAS_RESOURCES_ERROR);
+    expect(vpsAliasResourceChangeError(0)).toBeNull();
+  });
+
+  it.each(activeTurnCases)("rejects a bot's own SSH alias change during %s", (_reason, busy, activeVpsThread) => {
+    expect(vpsBotAliasChangeError(busy, activeVpsThread)).toBe(VPS_BOT_ALIAS_CHANGE_ERROR);
+  });
+
+  it("allows a bot's own SSH alias change while idle", () => {
+    expect(vpsBotAliasChangeError(false, false)).toBeNull();
+  });
+});
+
+describe("vpsNotChosenReason", () => {
+  it("points a Boat bot at the saved VPS it could use instead", () => {
+    const reason = vpsNotChosenReason("Scout", "production-vps");
+    expect(reason).toContain("production-vps");
+    expect(reason).toContain("Self-hosted VPS");
+    expect(reason).toContain("Scout's Bot settings, Access section");
+  });
+
+  it("says nothing when no VPS is set up", () => {
+    expect(vpsNotChosenReason("Scout", null)).toBeNull();
+  });
+});

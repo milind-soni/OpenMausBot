@@ -1,0 +1,156 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, it } from "vitest";
+import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
+import { waitForExit } from "../../server/testing/cleanup.ts";
+import { runControlOmb } from "../control-omb.ts";
+import { ENABLE_ADVANCED_UI, agentBrowser, sessionEnv, UI_TOOLS_DIR, type UiHandle } from "./control-omb-ui.ts";
+
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
+if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to install the pinned browser");
+
+(enabled ? it : it.skip)("renders separate cached input, uncached input and output after a real fixture turn", async () => {
+  let child: ChildProcess | undefined;
+  let info: { ui: string; url: string; botId: string; logPath: string } | undefined;
+  try {
+    let stdout = "", stderr = "";
+    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout!.on("data", chunk => { stdout += String(chunk); });
+    child.stderr!.on("data", chunk => { stderr += String(chunk); });
+    await expect.poll(() => {
+      if (child!.exitCode !== null || child!.signalCode !== null) return true;
+      try { info = JSON.parse(stdout); return Boolean(info?.ui); } catch { return false; }
+    }, { timeout: 600_000, interval: 250 }).toBe(true);
+    if (!info) throw new Error(`UI launcher exited: ${stderr}`);
+    const handle = info;
+    const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", handle.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
+    await ui("type", "--name", "Message Pepper", "--text", "Check the fixture usage");
+    await ui("press", "--keys", "Enter");
+    const settled = await ui("wait-settle", "--timeout", "60");
+    await ui("type", "--name", "Message Pepper", "--text", "A draft that stays editable at every width");
+    await ui("click", "--name", "More");
+    const read = () => ui("eval", "--js", `(() => {
+      const chip = document.querySelector('[data-testid="usage-chip"]');
+      return { title: chip?.getAttribute('title'), text: chip?.textContent };
+    })()`);
+    await expect.poll(async () => (await read()).result?.title, { timeout: 15_000 }).toContain("Last message: 10 uncached input · 2 cached input · 5 output");
+    const chip = (await read()).result;
+    expect(chip.text).toContain("$0.01");
+    expect(chip.title).not.toContain("17 read");
+    expect(chip.title).not.toContain("15 new");
+    // Header actions stay usable in the consolidated menu, including a
+    // denied clipboard. Only this disposable browser's clipboard is stubbed.
+    const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
+    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async () => { throw new Error('fixture denial'); } }); document.execCommand = () => false; true`);
+    await ui("click", "--name", "Copy as Markdown");
+    await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Couldn't copy. Use Download instead.");
+    await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { window.copiedTranscript = text; } }); true`);
+    await evaluate(`document.querySelector('[role=menu] button:has([role=status])').click(); true`);
+    await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Copied");
+    expect(await evaluate("window.copiedTranscript")).toContain("Check the fixture usage");
+    await ui("press", "--keys", "Escape");
+
+    const browser = JSON.parse(readFileSync(handle.ui, "utf8")) as UiHandle;
+    const geometry = [];
+    for (const width of [390, 800, 1100, 1600]) {
+      await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", String(width), "900"]);
+      if (width < 768) await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().right")).toBeLessThanOrEqual(0);
+      await ui("click", "--name", "More");
+      const layout = await evaluate(`(() => {
+        const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; };
+        return { viewport: innerWidth, scroll: document.documentElement.scrollWidth,
+          menu: rect('[role=menu][aria-label=More]'), editor: rect('.mention-editor'),
+          row: rect('[data-composer-row]'), controls: rect('[data-composer-actions]'),
+          wraps: getComputedStyle(document.querySelector('[data-composer-row]')).flexWrap === 'wrap' };
+      })()`);
+      expect(await evaluate("document.querySelectorAll('[data-chathead-controls] > div').length")).toBeLessThan(6);
+      expect(layout.scroll).toBeLessThanOrEqual(width);
+      expect(layout.viewport).toBe(width);
+      expect(layout.menu.left).toBeGreaterThanOrEqual(0);
+      expect(layout.menu.right).toBeLessThanOrEqual(width);
+      expect(layout.controls.width).toBeGreaterThan(0);
+      // Simple mode keeps the editor and its controls on one row at every width.
+      if (layout.wraps && layout.row.width < 480) {
+        expect(layout.editor.width).toBeGreaterThanOrEqual(layout.row.width - 1);
+        expect(layout.editor.bottom).toBeLessThanOrEqual(layout.controls.top);
+      }
+      geometry.push(layout);
+      await ui("screenshot", "--out", `${handle.logPath}.header-${width}.png`);
+      await ui("press", "--keys", "Escape");
+    }
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1100", "900"]);
+    await expect.poll(() => evaluate("innerWidth")).toBe(1100);
+    const density = await evaluate("localStorage.getItem('openmausbot.sidebarDensity')");
+    const activate = async (selector: string) => {
+      await expect.poll(() => evaluate(`(() => {
+        const button = document.querySelector(${JSON.stringify(selector)});
+        if (!button) return false;
+        button.focus();
+        return document.activeElement === button;
+      })()`), { timeout: 10_000 }).toBe(true);
+      await ui("press", "--keys", "Enter");
+    };
+    const openMore = () => activate('[data-chathead-controls] button[aria-label="More"][aria-expanded="false"]');
+    const openUsage = async () => {
+      await openMore();
+      await activate('[role="menu"][aria-label="More"] button[data-menu-key="usage"]');
+    };
+    await openUsage();
+    await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(80);
+    expect(await evaluate("localStorage.getItem('openmausbot.sidebarDensity')")).toBe(density);
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[role=dialog]'))"), { timeout: 10_000 }).toBe(true);
+    await ui("screenshot", "--out", `${handle.logPath}.settings-1100.png`);
+    await ui("press", "--keys", "Escape");
+    await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(280);
+    await openMore();
+    await activate('[role="menu"][aria-label="More"] button[data-menu-key="inspector"]');
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))"), { timeout: 10_000 }).toBe(true);
+    await openUsage();
+    await expect.poll(() => evaluate("document.querySelector('[role=dialog]') && getComputedStyle(document.querySelector('[role=dialog]')).position")).toBe("absolute");
+    expect(await evaluate("document.querySelector('main').getBoundingClientRect().width")).toBeGreaterThan(400);
+    await ui("screenshot", "--out", `${handle.logPath}.two-panels-1100.png`);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1600", "900"]);
+    await expect.poll(() => evaluate("getComputedStyle(document.querySelector('[role=dialog]')).position")).toBe("static");
+    await ui("press", "--keys", "Escape");
+    expect(await evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))")).toBe(true);
+    // Simple's 320 bot panel keeps the open sidebar beside it from 1040 wide (280 + a 440 chat + 320); narrower, or
+    // beside a wider panel (Advanced's above) under 1280, the sidebar folds to its avatars.
+    await openMore();
+    await activate('[role="menu"][aria-label="More"] button[data-menu-key="inspector"]');
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))")).toBe(false);
+    await evaluate(`(() => { localStorage.setItem("omb-advanced-mode", "0"); window.dispatchEvent(new StorageEvent("storage", { key: "omb-advanced-mode", storageArea: localStorage })); return true; })()`);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1040", "900"]);
+    await expect.poll(() => evaluate("innerWidth")).toBe(1040);
+    await activate('[data-chathead-pill][aria-expanded="false"]');
+    const besidePanel = () => evaluate(`(() => {
+      const width = selector => document.querySelector(selector)?.getBoundingClientRect().width ?? 0;
+      return { sidebar: width('[data-sidebar]'), panel: width('[role=dialog][aria-labelledby=bot-settings-title]'), chat: width('main'),
+        scroll: document.documentElement.scrollWidth, moving: (document.querySelector('[role=dialog][aria-labelledby=bot-settings-title]')?.getAnimations() ?? []).length > 0 };
+    })()`);
+    // The panel slides in: measure once it has landed.
+    await expect.poll(async () => { const at = await besidePanel(); return Math.round(at.panel) === 320 && !at.moving; }, { timeout: 10_000 }).toBe(true);
+    const open1040 = await besidePanel();
+    expect(open1040.sidebar).toBe(280);
+    expect(open1040.chat).toBeGreaterThanOrEqual(440);
+    expect(open1040.scroll).toBeLessThanOrEqual(1040);
+    await ui("screenshot", "--out", `${handle.logPath}.bot-panel-1040.png`);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1039", "900"]);
+    await expect.poll(async () => (await besidePanel()).sidebar).toBe(92);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1040", "900"]);
+    await expect.poll(async () => (await besidePanel()).sidebar).toBe(280);
+    geometry.push({ botPanel1040: open1040 });
+    const consoleResult = await ui("console");
+    expect((consoleResult.messages ?? []).filter((row: { type?: string }) => row.type === "error")).toEqual([]);
+    const evidence = handle.logPath + ".usage-details.json";
+    writeFileSync(evidence, JSON.stringify({ url: handle.url, botId: handle.botId, settled, chip, geometry, consoleResult }, null, 2));
+    console.log(`Usage details renderer evidence: ${evidence}`);
+  } finally {
+    if (child && child.exitCode === null && child.signalCode === null) await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+  }
+}, 660_000);

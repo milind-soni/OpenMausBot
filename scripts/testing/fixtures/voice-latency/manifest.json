@@ -1,0 +1,406 @@
+{
+  "corpusFixtureId": "c37afc9db95cb56f4b9bad17f5f88c4ba4ff9952c9280c9b4f5e777ea87ddfec",
+  "corpusPath": "scripts/testing/fixtures/voice-latency/corpus.json",
+  "generator": "scripts/testing/voice-latency-corpus.ts",
+  "splitter": {
+    "entry": "server/tts/speech-text.ts#toUtterances",
+    "minChars": 12,
+    "maxChars": 320
+  },
+  "cadence": {
+    "chunkChars": 24,
+    "intervalMs": 150
+  },
+  "gapThresholdMs": 200,
+  "synthesis": {
+    "rtf": 0.5,
+    "audioMsPerChar": 70,
+    "firstByteMs": 300
+  },
+  "totals": {
+    "replies": 24,
+    "blocks": 116,
+    "meanBlockChars": 65.78448275862068,
+    "blocks40to79": 108,
+    "speakableChars": 7631
+  },
+  "shapePins": {
+    "unpunctuated-run-319": {
+      "firstBlockChars": 319
+    },
+    "code-list-211": {
+      "firstBlockChars": 211
+    },
+    "em-dash-list-153": {
+      "firstBlockChars": 153
+    },
+    "typical-medium-26": {
+      "firstBlockChars": 26
+    },
+    "staccato-92": {
+      "blocks": 1,
+      "blockChars": 92
+    },
+    "mixed-late-319": {
+      "lastBlockChars": 319
+    }
+  },
+  "replies": [
+    {
+      "id": "unpunctuated-run-319",
+      "shape": "unpunctuated-run",
+      "rawChars": 319,
+      "blocks": 1,
+      "blockChars": [
+        319
+      ],
+      "firstBlockChars": 319,
+      "speakableChars": 319
+    },
+    {
+      "id": "code-list-211",
+      "shape": "code-list",
+      "rawChars": 232,
+      "blocks": 1,
+      "blockChars": [
+        211
+      ],
+      "firstBlockChars": 211,
+      "speakableChars": 211
+    },
+    {
+      "id": "em-dash-list-153",
+      "shape": "em-dash-list",
+      "rawChars": 153,
+      "blocks": 1,
+      "blockChars": [
+        153
+      ],
+      "firstBlockChars": 153,
+      "speakableChars": 153
+    },
+    {
+      "id": "typical-medium-26",
+      "shape": "typical-medium",
+      "rawChars": 155,
+      "blocks": 3,
+      "blockChars": [
+        26,
+        97,
+        30
+      ],
+      "firstBlockChars": 26,
+      "speakableChars": 153
+    },
+    {
+      "id": "staccato-92",
+      "shape": "staccato",
+      "rawChars": 92,
+      "blocks": 1,
+      "blockChars": [
+        92
+      ],
+      "firstBlockChars": 92,
+      "speakableChars": 92
+    },
+    {
+      "id": "mixed-late-319",
+      "shape": "mixed-late-block",
+      "rawChars": 760,
+      "blocks": 8,
+      "blockChars": [
+        58,
+        58,
+        65,
+        62,
+        63,
+        66,
+        62,
+        319
+      ],
+      "firstBlockChars": 58,
+      "speakableChars": 753
+    },
+    {
+      "id": "typical-01",
+      "shape": "typical",
+      "rawChars": 290,
+      "blocks": 5,
+      "blockChars": [
+        42,
+        75,
+        47,
+        75,
+        47
+      ],
+      "firstBlockChars": 42,
+      "speakableChars": 286
+    },
+    {
+      "id": "typical-02",
+      "shape": "typical",
+      "rawChars": 447,
+      "blocks": 7,
+      "blockChars": [
+        75,
+        47,
+        73,
+        43,
+        51,
+        73,
+        46
+      ],
+      "firstBlockChars": 75,
+      "speakableChars": 408
+    },
+    {
+      "id": "typical-03",
+      "shape": "typical",
+      "rawChars": 295,
+      "blocks": 5,
+      "blockChars": [
+        51,
+        73,
+        46,
+        74,
+        47
+      ],
+      "firstBlockChars": 51,
+      "speakableChars": 291
+    },
+    {
+      "id": "typical-04",
+      "shape": "typical",
+      "rawChars": 357,
+      "blocks": 6,
+      "blockChars": [
+        74,
+        47,
+        76,
+        43,
+        70,
+        42
+      ],
+      "firstBlockChars": 74,
+      "speakableChars": 352
+    },
+    {
+      "id": "typical-05",
+      "shape": "typical",
+      "rawChars": 286,
+      "blocks": 5,
+      "blockChars": [
+        43,
+        70,
+        42,
+        75,
+        52
+      ],
+      "firstBlockChars": 43,
+      "speakableChars": 282
+    },
+    {
+      "id": "typical-06",
+      "shape": "typical",
+      "rawChars": 450,
+      "blocks": 7,
+      "blockChars": [
+        75,
+        52,
+        74,
+        63,
+        49,
+        74,
+        53
+      ],
+      "firstBlockChars": 75,
+      "speakableChars": 440
+    },
+    {
+      "id": "typical-07",
+      "shape": "typical",
+      "rawChars": 307,
+      "blocks": 5,
+      "blockChars": [
+        49,
+        74,
+        53,
+        77,
+        50
+      ],
+      "firstBlockChars": 49,
+      "speakableChars": 303
+    },
+    {
+      "id": "typical-08",
+      "shape": "typical",
+      "rawChars": 373,
+      "blocks": 6,
+      "blockChars": [
+        77,
+        50,
+        74,
+        51,
+        67,
+        49
+      ],
+      "firstBlockChars": 77,
+      "speakableChars": 368
+    },
+    {
+      "id": "typical-09",
+      "shape": "typical",
+      "rawChars": 290,
+      "blocks": 5,
+      "blockChars": [
+        51,
+        67,
+        49,
+        70,
+        49
+      ],
+      "firstBlockChars": 51,
+      "speakableChars": 286
+    },
+    {
+      "id": "typical-10",
+      "shape": "typical",
+      "rawChars": 435,
+      "blocks": 7,
+      "blockChars": [
+        70,
+        49,
+        70,
+        65,
+        48,
+        73,
+        50
+      ],
+      "firstBlockChars": 70,
+      "speakableChars": 425
+    },
+    {
+      "id": "typical-11",
+      "shape": "typical",
+      "rawChars": 299,
+      "blocks": 5,
+      "blockChars": [
+        48,
+        73,
+        50,
+        75,
+        49
+      ],
+      "firstBlockChars": 48,
+      "speakableChars": 295
+    },
+    {
+      "id": "typical-12",
+      "shape": "typical",
+      "rawChars": 367,
+      "blocks": 6,
+      "blockChars": [
+        75,
+        49,
+        70,
+        46,
+        76,
+        46
+      ],
+      "firstBlockChars": 75,
+      "speakableChars": 362
+    },
+    {
+      "id": "typical-13",
+      "shape": "typical",
+      "rawChars": 289,
+      "blocks": 5,
+      "blockChars": [
+        46,
+        76,
+        46,
+        69,
+        48
+      ],
+      "firstBlockChars": 46,
+      "speakableChars": 285
+    },
+    {
+      "id": "typical-14",
+      "shape": "typical",
+      "rawChars": 441,
+      "blocks": 7,
+      "blockChars": [
+        69,
+        48,
+        73,
+        43,
+        48,
+        73,
+        48
+      ],
+      "firstBlockChars": 69,
+      "speakableChars": 402
+    },
+    {
+      "id": "typical-15",
+      "shape": "typical",
+      "rawChars": 294,
+      "blocks": 5,
+      "blockChars": [
+        48,
+        73,
+        48,
+        69,
+        52
+      ],
+      "firstBlockChars": 48,
+      "speakableChars": 290
+    },
+    {
+      "id": "typical-16",
+      "shape": "typical",
+      "rawChars": 351,
+      "blocks": 6,
+      "blockChars": [
+        69,
+        52,
+        65,
+        44,
+        68,
+        48
+      ],
+      "firstBlockChars": 69,
+      "speakableChars": 346
+    },
+    {
+      "id": "typical-17",
+      "shape": "typical",
+      "rawChars": 282,
+      "blocks": 5,
+      "blockChars": [
+        44,
+        68,
+        48,
+        73,
+        45
+      ],
+      "firstBlockChars": 44,
+      "speakableChars": 278
+    },
+    {
+      "id": "typical-18",
+      "shape": "typical",
+      "rawChars": 258,
+      "blocks": 4,
+      "blockChars": [
+        73,
+        45,
+        70,
+        63
+      ],
+      "firstBlockChars": 73,
+      "speakableChars": 251
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+import { memo, useMemo, useState, type DragEvent } from "react";
+import { GripVertical, Search, UsersRound } from "lucide-react";
+import { BotAvatar } from "@/components/Avatar";
+import type { BotApartFromTurns } from "@/state/apart-from-turns";
+import { MiniMonth } from "./MiniMonth";
+import { t } from "@/lib/i18n";
+
+export const BOT_CALENDAR_DRAG_TYPE = "application/x-openmaus-bot";
+
+export interface CalendarSidebarProps {
+  bots: readonly BotApartFromTurns[];
+  anchor: number;
+  onSelectDate: (at: number) => void;
+  /** Drawn again in a new language. */
+  locale?: string;
+}
+
+export const CalendarSidebar = memo(function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarProps) {
+  const [query, setQuery] = useState("");
+  const filteredBots = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return bots;
+    return bots.filter((bot) =>
+      `${bot.name} ${bot.title} ${bot.description}`.toLocaleLowerCase().includes(normalized),
+    );
+  }, [bots, query]);
+
+  const beginBotDrag = (event: DragEvent<HTMLDivElement>, bot: BotApartFromTurns) => {
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(BOT_CALENDAR_DRAG_TYPE, bot.id);
+    event.dataTransfer.setData("text/plain", bot.id);
+  };
+
+  return (
+    <aside
+      aria-label={t("routines.sidebar.label")}
+      className="flex h-full w-[320px] shrink-0 flex-col overflow-hidden border-r border-hairline/40 bg-panel"
+    >
+      <MiniMonth anchor={anchor} onSelect={onSelectDate} />
+
+      <div className="mx-4 border-t border-hairline/40" />
+
+      <section aria-labelledby="calendar-bots-heading" className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-3">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <div id="calendar-bots-heading" className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.11em] text-ink-secondary">
+            <UsersRound size={13} aria-hidden="true" />
+            {t("routines.sidebar.myBots")}
+          </div>
+          <span className="rounded-full bg-raised px-1.5 py-0.5 text-[9px] tabular-nums text-ink-secondary">
+            {bots.length}
+          </span>
+        </div>
+
+        <label className="relative mb-2 block">
+          <span className="sr-only">{t("routines.sidebar.searchBots")}</span>
+          <Search
+            size={13}
+            className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-tertiary"
+            aria-hidden="true"
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            type="search"
+            placeholder={t("routines.sidebar.searchBots")}
+            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[12px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/60 focus:bg-control"
+          />
+        </label>
+
+        <div role="list" aria-label={t("routines.sidebar.availableBots")} className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-0.5">
+          {filteredBots.map((bot) => (
+            <div
+              key={bot.id}
+              draggable
+              onDragStart={(event) => beginBotDrag(event, bot)}
+              role="listitem"
+              className="group flex cursor-grab items-center gap-2 rounded-xl px-2 py-2 transition-colors hover:bg-raised/80 active:cursor-grabbing"
+              aria-label={t("routines.sidebar.dragBot", { name: bot.name })}
+              title={t("routines.sidebar.dragBot", { name: bot.name })}
+            >
+              <GripVertical
+                size={13}
+                className="shrink-0 text-ink-secondary/35 transition-colors group-hover:text-ink-secondary"
+                aria-hidden="true"
+              />
+              <BotAvatar bot={bot} size={27} animated={false} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[12px] font-medium text-ink">{bot.name}</div>
+                <div className="truncate text-[10px] text-ink-tertiary">
+                  {bot.title || t("routines.sidebar.botFallback")}
+                </div>
+              </div>
+              <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[9px] text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
+                {t("routines.sidebar.drag")}
+              </span>
+            </div>
+          ))}
+
+          {filteredBots.length === 0 && (
+            <div className="px-3 py-8 text-center text-[11px] leading-relaxed text-ink-secondary">
+              {bots.length === 0 ? t("routines.sidebar.noBots") : t("routines.sidebar.noMatch")}
+            </div>
+          )}
+        </div>
+
+        <p className="mt-2 px-2 text-[10px] leading-relaxed text-ink-tertiary">
+          {t("routines.sidebar.dragHint")}
+        </p>
+      </section>
+    </aside>
+  );
+});

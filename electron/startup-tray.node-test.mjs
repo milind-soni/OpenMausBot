@@ -1,0 +1,284 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+import nativeText from "./native-text.cjs";
+import { createStartupScreen, startupScreenHtml } from "./startup-screen.mjs";
+import { createLendingIndicator } from "./lending-indicator.mjs";
+import { createSystemTray } from "./system-tray.mjs";
+
+const iconPath = fileURLToPath(new URL("./resources/app-icon.png", import.meta.url));
+class Window extends EventEmitter {
+  constructor(options = {}) {
+    super(); this.options = options; this.destroyed = false; this.visible = false;
+    this.webContents = new EventEmitter();
+    this.webContents.executeJavaScript = async () => {};
+  }
+  setMenu() {}
+  loadURL() { queueMicrotask(() => this.emit("ready-to-show")); return Promise.resolve(); }
+  isDestroyed() { return this.destroyed; }
+  destroy() { this.destroyed = true; this.emit("closed"); }
+  show() { this.visible = true; this.emit("show"); }
+  showInactive() { this.show(); }
+  hide() { this.visible = false; }
+  focus() { this.focused = true; }
+  isMinimized() { return this.minimized ?? false; }
+  minimize() { this.minimized = true; }
+  restore() { this.minimized = false; }
+  maximize() { this.maximized = true; }
+  setSkipTaskbar(value) { this.skipTaskbar = value; }
+}
+function fixture(options = {}) {
+  const calls = [];
+  let trayInstance;
+  class Tray extends EventEmitter {
+    constructor(_icon, guid) { super(); this.guid = guid; trayInstance = this; }
+    setToolTip(value) { this.tooltip = value; }
+    setContextMenu(value) { this.menu = value; }
+    isDestroyed() { return this.destroyed ?? false; }
+    destroy() { this.destroyed = true; calls.push("destroy-tray"); }
+  }
+  let active;
+  const tray = createSystemTray({ Tray, Menu: { buildFromTemplate: value => value },
+    nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath,
+    getWindow: () => active, onQuit: () => calls.push("quit") });
+  const splash = createStartupScreen({ BrowserWindow: Window, iconPath, platform: "win32",
+    isQuitting: () => false, onQuit: () => calls.push("quit"), onHide: win => tray.hide(win),
+    isHidden: () => tray.isHidden(), onShow: win => tray.windowShown(win),
+    onFinished: () => calls.push("finished"), ...options });
+  active = splash.window;
+  const win = new Window();
+  win.on("show", () => tray.windowShown(win));
+  return { tray, trayInstance, splash, win, calls, setActive: value => { active = value; } };
+}
+const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
+
+class UnreadyWindow extends Window {
+  loadURL() { return Promise.resolve(); }
+}
+
+test("a loading screen that never becomes ready cannot block server startup", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { splash, win, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  let ready = false;
+  void splash.ready.then(() => { ready = true; });
+  t.mock.timers.tick(9999); await flush();
+  assert.equal(ready, false);
+  t.mock.timers.tick(1); await flush();
+  assert.equal(ready, true);
+  // Still the app's only window: destroying it would quit before the workspace exists.
+  assert.equal(splash.window.destroyed, false);
+  assert.deepEqual(calls, []);
+  splash.attach(win);
+  win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(win.visible, true); assert.equal(splash.window.destroyed, true);
+  assert.deepEqual(calls, ["finished"]);
+});
+
+test("a loading renderer crash unblocks startup before ready-to-show", async () => {
+  const { splash, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  let ready = false;
+  void splash.ready.then(() => { ready = true; });
+  splash.window.webContents.emit("render-process-gone");
+  await flush();
+  assert.equal(ready, true);
+  assert.equal(splash.window.destroyed, false);
+  assert.deepEqual(calls, []);
+});
+
+test("a loaded page shows without ready-to-show, as on COSMIC Wayland", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { splash, calls } = fixture({ BrowserWindow: UnreadyWindow });
+  let ready = false;
+  void splash.ready.then(() => { ready = true; });
+  splash.window.webContents.emit("did-finish-load");
+  t.mock.timers.tick(499); await flush();
+  assert.equal(splash.window.visible, false); assert.equal(ready, false);
+  t.mock.timers.tick(1); await flush();
+  assert.equal(splash.window.visible, true); assert.equal(ready, true);
+  assert.deepEqual(calls, []);
+});
+
+test("ready-to-show and a loaded page show the splash once", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let shows = 0;
+  const { splash } = fixture({ onShow: () => { shows += 1; } });
+  await splash.ready;
+  splash.window.webContents.emit("did-finish-load");
+  t.mock.timers.tick(500); await flush();
+  assert.equal(shows, 1);
+});
+
+test("loading screen waits for mounted content before revealing the restored workspace", async () => {
+  const { splash, win, calls } = fixture();
+  await splash.ready;
+  assert.equal(splash.window.visible, true);
+  let mounted;
+  win.webContents.executeJavaScript = () => new Promise(resolve => { mounted = resolve; });
+  splash.attach(win, { maximized: true });
+  win.webContents.emit("did-finish-load");
+  assert.equal(win.visible, false);
+  mounted(); await flush();
+  assert.equal(win.visible, true); assert.equal(win.maximized, true);
+  assert.equal(win.focused, true); assert.equal(splash.window.destroyed, true);
+  assert.deepEqual(calls, ["finished"]);
+});
+
+test("closing during startup keeps the eventual workspace hidden until tray restore", async () => {
+  const { splash, win, tray, calls, setActive } = fixture();
+  await splash.ready;
+  let prevented = false;
+  splash.window.emit("close", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true); assert.equal(tray.isHidden(), true);
+  splash.attach(win, { maximized: true });
+  win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(win.visible, false); assert.equal(win.skipTaskbar, true);
+  setActive(win); assert.equal(tray.show(), true);
+  assert.equal(win.visible, true); assert.equal(win.skipTaskbar, false);
+  assert.equal(win.maximized, true); assert.equal(tray.isHidden(), false);
+  assert.deepEqual(calls, ["finished"]);
+});
+
+test("the tray's menu and the startup screen speak the app's language, and the tray says it again when it changes", () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  let trayInstance;
+  class Tray extends EventEmitter {
+    constructor() { super(); trayInstance = this; }
+    setToolTip(value) { this.tooltip = value; }
+    setContextMenu(value) { this.menu = value; }
+    isDestroyed() { return false; }
+  }
+  const tray = createSystemTray({ Tray, Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) },
+    iconPath, getWindow: () => null, onQuit: () => {}, t: text.t });
+  assert.deepEqual(trayInstance.menu.map(item => item.label), ["Open OpenMausBot", undefined, "Quit OpenMausBot"]);
+  text.set("pt-br");
+  tray.relabel();
+  assert.deepEqual(trayInstance.menu.map(item => item.label), ["Abrir o OpenMausBot", undefined, "Sair do OpenMausBot"]);
+  assert.equal(trayInstance.tooltip, "OpenMausBot");
+  const html = startupScreenHtml(iconPath, { t: text.t, lang: text.intlTag() });
+  assert.match(html, /<html lang="pt-BR">/);
+  assert.match(html, /<button aria-label="Fechar"/);
+  assert.match(startupScreenHtml(iconPath), /<html lang="en">.*<button aria-label="Close"/s);
+});
+
+test("tray restores minimized windows, supports explicit quit, and disposes once", async () => {
+  const { splash, win, tray, trayInstance, setActive, calls } = fixture();
+  await splash.ready; splash.dispose(); setActive(win);
+  win.minimize(); tray.hide(win); trayInstance.emit("click");
+  assert.equal(win.minimized, false); assert.equal(win.focused, true);
+  assert.equal(win.skipTaskbar, false);
+  trayInstance.menu[2].click();
+  tray.destroy(); tray.destroy();
+  assert.deepEqual(calls, ["finished", "quit", "destroy-tray"]);
+  win.destroy(); assert.equal(tray.show(), false);
+});
+
+test("renderer crash reveals the workspace recovery surface", async () => {
+  const { splash, win } = fixture(); await splash.ready; splash.attach(win);
+  win.webContents.emit("render-process-gone");
+  assert.equal(win.visible, true); assert.equal(splash.window.destroyed, true);
+});
+
+test("a renderer that never mounts has a bounded fallback", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { splash, win } = fixture(); await splash.ready; splash.attach(win);
+  t.mock.timers.tick(9999); assert.equal(win.visible, false);
+  t.mock.timers.tick(1); assert.equal(win.visible, true);
+  assert.equal(splash.window.destroyed, true);
+});
+
+test("quit never reveals a waiting workspace", async () => {
+  let quitting = false;
+  const { splash, win } = fixture({ isQuitting: () => quitting });
+  await splash.ready; splash.attach(win); quitting = true; splash.dispose();
+  win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(win.visible, false); assert.equal(splash.window.destroyed, true);
+});
+
+test("without a Windows tray or on another platform splash close quits", async () => {
+  for (const options of [{ platform: "darwin" }, { onHide: undefined }]) {
+    const { splash, calls } = fixture(options); await splash.ready;
+    splash.window.emit("close", { preventDefault() {} });
+    assert.deepEqual(calls, ["quit"]); splash.dispose();
+  }
+});
+
+test("the loading screen says what the app waits on, before its page has loaded and after", async () => {
+  const ran = [];
+  class Said extends Window {
+    constructor(options) { super(options); this.webContents.executeJavaScript = async (code) => { ran.push(code); }; }
+  }
+  const { splash } = fixture({ BrowserWindow: Said });
+  splash.status("Waking My Cloud…");
+  splash.window.webContents.emit("did-finish-load");
+  assert.equal(ran.length, 2);
+  for (const code of ran) { assert.match(code, /document\.querySelector\('\.status'\)/); assert.ok(code.includes(JSON.stringify("Waking My Cloud…"))); }
+  splash.dispose();
+  splash.status("Opening My Cloud…");
+  assert.equal(ran.length, 2, "nothing after it is gone");
+});
+
+test("the startup screen says how the workspace came up, once", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ways = [];
+  const painted = fixture({ onReveal: via => ways.push(via) });
+  await painted.splash.ready;
+  painted.win.webContents.executeJavaScript = () => Promise.resolve();
+  painted.splash.attach(painted.win);
+  painted.win.webContents.emit("did-finish-load"); await flush();
+  painted.win.webContents.emit("render-process-gone");
+  const crashed = fixture({ onReveal: via => ways.push(via) });
+  await crashed.splash.ready; crashed.splash.attach(crashed.win);
+  crashed.win.webContents.emit("render-process-gone");
+  const slow = fixture({ onReveal: via => ways.push(via) });
+  await slow.splash.ready; slow.splash.attach(slow.win);
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(ways, ["painted", "crashed", "timeout"]);
+  const hidden = fixture({ onReveal: via => ways.push(via) });
+  await hidden.splash.ready;
+  hidden.splash.window.emit("close", { preventDefault() {} });
+  hidden.win.webContents.executeJavaScript = () => Promise.resolve();
+  hidden.splash.attach(hidden.win);
+  hidden.win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(ways.at(-1), "hidden");
+});
+
+test("on Linux the lending indicator borrows the one tray icon and hands Open and Quit back", () => {
+  const made = [], opened = [];
+  class Tray extends EventEmitter {
+    constructor() { super(); made.push(this); }
+    setToolTip(value) { this.tooltip = value; }
+    setTitle(value) { this.title = value; }
+    setContextMenu(value) { this.menu = value; }
+    isDestroyed() { return this.destroyed ?? false; }
+    destroy() { this.destroyed = true; }
+  }
+  const fakes = { Menu: { buildFromTemplate: value => value }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) }, iconPath };
+  const win = new Window();
+  const tray = createSystemTray({ ...fakes, Tray, getWindow: () => win, onQuit: () => {} });
+  const labels = () => made[0].menu.filter(item => item.label).map(item => item.label);
+  const openQuit = labels();
+  const lending = createLendingIndicator({ ...fakes, Tray: tray.Borrowed,
+    onPause: () => {}, onResume: () => {}, onActivity: () => {}, device: "PC" });
+  win.on("show", () => opened.push("show"));
+
+  lending.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.equal(made.length, 1, "no second tray icon");
+  assert.match(made[0].tooltip, /^OpenMausBot: My Cloud/);
+  assert.ok(labels().includes("Pause"));
+  tray.relabel();
+  assert.ok(labels().includes("Pause"), "a language change does not put Open and Quit over the lending menu");
+  made[0].emit("click");
+  assert.deepEqual(opened, ["show"], "a click still opens the window");
+
+  lending.update({ clouds: [], using: [], paused: false });
+  assert.equal(made[0].isDestroyed(), false);
+  assert.equal(made[0].tooltip, "OpenMausBot");
+  assert.deepEqual(labels(), openQuit);
+
+  lending.update({ clouds: ["My Cloud"], using: [], paused: false });
+  assert.equal(made.length, 1);
+  assert.ok(labels().includes("Pause"), "lending again borrows the icon again");
+  lending.destroy(); tray.destroy();
+  assert.equal(made[0].isDestroyed(), true);
+});

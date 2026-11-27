@@ -1,0 +1,118 @@
+import { api, desktopApprovalBridge, persistBotUpdate, persistTaskApproval, type Bot } from "@/state/store";
+import type { Routine } from "./routines";
+import type { BotCreationDraft } from "./bot-creation-draft";
+import { imageAttachmentFromFile } from "./composer-attachments";
+import type { BotVisibility } from "../../shared/wire";
+import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar";
+import { t } from "@/lib/i18n";
+
+export async function preparedBotTemplate(draft: BotCreationDraft) {
+  const template = draft.export();
+  if (template.profile.avatarUrl?.startsWith("blob:")) {
+    if (!draft.avatarFile) throw new Error(t("newBot.avatar.chooseAgain"));
+    const uploaded = await imageAttachmentFromFile(draft.avatarFile);
+    const avatarUrl = uploaded && botAvatarUrlFromStoredPath(uploaded.path);
+    if (!avatarUrl) throw new Error(t("newBot.avatar.storeFailed"));
+    template.profile.avatarUrl = avatarUrl;
+  }
+  return template;
+}
+
+/** File setup and native consent finish before Chief handover or routine activation can affect other work. */
+export async function createConfiguredBot(
+  draft: BotCreationDraft,
+  request: typeof api = api,
+  update: typeof persistBotUpdate = persistBotUpdate,
+  approvals = desktopApprovalBridge(),
+  visibility?: BotVisibility,
+  reportsTo?: string,
+): Promise<{ bot: Bot; warnings: string[]; paused?: true }> {
+  const template = await preparedBotTemplate(draft);
+  const { chiefOfStaff, managedSections, toolScope, modelSelection, ...profile } = template.profile;
+  if (!profile.name?.trim()) throw new Error(t("newBot.nameRequired"));
+  const preset = draft.preset;
+  const chosenAi = modelSelection?.instanceId && modelSelection.model ? { modelSelection, requireAvailableModel: true } : {};
+  const response = await request<{ bot: Bot; paused?: true }>("/api/bots", {
+    method: "POST", body: JSON.stringify({ name: profile.name, title: profile.title,
+      description: profile.description, ...chosenAi, section: profile.section,
+      useDefaults: false, ...(visibility !== undefined ? { visibility } : {}), ...(reportsTo ? { reportsTo } : {}),
+      ...(Object.hasOwn(template.profile, "toolScope") ? { settings: { toolScope } } : {}),
+      ...(preset ? { preset: preset.id } : {}) }),
+  });
+  let bot = response.bot;
+  const routines: Array<{ id: string; enabled: boolean }> = [];
+  const warnings: string[] = [];
+  try {
+    const patched = await update(bot.id, { ...profile, ...draft.consent }, new AbortController().signal,
+      request, approvals, bot);
+    bot = { ...bot, ...patched };
+    if (profile.approvalMode === "full" || profile.approvalMode === "custom") {
+      if (patched.approvalMode !== profile.approvalMode) {
+        throw new Error(t("newBot.approvalNotGranted"));
+      }
+      const granted = await persistTaskApproval(bot.id, bot.threadId, {
+        approvalMode: profile.approvalMode,
+        acknowledgeLocalAuto: draft.consent.acknowledgeLocalAuto === true,
+      }, approvals, request);
+      if (granted.approvalMode !== profile.approvalMode) {
+        throw new Error(t("newBot.threadApprovalNotGranted"));
+      }
+    }
+    const botId = bot.id;
+    // Memory, skills and routines are separate stores on the server: each kind is written in its own order, the three
+    // side by side. Every request has answered before a failure is reported, so cleanup sees each routine that was made.
+    const setup = await Promise.allSettled([
+      (async () => {
+        for (const [path, text] of Object.entries(template.memory)) {
+          if (preset?.notes.includes(path)) continue;
+          await request(`/api/bots/${botId}/memory/file`, {
+            method: "PUT", body: JSON.stringify({ path, text }),
+          });
+        }
+      })(),
+      (async () => {
+        for (const skill of template.skills) {
+          if (preset?.skills.includes(skill.name)) continue;
+          await request(`/api/bots/${botId}/skill-template`, { method: "POST", body: JSON.stringify(skill) });
+        }
+      })(),
+      (async () => {
+        for (const routine of template.routines) {
+          const result = await request<{ routine: Routine }>("/api/routines", {
+            method: "POST", body: JSON.stringify({ ...routine, botId, enabled: false }),
+          });
+          routines.push({ id: result.routine.id, enabled: routine.enabled !== false });
+        }
+      })(),
+    ]);
+    const failed = setup.find((step) => step.status === "rejected");
+    if (failed) throw failed.reason;
+  } catch (error) {
+    const cleanup: string[] = [];
+    for (const routine of routines) {
+      try { await request(`/api/routines/${routine.id}`, { method: "DELETE" }); }
+      catch { cleanup.push(`routine ${routine.id}`); }
+    }
+    try { await request(`/api/bots/${bot.id}`, { method: "DELETE" }); }
+    catch { cleanup.push(`bot ${bot.name} (${bot.id})`); }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(cleanup.length ? `${message}. Cleanup failed for ${cleanup.join(", ")}; remove them before retrying.` : message);
+  }
+  // Creation is complete: never delete a bot whose routine may have run, undo a Chief handover, or invite a duplicate retry.
+  if (chiefOfStaff) {
+    try {
+      const result = await request<{ bot: Bot }>(`/api/bots/${bot.id}`, {
+        method: "PATCH", body: JSON.stringify({ chiefOfStaff, managedSections, acknowledgePeerScope: true }),
+      });
+      bot = { ...bot, ...result.bot };
+    } catch (error) {
+      warnings.push(t("newBot.warning.chiefOfStaff", { error: error instanceof Error ? error.message : String(error) }));
+    }
+  }
+  const switchedOn = await Promise.allSettled(routines.filter(routine => routine.enabled).map(routine =>
+    request(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) })));
+  for (const outcome of switchedOn) {
+    if (outcome.status === "rejected") warnings.push(t("newBot.warning.routine", { error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) }));
+  }
+  return { bot, warnings, ...(response.paused ? { paused: true as const } : {}) };
+}

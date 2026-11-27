@@ -1,0 +1,74 @@
+// /api/move/freeze: the desktop app freezes this computer's copy at the move's quiet moment (POST), lifts it when the
+// move can't finish or My Cloud ended (DELETE; `{ automations: "off" }` when another computer is home now), and asks who
+// is still busy (GET); POST /api/move/forget deletes the frozen copy once the move is long done. Every other change a
+// frozen server refuses here, before any other route, and a phone still paired with it hears where the bots went on every route.
+import { z } from "zod";
+
+import { type MoveFreeze, phoneMovedRefusal } from "../move-freeze.ts";
+import type { MoveWait } from "../move-waits.ts";
+import { PASS, type RouteHandler } from "./table.ts";
+
+export interface MoveFreezeRouteDeps {
+  freeze: MoveFreeze;
+  /** What the move still waits for (move-waits.ts): `busy` is its name, "" when it has none, and `what` says what it
+   * is; null when nothing holds the move. */
+  busy(): MoveWait | null;
+  /** Starts this server again, as a restored workspace does. */
+  restart(): void;
+  /** Switches off every automation here (move-freeze.ts `switchAutomationsOff`). */
+  automationsOff?(): Promise<unknown>;
+  platform?: NodeJS.Platform;
+}
+
+const freezeBody = z.object({ cloud: z.string().url().max(300).optional(), place: z.string().trim().min(1).max(120).optional() });
+const thawBody = z.object({ automations: z.literal("off").optional() });
+
+export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff, platform = process.platform }: MoveFreezeRouteDeps): RouteHandler {
+  return async ({ req, res, path, method, auth, json, readBody }) => {
+    // Health still answers: without it the companion tells the phone OpenMausBot isn't ready here, and the phone keeps
+    // trying instead of reading the reason.
+    if (auth.kind === "loopback" && auth.companionDevice && freeze.frozen() && freeze.lifts() && !(method === "GET" && path === "/api/health")) {
+      const place = freeze.place();
+      return json(res, 410, { error: phoneMovedRefusal(place, platform), code: "home_moved", ...(place ? { place } : {}) });
+    }
+    if (path === "/api/move/forget") {
+      if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
+      if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+      if (!freeze.forget()) return json(res, 409, { error: "Only a computer whose bots moved to My Cloud deletes its copy." });
+      json(res, 200, { forgot: true });
+      restart();
+      return;
+    }
+    if (path === "/api/move/freeze") {
+      if (auth.kind !== "loopback") return json(res, 403, { error: "Only OpenMausBot on this computer can do this." });
+      if (method === "GET") {
+        const who = busy();
+        const cloud = freeze.cloud(), place = freeze.place();
+        return json(res, 200, { frozen: freeze.frozen(), ...(freeze.frozen() && cloud ? { cloud } : {}), ...(freeze.frozen() && place ? { place } : {}), ...(who === null ? {} : { busy: who.name, what: who.what }) });
+      }
+      if (method === "POST") {
+        const body = freezeBody.safeParse(await readBody(req, 4096));
+        if (!body.success) return json(res, 400, { error: "send { cloud, place? }: the home's address, and its name when it is a server of the person's own" });
+        if (!freeze.frozen()) {
+          const who = busy();
+          if (who !== null) return json(res, 409, { error: "A bot is still working.", busy: who.name, what: who.what });
+          freeze.freeze(body.data.cloud ?? null, body.data.place ?? null);
+        }
+        return json(res, 200, { frozen: true });
+      }
+      if (method === "DELETE") {
+        const body = thawBody.safeParse(await readBody(req, 4096));
+        if (!body.success) return json(res, 400, { error: 'send {}, or { automations: "off" } to lift it with every automation off' });
+        if (!freeze.lifts()) return json(res, 409, { error: freeze.refusal() });
+        if (body.data.automations === "off") {
+          if (!automationsOff) return json(res, 409, { error: "This server can't switch its automations off." });
+          await automationsOff();
+        }
+        return freeze.unfreeze() ? json(res, 200, { frozen: false }) : json(res, 409, { error: freeze.refusal() });
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
+    const refused = freeze.refuses(method, path);
+    return refused ? json(res, 409, { error: refused, code: "moved" }) : PASS;
+  };
+}

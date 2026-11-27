@@ -1,0 +1,17 @@
+/node_modules
+/.source
+/coverage
+/.next
+/.open-next
+/out
+/build
+/public/app-icon.svg
+/public/screenshots
+*.tsbuildinfo
+.DS_Store
+*.pem
+.env*.local
+.vercel
+next-env.d.ts
+cloudflare-env.d.ts
+.env*

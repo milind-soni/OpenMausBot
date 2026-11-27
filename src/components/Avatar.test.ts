@@ -1,0 +1,166 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import {
+  BotAvatar,
+  InitialsAvatar,
+  MausAvatar,
+  resolveBotAvatarOutcome,
+  type BotAvatarProps,
+  type MausAvatarProps,
+} from "./Avatar";
+import { MASCOT_BODIES } from "../../shared/mascot-bodies";
+
+const render = (props: Partial<MausAvatarProps>) =>
+  renderToStaticMarkup(createElement(MausAvatar, { color: "green", animated: false, ...props }));
+
+const renderBot = (bot: Partial<BotAvatarProps["bot"]>) =>
+  renderToStaticMarkup(
+    createElement(BotAvatar, { bot: { color: "green", ...bot }, animated: false }),
+  );
+
+describe("MausAvatar body", () => {
+  it("wears the cursor when no body is given", () => {
+    expect(render({})).toContain(MASCOT_BODIES.cursor.fit);
+  });
+
+  it("draws every shape but the cursor with the Open Bot Avatar engine", () => {
+    expect(render({ bodyId: "star" })).toContain('data-object-body="star"');
+    expect(render({ bodyId: "circle" })).toContain('data-object-body="circle"');
+    expect(render({})).not.toContain("data-object-body");
+  });
+
+  it("paints the cursor in a gradient of its custom colour", () => {
+    const stops = (markup: string) => [...markup.matchAll(/stop-color="([^"]+)"/g)].map((m) => m[1]);
+    expect(stops(render({ bodyColor: "#123456" }))).toContain("#123456");
+    expect(stops(render({ bodyColor: "not a colour" }))).not.toContain("not a colour");
+  });
+
+  it("falls back to the cursor for an unknown body", () => {
+    // SAFETY: "hexagram" is deliberately not a MascotBodyId, to exercise the runtime fallback for persisted or streamed
+    // data.
+    expect(render({ bodyId: "hexagram" as MausAvatarProps["bodyId"] })).toContain(
+      MASCOT_BODIES.cursor.fit,
+    );
+  });
+
+  it("paints the cursor with the per-bot gradient, never a flat black fill", () => {
+    const markup = render({});
+    expect(markup).not.toContain('fill="#000000"');
+    expect(markup).not.toContain("{{GRADIENT}}");
+    expect(markup).toContain("url(#");
+  });
+});
+
+describe("mascot facial feature colors", () => {
+  it.each(["white", "black"] as const)("uses %s for both eyes and mouth on every body type", (mascotFaceColor) => {
+    const ink = mascotFaceColor === "white" ? "#ffffff" : "#000000";
+    for (const mascotBody of ["cursor", "pumpkin", "vampire"] as const) {
+      for (const color of ["green", "chrome"] as const) {
+        const markup = renderBot({ color, mascotBody, mascotFaceColor });
+        expect(markup).toContain(`fill="${ink}"`);
+        expect(markup).toContain(`stroke="${ink}"`);
+        expect(markup).not.toContain('visibility="hidden"');
+      }
+    }
+  });
+
+  it("cuts the features out of the body when no colour is set", () => {
+    expect(renderBot({ color: "chrome", mascotFaceColor: null })).toContain('stroke="#1E2833"');
+    for (const markup of [renderBot({ mascotBody: "ghost" }), renderBot({})]) {
+      expect(markup).toContain("<mask");
+      expect(markup).not.toMatch(/stroke="#(?:ffffff|0d0a10)"/);
+    }
+  });
+
+  it("does not paint features over an uploaded image", () => {
+    const markup = renderBot({ mascotFaceColor: "black", avatarUrl: "/api/attachments/photo.png", avatarCrop: "circle" });
+    expect(markup).toContain("<img");
+    expect(markup).not.toContain("<svg");
+  });
+});
+
+describe("BotAvatar's two avatar outcomes", () => {
+  it("zooms and positions a custom image inside its crop", () => {
+    const markup = renderBot({
+      avatarUrl: "/api/attachments/cat.webp",
+      avatarCrop: "circle",
+      avatarZoom: 2,
+      avatarFocusX: 0.25,
+      avatarFocusY: 0.75,
+    });
+    expect(markup).toContain("scale(2)");
+    expect(markup).toContain("25% 75%");
+    expect(markup).toContain("border-radius:50%");
+  });
+
+  it("renders a flat cropped image for circle/rounded/square, with no mascot at all", () => {
+    const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "circle" });
+    expect(markup).toContain("<img");
+    expect(markup).not.toContain("<svg");
+  });
+
+  it("shows the image as it is, with no mascot face painted on it", () => {
+    const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "square" });
+    expect(markup).toContain("border-radius:0");
+    expect(markup).toContain("<img");
+    expect(markup).not.toContain("<image");
+    expect(markup).not.toContain("radialGradient");
+  });
+
+  it("renders the gradient mascot when the crop is mascot, image or not", () => {
+    const markup = renderBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: "mascot" });
+    expect(markup).not.toContain("<img");
+    expect(markup).toContain("<svg");
+  });
+
+  it("falls back to the gradient mascot when a flat crop has no valid image", () => {
+    const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
+    expect(markup).not.toContain("<img");
+    expect(markup).toContain("<svg");
+  });
+});
+
+describe("theme hooks on faces", () => {
+  it("marks a bot's picture, its gradient, carved and object mascots, and leaves a decorative mascot unmarked", () => {
+    expect(renderBot({ avatarUrl: "/api/attachments/a.png", avatarCrop: "circle" })).toMatch(/<span data-avatar="picture" data-avatar-kind="bot"/);
+    expect(renderBot({})).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "obj-ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(render({})).not.toContain("data-avatar");
+  });
+
+  it("marks the person's picture and their initials", () => {
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL", avatarUrl: "/api/attachments/me.png" }))).toMatch(/<img data-avatar="picture" data-avatar-kind="person"/);
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL" }))).toMatch(/<div data-avatar="initials" data-avatar-kind="person"/);
+  });
+});
+
+describe("resolveBotAvatarOutcome", () => {
+  // imageFailed is set by the <img>'s onError, which renderToStaticMarkup never fires, so the decision is a pure
+  // function.
+  it("falls back to the gradient mascot for an image that failed to load", () => {
+    expect(
+      resolveBotAvatarOutcome({ avatarCrop: "circle", hasUrl: true, imageFailed: true }),
+    ).toBe("gradientMascot");
+  });
+
+  it("renders a good flat image flat", () => {
+    expect(
+      resolveBotAvatarOutcome({ avatarCrop: "rounded", hasUrl: true, imageFailed: false }),
+    ).toBe("flatImage");
+  });
+
+  it("keeps the mascot crop on the gradient mascot even with a loaded image", () => {
+    expect(
+      resolveBotAvatarOutcome({ avatarCrop: "mascot", hasUrl: true, imageFailed: false }),
+    ).toBe("gradientMascot");
+  });
+
+  it("falls back to the gradient mascot when there is no image at all", () => {
+    expect(
+      resolveBotAvatarOutcome({ avatarCrop: "square", hasUrl: false, imageFailed: false }),
+    ).toBe("gradientMascot");
+  });
+});

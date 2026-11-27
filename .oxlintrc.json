@@ -1,0 +1,38 @@
+{
+  "ignorePatterns": [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "dist/**",
+    "dist-electron/**",
+    "dist-native/**",
+    "dist-server/**",
+    "electron/vendor/**",
+    "release/**",
+    "third_party/**",
+    "packages/phone-protocol/src/open-bot-avatar/**",
+    "electron/resources/**"
+  ],
+  "overrides": [
+    {
+      "files": ["packages/phone-protocol/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [{ "group": ["node:*"], "message": "The phone imports this package: no Node modules." }]
+        }],
+        "no-restricted-globals": ["error",
+          { "name": "window", "message": "The phone imports this package: no DOM." },
+          { "name": "document", "message": "The phone imports this package: no DOM." }
+        ]
+      }
+    }
+  ]
+}

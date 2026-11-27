@@ -1,0 +1,64 @@
+// xAI API driver over the OpenAI chat-completions contract, with the shared retry policy.
+import type { ProviderDriver } from "../contracts.ts";
+import { createOpenAIChatRuntime } from "./openai-chat.ts";
+
+const DRIVER_KIND = "grok";
+const DEFAULT_URL = "https://api.x.ai/v1";
+const MODELS = {
+  default: "grok-4.7",
+  options: [
+    { id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 },
+    { id: "grok-4", label: "Grok 4" },
+    { id: "grok-4-fast", label: "Grok 4 Fast" },
+    { id: "grok-3-mini", label: "Grok 3 Mini" },
+  ],
+};
+
+export interface GrokConfig {
+  tools?: boolean;
+  url: string;
+  apiKeyEnv: string;
+}
+
+function decodeConfig(raw: unknown): GrokConfig {
+  const config = (raw ?? {}) as Record<string, unknown>;
+  if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
+  return {
+    ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
+    url: typeof config.url === "string" ? config.url : DEFAULT_URL,
+    apiKeyEnv: typeof config.apiKeyEnv === "string" ? config.apiKeyEnv : "XAI_API_KEY",
+  };
+}
+
+export const GrokDriver: ProviderDriver<GrokConfig> = {
+  driverKind: DRIVER_KIND,
+  metadata: { displayName: "Grok (API)", supportsMultipleInstances: true },
+  models: MODELS,
+  decodeConfig,
+  defaultConfig: () => decodeConfig({}),
+
+  async create(input) {
+    const { config } = input;
+    const apiKey = input.environment[config.apiKeyEnv] ?? process.env[config.apiKeyEnv] ?? "";
+    return createOpenAIChatRuntime({
+      input,
+      driverKind: DRIVER_KIND,
+      apiKey,
+      apiUrl: config.url,
+      tools: config.tools,
+      models: () => MODELS,
+      requestBody: (model, messages, stream) => ({ model, messages, stream }),
+      httpErrorLabel: "xAI",
+      missingKeyError: `Save an xAI API key in Settings → AI → Providers, or set ${config.apiKeyEnv}.`,
+      unavailableReason: "No xAI API key — open Settings → AI → Providers.",
+      timeoutMs: 120_000,
+      retryScale: Number(process.env.FAKE_GROK_RETRY_SCALE ?? "1"),
+      generateModel: () => "grok-3-mini",
+      nativeLog: {
+        source: "xai.chat.completions",
+        outgoing: (_turn, messages, model) => ({ model, messageCount: messages.length }),
+        incoming: ({ text, usage }) => ({ text, usage }),
+      },
+    });
+  },
+};

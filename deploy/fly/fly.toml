@@ -1,0 +1,58 @@
+# OMB Cloud Pro home machine: one Fly app per customer (docs/cloud-pro.md).
+# The Admin creates it through the Machines API with these settings; this file
+# is the same shape for a manual deploy. Fill the {{…}} values per customer.
+# Create each app in its own private network (`fly apps create --network
+# <app>`, or `network` on POST /v1/apps) so one customer's machine can never
+# reach another's over Fly's 6PN.
+
+app = "{{FLY_APP}}"
+primary_region = "{{REGION}}"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  image = "{{IMAGE}}"
+
+# Not secret. The Admin (openmaus-cloud) sets these on the machine and
+# applies two Fly secrets, never in this file:
+#   OMB_CLOUD_ADMIN_URL         the Cloud origin, e.g. https://cloud.openmausbot.com
+#   OMB_CLOUD_BOOTSTRAP_SECRET  the key the Admin signs pairing requests with
+# Cloud Pro includes no AI: there is no model gateway to configure. The person
+# signs in on the machine with their own Claude or ChatGPT account, or an API key.
+[env]
+  OMB_CLOUD_ROLE = "home"
+  OMB_CLOUD_MACHINE_ID = "{{MACHINE_ID}}"
+  OMB_PUBLIC_URL = "https://{{FLY_APP}}.fly.dev"
+
+[[mounts]]
+  source = "omb_home"
+  destination = "/data"
+  initial_size = "10gb"
+  snapshot_retention = 7
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # The home machine runs routines and Slack around the clock.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "15s"
+    timeout = "5s"
+    method = "GET"
+    path = "/api/health"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "2gb"

@@ -1,0 +1,151 @@
+import { Children, createElement, isValidElement, type ReactElement, type ReactNode, type RefObject } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Bot } from "@/state/store";
+import type { Routine, RoutineRun } from "../../shared/routines";
+
+const fixture = vi.hoisted(() => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+  return { calls: [] as { ref: RefObject<unknown>; onClose: () => void }[] };
+});
+vi.mock("@/hooks/use-modal-dialog", () => ({
+  useModalDialog: (ref: RefObject<unknown>, onClose: () => void) => { fixture.calls.push({ ref, onClose }); },
+}));
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  return { ...original, useStore: () => ({ state: original.initialState, dispatch: vi.fn() }) };
+});
+vi.mock("./DesktopCapabilities", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./DesktopCapabilities")>(),
+  useDesktopCapabilities: () => ({ capabilities: { host: {}, dictation: { available: false } }, ready: true }),
+}));
+vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+
+const { setLocale, t } = await import("@/lib/i18n");
+const { EventDetails, EventEditor, PausedList } = await import("./RoutineCalendarPage");
+
+const bot = {
+  id: "runner", threadId: "execution", name: "Runner", title: "", description: "", color: "green",
+  notifications: true, unread: false, busy: false, messages: [],
+  modelSelection: { instanceId: "test", model: "test" },
+} as Bot;
+const routine: Routine = {
+  id: "weekly", name: "Weekly digest", prompt: "Summarise the week", target: "bot", botId: bot.id,
+  runOn: "maus", enabled: false, schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30,
+  nextRunAt: null, createdAt: 1, updatedAt: 1,
+};
+
+type Props = { children?: ReactNode; ref?: unknown; role?: string; tabIndex?: number; onClick?: () => void; [key: string]: unknown };
+function nodes(value: ReactNode): ReactElement<Props>[] {
+  return Children.toArray(value).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
+}
+function render(element: () => ReactNode) {
+  let tree: ReactNode;
+  function Capture() { tree = element(); return tree; }
+  renderToStaticMarkup(createElement(Capture));
+  return nodes(tree);
+}
+
+beforeEach(() => { fixture.calls = []; });
+afterAll(() => vi.unstubAllGlobals());
+afterEach(() => setLocale("en"));
+
+describe.each([
+  {
+    name: "paused routines",
+    closeLabel: t("routines.paused.close"),
+    render: (onClose: () => void) => PausedList({ routines: [routine], bots: [bot], groups: [], onClose, onEdit: vi.fn(), onOpenRoom: vi.fn() }),
+  },
+])("calendar $name dialog", ({ closeLabel, render: dialog }) => {
+  it("hands its dialog element to the modal keyboard handling", () => {
+    const onClose = vi.fn();
+    const tree = render(() => dialog(onClose));
+    const element = tree.find((node) => node.props.role === "dialog")!;
+    expect(fixture.calls).toHaveLength(1);
+    expect(element.props.ref).toBe(fixture.calls[0]!.ref);
+    expect(element.props.tabIndex).toBe(-1);
+    fixture.calls[0]!.onClose();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("names its close button", () => {
+    const onClose = vi.fn();
+    const close = render(() => dialog(onClose)).find((node) => node.type === "button" && node.props["aria-label"] === closeLabel);
+    expect(close).toBeDefined();
+    close!.props.onClick!();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("calendar event details drawer", () => {
+  const drawer = (onClose: () => void) => EventDetails({
+    item: { kind: "routine", id: routine.id, at: 1, durationMinutes: 30, routine, run: null },
+    bots: [bot], onClose, onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
+  });
+
+  it("is a labelled drawer beside the calendar, not a focus-trapping modal", () => {
+    const tree = render(() => drawer(vi.fn()));
+    expect(tree.find((node) => node.type === "aside" && node.props["aria-label"] === t("routines.drawer.label"))).toBeDefined();
+    expect(tree.some((node) => node.props.role === "dialog")).toBe(false);
+    expect(fixture.calls).toHaveLength(0);
+  });
+
+  it("shows a goal with no group as the bot's own, with no group to open", () => {
+    const ownGoal: Routine = { ...routine, target: "room-goal" };
+    const html = renderToStaticMarkup(createElement(() => EventDetails({
+      item: { kind: "routine", id: ownGoal.id, at: 1, durationMinutes: 30, routine: ownGoal, run: null },
+      bots: [bot], onClose: vi.fn(), onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
+    })));
+    expect(html).toContain(t("routines.drawer.lead"));
+    expect(html).toContain("Runner");
+    expect(html).not.toContain(">Group<");
+    expect(html).not.toContain("Group unavailable");
+    expect(html).not.toContain("Open group");
+  });
+
+  it("shows a goal run that had no group as the bot's own, even after the routine was given a room", () => {
+    const roomGoal: Routine = { ...routine, target: "room-goal", groupId: "room" };
+    const run: RoutineRun = { id: "run", routineId: roomGoal.id, routineName: roomGoal.name, target: "room-goal", botId: bot.id, runOn: "maus", scheduledFor: 1, status: "running", manual: false, createdAt: 1 };
+    const html = renderToStaticMarkup(createElement(() => EventDetails({
+      item: { kind: "routine", id: roomGoal.id, at: 1, durationMinutes: 30, routine: roomGoal, run },
+      bots: [bot], onClose: vi.fn(), onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),
+    })));
+    expect(html).toContain("Runner");
+    expect(html).not.toContain("Group unavailable");
+  });
+
+  it("names its close button", () => {
+    const onClose = vi.fn();
+    const close = render(() => drawer(onClose)).find((node) => node.type === "button" && node.props["aria-label"] === t("routines.drawer.close"));
+    expect(close).toBeDefined();
+    close!.props.onClick!();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("calendar event editor", () => {
+  it("dims the page behind the editor without blurring it", () => {
+    const tree = render(() => EventEditor({
+      seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine },
+      bots: [bot], plain: true, onClose: vi.fn(), onSavedCall: vi.fn(),
+    }));
+    const overlay = tree.find((node) => String(node.props.className ?? "").includes("fixed inset-0"))!;
+    expect(overlay.props.className).toContain("bg-black/65");
+    expect(overlay.props.className).not.toMatch(/backdrop-blur|backdrop-filter/);
+  });
+
+  it.each([
+    ["en", "Room no longer exists. Choose another.", "Save"],
+    ["pt-br", "O grupo não existe mais. Escolha outro.", "Salvar"],
+  ])("cannot save a room goal whose room is gone until another room is chosen in %s", (locale, notice, save) => {
+    setLocale(locale);
+    const orphaned: Routine = { ...routine, target: "room-goal", groupId: "gone" };
+    const html = renderToStaticMarkup(createElement(() => EventEditor({
+      seed: { kind: "routine", at: 1, durationMinutes: 30, botIds: [bot.id], routine: orphaned },
+      bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
+    })));
+    expect(html).toContain(notice);
+    expect(html).toMatch(new RegExp(`<button[^>]*\\bdisabled=""[^>]*>(?:(?!<\\/button>).)*${save}<\\/button>`, "s"));
+  });
+});

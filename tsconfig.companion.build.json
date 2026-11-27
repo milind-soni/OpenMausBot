@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-companion",
+    "rootDir": "companion/src",
+    "rewriteRelativeImportExtensions": true,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "companion/src"
+  ],
+  "exclude": [
+    "companion/src/e2e/gen-vectors.ts",
+    "companion/src/e2e/interop-server.ts"
+  ]
+}

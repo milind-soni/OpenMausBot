@@ -1,0 +1,338 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { PREVIEW_MAX_BYTES } from "@/lib/composer-attachments";
+import { AttachmentGallery, collectMessageFiles, isAudioAttachment, isVideoAttachment, loadMessageAudio, loadMessageVideo, MessageAttachmentGallery, splitMessageAttachments } from "./AttachmentGallery";
+
+const message = { threadId: "thread/one", messageId: "message two" };
+const file = { path: "/workspace/demo.mp4", name: "demo.mp4", linked: true };
+const image = { path: "/store/123e4567-e89b-42d3-a456-426614174000.png", name: "Overview.png", private: true };
+afterEach(() => vi.unstubAllGlobals());
+
+describe("bot-attached files", () => {
+  const attachments = [
+    { kind: "image" as const, path: "/store/aaaa.png", mime: "image/png" },
+    { kind: "file" as const, path: "/store/bbbb.mp3", mime: "audio/mpeg", name: "song.mp3" },
+    { kind: "file" as const, path: "/store/cccc.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", name: "deck.pptx" },
+  ];
+
+  it("splits a message's attachments into images and private files, keeping display names", () => {
+    expect(splitMessageAttachments(attachments)).toEqual({
+      images: ["/store/aaaa.png"],
+      files: [
+        { path: "/store/bbbb.mp3", name: "song.mp3", private: true },
+        { path: "/store/cccc.pptx", name: "deck.pptx", private: true },
+      ],
+      originals: {},
+    });
+    expect(splitMessageAttachments(undefined)).toEqual({ images: [], files: [], originals: {} });
+    expect(splitMessageAttachments([
+      ...attachments, { kind: "audio", path: "/store/voice.mp3" }, { kind: "future", path: "/store/unknown" },
+    ])).toEqual(splitMessageAttachments(attachments));
+  });
+
+  it("remembers the original of each image and file a bot attached, never of a voice note", () => {
+    const split = splitMessageAttachments([
+      { ...attachments[0]!, source: "/Users/me/Pictures/chart.png" },
+      { ...attachments[2]!, source: "C:\\Users\\me\\deck.pptx" },
+      { kind: "audio", path: "/store/voice.mp3", source: "/Users/me/voice.mp3" },
+    ]);
+    expect(split.originals).toEqual({ "/store/aaaa.png": "/Users/me/Pictures/chart.png", "/store/cccc.pptx": "C:\\Users\\me\\deck.pptx" });
+    expect(split.images).toEqual(["/store/aaaa.png"]);
+  });
+
+  it("shows an attached clip as a play button and a deck as a save chip, without repeating a linked one", () => {
+    const render = (text: string) => renderToStaticMarkup(createElement(MessageAttachmentGallery, { text, attachments, message }));
+    const html = render("");
+    expect(html).toContain("song.mp3");
+    expect(html).toContain("deck.pptx");
+    expect(html).toContain("Play song.mp3");
+    expect(render("Done: [the deck](/store/cccc.pptx)")).toBe(html);
+  });
+
+  it("does not turn an unattached audio path into a player", () => {
+    const html = renderToStaticMarkup(createElement(AttachmentGallery, { files: [{ path: "/store/x.mp3", name: "x.mp3" }], message }));
+    expect(html).not.toContain("Play x.mp3");
+  });
+});
+
+describe("audio attachments", () => {
+  const clip = { path: "/store/song.mp3", name: "song.mp3", private: true };
+
+  it("recognizes audio by suffix only", () => {
+    for (const name of ["a.mp3", "a.M4A", "a.wav", "a.ogg", "a.opus", "a.flac", "a.aac"]) expect(isAudioAttachment(`/store/${name}`)).toBe(true);
+    expect(isAudioAttachment("/store/a.mp3.exe")).toBe(false);
+    expect(isAudioAttachment("/store/a.mp4")).toBe(false);
+  });
+
+  const route = "/api/threads/thread%2Fone/messages/message%20two/file";
+  const asks = (body: unknown) => [route, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: expect.any(AbortSignal),
+  }];
+
+  it("streams audio of any size through this message's own link", async () => {
+    const url = `${route}?media=${"c".repeat(43)}`;
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ url, mime: "audio/mpeg", bytes: PREVIEW_MAX_BYTES * 8 }), {
+      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await loadMessageAudio(clip, message, new AbortController().signal)).toBe(url);
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url, mime: "video/mp4" }), {
+      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+  });
+
+  it("loads audio through the message-scoped file endpoint and keeps the server's MIME type", async () => {
+    const fetcher = vi.fn(async () => new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const blob = await loadMessageAudio(clip, message, new AbortController().signal) as Blob;
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
+    expect(blob.type).toBe("audio/mpeg");
+    expect(await blob.text()).toBe("audio bytes");
+  });
+
+  it("asks again for the bytes when the server links only videos", async () => {
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => String(init.body).includes("media")
+      ? new Response(JSON.stringify({ error: "only videos can be played here" }), { status: 415 })
+      : new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await (await loadMessageAudio(clip, message, new AbortController().signal) as Blob).text()).toBe("audio bytes");
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true }), asks({ path: clip.path })]);
+  });
+
+  it("refuses anything the server does not call audio, and keeps authorization failures", async () => {
+    for (const mime of ["text/html", "application/octet-stream", "video/mp4", "image/svg+xml"]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("not audio", { headers: { "content-type": mime } })));
+      await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+    }
+    const refused = vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 }));
+    vi.stubGlobal("fetch", refused);
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("outside this conversation");
+    expect(refused).toHaveBeenCalledOnce();
+  });
+
+  it("enforces the size limit with and without Content-Length", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("audio", {
+      headers: { "content-type": "audio/mpeg", "content-length": String(PREVIEW_MAX_BYTES + 1) },
+    })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("25 MB");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(PREVIEW_MAX_BYTES + 1), { headers: { "content-type": "audio/mpeg" } })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("25 MB");
+  });
+});
+
+describe("message gallery", () => {
+  it("collects only rendered local file links, including references, with generated files deduplicated", () => {
+    const text = [
+      "I wrote [report](./report.pdf) and [again](./report.pdf).",
+      "[video][clip]",
+      "",
+      "[clip]: ./demo.mp4",
+      "",
+      "![image](./image.png)",
+      "[![linked image](./image.png)](./full.png)",
+      "[generated](file:///store/123e4567-e89b-42d3-a456-426614174000.png)",
+      "[web](https://example.com/file.pdf) [network](//example.com/file.pdf) [anchor](#section)",
+      "`[code](./secret.txt)`",
+      "```md\n[example](./secret.txt)\n```",
+      "Plain prose /workspace/private.txt",
+    ].join("\n");
+    expect(collectMessageFiles(text, [image.path])).toEqual([
+      { path: "./report.pdf", shownPath: "./report.pdf", name: "report.pdf", linked: true },
+      { path: "./demo.mp4", shownPath: "./demo.mp4", name: "demo.mp4", linked: true },
+    ]);
+  });
+
+  it("handles Windows and encoded paths while keeping a safe filename", () => {
+    expect(collectMessageFiles("[release](file:///C:/work/release%20notes.pdf) [video](./demo.MP4#section)"))
+      .toEqual([
+        { path: "file:///C:/work/release%20notes.pdf", shownPath: "C:/work/release notes.pdf", name: "release notes.pdf", linked: true },
+        { path: "./demo.MP4#section", shownPath: "./demo.MP4", name: "demo.MP4", linked: true },
+      ]);
+    expect(isVideoAttachment("./demo.MP4#section")).toBe(true);
+    expect(isVideoAttachment("./movie.mp4.html")).toBe(false);
+  });
+
+  it("sends a Windows path with its backslash before punctuation intact", () => {
+    expect(collectMessageFiles("[report](C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md)")).toEqual([
+      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", shownPath: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
+    ]);
+  });
+
+  it("does not decode file URLs twice or mistake filename characters for URL suffixes", () => {
+    expect(collectMessageFiles("[video](file:///work/demo%23one.mp4) [percent](file:///work/r%2520.pdf) [space](file:///work/r%20.pdf)"))
+      .toEqual([
+        { path: "file:///work/demo%23one.mp4", shownPath: "/work/demo#one.mp4", name: "demo#one.mp4", linked: true },
+        { path: "file:///work/r%2520.pdf", shownPath: "/work/r%20.pdf", name: "r%20.pdf", linked: true },
+        { path: "file:///work/r%20.pdf", shownPath: "/work/r .pdf", name: "r .pdf", linked: true },
+      ]);
+    expect(isVideoAttachment("file:///work/demo%23one.mp4")).toBe(true);
+  });
+
+  it("shows one compact collection, keeps file actions explicit, and never eagerly loads videos", () => {
+    const markup = renderToStaticMarkup(createElement(AttachmentGallery, {
+      images: [image], files: [file, { path: "/workspace/report.pdf", name: "report.pdf", linked: true }], message,
+    }));
+    expect(markup).toContain("3 attachments");
+    expect(markup).toContain("Overview.png");
+    expect(markup).toContain("Load video");
+    expect(markup).toContain("Save a copy of demo.mp4");
+    expect(markup).toContain("Save a copy of report.pdf");
+    expect(markup).toContain("loading=\"lazy\"");
+    expect(markup).not.toContain("<video");
+    expect(markup).not.toContain("src=\"/workspace/");
+  });
+
+  it("collapses large collections and deduplicates paths", () => {
+    const markup = renderToStaticMarkup(createElement(AttachmentGallery, {
+      images: [image, image],
+      files: Array.from({ length: 5 }, (_, index) => ({ path: `./file${index}.pdf`, name: `file${index}.pdf`, linked: true })),
+      message,
+    }));
+    expect(markup).toContain("6 attachments");
+    expect(markup).toContain("Show 2 more");
+    expect(markup).toContain("aria-expanded=\"false\"");
+    expect(markup).not.toContain("file3.pdf");
+    expect(markup).not.toContain("file4.pdf");
+  });
+
+  it("keeps legacy attachments visible but inert and does not expose a video preview without message context", () => {
+    const markup = renderToStaticMarkup(createElement(AttachmentGallery, { images: [{ path: "/old/image.png", name: "Old.png" }], files: [file] }));
+    expect(markup).toContain("Old.png");
+    expect(markup).toContain("demo.mp4");
+    expect(markup).toContain("Unavailable");
+    expect(markup).not.toContain("Load video");
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain("<img");
+  });
+});
+
+describe("explicit local video preview", () => {
+  const route = "/api/threads/thread%2Fone/messages/message%20two/file";
+  const linkResponse = (body: unknown) => new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+  });
+
+  it("asks the message route for a streaming link and plays that link without downloading the file", async () => {
+    const url = `${route}?media=${"a".repeat(43)}`;
+    const fetcher = vi.fn(async () => linkResponse({ url, mime: "video/mp4", bytes: 24_000_000 }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await loadMessageVideo(file, message, new AbortController().signal)).toBe(url);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith(route, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: file.path, media: true }), signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("streams a video over the in-memory preview limit, since the player reads it in ranges", async () => {
+    const url = `${route}?media=b`;
+    vi.stubGlobal("fetch", vi.fn(async () => linkResponse({ url, mime: "video/webm", bytes: PREVIEW_MAX_BYTES * 4 })));
+    expect(await loadMessageVideo(file, message, new AbortController().signal)).toBe(url);
+  });
+
+  it("refuses a link that points anywhere but this message's file route, or at something not a video", async () => {
+    for (const body of [
+      { url: "https://example.com/clip.mp4", mime: "video/mp4" },
+      { url: "/api/threads/thread%2Fone/messages/other/file?media=abc", mime: "video/mp4" },
+      { url: `${route}?media=abc&path=/etc/passwd`, mime: "video/mp4" },
+      { url: `${route}?media=abc`, mime: "text/html" },
+      null,
+    ]) {
+      vi.stubGlobal("fetch", vi.fn(async () => linkResponse(body)));
+      await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+    }
+  });
+
+  it("falls back to the authorized response bytes from a server without streaming links", async () => {
+    const fetcher = vi.fn(async () => new Response("video bytes", { headers: { "content-type": "video/mp4" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const blob = await loadMessageVideo(file, message, new AbortController().signal) as Blob;
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(blob.type).toBe("video/mp4");
+    expect(await blob.text()).toBe("video bytes");
+  });
+
+  it("preserves server authorization failures instead of falling back to arbitrary file URLs", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 }));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("outside this conversation");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses executable MIME types and old servers' unspecified bytes", async () => {
+    for (const mime of ["text/html", "application/octet-stream", "image/svg+xml"]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("not video", { headers: { "content-type": mime } })));
+      await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+    }
+  });
+
+  it("enforces the video size limit with and without Content-Length", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("video", {
+      headers: { "content-type": "video/mp4", "content-length": String(PREVIEW_MAX_BYTES + 1) },
+    })));
+    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toMatchObject({
+      code: "file_too_large",
+      message: "This file is 25.1 MB, over the 25 MB preview limit. You can still download it below.",
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(PREVIEW_MAX_BYTES + 1), { headers: { "content-type": "video/mp4" } })));
+    await expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toMatchObject({
+      code: "file_too_large",
+      message: "Preview is limited to 25 MB.",
+    });
+  });
+
+  it("cancels a partially read video when the preview is closed", async () => {
+    const request = new AbortController();
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        request.abort();
+      },
+      cancel,
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, { headers: { "content-type": "video/mp4" } })));
+    await expect(loadMessageVideo(file, message, request.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("retries a download that stops sending bytes instead of loading forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = (signal: AbortSignal) => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1]));
+          signal.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")));
+        },
+      }), { headers: { "content-type": "video/mp4" } });
+      const fetcher = vi.fn(async (_url: string, init: RequestInit) => fetcher.mock.calls.length === 1
+        ? stuck(init.signal!)
+        : new Response("video bytes", { headers: { "content-type": "video/mp4" } }));
+      vi.stubGlobal("fetch", fetcher);
+      const pending = loadMessageVideo(file, message, new AbortController().signal);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await (await pending as Blob).text()).toBe("video bytes");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up with a retryable error after repeated stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init.signal!.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      }));
+      vi.stubGlobal("fetch", fetcher);
+      const pending = expect(loadMessageVideo(file, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+      await vi.advanceTimersByTimeAsync(45_000);
+      await pending;
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

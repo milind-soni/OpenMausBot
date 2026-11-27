@@ -1,0 +1,124 @@
+import { t } from "./i18n";
+
+export interface FeatureFlagConfig {
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean; skillBurger?: boolean; threadTabs?: boolean; roomFeed?: boolean; roomFeedSince?: number; teamBoard?: boolean; suggestedReplies?: boolean };
+  browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
+}
+
+export function browserAvailable(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.browserEngine?.kind === "engine";
+}
+
+export function browserUnavailableReason(config: FeatureFlagConfig | null | undefined): string {
+  const engine = config?.browserEngine;
+  if (engine?.kind === "unavailable" && engine.installable) return t("browser.notInstalled");
+  if (engine?.kind === "unavailable" && engine.reason) return engine.reason;
+  return t("browser.noEngine");
+}
+
+export function skillAuthoringEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillAuthoring !== false;
+}
+
+export const DEFAULT_SKILL_REVIEW_STEPS = 10;
+export const MIN_SKILL_REVIEW_STEPS = 3;
+export const MAX_SKILL_REVIEW_STEPS = 100;
+
+export function skillReviewEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return skillAuthoringEnabled(config) && config?.features?.skillReview === true;
+}
+
+export function skillReviewSteps(config: FeatureFlagConfig | null | undefined): number {
+  const raw = config?.features?.skillReviewSteps;
+  const value = typeof raw === "number" && Number.isFinite(raw) ? Math.round(raw) : DEFAULT_SKILL_REVIEW_STEPS;
+  return Math.min(MAX_SKILL_REVIEW_STEPS, Math.max(MIN_SKILL_REVIEW_STEPS, value));
+}
+
+export function skillReviewUnavailableEngines(
+  bots: ReadonlyArray<{ modelSelection?: { instanceId?: string } }>,
+  instances: ReadonlyArray<{ instanceId: string; displayName: string; capabilities?: { backgroundText?: boolean; agentsMcp?: boolean } }>,
+): string[] {
+  const used = new Set(bots.map((bot) => bot.modelSelection?.instanceId).filter(Boolean));
+  return [...new Set(instances
+    .filter((instance) => used.has(instance.instanceId))
+    .filter((instance) => instance.capabilities?.backgroundText !== true || instance.capabilities?.agentsMcp !== true)
+    .map((instance) => instance.displayName))];
+}
+
+export function parseSkillReviewSteps(value: string): number | null {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const steps = Number(trimmed);
+  return steps >= MIN_SKILL_REVIEW_STEPS && steps <= MAX_SKILL_REVIEW_STEPS ? steps : null;
+}
+
+export function builtInBrowserEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.browser === true;
+}
+
+export function showToolCallsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.showToolCalls === true;
+}
+
+export function sharedComputersEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.sharedComputers === true;
+}
+
+export function claudeUserMcpEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.claudeUserMcp === true;
+}
+
+export function claudeUserSkillsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.claudeUserSkills === true;
+}
+
+export function skillsLibraryEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillsLibrary === true;
+}
+
+export function shareLearnedSkillsMode(config: FeatureFlagConfig | null | undefined): "off" | "ask" | "auto" {
+  if (!skillsLibraryEnabled(config)) return "off";
+  return config?.features?.shareLearnedSkills ?? "ask";
+}
+
+export function roomMemoryCaptureEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.roomMemoryCapture === true;
+}
+
+export function savedStepsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.savedSteps !== false;
+}
+
+/** The server can run saved steps (a Mac, not Windows or a Cloud home); unsaid counts as no. */
+export function savedStepsHere(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.savedStepsHere === true;
+}
+
+export function usbPhoneTakeoverEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.usbPhoneTakeover === true;
+}
+
+export function skillBurgerEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.skillBurger !== false;
+}
+
+/** A faded next-line suggestion in an empty composer after a bot replies. The server reports it on unless switched off; a
+ * server that doesn't report it has no suggestions to give. */
+export function suggestedRepliesEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.suggestedReplies === true;
+}
+
+export function threadTabsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.threadTabs === true;
+}
+
+/** Whether this home shows rooms as their feed: one from this version on reports `features.roomFeedSince` (and
+ * `roomFeed: true`); a 0.1.181 home only where its old switch was turned on. Any other home, including a 0.1.181 one
+ * that never opted in, keeps every room's single transcript until it updates. */
+export function roomFeedEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.roomFeed === true || typeof config?.features?.roomFeedSince === "number";
+}
+
+export function teamBoardEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.teamBoard === true;
+}

@@ -1,0 +1,100 @@
+import {
+  ArrowRight, Atom, Award, Bell, Book, BookOpen, Bot, Box, Briefcase, Bug, Calendar, ChartColumn, ChartNoAxesCombined, Check,
+  ChevronLeft, ChevronRight, Circle, CircleCheck, CircleCheckBig, CircleHelp, CircleUserRound, Clock, Compass, Contact, Dot,
+  Download, Ellipsis, EllipsisVertical, ExternalLink, FileIcon, FileText, FlaskConical, Folder, GitPullRequest, Globe, History,
+  IdCard, ImageIcon, Images, Info, KeyRound, Layers, LifeBuoy, Lightbulb, LinkIcon, LockIcon, Mail, MapIcon, MapPin, Monitor,
+  Notebook, NotebookPen, PartyPopper, Pencil, PencilLine, Phone, Play, Plus, RefreshCw, Search, SlidersHorizontal, Smartphone,
+  Sparkle, Sparkles, SquareCode, SquareMenu, SquarePen, Star, TriangleAlert, Upload, User, X, Zap, type LucideIcon,
+} from "lucide-react";
+
+export const WIDGET_ICONS: Readonly<Record<string, LucideIcon>> = {
+  info: Info,
+  agent: Bot,
+  analytics: ChartNoAxesCombined,
+  atom: Atom,
+  batch: Layers,
+  bolt: Zap,
+  "book-open": BookOpen,
+  "book-closed": Book,
+  "book-clock": History,
+  bug: Bug,
+  calendar: Calendar,
+  chart: ChartColumn,
+  check: Check,
+  "check-circle": CircleCheck,
+  "check-circle-filled": CircleCheckBig,
+  "chevron-left": ChevronLeft,
+  "chevron-right": ChevronRight,
+  "circle-question": CircleHelp,
+  compass: Compass,
+  confetti: PartyPopper,
+  cube: Box,
+  desktop: Monitor,
+  document: FileText,
+  dot: Dot,
+  "dots-horizontal": Ellipsis,
+  "dots-vertical": EllipsisVertical,
+  "empty-circle": Circle,
+  "external-link": ExternalLink,
+  globe: Globe,
+  keys: KeyRound,
+  lab: FlaskConical,
+  images: Images,
+  lifesaver: LifeBuoy,
+  lightbulb: Lightbulb,
+  mail: Mail,
+  "map-pin": MapPin,
+  maps: MapIcon,
+  mobile: Smartphone,
+  name: IdCard,
+  notebook: Notebook,
+  "notebook-pencil": NotebookPen,
+  "page-blank": FileIcon,
+  phone: Phone,
+  play: Play,
+  plus: Plus,
+  profile: CircleUserRound,
+  "profile-card": Contact,
+  reload: RefreshCw,
+  star: Star,
+  "star-filled": Star,
+  search: Search,
+  sparkle: Sparkle,
+  "sparkle-double": Sparkles,
+  "square-code": SquareCode,
+  "square-image": ImageIcon,
+  "square-text": SquareMenu,
+  suitcase: Briefcase,
+  "settings-slider": SlidersHorizontal,
+  user: User,
+  wreath: Award,
+  write: Pencil,
+  "write-alt": PencilLine,
+  "write-alt2": SquarePen,
+  "pull-request": GitPullRequest,
+  upload: Upload,
+  download: Download,
+  clock: Clock,
+  lock: LockIcon,
+  link: LinkIcon,
+  file: FileIcon,
+  folder: Folder,
+  bell: Bell,
+  warning: TriangleAlert,
+  close: X,
+  "arrow-right": ArrowRight,
+};
+
+export function widgetIcon(name: unknown): LucideIcon {
+  return typeof name === "string" && Object.hasOwn(WIDGET_ICONS, name) ? WIDGET_ICONS[name]! : Dot;
+}
+
+/** lucide draws outlines only: the filled star is the same glyph, filled. */
+export function widgetIconFilled(name: unknown): boolean {
+  return name === "star-filled";
+}
+
+/** lucide's dot is a 2px speck; the widget's dot is the 7px status dot. */
+export function isWidgetDot(name: unknown): boolean {
+  return widgetIcon(name) === Dot;
+}

@@ -1,0 +1,138 @@
+import { describe, expect, it } from "vitest";
+import { BOT_PARTS, EMPTY, PICTURE_PART, itemKey, parseSendSummary, planSend } from "../electron/cloud-send-parts.mjs";
+import { botParts, cloudSendSummary, partHash, unused, type CloudSendSources } from "./cloud-send.ts";
+import { keptBotIds } from "./routes/bots-create.ts";
+import type { BotRecord } from "./store.ts";
+
+const bot = (extra: Partial<BotRecord> = {}): BotRecord => ({
+  id: "ember-0001", threadId: "thread-0001", name: "Ember", title: "", description: "", soul: "Be brief.", notifications: true, color: "blue",
+  unread: false, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, resumeCursors: {}, createdAt: 1, tasks: [{ threadId: "thread-0001" }],
+  ...extra,
+} as unknown as BotRecord);
+
+const sources = (extra: Partial<CloudSendSources> = {}): CloudSendSources => ({
+  appVersion: "0.1.117",
+  bots: () => [bot()],
+  greetingOnly: () => false,
+  skills: () => [{ name: "weekly-summary", sha256: "a".repeat(64), enabled: true }],
+  picture: () => new Uint8Array([1, 2, 3]),
+  logins: () => [{ id: "l1", site: "example.test", hosts: ["accounts.example.test"], exactHost: false, username: "Alice", updatedAt: 5 }],
+  onePassword: () => ({ connectedAt: 7, grants: { v1: ["ember-0001"] } }),
+  settings: () => ({ profile: { name: "Amit", aboutMe: "Solo developer." }, language: undefined }),
+  ...extra,
+});
+
+describe("what a server reports for Send to My Cloud", () => {
+  it("hashes each part of a bot on its own, and says '-' for a part it has no value for", () => {
+    const parts = botParts(bot(), () => null);
+    expect(Object.keys(parts).sort()).toEqual([...Object.keys(BOT_PARTS), PICTURE_PART].sort());
+    expect(parts[PICTURE_PART]).toBe(EMPTY);
+    const changed = botParts(bot({ soul: "Be very brief." }), () => null);
+    expect(Object.entries(changed).filter(([part, hash]) => parts[part] !== hash).map(([part]) => part)).toEqual(["soul"]);
+    expect(botParts(bot({ voice: "" }), () => null).voice).toBe(parts.voice);
+    expect(partHash(undefined)).toBe(EMPTY);
+    expect(partHash({ a: null, b: [] })).toBe(EMPTY);
+    expect(partHash({ b: 1, a: 2 })).toBe(partHash({ a: 2, b: 1 }));
+    // A working folder is this computer's: it is not part of what is compared.
+    expect(botParts(bot({ cwd: "/Users/amit/work" }), () => null)).toEqual(parts);
+  });
+
+  it("lists bots, their skills, logins, 1Password and settings, without a secret or a picture's bytes", () => {
+    const summary = cloudSendSummary(sources());
+    expect(summary.items.map((item) => item.key)).toEqual([
+      itemKey.bot("ember-0001"), itemKey.skill("ember-0001", "weekly-summary"), itemKey.login("example.test", "alice"), "1password",
+      itemKey.setting("profile"), itemKey.setting("language"),
+    ]);
+    expect(summary.items.find((item) => item.kind === "login")).toMatchObject({ label: "accounts.example.test", detail: "Alice", id: "l1" });
+    expect(summary.items.find((item) => item.key === "setting:language")!.parts).toEqual({ value: EMPTY });
+    expect(summary.items.find((item) => item.key === "setting:profile")!.parts.email).toBe(EMPTY);
+    const text = JSON.stringify(summary);
+    for (const secret of ["Be brief.", "Solo developer.", "Amit", "AQID"]) expect(text).not.toContain(secret);
+  });
+
+  it("leaves out a bot nobody has touched since it was made, so a fresh install's starter never lands beside My Cloud's own", () => {
+    const starter = bot({ soul: "" });
+    expect(unused(starter, 0, () => true)).toBe(true);
+    expect(unused(starter, 0, () => true, (botId) => botId === starter.id), "a starter put in a room is in use").toBe(false);
+    expect(unused(starter, 0, () => false)).toBe(false);
+    expect(unused(starter, 1, () => true)).toBe(false);
+    expect(unused(bot({ soul: "", title: "Research" }), 0, () => true)).toBe(false);
+    expect(cloudSendSummary(sources({ bots: () => [starter], greetingOnly: () => true, skills: () => [] })).items.some((item) => item.kind === "bot")).toBe(false);
+  });
+
+  it("keys a login kept to one exact host apart from another account on the same site", () => {
+    const summary = cloudSendSummary(sources({ logins: () => [
+      { id: "l1", site: "example.test", hosts: ["a.example.test"], exactHost: true, username: "ops", updatedAt: 1 },
+      { id: "l2", site: "example.test", hosts: ["b.example.test"], exactHost: true, username: "ops", updatedAt: 1 },
+    ] }));
+    expect(summary.items.filter((item) => item.kind === "login").map((item) => item.key))
+      .toEqual(["login:example.test|ops|a.example.test", "login:example.test|ops|b.example.test"]);
+  });
+});
+
+describe("saved Vault secrets in the comparison", () => {
+  it("go by their id here, with when they changed: never a value, and never on a bot's move into a team", () => {
+    const secrets = () => [{ id: "s1", name: "Stripe secret key", updatedAt: 9 }];
+    const items = cloudSendSummary(sources({ secrets })).items.filter((item) => item.kind === "secret");
+    expect(items).toEqual([{ key: "secret:s1", kind: "secret", label: "Stripe secret key", id: "s1", parts: { saved: partHash(9) } }]);
+    expect(itemKey.secret("s1")).toBe("secret:s1");
+    expect(cloudSendSummary(sources({ secrets }), { move: true, bot: "ember-0001" }).items.some((item) => item.kind === "secret")).toBe(false);
+  });
+});
+
+describe("a bot sent from the person's other computer keeps its id", () => {
+  const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined, bots: [] as Array<{ id: string }> };
+  it("takes the server's own id form, only while nothing here uses it", () => {
+    expect(keptBotIds({}, store)).toEqual({});
+    expect(keptBotIds({ id: "ember-0001", threadId: "thread-0001" }, store)).toEqual({ id: "ember-0001", threadId: "thread-0001" });
+    expect(keptBotIds({ id: "ember-0001" }, store)).toEqual({ id: "ember-0001" });
+    expect(keptBotIds({ id: "taken-0001" }, store)).toEqual({ error: "a bot with this id already exists here" });
+    expect(keptBotIds({ id: "ember-0001", threadId: "thread-taken" }, store)).toEqual({ error: "this conversation id is already used here" });
+    expect(keptBotIds({ id: "ember-0001", threadId: "ember-0001" }, store)).toEqual({ error: "this conversation id is already used here" });
+    for (const id of ["short", "../../etc/passwd", "x".repeat(129), 42]) expect(keptBotIds({ id }, store)).toHaveProperty("error");
+    expect(keptBotIds({ threadId: "thread-0001" }, store)).toHaveProperty("error");
+  });
+
+  it("refuses an id shaped like another place's address, so a bot here is never also an address", () => {
+    // bot-link/protocol.ts addresses a bot of another place as `link-<that place's key>-<its id there>`.
+    for (const id of ["link-0123abcd-local-writer", "LINK-0123abcd-local-writer", "Link-0123abcd-writer"]) {
+      expect(keptBotIds({ id }, store), id).toEqual({ error: "id must not begin with \"link-\": that is how a bot in another place is addressed here" });
+    }
+    // The reserved shape only: an id that merely contains or ends in it is taken as usual.
+    for (const id of ["my-link-0001", "linker-00001", "bot-link-0001"]) expect(keptBotIds({ id }, store), id).toEqual({ id });
+  });
+
+  it("refuses an id that differs from one here only by case, so no case-variant twin can be brought in beside a bot", () => {
+    const here = { bot: () => null, botByThread: () => null, groupByThread: () => undefined, bots: [{ id: "ember-0001-4eea-ac52" }] };
+    expect(keptBotIds({ id: "EMBER-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
+    expect(keptBotIds({ id: "Ember-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });
+    // An id that names no bot here, exactly or in another case, is taken as usual.
+    expect(keptBotIds({ id: "ember-0002-4eea-ac52" }, here)).toEqual({ id: "ember-0002-4eea-ac52" });
+  });
+});
+
+describe("a bot coming back to the place it left", () => {
+  const stub = (movedTo: object) => bot({ hidden: true, title: "Old title", movedTo } as Partial<BotRecord>);
+  const routine = { key: "routine:r1", kind: "routine" as const, label: "Daily", id: "r1", bot: "ember-0001", parts: { def: "aaa" } };
+  const move = { items: () => [routine], botParts: () => ({ archived: "x" }) };
+
+  it("is listed where it comes to while it is held as returning, marked with its skills and routines; as a stub it is not", () => {
+    const leaving = (movedTo: object) => cloudSendSummary(sources({ bots: () => [stub(movedTo)], move }), { move: true, leaving: true });
+    expect(leaving({ team: { id: "my-cloud", name: "My Cloud" }, state: "moved", at: 1 }).items.filter((item) => item.kind === "bot")).toEqual([]);
+    const coming = leaving({ team: { id: "my-cloud", name: "My Cloud" }, state: "moving", at: 1, back: true });
+    expect(coming.items.filter((item) => item.bot === "ember-0001" || item.key === itemKey.bot("ember-0001")).map((item) => [item.key, item.returning])).toEqual([
+      [itemKey.bot("ember-0001"), true], [itemKey.skill("ember-0001", "weekly-summary"), true], ["routine:r1", true]]);
+    expect(cloudSendSummary(sources({ move }), { move: true }).items.some((item) => item.returning), "a bot that is not coming back is not marked").toBe(false);
+  });
+
+  it("takes what the place it comes from has, over what its line kept, even where an earlier send left both agreeing", () => {
+    const there = { v: 1 as const, appVersion: "x", items: [{ key: itemKey.bot("ember-0001"), kind: "bot", label: "Ember", parts: { title: "new", soul: "same", archived: EMPTY } }, { ...routine, parts: { def: "bbb" } }] };
+    const here = parseSendSummary({ v: 1, appVersion: "x", items: [{ key: itemKey.bot("ember-0001"), kind: "bot", label: "Ember", parts: { title: "old", soul: "same", archived: "hid" }, returning: true },
+      { ...routine, returning: true }] });
+    const sent = { [itemKey.bot("ember-0001")]: { title: ["new", "old"] as [string, string] } };
+    const plan = planSend({ local: there as never, cloud: here, sent });
+    expect(plan.rows.map((row) => [row.key, row.state, row.parts])).toEqual([[itemKey.bot("ember-0001"), "to-update", ["title", "archived"]], ["routine:r1", "to-update", ["def"]]]);
+    const plain = planSend({ local: there as never, cloud: parseSendSummary({ ...here, items: here!.items.map(({ returning: _returning, ...item }) => item) }), sent });
+    expect(plain.rows[0]!.state, "without the mark, the line's own values are kept").toBe("differs");
+  });
+});

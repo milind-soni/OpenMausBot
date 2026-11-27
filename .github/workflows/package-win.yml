@@ -1,0 +1,148 @@
+# Windows installer, built on a real Windows runner and published as a
+# workflow artifact.
+#
+# Why this exists: releases are cut by hand from a Mac, which cannot build
+# an NSIS installer (electron-builder needs wine, and a cross-built exe
+# that never ran on Windows is exactly the artifact that looks fine and
+# breaks in the field). So every release so far shipped Windows behind the
+# mac build — different trees under one version number. Run this from the
+# same commit as the mac build and attach the artifact to the release.
+#
+# Deliberately artifact-only: the full release workflow is the one place
+# allowed to create a GitHub release.
+name: Package Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit/tag/branch to build (defaults to the branch this is run from)"
+        required: false
+        type: string
+
+# least privilege: the build only reads the checkout, it never writes back
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: NSIS installer
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # the packaged app ships compiled JS, so a stale dist/ or dist-server/
+      # would ride along unsigned-for and unsealed (the 0.1.15 "damaged"
+      # incident) — a fresh checkout is clean, but be explicit
+      - name: clean build outputs
+        shell: bash
+        run: rm -rf dist dist-server release
+      - run: pnpm package:win
+      - name: Verify the bundled browser with an empty home
+        run: node scripts/smoke-browser-bundle.mjs --resources "${{ github.workspace }}/release/win-unpacked/resources"
+      - name: Verify the packaged server discovers its browser
+        env:
+          OMB_SMOKE_DIST: ${{ github.workspace }}/release/win-unpacked/resources/server
+        run: node scripts/smoke-packaged-server.mjs --browser-bundle "${{ github.workspace }}/release/win-unpacked/resources/browser-engine"
+      - name: report what was built
+        shell: bash
+        run: |
+          echo "version: $(node -p "require('./package.json').version")"
+          echo "commit:  $(git rev-parse HEAD)"
+          ls -lh release/*.exe release/*.yml 2>/dev/null || true
+      # Three things silently produce an installer that builds fine and is
+      # broken in the field, and none of them can be checked from the Mac the
+      # release is cut on — the artifact carries only the .exe. So assert them
+      # here, where the unpacked tree exists, and fail the build instead of
+      # shipping it.
+      - name: verify the packaged tree
+        shell: bash
+        run: |
+          res=release/win-unpacked/resources
+          fail=0
+          # missing → utilityProcess.fork fails → the 🐭 "Couldn't start the
+          # bot server" page
+          [ -f "$res/server/index.js" ] || { echo "::error::missing $res/server/index.js"; fail=1; }
+          # missing → the desktop falls back to index.js with no compile cache
+          [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing $res/server/desktop-entry.mjs"; fail=1; }
+          # package.json "main" is electron/boot.mjs, which loads main.mjs: a missing or broken entry
+          # inside app.asar is an app that never opens. The packed exe reads its own asar as Node.
+          exe=release/win-unpacked/OpenMausBot.exe
+          for entry in boot.mjs main-compile-cache.mjs main.mjs; do
+            ELECTRON_RUN_AS_NODE=1 "$exe" --check "$res/app.asar/electron/$entry" || {
+              echo "::error::app.asar/electron/$entry is missing or does not parse"; fail=1; }
+          done
+          main=$(ELECTRON_RUN_AS_NODE=1 "$exe" -p "require(process.argv[1]).main" "$res/app.asar/package.json")
+          [ "$main" = "electron/boot.mjs" ] || { echo "::error::app.asar package.json main is '$main'"; fail=1; }
+          # missing → the server has nothing to serve → black window
+          [ -f "$res/ui/index.html" ] || { echo "::error::missing $res/ui/index.html"; fail=1; }
+          [ -f "$res/cloudflared/cloudflared.exe" ] || {
+            echo "::error::missing $res/cloudflared/cloudflared.exe"; fail=1; }
+          [ -f "$res/licenses/cloudflared-LICENSE.txt" ] || {
+            echo "::error::missing cloudflared Apache 2.0 license"; fail=1; }
+          [ -f "$res/licenses/cloudflared-README.md" ] || {
+            echo "::error::missing cloudflared release provenance"; fail=1; }
+          if [ -f "$res/cloudflared/cloudflared.exe" ]; then
+            expected=$(node --input-type=module -e "import { CLOUDFLARED_ASSETS } from './scripts/prepare-cloudflared.mjs'; console.log(Object.values(CLOUDFLARED_ASSETS).find((asset) => asset.name === 'cloudflared-windows-amd64.exe').binarySha256)")
+            actual=$(sha256sum "$res/cloudflared/cloudflared.exe" | cut -d' ' -f1)
+            [ "$actual" = "$expected" ] || {
+              echo "::error::packaged cloudflared hash is $actual"; fail=1; }
+            "$res/cloudflared/cloudflared.exe" version | grep -Fq "cloudflared version 2026.10.3 " || {
+              echo "::error::packaged cloudflared has the wrong version"; fail=1; }
+          fi
+          [ -f "$res/app-update.yml" ] || { echo "::error::missing $res/app-update.yml"; fail=1; }
+          if [ -f "$res/app-update.yml" ]; then
+            grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || {
+              echo "::error::app-update.yml does not point at milind-soni/OpenMausBot"; fail=1; }
+            # while the build is unsigned, a publisherName makes
+            # electron-updater reject every update as untrusted
+            if grep -q "publisherName" "$res/app-update.yml"; then
+              echo "::error::app-update.yml carries publisherName on an unsigned build"; fail=1
+            fi
+          fi
+          echo "--- app-update.yml ---"; cat "$res/app-update.yml" 2>/dev/null || true
+          exit $fail
+
+      # index.js EXISTING is not the same as index.js RUNNING. 0.1.24 shipped a
+      # server that died instantly on ERR_MODULE_NOT_FOUND because tsc left a
+      # bare `zod` import in a tree that carries no node_modules — and the
+      # existence check above passed it. Start the real packaged copy here,
+      # where node_modules genuinely is not present.
+      - name: start the packaged server
+        shell: bash
+        run: |
+          res=release/win-unpacked/resources
+          HOME="$RUNNER_TEMP/omb-smoke" USERPROFILE="$RUNNER_TEMP/omb-smoke" \
+            OMB_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 90); do
+            if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then
+              echo "packaged server answered /api/health ✓"
+              kill $pid 2>/dev/null || true
+              exit 0
+            fi
+            kill -0 $pid 2>/dev/null || break
+            sleep 1
+          done
+          echo "::error::the packaged server never served /api/health"
+          cat "$RUNNER_TEMP/server.log" || true
+          kill $pid 2>/dev/null || true
+          exit 1
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-installer
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 14

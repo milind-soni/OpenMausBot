@@ -1,0 +1,3516 @@
+// @vitest-environment happy-dom
+import { Component, createElement, type ReactNode } from "react";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  api,
+  ApiError,
+  CLOUD_LINK_SETTINGS,
+  configStatusFromFrame,
+  currentTaskBot,
+  desktopApprovalBridge,
+  initialState,
+  liveCallFromFrame,
+  loadSnapshotBoundary,
+  openBot,
+  openThread,
+  persistBotUpdate,
+  persistTaskApproval,
+  pinBotThreadAction,
+  reducer,
+  requestConfirmedBotDeletion,
+  runtimeFrameAction,
+  StoreProvider,
+  useStore,
+  visibleMessages,
+  visibleNotificationThread,
+  type AppState,
+  type Bot,
+  type BotAnnouncement,
+  type ConfigStatusFrame,
+  type Group,
+  type Message,
+  type Action,
+} from "./store";
+import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
+import { cacheDesktopCapabilities, desktopCapabilitiesNow } from "@/lib/desktop";
+import { LAST_BOT_SECTION_KEY } from "@/lib/last-bot-section";
+import { NOTIFICATION_TRAY_PINNED_KEY } from "@/lib/notification-preferences";
+import { transcriptLookups } from "@/lib/transcript-derivations";
+import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
+import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
+import type { ConnectorToolGrant } from "../../shared/wire";
+import type { RoutineRun } from "../lib/routines";
+
+describe("api refusals", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("keep the refusal's body for callers that read more than the sentence", async () => {
+    const refusal = { error: "Morgan has more than 30 skills. Choose fewer skills and try again.", choices: { skills: ["a", "b"] } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(refusal), { status: 400 })));
+    const error = await api("/api/teams/export", { method: "POST", body: "{}" }).catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ message: refusal.error, status: 400, body: refusal });
+  });
+
+  it("shows a structured Data error's message without losing its details", async () => {
+    const refusal = { error: { code: "sql_error", message: "Parser Error: syntax error at end of input", sql: "SELECT" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(refusal), { status: 400 })));
+    await expect(api("/api/bots/fixture/data/run")).rejects.toMatchObject({ message: refusal.error.message, status: 400, body: refusal });
+  });
+
+  it.each([null, {}, { error: { code: "unavailable" } }, { error: 123 }])("falls back to the HTTP status for a malformed error body: %j", async body => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 503, statusText: "Service Unavailable" })));
+    await expect(api("/api/bots/fixture/data")).rejects.toThrow("503 Service Unavailable");
+  });
+});
+
+describe("mounted Data view context", () => {
+  it("stores and clears the active view independently from one-shot result navigation", () => {
+    const view = { botId: "pepper", threadId: "task", cardId: "c_1", draftSql: "select incomplete" };
+    const opened = reducer(initialState, { type: "dataView", view });
+    expect(opened.dataView).toEqual(view);
+    expect(opened.dataResultFocus).toBeNull();
+    expect(reducer(opened, { type: "dataView", view: null }).dataView).toBeNull();
+  });
+});
+
+describe("partial profile save responses", () => {
+  it.each([true, false])("preserves independently saved fields with about-me response first: %s", aboutFirst => {
+    const config = { ...initialState.config, profile: { name: "Old", email: "old@example.invalid", aboutMe: "Old biography" } } as NonNullable<AppState["config"]>;
+    const about: Action = { type: "profileSaved", profile: { aboutMe: "New biography" } };
+    const identity: Action = { type: "profileSaved", profile: { name: "New", email: "new@example.invalid" } };
+    const first = reducer({ ...initialState, config }, aboutFirst ? about : identity);
+    const last = reducer(first, aboutFirst ? identity : about);
+    expect(last.config?.profile).toEqual({ name: "New", email: "new@example.invalid", aboutMe: "New biography" });
+    expect(reducer(last, { type: "profileSaved", profile: { aboutMe: "" } }).config?.profile)
+      .toEqual({ name: "New", email: "new@example.invalid", aboutMe: "" });
+  });
+});
+
+describe("composer thread approval persistence", () => {
+  it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
+    const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;
+    const bridge = { setMode: vi.fn().mockResolvedValue(bot) };
+    const request = vi.fn();
+    expect(await persistTaskApproval("bot", "thread", { approvalMode: mode }, bridge, request)).toBe(bot);
+    expect(bridge.setMode).toHaveBeenCalledExactlyOnceWith("bot", mode, { threadId: "thread", threadOnly: true, acknowledgeLocalAuto: false });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("sends Full over the thread settings route with no bridge and no consent field", async () => {
+    const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: "full" }] } as BotAnnouncement;
+    const request = vi.fn().mockResolvedValue({ bot });
+    expect(await persistTaskApproval("bot", "thread", { approvalMode: "full" }, undefined, request)).toBe(bot);
+    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots/bot/tasks/thread", { method: "PATCH", body: JSON.stringify({ approvalMode: "full" }) });
+  });
+  it("never falls back to HTTP for Custom", async () => {
+    const request = vi.fn();
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "custom" }, undefined, request)).rejects.toThrow("packaged desktop");
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("uses the desktop bridge only where it works: the packaged app's own window", () => {
+    const approvals = { setMode: vi.fn() };
+    const packaged = (value: boolean) => {
+      const now = desktopCapabilitiesNow();
+      cacheDesktopCapabilities({ ...now, host: { ...now.host, packaged: value } });
+    };
+    window.ogb = { approvals } as unknown as NonNullable<Window["ogb"]>;
+    try {
+      packaged(false);
+      expect(desktopApprovalBridge()).toBeUndefined();
+      packaged(true);
+      expect(desktopApprovalBridge()).toBe(approvals);
+      delete window.ogb;
+      expect(desktopApprovalBridge()).toBeUndefined();
+    } finally {
+      delete window.ogb;
+      packaged(false);
+    }
+  });
+  it("propagates failed bridge grants", async () => {
+    const request = vi.fn();
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full" }, { setMode: vi.fn().mockRejectedValue(new Error("gone")) }, request)).rejects.toThrow("gone");
+    expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("independent bot threads", () => {
+  const bot: Bot = {
+    id: "thread-bot", threadId: "first", name: "Maus", title: "Helper", description: "",
+    notifications: true, color: "green", unread: true, busy: true, activity: "waiting-on-you",
+    modelSelection: { instanceId: "default", model: "default-model" }, approvalMode: "ask", alwaysAllow: [],
+    messages: [{ id: "first-message", role: "user", kind: "text", text: "First conversation", at: 1 }],
+    activeLeafId: "first-message",
+    tasks: [
+      { threadId: "first", title: "First", createdAt: 1, activity: "idle", busy: false, unread: false,
+        modelSelection: { instanceId: "codex", model: "thread-model", effort: "high" }, approvalMode: "auto", alwaysAllow: ["Read"] },
+      { threadId: "second", title: "Second", createdAt: 2, activity: "waiting-on-you", busy: true, unread: true,
+        modelSelection: { instanceId: "claude", model: "other-model" }, approvalMode: "ask", turnStartedAt: 5_000 },
+    ],
+  };
+  const start = () => ({ ...initialState, bots: [bot], selectedId: bot.id });
+
+  it("keeps the profile aggregate while projecting the selected thread's model, permissions and idle composer", () => {
+    const current = currentTaskBot(bot);
+    expect(current).toMatchObject({ busy: false, activity: "idle", unread: false, approvalMode: "auto", alwaysAllow: ["Read"] });
+    expect(current.modelSelection).toEqual(bot.tasks?.[0]?.modelSelection);
+    expect(bot.busy).toBe(true);
+    expect(currentTaskBot(bot, "second")).toMatchObject({ busy: true, activity: "waiting-on-you", approvalMode: "ask", turnStartedAt: 5_000 });
+    expect(currentTaskBot(bot).turnStartedAt).toBeNull();
+    expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).turnStartedAt).toBeNull();
+    expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).modelSelection).toEqual(bot.modelSelection);
+  });
+
+  it("edits only the pinned thread model and approval defaults", () => {
+    const modelSelection = { instanceId: "codex", model: "new-model" };
+    const modeled = reducer(start(), { type: "setModel", botId: bot.id, threadId: "first", selection: modelSelection });
+    const updated = reducer(modeled, { type: "updateTask", botId: bot.id, threadId: "first", patch: { approvalMode: "ask" } });
+    expect(updated.bots[0]?.modelSelection).toEqual(bot.modelSelection);
+    expect(updated.bots[0]?.tasks?.[0]).toMatchObject({ modelSelection, approvalMode: "ask" });
+    expect(updated.bots[0]?.tasks?.[1]).toEqual(bot.tasks?.[1]);
+  });
+
+  it("moves following threads with a default-only model change and leaves own picks alone", () => {
+    const following = { threadId: "third", title: "Third", createdAt: 3, modelSelection: bot.modelSelection, followsBotModel: true };
+    const own = { ...bot.tasks![0]!, followsBotModel: false };
+    const selection = { instanceId: "codex", model: "new-default", effort: "low" as const };
+    const updated = reducer({ ...start(), bots: [{ ...bot, tasks: [own, following] }] }, { type: "setModel", botId: bot.id, selection });
+    expect(updated.bots[0]?.modelSelection).toEqual(selection);
+    expect(currentTaskBot(updated.bots[0]!, "third").modelSelection).toEqual(selection);
+    expect(updated.bots[0]?.tasks?.[0]).toEqual(own);
+  });
+
+  it("does not persist request-only model scope on a task", () => {
+    const updated = reducer(start(), { type: "updateTask", botId: bot.id, threadId: "first", patch: { modelSelection: bot.modelSelection, updateBotDefault: true } });
+    expect(updated.bots[0]?.tasks?.[0]).not.toHaveProperty("updateBotDefault");
+    expect(updated.bots[0]?.tasks?.[1]).toEqual(bot.tasks?.[1]);
+  });
+
+  it("pins send, stop, edit, approval and queued-message actions before navigation", () => {
+    const actions: Action[] = [
+      { type: "send", botId: bot.id, text: "Go" }, { type: "interrupt", botId: bot.id },
+      { type: "editMessage", botId: bot.id, messageId: "first-message", text: "Changed" },
+      { type: "answerCard", botId: bot.id, messageId: "approval", answer: "Allow" },
+      { type: "dismissCard", botId: bot.id, messageId: "approval" },
+      { type: "cancelQueued", botId: bot.id, queueId: "queued" },
+    ];
+    for (const action of actions) expect(pinBotThreadAction(action, [bot])).toMatchObject({ threadId: "first" });
+    const pinned: Action = { type: "send", botId: bot.id, text: "Background", threadId: "second" };
+    expect(pinBotThreadAction(pinned, [bot])).toBe(pinned);
+  });
+
+  it("a frame without onlyPeopleAdded clears it: the bot is back to everyone", () => {
+    const limited = reducer(start(), { type: "botPatched", bot: { ...bot, onlyPeopleAdded: true } });
+    expect(limited.bots[0]?.onlyPeopleAdded).toBe(true);
+    const open = reducer(limited, { type: "botPatched", bot: { ...bot, onlyPeopleAdded: undefined } });
+    expect(open.bots[0]?.onlyPeopleAdded).toBeUndefined();
+  });
+
+  it("a frame without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    expect(voiced.bots[0]?.liveVoice).toBe("marin");
+    const cleared = reducer(voiced, { type: "botPatched", bot: { ...bot } });
+    expect(cleared.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("a thread-switch snapshot without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    const full = { ...bot, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1), messages: [] };
+    const switched = reducer(voiced, { type: "botPatched", bot: full });
+    expect(switched.bots[0]).toMatchObject({ threadId: "second" });
+    expect(switched.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("a direct thread snapshot without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    const switched = reducer(voiced, { type: "taskSwitched", bot: { ...bot, threadId: "second", messages: [] } });
+    expect(switched.bots[0]).toMatchObject({ threadId: "second" });
+    expect(switched.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
+    const patched = reducer(start(), { type: "botPatched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: "other" } });
+    expect(patched.bots[0]?.threadId).toBe("first");
+    expect(patched.bots[0]?.messages).toEqual(bot.messages);
+    expect(patched.bots[0]?.activeLeafId).toBe("first-message");
+    const read = reducer(patched, { type: "select", id: bot.id });
+    expect(read.bots[0]?.unread).toBe(true);
+    expect(read.bots[0]?.tasks?.[1]?.unread).toBe(true);
+  });
+
+  it("drops deleted-thread approvals before a slim deletion frame is followed by its transcript", () => {
+    const approval: Message = { id: "old-approval", role: "bot", kind: "options", at: 2,
+      card: { title: "Enable skill?", subtitle: "Review this skill", options: ["Enable", "Deny"],
+        requestId: "old-request", tool: "stage_skill" } };
+    let state: ReturnType<typeof reducer> = { ...start(), bots: [{ ...bot, messages: [approval], activeLeafId: approval.id }] };
+    const { messages: _messages, ...slim } = bot;
+    const deletion = { ...slim, threadId: "second", activeLeafId: "replacement", tasks: bot.tasks!.slice(1) };
+    state = reducer(state, { type: "botPatched", bot: deletion });
+    expect(state.bots[0]?.threadId).toBe("second");
+    expect(state.bots[0]?.messages).toEqual([]);
+    expect(state.bots[0]?.activeLeafId).toBeNull();
+    expect(state.bots[0]?.awaitingThreadSnapshot).toBe(true);
+    const replacement: Message = { id: "replacement", role: "user", kind: "text", text: "Keep this conversation", at: 3 };
+    const response = { ...deletion, messages: [replacement] };
+    state = reducer(state, { type: "botPatched", bot: response });
+    expect(state.bots[0]?.messages).toEqual([replacement]);
+    expect(state.bots[0]?.activeLeafId).toBe(replacement.id);
+    expect(state.bots[0]?.awaitingThreadSnapshot).toBe(false);
+    const edited = { ...replacement, text: "Newer state" };
+    state = reducer(state, { type: "messagePatched", threadId: "second", message: edited });
+    state = reducer(state, { type: "botPatched", bot: response });
+    expect(state.bots[0]?.messages).toEqual([edited]);
+  });
+
+  it("replays replacement-thread events received between deletion and the replacement snapshot", () => {
+    const { messages: _messages, ...slim } = bot;
+    const deletion = { ...slim, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1) };
+    let state = reducer(start(), { type: "botPatched", bot: deletion });
+    const reply: Message = { id: "second-reply", role: "bot", kind: "text", text: "Still working", at: 3, parentId: null };
+    state = reducer(state, { type: "messageAdded", threadId: "second", message: reply });
+    state = reducer(state, { type: "botPatched", bot: { ...deletion, messages: [] } });
+    expect(state.bots[0]?.messages).toEqual([reply]);
+    expect(state.bots[0]?.activeLeafId).toBe(reply.id);
+    expect(state.backgroundThreadEvents.second).toBeUndefined();
+  });
+
+  it("switches atomically when a deletion's full snapshot arrives first", () => {
+    const full = { ...bot, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1), messages: [] };
+    let state = reducer(start(), { type: "botPatched", bot: full });
+    const { messages: _messages, ...slim } = full;
+    state = reducer(state, { type: "botPatched", bot: slim });
+    expect(state.bots[0]).toMatchObject({ threadId: "second", messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
+  });
+
+  it.each(["slim-first", "full-first"])("replaces the only worked thread with an empty task (%s)", (order) => {
+    const onlyThread = { ...bot, busy: false, activity: "idle" as const, unread: false, tasks: bot.tasks!.slice(0, 1) };
+    const otherBot = { ...bot, id: "other-bot", threadId: "other-thread", tasks: [{ threadId: "other-thread", title: "Keep this task", createdAt: 1 }] };
+    const replacement = { threadId: "fresh-thread", title: "New task", createdAt: 3, busy: false, activity: "idle" as const, unread: false };
+    const full = { ...onlyThread, threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null };
+    const { messages: _messages, ...slim } = full;
+    let state: ReturnType<typeof reducer> = { ...start(), bots: [onlyThread, otherBot] };
+    state = reducer(state, { type: "botPatched", bot: order === "slim-first" ? slim : full });
+    expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null });
+    expect(Boolean(state.bots[0]?.awaitingThreadSnapshot)).toBe(order === "slim-first");
+    state = reducer(state, { type: "botPatched", bot: order === "slim-first" ? full : slim });
+    expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
+    expect(state.selectedId).toBe(bot.id);
+    expect(state.bots[1]).toBe(otherBot);
+    expect(reducer(state, { type: "messageAdded", threadId: onlyThread.threadId, message: onlyThread.messages[0]! })).toBe(state);
+  });
+
+  it("does not replay old background approvals over the replacement snapshot", () => {
+    const stale: Message = { id: "approval", role: "bot", kind: "options", at: 2,
+      card: { title: "Review", subtitle: "Old state", options: ["Enable", "Deny"], requestId: "request", tool: "stage_skill" } };
+    const settled = { ...stale, card: { ...stale.card!, answered: "deny", dismissed: true } };
+    const full = { ...bot, threadId: "second", activeLeafId: stale.id, tasks: bot.tasks!.slice(1), messages: [settled] };
+    const before = { ...start(), backgroundThreadEvents: { second: [{ type: "messagePatched" as const, threadId: "second", message: stale }] } };
+    const state = reducer(before, { type: "botPatched", bot: full });
+    expect(state.bots[0]?.messages).toEqual([settled]);
+    expect(state.backgroundThreadEvents.second).toBeUndefined();
+  });
+
+  it("does not undo navigation when a deleted thread's replacement snapshot arrives late", () => {
+    const third = { threadId: "third", title: "Third", createdAt: 3 };
+    const { messages: _messages, ...slim } = bot;
+    const deletion = { ...slim, threadId: "second", activeLeafId: null, tasks: [...bot.tasks!.slice(1), third] };
+    let state = reducer(start(), { type: "botPatched", bot: deletion });
+    state = reducer(state, { type: "taskSwitched", bot: { ...deletion, threadId: "third", messages: [] } });
+    state = reducer(state, { type: "botPatched", bot: { ...deletion, messages: bot.messages } });
+    expect(state.bots[0]).toMatchObject({ threadId: "third", messages: [], awaitingThreadSnapshot: false });
+  });
+
+  it("folds background messages racing a switch snapshot without changing the original conversation", () => {
+    let state = reducer(start(), { type: "switchTask", botId: bot.id, threadId: "second" });
+    const reply: Message = { id: "second-reply", role: "bot", kind: "text", text: "Second answer", at: 3, parentId: null };
+    state = reducer(state, { type: "messageAdded", threadId: "second", message: reply });
+    expect(state.bots[0]?.messages).toEqual(bot.messages);
+    state = reducer(state, { type: "taskSwitched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: null } });
+    expect(state.bots[0]?.messages).toEqual([reply]);
+    expect(state.bots[0]?.activeLeafId).toBe(reply.id);
+    expect(state.backgroundThreadEvents.second).toBeUndefined();
+    expect(currentTaskBot(state.bots[0]!).modelSelection.model).toBe("other-model");
+  });
+
+  it("can start a new thread while another waits and cancels only the pinned queue", () => {
+    const opened = reducer(start(), { type: "newTask", botId: bot.id });
+    expect(opened.selectedId).toBe(bot.id);
+    expect(opened.bots[0]?.busy).toBe(true);
+    const queued = { ...opened, pendingQueued: { first: [{ queueId: "one", text: "First" }], second: [{ queueId: "two", text: "Second" }] } };
+    const cancelled = reducer(queued, { type: "cancelQueued", botId: bot.id, threadId: "second", queueId: "two" });
+    expect(cancelled.pendingQueued.first).toEqual(queued.pendingQueued.first);
+    expect(cancelled.pendingQueued.second).toBeUndefined();
+  });
+
+  it("waits for acknowledged folder writes and keeps them separate from every thread and bot default", () => {
+    const projectBot = { ...bot, projects: [{ id: "work", name: "Work" }, { id: "personal", name: "Personal" }] };
+    const original = { ...start(), bots: [projectBot] };
+    const pending = reducer(original, { type: "updateProject", botId: bot.id, projectId: "work", patch: { name: "Research", emoji: "🧪" } });
+    expect(pending).toBe(original);
+    expect(reducer(original, { type: "reorderProjects", botId: bot.id, projectIds: ["personal", "work"] })).toBe(original);
+    expect(reducer(original, { type: "createProject", botId: bot.id, name: "New", emoji: "📁" })).toBe(original);
+    expect(reducer(original, { type: "deleteProject", botId: bot.id, projectId: "work" })).toBe(original);
+    const projects = [{ id: "personal", name: "Personal" }, { id: "work", name: "Research", emoji: "🧪" }];
+    const state = reducer(pending, { type: "botPatched", bot: { ...projectBot, projects } });
+    expect(state.bots[0]?.projects).toEqual(projects);
+    expect(state.selectedId).toBe(original.selectedId);
+    expect(state.bots[0]?.threadId).toBe(bot.threadId);
+    expect(state.bots[0]?.tasks).toEqual(bot.tasks);
+    expect(state.bots[0]?.messages).toEqual(bot.messages);
+    expect(state.bots[0]?.modelSelection).toEqual(bot.modelSelection);
+  });
+
+  it("moves or ungroups a busy thread without changing its model, state, or selected conversation", () => {
+    const grouped = reducer(start(), { type: "updateTask", botId: bot.id, threadId: "second", patch: { projectId: "work" } });
+    expect(grouped.bots[0]?.tasks?.[1]).toEqual({ ...bot.tasks?.[1], projectId: "work" });
+    expect(grouped.bots[0]?.threadId).toBe("first");
+    expect(grouped.bots[0]?.messages).toEqual(bot.messages);
+    const ungrouped = reducer(grouped, { type: "updateTask", botId: bot.id, threadId: "second", patch: { projectId: null } });
+    expect(ungrouped.bots[0]?.tasks?.[1]).toEqual({ ...bot.tasks?.[1], projectId: undefined });
+    expect(ungrouped.bots[0]?.tasks?.[0]).toEqual(bot.tasks?.[0]);
+  });
+
+  it("drops the machine's mark the moment the person pins or unpins a thread's place", () => {
+    const autoPinned = { ...start(), bots: [{ ...bot, tasks: bot.tasks?.map((task) =>
+      task.threadId === "first" ? { ...task, surface: "browser" as const, surfaceAuto: true as const } : task) }] };
+    const pinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { surface: "cloud" } });
+    expect(pinned.bots[0]?.tasks?.[0]?.surface).toBe("cloud");
+    expect(pinned.bots[0]?.tasks?.[0]?.surfaceAuto).toBeUndefined();
+    const unpinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { surface: null } });
+    expect(unpinned.bots[0]?.tasks?.[0]?.surface).toBeUndefined();
+    expect(unpinned.bots[0]?.tasks?.[0]?.surfaceAuto).toBeUndefined();
+    const listPinned = reducer(autoPinned, { type: "updateTask", botId: bot.id, threadId: "first", patch: { pinned: true } });
+    expect(listPinned.bots[0]?.tasks?.[0]).toMatchObject({ surface: "browser", surfaceAuto: true });
+  });
+});
+
+describe("keyboard shortcuts dialog state", () => {
+  it("opens and closes without replacing bot settings navigation", () => {
+    expect(initialState.shortcutsOpen).toBe(false);
+    expect(initialState.botSettingsSection).toBe("overview");
+    expect(initialState.botSettingsExpandAccordion).toBe(false);
+    const state = { ...initialState, botSettingsSection: "soul" as const };
+    const opened = reducer(state, { type: "toggleShortcuts", open: true });
+    expect(opened.shortcutsOpen).toBe(true);
+    expect(opened.botSettingsSection).toBe("soul");
+    const closed = reducer(opened, { type: "toggleShortcuts" });
+    expect(closed.shortcutsOpen).toBe(false);
+    expect(closed.botSettingsSection).toBe("soul");
+  });
+});
+
+describe("Settings opened by the Cloud link", () => {
+  it("marks only the link's own opening, counts each link, and clears on any other Settings navigation", () => {
+    expect(initialState.appSettingsCloudLink).toBe(0);
+    const link = CLOUD_LINK_SETTINGS;
+    const opened = reducer(initialState, link);
+    expect(opened).toMatchObject({ appSettingsOpen: true, appSettingsSection: "cloudAccount", appSettingsCloudLink: 1 });
+    expect(reducer(opened, link).appSettingsCloudLink).toBe(2);
+    expect(reducer(opened, { type: "toggleAppSettings", open: true, section: "cloudAccount" }).appSettingsCloudLink).toBe(0);
+    expect(reducer(opened, { type: "toggleAppSettings", open: true, section: "general" }).appSettingsCloudLink).toBe(0);
+    expect(reducer(opened, { type: "toggleAppSettings", open: false })).toMatchObject({ appSettingsOpen: false, appSettingsCloudLink: 0 });
+    expect(reducer(opened, { type: "toggleAppSettings" }).appSettingsCloudLink).toBe(0);
+    expect(reducer(initialState, { ...link, open: false }).appSettingsCloudLink).toBe(0);
+  });
+});
+
+describe("Settings opened on the phone pairing", () => {
+  it("counts each request, and clears on any other Settings navigation", () => {
+    expect(initialState.appSettingsPhonePairing).toBe(0);
+    const phone = { type: "toggleAppSettings", open: true, section: "companion", phonePairing: true } as const;
+    const opened = reducer(initialState, phone);
+    expect(opened).toMatchObject({ appSettingsOpen: true, appSettingsSection: "companion", appSettingsPhonePairing: 1 });
+    expect(reducer(opened, phone).appSettingsPhonePairing).toBe(2);
+    expect(reducer(opened, { type: "toggleAppSettings", open: true, section: "companion" }).appSettingsPhonePairing).toBe(0);
+    expect(reducer(opened, { type: "toggleAppSettings", open: false }).appSettingsPhonePairing).toBe(0);
+    expect(reducer(initialState, { ...phone, open: false }).appSettingsPhonePairing).toBe(0);
+  });
+});
+
+describe("connector grants persistence", () => {
+  const announcement = () => ({
+    id: "bot-1",
+    threadId: "thread-1",
+    name: "Maus",
+    title: "Helper",
+    description: "",
+    notifications: true,
+    color: "green" as const,
+    unread: false,
+    modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" },
+    approvalMode: "ask" as const,
+  });
+
+  it("PATCHes the exact explicit tool set the editor saved", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement() }));
+    const grants: Record<string, ConnectorToolGrant> = {
+      gmail: { tools: ["GMAIL_FETCH_EMAILS", "GMAIL_SEND_EMAIL"] },
+      slack: { tools: "*" },
+    };
+    await persistBotUpdate("bot-1", { connectorTools: grants }, new AbortController().signal, request);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ connectorTools: grants });
+  });
+
+  it("sends null to drop the record and return to the legacy boolean", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement() }));
+    await persistBotUpdate("bot-1", { connectorTools: null }, new AbortController().signal, request);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ connectorTools: null });
+  });
+});
+
+describe("trusted approval-mode persistence", () => {
+  const announcement = (approvalMode: Bot["approvalMode"] = "ask") => ({
+    id: "bot-1",
+    threadId: "thread-1",
+    name: "Maus",
+    title: "Helper",
+    description: "",
+    notifications: true,
+    color: "green" as const,
+    unread: false,
+    modelSelection: { instanceId: "codex", model: "gpt-5.6-sol" },
+    approvalMode,
+  });
+
+  it("commits ordinary edits before granting Full through the private bridge", async () => {
+    const order: string[] = [];
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => {
+      order.push("http");
+      return { bot: announcement("ask") };
+    });
+    const setMode = vi.fn(async () => {
+      order.push("private");
+      return announcement("full");
+    });
+
+    await expect(persistBotUpdate(
+      "bot-1",
+      { approvalMode: "full", title: "Ops" },
+      new AbortController().signal,
+      request,
+      { setMode },
+    )).resolves.toMatchObject({ approvalMode: "full" });
+
+    expect(order).toEqual(["http", "private"]);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ title: "Ops" });
+    expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false });
+  });
+
+  it("passes all-threads scope through the private grant when there is one", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
+    const setMode = vi.fn(async () => announcement("full"));
+    await persistBotUpdate("bot-1", { approvalMode: "full", applyToAllThreads: true, title: "Chief" },
+      new AbortController().signal, request, { setMode });
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ title: "Chief" });
+    expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: false, allThreads: true });
+  });
+
+  it("sends Full over the bot API with no bridge, all-threads scope included, and no consent field", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("full") }));
+    await expect(persistBotUpdate("bot-1", { approvalMode: "full", applyToAllThreads: true, title: "Chief" },
+      new AbortController().signal, request, undefined)).resolves.toMatchObject({ approvalMode: "full" });
+    await persistBotUpdate("bot-1", { approvalMode: "full" }, new AbortController().signal, request, undefined);
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls.map(([path, init]) => [path, init?.method, JSON.parse(String(init?.body))])).toEqual([
+      ["/api/bots/bot-1", "PATCH", { title: "Chief", approvalMode: "full", applyToAllThreads: true }],
+      ["/api/bots/bot-1", "PATCH", { approvalMode: "full" }],
+    ]);
+  });
+
+  it("sends the all-threads scope with every level but Custom, the same way", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
+    for (const approvalMode of ["ask", "edits", "auto", "full"] as const) {
+      await persistBotUpdate("bot-1", { approvalMode, applyToAllThreads: true }, new AbortController().signal, request, undefined);
+    }
+    expect(request.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual(
+      ["ask", "edits", "auto", "full"].map((approvalMode) => ({ approvalMode, applyToAllThreads: true })));
+  });
+
+  it("leaves a thread's Custom through the private bridge when the level goes to every thread", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("auto") }));
+    const setMode = vi.fn(async () => announcement("auto"));
+    const current = { ...announcement("ask"), tasks: [
+      { threadId: "main", title: "Main", createdAt: 1 },
+      { threadId: "codex-rules", title: "Rules", createdAt: 2, approvalMode: "custom" as const },
+    ] };
+    await persistBotUpdate("bot-1", { approvalMode: "auto", applyToAllThreads: true }, new AbortController().signal, request, { setMode }, current);
+    expect(setMode).toHaveBeenCalledWith("bot-1", "auto", { acknowledgeLocalAuto: false, allThreads: true });
+    expect(request).not.toHaveBeenCalled();
+    await persistBotUpdate("bot-1", { approvalMode: "auto" }, new AbortController().signal, request, { setMode }, current);
+    expect(setMode).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({ approvalMode: "auto" });
+  });
+
+  it("fails closed when Custom has no packaged desktop bridge", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("ask") }));
+    await expect(persistBotUpdate(
+      "bot-1",
+      { approvalMode: "custom" },
+      new AbortController().signal,
+      request,
+      undefined,
+    )).rejects.toThrow("packaged desktop app");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("uses the private bridge to leave Custom instead of the bot-callable HTTP API", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({ bot: announcement("custom") }));
+    const setMode = vi.fn(async () => announcement("ask"));
+
+    await expect(persistBotUpdate(
+      "bot-1",
+      { approvalMode: "ask" },
+      new AbortController().signal,
+      request,
+      { setMode },
+      announcement("custom"),
+    )).resolves.toMatchObject({ approvalMode: "ask" });
+
+    expect(request).not.toHaveBeenCalled();
+    expect(setMode).toHaveBeenCalledWith("bot-1", "ask", { acknowledgeLocalAuto: false });
+  });
+
+  it("revokes a trusted mode that completes after its save was cancelled", async () => {
+    let finishFull!: (bot: BotAnnouncement) => void;
+    const lateFull = new Promise<BotAnnouncement>((resolve) => {
+      finishFull = resolve;
+    });
+    const calls: string[] = [];
+    const setMode = vi.fn(async (_botId: string, mode: "ask" | "auto" | "full" | "custom") => {
+      calls.push(mode);
+      return mode === "full" ? lateFull : announcement(mode);
+    });
+    const controller = new AbortController();
+    const pending = persistBotUpdate(
+      "bot-1",
+      { approvalMode: "full" },
+      controller.signal,
+      vi.fn(),
+      { setMode },
+      announcement("ask"),
+    );
+    await Promise.resolve();
+
+    controller.abort();
+    finishFull(announcement("full"));
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).toEqual(["full", "ask"]);
+  });
+
+  it("revokes a late Custom-to-Full grant when a newer save supersedes it", async () => {
+    let finishFull!: (bot: BotAnnouncement) => void;
+    const lateFull = new Promise<BotAnnouncement>((resolve) => {
+      finishFull = resolve;
+    });
+    const calls: string[] = [];
+    const setMode = vi.fn(async (_botId: string, mode: "ask" | "auto" | "full" | "custom") => {
+      calls.push(mode);
+      return mode === "full" ? lateFull : announcement(mode);
+    });
+    const controller = new AbortController();
+    const pending = persistBotUpdate(
+      "bot-1",
+      { approvalMode: "full" },
+      controller.signal,
+      vi.fn(),
+      { setMode },
+      announcement("custom"),
+    );
+    await Promise.resolve();
+
+    controller.abort();
+    finishFull(announcement("full"));
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(calls).toEqual(["full", "ask"]);
+  });
+
+  it("leaves Custom before persisting a coalesced non-Codex model switch", async () => {
+    const order: string[] = [];
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => {
+      order.push("http");
+      return {
+        bot: {
+          ...announcement("ask"),
+          modelSelection: { instanceId: "gemini", model: "gemini-3.1-pro" },
+        },
+      };
+    });
+    const setMode = vi.fn(async () => {
+      order.push("private");
+      return announcement("ask");
+    });
+
+    await expect(persistBotUpdate(
+      "bot-1",
+      {
+        approvalMode: "ask",
+        modelSelection: { instanceId: "gemini", model: "gemini-3.1-pro" },
+      },
+      new AbortController().signal,
+      request,
+      { setMode },
+      announcement("custom"),
+    )).resolves.toMatchObject({
+      approvalMode: "ask",
+      modelSelection: { instanceId: "gemini", model: "gemini-3.1-pro" },
+    });
+
+    expect(order).toEqual(["private", "http"]);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
+      modelSelection: { instanceId: "gemini", model: "gemini-3.1-pro" },
+    });
+    expect(setMode).toHaveBeenCalledWith("bot-1", "ask", { acknowledgeLocalAuto: false });
+  });
+
+  it("keeps local-computer consent on an ordinary PATCH coalesced with a private mode", async () => {
+    const request = vi.fn(async (_path: string, _init?: RequestInit) => ({
+      bot: { ...announcement("auto"), computer: "local" as const },
+    }));
+    const setMode = vi.fn(async () => announcement("full"));
+
+    await persistBotUpdate(
+      "bot-1",
+      {
+        computer: "local",
+        acknowledgeLocalAuto: true,
+        approvalMode: "full",
+      },
+      new AbortController().signal,
+      request,
+      { setMode },
+      announcement("auto"),
+    );
+
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
+      computer: "local",
+      acknowledgeLocalAuto: true,
+    });
+    expect(setMode).toHaveBeenCalledWith("bot-1", "full", { acknowledgeLocalAuto: true });
+  });
+});
+
+describe("server-authoritative bot deletion", () => {
+  const bot = {
+    id: "bot-delete",
+    threadId: "thread-delete",
+    name: "Keeper",
+    messages: [],
+  } as never as Bot;
+
+  const stateWithQueuedWork = () => reducer(
+    reducer(initialState, { type: "botAdded", bot }),
+    { type: "pendingQueued", threadId: bot.threadId, queueId: "queued-1", text: "keep this" },
+  );
+
+  it.each([409, 503])("keeps the bot, selection, and queued work when DELETE is rejected with %s", async (status) => {
+    let state = stateWithQueuedWork();
+    const cancel = vi.fn();
+
+    await expect(requestConfirmedBotDeletion(
+      bot.id,
+      async () => { throw new Error(`${status} computer cleanup required`); },
+      (botId) => {
+        cancel(botId);
+        state = reducer(state, { type: "deleteBot", botId });
+      },
+    )).rejects.toThrow(String(status));
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect(state.selectedId).toBe(bot.id);
+    expect(state.bots.map((candidate) => candidate.id)).toContain(bot.id);
+    expect(state.pendingQueued[bot.threadId]).toEqual([
+      { queueId: "queued-1", text: "keep this" },
+    ]);
+  });
+
+  it("removes the bot only after DELETE succeeds", async () => {
+    let state = stateWithQueuedWork();
+    const cancel = vi.fn();
+    const requestDelete = vi.fn(async () => ({ ok: true }));
+
+    await requestConfirmedBotDeletion(bot.id, requestDelete, (botId) => {
+      cancel(botId);
+      state = reducer(state, { type: "deleteBot", botId });
+    });
+
+    expect(requestDelete).toHaveBeenCalledWith(bot.id);
+    expect(cancel).toHaveBeenCalledWith(bot.id);
+    expect(state.bots).toHaveLength(0);
+  });
+
+  it("coalesces repeated delete clicks while the server request is pending", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const requestDelete = vi.fn(async () => gate);
+    const onConfirmed = vi.fn();
+
+    const first = requestConfirmedBotDeletion(bot.id, requestDelete, onConfirmed);
+    const second = requestConfirmedBotDeletion(bot.id, requestDelete, onConfirmed);
+    expect(requestDelete).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+
+    expect(onConfirmed).toHaveBeenCalledTimes(1);
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, undefined);
+  });
+
+  it("hands the server's answer on, so a deletion that left something behind can say so", async () => {
+    const onConfirmed = vi.fn();
+    const answer = { ok: true, notice: "Deleted. gone-vps could not be reached." };
+
+    await requestConfirmedBotDeletion(bot.id, async () => answer, onConfirmed);
+
+    expect(onConfirmed).toHaveBeenCalledWith(bot.id, answer);
+  });
+
+  it("keeps a visible pending marker until deletion settles or fails", () => {
+    const state = stateWithQueuedWork();
+    const pending = reducer(state, { type: "botDeletionPending", botId: bot.id, on: true });
+
+    expect(pending.bots.map((candidate) => candidate.id)).toContain(bot.id);
+    expect(pending.deletingBots).toEqual({ [bot.id]: true });
+
+    const failed = reducer(pending, { type: "botDeletionPending", botId: bot.id, on: false });
+    expect(failed.bots.map((candidate) => candidate.id)).toContain(bot.id);
+    expect(failed.deletingBots).toEqual({});
+
+    const removed = reducer(pending, { type: "deleteBot", botId: bot.id });
+    expect(removed.bots).toHaveLength(0);
+    expect(removed.deletingBots).toEqual({});
+  });
+});
+
+type SnapshotFrame =
+  | { kind: "hello"; resumed: boolean; cursor: string }
+  | { kind: "message"; threadId: string; message: { id: string } };
+
+class SnapshotEventSource implements LiveEventSourceLike {
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: string; lastEventId?: string }) => void) | null = null;
+  close = vi.fn();
+
+  constructor(readonly url: string) {}
+
+  message(frame: SnapshotFrame, lastEventId = "") {
+    this.onmessage?.({ data: JSON.stringify(frame), lastEventId });
+  }
+}
+
+describe("replacement snapshot boundary", () => {
+  it("flushes bot frames without reconnecting when a peripheral snapshot fails", async () => {
+    const sources: SnapshotEventSource[] = [];
+    const applied: unknown[] = [];
+    const pending: unknown[] = [];
+    const scheduleRetry = vi.fn();
+    let hydrated = false;
+    const platform: LiveEventsPlatform = {
+      createEventSource: (url) => {
+        const source = new SnapshotEventSource(url);
+        sources.push(source);
+        return source;
+      },
+      isOnline: () => true,
+      isVisible: () => true,
+      now: Date.now,
+    };
+    const stop = openLiveEvents(
+      {
+        onSnapshotRequired: async () => {
+          const chatReady = await loadSnapshotBoundary(
+            async () => {},
+            [{ key: "webhooks", load: async () => Promise.reject(new Error("webhooks unavailable")) }],
+            (part, error) => scheduleRetry(part.key, error),
+          );
+          if (chatReady) {
+            hydrated = true;
+            applied.push(...pending.splice(0));
+          }
+          return chatReady;
+        },
+        onFrame: (frame) => {
+          if (hydrated) applied.push(frame);
+          else pending.push(frame);
+        },
+        retryMinMs: 1,
+        retryMaxMs: 1,
+      },
+      platform,
+    );
+
+    sources[0]!.message({ kind: "hello", resumed: false, cursor: "stream00:4" });
+    sources[0]!.message(
+      { kind: "message", threadId: "bot-thread", message: { id: "user-1" } },
+      "stream00:5",
+    );
+    await vi.waitFor(() => expect(applied).toHaveLength(1));
+
+    expect(applied).toEqual([
+      { kind: "message", threadId: "bot-thread", message: { id: "user-1" } },
+    ]);
+    expect(scheduleRetry).toHaveBeenCalledWith("webhooks", expect.any(Error));
+    expect(sources).toHaveLength(1);
+    expect(sources[0]!.close).not.toHaveBeenCalled();
+    stop();
+  });
+});
+
+describe("notification routing", () => {
+  const bots = [{ id: "bot-1", threadId: "main-thread", tasks: [{ threadId: "detached-thread" }] }];
+  const groups = [{
+    id: "room-1",
+    threadId: "room-thread",
+    tasks: [
+      { threadId: "room-thread", title: "Current", createdAt: 1 },
+      { threadId: "older-room-thread", title: "Older", createdAt: 0 },
+    ],
+  }];
+
+  describe("openThread", () => {
+    const named = bots.map((bot) => ({ ...bot, name: "Scout" }));
+
+    it("opens the room when a notification's thread is a group's, never a bot switch that would 404", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId: "room-thread" }, { bots: named, groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "room-1" }, { type: "revealThread", threadId: "room-thread" }]);
+    });
+
+    it("opens the conversation that owns the thread when a teammate's routine reports there", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "runner", threadId: "detached-thread" }, { bots: [...named, { id: "runner", name: "Runner", threadId: "runner-thread", tasks: [] }], groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
+        { type: "revealThread", threadId: "detached-thread" },
+      ]);
+    });
+
+    it("shows the thread in the sidebar whichever list a switch came from", () => {
+      const switched = reducer({ ...initialState, bots: named as never }, { type: "switchTask", botId: "bot-1", threadId: "detached-thread" });
+      expect(switched.revealThread?.threadId).toBe("detached-thread");
+    });
+
+    it("takes down what covers the chat, so the click is seen to land", () => {
+      const covered = { ...initialState, appSettingsOpen: true, shortcutsOpen: true, pluginsOpen: true };
+      expect(reducer(covered, { type: "revealThread", threadId: "t" })).toMatchObject({ appSettingsOpen: false, shortcutsOpen: false, pluginsOpen: false });
+    });
+
+    it("selects the bot, switches the view to the thread and reveals its row", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "detached-thread" }, { bots: named, groups }, true)).toBe(true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "detached-thread" },
+        { type: "revealThread", threadId: "detached-thread" },
+      ]);
+    });
+
+    it("opens a room thread through the room, not a bot switch", () => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId: "older-room-thread" }, { bots: named, groups }, true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "room-1" },
+        { type: "switchGroupTask", groupId: "room-1", threadId: "older-room-thread" },
+        { type: "revealThread", threadId: "older-room-thread" },
+      ]);
+    });
+
+    it("falls back to the bot with a quiet notice when the thread is gone, never a switch that would 404", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups }, true)).toBe(false);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "revealThread", threadId: "deleted-thread" },
+        { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
+      ]);
+    });
+
+    it("only notices when even the bot is gone", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "deleted-bot", threadId: "deleted-thread" }, { bots: named, groups }, true)).toBe(false);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "revealThread", threadId: "deleted-thread" },
+        { type: "notice", notice: { kind: "thread-gone", botName: null } },
+      ]);
+    });
+
+    it("stores the notice and bumps the reveal nonce so the same thread can be revealed twice", () => {
+      const noticed = reducer(initialState, { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } });
+      expect(noticed.notice).toEqual({ kind: "thread-gone", botName: "Scout" });
+      expect(reducer(noticed, { type: "notice", notice: null }).notice).toBeNull();
+      const once = reducer(initialState, { type: "revealThread", threadId: "t" });
+      const twice = reducer(once, { type: "revealThread", threadId: "t" });
+      expect(once.revealThread).toEqual({ threadId: "t", nonce: 1 });
+      expect(twice.revealThread?.nonce).toBe(2);
+    });
+  });
+
+  describe("openBot", () => {
+    const bot: Bot = {
+      id: "bot-1", threadId: "routine-report", mainThreadId: "later-chat", name: "Scout", title: "", description: "", color: "green",
+      notifications: true, unread: true, modelSelection: { instanceId: "test", model: "test" }, messages: [],
+      tasks: [
+        { threadId: "routine-report", title: "Reports", createdAt: 1, unread: true },
+        { threadId: "later-chat", title: "Later chat", createdAt: 2 },
+      ],
+    };
+    const opened = (target: Bot, threadsShown: boolean) => {
+      const dispatch = vi.fn();
+      openBot(dispatch, target, threadsShown);
+      return dispatch.mock.calls.map(([action]) => action);
+    };
+
+    it("opens the thread it was on while threads are shown", () => {
+      expect(opened(bot, true)).toEqual([{ type: "select", id: "bot-1" }]);
+    });
+
+    it("opens the bot's main thread while threads are hidden, the way its row would", () => {
+      expect(opened(bot, false)).toEqual([{ type: "switchTask", botId: "bot-1", threadId: "later-chat" }]);
+      expect(opened({ ...bot, threadId: "later-chat" }, false)).toEqual([{ type: "select", id: "bot-1" }]);
+      expect(opened({ ...bot, tasks: undefined }, false)).toEqual([{ type: "select", id: "bot-1" }]);
+      expect(opened({ ...bot, mainThreadId: undefined }, false)).toEqual([{ type: "select", id: "bot-1" }]);
+      const switched = reducer({ ...initialState, bots: [bot], selectedId: "other", activeView: "routines" }, opened(bot, false)[0] as Action);
+      expect(switched).toMatchObject({ selectedId: "bot-1", activeView: "chat" });
+      expect(switched.bots[0]!.tasks!.find((task) => task.threadId === "routine-report")!.unread).toBe(true);
+    });
+
+    const followed = (threadId: string, threadsShown: boolean) => {
+      const dispatch = vi.fn();
+      openThread(dispatch, { botId: "bot-1", threadId }, { bots: [bot], groups: [] }, threadsShown);
+      return dispatch.mock.calls.map(([action]) => action as Action).filter((action) => action.type !== "revealThread" && action.type !== "notice");
+    };
+
+    it("opens a thread a notification names without passing the reply the bot was left on as read, with threads hidden", () => {
+      const actions = followed("later-chat", false);
+      expect(actions).toEqual([{ type: "switchTask", botId: "bot-1", threadId: "later-chat" }]);
+      const opened = actions.reduce(reducer, { ...initialState, bots: [bot], selectedId: "other", activeView: "chat" });
+      expect(opened).toMatchObject({ selectedId: "bot-1", activeView: "chat" });
+      expect(opened.bots[0]!.tasks!.find((task) => task.threadId === "routine-report")!.unread).toBe(true);
+      expect(followed("routine-report", false)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "routine-report" },
+      ]);
+    });
+
+    it("opens a thread a notification names as before while threads are shown", () => {
+      expect(followed("later-chat", true)).toEqual([
+        { type: "select", id: "bot-1" },
+        { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+      ]);
+    });
+
+    it("falls back from a thread it cannot place to the bot itself, its main thread with threads hidden", () => {
+      expect(followed("deleted-thread", false)).toEqual([{ type: "switchTask", botId: "bot-1", threadId: "later-chat" }]);
+      expect(followed("deleted-thread", true)).toEqual([{ type: "select", id: "bot-1" }]);
+      const named = [{ ...bot, name: "Scout" }];
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "deleted-thread" }, { bots: named, groups: [] }, false)).toBe(false);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+        { type: "revealThread", threadId: "deleted-thread" },
+        { type: "notice", notice: { kind: "thread-gone", botName: "Scout" } },
+      ]);
+    });
+
+    it("opens a chip's or a link's thread the same way, then reveals it", () => {
+      const dispatch = vi.fn();
+      expect(openThread(dispatch, { botId: "bot-1", threadId: "later-chat" }, { bots: [{ ...bot, name: "Scout" }], groups: [] }, false)).toBe(true);
+      expect(dispatch.mock.calls.map(([action]) => action)).toEqual([
+        { type: "switchTask", botId: "bot-1", threadId: "later-chat" },
+        { type: "revealThread", threadId: "later-chat" },
+      ]);
+    });
+  });
+
+  it("identifies only the exact chat thread currently on screen", () => {
+    expect(visibleNotificationThread({
+      activeView: "chat",
+      selectedId: "bot-1",
+      bots,
+      groups,
+      forkPanel: null,
+    })).toBe("main-thread");
+    expect(visibleNotificationThread({
+      activeView: "chat",
+      selectedId: "room-1",
+      bots,
+      groups,
+      forkPanel: null,
+    })).toBe("room-thread");
+    expect(visibleNotificationThread({
+      activeView: "chat", selectedId: "room-1", bots, groups,
+      forkPanel: { kind: "group", ownerId: "room-1", threadId: "fork-thread" } as AppState["forkPanel"],
+    }, "fork-thread")).toBe("fork-thread");
+    expect(visibleNotificationThread({
+      activeView: "routines",
+      selectedId: "bot-1",
+      bots,
+      groups,
+      forkPanel: null,
+    })).toBeNull();
+  });
+});
+
+describe("config status frames", () => {
+  it("keeps each provider's own key flag through a live config update", () => {
+    const status = configStatusFromFrame({
+      openai: { configured: true },
+      openrouter: { configured: false },
+      anthropic: { configured: true, everyClaudeBot: false },
+    } as ConfigStatusFrame);
+    expect(status.openai).toEqual({ configured: true });
+    expect(status.openrouter).toEqual({ configured: false });
+    expect(status.anthropic).toEqual({ configured: true, everyClaudeBot: false });
+  });
+
+  it("keeps every saved key's hint through a live config update, so a masked key never empties", () => {
+    const status = configStatusFromFrame({
+      openai: { configured: true, last4: "a1b2" },
+      box: { configured: true, last4: "c3d4" },
+      savedKeys: { ttsKey: { configured: true, last4: "e5f6" }, openaiLiveKey: { configured: false } },
+    } as ConfigStatusFrame);
+    expect(status.openai).toEqual({ configured: true, last4: "a1b2" });
+    expect(status.box).toEqual({ configured: true, last4: "c3d4" });
+    expect(status.savedKeys).toEqual({ ttsKey: { configured: true, last4: "e5f6" }, openaiLiveKey: { configured: false } });
+  });
+
+  it("keeps thread capacity and room timeout with the existing config fields", () => {
+    expect(
+      configStatusFromFrame({
+        xai: { configured: true },
+        composio: { configured: true, mode: "managed" },
+        box: { configured: false },
+        vps: { configured: true, sshAlias: "homelab" },
+        rooms: { turnTimeoutMinutes: 20 },
+        mcp: { callTimeoutMinutes: 30 },
+        threads: { maxConcurrentPerBot: 10 },
+        localVm: { mode: "per-bot", maxInstances: 3 },
+        opencodeGo: { configured: true },
+        tts: { configured: true, ready: true, voice: "Ada" },
+        profile: { name: "Ian", email: "ian@example.test" },
+        features: { skillAuthoring: true },
+      }),
+    ).toEqual({
+      xai: { configured: true },
+      composio: { configured: true, mode: "managed" },
+      box: { configured: false },
+      vps: { configured: true, sshAlias: "homelab" },
+      rooms: { turnTimeoutMinutes: 20 },
+      mcp: { callTimeoutMinutes: 30 },
+      threads: { maxConcurrentPerBot: 10 },
+      localVm: { mode: "per-bot", maxInstances: 3 },
+      opencodeGo: { configured: true },
+      tts: { configured: true, ready: true, voice: "Ada" },
+      profile: { name: "Ian", email: "ian@example.test" },
+      features: { skillAuthoring: true },
+    });
+  });
+});
+
+describe("task rename", () => {
+  it("updates the task title in local state immediately", () => {
+    const bot = {
+      id: "echo",
+      threadId: "t1",
+      name: "Echo",
+      title: "",
+      description: "",
+      notifications: true,
+      color: "green",
+      unread: false,
+      modelSelection: { instanceId: "x", model: "y" },
+      messages: [],
+      tasks: [
+        { threadId: "t1", title: "New task", createdAt: 1 },
+        { threadId: "t2", title: "Other", createdAt: 2 },
+      ],
+    } satisfies Bot;
+    const next = reducer(
+      { ...initialState, bots: [bot] },
+      { type: "renameTask", botId: bot.id, threadId: "t1", title: "Renamed" },
+    );
+    expect(next.bots[0]?.tasks?.find((task) => task.threadId === "t1")?.title).toBe("Renamed");
+    expect(next.bots[0]?.tasks?.find((task) => task.threadId === "t2")?.title).toBe("Other");
+  });
+
+  it("updates a channel task title in local state immediately", () => {
+    const group = {
+      id: "room",
+      threadId: "room-task-1",
+      name: "Launch",
+      memberIds: [],
+      defaultResponder: { kind: "everyone" },
+      bulletin: "",
+      unread: false,
+      createdAt: 1,
+      messages: [],
+      tasks: [
+        { threadId: "room-task-1", title: "New task", createdAt: 1 },
+        { threadId: "room-task-2", title: "Other", createdAt: 2 },
+      ],
+    } satisfies Group;
+    const next = reducer(
+      { ...initialState, groups: [group] },
+      { type: "renameGroupTask", groupId: group.id, threadId: "room-task-1", title: "Renamed" },
+    );
+    expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-1")?.title).toBe("Renamed");
+    expect(next.groups[0]?.tasks?.find((task) => task.threadId === "room-task-2")?.title).toBe("Other");
+  });
+
+  it("archives and unarchives a channel task in local state immediately", () => {
+    const group = {
+      id: "room", threadId: "room-task-1", name: "Launch", memberIds: [], defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, createdAt: 1, messages: [],
+      tasks: [{ threadId: "room-task-1", title: "Open", createdAt: 1 }, { threadId: "room-task-2", title: "Done", createdAt: 2 }],
+    } satisfies Group;
+    const archived = reducer({ ...initialState, groups: [group] }, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: 1234 });
+    expect(archived.groups[0]?.tasks?.map((task) => task.archivedAt)).toEqual([undefined, 1234]);
+    const unarchived = reducer(archived, { type: "archiveGroupTask", groupId: "room", threadId: "room-task-2", archivedAt: null });
+    expect(unarchived.groups[0]?.tasks?.[1]?.archivedAt).toBeUndefined();
+  });
+});
+
+describe("config status", () => {
+  const config = configStatusFromFrame({
+    composio: { configured: false },
+    box: { configured: false },
+    vps: { configured: false, sshAlias: "" },
+    rooms: { turnTimeoutMinutes: 5 },
+    mcp: { callTimeoutMinutes: 10 },
+    localVm: { mode: "shared", maxInstances: 2 },
+    features: { skillAuthoring: true },
+  });
+
+  it("replaces the config without moving the person off their current view", () => {
+    const onRoutines = reducer(initialState, { type: "showRoutines" });
+    expect(onRoutines.activeView).toBe("routines");
+
+    const next = reducer(onRoutines, {
+      type: "configStatus",
+      config: { ...config, features: { skillAuthoring: false } },
+    });
+    expect(next.activeView).toBe("routines");
+    expect(next.config?.features).toEqual({ skillAuthoring: false });
+  });
+});
+
+describe("onboarding quiz", () => {
+  const quizCard = {
+    title: "What do you mostly want help with?",
+    subtitle: "Pick whatever's closest; we can always expand from there.",
+    options: ["Work & projects"],
+  };
+  const bot = {
+    id: "echo",
+    threadId: "t1",
+    name: "Echo",
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "x", model: "y" },
+    messages: [
+      { id: "g", role: "bot", kind: "text", text: "Hey", at: 1 },
+      { id: "q", role: "bot", kind: "options", card: quizCard, at: 2 },
+    ],
+    activeLeafId: "q",
+  } satisfies Bot;
+
+  it("hides the quiz as soon as the person sends a message", () => {
+    const state = { ...initialState, bots: [bot], selectedId: bot.id };
+    const next = reducer(state, { type: "send", botId: bot.id, text: "Hi bro" });
+    expect(next.bots[0]?.messages.find((message) => message.id === "q")?.card?.dismissed).toBe(true);
+  });
+
+  it("hides the quiz when they pick an option", () => {
+    const state = { ...initialState, bots: [bot], selectedId: bot.id };
+    const next = reducer(state, { type: "answerCard", botId: bot.id, messageId: "q", answer: "Work & projects" });
+    expect(next.bots[0]?.messages.find((message) => message.id === "q")?.card).toMatchObject({
+      answered: "Work & projects",
+      dismissed: true,
+    });
+  });
+
+  it("leaves a live permission card in place", () => {
+    const askBot: Bot = {
+      ...bot,
+      messages: [
+        ...bot.messages,
+        {
+          id: "ask",
+          role: "bot",
+          kind: "options",
+          card: {
+            title: "Approval needed",
+            subtitle: "rm",
+            options: ["Allow", "Deny"],
+            requestId: "r1",
+            tool: "Bash",
+          },
+          at: 3,
+        },
+      ],
+      activeLeafId: "ask",
+    };
+    const state = { ...initialState, bots: [askBot], selectedId: askBot.id };
+    const next = reducer(state, { type: "send", botId: askBot.id, text: "ok" });
+    expect(next.bots[0]?.messages.find((message) => message.id === "ask")?.card?.dismissed).toBeUndefined();
+    expect(next.bots[0]?.messages.find((message) => message.id === "q")?.card?.dismissed).toBe(true);
+  });
+});
+
+describe("optimistic sent messages", () => {
+  const root: Message = { id: "root", role: "bot", kind: "text", text: "Ready", at: 1 };
+  const bot: Bot = {
+    id: "preview-bot",
+    threadId: "preview-thread",
+    name: "Preview",
+    title: "",
+    description: "",
+    notifications: true,
+    color: "purple",
+    unread: false,
+    modelSelection: { instanceId: "claude", model: "default" },
+    messages: [root],
+    activeLeafId: root.id,
+  };
+
+  it("shows a direct send immediately and replaces it with the canonical server message", () => {
+    const sent = reducer(
+      { ...initialState, bots: [bot] },
+      {
+        type: "send",
+        botId: bot.id,
+        threadId: bot.threadId,
+        sendId: "send-preview",
+        text: "look\n\n<attached-image path=\"/private/photo.png\" />",
+      },
+    );
+    expect(sent.bots[0]?.messages.at(-1)).toMatchObject({
+      id: "optimistic-send-preview",
+      role: "user",
+      sendId: "send-preview",
+    });
+    expect(sent.bots[0]?.activeLeafId).toBe("optimistic-send-preview");
+
+    const canonical: Message = {
+      id: "server-message",
+      role: "user",
+      kind: "text",
+      text: "look\n\n<attached-image path=\"/private/photo.png\" />",
+      at: 2,
+      parentId: root.id,
+      sendId: "send-preview",
+    };
+    const reconciled = reducer(sent, {
+      type: "messageAdded",
+      threadId: bot.threadId,
+      message: canonical,
+    });
+    expect(reconciled.bots[0]?.messages).toEqual([root, canonical]);
+    expect(reconciled.bots[0]?.activeLeafId).toBe(canonical.id);
+  });
+
+  it("removes only the optimistic row when a send queues or fails", () => {
+    const sent = reducer(
+      { ...initialState, bots: [bot] },
+      { type: "send", botId: bot.id, sendId: "send-failed", text: "later" },
+    );
+    const removed = reducer(sent, {
+      type: "optimisticMessageRemoved",
+      threadId: bot.threadId,
+      sendId: "send-failed",
+    });
+    expect(removed.bots[0]?.messages).toEqual([root]);
+    expect(removed.bots[0]?.activeLeafId).toBe(root.id);
+  });
+
+  describe("edits", () => {
+    const question: Message = { id: "q1", role: "user", kind: "text", text: "first try", at: 2, parentId: root.id };
+    const answer: Message = { id: "a1", role: "bot", kind: "text", text: "old answer", at: 3, parentId: question.id };
+    const conversation = (): AppState => ({
+      ...initialState,
+      bots: [{ ...bot, messages: [root, question, answer], activeLeafId: answer.id }],
+    });
+
+    it("swaps the edited question in immediately and hides the old answer", () => {
+      const edited = reducer(conversation(), {
+        type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: question.id, text: " second try ", sendId: "edit-1",
+      });
+      const visible = visibleMessages(edited.bots[0]!);
+      expect(visible.map((message) => message.text)).toEqual(["Ready", "second try"]);
+      expect(edited.bots[0]?.activeLeafId).toBe("optimistic-edit-1");
+      expect(transcriptLookups(edited.bots[0]!.messages, visible).editVersions(question)?.map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
+    });
+
+    it("hands the swap to the server fork and keeps its reply visible", () => {
+      const edited = reducer(conversation(), {
+        type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: question.id, text: "second try", sendId: "edit-2",
+      });
+      const fork: Message = { id: "q2", role: "user", kind: "text", text: "second try", at: 4, parentId: root.id, sendId: "edit-2" };
+      const reconciled = reducer(edited, { type: "messageAdded", threadId: bot.threadId, message: fork });
+      const confirmed = reducer(reconciled, { type: "threadActive", threadId: bot.threadId, activeLeafId: fork.id });
+      const reply: Message = { id: "a2", role: "bot", kind: "text", text: "new answer", at: 5, parentId: fork.id };
+      const answered = reducer(confirmed, { type: "messageAdded", threadId: bot.threadId, message: reply });
+      const late = reducer(answered, { type: "messageAdded", threadId: bot.threadId, message: fork });
+      expect(visibleMessages(late.bots[0]!).map((message) => message.text)).toEqual(["Ready", "second try", "new answer"]);
+      expect(late.bots[0]?.messages.some((message) => message.id.startsWith("optimistic-"))).toBe(false);
+    });
+
+    it("puts the old question and answer back when the edit fails", () => {
+      const edited = reducer(conversation(), {
+        type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: question.id, text: "second try", sendId: "edit-3",
+      });
+      const restored = reducer(edited, {
+        type: "optimisticMessageRemoved", threadId: bot.threadId, sendId: "edit-3", restoreLeafId: answer.id,
+      });
+      expect(visibleMessages(restored.bots[0]!).map((message) => message.text)).toEqual(["Ready", "first try", "old answer"]);
+      expect(restored.bots[0]?.messages).toEqual([root, question, answer]);
+    });
+
+    it("hands back the same branch for the same transcript and leaf", () => {
+      const shown = conversation().bots[0]!;
+      const branch = visibleMessages(shown);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: answer.id })).toBe(branch);
+      expect(visibleMessages({ messages: shown.messages, activeLeafId: question.id }).map((message) => message.id)).toEqual([root.id, question.id]);
+      expect(visibleMessages({ messages: [...shown.messages], activeLeafId: answer.id })).not.toBe(branch);
+    });
+  });
+
+  it("uses the same immediate reconciliation for a channel", () => {
+    const group: Group = {
+      id: "preview-room",
+      threadId: "preview-room-thread",
+      name: "Preview room",
+      memberIds: [bot.id],
+      defaultResponder: { kind: "member", botId: bot.id },
+      bulletin: "",
+      unread: false,
+      createdAt: 1,
+      messages: [],
+    };
+    const sent = reducer(
+      { ...initialState, groups: [group] },
+      {
+        type: "sendGroup",
+        groupId: group.id,
+        threadId: group.threadId,
+        sendId: "room-preview",
+        text: "show this",
+        mode: "chat",
+      },
+    );
+    expect(sent.groups[0]?.messages).toEqual([
+      expect.objectContaining({ id: "optimistic-room-preview", sendId: "room-preview" }),
+    ]);
+
+    const canonical: Message = {
+      id: "server-room-message",
+      role: "user",
+      kind: "text",
+      text: "show this",
+      at: 2,
+      sendId: "room-preview",
+    };
+    const reconciled = reducer(sent, {
+      type: "messageAdded",
+      threadId: group.threadId,
+      message: canonical,
+    });
+    expect(reconciled.groups[0]?.messages).toEqual([canonical]);
+  });
+});
+
+describe("cross-client bot creation", () => {
+  it("adds an announced bot before its greeting frames arrive", () => {
+    const announced = {
+      id: "phone-bot",
+      threadId: "phone-thread",
+      name: "Scout",
+      title: "",
+      description: "",
+      notifications: true,
+      color: "green",
+      unread: false,
+      modelSelection: { instanceId: "codex", model: "default" },
+    } satisfies Omit<Bot, "messages">;
+
+    const added = reducer(initialState, { type: "botPatched", bot: announced });
+
+    expect(added.bots).toEqual([{ ...announced, messages: [] }]);
+
+    const greeting = {
+      id: "greeting",
+      role: "bot",
+      kind: "text",
+      text: "Hey — I'm Scout. Nice to meet you.",
+      at: 2,
+    } satisfies Message;
+    const greeted = reducer(added, {
+      type: "messageAdded",
+      threadId: announced.threadId,
+      message: greeting,
+    });
+
+    expect(greeted.bots[0]?.messages).toEqual([greeting]);
+  });
+});
+
+describe("routine receipt retention", () => {
+  it("opens a bot's logs without retaining stale filters on a later global visit", () => {
+    const focused = reducer(initialState, { type: "showRoutines", section: "logs", view: "list", botId: "echo", routineId: "routine-1" });
+    expect(focused.activeView).toBe("routines");
+    expect(focused.routinesFocus).toEqual({ section: "logs", view: "list", botId: "echo", routineId: "routine-1", nonce: 1 });
+    const all = reducer(focused, { type: "showRoutines" });
+    expect(all.routinesFocus).toEqual({ section: undefined, view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
+    const failures = reducer(focused, { type: "showRoutines", section: "logs" });
+    expect(failures.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, nonce: 2 });
+  });
+
+  it("carries the problems filter from the errors pill and drops it on a plain visit", () => {
+    const focused = reducer(initialState, { type: "showRoutines", section: "logs", runStatus: "problems" });
+    expect(focused.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, runStatus: "problems", nonce: 1 });
+    const plain = reducer(focused, { type: "showRoutines", section: "logs" });
+    expect(plain.routinesFocus).toEqual({ section: "logs", view: undefined, botId: undefined, routineId: undefined, runStatus: undefined, nonce: 2 });
+  });
+
+  it("leaves the bulk-seen sweep to the server's emitted receipts", () => {
+    expect(reducer(initialState, { type: "markAllRoutineRunsSeen" })).toBe(initialState);
+  });
+
+  it("distinguishes a failed load from an empty schedule and recovers on hydration", () => {
+    expect(initialState.routinesLoadState).toBe("loading");
+    const failed = reducer(initialState, { type: "routinesLoadFailed" });
+    expect(failed.routinesLoadState).toBe("error");
+    const ready = reducer(failed, { type: "routinesHydrated", routines: [], runs: [] });
+    expect(ready.routinesLoadState).toBe("ready");
+    expect(ready.routines).toEqual([]);
+  });
+
+  const run = (id: string, scheduledFor: number, status: RoutineRun["status"]): RoutineRun => ({
+    id,
+    routineId: "routine",
+    routineName: "Check inbox",
+    target: "bot",
+    botId: "echo",
+    runOn: "maus",
+    scheduledFor,
+    status,
+    manual: false,
+    createdAt: scheduledFor,
+  });
+
+  it("trims finished history without hiding older active work", () => {
+    const waiting = run("waiting", 0, "waiting");
+    const history = Array.from({ length: 2_000 }, (_, index) =>
+      run(`finished-${index}`, index + 1, "completed"),
+    );
+
+    const hydrated = reducer(initialState, {
+      type: "routinesHydrated",
+      routines: [],
+      runs: [waiting, ...history],
+    });
+    expect(hydrated.routineRuns).toHaveLength(2_000);
+    expect(hydrated.routineRuns).toContainEqual(waiting);
+
+    const running = { ...waiting, status: "running" as const, startedAt: 2_000 };
+    const activePatched = reducer(hydrated, {
+      type: "routineRunPatched",
+      run: running,
+    });
+    expect(activePatched.routineRuns).toContainEqual(running);
+
+    const next = reducer(activePatched, {
+      type: "routineRunPatched",
+      run: run("newest", 2_001, "completed"),
+    });
+    expect(next.routineRuns).toHaveLength(2_000);
+    expect(next.routineRuns).toContainEqual(running);
+    expect(next.routineRuns[0]?.id).toBe("newest");
+  });
+});
+
+describe("canonical message races", () => {
+  it("does not rewind the active branch when POST repeats a user message after the reply", () => {
+    const sent = {
+      id: "sent",
+      role: "user",
+      kind: "text",
+      text: "Ship it",
+      at: 1,
+      parentId: null,
+    } satisfies Message;
+    const reply = {
+      id: "reply",
+      role: "bot",
+      kind: "text",
+      text: "Done",
+      at: 2,
+      parentId: sent.id,
+    } satisfies Message;
+    const bot = {
+      id: "race-bot",
+      threadId: "race-thread",
+      name: "Race",
+      title: "",
+      description: "",
+      notifications: true,
+      color: "green",
+      unread: false,
+      modelSelection: { instanceId: "codex", model: "default" },
+      messages: [sent, reply],
+      activeLeafId: reply.id,
+    } satisfies Bot;
+    const state = { ...initialState, bots: [bot] };
+
+    const next = reducer(state, {
+      type: "messageAdded",
+      threadId: bot.threadId,
+      message: sent,
+    });
+
+    expect(next).toBe(state);
+    expect(next.bots[0]?.activeLeafId).toBe(reply.id);
+    expect(next.bots[0]?.messages).toEqual([sent, reply]);
+  });
+});
+
+describe("computer destination announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the old target on Auto via %s", (kind) => {
+    const bot: Bot = {
+      id: "computer-bot", threadId: "computer-thread", name: "Ziggy", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, computer: "browser",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { computer: _oldComputer, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
+    });
+    expect(next.bots[0]?.computer).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(bot.messages);
+  });
+});
+
+describe("VPS alias announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the bot's own server when the frame omits it via %s", (kind) => {
+    const bot: Bot = {
+      id: "vps-bot", threadId: "vps-thread", name: "Ziggy", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, vpsAlias: "alpha-vps",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { vpsAlias: _oldAlias, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : bot.threadId },
+    });
+    expect(next.bots[0]?.vpsAlias).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(bot.messages);
+  });
+});
+
+describe("tool selection announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the saved restriction when the server returns to all tools via %s", kind => {
+    const bot: Bot = { id: "scoped", threadId: "old", name: "Scope fixture", title: "", description: "",
+      notifications: false, color: "green", unread: false, modelSelection: { instanceId: "pi", model: "local" },
+      toolScope: { allow: [] }, messages: [] };
+    const { toolScope: _scope, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "new" : bot.threadId },
+    });
+    expect(next.bots[0]?.toolScope).toBeUndefined();
+  });
+});
+
+describe("team access announcements", () => {
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears additional teams after a demote via %s", kind => {
+    const bot: Bot = { id: "chief", threadId: "old", name: "Chief fixture", title: "", description: "",
+      notifications: false, color: "green", unread: false, modelSelection: { instanceId: "pi", model: "local" },
+      chiefOfStaff: true, managedSections: ["Research", ""], messages: [] };
+    const { managedSections: _sections, ...demoted } = { ...bot, chiefOfStaff: false };
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...demoted, threadId: kind === "botPatchedSwitch" ? "new" : bot.threadId },
+    });
+    expect(next.bots[0]?.chiefOfStaff).toBe(false);
+    expect(next.bots[0]?.managedSections).toBeUndefined();
+  });
+});
+
+describe("teammate wait announcements", () => {
+  const waiting: Bot = {
+    id: "wait-bot", threadId: "wait-thread", name: "Scooter", title: "", description: "",
+    notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "codex", model: "default" }, busy: true, activity: "working", waitingForTeammates: true,
+    messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+  };
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the wait when a working frame reports settlement via %s", (kind) => {
+    const announcement = { ...waiting, waitingForTeammates: false };
+    const next = reducer({ ...initialState, bots: [waiting] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : waiting.threadId },
+    });
+    expect(next.bots[0]?.waitingForTeammates).toBe(false);
+    expect(next.bots[0]?.messages).toEqual(waiting.messages);
+  });
+
+  it("clears the wait on an idle frame too, not only a working one", () => {
+    const announcement = { ...waiting, waitingForTeammates: false };
+    const next = reducer({ ...initialState, bots: [waiting] }, { type: "botPatched", bot: { ...announcement, busy: false, activity: "idle" } });
+    expect(next.bots[0]?.waitingForTeammates).toBe(false);
+    expect(next.bots[0]?.busy).toBe(false);
+  });
+
+  it("keeps the wait painted while the frame still carries it", () => {
+    const { messages, ...rest } = waiting;
+    const next = reducer({ ...initialState, bots: [waiting] }, { type: "botPatched", bot: rest });
+    expect(next.bots[0]?.waitingForTeammates).toBe(true);
+    expect(next.bots[0]?.messages).toBe(messages);
+  });
+});
+
+describe("browser profile announcements", () => {
+  it.each([undefined, null, "guest", "another-profile"])("replaces an old shared profile with %s without losing chat", (profile) => {
+    const bot: Bot = {
+      id: "browser-bot", threadId: "browser-thread", name: "Pepper", title: "", description: "",
+      notifications: true, color: "green", unread: false,
+      modelSelection: { instanceId: "codex", model: "default" }, browserProfile: "old-profile",
+      messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+    };
+    const { messages, browserProfile: _oldProfile, ...announcement } = bot;
+    const next = reducer({ ...initialState, bots: [bot] }, {
+      type: "botPatched", bot: { ...announcement, ...(profile === undefined ? {} : { browserProfile: profile }) },
+    });
+    expect(next.bots[0]?.browserProfile).toBe(profile);
+    expect(next.bots[0]?.messages).toBe(messages);
+  });
+});
+
+describe("phone grant announcements", () => {
+  const granted: Bot = {
+    id: "phone-bot", threadId: "phone-thread", name: "Pepper", title: "", description: "",
+    notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "codex", model: "default" }, phoneApps: { location: "read" },
+    messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+  };
+  const { messages, phoneApps: _old, ...announcement } = granted;
+
+  it("clears a stale grant when a complete frame omits it", () => {
+    const next = reducer({ ...initialState, bots: [granted] }, { type: "botPatched", bot: announcement });
+    expect(next.bots[0]?.phoneApps).toBeUndefined();
+    expect(next.bots[0]?.messages).toBe(messages);
+  });
+
+  it("clears it on the thread-snapshot path too", () => {
+    const next = reducer({ ...initialState, bots: [{ ...granted, awaitingThreadSnapshot: true }] }, { type: "botPatched", bot: { ...announcement, messages } });
+    expect(next.bots[0]?.phoneApps).toBeUndefined();
+  });
+});
+
+describe("section Chiefs", () => {
+  const bot = (id: string, section: string, chiefOfStaff = false) => ({
+    id,
+    threadId: `thread-${id}`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green" as const,
+    unread: false,
+    modelSelection: { instanceId: "codex", model: "default" },
+    section,
+    chiefOfStaff,
+  });
+
+  it("atomically removes a deleted team and its assignments before SSE arrives", () => {
+    const member = { ...bot("member", "Delivery"), messages: [] };
+    const other = { ...bot("other", "Personal"), messages: [] };
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const next = reducer({ ...initialState, bots: [member, other], groups: [group], sections: ["Delivery", "Personal"] },
+      { type: "sectionDeleted", section: "Delivery", sections: ["Personal"] });
+    expect(next.sections).toEqual(["Personal"]);
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.groups[0].section).toBeUndefined();
+    expect(next.bots[0].messages).toBe(member.messages);
+    expect(next.bots[1]).toBe(other);
+  });
+
+  it("clears previous membership when a complete bot frame moves it to General", () => {
+    const current = { ...bot("moved", "Delivery"), messages: [] };
+    const { section: _oldSection, ...announcement } = current;
+    const next = reducer({ ...initialState, bots: [current], sections: ["Delivery"] }, { type: "botPatched", bot: announcement });
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.sections).toEqual(["Delivery"]);
+  });
+
+  it("clears full group membership without treating a partial patch as a move", () => {
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const state = { ...initialState, groups: [group] };
+    expect(reducer(state, { type: "groupPatched", group: { id: group.id, unread: true } }).groups[0].section).toBe("Delivery");
+    const { section: _oldSection, ...announcement } = group;
+    expect(reducer(state, { type: "groupPatched", group: announcement }).groups[0].section).toBeUndefined();
+  });
+
+  it("hands off only within the patched bot's section", () => {
+    const workChief = bot("work-a", "Work", true);
+    const workCandidate = bot("work-b", "Work");
+    const personalChief = bot("personal", "Personal", true);
+    const state = {
+      ...initialState,
+      bots: [workChief, workCandidate, personalChief].map((candidate) => ({ ...candidate, messages: [] })),
+    };
+
+    const next = reducer(state, {
+      type: "botPatched",
+      bot: { ...workCandidate, chiefOfStaff: true },
+    });
+
+    expect(next.bots.find((candidate) => candidate.id === workChief.id)?.chiefOfStaff).toBe(false);
+    expect(next.bots.find((candidate) => candidate.id === workCandidate.id)?.chiefOfStaff).toBe(true);
+    expect(next.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(true);
+  });
+
+  it("keeps other section Chiefs during an optimistic settings update", () => {
+    const workChief = bot("work-a", "Work", true);
+    const workCandidate = bot("work-b", "Work");
+    const personalChief = bot("personal", "Personal", true);
+    const state = {
+      ...initialState,
+      bots: [workChief, workCandidate, personalChief].map((candidate) => ({ ...candidate, messages: [] })),
+    };
+
+    const next = reducer(state, {
+      type: "updateBot",
+      botId: workCandidate.id,
+      patch: { chiefOfStaff: true },
+    });
+
+    expect(next.bots.find((candidate) => candidate.id === workChief.id)?.chiefOfStaff).toBe(false);
+    expect(next.bots.find((candidate) => candidate.id === workCandidate.id)?.chiefOfStaff).toBe(true);
+    expect(next.bots.find((candidate) => candidate.id === personalChief.id)?.chiefOfStaff).toBe(true);
+  });
+
+  it("optimistically clears an explicit computer when Auto is selected", () => {
+    const current = { ...bot("cloud-bot", "Work"), computer: "cloud" as const, messages: [] };
+    const next = reducer({ ...initialState, bots: [current] }, {
+      type: "updateBot",
+      botId: current.id,
+      patch: { computer: null },
+    });
+
+    expect(next.bots[0]?.computer).toBeUndefined();
+  });
+});
+
+describe("pending queued chip", () => {
+  const bot = {
+    id: "b1",
+    threadId: "t1",
+    name: "Ada",
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+  } satisfies Omit<Bot, "messages">;
+
+  it("records queue-fallback text and drops it when that user line lands", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q1",
+      text: "later",
+    });
+    expect(queued.pendingQueued).toEqual({ t1: [{ queueId: "q1", text: "later" }] });
+    const landed = reducer(queued, {
+      type: "consumePendingQueued",
+      threadId: "t1",
+      queueId: "q1",
+    });
+    expect(landed.pendingQueued).toEqual({});
+  });
+
+  it("retains capacity explanation only on its queued thread until dispatch", () => {
+    const queued = reducer(initialState, {
+      type: "pendingQueued", threadId: "t1", queueId: "capacity-1", text: "later", reason: "capacity",
+    });
+    expect(queued.pendingQueued).toEqual({ t1: [{ queueId: "capacity-1", text: "later", reason: "capacity" }] });
+    expect(reducer(queued, {
+      type: "consumePendingQueued", threadId: "t1", queueId: "capacity-1",
+    }).pendingQueued).toEqual({});
+  });
+
+  it("starts mascot work motion when the queued line is released into the transcript", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const landed = reducer(withBot, {
+      type: "messageAdded",
+      threadId: "t1",
+      message: {
+        id: "landed",
+        at: 2,
+        role: "user",
+        kind: "text",
+        text: "now run this",
+        queueId: "q-landed",
+      },
+    });
+
+    expect(landed.mascotMotion).toMatchObject({ botId: "b1", kind: "working" });
+  });
+
+  it("keeps a Shift+Enter multiline message as one entry", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-ml",
+      text: "line one\nline two",
+    });
+    expect(queued.pendingQueued).toEqual({ t1: [{ queueId: "q-ml", text: "line one\nline two" }] });
+    const landed = reducer(queued, {
+      type: "consumePendingQueued",
+      threadId: "t1",
+      queueId: "q-ml",
+    });
+    expect(landed.pendingQueued).toEqual({});
+  });
+
+  it("leaves the chip on the old thread after a task switch", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-stay",
+      text: "stay here",
+    });
+    const switched = reducer(queued, {
+      type: "botPatched",
+      bot: { ...bot, threadId: "t2", messages: [] },
+    });
+    expect(switched.pendingQueued).toEqual({ t1: [{ queueId: "q-stay", text: "stay here" }] });
+    expect(switched.pendingQueued[switched.bots[0]!.threadId]).toBeUndefined();
+    const drained = reducer(switched, {
+      type: "consumePendingQueued",
+      threadId: "t1",
+      queueId: "q-stay",
+    });
+    expect(drained.pendingQueued).toEqual({});
+  });
+
+  it("consumes only the matching queue id when two pending lines share text", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const first = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "qa",
+      text: "same",
+    });
+    const both = reducer(first, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "qb",
+      text: "same",
+    });
+    expect(both.pendingQueued).toEqual({
+      t1: [
+        { queueId: "qa", text: "same" },
+        { queueId: "qb", text: "same" },
+      ],
+    });
+    const afterOther = reducer(both, {
+      type: "consumePendingQueued",
+      threadId: "t1",
+      queueId: "qa",
+    });
+    expect(afterOther.pendingQueued).toEqual({ t1: [{ queueId: "qb", text: "same" }] });
+  });
+
+  it("does not add a chip when the drain frame arrives before the POST continuation", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const drained = reducer(withBot, {
+      type: "consumePendingQueued",
+      threadId: "t1",
+      queueId: "q1",
+    });
+    expect(drained.pendingQueued).toEqual({});
+    const late = reducer(drained, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q1",
+      text: "later",
+    });
+    expect(late.pendingQueued).toEqual({});
+    expect(late.consumedQueueIds).toEqual({});
+  });
+
+  it("reconciles a missed drain from hydration and rejects its late POST continuation", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-snapshot",
+      text: "already ran",
+    });
+    const canonical = {
+      id: "m-snapshot",
+      at: 100,
+      role: "user",
+      kind: "text",
+      text: "already ran",
+      queueId: "q-snapshot",
+    } satisfies Message;
+    const hydrated = reducer(queued, {
+      type: "hydrate",
+      bots: [{ ...bot, messages: [canonical] }],
+      groups: [],
+      computerControl: {},
+    });
+
+    expect(hydrated.pendingQueued).toEqual({});
+    expect(hydrated.consumedQueueIds["q-snapshot"]).toBe(true);
+    const late = reducer(hydrated, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-snapshot",
+      text: "already ran",
+    });
+    expect(late.pendingQueued).toEqual({});
+    expect(late.consumedQueueIds["q-snapshot"]).toBeUndefined();
+  });
+
+  it("restores a queued sibling on reload and preserves group-local queues", () => {
+    const group: Group = { id: "team", name: "Team", threadId: "team-thread", memberIds: [], createdAt: 1,
+      defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [] };
+    const state = { ...initialState, groups: [group], pendingQueued: { "team-thread": [{ queueId: "team-q", text: "team work" }] } };
+    const queues = { sibling: [{ queueId: "sibling-q", text: "waiting after refresh", reason: "capacity" as const }] };
+    const hydrated = reducer(state, { type: "hydrate", bots: [{ ...bot, messages: [] }], groups: [group], computerControl: {}, botQueuedMessages: queues });
+    expect(hydrated.pendingQueued).toEqual({ ...queues, "team-thread": state.pendingQueued["team-thread"] });
+    const cancelled = reducer(hydrated, { type: "botQueues", queues: {} });
+    expect(cancelled.pendingQueued).toEqual(state.pendingQueued);
+    const late = reducer(cancelled, { type: "pendingQueued", threadId: "sibling", queueId: "sibling-q", text: "waiting after refresh" });
+    expect(late.pendingQueued).toEqual(state.pendingQueued);
+  });
+
+  it("folds queue snapshots without duplicating a later send response or reviving drained work", () => {
+    const queues = { t1: [{ queueId: "remote-q", text: "remote send" }] };
+    const restored = reducer(reducer(initialState, { type: "botPatched", bot }), { type: "botQueues", queues });
+    const duplicate = reducer(restored, { type: "pendingQueued", threadId: "t1", queueId: "remote-q", text: "remote send" });
+    expect(duplicate.pendingQueued).toEqual(queues);
+    const drained = reducer(duplicate, { type: "messageAdded", threadId: "t1", message: {
+      id: "drained-q", at: 10, role: "user", kind: "text", queueId: "remote-q", text: "remote send",
+    } });
+    expect(reducer(drained, { type: "botQueues", queues }).pendingQueued).toEqual({});
+  });
+
+  it.each(["drain", "cancel"])("does not resurrect an offscreen queue after an early SSE receipt and %s", (operation) => {
+    const queues = { sibling: [{ queueId: "early-q", text: "waiting" }] };
+    const queued = reducer(reducer(initialState, { type: "botPatched", bot }), { type: "botQueues", queues });
+    const removed = reducer(queued, operation === "drain"
+      ? { type: "consumePendingQueued", threadId: "sibling", queueId: "early-q" }
+      : { type: "cancelQueued", botId: bot.id, threadId: "sibling", queueId: "early-q" });
+    const snapshot = reducer(removed, { type: "botQueues", queues: {} });
+    expect(reducer(snapshot, { type: "pendingQueued", threadId: "sibling", queueId: "early-q", text: "waiting" }).pendingQueued).toEqual({});
+  });
+
+  it("keeps a fresh cancellation receipt ahead of old transcript receipts", () => {
+    const messages = Array.from({ length: 65 }, (_, i): Message => ({
+      id: `old-${i}`, queueId: `old-q-${i}`, at: i, role: "user", kind: "text", text: "old queued message",
+    }));
+    const queued = reducer(reducer(initialState, { type: "botPatched", bot: { ...bot, messages } }), {
+      type: "botQueues", queues: { sibling: [{ queueId: "new-q", text: "new waiting message" }] },
+    });
+    const removed = reducer(queued, { type: "botQueues", queues: {} });
+    expect(removed.consumedQueueIds["new-q"]).toBe(true);
+    expect(Object.keys(removed.consumedQueueIds)).toHaveLength(64);
+    expect(reducer(removed, { type: "pendingQueued", threadId: "sibling", queueId: "new-q", text: "new waiting message" }).pendingQueued).toEqual({});
+  });
+
+  it("bounds unmatched queue tombstones from other clients", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    let state = withBot;
+    for (let index = 0; index < 100; index += 1) {
+      state = reducer(state, {
+        type: "consumePendingQueued",
+        threadId: "t1",
+        queueId: `foreign-${index}`,
+      });
+    }
+
+    expect(Object.keys(state.consumedQueueIds)).toHaveLength(64);
+    expect(state.consumedQueueIds["foreign-0"]).toBeUndefined();
+    expect(state.consumedQueueIds["foreign-99"]).toBe(true);
+
+    const late = reducer(state, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "foreign-99",
+      text: "already drained",
+    });
+    expect(late.pendingQueued).toEqual({});
+    expect(late.consumedQueueIds["foreign-99"]).toBeUndefined();
+  });
+
+  it("drops a cancelled pending chip without waiting for drain", () => {
+    const withBot = reducer(initialState, { type: "botPatched", bot });
+    const queued = reducer(withBot, {
+      type: "pendingQueued",
+      threadId: "t1",
+      queueId: "q-drop",
+      text: "never mind",
+    });
+    const cancelled = reducer(queued, {
+      type: "cancelQueued",
+      botId: "b1",
+      queueId: "q-drop",
+    });
+    expect(cancelled.pendingQueued).toEqual({});
+  });
+
+  it("drops a cancelled channel follow-up from its original task", () => {
+    const queued = reducer(initialState, {
+      type: "pendingQueued",
+      threadId: "room-task-1",
+      queueId: "q-room-drop",
+      text: "never mind",
+    });
+    const cancelled = reducer(queued, {
+      type: "cancelGroupQueued",
+      groupId: "room-1",
+      threadId: "room-task-1",
+      queueId: "q-room-drop",
+    });
+    expect(cancelled.pendingQueued).toEqual({});
+  });
+});
+
+describe("scrollback pages", () => {
+  const message = (id: string, at: number) =>
+    ({ id, at, role: "user", kind: "text", text: id }) as never as Message;
+  const bot = {
+    id: "bot-1",
+    threadId: "thread-1",
+    messages: [message("m3", 3), message("m4", 4)],
+    hasMore: true,
+  } as never as Bot;
+  const state = { ...initialState, bots: [bot] };
+
+  it("marks the thread loading so one click cannot ask twice", () => {
+    const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
+    expect(loading.loadingOlder["thread-1"]).toBe(true);
+    expect(reducer(loading, { type: "loadOlderMessages", threadId: "thread-1" })).toBe(loading);
+  });
+
+  it("prepends a page, keeps held copies, and clears the flag", () => {
+    const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
+    const next = reducer(loading, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation: loading.transcriptGeneration["thread-1"] ?? 0,
+      messages: [message("m1", 1), message("m2", 2), message("m3", 3)],
+      hasMore: false,
+    });
+    expect(next.bots[0].messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(next.bots[0].hasMore).toBe(false);
+    expect(next.loadingOlder).toEqual({});
+  });
+
+  it("drops a page that was in flight across a rewind, and stops the spinner", () => {
+    const withLeaf = { ...bot, activeLeafId: "m4" } as never as Bot;
+    const loading = reducer({ ...initialState, bots: [withLeaf] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+
+    const rewound = reducer(loading, { type: "threadActive", threadId: "thread-1", activeLeafId: "m3" });
+    expect(rewound.transcriptGeneration["thread-1"]).not.toBe(generation);
+
+    const landed = reducer(rewound, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("abandoned", 1)],
+      hasMore: false,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(landed.bots[0].hasMore).toBe(true);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("still lands a page over messages that arrived while it was on the wire", () => {
+    const loading = reducer({ ...initialState, bots: [bot] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+    const appended = reducer(loading, {
+      type: "messageAdded",
+      threadId: "thread-1",
+      message: message("m5", 5) as never as Message,
+    });
+    const landed = reducer(appended, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("m2", 2)],
+      hasMore: true,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m2", "m3", "m4", "m5"]);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("keeps the open transcript's scrollback answer when a bot frame does not switch it", () => {
+    const open = { ...bot, tasks: [{ threadId: "thread-1", title: "Long", createdAt: 1 }] } as never as Bot;
+    const opened = reducer({ ...initialState, bots: [open] }, {
+      type: "botPatched",
+      bot: { ...open, threadId: "thread-2", tasks: [{ threadId: "thread-2", title: "New", createdAt: 2 }, ...open.tasks!], messages: [], hasMore: false } as never,
+    });
+    expect(opened.bots[0]).toMatchObject({ threadId: "thread-1", hasMore: true });
+    expect(opened.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    const loaded = { ...initialState, bots: [{ ...open, hasMore: false }] };
+    const replied = reducer(loaded, { type: "botPatched", bot: { ...open, messages: [message("m4", 4)], hasMore: true } as never });
+    expect(replied.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(replied.bots[0].hasMore).toBe(false);
+  });
+
+  it("answers the scrollback question from a payload that carries a transcript", () => {
+    const group = {
+      id: "room",
+      threadId: "room-thread",
+      name: "Room",
+      memberIds: [],
+      defaultResponder: { kind: "mentions" },
+      createdAt: 1,
+      bulletin: "",
+      unread: false,
+      messages: [message("m9", 9)],
+      hasMore: true,
+    } as never as Group;
+    const withRoom = { ...initialState, groups: [group] };
+    const complete = reducer(withRoom, {
+      type: "groupPatched",
+      group: { id: "room", threadId: "room-thread", messages: [message("m8", 8), message("m9", 9)] } as never as Group,
+    });
+    expect(complete.groups[0].hasMore).toBe(false);
+    const renamed = reducer(withRoom, { type: "groupPatched", group: { id: "room", name: "Renamed" } });
+    expect(renamed.groups[0].hasMore).toBe(true);
+  });
+});
+
+describe("messageAdded leaf adoption", () => {
+  const baseBot = {
+    id: "bot-1",
+    threadId: "thread-1",
+    messages: [
+      { id: "m1", at: 1, role: "bot", kind: "text", text: "turn done" },
+      { id: "m2", at: 2, parentId: "m1", role: "user", kind: "text", text: "next question" },
+    ],
+    activeLeafId: "m2",
+  } as never as Bot;
+  const state = { ...initialState, bots: [baseBot] };
+
+  it("adopts the leaf for a message chaining onto it", () => {
+    const next = reducer(state, {
+      type: "messageAdded",
+      threadId: "thread-1",
+      message: { id: "m3", at: 3, parentId: "m2", role: "bot", kind: "text", text: "reply" } as never as Message,
+    });
+    expect(next.bots[0].activeLeafId).toBe("m3");
+  });
+
+  it("keeps the leaf when a late artifact is chain-inserted mid-branch", () => {
+    const next = reducer(state, {
+      type: "messageAdded",
+      threadId: "thread-1",
+      message: { id: "shot", at: 3, parentId: "m1", role: "bot", kind: "screen", png: "x" } as never as Message,
+    });
+    expect(next.bots[0].activeLeafId).toBe("m2");
+    expect(next.bots[0].messages.map((m) => m.id)).toContain("shot");
+  });
+});
+
+describe("thread ordering stamps", () => {
+  it.each(["bot", "group"] as const)("restores overlapping %s sends in every failure order", owner => {
+    const orders = [[0, 1], [1, 0], [0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    const clock = vi.spyOn(Date, "now");
+    try {
+      for (const order of orders) {
+        const task = { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 };
+        const bot = { id: "b", threadId: "first", messages: [], hasMore: true, tasks: [task] } as never as Bot;
+        const group = { id: "g", threadId: "first", createdAt: 1, messages: [], hasMore: true, tasks: [task] } as never as Group;
+        let state = { ...initialState, bots: owner === "bot" ? [bot] : [], groups: owner === "group" ? [group] : [] };
+        for (let i = 0; i < order.length; i++) {
+          clock.mockReturnValue(100 + i * 10);
+          state = reducer(state, owner === "bot"
+            ? { type: "send", botId: "b", text: "Pending", sendId: String(i) }
+            : { type: "sendGroup", groupId: "g", text: "Pending", sendId: String(i) });
+        }
+        for (const i of order) state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: String(i) });
+        const result = owner === "bot" ? state.bots[0] : state.groups[0];
+        expect(result.messages, `${owner}: ${order}`).toEqual([]);
+        expect(result.tasks?.[0]?.lastThreadOrderAt, `${owner}: ${order}`).toBe(25);
+      }
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it.each(["accepted-send", "completed-reply"] as const)("retains %s while another optimistic send rolls back", event => {
+    const bot = { id: "b", threadId: "first", messages: [], hasMore: true, tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 },
+    ] } as never as Bot;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(100);
+    try {
+      let state = reducer({ ...initialState, bots: [bot] }, { type: "send", botId: "b", text: "First", sendId: "first" });
+      clock.mockReturnValue(110);
+      state = reducer(state, { type: "send", botId: "b", text: "Second", sendId: "second" });
+      const message: Message = event === "accepted-send"
+        ? { id: "accepted", at: 120, role: "user", kind: "text", sendId: "first", parentId: null }
+        : { id: "reply", at: 80, role: "bot", kind: "text", turnId: "turn", turnTerminal: true, turnCompletedAt: 120 };
+      state = reducer(state, { type: "messageAdded", threadId: "first", message });
+      state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: "first" });
+      state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: "second" });
+      expect(state.bots[0].messages.map(row => row.id)).toEqual([message.id]);
+      expect(state.bots[0].tasks?.[0]?.lastThreadOrderAt).toBe(120);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+  it.each(["first", "second"])("orders terminal completion in active and background threads: %s", threadId => {
+    const bot = { id: "b", threadId: "first", messages: [], tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 },
+      { threadId: "second", createdAt: 2, lastThreadOrderAt: 5 },
+    ] } as never as Bot;
+    const message = { id: "reply", at: 20, role: "bot", kind: "text", turnId: "turn", turnTerminal: true, turnCompletedAt: 30 } as Message;
+    const state = reducer({ ...initialState, bots: [bot] }, { type: "messagePatched", threadId, message });
+    expect(state.bots[0].tasks?.find(task => task.threadId === threadId)?.lastThreadOrderAt).toBe(30);
+  });
+
+  it.each([false, true])("restores unloaded ordering history and retains newer loaded events: %s", laterReply => {
+    const bot = { id: "b", threadId: "first", messages: [], hasMore: true, tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 25 },
+    ] } as never as Bot;
+    let state = reducer({ ...initialState, bots: [bot] }, { type: "send", botId: "b", text: "Pending", sendId: "send" });
+    if (laterReply) state = reducer(state, { type: "messageAdded", threadId: "first", message: { id: "reply", at: Date.now() + 10, role: "bot", kind: "text" } });
+    const expected = laterReply ? state.bots[0].messages.at(-1)!.at : 25;
+    state = reducer(state, { type: "optimisticMessageRemoved", threadId: "first", sendId: "send" });
+    expect(state.bots[0].tasks?.[0]?.lastThreadOrderAt).toBe(expected);
+  });
+
+  it("restores a channel stamp when rollback history is incomplete", () => {
+    const group = { id: "g", threadId: "room", createdAt: 1, messages: [], hasMore: true,
+      tasks: [{ threadId: "room", createdAt: 1, lastThreadOrderAt: 25 }] } as never as Group;
+    let state = reducer({ ...initialState, groups: [group] }, { type: "sendGroup", groupId: "g", text: "Pending", sendId: "send" });
+    state = reducer(state, { type: "optimisticMessageRemoved", threadId: "room", sendId: "send" });
+    expect(state.groups[0].tasks?.[0]?.lastThreadOrderAt).toBe(25);
+  });
+
+  it("leaves running activity in place, then moves completed replies and person messages", () => {
+    const bot = { id: "b", threadId: "first", messages: [], tasks: [
+      { threadId: "first", createdAt: 1, lastThreadOrderAt: 10 },
+      { threadId: "second", createdAt: 2, lastThreadOrderAt: 5 },
+    ] } as never as Bot;
+    let state = { ...initialState, bots: [bot] };
+    const add = (message: Message) => { state = reducer(state, { type: "messageAdded", threadId: "second", message }); };
+    add({ id: "reply", at: 20, role: "bot", kind: "text", text: "Working", turnId: "turn-1" });
+    add({ id: "peer", at: 21, role: "user", kind: "text", text: "Peer", peerAsk: { botId: "p", name: "Peer" } });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(5);
+    state = reducer(state, { type: "messagePatched", threadId: "second", message: { id: "reply", at: 20, role: "bot", kind: "text", text: "Done", turnId: "turn-1", turnTerminal: true } });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(20);
+    add({ id: "person", at: 22, role: "user", kind: "text", text: "Hello" });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(22);
+    state = reducer(state, { type: "hydrate", bots: [bot], groups: [], computerControl: {} });
+    expect(state.bots[0].tasks?.[1]?.lastThreadOrderAt).toBe(22);
+  });
+});
+
+describe("bot settings section", () => {
+  const bot = {
+    id: "test-bot",
+    threadId: "test-thread",
+    name: "Test",
+    title: "",
+    description: "",
+    notifications: true,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "x", model: "y" },
+    messages: [],
+  } as never as Bot;
+
+  it("toggleSettings with a section sets it and opens", () => {
+    const next = reducer(initialState, {
+      type: "toggleSettings",
+      open: true,
+      section: "identity",
+    });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("identity");
+    expect(next.botSettingsExpandAccordion).toBe(true);
+  });
+
+  it("toggleSettings leaves the computer panel and inspector open, closes app settings", () => {
+    const withPanels = { ...initialState, computerOpen: true, inspectorOpen: true, appSettingsOpen: true };
+    const next = reducer(withPanels, { type: "toggleSettings", open: true });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.computerOpen).toBe(true);
+    expect(next.inspectorOpen).toBe(true);
+    expect(next.appSettingsOpen).toBe(false);
+  });
+
+  it("reopens the same section after a collapse without remounting settings", () => {
+    const opened = reducer(initialState, { type: "toggleSettings", open: true, section: "usage" });
+    const collapsed = reducer(opened, { type: "toggleSettings", open: true });
+    expect(collapsed.settingsOpen).toBe(true);
+    expect(collapsed.botSettingsExpandAccordion).toBe(false);
+    const reopened = reducer(collapsed, { type: "toggleSettings", open: true, section: "usage" });
+    expect(reopened.botSettingsSection).toBe("usage");
+    expect(reopened.botSettingsExpandAccordion).toBe(true);
+  });
+
+  it("toggleSettings without a section keeps it", () => {
+    const state = reducer(initialState, {
+      type: "toggleSettings",
+      open: true,
+      section: "soul",
+    });
+    expect(state.botSettingsExpandAccordion).toBe(true);
+    const next = reducer(state, {
+      type: "toggleSettings",
+      open: true,
+    });
+    expect(next.botSettingsSection).toBe("soul");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+  });
+
+  it.each(["identity", "model"] as const)("opens a bot's %s settings without leaving the team map or reading its conversations", (section) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: "room",
+      bots: [{ ...bot, unread: true }],
+      groups: [{ id: "room", unread: true } as Group],
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: bot.id, section });
+    expect(next.selectedId).toBe(bot.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe(section);
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.bots).toBe(state.bots);
+    expect(next.groups).toBe(state.groups);
+  });
+
+  it("switches an open settings panel to another bot without toggling it closed", () => {
+    const other = { ...bot, id: "other-bot" };
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, other],
+      settingsOpen: true,
+      botSettingsSection: "soul" as const,
+      botSettingsExpandAccordion: true,
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    expect(next.selectedId).toBe(other.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("soul");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+
+    const model = reducer(next, { type: "toggleSettings", botId: bot.id, section: "model" });
+    expect(model.settingsOpen).toBe(true);
+    expect(model.botSettingsSection).toBe("model");
+    expect(model.botSettingsExpandAccordion).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id }).settingsOpen).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id, open: false }).settingsOpen).toBe(false);
+    expect(reducer(model, { type: "toggleSettings" }).settingsOpen).toBe(false);
+  });
+
+  it.each(["missing-bot", "hidden-bot", "room"])("ignores unavailable settings target %s", (botId) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, { ...bot, id: "hidden-bot", hidden: true }],
+      groups: [{ id: "room" } as Group],
+      settingsOpen: true,
+    };
+    expect(reducer(state, { type: "toggleSettings", botId, section: "identity" })).toBe(state);
+  });
+
+  it("an open that names a section marks a choice stored", () => {
+    const next = reducer(initialState, { type: "toggleSettings", open: true, section: "identity" });
+    expect(next.botSettingsSectionStored).toBe(true);
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.botSettingsExpandRemembered).toBe(false);
+  });
+
+  it("a fresh bare open with a stored choice expands the remembered section", () => {
+    const stored = { ...initialState, botSettingsSection: "model" as const, botSettingsSectionStored: true };
+    const next = reducer(stored, { type: "toggleSettings", open: true });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("model");
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.botSettingsExpandRemembered).toBe(true);
+  });
+
+  it("a bare open while the panel is open collapses the rail", () => {
+    const remembered = {
+      ...initialState,
+      settingsOpen: true,
+      botSettingsSection: "model" as const,
+      botSettingsExpandAccordion: true,
+      botSettingsExpandRemembered: true,
+      botSettingsSectionStored: true,
+    };
+    const collapsed = reducer(remembered, { type: "toggleSettings", open: true });
+    expect(collapsed.settingsOpen).toBe(true);
+    expect(collapsed.botSettingsSection).toBe("model");
+    expect(collapsed.botSettingsExpandAccordion).toBe(false);
+    expect(collapsed.botSettingsExpandRemembered).toBe(false);
+    expect(collapsed.botSettingsSectionStored).toBe(true);
+  });
+
+  it("a bare open with nothing stored keeps the rail collapsed", () => {
+    expect(initialState.botSettingsSection).toBe("overview");
+    expect(initialState.botSettingsExpandAccordion).toBe(false);
+    expect(initialState.botSettingsExpandRemembered).toBe(false);
+    expect(initialState.botSettingsSectionStored).toBe(false);
+    const next = reducer(initialState, { type: "toggleSettings", open: true });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("overview");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+    expect(next.botSettingsExpandRemembered).toBe(false);
+    expect(next.botSettingsSectionStored).toBe(false);
+  });
+
+  it("opening another bot's profile keeps the current section", () => {
+    const other = { ...bot, id: "other-bot" };
+    const state = {
+      ...initialState,
+      selectedId: bot.id,
+      bots: [bot, other],
+      settingsOpen: true,
+      botSettingsSection: "soul" as const,
+      botSettingsExpandAccordion: true,
+      botSettingsSectionStored: true,
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("soul");
+  });
+
+  it("selecting a different bot or room keeps the section pointer", () => {
+    let state = reducer(initialState, {
+      type: "botAdded",
+      bot: { ...bot, id: "bot-a", threadId: "thread-a" },
+    });
+    state = reducer(state, {
+      type: "botAdded",
+      bot: { ...bot, id: "bot-b", threadId: "thread-b" },
+    });
+    const room = {
+      id: "room-1", name: "Room", threadId: "room-thread", memberIds: [], createdAt: 1,
+      defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [],
+    } as Group;
+    state = {
+      ...state,
+      groups: [room],
+      settingsOpen: true,
+      botSettingsSection: "model" as const,
+      botSettingsExpandAccordion: true,
+      botSettingsExpandRemembered: true,
+      botSettingsSectionStored: true,
+    };
+    const kept = {
+      botSettingsSection: "model",
+      botSettingsExpandAccordion: true,
+      botSettingsExpandRemembered: true,
+      botSettingsSectionStored: true,
+    };
+    expect(reducer(state, { type: "select", id: "bot-a" })).toMatchObject(kept);
+    expect(reducer(state, { type: "select", id: room.id })).toMatchObject(kept);
+  });
+});
+
+describe("activity panel", () => {
+  it("starts closed", () => {
+    expect(initialState.activityOpen).toBe(false);
+  });
+
+  it("toggleActivity opens it and closes the other side panels", () => {
+    const withPanels = { ...initialState, computerOpen: true, inspectorOpen: true, appSettingsOpen: true };
+    const next = reducer(withPanels, { type: "toggleActivity" });
+    expect(next.activityOpen).toBe(true);
+    expect(next.computerOpen).toBe(false);
+    expect(next.inspectorOpen).toBe(false);
+    expect(next.appSettingsOpen).toBe(false);
+    expect(reducer(next, { type: "toggleActivity" }).activityOpen).toBe(false);
+  });
+
+  it("opening the inspector or the computer closes the activity panel", () => {
+    const open = { ...initialState, activityOpen: true };
+    expect(reducer(open, { type: "toggleInspector", open: true }).activityOpen).toBe(false);
+    expect(reducer(open, { type: "toggleComputer", open: true }).activityOpen).toBe(false);
+  });
+
+  it("opening bot settings closes activity without changing the other panels", () => {
+    const open = { ...initialState, activityOpen: true, computerOpen: true };
+    const next = reducer(open, { type: "toggleSettings", open: true });
+    expect(next.activityOpen).toBe(false);
+    expect(next.computerOpen).toBe(true);
+  });
+
+  it("switching to routines or the team map closes the activity panel", () => {
+    const open = { ...initialState, activityOpen: true };
+    expect(reducer(open, { type: "showRoutines" }).activityOpen).toBe(false);
+    expect(reducer(open, { type: "showTeamMap" }).activityOpen).toBe(false);
+  });
+
+  it("opens Files as its own page, carrying the folders it should offer to share only when asked", () => {
+    const open = { ...initialState, activityOpen: true, appSettingsOpen: true, settingsOpen: true };
+    const suggested = reducer(open, { type: "showFiles", suggest: ["/Users/ada/site"] });
+    expect(suggested).toMatchObject({ activeView: "files", filesSuggest: ["/Users/ada/site"], activityOpen: false, appSettingsOpen: false, settingsOpen: false });
+    expect(reducer(suggested, { type: "showFiles" })).toMatchObject({ activeView: "files", filesSuggest: null });
+    expect(reducer(suggested, { type: "showFiles", suggest: [] }).filesSuggest).toBeNull();
+    expect(reducer(suggested, { type: "showTeamMap" })).toMatchObject({ activeView: "team-map", filesSuggest: null });
+  });
+
+  it("a pinned web panel replaces the main view like the team map, and chat comes back", () => {
+    const open = { ...initialState, activityOpen: true, computerOpen: true, settingsOpen: true };
+    const panel = reducer(open, { type: "showWebPanel", id: "panel-1" });
+    expect(panel).toMatchObject({ activeView: "web-panel", webPanelId: "panel-1", activityOpen: false, computerOpen: false, settingsOpen: false });
+    expect(reducer(panel, { type: "showTeamMap" })).toMatchObject({ activeView: "team-map", webPanelId: "panel-1" });
+    expect(reducer(panel, { type: "showChat" }).activeView).toBe("chat");
+  });
+});
+
+describe("live config frames", () => {
+  const baseFrame: ConfigStatusFrame = {
+    composio: { configured: false },
+    box: { configured: false },
+    vps: { configured: false, sshAlias: "" },
+    rooms: { turnTimeoutMinutes: 10 },
+    mcp: { callTimeoutMinutes: 10 },
+    localVm: { mode: "shared", maxInstances: 1 },
+  };
+
+  it("keeps automatic recovery and its backup through live config refreshes", () => {
+    const automaticRecovery = { enabled: true, backup: { instanceId: "backup", model: "fixture-model" } };
+    expect(configStatusFromFrame({ ...baseFrame, automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
+    expect(configStatusFromFrame({ ...baseFrame, automaticRecovery: { enabled: false } }).automaticRecovery).toEqual({ enabled: false });
+  });
+
+  it("keeps a Team Cloud's team through live config refreshes, so its people stay in the @ list", () => {
+    const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.test/cloud" };
+    expect(configStatusFromFrame({ ...baseFrame, team }).team).toEqual(team);
+    expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("team");
+  });
+
+  it("keeps an OMB Cloud home's flag through live config refreshes, and adds none elsewhere", () => {
+    expect(configStatusFromFrame({ ...baseFrame, cloudHome: true }).cloudHome).toBe(true);
+    expect(configStatusFromFrame({ ...baseFrame, awakeLimit: 3, pausedBots: ["scout"] })).toMatchObject({ awakeLimit: 3, pausedBots: ["scout"] });
+    expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("pausedBots");
+    expect(configStatusFromFrame(baseFrame)).not.toHaveProperty("cloudHome");
+  });
+
+  it("preserves edition, budgets and billing through configStatusFromFrame", () => {
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD", prices: { default: { inputPerMillion: 1, outputPerMillion: 2 } } },
+    };
+    const status = configStatusFromFrame(frame);
+    expect(status.edition).toEqual(frame.edition);
+    expect(status.budgets).toEqual(frame.budgets);
+    expect(status.billing).toEqual(frame.billing);
+  });
+
+  it("keeps saved provider keys and the fleet flag after a config SSE frame lands after a save's own response", () => {
+    const saved = reducer(initialState, {
+      type: "configStatus",
+      config: configStatusFromFrame({ ...baseFrame, openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" } }),
+    });
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      anthropic: { configured: true },
+      mistral: { configured: true },
+      groq: { configured: true },
+      meta: { configured: true },
+      openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
+      fleet: { available: true },
+    };
+    const state = reducer(saved, { type: "configStatus", config: configStatusFromFrame(frame) });
+    expect(state.config).toMatchObject({
+      anthropic: { configured: true },
+      mistral: { configured: true },
+      groq: { configured: true },
+      meta: { configured: true },
+      openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
+      fleet: { available: true },
+    });
+  });
+
+  it("carries the organisation's read-only desktop policy through a config frame", () => {
+    const managedPolicy = { organizationName: "Fixture Agency", version: 2, companyModelsOnly: true, allowedEngines: ["codex"],
+      mcp: { allowCustom: false, allowlist: ["github"] }, computers: { thisComputer: false, localVm: true, box: true, vps: true }, remoteAccess: false };
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy }).managedPolicy).toEqual(managedPolicy);
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy: null }).managedPolicy).toBeNull();
+  });
+
+  it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD" },
+    };
+    const state = reducer(initialState, { type: "configStatus", config: configStatusFromFrame(frame) });
+    expect(state.config).toMatchObject({
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD" },
+    });
+  });
+
+  it("keeps live settings when a config frame arrives", () => {
+    const live = { configured: true, voice: "sol", readTypedReplies: false, idleMinutes: 7 };
+    const config = configStatusFromFrame({ ...baseFrame, live });
+    expect(config.live).toEqual(live);
+    const state = reducer(initialState, { type: "configStatus", config });
+    expect(state.config?.live).toEqual(live);
+  });
+});
+
+
+describe("conversation model variant discoveries", () => {
+  const selection = { instanceId: "opencode", model: "provider/model", variant: "minimal" };
+  const owner: Bot = { id: "owner", threadId: "first", name: "Owner", title: "", description: "", notifications: true,
+    color: "green", unread: false, modelSelection: selection, messages: [],
+    tasks: ["first", "second"].map((threadId) => ({ threadId, title: threadId, createdAt: 1, modelSelection: selection })) };
+  const start = () => ({ ...initialState, bots: [owner], instances: [{ instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode",
+    snapshot: { state: "available" as const }, capabilities: { modelVariants: true }, models: { default: selection.model, options: [] } }] });
+  const base = (threadId = "first", turnId = "turn-1") => ({ eventId: `${threadId}-${turnId}`, provider: "opencodeGo" as const,
+    providerInstanceId: "opencode", threadId, turnId, createdAt: "2026-09-15T12:00:00Z" });
+  const run = (state: AppState, event: RuntimeEvent) => reducer(state, { type: "modelVariantRuntime", event });
+  const discovery = (variants: ModelVariantState = { options: [{ id: "minimal", label: "Minimal" }], currentValue: "minimal" }, threadId = "first", turnId = "turn-1"): RuntimeEvent =>
+    ({ ...base(threadId, turnId), type: "session.model-variants", model: selection.model, variants });
+
+  it("ignores reply and reasoning deltas but still folds model-variant frames", () => {
+    const apply = (state: AppState, event: RuntimeEvent) => {
+      const action = runtimeFrameAction(event);
+      return action ? reducer(state, action) : state;
+    };
+    let state = apply(start(), { ...base(), type: "turn.started" });
+    for (const streamKind of ["assistant_text", "reasoning_text"] as const) {
+      const delta: RuntimeEvent = { ...base(), type: "content.delta", streamKind, delta: "partial" };
+      expect(runtimeFrameAction(delta)).toBeNull();
+      expect(apply(state, delta)).toBe(state);
+    }
+    state = apply(state, discovery());
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+    state = apply(state, { ...base(), type: "turn.completed", ok: true });
+    expect(state.modelVariantSessions.first.acceptingUpdates).toBe(false);
+  });
+
+  it("keeps capabilities on their thread, separate from catalog and persisted choices", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    const first = state.modelVariantSessions.first;
+    state = run(state, { ...base("second"), type: "turn.started" });
+    state = run(state, discovery({ options: [], currentValue: "default" }, "second"));
+    expect(state.modelVariantSessions.first).toEqual(first);
+    expect(state.modelVariantSessions.second.variants).toEqual({ options: [], currentValue: "default" });
+    expect(state.instances[0].models.options).toEqual([]);
+    expect(state.bots).toEqual([owner]);
+  });
+
+  it("requires the current turn, account, and model, rejecting stale discoveries and start events", () => {
+    expect(run(start(), discovery()).modelVariantSessions).toEqual({});
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, { ...base("first", "turn-2"), createdAt: "2026-09-15T12:00:01Z", type: "turn.started" });
+    expect(run(state, { ...base(), type: "turn.started" })).toBe(state);
+    expect(run(state, discovery())).toBe(state);
+    const valid = discovery(undefined, "first", "turn-2");
+    expect(run(state, { ...valid, providerInstanceId: "other" })).toBe(state);
+    expect(run(state, { ...valid, type: "session.model-variants", model: "other-model", variants: { options: [] } })).toBe(state);
+    expect(run(state, { ...valid, threadId: "missing" })).toBe(state);
+    expect(run(state, { ...valid, turnId: undefined })).toBe(state);
+    state = run(state, valid);
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+  });
+
+  it("retains the last session choices on completion but refuses late updates", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    state = run(state, { ...base(), type: "turn.completed", ok: true });
+    expect(state.modelVariantSessions.first.variants?.options).toEqual([{ id: "minimal", label: "Minimal" }]);
+    expect(run(state, discovery({ options: [] }))).toBe(state);
+    state = run(state, { ...base("first", "turn-2"), type: "turn.started", createdAt: "2026-09-15T12:00:01Z" });
+    expect(state.modelVariantSessions.first.variants).toBeUndefined();
+  });
+
+  it("drops discoveries when a thread changes model, but preserves sibling choices", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    state = run(state, { ...base("second"), type: "turn.started" });
+    state = run(state, discovery(undefined, "second"));
+    state = reducer(state, { type: "setModel", botId: owner.id, threadId: "first", selection: { ...selection, model: "other-model", variant: undefined } });
+    expect(state.modelVariantSessions.first).toBeUndefined();
+    expect(state.modelVariantSessions.second.variants?.currentValue).toBe("minimal");
+    expect(state.bots[0].tasks![1].modelSelection).toEqual(selection);
+    expect(run(state, discovery())).toBe(state);
+  });
+
+  it("accepts capabilities for a background thread while keeping them out of another selected conversation", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = reducer(state, { type: "taskSwitched", bot: { ...owner, threadId: "second" } });
+    state = run(state, discovery());
+    expect(state.bots[0].threadId).toBe("second");
+    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
+    expect(state.modelVariantSessions.second).toBeUndefined();
+  });
+
+  it("clears runtime capabilities on reload while preserving the saved variant", () => {
+    let state = run(start(), { ...base(), type: "turn.started" });
+    state = run(state, discovery());
+    state = reducer(state, { type: "hydrate", bots: [owner], groups: [], computerControl: {} });
+    expect(state.modelVariantSessions).toEqual({});
+    expect(state.bots[0].tasks![0].modelSelection?.variant).toBe("minimal");
+  });
+});
+
+describe("live call state", () => {
+  const call = { callId: "c1", botId: "b1", threadId: "t1", client: "ios", voice: "marin", startedAt: 1, status: "live" } as const;
+  it("starts empty and follows live.call frames", () => {
+    expect(initialState.liveCall).toBeNull();
+    const live = reducer(initialState, { type: "liveCall", call });
+    expect(live.liveCall).toEqual(call);
+    const ended = reducer(live, { type: "liveCall", call: { ...call, status: "ended", endReason: "idle" } });
+    expect(ended.liveCall?.status).toBe("ended");
+    expect(reducer(ended, { type: "liveCall", call: null }).liveCall).toBeNull();
+  });
+
+  it("takes a lookup of the line only if no newer frame landed while it was out", () => {
+    const since = initialState.liveCallVersion;
+    const framed = reducer(initialState, { type: "liveCall", call });
+    expect(reducer(framed, { type: "liveCallLookup", call: null, since, seq: 1 })).toBe(framed);
+    const fresh = reducer(framed, { type: "liveCallLookup", call: { ...call, status: "ended", endReason: "idle" }, since: framed.liveCallVersion, seq: 2 });
+    expect(fresh.liveCall?.status).toBe("ended");
+    expect(fresh.liveCallVersion).toBe(framed.liveCallVersion);
+  });
+
+  it("never lets an earlier lookup's answer replace a later one's", () => {
+    const since = initialState.liveCallVersion;
+    const later = reducer(initialState, { type: "liveCallLookup", call, since, seq: 2 });
+    expect(later.liveCall).toEqual(call);
+    expect(reducer(later, { type: "liveCallLookup", call: null, since, seq: 1 })).toBe(later);
+    const inOrder = reducer(reducer(initialState, { type: "liveCallLookup", call: null, since, seq: 1 }), { type: "liveCallLookup", call, since, seq: 2 });
+    expect(inOrder.liveCall).toEqual(call);
+  });
+
+  it("reads a live.call frame's call, and ignores a frame without one", () => {
+    expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1", call })).toEqual({ call });
+    expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1", call: null })).toEqual({ call: null });
+    expect(liveCallFromFrame({ kind: "live.call", botId: "b1", threadId: "t1" })).toBeNull();
+    expect(liveCallFromFrame({ kind: "live.call", call: "c1" })).toBeNull();
+    expect(liveCallFromFrame({ kind: "live.call", call: { status: "live" } })).toBeNull();
+  });
+});
+
+describe("restoring the open conversation", () => {
+  const bot = (id: string, extra: Partial<Bot> = {}): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+    messages: [],
+    ...extra,
+  });
+  const first = bot("bot-1");
+  const second = bot("bot-2");
+  const room: Group = {
+    id: "room-1", name: "Room", threadId: "room-thread", memberIds: [], createdAt: 1,
+    defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [],
+  };
+  const hydrating = (state: AppState, resumeId?: string, bots: Bot[] = [first, second], groups: Group[] = [room]) =>
+    reducer(state, { type: "hydrate", bots, groups, computerControl: {}, resumeId });
+
+  it("hydrate keeps a known live selection", () => {
+    expect(hydrating({ ...initialState, selectedId: "bot-2" }, "room-1").selectedId).toBe("bot-2");
+    expect(hydrating({ ...initialState, selectedId: "room-1" }).selectedId).toBe("room-1");
+  });
+
+  it("hydrate resumes the remembered bot", () => {
+    expect(hydrating(initialState, "bot-2").selectedId).toBe("bot-2");
+  });
+
+  it("hydrate resumes the remembered room", () => {
+    expect(hydrating(initialState, "room-1").selectedId).toBe("room-1");
+  });
+
+  it("hydrate falls back to the first bot when the resume id is unknown", () => {
+    expect(hydrating(initialState, "deleted-bot").selectedId).toBe("bot-1");
+  });
+
+  it("hydrate falls back to the first bot when the resumed bot is hidden", () => {
+    expect(hydrating(initialState, "bot-9", [first, bot("bot-9", { hidden: true })], []).selectedId).toBe("bot-1");
+  });
+
+  it("hydrate without a resume id behaves as today", () => {
+    expect(hydrating(initialState).selectedId).toBe("bot-1");
+    expect(hydrating({ ...initialState, selectedId: "deleted" }).selectedId).toBe("bot-1");
+  });
+
+  describe("the provider's own effect", () => {
+    class TestErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+      state = { failed: false };
+      static getDerivedStateFromError() { return { failed: true }; }
+      render() { return this.state.failed ? createElement("div", { id: "snapshot-crash" }) : this.props.children; }
+    }
+    // The provider opens the one stream and pulls the snapshot itself, so the fixture answers both.
+    class FixtureEventSource {
+      static opened: FixtureEventSource[] = [];
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onmessage: ((event: { data: string; lastEventId?: string }) => void) | null = null;
+      constructor(readonly url: string) {
+        FixtureEventSource.opened.push(this);
+      }
+      close() {}
+      send(frame: object, id?: string) {
+        this.onmessage?.({ data: JSON.stringify(frame), lastEventId: id });
+      }
+    }
+
+    const settle = async () => {
+      for (let round = 0; round < 10; round++) await new Promise((resolve) => setTimeout(resolve, 0));
+    };
+    let seen!: AppState;
+    let dispatch!: (action: Action) => void;
+    function Probe() {
+      const store = useStore();
+      seen = store.state;
+      dispatch = store.dispatch;
+      return null;
+    }
+    let root: Root | undefined;
+    let container: HTMLDivElement | undefined;
+
+    afterEach(() => {
+      root?.unmount();
+      container?.remove();
+      root = undefined;
+      container = undefined;
+      vi.unstubAllGlobals();
+      FixtureEventSource.opened.length = 0;
+    });
+
+    const boot = async (seed: Record<string, string> = {}, storage?: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void }) => {
+      const stored = new Map<string, string>(Object.entries(seed));
+      const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body)));
+      const answers: Record<string, unknown> = {
+        "/api/instances": { instances: [] },
+        "/api/config": {},
+        "/api/routines": { routines: [], runs: [] },
+        "/api/webhooks": { webhooks: [], attempts: [], ingress: null },
+      };
+      vi.stubGlobal("localStorage", storage ?? {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => void stored.set(key, value),
+      });
+      vi.stubGlobal("EventSource", FixtureEventSource);
+      vi.stubGlobal("fetch", (path: string) =>
+        path.startsWith("/api/bots?") ? json({ bots: [first, second], groups: [room] }) : json(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}),
+      );
+
+      container = document.createElement("div");
+      document.body.append(container);
+      root = createRoot(container);
+      flushSync(() => root!.render(createElement(TestErrorBoundary, null, createElement(StoreProvider, null, createElement(Probe)))));
+      await settle();
+      const [stream] = FixtureEventSource.opened;
+      expect(FixtureEventSource.opened).toHaveLength(1);
+      expect(seen.selectedId).toBe("");
+      return { stored, stream };
+    };
+    const hello = () => ({ kind: "hello", resumed: false, cursor: "run:0" });
+
+    it("keeps the UI mounted when a reconnect receives a malformed bots snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      vi.stubGlobal("fetch", () => Promise.resolve(new Response("{}")));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.selectedId).toBe("bot-1");
+    });
+
+    it("keeps the UI mounted when a reconnect receives a malformed routines snapshot", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(seen.routinesLoadState).toBe("error");
+    });
+
+    it("keeps the engines and webhooks it had when a reconnect receives empty answers for them", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.startsWith("/api/bots?") ? { bots: [first, second], groups: [room] } : {},
+      ))));
+      stream.send(hello());
+      await settle();
+      expect(container?.querySelector("#snapshot-crash")).toBeNull();
+      expect(Array.isArray(seen.instances)).toBe(true);
+      expect(Array.isArray(seen.webhooks)).toBe(true);
+    });
+
+    it("the provider remembers each non-empty selection and never an empty one", async () => {
+      const { stored, stream } = await boot();
+
+      expect(stored.has(LAST_CONVERSATION_KEY)).toBe(false);
+
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("bot-1");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-1");
+
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      await settle();
+      expect(seen.selectedId).toBe("bot-2");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-2");
+    });
+
+    it("a pressed Steer that stays queued says why: pictures anywhere, any held room steer, and a plain 1:1 queued answer stays quiet", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      const answers: Record<string, unknown> = {
+        "/api/bots/bot-1/queue/q-image/steer": { ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "images" },
+        "/api/groups/room-1/queue/q-room/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "images" },
+        "/api/groups/room-1/queue/q-room-plain/steer": { ok: true, queued: true, threadId: "room-thread" },
+        "/api/bots/bot-1/queue/q-plain/steer": { ok: true, queued: true, threadId: "bot-1-thread" },
+      };
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}))));
+
+      const settled = vi.fn();
+      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-plain", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(seen.notice).toBeNull();
+
+      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-image", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(2);
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null, threadId: "bot-1-thread" });
+
+      flushSync(() => dispatch({ type: "notice", notice: null }));
+      flushSync(() => dispatch({ type: "select", id: "room-1" }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(3);
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null, threadId: "room-thread" });
+
+      flushSync(() => dispatch({ type: "notice", notice: null }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room-plain", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(4);
+      expect(seen.notice).toMatchObject({ kind: "note", text: expect.stringContaining("Nothing was stopped"), threadId: "room-thread" });
+    });
+
+    it("a room send with the steer follow-up hands its fresh queue head to the running turn", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      const steered: string[] = [];
+      vi.stubGlobal("fetch", (path: string) => {
+        const clean = path.replace(/\?since=[^&]*$/, "");
+        if (clean === "/api/groups/room-1/messages") {
+          return Promise.resolve(new Response(JSON.stringify({ ok: true, queued: true, threadId: "room-thread", queueId: "q-fresh" })));
+        }
+        if (clean === "/api/groups/room-1/queue/q-fresh/steer") {
+          steered.push(clean);
+          return Promise.resolve(new Response(JSON.stringify({ ok: true, steered: true, threadId: "room-thread", messages: [], queueIds: ["q-fresh"] })));
+        }
+        return Promise.resolve(new Response(JSON.stringify({})));
+      });
+
+      flushSync(() => dispatch({ type: "sendGroup", groupId: "room-1", text: "join in", sendId: "s-steer", followUp: "steer" }));
+      await settle();
+      expect(steered).toEqual(["/api/groups/room-1/queue/q-fresh/steer"]);
+
+      steered.length = 0;
+      flushSync(() => dispatch({ type: "sendGroup", groupId: "room-1", text: "just queue it", sendId: "s-queue", followUp: "queue" }));
+      await settle();
+      expect(steered).toEqual([]);
+    });
+
+    it("a room's Enter steer says nothing when it cannot steer, and never reaches past a message queued ahead", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      const steered: string[] = [];
+      let queueId = "q-refused";
+      vi.stubGlobal("fetch", (path: string) => {
+        const clean = path.replace(/\?since=[^&]*$/, "");
+        if (clean === "/api/groups/room-1/messages") {
+          return Promise.resolve(new Response(JSON.stringify({ ok: true, queued: true, threadId: "room-thread", queueId })));
+        }
+        steered.push(clean);
+        if (clean === "/api/groups/room-1/queue/q-refused/steer") {
+          return Promise.resolve(new Response(JSON.stringify({ error: "only the first queued message can steer" }), { status: 409 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ ok: true, queued: true, threadId: "room-thread" })));
+      });
+
+      flushSync(() => dispatch({ type: "sendGroup", groupId: "room-1", text: "first", sendId: "s-1", followUp: "steer" }));
+      await settle();
+      expect(steered).toEqual(["/api/groups/room-1/queue/q-refused/steer"]);
+      expect(seen.error).toBeFalsy();
+      expect(seen.notice).toBeNull();
+
+      steered.length = 0;
+      queueId = "q-behind";
+      flushSync(() => dispatch({ type: "sendGroup", groupId: "room-1", text: "second", sendId: "s-2", followUp: "steer" }));
+      await settle();
+      expect(steered, "q-refused is still queued ahead of it").toEqual([]);
+      expect(seen.pendingQueued["room-thread"]?.map((entry) => entry.queueId)).toEqual(["q-refused", "q-behind"]);
+      expect(seen.error).toBeFalsy();
+      expect(seen.notice).toBeNull();
+    });
+
+    it("a Steer send that stays queued because of pictures says why", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.replace(/\?since=[^&]*$/, "").startsWith("/api/bots/bot-1/messages")
+          ? { ok: true, queued: true, threadId: "bot-1-thread", queueId: "q-image-send", blockedBy: "images" }
+          : {},
+      ))));
+      flushSync(() => dispatch({
+        type: "send",
+        botId: "bot-1",
+        text: "see this",
+        threadId: "bot-1-thread",
+        followUp: "steer",
+        sendId: "send-image",
+      }));
+      await settle();
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null, threadId: "bot-1-thread" });
+    });
+
+    it("an earlier notice timer does not clear a newer pictures notice", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        flushSync(() => dispatch({ type: "notice", notice: { kind: "note", botName: null, text: "held" } }));
+        flushSync(() => vi.advanceTimersByTime(19_000));
+        flushSync(() => dispatch({ type: "notice", notice: { kind: "steer-images", botName: null, threadId: "bot-1-thread" } }));
+        flushSync(() => vi.advanceTimersByTime(2_000));
+        expect(seen.notice).toEqual({ kind: "steer-images", botName: null, threadId: "bot-1-thread" });
+        flushSync(() => vi.advanceTimersByTime(6_000));
+        expect(seen.notice).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("a pictures notice leaves when the person opens another conversation", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      flushSync(() => dispatch({ type: "notice", notice: { kind: "steer-images", botName: null, threadId: "bot-1-thread" } }));
+      flushSync(() => dispatch({ type: "select", id: "bot-1" }));
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null, threadId: "bot-1-thread" });
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      expect(seen.notice).toBeNull();
+      flushSync(() => dispatch({ type: "notice", notice: { kind: "thread-gone", botName: "bot-1" } }));
+      flushSync(() => dispatch({ type: "select", id: "bot-1" }));
+      expect(seen.notice).toEqual({ kind: "thread-gone", botName: "bot-1" });
+    });
+
+    it("clears a pictures notice while the next task snapshot is still pending", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", () => new Promise<Response>(() => {}));
+      flushSync(() => dispatch({ type: "notice", notice: { kind: "steer-images", botName: null, threadId: "bot-1-thread" } }));
+      flushSync(() => dispatch({ type: "switchTask", botId: "bot-1", threadId: "task-b" }));
+      expect(seen.bots.find((bot) => bot.id === "bot-1")).toMatchObject({ threadId: "bot-1-thread", switchingTo: "task-b" });
+      expect(seen.notice).toBeNull();
+      flushSync(() => dispatch({ type: "notice", notice: { kind: "steer-images", botName: null, threadId: "task-b" } }));
+      expect(seen.notice).toMatchObject({ threadId: "task-b" });
+    });
+
+    it("ignores a pictures-held response arriving after navigation without erasing the current notice", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      let respond!: (response: Response) => void;
+      vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { respond = resolve; }));
+      const settled = vi.fn();
+      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "delayed-image", onSettled: settled }));
+      await settle();
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      const current = { kind: "steer-images" as const, botName: null, threadId: "bot-2-thread" };
+      flushSync(() => dispatch({ type: "notice", notice: current }));
+      respond(new Response(JSON.stringify({ ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "images" })));
+      await settle();
+      expect(settled).toHaveBeenCalledOnce();
+      expect(seen.notice).toEqual(current);
+    });
+
+    it("ignores a held room-steer note arriving after navigation without erasing the current notice", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      let respond!: (response: Response) => void;
+      vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { respond = resolve; }));
+      const settled = vi.fn();
+      flushSync(() => dispatch({ type: "select", id: "room-1" }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "delayed-room-plain", onSettled: settled }));
+      await settle();
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      const current = { kind: "steer-images" as const, botName: null, threadId: "bot-2-thread" };
+      flushSync(() => dispatch({ type: "notice", notice: current }));
+      respond(new Response(JSON.stringify({ ok: true, queued: true, threadId: "room-thread" })));
+      await settle();
+      expect(settled).toHaveBeenCalledOnce();
+      expect(seen.notice).toEqual(current);
+    });
+
+    it("the provider restores the conversation remembered on this device", async () => {
+      const { stored, stream } = await boot({ [LAST_CONVERSATION_KEY]: "room-1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.selectedId).toBe("room-1");
+      expect(stored.get(LAST_CONVERSATION_KEY)).toBe("room-1");
+    });
+
+    it("the provider restores the notification tray pin remembered on this device (email 1a1a4fb0)", async () => {
+      const { stream } = await boot({ [NOTIFICATION_TRAY_PINNED_KEY]: "1" });
+      stream.send(hello());
+      await settle();
+      expect(seen.notificationsPinned).toBe(true);
+    });
+
+    it("the provider remembers a section only while it is expanded", async () => {
+      const { stored, stream } = await boot({ [LAST_BOT_SECTION_KEY]: "model" });
+      stream.send(hello());
+      await settle();
+      expect(seen.botSettingsSection).toBe("model");
+      expect(seen.botSettingsSectionStored).toBe(true);
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("model");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.botSettingsExpandRemembered).toBe(true);
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("model");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.botSettingsExpandAccordion).toBe(false);
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("model");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true, section: "usage" }));
+      await settle();
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("usage");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: false }));
+      await settle();
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("usage");
+    });
+
+    it("the provider remembers Overview like any other section", async () => {
+      const { stored, stream } = await boot();
+      stream.send(hello());
+      await settle();
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true, section: "overview" }));
+      await settle();
+      expect(stored.get(LAST_BOT_SECTION_KEY)).toBe("overview");
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: false }));
+      await settle();
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.botSettingsSection).toBe("overview");
+      expect(seen.botSettingsExpandAccordion).toBe(true);
+      expect(seen.botSettingsExpandRemembered).toBe(true);
+    });
+
+    it("a throwing storage surface boots as if nothing were stored", async () => {
+      const { stream } = await boot({}, {
+        getItem: () => {
+          throw new Error("blocked");
+        },
+        setItem: () => {
+          throw new Error("blocked");
+        },
+      });
+      stream.send(hello());
+      await settle();
+      expect(seen.botSettingsSection).toBe("overview");
+      expect(seen.botSettingsSectionStored).toBe(false);
+      expect(seen.botSettingsExpandRemembered).toBe(false);
+
+      flushSync(() => dispatch({ type: "toggleSettings", open: true }));
+      await settle();
+      expect(seen.settingsOpen).toBe(true);
+      expect(seen.botSettingsSection).toBe("overview");
+      expect(seen.botSettingsExpandAccordion).toBe(false);
+      expect(seen.botSettingsExpandRemembered).toBe(false);
+    });
+  });
+});
+
+describe("notifications feed", () => {
+  const entry = (id: string, at: number) => ({
+    id, at, kind: "done" as const, botId: "b1", botName: "Scout", threadId: "t1", title: `${id} finished`, body: "", read: false,
+  });
+
+  it("hydrates, then grows on each push without duplicating a replayed id", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n1"]);
+    state = reducer(state, { type: "notificationReceived", entry: entry("n2", 2) });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
+    // the same frame replayed (a resumed SSE stream) must not duplicate the row
+    state = reducer(state, { type: "notificationReceived", entry: entry("n2", 2) });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
+  });
+
+  it("hydration keeps a live entry that arrived while the request was in flight, newest first", () => {
+    let state = reducer(initialState, { type: "notificationReceived", entry: entry("live", 5) });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n2", 2), entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["live", "n2", "n1"]);
+  });
+
+  it("hydration takes the server's copy for an id both sides have (a failed mark-read resyncs to unread)", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications[0].read).toBe(false);
+  });
+
+  it("showRoutines closes the feed so its rail is reachable again", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "showRoutines" }).notificationsOpen).toBe(false);
+  });
+
+  it("marks one or all read without touching the rest", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2)],
+    });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    expect(state.notifications.find((n) => n.id === "n1")?.read).toBe(true);
+    expect(state.notifications.find((n) => n.id === "n2")?.read).toBe(false);
+    state = reducer(state, { type: "notificationsMarkAllRead" });
+    expect(state.notifications.every((n) => n.read)).toBe(true);
+  });
+
+  it("marks the entries a conversation read elsewhere, and only those", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2), entry("n3", 3)],
+    });
+    state = reducer(state, { type: "notificationsRead", ids: ["n1", "n3", "gone"] });
+    expect(state.notifications.filter((n) => n.read).map((n) => n.id)).toEqual(["n3", "n1"]);
+  });
+
+  it("toggleNotifications closes the other docked panels, and vice versa", () => {
+    let state = reducer(initialState, { type: "toggleComputer", open: true });
+    expect(state.computerOpen).toBe(true);
+    state = reducer(state, { type: "toggleNotifications", open: true });
+    expect(state).toMatchObject({ notificationsOpen: true, computerOpen: false });
+    state = reducer(state, { type: "toggleActivity", open: true });
+    expect(state).toMatchObject({ activityOpen: true, notificationsOpen: false });
+  });
+
+  it("toggleNotificationsPinned flips independently of notificationsOpen", () => {
+    const state = reducer(initialState, { type: "toggleNotificationsPinned" });
+    expect(state).toMatchObject({ notificationsPinned: true, notificationsOpen: false });
+  });
+
+  it("unpinned, switching chats closes it; pinned, it stays open (email 1a1a4fb0)", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1" };
+    const switches = [
+      { type: "select", id: "other-bot" } as const,
+      { type: "switchTask", botId: "other-bot", threadId: "other-thread" } as const,
+    ];
+    for (const action of switches) expect(reducer(open, action).notificationsOpen).toBe(false);
+    const pinned = reducer(open, { type: "toggleNotificationsPinned" });
+    for (const action of switches) expect(reducer(pinned, action).notificationsOpen).toBe(true);
+    const inRoom = { ...open, selectedId: "room-1", groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const roomSwitch = { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" } as const;
+    expect(reducer(inRoom, roomSwitch).notificationsOpen).toBe(false);
+    expect(reducer({ ...inRoom, notificationsPinned: true }, roomSwitch).notificationsOpen).toBe(true);
+  });
+
+  it("unpinned, a new thread in the room on screen closes it; a background room leaves it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "room-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    const action = { type: "newGroupTask", groupId: "room-1" } as const;
+    expect(reducer(open, action).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "bot-1" }, action).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, activeView: "team-map" as const }, action).notificationsOpen).toBe(true);
+  });
+
+  it("a thread switch in a room that is not on screen leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "switchGroupTask", groupId: "room-1", threadId: "room-thread" }).notificationsOpen).toBe(true);
+  });
+
+  it("re-selecting a thread the bot is already switching to leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1", switchingTo: "t-2" }] as AppState["bots"] };
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-3" }).notificationsOpen).toBe(false);
+  });
+
+  it("re-selecting the open chat or its open thread leaves the tray as it is", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1",
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(true);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "switchGroupTask", groupId: "room-1", threadId: "room-t" }).notificationsOpen).toBe(true);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-2" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, re-selecting the open chat from another view closes it", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), selectedId: "bot-1", activeView: "team-map" as const,
+      bots: [{ id: "bot-1", threadId: "t-1" }] as AppState["bots"], groups: [{ id: "room-1", threadId: "room-t" }] as AppState["groups"] };
+    expect(reducer(open, { type: "select", id: "bot-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, selectedId: "room-1" }, { type: "select", id: "room-1" }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "switchTask", botId: "bot-1", threadId: "t-1" }).notificationsOpen).toBe(false);
+    expect(reducer({ ...open, notificationsPinned: true }, { type: "select", id: "bot-1" }).notificationsOpen).toBe(true);
+  });
+
+  it("unpinned, starting a new chat closes it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "newTask", botId: "bot-1" }).notificationsOpen).toBe(false);
+  });
+
+  it("unpinned, adding a bot that takes the chat closes it; a background add keeps it", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    const bot = { id: "bot-new", threadId: "thread-new", name: "New", messages: [] } as never as Bot;
+    expect(reducer(open, { type: "botAdded", bot }).notificationsOpen).toBe(false);
+    expect(reducer(open, { type: "botAdded", bot, preserveSelection: true }).notificationsOpen).toBe(true);
+    const pinned = { ...open, notificationsPinned: true };
+    expect(reducer(pinned, { type: "botAdded", bot }).notificationsOpen).toBe(true);
+  });
+
+  it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), notificationsPinned: true };
+    for (const action of [
+      { type: "toggleComputer", open: true } as const,
+      { type: "toggleInspector", open: true } as const,
+      { type: "toggleActivity", open: true } as const,
+      { type: "toggleAppSettings", open: true } as const,
+    ]) {
+      expect(reducer(open, action).notificationsOpen).toBe(true);
+    }
+  });
+
+  it("unpinned, the same four still close it exactly as before (regression guard)", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(open.notificationsPinned).toBe(false);
+    for (const action of [
+      { type: "toggleComputer", open: true } as const,
+      { type: "toggleInspector", open: true } as const,
+      { type: "toggleActivity", open: true } as const,
+      { type: "toggleAppSettings", open: true } as const,
+    ]) {
+      expect(reducer(open, action).notificationsOpen).toBe(false);
+    }
+  });
+});
+
+describe("a routine's answer and its broadcast", () => {
+  it("applies whichever arrives first and never steps back to an older edit", () => {
+    const routine = { id: "r1", name: "Daily", prompt: "Summarize", target: "bot", botId: "b1", runOn: "maus", enabled: true,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] }, durationMinutes: 30, nextRunAt: 5, createdAt: 1, updatedAt: 10 } as AppState["routines"][number];
+    const paused = { ...routine, enabled: false, nextRunAt: null, updatedAt: 11 };
+    const resumed = { ...routine, updatedAt: 12 };
+    let state = reducer({ ...initialState, routines: [routine] }, { type: "routinePatched", routine: paused });
+    state = reducer(state, { type: "routinePatched", routine: resumed });
+    state = reducer(state, { type: "routinePatched", routine: paused });
+    expect(state.routines).toEqual([resumed]);
+    expect(reducer(state, { type: "routinePatched", routine: { ...resumed, failureStreak: 1 } }).routines[0]).toMatchObject({ failureStreak: 1 });
+  });
+});
+
+describe("room order from the server", () => {
+  const room = (id: string): Group => ({ id, threadId: `${id}-thread`, name: id, memberIds: [], createdAt: 1, messages: [] } as unknown as Group);
+  const hydrated = reducer(initialState, { type: "hydrate", bots: [], groups: [room("a"), room("b"), room("c")], computerControl: {} });
+  const ids = (state: AppState) => state.groups.map((candidate) => candidate.id);
+
+  it("applies a groups.order frame as a stable partial reorder", () => {
+    expect(ids(reducer(hydrated, { type: "groupsOrdered", groupIds: ["c", "b", "a"] }))).toEqual(["c", "b", "a"]);
+    const partial = reducer(hydrated, { type: "groupsOrdered", groupIds: ["c", "a"] });
+    expect(ids(partial)).toEqual(["c", "b", "a"]);
+    expect(partial.groups[0]).toBe(hydrated.groups[2]);
+  });
+
+  it("ignores ids it does not know and leaves an unchanged order alone", () => {
+    expect(ids(reducer(hydrated, { type: "groupsOrdered", groupIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c"]);
+    expect(reducer(hydrated, { type: "groupsOrdered", groupIds: ["a", "b", "c"] })).toBe(hydrated);
+  });
+});
+
+describe("fleet order from the server", () => {
+  const bot = (id: string): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+    messages: [],
+  });
+  const hydrated = reducer(initialState, { type: "hydrate", bots: [bot("a"), bot("b"), bot("c"), bot("d")], groups: [], computerControl: {} });
+  const ids = (state: AppState) => state.bots.map((candidate) => candidate.id);
+
+  it("applies a bots.order frame as a stable partial reorder", () => {
+    expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["d", "c", "b", "a"] }))).toEqual(["d", "c", "b", "a"]);
+    // Only c and a move, into the positions they already share; b and d stay put.
+    const partial = reducer(hydrated, { type: "botsOrdered", botIds: ["c", "a"] });
+    expect(ids(partial)).toEqual(["c", "b", "a", "d"]);
+    expect(partial.bots[0]).toBe(hydrated.bots[2]);
+  });
+
+  it("ignores ids it does not know and leaves an unchanged order alone", () => {
+    expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c", "d"]);
+    expect(reducer(hydrated, { type: "botsOrdered", botIds: ["a", "b", "c", "d"] })).toBe(hydrated);
+  });
+});

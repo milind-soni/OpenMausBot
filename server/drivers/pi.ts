@@ -1,0 +1,1000 @@
+import { piModelId } from "./pi-model-id.ts";
+import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
+// The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
+// (`pi --mode rpc`), not ACP. pi is BYOK and reads auth.json from its agent folder itself, so this driver
+// holds no key; resumeCursor is pi's `sessionFile` (switch_session).
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
+import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { augmentedPath } from "../env-path.ts";
+import { describeSpawnFailure, execCliBoxed, killCliTree, spawnCli } from "../procs.ts";
+import { instanceEnvNames } from "../bot-box/env.ts";
+import {
+  deletePromptSplitReceipt,
+  promptHalves,
+  readPromptSplitReceipt,
+  splitSessionPrompt,
+  writePromptSplitReceipt,
+} from "./prompt-split.ts";
+import type { PromptSplitReceipt } from "./prompt-split.ts";
+import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
+
+import type {
+  DriverCreateInput,
+  EffortLevel,
+  ModelCatalog,
+  ProviderDriver,
+  ProviderInstance,
+  ProviderSnapshot,
+  RuntimeEvent,
+  RuntimeEventListener,
+  SendTurnInput,
+  SteerOutcome,
+} from "../contracts.ts";
+import { newEventId, newId } from "../contracts.ts";
+export const PI_EFFORT_LEVELS = ["none", "low", "medium", "high", "xhigh", "max"] as const;
+import { ASK_USER_TOOL, MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
+import {
+  decodeInjectId,
+  encodeInjectId,
+  hostApiKey,
+  localHost,
+  mergeLocalInject,
+} from "./local-inject.ts";
+import { appendNative } from "./native.ts";
+import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
+import { piSessionDir, piSessionPath, piTurnArgs } from "./pi-session.ts";
+import { piAgentDir, readPiDefaultModel, withOwnPiAgentDir } from "./pi-agent-dir.ts";
+import { noticeFailure } from "../chat-notices.ts";
+
+import { piCatalogFromFrame } from "./pi-catalog.ts";
+import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
+import { piMessageUsage, PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
+export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+export { parsePiCatalog } from "./pi-catalog.ts";
+
+const DRIVER_KIND = "piAgent";
+const PI_ARGS = ["--mode", "rpc", "--no-session"]; // catalog probes only: do not write a session file
+const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
+/** omp's RPC transport caps a frame at 1 MiB and chunks bigger ones only after the client
+ *  negotiates protocol 2. Vanilla pi has no handshake frame to wait for. */
+const PI_NEGOTIATE_FRAME = { id: "negotiate", type: "negotiate_protocol", protocolVersion: 2 };
+const PI_PROMPT_RE_ANCHOR_TURNS = 8;
+/** How long to wait after a finished turn_end for agent_end, which some runtimes never send. */
+const PI_AGENT_END_GRACE_MS = 60_000;
+/** A prompt sent before pi answers new_session or switch_session runs on a session pi then replaces, so the turn waits
+ *  for that answer however long it takes, and says so in the chat after this long. */
+const PI_SESSION_SLOW_MS = 20_000;
+
+/** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
+class PiRpcRefusalError extends Error {}
+
+export function piThinkingLevel(effort: EffortLevel): (typeof PI_EFFORT_LEVELS)[number] | "off" {
+  return effort === "none" ? "off" : effort === "ultra" ? "max" : effort;
+}
+
+export function splitPiModel(id: string): { provider: string; modelId: string } | null {
+  const inject = decodeInjectId(id);
+  if (inject) return { provider: inject.host, modelId: inject.model };
+  if (!id.includes("/")) return null;
+  const [provider, ...rest] = id.split("/");
+  if (!provider || !rest.length) return null;
+  return { provider, modelId: rest.join("/") };
+}
+
+export function preferPiInjectRows(catalog: ModelCatalog): ModelCatalog {
+  const injectIds = new Set(
+    catalog.options.filter((option) => decodeInjectId(option.id)).map((option) => option.id),
+  );
+  if (!injectIds.size) return catalog;
+  const options = catalog.options.filter((option) => {
+    if (decodeInjectId(option.id)) return true;
+    const slash = option.id.indexOf("/");
+    if (slash <= 0) return true;
+    return !injectIds.has(encodeInjectId(option.id.slice(0, slash), option.id.slice(slash + 1)));
+  });
+  let def = catalog.default;
+  if (def && !options.some((option) => option.id === def)) {
+    const slash = def.indexOf("/");
+    const mapped = slash > 0 ? encodeInjectId(def.slice(0, slash), def.slice(slash + 1)) : "";
+    def = injectIds.has(mapped) ? mapped : (options[0]?.id ?? "");
+  }
+  return { default: def, options };
+}
+
+export async function applyPiLocalCatalog(
+  catalog: ModelCatalog,
+  env: Record<string, string | undefined> = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelCatalog> {
+  return preferPiInjectRows(await mergeLocalInject(catalog, env, fetchImpl));
+}
+
+/** Upsert a live local host into the Pi agent folder's models.json so `set_model` can reach it. */
+export function ensurePiInjectModel(
+  modelId: string,
+  env: Record<string, string | undefined> = process.env,
+): { provider: string; modelId: string } | null {
+  const split = splitPiModel(modelId);
+  if (!split) return null;
+  const inject = decodeInjectId(modelId);
+  if (!inject) return split;
+  const host = localHost(inject.host);
+  if (!host) return split;
+
+  const dir = piAgentDir(env);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "models.json");
+  let root: Record<string, unknown> = { providers: {} };
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        root = parsed as Record<string, unknown>;
+      } else {
+        return split;
+      }
+    } catch {
+      return split;
+    }
+  }
+
+  const providers =
+    root.providers && typeof root.providers === "object" && !Array.isArray(root.providers)
+      ? { ...(root.providers as Record<string, unknown>) }
+      : {};
+  const previous = providers[inject.host];
+  const existing: Record<string, unknown> =
+    previous && typeof previous === "object" && !Array.isArray(previous)
+      ? { ...(previous as Record<string, unknown>) }
+      : {
+          baseUrl: host.baseUrl,
+          api: "openai-completions",
+          apiKey: hostApiKey(host, env),
+          compat: { supportsDeveloperRole: false, supportsReasoningEffort: true },
+          models: [] as Array<Record<string, unknown>>,
+        };
+  existing.baseUrl = host.baseUrl;
+  existing.api = typeof existing.api === "string" && existing.api ? existing.api : "openai-completions";
+  existing.apiKey = hostApiKey(host, env);
+  if (!existing.compat) {
+    existing.compat = { supportsDeveloperRole: false, supportsReasoningEffort: true };
+  }
+  const models: Array<Record<string, unknown>> = Array.isArray(existing.models)
+    ? existing.models.filter(
+        (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row),
+      )
+    : [];
+  if (!models.some((row) => row.id === inject.model)) {
+    models.push({
+      id: inject.model,
+      name: inject.model,
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 131072,
+      maxTokens: 16384,
+    });
+  }
+  existing.models = models;
+  providers[inject.host] = existing;
+  root.providers = providers;
+  writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {}
+  return split;
+}
+
+/** Security: Pi loads its extensions from its agent folder on every start, so while the bot box is on its model list runs in
+ * the box, as a bot's turn does. `allowEnv`: the keys the instance's own settings put in `env`. */
+export async function fetchPiModels(
+  cli: string,
+  env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
+): Promise<ModelCatalog> {
+  const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env, box: { allowEnv, engine: DRIVER_KIND } });
+  return new Promise((resolve) => {
+    let done = false;
+    const fallbackDefault = readPiDefaultModel(env);
+    const finish = (catalog: ModelCatalog) => {
+      if (done) return;
+      done = true;
+      try {
+        killCliTree(child);
+      } catch {}
+      resolve(catalog);
+    };
+    const timer = setTimeout(() => finish({ default: "", options: [] }), 15_000);
+    timer.unref?.();
+    const chunks = new PiRpcChunks();
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", piLineReader((line) => {
+      const frame = decodePiFrame(line, chunks);
+      if (frame?.command !== "get_available_models") return false;
+      clearTimeout(timer);
+      finish(piCatalogFromFrame(frame, fallbackDefault) ?? { default: fallbackDefault, options: [] });
+      return true;
+    }));
+    child.on("error", () => finish({ default: "", options: [] }));
+    child.on("close", () => finish({ default: "", options: [] }));
+    try {
+      child.stdin.write(`${JSON.stringify(PI_NEGOTIATE_FRAME)}\n`);
+      child.stdin.write(JSON.stringify({ id: "catalog", type: "get_available_models" }) + "\n");
+    } catch {
+      finish({ default: "", options: [] });
+    }
+  });
+}
+
+export async function updatePiModelCatalog(
+  cli: string,
+  env: Record<string, string | undefined>,
+  allowEnv: readonly string[] = [],
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    execCliBoxed(cli, PI_MODEL_UPDATE_ARGS, { env, timeout: 60_000, maxBuffer: 1024 * 1024, box: { allowEnv, engine: DRIVER_KIND } }, (error) => resolve(!error));
+  });
+}
+
+export interface PiConfig {
+  cli: string;
+  /** Full-auto: never ask before an action. Host control is unavailable in this mode. */
+  fullAuto: boolean;
+}
+
+function decodeConfig(raw: unknown): PiConfig {
+  if (raw === null || raw === undefined) return { cli: "pi", fullAuto: false };
+  if (typeof raw !== "object") throw new Error("pi config must be an object");
+  const obj = raw as { cli?: unknown; fullAuto?: unknown };
+  if (obj.cli !== undefined && typeof obj.cli !== "string") throw new Error("pi config `cli` must be a string");
+  if (obj.fullAuto !== undefined && typeof obj.fullAuto !== "boolean") throw new Error("pi config `fullAuto` must be a boolean");
+  return {
+    cli: obj.cli && obj.cli.trim() ? obj.cli.trim() : "pi",
+    fullAuto: obj.fullAuto === true,
+  };
+}
+
+const EMPTY: ModelCatalog = { default: "", options: [] };
+
+interface PiEvent {
+  type: string;
+  command?: string;
+  success?: boolean;
+  data?: unknown;
+  assistantMessageEvent?: { type?: string; delta?: string };
+  toolCallId?: string;
+  toolName?: string;
+  args?: unknown;
+  result?: unknown;
+  isError?: boolean;
+  message?: { role?: string; stopReason?: string; errorMessage?: string; usage?: PiUsage };
+  usage?: PiUsage;
+  isTerminal?: boolean;
+  willRetry?: boolean;
+  agentInvoked?: boolean;
+  status?: string;
+  error?: { message?: string };
+  id?: string;
+  method?: string;
+  options?: unknown[];
+  title?: string;
+}
+
+function piEnvironment(source: Record<string, string | undefined>): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...source, PATH: augmentedPath() };
+  // pi reads provider keys from its env: an inherited key would flip billing, and workspace
+  // credentials are the harness's secrets.
+  stripWorkspaceCredentialEnv(env);
+  for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
+  return env;
+}
+
+export const PiDriver: ProviderDriver<PiConfig> = {
+  driverKind: DRIVER_KIND,
+  metadata: { displayName: "pi", supportsMultipleInstances: true, access: "custom" },
+  install: {
+    command: {
+      darwin: "npm install -g @earendil-works/pi-coding-agent",
+      linux: "npm install -g @earendil-works/pi-coding-agent",
+      win32: "npm install -g @earendil-works/pi-coding-agent",
+    },
+    needsNode: true,
+    docsUrl: "https://pi.dev",
+  },
+  models: EMPTY,
+  decodeConfig,
+  defaultConfig: () => decodeConfig({}),
+
+  async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
+    const { instanceId, config } = input;
+    // Made again on every read, so a login or provider the person adds later reaches the model list.
+    const catalogEnvironment = () => piEnvironment(withOwnPiAgentDir({ ...process.env, ...input.environment }, instanceId));
+    let models = EMPTY;
+    const readModels = async () => {
+      let base = models, listed = false;
+      const catalogEnv = catalogEnvironment();
+      try {
+        const resolved = await fetchPiModels(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
+        if (resolved.options.length) [base, listed] = [resolved, true];
+      } catch {}
+      try {
+        const next = await applyPiLocalCatalog(base, catalogEnv);
+        if (next.options.length) models = next;
+      } catch {
+        if (base.options.length) models = base;
+      }
+      try { if (!listed) unconfirmedModelCatalog(models); writeStartupModelCache(instanceId, models); } catch {}
+    };
+    const refreshModels = async () => {
+      const catalogEnv = catalogEnvironment();
+      await updatePiModelCatalog(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
+      await readModels();
+    };
+    const startupModelRefresh = (await openStartupModelCatalog({
+      instanceId,
+      use: (catalog) => { models = catalog; },
+      current: () => models,
+      refresh: readModels,
+    }))?.pending ?? null;
+
+    const listeners = new Set<RuntimeEventListener>();
+    const active = new Map<string, {
+      stop: () => Promise<void>;
+      turnId: string;
+      pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
+      child?: { stdin: { write: (s: string) => void } };
+      steer?: (text: string) => Promise<SteerOutcome>;
+    }>();
+
+    const stopAll = async () => {
+      const results = await Promise.allSettled([...active.values()].map(({ stop }) => Promise.resolve().then(stop)));
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
+    };
+
+    const emit = (event: RuntimeEvent) => {
+      for (const l of Array.from(listeners)) l(event);
+    };
+    const base = (threadId: string, turnId: string) => ({
+      eventId: newEventId(),
+      provider: DRIVER_KIND,
+      providerInstanceId: instanceId,
+      threadId,
+      turnId,
+      createdAt: new Date().toISOString(),
+    });
+
+    const sendTurn = async (turn: SendTurnInput) => {
+      if (startupModelRefresh) await startupModelRefresh;
+      const { threadId } = turn;
+      const selection = parseToolScope(turn.toolScope);
+      if (!selection.ok) throw new Error(selection.error);
+      const toolScope = selection.scope;
+      if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      const fullAuto = turn.approvalMode === undefined ? config.fullAuto : false;
+      // Host control always routes through the permission card, full-auto or not.
+      const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
+      if (controlsHost && fullAuto) {
+        throw new Error("local computer control requires the interactive approval broker");
+      }
+      const turnId = newId();
+      const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
+      const askTimers = new Set<ReturnType<typeof setTimeout>>();
+      let settled = false;
+      let completion: Promise<void> | null = null;
+      let endStopReason: string | undefined;
+      const runUsage = new PiRunUsage();
+      let completionOutcome: { ok: boolean; stopReason: string; cost?: number; usage?: TurnUsage } | null = null;
+      let endErrorMessage: string | undefined;
+      let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
+      const images = readPiPromptImages(turn);
+
+      // Before any credential-bearing temp file, so a model setup failure leaves nothing to clean up.
+      const turnEnv = withOwnPiAgentDir({ ...process.env, ...input.environment }, instanceId);
+      if (typeof turn.model === "string" && turn.model) ensurePiInjectModel(turn.model, turnEnv);
+
+      // The MCP config carries credentials: a 0600 temp file removed at settle, never argv.
+      // Written on every turn: the extension also carries ask_user.
+      const mcpServers = buildMcpServers(turn);
+      const askUser = toolScope === undefined || allowsTool(toolScope, { kind: "native", name: ASK_USER_TOOL });
+      const sessionDir = piSessionDir(turn, input.instanceId);
+      const sessionPath = piSessionPath(turn, sessionDir);
+      // A cursor that cannot be resumed here starts a new session, which gets the conversation the harness built for it.
+      if (!sessionPath && typeof turn.resumeCursor === "string" && !turn.sessionReset && turn.recoveryText?.trim()) turn = { ...turn, text: turn.recoveryText };
+      const childArgs = [...piTurnArgs(sessionDir), "-e", SPAWNED_PROXIES.piMcpExtension];
+      const mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
+      const scopeReadyPath = toolScope !== undefined ? join(mcpTempDir, "scope-ready.json") : undefined;
+      try {
+        writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers: mcpServers ?? {}, toolScope, scopeReadyPath, approvalMode: turn.approvalMode, askUser }), { mode: 0o600 });
+      } catch (err) {
+        // A partial file could still hold credentials.
+        try {
+          rmSync(mcpTempDir, { recursive: true, force: true });
+        } catch {}
+        throw err;
+      }
+
+      // spawnCli can throw synchronously, before settle() could remove the credential file.
+      const child = (() => {
+        try {
+          return spawnCli(config.cli, childArgs, {
+            stdio: ["pipe", "pipe", "pipe"],
+            cwd: turn.cwd,
+            box: { rw: [sessionDir, mcpTempDir], engine: DRIVER_KIND },
+            env: piEnvironment({ ...turnEnv, OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") }),
+          }, "bot");
+        } catch (err) {
+          try {
+            rmSync(mcpTempDir, { recursive: true, force: true });
+          } catch {}
+          throw err;
+        }
+      })();
+      let assistantText = "";
+      let compactionObserved = false;
+      const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer?: NodeJS.Timeout }>();
+      // Steers correlate by a unique id, so concurrent steers never share or overwrite a waiter.
+      let steerSeq = 0;
+      const rejectWaiters = (err: Error) => {
+        for (const waiter of responseWaiters.values()) {
+          clearTimeout(waiter.timer);
+          waiter.reject(err);
+        }
+        responseWaiters.clear();
+      };
+      const awaitResponse = (command: string, timeoutMs = 20_000, key = command) =>
+        new Promise<unknown>((resolve, reject) => {
+          const timer = timeoutMs === Infinity ? undefined : setTimeout(() => {
+            responseWaiters.delete(key);
+            reject(new Error(`pi ${command} timed out`));
+          }, timeoutMs);
+          timer?.unref?.();
+          responseWaiters.set(key, { resolve, reject, timer });
+        });
+      child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
+      const send = (obj: Record<string, unknown>) => {
+        appendNative(threadId, { dir: "out", source: "pi.rpc", msg: piNativeLogMessage(obj) });
+        child.stdin.write(JSON.stringify(obj) + "\n");
+      };
+      // Vanilla pi refuses the unknown command; no waiter is keyed for the reply.
+      send(PI_NEGOTIATE_FRAME);
+
+      const flushAssistantText = () => {
+        const text = assistantText;
+        assistantText = "";
+        if (!text.trim()) return;
+        emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
+      };
+
+      const settle = (ok: boolean, stopReason?: string | null, usage = runUsage.usage): Promise<void> => {
+        if (completion) return completion;
+        const outcome = completionOutcome ??= {
+          ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
+          ...(usage ? { usage } : {}),
+          ...(runUsage.cost === undefined ? {} : { cost: runUsage.cost }),
+        };
+        settled = true;
+        if (agentEndTimer) {
+          clearTimeout(agentEndTimer);
+          agentEndTimer = null;
+        }
+        for (const timer of askTimers) clearTimeout(timer);
+        askTimers.clear();
+        pending.clear();
+        try {
+          child.stdin.end();
+        } catch {}
+        completion = (async () => {
+          // The TERM grace lets Pi end the detached tool processes it started; a CLI that ignores TERM is killed after it.
+          if (!await killCliTree(child)) throw new Error("Pi process termination could not be confirmed");
+          rejectWaiters(new Error("pi turn ended"));
+          try {
+            rmSync(mcpTempDir, { recursive: true, force: true });
+          } catch {}
+          active.delete(threadId);
+          flushAssistantText();
+          emit({
+            ...base(threadId, turnId),
+            type: "turn.completed",
+            ...outcome,
+          });
+        })();
+        void completion.catch((error: Error) => {
+          completion = null;
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
+        });
+        return completion;
+      };
+
+      const finishRun = () => {
+        const sr = endStopReason;
+        if (sr === "error" || sr === "failed") {
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: String(endErrorMessage ?? "pi turn failed").slice(0, 2_000),
+          });
+          settle(false, "failed", runUsage.usage);
+          return;
+        }
+        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", runUsage.usage);
+      };
+
+      const stop = () => {
+        try {
+          send({ type: "abort" });
+        } catch {}
+        return settle(true, "cancelled");
+      };
+
+      // pi queues a steer into the running agent without aborting the step, answers success only after
+      // session.steer() accepted it, and echoes each frame's id.
+      const steerActiveTurn = async (text: string): Promise<SteerOutcome> => {
+        if (settled || child.exitCode !== null || child.signalCode !== null) return "refused";
+        let ack: Promise<unknown>;
+        try {
+          const id = `steer:${++steerSeq}`;
+          ack = awaitResponse("steer", 20_000, id);
+          send({ type: "steer", id, message: text });
+        } catch {
+          return "refused";
+        }
+        try {
+          await ack;
+          return "steered";
+        } catch (error) {
+          return error instanceof PiRpcRefusalError ? "refused" : "indeterminate";
+        }
+      };
+      active.set(threadId, { stop, turnId, pending, child, steer: steerActiveTurn });
+
+      const onEvent = (evt: PiEvent) => {
+        appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
+        if (settled) return;
+        switch (evt.type) {
+          case "response": {
+            const key = typeof evt.id === "string" && responseWaiters.has(evt.id) ? evt.id : evt.command;
+            if (key && responseWaiters.has(key)) {
+              const waiter = responseWaiters.get(key)!;
+              responseWaiters.delete(key);
+              clearTimeout(waiter.timer);
+              if (evt.success) waiter.resolve(evt.data);
+              else waiter.reject(new PiRpcRefusalError(`pi ${evt.command} failed`));
+            }
+            return;
+          }
+          case "message_update": {
+            const e = evt.assistantMessageEvent;
+            if (!e) return;
+            if (e.type === "text_delta" && typeof e.delta === "string") {
+              assistantText += e.delta;
+              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "assistant_text", delta: e.delta });
+            } else if (e.type === "thinking_delta" && typeof e.delta === "string") {
+              emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: e.delta });
+            }
+            return;
+          }
+          case "tool_execution_start": {
+            flushAssistantText();
+            emit({
+              ...base(threadId, turnId),
+              type: "item.started",
+              itemType: "tool",
+              itemId: evt.toolCallId,
+              title: String(evt.toolName ?? "tool").slice(0, 80),
+              summary: commandSummary(evt.args),
+              input: toolDetailPreview(evt.args),
+            });
+            return;
+          }
+          case "tool_execution_end": {
+            emit({
+              ...base(threadId, turnId),
+              type: "item.completed",
+              itemType: "tool",
+              itemId: evt.toolCallId,
+              ok: !evt.isError,
+              output: toolDetailPreview(evt.result),
+            });
+            return;
+          }
+          case "extension_ui_request": {
+            // pi floods setWidget/setStatus; only select/confirm/input wait for an answer.
+            if (evt.method === "select" || evt.method === "confirm" || evt.method === "input") {
+              flushAssistantText();
+              const reqId = evt.id ?? newId();
+              const isSelect = evt.method === "select";
+              const isQuestion = isSelect || evt.method === "input";
+              const selectOptions: string[] = isSelect && Array.isArray(evt.options)
+                ? evt.options.filter((option): option is string => typeof option === "string") : [];
+              const summary = String(evt.title ?? (isQuestion ? "pi has a question" : "pi wants confirmation")).slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
+              const question = isSelect
+                ? (parseAskQuestions({
+                    questions: [{ question: summary, options: selectOptions }],
+                  }) ?? [])[0]
+                : undefined;
+              const choices = question?.options.length ? question.options.map((option) => option.label) : undefined;
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              // Register BEFORE emitting: the harness may auto-approve inside its synchronous request.opened listener.
+              pending.set(reqId, (decision) => {
+                if (timer) {
+                  clearTimeout(timer);
+                  askTimers.delete(timer);
+                }
+                if (decision.behavior === "deny") send({ type: "extension_ui_response", id: reqId, cancelled: true });
+                else if (isQuestion) {
+                  const value = question
+                    ? questionAnswersByQuestion(decision.message ?? "", [question])[question.question] ?? decision.message ?? ""
+                    : decision.message ?? "";
+                  // pi expects the original option, not the capped display label; never guess between two.
+                  const matched = selectOptions.filter(option => parseChoices([option], 1)?.[0] === value);
+                  send(matched.length > 1
+                    ? { type: "extension_ui_response", id: reqId, cancelled: true }
+                    : { type: "extension_ui_response", id: reqId, value: matched[0] ?? value });
+                }
+                else send({ type: "extension_ui_response", id: reqId, confirmed: true });
+              });
+              if (!isQuestion) {
+                timer = setTimeout(() => {
+                  if (timer) askTimers.delete(timer);
+                  if (!pending.delete(reqId)) return;
+                  send({ type: "extension_ui_response", id: reqId, cancelled: true });
+                  emit({ ...base(threadId, turnId), requestId: reqId, type: "request.resolved", behavior: "deny", source: "timeout" });
+                }, 15 * 60_000);
+                askTimers.add(timer);
+                timer.unref?.();
+              }
+              emit({
+                ...base(threadId, turnId),
+                requestId: reqId,
+                type: "request.opened",
+                requestType: isQuestion ? "question" : "permission",
+                tool: String(evt.title ?? "pi"),
+                summary,
+                ...(choices ? { choices } : {}),
+                ...(question ? { questions: [question] } : {}),
+              });
+            }
+            return;
+          }
+          case "compaction_start":
+          case "compaction_end":
+          case "auto_compaction_start":
+          case "auto_compaction_end": {
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
+            if (sessionReady && sessionFile) { // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt
+              compactionObserved = true;
+              deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
+            }
+            if (evt.type.endsWith("compaction_end") && typeof (evt as { result?: { summary?: unknown } }).result?.summary === "string" && /\S/.test((evt as { result: { summary: string } }).result.summary) && !(evt as { aborted?: boolean }).aborted && !(evt as { errorMessage?: string }).errorMessage) { flushAssistantText(); emit({ ...base(threadId, turnId), type: "context.compacted" }); }
+            return;
+          }
+          case "message_end": {
+            if (evt.message?.role !== "assistant") return;
+            runUsage.add(evt.message.usage);
+            const call = piMessageUsage(evt.message.usage);
+            if (!call) return;
+            const contextWindow = models.options.find((option) => option.id === turn.model)?.contextWindow;
+            emit({
+              ...base(threadId, turnId),
+              type: "thread.token-usage.updated",
+              input: call.input,
+              output: call.output,
+              ...(call.cachedInput === undefined ? {} : { cachedInput: call.cachedInput }),
+              contextTokens: call.contextTokens,
+              ...(typeof contextWindow === "number" && contextWindow > 0 ? { contextWindow } : {}),
+            });
+            return;
+          }
+          case "turn_end":
+          {
+            // A killed child can still flush one buffered frame after the turn settled.
+            if (settled) return;
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
+            const sr = evt.message?.stopReason;
+            runUsage.endTurn(evt.usage ?? evt.message?.usage);
+            // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
+            if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
+            endStopReason = sr;
+            endErrorMessage = evt.message?.errorMessage;
+            // pi can schedule maintenance (overflow-recovery compaction) after the final turn_end;
+            // only agent_end proves the session is done rewriting itself.
+            agentEndTimer = setTimeout(finishRun, PI_AGENT_END_GRACE_MS);
+            agentEndTimer.unref?.();
+            return;
+          }
+          case "turn_start":
+          case "agent_start": {
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
+            return;
+          }
+          case "agent_end": {
+            // Non-terminal agent_end: upstream pi sets willRetry: true before an automatic retry; the omp
+            // fork sets isTerminal: false while maintenance or async delivery is scheduled.
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
+            if (evt.isTerminal === false || evt.willRetry === true) return;
+            finishRun();
+            return;
+          }
+          case "prompt_result":
+            // agentInvoked false: omp failed the prompt before the agent ran, so no turn_end or agent_end follows.
+            if (evt.agentInvoked !== false) return;
+            endStopReason = evt.status;
+            endErrorMessage = evt.error?.message;
+            finishRun();
+            return;
+          case "agent_settled": {
+            // upstream pi's explicit fully-settled guarantee: no retry or queued continuation remains.
+            if (agentEndTimer) {
+              clearTimeout(agentEndTimer);
+              agentEndTimer = null;
+            }
+            finishRun();
+            return;
+          }
+          default:
+            return;
+        }
+      };
+
+      const chunks = new PiRpcChunks();
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", piLineReader((line) => {
+        const frame = decodePiFrame(line, chunks);
+        if (!frame) return;
+        try {
+          onEvent(frame as unknown as PiEvent);
+        } catch {}
+      }));
+      child.on("error", (err) => {
+        const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli, turn.cwd);
+        rejectWaiters(new Error(fail.message));
+        emit({ ...base(threadId, turnId), type: "runtime.error", message: fail.message, setup: fail.setup });
+        settle(false);
+      });
+      child.on("close", () => {
+        rejectWaiters(new Error("pi process exited before replying"));
+        settle(false);
+      });
+
+      emit({ ...base(threadId, turnId), type: "turn.started" });
+
+      // The resumeCursor is pi's sessionFile, which switch_session takes as `sessionPath`.
+      let sessionFile = sessionPath;
+      let sessionId: string | null = sessionFile;
+      let sessionReady = false;
+      let sessionOpened = false;
+      let confirmedModel: string | null = null;
+      try {
+        const command = sessionPath ? "switch_session" : "new_session";
+        const hsPromise = awaitResponse(command, Infinity);
+        send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
+        const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", ...noticeFailure("chat.notice.piSessionSlow") }), PI_SESSION_SLOW_MS);
+        const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string; cancelled?: boolean } | undefined;
+        if (hs?.cancelled) throw new PiRpcRefusalError("pi session switch cancelled");
+        if (hs?.sessionFile) sessionFile = hs.sessionFile;
+        sessionId = sessionFile ?? hs?.sessionId ?? null;
+        sessionReady = true;
+        sessionOpened = true;
+      } catch (error) {
+        if (sessionPath && !settled) {
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message) });
+          await settle(false);
+          return { turnId };
+        }
+        // A new turn can still be accepted without an explicit session handshake.
+      }
+      if (settled) return { turnId };
+
+      const chosen = typeof turn.model === "string" ? splitPiModel(turn.model) : null;
+      if (chosen) {
+        try {
+          const modelPromise = awaitResponse("set_model");
+          send({ type: "set_model", provider: chosen.provider, modelId: chosen.modelId });
+          confirmedModel = piModelId(await modelPromise);
+          if (!confirmedModel) throw new RuntimeNoticeError("Pi did not confirm the selected model", "chat.notice.piModelNotConfirmed");
+        } catch (error) {
+          if (!settled) {
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message), text: runtimeErrorText(error) });
+            await settle(false);
+          }
+          return { turnId };
+        }
+      }
+      // Official new_session returns only `{ cancelled }`; sessionFile is on get_state when persisted.
+      if (!chosen || (sessionOpened && !sessionFile)) {
+        try {
+          const statePromise = awaitResponse("get_state");
+          send({ type: "get_state" });
+          const state = await statePromise as { model?: unknown; sessionFile?: string; sessionId?: string } | undefined;
+          if (!chosen) confirmedModel = piModelId(state?.model);
+          if (typeof state?.sessionFile === "string" && state.sessionFile) sessionFile = state.sessionFile;
+          sessionId = sessionFile ?? (typeof state?.sessionId === "string" ? state.sessionId : null) ?? sessionId;
+        } catch {}
+      }
+      if (settled) return { turnId };
+      if (sessionOpened) emit({ ...base(threadId, turnId), type: "session.started", sessionId, model: confirmedModel });
+
+      // After the model: the supported level set is model-dependent.
+      if (turn.effort) {
+        try {
+          const levelPromise = awaitResponse("set_thinking_level");
+          send({ type: "set_thinking_level", level: piThinkingLevel(turn.effort) });
+          await levelPromise;
+        } catch {}
+      }
+      if (settled) return { turnId };
+
+      if (scopeReadyPath) {
+        let ready = false;
+        try {
+          const receipt = JSON.parse(readFileSync(scopeReadyPath, "utf8")) as { ok?: unknown; toolScope?: unknown };
+          ready = receipt.ok === true && JSON.stringify(receipt.toolScope) === JSON.stringify(toolScope);
+        } catch { /* Missing or malformed readiness is never a grant. */ }
+        if (!ready) {
+          const message = "Pi tool selection enforcement is unavailable. Update Pi and check the OpenMausBot extension before retrying.";
+          emit({ ...base(threadId, turnId), type: "runtime.error", message });
+          settle(false);
+          throw new Error(message);
+        }
+      }
+
+      const halves = promptHalves(turn);
+      let message: string;
+      let pendingReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+      if (halves.stable !== null && sessionReady && sessionFile) {
+        const receiptKey = JSON.stringify([threadId, sessionFile]);
+        const composed = splitSessionPrompt(
+          halves.stable,
+          halves.volatile,
+          readPromptSplitReceipt("pi", receiptKey),
+          turn.system,
+          turn.text,
+          Boolean(turn.mentionTurn),
+          PI_PROMPT_RE_ANCHOR_TURNS,
+        );
+        message = composed.text;
+        pendingReceipt = { key: receiptKey, receipt: composed.receipt };
+      } else {
+        message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      }
+      try {
+          // pi answers the prompt only after preflight accepts it, and rejects it while a compaction runs.
+        const accepted = awaitResponse("prompt", 120_000);
+        send({ type: "prompt", message, ...(images.length ? { images } : {}) });
+        void accepted.then(
+          () => {
+            if (!pendingReceipt || compactionObserved) return;
+            try {
+              writePromptSplitReceipt("pi", pendingReceipt.key, pendingReceipt.receipt);
+            } catch {}
+          },
+          (err: Error) => {
+            if (settled) return;
+            emit({
+              ...base(threadId, turnId),
+              type: "runtime.error",
+              message: String(err?.message ?? err).slice(0, 2_000),
+            });
+            settle(false);
+          },
+        );
+      } catch (err) {
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: String((err as Error)?.message ?? err).slice(0, 2_000),
+        });
+        settle(false);
+      }
+
+      return { turnId };
+    };
+
+    const snapshot = async (): Promise<ProviderSnapshot> => {
+      const version = await new Promise<string | null>((resolve) => {
+        const child = spawnCli(config.cli, ["--version"], {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: piEnvironment({ ...process.env, ...input.environment }),
+        });
+        let out = "";
+        child.stdout?.setEncoding("utf8");
+        child.stdout?.on("data", (c: string) => (out += c));
+        const timer = setTimeout(() => {
+          try {
+            killCliTree(child);
+          } catch {}
+          resolve(null);
+        }, 8000);
+        timer.unref?.();
+        child.on("error", () => {
+          clearTimeout(timer);
+          resolve(null);
+        });
+        child.on("close", () => {
+          clearTimeout(timer);
+          resolve(out.trim() || null);
+        });
+      });
+      if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+      // pi manages its own credentials; there is no sign-in to probe.
+      return { state: "available", version, authenticated: true };
+    };
+
+    return {
+      instanceId,
+      driverKind: DRIVER_KIND,
+      displayName: input.displayName,
+      enabled: input.enabled,
+      get models() {
+        return models;
+      },
+      refreshModels,
+      ...(startupModelRefresh ? { startupModelRefresh } : {}),
+      snapshot,
+      adapter: {
+        provider: DRIVER_KIND,
+        capabilities: {
+          sessionModelSwitch: "in-session",
+          // pi core has no MCP client of its own.
+          agentsMcp: true,
+          computerMcp: true,
+          composioMcp: true,
+          phoneMcp: true,
+          customMcp: true,
+          browserMcp: true,
+          dataMcp: true, emailMcp: true, deviceMcp: true,
+          localComputerMcp: true,
+          images: true,
+          nativeImageInput: true,
+          // pi rejects an unsupported level and the turn keeps the engine default.
+          effortLevels: PI_EFFORT_LEVELS,
+          queueing: true, askTool: { kind: "native", name: "ask_user" },
+        },
+        sendTurn,
+        interruptTurn: async (threadId) => { await active.get(threadId)?.stop(); },
+        respondToRequest: async (threadId, requestId, decision) => {
+          const entry = active.get(threadId);
+          const answer = entry?.pending.get(requestId);
+          if (!entry || !answer) return "unavailable";
+          entry.pending.delete(requestId);
+          answer({ behavior: decision.behavior, message: decision.message });
+          emit({
+            ...base(threadId, entry.turnId),
+            requestId,
+            type: "request.resolved",
+            behavior: decision.behavior,
+            source: "user",
+          });
+          return decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected";
+        },
+        steer: async (threadId, text) => {
+          const entry = active.get(threadId);
+          return entry?.steer ? await entry.steer(text) : "refused";
+        },
+        hasSession: (threadId) => active.has(threadId),
+        stopAll,
+        onEvent: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+      dispose: async () => {
+        try {
+          await stopAll();
+        } finally {
+          listeners.clear();
+        }
+      },
+    };
+  },
+};

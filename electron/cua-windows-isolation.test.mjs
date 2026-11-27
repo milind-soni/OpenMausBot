@@ -1,0 +1,162 @@
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const fixture = vi.hoisted(() => ({ home: "", packaged: false, hosts: [], start: null, handlers: new Map() }));
+vi.mock("electron", () => ({
+  app: { get isPackaged() { return fixture.packaged; }, getPath: () => fixture.home, getAppPath: () => fixture.home },
+  ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
+}));
+vi.mock("@trycua/cua-driver/embedded", () => ({
+  EmbeddedCuaDriverHost: class {
+    constructor(options) { this.binary = options.binaryPath; this.bundleId = options.hostBundleId; this.options = options; fixture.hosts.push(this); }
+    static withOptions(options) { return new this(options); }
+    waitForExit() { return new Promise(() => {}); }
+    start(options) { return fixture.start(options); }
+    stop = vi.fn(async () => {});
+    uniffiDestroy = vi.fn();
+  },
+}));
+vi.mock("@trycua/cua-driver/electron", () => { throw new Error("macOS permissions loaded on Windows"); });
+vi.mock("node:child_process", () => ({ execFile: vi.fn(() => { throw new Error("unowned launch"); }) }));
+vi.mock("node:net", () => ({ default: { createConnection: vi.fn(() => { throw new Error("foreign pipe probed"); }) } }));
+
+let cua;
+const connection = { socketPath: "\\\\.\\pipe\\fixture-owned-cua" };
+beforeEach(async () => {
+  fixture.home = mkdtempSync(join(tmpdir(), "omb-cua-win-"));
+  fixture.hosts = [];
+  fixture.packaged = false;
+  fixture.handlers.clear();
+  fixture.start = vi.fn(async () => connection);
+  vi.stubGlobal("process", new Proxy(process, {
+    get(target, key) { return key === "platform" ? "win32" : key === "resourcesPath" ? fixture.home : Reflect.get(target, key); },
+  }));
+  vi.stubEnv("CUA_DRIVER_PATH", join(fixture.home, "cua-driver.exe"));
+  vi.stubEnv("OPENMAUSBOT_CUA_EMBEDDED", "");
+  vi.resetModules();
+  cua = await import("./cua.mjs");
+});
+afterEach(async () => {
+  await cua?.stopCua();
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  rmSync(fixture.home, { recursive: true, force: true });
+});
+
+describe("Windows owned CUA host", () => {
+  it("uses embedded control even in dev, without a shared pipe or macOS permissions", async () => {
+    await expect(cua.startCua()).resolves.toMatchObject({
+      mode: "embedded", ...connection,
+      mcpArgs: ["mcp", "--embedded", "--socket", connection.socketPath],
+      mcpEnv: { CUA_DRIVER_EMBEDDED: "1", CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" },
+    });
+    expect(fixture.start.mock.calls[0][0].signal).toBeInstanceOf(AbortSignal);
+    expect(fixture.hosts[0].binary).toBe(process.env.CUA_DRIVER_PATH);
+    await cua.stopCua();
+    expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
+    expect(fixture.hosts[0].uniffiDestroy).toHaveBeenCalledOnce();
+  });
+
+  it("reports a failed host instead of launching or attaching to an unowned daemon", async () => {
+    fixture.start.mockRejectedValue(new Error("fixture start failed"));
+    await expect(cua.startCua()).resolves.toMatchObject({
+      mode: "unavailable", reason: "embedded host failed: fixture start failed",
+    });
+    expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
+    expect(fixture.hosts[0].uniffiDestroy).toHaveBeenCalledOnce();
+  });
+
+  it("tries a start that failed for a passing reason again by itself, twice, and never a blocked helper", async () => {
+    vi.useFakeTimers();
+    try {
+      const exited = Object.assign(new Error("EmbeddedDriverError.ExitedBeforeReady"), { tag: "ExitedBeforeReady", inner: { code: 1 } });
+      fixture.start.mockRejectedValueOnce(exited).mockRejectedValueOnce(exited);
+      await expect(cua.startCua()).resolves.toMatchObject({ mode: "unavailable", reason: "embedded host failed: ExitedBeforeReady: code 1" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(fixture.start).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fixture.start).toHaveBeenCalledTimes(3);
+      expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8"))).toMatchObject({ mode: "embedded" });
+
+      fixture.start.mockReset();
+      fixture.start.mockRejectedValue(Object.assign(new Error("EmbeddedDriverError.Spawn"), { tag: "Spawn", inner: { reason: "Access is denied. (os error 5)" } }));
+      await expect(cua.startCua()).resolves.toMatchObject({ mode: "unavailable", reason: expect.stringContaining("Access is denied") });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.start, "a blocked helper waits for the person").toHaveBeenCalledTimes(1);
+
+      fixture.start.mockReset();
+      fixture.start.mockRejectedValue(exited);
+      await cua.startCua();
+      await cua.stopCua();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(fixture.start, "Stop cancels a retry").toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a stalled start when the desktop stops", async () => {
+    fixture.start.mockImplementation(({ signal }) => new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+    const started = cua.startCua();
+    const rejected = expect(started).rejects.toMatchObject({ name: "AbortError" });
+    await expect.poll(() => fixture.hosts.length).toBe(1);
+    await cua.stopCua();
+    await rejected;
+    expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
+    expect(fixture.hosts[0].uniffiDestroy).toHaveBeenCalledOnce();
+  });
+
+  it("discards late startup without replacing or stopping the new host", async () => {
+    let finish;
+    fixture.start.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const first = cua.startCua();
+    const rejected = expect(first).rejects.toMatchObject({ name: "AbortError" });
+    await expect.poll(() => fixture.hosts.length).toBe(1);
+    await cua.stopCua();
+    await cua.startCua();
+    finish({ socketPath: "stale-pipe" });
+    await rejected;
+    expect(fixture.hosts[0].stop).toHaveBeenCalledOnce();
+    expect(fixture.hosts[1].stop).not.toHaveBeenCalled();
+    expect(JSON.parse(readFileSync(join(fixture.home, "cua-connection.json"), "utf8")).socketPath).toBe(connection.socketPath);
+  });
+
+  it("resolves the staged development executable without installing a foreign driver", () => {
+    vi.stubEnv("CUA_DRIVER_PATH", "");
+    const stage = join(fixture.home, "dist-native", "cua-win32-x64");
+    mkdirSync(stage, { recursive: true });
+    writeFileSync(join(stage, "cua-driver.exe"), "inert fixture");
+    expect(cua.resolveDriverBinary()).toBe(join(stage, "cua-driver.exe"));
+  });
+
+  it("uses the background daemon in packages but leaves the CLI proxy unchanged", () => {
+    fixture.packaged = true;
+    vi.stubEnv("CUA_DRIVER_PATH", "");
+    const cli = join(fixture.home, "cua-driver.exe");
+    const background = join(fixture.home, "cua-driver-background.exe");
+    writeFileSync(cli, "inert CLI fixture");
+    writeFileSync(background, "inert GUI fixture");
+    expect(cua.resolveDriverBinary()).toBe(cli);
+    expect(cua.resolveEmbeddedDriverBinary(cli)).toBe(background);
+  });
+
+  it("fails visibly when a package is incomplete rather than flashing a console", () => {
+    fixture.packaged = true;
+    vi.stubEnv("CUA_DRIVER_PATH", "");
+    expect(() => cua.resolveEmbeddedDriverBinary(join(fixture.home, "cua-driver.exe"))).toThrow("background CUA driver is missing");
+  });
+
+  it("preserves custom and development executables", () => {
+    const binary = process.env.CUA_DRIVER_PATH;
+    expect(cua.resolveEmbeddedDriverBinary(binary)).toBe(binary);
+    fixture.packaged = true;
+    expect(cua.resolveEmbeddedDriverBinary(binary)).toBe(binary);
+    vi.stubEnv("CUA_DRIVER_PATH", "");
+    const external = join(fixture.home, "external", "cua-driver.exe");
+    expect(cua.resolveEmbeddedDriverBinary(external)).toBe(external);
+  });
+});

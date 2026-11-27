@@ -1,0 +1,202 @@
+import { describe, expect, it } from "vitest";
+
+import type { InstanceInfo } from "@/state/store";
+import { backupNote, configuredModelInstances, isClaudeAccount, modelsAwaitEngine, signInFamily, splitEngineRail } from "./engine-rail";
+
+describe("splitEngineRail", () => {
+  it("groups sign-in plans, pasted provider keys and Local engines", () => {
+    const { subscription, api, custom } = splitEngineRail([
+      { access: "subscription", instanceId: "claude" },
+      { access: "custom", instanceId: "hermes" },
+      { instanceId: "grok" },
+      { access: "api", instanceId: "mistral" },
+      { access: "custom", instanceId: "qwen" },
+    ]);
+    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok"]);
+    expect(api.map((row) => row.instanceId)).toEqual(["mistral"]);
+    expect(custom.map((row) => row.instanceId)).toEqual(["hermes", "qwen"]);
+  });
+
+  it("hides the second group when nothing is custom-only", () => {
+    const rows = [{ instanceId: "claude" }];
+    expect(splitEngineRail(rows).custom).toEqual([]);
+  });
+});
+
+describe("configuredModelInstances", () => {
+  const cloud = { id: "cloud-model", label: "Cloud model" };
+  const local = { id: "local-model", label: "Local model", custom: true, loaded: true, provider: "Local host" };
+  const instance = (overrides: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId: "codex",
+    driverKind: "codex",
+    displayName: "Codex",
+    access: "subscription",
+    snapshot: { state: "available", authenticated: true },
+    models: { default: cloud.id, options: [cloud, local] },
+    ...overrides,
+  });
+
+  it("hides engines that are not installed, and engines without selectable models, when the bot is not on them", () => {
+    const ready = instance();
+    const unavailable = instance({ instanceId: "unavailable", snapshot: { state: "unavailable", authenticated: true } });
+    const unavailableLocal = instance({ instanceId: "unavailable-local", access: "custom", snapshot: { state: "unavailable" } });
+    const empty = instance({ instanceId: "empty", models: { default: cloud.id, options: [] } });
+    const emptyLocal = instance({ instanceId: "empty-local", access: "custom", models: { default: local.id, options: [] } });
+
+    expect(configuredModelInstances([unavailable, empty, ready, unavailableLocal, emptyLocal])).toEqual([ready]);
+    expect(configuredModelInstances([unavailable, empty, ready, unavailableLocal, emptyLocal], "codex")).toEqual([ready]);
+  });
+
+  it.each([true, false, undefined])("keeps cloud and custom models when authentication is %s", (authenticated) => {
+    const explicitSubscription = instance({ snapshot: { state: "available", authenticated } });
+    const legacy = instance({ instanceId: "legacy", access: undefined, snapshot: { state: "available", authenticated } });
+
+    expect(configuredModelInstances([explicitSubscription, legacy])).toEqual([explicitSubscription, legacy]);
+  });
+
+  it("keeps a signed-out engine with its whole catalog so the picker can show its sign-in card", () => {
+    const cloudOnly = instance({ instanceId: "cloud-only", snapshot: { state: "available", authenticated: false }, models: { default: cloud.id, options: [cloud] } });
+    const mixed = instance({ snapshot: { state: "available", authenticated: false } });
+    const legacy = instance({ instanceId: "legacy", access: undefined, snapshot: { state: "available", authenticated: false } });
+
+    const configured = configuredModelInstances([cloudOnly, mixed, legacy]);
+
+    expect(configured.map((engine) => engine.instanceId)).toEqual(["cloud-only", "codex", "legacy"]);
+    expect(configured.map((engine) => engine.models.options)).toEqual([[cloud], [cloud, local], [cloud, local]]);
+  });
+
+  it.each([true, false, undefined])("keeps custom engines when authentication is %s", (authenticated) => {
+    const custom = instance({ access: "custom", snapshot: { state: "available", authenticated } });
+
+    expect(configuredModelInstances([custom])).toEqual([custom]);
+  });
+
+  it("always keeps the engine the bot runs on, even when its CLI is missing or it lists nothing", () => {
+    const missing = instance({ instanceId: "missing", snapshot: { state: "unavailable", reason: "`codex` CLI not found" } });
+    const empty = instance({ instanceId: "empty", access: "custom", snapshot: { state: "unavailable" }, models: { default: local.id, options: [] } });
+    const ready = instance({ instanceId: "ready" });
+
+    expect(configuredModelInstances([missing, ready, empty], "missing")).toEqual([missing, ready]);
+    expect(configuredModelInstances([missing, ready, empty], "empty")).toEqual([ready, empty]);
+    expect(configuredModelInstances([missing, ready, empty], "")).toEqual([ready]);
+  });
+
+  it("judges each Claude account on its own and preserves account order", () => {
+    const claude = (id: string, snapshot: InstanceInfo["snapshot"]) => instance({
+      instanceId: id,
+      driverKind: "claudeAgent",
+      displayName: id,
+      snapshot,
+      models: { default: cloud.id, options: [cloud] },
+    });
+    const personal = claude("Personal", { state: "available", authenticated: false });
+    const work = claude("Work", { state: "available", authenticated: true });
+    const missing = claude("Missing", { state: "unavailable", reason: "`claude` CLI not found" });
+    const other = claude("Other", { state: "available", authenticated: true });
+
+    expect(configuredModelInstances([personal, work, missing, other])).toEqual([personal, work, other]);
+    expect(configuredModelInstances([personal, work, missing, other], "Missing")).toEqual([personal, work, missing, other]);
+  });
+
+  it("returns the catalog's own entries and leaves them intact so saved models keep their labels", () => {
+    const signedOut = instance({ snapshot: { state: "available", authenticated: false } });
+    const unavailable = instance({ instanceId: "unavailable", snapshot: { state: "unavailable" } });
+    const catalog = [signedOut, unavailable];
+    const before = structuredClone(catalog);
+    for (const engine of catalog) {
+      for (const option of engine.models.options) Object.freeze(option);
+      Object.freeze(engine.models.options);
+      Object.freeze(engine.models);
+      Object.freeze(engine.snapshot);
+      Object.freeze(engine);
+    }
+    Object.freeze(catalog);
+
+    const configured = configuredModelInstances(catalog);
+
+    expect(configured).toEqual([signedOut]);
+    expect(configured[0]).toBe(signedOut);
+    expect(catalog).toEqual(before);
+  });
+});
+
+describe("Claude in the picker when Claude Code is signed out or not found", () => {
+  const official = [{ id: "claude-opus-5-5", label: "Opus 5.5" }, { id: "claude-sonnet-5", label: "Sonnet 5" }];
+  const ollama = { id: "ollama:qwen3", label: "qwen3", custom: true, provider: "Ollama" };
+  const claude = (snapshot: InstanceInfo["snapshot"], options: InstanceInfo["models"]["options"] = official): InstanceInfo => ({
+    instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", access: "subscription", snapshot,
+    models: { default: "claude-opus-5-5", options },
+  });
+
+  it("shows a signed-in Claude", () => {
+    expect(configuredModelInstances([claude({ state: "available", authenticated: true })])).toHaveLength(1);
+  });
+
+  it("keeps a signed-out Claude and its official models, whichever engine the bot is on", () => {
+    const signedOut = claude({ state: "available", authenticated: false });
+    for (const selected of [undefined, "codex", "claude"]) {
+      expect(configuredModelInstances([signedOut], selected)).toEqual([signedOut]);
+    }
+  });
+
+  it("keeps local models found at startup next to the official ones for a signed-out Claude", () => {
+    const [kept] = configuredModelInstances([claude({ state: "available", authenticated: false }, [...official, ollama])]);
+    expect(kept.models.options).toEqual([...official, ollama]);
+  });
+
+  it("keeps a Claude whose CLI is not found only while the bot runs on it", () => {
+    const missing = claude({ state: "unavailable", reason: "`claude` CLI not found" });
+    expect(configuredModelInstances([missing], "claude")).toEqual([missing]);
+    expect(configuredModelInstances([missing])).toEqual([]);
+    expect(configuredModelInstances([missing], "codex")).toEqual([]);
+  });
+});
+
+describe("modelsAwaitEngine", () => {
+  const snapshot = { state: "available" as const, authenticated: true };
+
+  it("asks a signed-in engine whose list it never gave", () => {
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot })).toBe(true);
+  });
+
+  it("leaves a confirmed list, a signed-out engine and an unavailable one alone", () => {
+    expect(modelsAwaitEngine({ snapshot })).toBe(false);
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { ...snapshot, authenticated: false } })).toBe(false);
+    expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { state: "unavailable", reason: "missing" } })).toBe(false);
+  });
+});
+
+describe("signInFamily", () => {
+  it("groups official Claude sign-ins but keeps custom endpoints and Bedrock apart", () => {
+    expect(signInFamily({ driverKind: "claudeAgent" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "subscription" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "custom" })).toBeUndefined();
+    expect(signInFamily({ driverKind: "claudeAgent", access: "api" })).toBeUndefined();
+    expect(isClaudeAccount({ driverKind: "claudeAgent", access: "custom" })).toBe(false);
+    expect(signInFamily({ driverKind: "codex" })).toBe("openai");
+  });
+});
+
+describe("backupNote", () => {
+  const engine = (instanceId: string, driverKind: string, overrides: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId, driverKind, displayName: instanceId, snapshot: { state: "available" },
+    models: { default: "m", options: [{ id: "m", label: "M" }] }, ...overrides,
+  });
+  const main = engine("codex", "codex");
+
+  it("says another sign-in to the main subscription AI is used only while the main one is signed out", () => {
+    expect(backupNote(main, engine("codex-sub1", "codex"))).toBe(
+      "Another sign-in to the main AI: used only while the main one is signed out, never at its usage limit (provider terms).");
+    expect(backupNote(engine("claude", "claudeAgent"), engine("claude-2", "claudeAgent"))).toMatch(/^Another sign-in/);
+    // A key the CLI stored itself is not pay-per-use to the server's limit rule, so the note still applies.
+    expect(backupNote(main, engine("codex-stored-key", "codex", { snapshot: { state: "available", account: { method: "api-key" } } }))).toMatch(/^Another sign-in/);
+  });
+
+  it("keeps the same-account note and says nothing for other AIs or pay-per-use keys", () => {
+    expect(backupNote(main, main)).toBe("Same account as the main AI: it shares the usage limit.");
+    expect(backupNote(main, engine("claude", "claudeAgent"))).toBeUndefined();
+    expect(backupNote(main, engine("codex-key", "codex", { access: "api" }))).toBeUndefined();
+    expect(backupNote(engine("ollama", "openaiChat"), engine("ollama-2", "openaiChat"))).toBeUndefined();
+    expect(backupNote(undefined, engine("codex-sub1", "codex"))).toBeUndefined();
+  });
+});

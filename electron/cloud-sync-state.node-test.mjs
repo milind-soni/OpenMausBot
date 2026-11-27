@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { openSyncState } from "./cloud-sync-state.mjs";
+
+test("keeps the base, PC places, failures and flags across a reopen, and forgets them on reset", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "omb-sync-state-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "cloud-sync", "state.db");
+  let state = openSyncState(file);
+  state.setBase("f1", "a.txt", { sha256: "s", size: 3, mtimeMs: 1.5 });
+  state.setPlace("bot-b-t", "/Users/ash/Documents/MausBot/Owl/Plan");
+  assert.equal(state.failed("f1", "x.xlsx", "EBUSY"), 1);
+  assert.equal(state.failed("f1", "x.xlsx", "EBUSY"), 2);
+  assert.deepEqual(state.failures(), []);
+  assert.equal(state.failed("f1", "x.xlsx", "EBUSY"), 3);
+  state.setMeta("relinked:f1", "1");
+  state.close();
+  state = openSyncState(file);
+  assert.deepEqual(state.base("f1"), new Map([["a.txt", { sha256: "s", size: 3, mtimeMs: 1.5 }]]));
+  assert.equal(state.place("bot-b-t"), "/Users/ash/Documents/MausBot/Owl/Plan");
+  assert.deepEqual(state.failures(), [{ folderId: "f1", path: "x.xlsx", error: "EBUSY" }]);
+  state.cleared("f1", "x.xlsx");
+  assert.deepEqual(state.failures(), []);
+  assert.equal(state.meta("relinked:f1"), "1");
+  state.dropBase("f1", "a.txt");
+  assert.equal(state.base("f1").size, 0);
+  state.setBase("f1", "b.txt", { sha256: "t", size: 1, mtimeMs: 2 });
+  state.reset();
+  assert.equal(state.base("f1").size, 0);
+  assert.equal(state.place("bot-b-t"), null);
+  assert.equal(state.meta("relinked:f1"), null);
+  state.close();
+});

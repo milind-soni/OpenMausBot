@@ -1,0 +1,39 @@
+name: Feature request
+description: Propose an improvement or new capability
+labels: [enhancement]
+body:
+  - type: checkboxes
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and this isn't a duplicate
+          required: true
+  - type: dropdown
+    attributes:
+      label: Area
+      options:
+        - Chat UI (src/)
+        - Harness server / API (server/)
+        - Provider drivers (new provider or driver behavior)
+        - Computer use (cloud box / local)
+        - Connected apps (Composio)
+        - Desktop shell / packaging (electron/)
+        - Docs
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Problem
+      description: What can't you do today, or what is painful?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Proposal
+      description: What you'd like to happen. Sketches welcome.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Alternatives considered

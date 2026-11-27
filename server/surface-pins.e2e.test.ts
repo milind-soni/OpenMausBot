@@ -1,0 +1,636 @@
+// A restartable fixture home lets tests seed bots.json between boots: the sourceless pin shapes only exist on disk.
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { writeFileAtomic } from "./atomic.ts";
+import { freePortBlock } from "./testing/ports.ts";
+import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { decodeCuaConnection } from "./local-computer.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
+
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+describe("surface pin provenance against the real server", () => {
+  let home = "";
+  let data = "";
+  let ui = "";
+  let stateFile = "";
+  let dumpFile = "";
+  let finishFile = "";
+  let cuaDescriptor = "";
+  let inertBrowser = "";
+  let output = "";
+  let child: ChildProcess | null = null;
+  let base = "";
+  let boatServer: Server;
+  let boatApi = "";
+  let boatDown = false;
+
+  const vmState = (state: Record<string, unknown> = {}) => writeFileAtomic(stateFile, JSON.stringify(state));
+  const resetTurn = () => { vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true }); };
+  const api = async (method: string, path: string, body?: unknown) => {
+    const response = await fetch(base + path, {
+      method, headers: { "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return { status: response.status, body: await response.json() as any };
+  };
+  const apiOk = async (method: string, path: string, body?: unknown) => {
+    const result = await api(method, path, body);
+    expect(result.status, `${method} ${path}: ${JSON.stringify(result.body)}`).toBeLessThan(400);
+    return result.body;
+  };
+  async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolean): Promise<T> {
+    const end = Date.now() + 20_000;
+    for (;;) {
+      const value = await read();
+      if (accept(value)) return value;
+      if (Date.now() >= end) throw new Error(`Fixture wait expired: ${JSON.stringify(value)}`);
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+  }
+  const dump = (): Promise<any> => until((): any => {
+    if (!existsSync(dumpFile)) return null;
+    try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
+  }, Boolean);
+  const mountedComputer = (sent: any) => sent.mcpConfig.mcpServers.computer;
+  // The first screen tools/call, exactly as the mounted proxy issues it: a claim and its pin land on use, not on mount.
+  const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, {
+    headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` },
+  }).then(response => response.json() as Promise<any>);
+  const threadState = (botId: string, threadId: string) =>
+    api("GET", "/api/bots?messages=0").then(({ body }) =>
+      body.bots.find((bot: any) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId));
+  const busy = (botId: string, threadId: string) => until(() => threadState(botId, threadId), Boolean);
+  const idle = (botId: string, threadId: string) => until(() => threadState(botId, threadId), task => !task?.busy);
+  const savedTask = (botId: string, threadId: string) =>
+    (readRegistry(data).bots as any[])
+      .find((bot: any) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId);
+  const editSavedBot = (botId: string, edit: (bot: any) => void) => {
+    const bots = readRegistry(data).bots as any[];
+    edit(bots.find((bot: any) => bot.id === botId));
+    writeRegistry(data, { bots });
+  };
+
+  async function start(withBrowser = false) {
+    const port = await freePortBlock([0, 1]);
+    base = `http://127.0.0.1:${port}`;
+    output = "";
+    const proc = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href,
+      "--import", pathToFileURL(join(ROOT, "server/testing/desktop-parent.mjs")).href, join(ROOT, "server/index.ts")], {
+      cwd: ROOT, env: {
+        PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: home, USERPROFILE: home, OMB_DATA_DIR: data,
+        APPDATA: join(home, "appdata"), LOCALAPPDATA: join(home, "localappdata"),
+        TEMP: home, TMP: home, TMPDIR: home,
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
+        OMB_BOAT_API: boatApi, OMB_USER_DATA: join(home, "user-data"), OMB_TEST_DESKTOP_CUA_CONNECTION: cuaDescriptor,
+        ...(withBrowser ? { OMB_AGENT_BROWSER_PATH: inertBrowser, AGENT_BROWSER_EXECUTABLE_PATH: inertBrowser } : {}),
+      }, stdio: ["ignore", "pipe", "pipe"],
+    });
+    child = proc;
+    proc.stdout!.on("data", chunk => { output += chunk; });
+    proc.stderr!.on("data", chunk => { output += chunk; });
+    await until(async () => {
+      if (proc.exitCode !== null) throw new Error(`server exited during boot:\n${output}`);
+      try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
+    }, Boolean);
+    // Chief first makes the seeded bot its team's Chief, which answers a teammate's failed run with a Problems to look at
+    // turn of its own on the same slow Claude: its dump would stand in for the turn under test. Stepped down, each dump
+    // is the test's own. Only the first boot finds it a Chief.
+    const seeded = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
+    if (seeded) await apiOk("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
+  }
+  async function stop() {
+    if (!child) return;
+    const proc = child;
+    child = null;
+    writeFileSync(finishFile, "finish");
+    await waitForExit(proc, { signal: "SIGTERM" });
+  }
+
+  beforeAll(async () => {
+    home = mkdtempSync(join(tmpdir(), "omb-surface-pins-"));
+    data = join(home, "data");
+    ui = join(home, "static");
+    stateFile = join(home, "vm.json");
+    dumpFile = join(home, "dump.json");
+    finishFile = join(home, "finish");
+    cuaDescriptor = join(home, "user-data", "cua-connection.json");
+    inertBrowser = join(home, "agent-browser");
+    writeFileSync(inertBrowser, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    vmState();
+    mkdirSync(data);
+    mkdirSync(join(ui, "assets"), { recursive: true });
+    writeFileSync(join(ui, "index.html"), "<title>Surface pins</title>");
+    writeFileSync(join(ui, "assets", "test.css"), "body{}");
+    boatServer = createServer(async (req, res) => {
+      res.setHeader("content-type", "application/json");
+      const path = new URL(req.url ?? "/", "http://box.fixture").pathname;
+      if (boatDown && path.startsWith("/sandboxes")) { res.statusCode = 503; return res.end(JSON.stringify({ error: "Fixture Boat unavailable" })); }
+      if (path === "/sandboxes") return res.end(JSON.stringify({ sandboxes: [] }));
+      return res.end("{}");
+    });
+    await new Promise<void>(resolve => boatServer.listen(0, "127.0.0.1", resolve));
+    boatApi = `http://127.0.0.1:${(boatServer.address() as { port: number }).port}`;
+    writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { claude: {
+      driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
+      // The first computer call is what reaches the Boat, as with a real model.
+      environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile, FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" },
+    }, teammate: {
+      driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
+      environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: join(home, "teammate-dump.json"), FAKE_CLAUDE_SLOW_FINISH_GATE: join(home, "teammate-finish"), FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" },
+    } } }));
+  });
+  afterAll(async () => {
+    await stop();
+    if (boatServer) await new Promise<void>(resolve => boatServer.close(() => resolve()));
+    if (home) await removeTempDir(home);
+  });
+  afterEach(async () => { await stop(); resetTurn(); boatDown = false; });
+
+  it("marks a person's thread pin as theirs and clears provenance with the pin", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Pin Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "local" });
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    const personPin = await threadState(bot.id, task.threadId);
+    expect(personPin).toMatchObject({ surface: "local" });
+    expect(personPin).not.toHaveProperty("surfaceAuto");
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: null });
+    const cleared = savedTask(bot.id, task.threadId)!;
+    expect(cleared.surface).toBeUndefined();
+    expect(cleared.surfaceSource).toBeUndefined();
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("still refuses to change a busy thread's surface", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Busy Pin Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly.", threadId: task.threadId });
+    await busy(bot.id, task.threadId);
+    expect(await gate(mountedComputer(await dump()))).toEqual({ held: false, helpOpen: false });
+    await until(() => savedTask(bot.id, task.threadId)?.surface === "vm", Boolean);
+    const refused = await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "vm" });
+    expect(refused.status).toBe(409);
+    const pinned = savedTask(bot.id, task.threadId)!;
+    expect(pinned.surface).toBe("vm");
+    expect(pinned.surfaceSource).toBe("auto");
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("sweeps only conflicting auto pins when Works on is set, and nothing when it returns to Auto", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Sweep Bot" });
+    const [autoMismatch, personMismatch, autoMatch] = (await Promise.all([
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+    ])).map(({ task }) => task);
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${personMismatch.threadId}`, { surface: "local" });
+    await stop();
+    editSavedBot(bot.id, saved => {
+      Object.assign(saved.tasks.find((task: any) => task.threadId === autoMismatch.threadId), { surface: "local", surfaceSource: "auto" });
+      Object.assign(saved.tasks.find((task: any) => task.threadId === autoMatch.threadId), { surface: "vm", surfaceSource: "auto" });
+    });
+    await start();
+    expect(output).not.toContain("auto-pinned");
+    expect(savedTask(bot.id, autoMismatch.threadId)?.surface).toBe("local");
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "vm" });
+    expect(savedTask(bot.id, autoMismatch.threadId)?.surface).toBeUndefined();
+    expect(savedTask(bot.id, personMismatch.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(savedTask(bot.id, autoMatch.threadId)?.surface).toBe("vm");
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: null });
+    expect(savedTask(bot.id, personMismatch.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(savedTask(bot.id, autoMatch.threadId)?.surface).toBe("vm");
+    expect(savedTask(bot.id, autoMismatch.threadId)?.surface).toBeUndefined();
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("preserves pre-provenance user pins at boot and after Works on changes", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Repair Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "local" });
+    await stop();
+    editSavedBot(bot.id, saved => {
+      saved.computer = "vm";
+      const target = saved.tasks.find((entry: any) => entry.threadId === task.threadId);
+      target.surface = "local";
+      delete target.surfaceSource;
+    });
+    await start();
+    expect(output).not.toContain("auto-pinned thread");
+    expect(savedTask(bot.id, task.threadId)?.surface).toBe("local");
+    expect(savedTask(bot.id, task.threadId)?.surfaceSource).toBeUndefined();
+    const place = await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${task.threadId}`);
+    expect(place.surface).toBe("local");
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "browser" });
+    expect(savedTask(bot.id, task.threadId)?.surface).toBe("local");
+    await stop();
+    await start();
+    expect(output).not.toContain("auto-pinned thread");
+    expect(savedTask(bot.id, task.threadId)?.surface).toBe("local");
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("mounts the VM for a turn into a thread auto-pinned to this computer", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Incident Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "local" });
+    await stop();
+    editSavedBot(bot.id, saved => {
+      saved.computer = "vm";
+      saved.tasks.find((entry: any) => entry.threadId === task.threadId).surfaceSource = "auto";
+    });
+    await start();
+    expect(output.match(/auto-pinned thread/g)).toHaveLength(1);
+    await stop();
+    await start();
+    expect(output).not.toContain("auto-pinned thread");
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work where you should.", threadId: task.threadId });
+    const sent = await dump();
+    expect(sent.systemPrompt).toContain("Local VM");
+    expect(mountedComputer(sent).args.some((arg: string) => arg.includes("container-mcp"))).toBe(true);
+    expect(sent.systemPrompt).not.toContain("You can act on the user's computer");
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+    expect(savedTask(bot.id, task.threadId)?.surface).toBeUndefined();
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("mounts the built-in browser beside the computer in a person's thread and in a thread a teammate opened", async () => {
+    await start(true);
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Delegated Browser Bot" });
+    const [own, delegated] = (await Promise.all([
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+    ])).map(({ task }) => task);
+    await stop();
+    editSavedBot(bot.id, saved => {
+      saved.browserProfile = "guest";
+      saved.tasks.find((task: any) => task.threadId === delegated.threadId).openedBy = { botId: "coordinator", name: "Coordinator", kind: "work", at: Date.now() };
+    });
+    const turnIn = async (threadId: string) => {
+      resetTurn();
+      await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Check the signed-in page.", threadId });
+      const servers = (await dump()).mcpConfig.mcpServers;
+      writeFileSync(finishFile, "finish");
+      await idle(bot.id, threadId);
+      return servers;
+    };
+    for (const computer of [undefined, "vm"]) {
+      if (computer) {
+        await stop();
+        editSavedBot(bot.id, saved => { saved.computer = computer; });
+        for (const threadId of [own.threadId, delegated.threadId]) {
+          editSavedBot(bot.id, saved => {
+            const task = saved.tasks.find((entry: any) => entry.threadId === threadId);
+            delete task.surface;
+            delete task.surfaceSource;
+          });
+        }
+      }
+      await start(true);
+      const person = await turnIn(own.threadId);
+      expect(person.computer?.args.some((arg: string) => arg.includes("container-mcp")), `${computer} person`).toBe(true);
+      expect(person.browser, `${computer} person`).toBeDefined();
+      const teammate = await turnIn(delegated.threadId);
+      expect(teammate.computer?.args.some((arg: string) => arg.includes("container-mcp")), `${computer} teammate`).toBe(true);
+      expect(teammate.browser, `${computer} teammate`).toBeDefined();
+    }
+    await stop();
+  }, 60_000);
+
+  it("records future auto pins and moves them when Works on changes", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "New Auto Pin Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the available computer.", threadId: task.threadId });
+    expect(mountedComputer(await dump()).args.some((arg: string) => arg.includes("container-mcp"))).toBe(true);
+    expect(savedTask(bot.id, task.threadId)).not.toHaveProperty("surface");
+    expect(await gate(mountedComputer(await dump()))).toEqual({ held: false, helpOpen: false });
+    await until(() => savedTask(bot.id, task.threadId)?.surface === "vm", Boolean);
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "auto" });
+    expect(await threadState(bot.id, task.threadId)).not.toHaveProperty("surfaceSource");
+    expect(await threadState(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceAuto: true });
+    expect(savedTask(bot.id, task.threadId)).not.toHaveProperty("surfaceAuto");
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+    await stop();
+    await start();
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "auto" });
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "off" });
+    expect(savedTask(bot.id, task.threadId)?.surface).toBeUndefined();
+    expect(savedTask(bot.id, task.threadId)?.surfaceSource).toBeUndefined();
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Continue without a computer.", threadId: task.threadId });
+    expect(mountedComputer(await dump())).toBeUndefined();
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("keeps a person's pin when Works on changes under it", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Person Pin Bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "local" });
+    await stop();
+    editSavedBot(bot.id, saved => { saved.computer = "vm"; });
+    await start();
+    expect(output).not.toContain("auto-pinned thread");
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    const place = await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${task.threadId}`);
+    expect(place.surface).toBe("local");
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(home, "cua.sock"),
+      mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    try {
+      // Validate the fixture on every host before waiting for a provider; Windows cannot emulate the POSIX ownership check.
+      const platforms: NodeJS.Platform[] = process.platform === "win32" ? ["win32"] : ["darwin", "win32"];
+      for (const platform of platforms) {
+        expect(decodeCuaConnection(JSON.parse(readFileSync(cuaDescriptor, "utf8")), { platform }))
+          .toMatchObject({ command: "/fixture/cua-driver", platform, scope: "local-computer" });
+      }
+      // Linux requires a separately validated native runtime descriptor.
+      if (process.platform !== "linux") {
+        resetTurn();
+        await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Stay where I pinned you.", threadId: task.threadId });
+        const sent = await dump();
+        expect(sent.systemPrompt).toContain("You can act on the user's computer");
+        expect(mountedComputer(sent).env.OMB_CUA_COMMAND).toBe("/fixture/cua-driver");
+        expect(mountedComputer(sent).args.some((arg: string) => arg.includes("container-mcp"))).toBe(false);
+        writeFileSync(finishFile, "finish");
+        await idle(bot.id, task.threadId);
+      }
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  // Linux needs a separately validated native runtime descriptor for this computer (see the test above).
+  it.skipIf(process.platform === "linux")("runs two threads of one bot on two computers at once, and keeps each choice to its own thread", async () => {
+    // The app's driver record is there from the server's start, so this computer is ready before the first turn.
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(home, "cua.sock"),
+      mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Two Places Bot" });
+    const { bot: neighbour } = await apiOk("POST", "/api/bots", { name: "Neighbour Bot" });
+    for (const id of [bot.id, neighbour.id]) await apiOk("PATCH", `/api/bots/${id}`, { computer: "vm" });
+    const [mine, sibling] = (await Promise.all([
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+    ])).map(({ task }) => task);
+    const { task: theirs } = await apiOk("POST", `/api/bots/${neighbour.id}/tasks`, {});
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${mine.threadId}`, { surface: "local" });
+    expect((await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${mine.threadId}`)).surface).toBe("local");
+    expect((await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${sibling.threadId}`)).surface).toBe("vm");
+    const onVm = (sent: any) => mountedComputer(sent)?.args.some((arg: string) => arg.includes("container-mcp")) === true;
+    const turnIn = async (botId: string, threadId: string, text: string) => {
+      rmSync(dumpFile, { force: true });
+      await apiOk("POST", `/api/bots/${botId}/messages`, { text, threadId });
+      const sent = await until(dump, (candidate) => JSON.stringify(candidate.prompt).includes(text));
+      await busy(botId, threadId);
+      return sent;
+    };
+    try {
+      resetTurn();
+      const here = await turnIn(bot.id, mine.threadId, "Pinned thread: work on this computer.");
+      expect(here.systemPrompt).toContain("You can act on the user's computer");
+      expect(mountedComputer(here).env.OMB_CUA_COMMAND).toBe("/fixture/cua-driver");
+      expect(onVm(here)).toBe(false);
+
+      const there = await turnIn(bot.id, sibling.threadId, "Sibling thread: work where the bot works.");
+      expect(onVm(there)).toBe(true);
+      expect(mountedComputer(there).env.OMB_CUA_COMMAND).toBeUndefined();
+      expect(there.systemPrompt).not.toContain("You can act on the user's computer");
+      // Both turns of the one bot are running at once, each on its own computer.
+      expect((await threadState(bot.id, mine.threadId)).busy).toBe(true);
+      expect((await threadState(bot.id, sibling.threadId)).busy).toBe(true);
+      writeFileSync(finishFile, "finish");
+      await idle(bot.id, mine.threadId);
+      await idle(bot.id, sibling.threadId);
+
+      rmSync(finishFile, { force: true });
+      const neighbours = await turnIn(neighbour.id, theirs.threadId, "Neighbour: work where you work.");
+      expect(onVm(neighbours)).toBe(true);
+      expect(mountedComputer(neighbours).env.OMB_CUA_COMMAND).toBeUndefined();
+      writeFileSync(finishFile, "finish");
+      await idle(neighbour.id, theirs.threadId);
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+    expect(savedTask(bot.id, mine.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    expect(savedTask(bot.id, sibling.threadId)).not.toHaveProperty("surface");
+    expect(savedTask(neighbour.id, theirs.threadId)).not.toHaveProperty("surface");
+    expect((readRegistry(data).bots as any[]).find((saved: any) => saved.id === bot.id).computer).toBe("vm");
+
+    const { messages } = await apiOk("GET", `/api/threads/${mine.threadId}/messages?limit=30`);
+    const reply = messages.findLast((message: any) => message.role === "bot" && message.kind === "text");
+    const { task: forked } = await apiOk("POST", `/api/bots/${bot.id}/tasks/${mine.threadId}/forks`, { messageId: reply.id });
+    expect(savedTask(bot.id, forked.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
+    const { task: fresh } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    expect(savedTask(bot.id, fresh.threadId)).not.toHaveProperty("surface");
+
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${mine.threadId}`, { surface: null });
+    expect((await apiOk("GET", `/api/bots/${bot.id}/computer?threadId=${mine.threadId}`)).surface).toBe("vm");
+    for (const id of [bot.id, neighbour.id]) await apiOk("DELETE", `/api/bots/${id}`);
+    await stop();
+  }, 60_000);
+
+  it.skipIf(process.platform === "linux")("never puts a thread chosen for the Local VM on this computer when the VM can't be had", async () => {
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(home, "cua.sock"),
+      mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    await start();
+    try {
+      const { bot } = await apiOk("POST", "/api/bots", { name: "Isolated Bot" });
+      await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
+      const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+      await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "vm" });
+      resetTurn();
+      vmState({ failed: true });
+      await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the private desktop.", threadId: task.threadId });
+      const lastRow = async () => {
+        const { messages } = await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=30`);
+        return String(messages.filter((message: any) => message.kind !== "digest").at(-1)?.tool?.name ?? "");
+      };
+      await until(() => lastRow(), (row) => row.startsWith("error:"));
+      await idle(bot.id, task.threadId);
+      // Refused before any engine started: no tools at all, so none on this computer.
+      expect(existsSync(dumpFile)).toBe(false);
+      expect(await lastRow()).toMatch(/Clear this conversation's place/);
+      expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "user" });
+      await apiOk("DELETE", `/api/bots/${bot.id}`);
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+    await stop();
+  }, 60_000);
+
+  it("clears a select_computer pin to a cloud computer that fails, and keeps a person's pin", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Failed place bot" });
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, {});
+    await apiOk("PUT", "/api/config", { box: { token: "box_fixture" } });
+    const lastRow = async () => {
+      const { messages } = await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=30`);
+      return String(messages.filter((message: any) => message.kind !== "digest").at(-1)?.tool?.name ?? "");
+    };
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Open Chrome on the cloud computer.", threadId: task.threadId });
+    const sent = await dump();
+    const token = sent.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const selected = await fetch(base + "/api/internal/computer/select", { method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ surface: "cloud" }) });
+    expect(await selected.json()).toMatchObject({ status: "pending", surface: "cloud" });
+    boatDown = true;
+    writeFileSync(finishFile, "finish");
+    await until(() => lastRow(), row => row.startsWith("error:"));
+    await idle(bot.id, task.threadId);
+    expect(await lastRow()).toBe("error: Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto. Send your message again.");
+    const cleared = savedTask(bot.id, task.threadId)!;
+    expect(cleared.surface).toBeUndefined();
+    expect(cleared.surfaceSource).toBeUndefined();
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Carry on where you can.", threadId: task.threadId });
+    const next = await dump();
+    expect(mountedComputer(next)?.args ?? []).not.toContain("computer");
+    writeFileSync(finishFile, "finish");
+    await idle(bot.id, task.threadId);
+    expect(await lastRow()).not.toMatch(/^error:/);
+
+    await apiOk("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "cloud" });
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the cloud computer.", threadId: task.threadId });
+    await until(() => lastRow(), row => row.startsWith("error:"));
+    await idle(bot.id, task.threadId);
+    expect(await lastRow()).toBe("error: Cloud desktops can't start right now. It isn't anything you did. Clear this conversation's place in the composer to continue.");
+    expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "cloud", surfaceSource: "user" });
+    boatDown = false;
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("never takes a relayed line's conversation for where the person writes, when select_computer continues its turn", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Relayed place bot" });
+    // An Ask thread, as a Slack relay's guarded send expects.
+    const { task } = await apiOk("POST", `/api/bots/${bot.id}/tasks`, { approvalMode: "ask" });
+    await apiOk("PUT", "/api/config", { box: { token: "box_fixture" } });
+    const lastRow = async () => {
+      const { messages } = await apiOk("GET", `/api/threads/${task.threadId}/messages?limit=30`);
+      return String(messages.filter((message: any) => message.kind !== "digest").at(-1)?.tool?.name ?? "");
+    };
+    resetTurn();
+    await apiOk("POST", `/api/bots/${bot.id}/messages/guarded`, {
+      threadId: task.threadId, sendId: randomUUID(), text: "Check the dashboard on the cloud computer.", expectedActiveLeafId: null,
+    });
+    const sent = await dump();
+    const token = sent.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const selected = await fetch(base + "/api/internal/computer/select", { method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ surface: "cloud" }) });
+    expect(await selected.json()).toMatchObject({ status: "pending", surface: "cloud" });
+    boatDown = true;
+    writeFileSync(finishFile, "finish");
+    await until(() => lastRow(), row => row.startsWith("error:"));
+    await idle(bot.id, task.threadId);
+    expect(savedTask(bot.id, task.threadId)).not.toHaveProperty("askedAt");
+    boatDown = false;
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+    await stop();
+  });
+
+  it("lets a teammate's hand-off move to the built-in browser only, and returns the result from there", async () => {
+    // The teammate runs on its own fixture engine, so its turn waits on its own gate while the asker's turn ends.
+    const teammateDump = join(home, "teammate-dump.json"), teammateFinish = join(home, "teammate-finish");
+    rmSync(teammateDump, { force: true });
+    rmSync(teammateFinish, { force: true });
+    await start(true);
+    const asker = (await apiOk("POST", "/api/bots", { name: "Asker" })).bot;
+    const tester = (await apiOk("POST", "/api/bots", { name: "Tester" })).bot;
+    await apiOk("PATCH", `/api/bots/${tester.id}`, { modelSelection: { ...tester.modelSelection, instanceId: "teammate" } });
+    await stop();
+    // Both bots use the guest browser: the asker's own turn mounts it beside its computer too, and the fixture's inert
+    // browser binary cannot prepare a saved profile in time.
+    for (const id of [asker.id, tester.id]) editSavedBot(id, saved => { saved.browserProfile = "guest"; });
+    await start(true);
+    const { task: own } = await apiOk("POST", `/api/bots/${asker.id}/tasks`, {});
+    resetTurn();
+    await apiOk("POST", `/api/bots/${asker.id}/messages`, { text: "Ask Tester to check the site.", threadId: own.threadId });
+    const askerToken = (await dump()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const handed = await fetch(base + "/api/internal/coordinate-bots", { method: "POST",
+      headers: { authorization: `Bearer ${askerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ botIds: [tester.id], message: "Sign in to the shop and check the order page." }) });
+    expect(handed.status).toBeLessThan(400);
+    writeFileSync(finishFile, "finish");
+    const teammateTurn = (): Promise<any> => until((): any => {
+      if (!existsSync(teammateDump)) return null;
+      try { return JSON.parse(readFileSync(teammateDump, "utf8")); } catch { return null; }
+    }, Boolean);
+    const token = (await teammateTurn()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const select = (body?: unknown) => fetch(base + "/api/internal/computer/select", { method: body ? "POST" : "GET",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const offered = await (await select()).json() as any;
+    expect(offered).toMatchObject({ canSelect: true });
+    expect(offered.options.map((option: any) => option.surface)).toEqual(["browser"]);
+    const refused = await select({ surface: "vm" });
+    expect(refused.status).toBe(403);
+    expect((await refused.json() as any).error).toMatch(/only to the built-in browser/);
+    expect(await (await select({ surface: "browser" })).json()).toMatchObject({ status: "pending", surface: "browser" });
+    const workThread = (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === tester.id)
+      .tasks.find((task: any) => task.openedBy?.botId === asker.id).threadId as string;
+    rmSync(teammateDump, { force: true });
+    // Hold the asker's own turn that resumes with the result, to check it is not offered the hand-off's browser move.
+    // Its first turn must have used up the finish gate before the gate is removed for the resumed turn.
+    await idle(asker.id, own.threadId);
+    rmSync(dumpFile, { force: true });
+    rmSync(finishFile, { force: true });
+    writeFileSync(teammateFinish, "finish");
+    const moved = await teammateTurn();
+    expect(JSON.stringify(moved.prompt)).toContain("Continue the handed-off request");
+    expect(moved.mcpConfig.mcpServers.browser).toBeDefined();
+    expect(savedTask(tester.id, workThread)).toMatchObject({ surface: "browser" });
+    const resumedToken = (await dump()).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const resumedOffer = await (await fetch(base + "/api/internal/computer/select", {
+      headers: { authorization: `Bearer ${resumedToken}` } })).json() as any;
+    expect(resumedOffer.canSelect).not.toBe(true);
+    writeFileSync(finishFile, "finish");
+    // The asker hears back from the browser turn, never from the turn that only asked to move.
+    const replies = async () => JSON.stringify((await apiOk("GET", `/api/threads/${own.threadId}/messages?limit=60`)).messages);
+    // "reply to: ..." is the fixture engine's own answer from the browser turn, not the prompt that started it.
+    expect(await until(replies, (text) => /reply to: [^"]*The computer selection is now the built-in browser/.test(text))).toBeTruthy();
+    await idle(tester.id, workThread);
+    await idle(asker.id, own.threadId);
+    await stop();
+  }, 60_000);
+});

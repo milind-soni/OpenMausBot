@@ -1,0 +1,112 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const fixture = vi.hoisted(() => ({ api: vi.fn(), effects: [] as Array<() => void> }));
+vi.mock("@/state/store", () => ({ api: fixture.api }));
+vi.mock("react", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react")>(),
+  useEffect: (effect: () => void) => { fixture.effects.push(effect); },
+  useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
+}));
+
+import { mcpServersForBot, mcpServersOfBot, mcpSwitch } from "./mcp-servers";
+
+describe("mcpServersForBot", () => {
+  const all = [
+    { name: "notes", enabled: true },
+    { name: "linear", enabled: true },
+    { name: "off", enabled: false },
+  ];
+
+  it("gives a bot without a list every enabled server", () => {
+    expect(mcpServersForBot(all, undefined, "b1").map((s) => s.name)).toEqual(["notes", "linear"]);
+    expect(mcpServersForBot(all, null, "b1").map((s) => s.name)).toEqual(["notes", "linear"]);
+  });
+
+  it("narrows to the bot's own names and never revives a disabled server", () => {
+    expect(mcpServersForBot(all, ["linear", "off", "gone"], "b1").map((s) => s.name)).toEqual(["linear"]);
+    expect(mcpServersForBot(all, [], "b1")).toEqual([]);
+  });
+
+  it("never gives a bot another bot's own server", () => {
+    const owned = [...all, { name: "blender", enabled: true, bot: "ingo" }];
+    expect(mcpServersForBot(owned, undefined, "ingo").map((s) => s.name)).toEqual(["notes", "linear", "blender"]);
+    expect(mcpServersForBot(owned, ["blender"], "pepe")).toEqual([]);
+    expect(mcpServersOfBot(owned, "pepe").map((s) => s.name)).toEqual(["notes", "linear", "off"]);
+  });
+});
+
+describe("shared MCP inventory", () => {
+  beforeEach(() => { vi.resetModules(); fixture.api.mockReset(); fixture.effects = []; });
+  const notes = { name: "notes", enabled: true };
+  const changed = { name: "notes", enabled: false };
+
+  it("renders cached inventory immediately and revalidates when Access mounts", async () => {
+    fixture.api.mockResolvedValue({ servers: [changed] });
+    const { updateMcpServers, useMcpServers } = await import("./mcp-servers");
+    updateMcpServers([notes]);
+    expect(useMcpServers().servers).toEqual([notes]);
+    expect(fixture.api).not.toHaveBeenCalled();
+    fixture.effects[0]();
+    await vi.waitFor(() => expect(useMcpServers().servers).toEqual([changed]));
+    expect(fixture.api).toHaveBeenCalledOnce();
+  });
+
+  it("does not let an older read replace a forced refresh", async () => {
+    const pending: Array<(result: { servers: typeof notes[] }) => void> = [];
+    fixture.api.mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+    const { loadMcpServers, useMcpServers } = await import("./mcp-servers");
+    const old = loadMcpServers();
+    const fresh = loadMcpServers(true);
+    expect(fixture.api).toHaveBeenCalledTimes(2);
+    pending[1]({ servers: [changed] });
+    await fresh;
+    pending[0]({ servers: [notes] });
+    await old;
+    expect(useMcpServers().servers).toEqual([changed]);
+  });
+
+  it("publishes mutation results and ignores reads started before the write", async () => {
+    let resolve!: (result: { servers: typeof notes[] }) => void;
+    fixture.api.mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const { loadMcpServers, updateMcpServers, useMcpServers } = await import("./mcp-servers");
+    const old = loadMcpServers();
+    updateMcpServers([changed]);
+    resolve({ servers: [notes] });
+    await old;
+    expect(await loadMcpServers()).toEqual([changed]);
+    expect(fixture.api).toHaveBeenCalledOnce();
+    expect(useMcpServers().error).toBe(false);
+  });
+
+  it("settles failures as errors and allows a retry without discarding known servers", async () => {
+    fixture.api.mockRejectedValueOnce(new Error("offline"));
+    const { loadMcpServers, updateMcpServers, useMcpServers } = await import("./mcp-servers");
+    await loadMcpServers();
+    expect(useMcpServers()).toMatchObject({ servers: null, error: true });
+    updateMcpServers([notes]);
+    fixture.api.mockRejectedValueOnce(new Error("offline"));
+    await loadMcpServers(true);
+    expect(useMcpServers()).toMatchObject({ servers: [notes], error: true });
+    fixture.api.mockResolvedValueOnce({ servers: [changed] });
+    await loadMcpServers();
+    expect(useMcpServers()).toMatchObject({ servers: [changed], error: false });
+  });
+});
+
+describe("mcpSwitch", () => {
+  const all = [
+    { name: "notes", enabled: true },
+    { name: "linear", enabled: true },
+    { name: "off", enabled: false },
+  ];
+
+  it("starts from every enabled server when the bot has no list", () => {
+    expect(mcpSwitch(all, null, "notes")).toEqual(["linear"]);
+    expect(mcpSwitch(all, undefined, "linear")).toEqual(["notes"]);
+  });
+
+  it("adds a name the explicit list leaves out and removes one it holds", () => {
+    expect(mcpSwitch(all, ["notes"], "linear")).toEqual(["notes", "linear"]);
+    expect(mcpSwitch(all, ["notes", "linear"], "notes")).toEqual(["linear"]);
+  });
+});

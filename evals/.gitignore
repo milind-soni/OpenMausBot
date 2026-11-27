@@ -1,0 +1,3 @@
+# per-run eval artifacts and the developer's local live-tier baseline
+reports/runs/
+live/baselines/

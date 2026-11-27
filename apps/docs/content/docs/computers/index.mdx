@@ -1,0 +1,98 @@
+---
+title: Give a bot a computer
+description: Choose the right desktop or isolated environment for a task.
+icon: Monitor
+---
+
+A bot can work without a computer, use the computer running MausBot, or work inside an isolated desktop.
+
+<ProductScreenshot name="docs-computer-panel" alt="MausBot computer panel offering cloud, local VM, host computer, and off modes" caption="Computer placement is explicit per bot and can be changed without changing its model." />
+
+| Backend | Isolation | Best for |
+|---|---|---|
+| This computer | None | Working with local apps and files you explicitly approve |
+| Local VM | Containerized desktop | Repeatable browser and desktop work on your machine |
+| Boat cloud computer | Hosted remote desktop | Always-available isolated Linux work |
+| Self-hosted VPS | Hardened container over SSH | Using infrastructure you own |
+
+To let bots on your own server use your Windows PC or Mac, see [Let bots on your own server use this computer](/docs/computers/lend-to-your-server).
+
+To use your own Linux server as the desktop, start with [Your own VPS (BYO)](/docs/computers/byo-vps), including the 0.1.151 and 0.1.152 existing-bot selector workaround.
+
+## Auto, local, and cloud selection
+
+Each bot has a default computer, its **Works on** setting. Auto may reuse a ready, verified backend, but it does not silently provision every backend or turn on host control.
+
+## A different computer for one chat
+
+One chat can work somewhere other than its bot's default, so the same bot can work on this computer in one chat and on its Local VM or cloud desktop in another, at the same time. This choice is in **Advanced mode**: open the **+** under the message box and choose **Works on**.
+
+- **Follow this bot's setting** (or **Auto**) is the default: the chat uses whatever the bot works on.
+- Any other place is for this chat only. Places this bot can't use are listed but dimmed, with the reason.
+
+While a chat has its own place, a small icon under the message box shows it; open it to change it or to follow the bot again. Other chats of the bot, other bots and the bot's own setting are unchanged.
+
+In **Simple mode** there is no picker. A chat given its own place in Advanced mode keeps it, and shows a small icon of that place beside the **+** (not on a phone); the Screen panel says the chat has its own place and can switch it back to the bot's.
+
+- The change applies from the chat's next message. It can't be changed while the bot is working in that chat.
+- The choice is saved on the server with the chat, so every device you use shows the same one.
+- A fork of the chat keeps its place. A new chat follows the bot.
+- If the chosen place isn't available when the bot starts, the bot doesn't work anywhere else instead: the chat says why in one line, with the fix (such as connecting the cloud desktop service) or a button to follow the bot again. In Advanced mode, the chat's icon switches it back at any time.
+- If the bot's **Works on** is **Off**, no chat of that bot gets a computer.
+- The choice is a kind of place (this computer, Local VM, cloud desktop, Browser). Which cloud desktop or VPS server a bot uses is still set for the whole bot.
+
+## Preview and takeover
+
+The Screen panel can show live frames while an agent works. Supported cloud desktops also provide an interactive viewer. MausBot opens that viewer in the app when possible, with a browser fallback for external join flows.
+
+When a bot needs you to sign in to a website, it asks with a **Sign in needed** card instead of asking for a password in chat. **Open** goes to the computer or browser the bot is working in, with **Take control**; **Done** hands it back and resumes the bot. See [Website sign-in](/docs/security/permissions-and-secrets#website-sign-in).
+
+In the built-in browser (and in My Chrome) a bot can also sign in with a login you saved, from the card's **Save a login** or **Settings → Vault**, or with one from a connected 1Password vault: it calls `fill_login` on the site's login page, and MausBot types the username, password and any one-time code into the page itself and submits the form, only on that login's own site. The bot never sees the password. See [Saved logins](/docs/security/permissions-and-secrets#saved-logins), including what a screenshot can still show.
+
+<Callout type="warn" title="Preview is not permission">
+  Starting a screen preview does not grant the bot control. Local input requires a separate opt-in and remains subject to the computer-use safety boundary.
+</Callout>
+
+## See all your devices
+
+**Settings → Devices** draws every device connected to the place you have open, on one small map. The place is at the top. Every other device hangs off a line named for how it connects:
+
+- **Same network**: a phone on the same Wi-Fi.
+- **Private network**: anything that reaches this computer over Tailscale. It is drawn as a group of its own, with Tailscale's state.
+- **Through MausBot**: a phone using the relay.
+- **MausBot Cloud**: the Cloud, or devices signed in to it.
+- **Internet**: a server of your own at a public address.
+- **Signed in**: a browser or device paired with a code.
+- **SSH**: a server your bots work on.
+
+Each device shows whether it is online, when it was last seen, or the one thing it needs: **Update it**, **Pair it again** or **Can't reach it**. Choose a device to see its details and the actions that already exist for it:
+
+- Switch to it.
+- Try now.
+- Pair again.
+- Copy its address.
+- Copy the update command for that install.
+- Remove it.
+- Manage it on its own settings page.
+
+**Add a device** takes each kind into the flow it already has:
+
+- **Phone** opens Pair a phone.
+- **Computer** makes a pairing link over your private network. It shows the link and code, and says when the other computer has connected. A Cloud's page says to sign in on the other computer instead.
+- **Your own server** gives you one line to run on that machine. `npx openmausbot account login && npx openmausbot serve --tunnel` makes it reachable from anywhere; `npx openmausbot serve --tailscale` keeps it on your private network. Then **Paste the link it shows**.
+- **Cloud** opens Get a Cloud.
+
+### Private network (Tailscale)
+
+MausBot only asks Tailscale about this computer when you press **Set up** or **Check again**. After that, it checks again each time you come back to the window. Each state has one next step:
+
+| Map says | Next step |
+|---|---|
+| Not set up | **Set up**: checks Tailscale and lets your other computers on it connect here |
+| Not installed | **Get Tailscale** for your system, then sign in |
+| Signed out, Not running | Open Tailscale and sign in, then **Check again** |
+| Waiting for approval | Approve this computer in the Tailscale admin console, then **Check again** |
+| Needs MagicDNS | Turn on MagicDNS in Tailscale, then **Check again** |
+| On | **Add a computer** |
+
+MausBot never installs Tailscale, signs you in, or changes your tailnet.

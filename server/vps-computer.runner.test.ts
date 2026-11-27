@@ -1,0 +1,188 @@
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { PassThrough, Writable } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { spawnMock, stopMock } = vi.hoisted(() => ({ spawnMock: vi.fn(), stopMock: vi.fn() }));
+
+vi.mock("node:child_process", async () => ({
+  ...(await vi.importActual<typeof import("node:child_process")>("node:child_process")),
+  spawn: spawnMock,
+}));
+vi.mock("./procs.ts", async () => ({
+  ...(await vi.importActual<typeof import("./procs.ts")>("./procs.ts")),
+  killCliTree: stopMock,
+}));
+
+import { defaultRunner, dockerCliInstallCommand, VpsHostUnreachableError } from "./vps-computer.ts";
+import { resolveCliSpawn } from "./env-path.ts";
+
+type FakeChild = EventEmitter & {
+  stdin: Writable;
+  stdout: PassThrough;
+  stderr: PassThrough;
+  kill: ReturnType<typeof vi.fn>;
+};
+
+function fakeChild(): FakeChild {
+  const child = new EventEmitter() as FakeChild;
+  child.stdin = new Writable({ write: (_chunk, _encoding, callback) => callback() });
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = vi.fn(() => true);
+  spawnMock.mockReturnValue(child);
+  return child;
+}
+
+describe("default VPS command runner", () => {
+  beforeEach(() => {
+    spawnMock.mockReset();
+    stopMock.mockReset().mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("calls a host unreachable only when ssh itself says it never got there", async () => {
+    const transport = fakeChild();
+    const lost = defaultRunner(["info"]);
+    // Docker puts ssh's words first; a long tail after them must not hide them.
+    transport.stderr.write("error during connect: command [ssh -- vps docker system dial-stdio] has exited with exit status 255, " +
+      "stderr=ssh: connect to host vps port 22: Connection refused\n" + "debug1: retrying\n".repeat(200));
+    transport.emit("close", 1, null);
+    await expect(lost).rejects.toBeInstanceOf(VpsHostUnreachableError);
+
+    const remote = fakeChild();
+    const refused = defaultRunner(["info"]);
+    remote.stderr.write("error during connect: command [ssh -- vps docker system dial-stdio] has exited with exit status 255, stderr=dial-stdio is not allowed here");
+    remote.emit("close", 1, null);
+    const error = await refused.catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
+  });
+
+  it("keeps a command's own ssh-looking error output as its failure, not an unreachable host", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "sh", "-lc", "ssh example"]);
+    child.stdout.write("tried");
+    child.stderr.write("ssh: connect to host example port 22: Connection refused\n");
+    child.emit("close", 2, null);
+    const error = await failed.catch((failure: unknown) => failure);
+    expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
+    expect(error).toMatchObject({ exitCode: 2, stdout: "tried", stderr: "ssh: connect to host example port 22: Connection refused\n" });
+  });
+
+  it("keeps a failed command's exit status and output on the error", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "false"]);
+    child.stdout.write("partial");
+    child.stderr.write("boom");
+    child.emit("close", 3, null);
+    await expect(failed).rejects.toMatchObject({ message: "boom", exitCode: 3, stdout: "partial", stderr: "boom" });
+  });
+
+  it("collects output and resolves after the child closes", async () => {
+    const child = fakeChild();
+    const result = defaultRunner(["info"], { input: "request" });
+
+    child.stdout.write("out");
+    child.stderr.write("err");
+    child.emit("close", 0, null);
+
+    await expect(result).resolves.toEqual({ stdout: "out", stderr: "err" });
+    const resolved = resolveCliSpawn("docker", ["info"]);
+    expect(spawnMock).toHaveBeenCalledWith(resolved.command, resolved.args, {
+      shell: false,
+      env: expect.objectContaining({ PATH: expect.any(String) }),
+      stdio: ["pipe", "pipe", "pipe"],
+      ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
+    });
+  });
+
+  it("turns stdin EPIPE into a rejected command instead of an unhandled error", async () => {
+    const child = fakeChild();
+    const result = defaultRunner(["build", "-"], { input: "Dockerfile" });
+
+    child.stdin.emit("error", new Error("write EPIPE"));
+
+    await expect(result).rejects.toThrow("Docker-over-SSH stdin failed: write EPIPE");
+    expect(stopMock).toHaveBeenCalledWith(child, 5_000);
+    expect(child.stdin.destroyed && child.stdout.destroyed && child.stderr.destroyed).toBe(true);
+    child.emit("close", 1, null);
+  });
+
+  it("waits for owned-tree cleanup after timeout even when Docker closes first", async () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    let finishCleanup!: () => void;
+    stopMock.mockReturnValue(new Promise<void>((resolve) => { finishCleanup = resolve; }));
+    let settled = false;
+    const result = defaultRunner(["info"], { timeoutMs: 100 });
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    const rejection = expect(result).rejects.toThrow("Docker-over-SSH command timed out");
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(stopMock).toHaveBeenCalledWith(child, 5_000);
+    child.emit("close", null, "SIGTERM");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(settled).toBe(false);
+    finishCleanup();
+    await rejection;
+    expect(child.stdout.destroyed && child.stderr.destroyed).toBe(true);
+  });
+
+  it("names the Docker CLI install line when the CLI is absent", async () => {
+    const child = fakeChild();
+    const result = defaultRunner(["info"]);
+    child.emit("error", Object.assign(new Error("spawn docker ENOENT"), { code: "ENOENT" }));
+    const message = await result.catch((error: Error) => error.message);
+    expect(message).toContain("Docker-over-SSH could not start: spawn docker ENOENT");
+    expect(message).toContain(dockerCliInstallCommand(process.platform)!);
+  });
+
+  it.skipIf(process.platform === "win32").each(["timeout", "stdin"])("reaps real SSH-like grandchildren after %s without stopping an unrelated master", async (failure) => {
+    const { spawn: realSpawn } = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    const { killCliTree: realStop } = await vi.importActual<typeof import("./procs.ts")>("./procs.ts");
+    stopMock.mockImplementation(realStop);
+    const idle = "setInterval(() => {}, 1000)";
+    const helperCode = `process.on('SIGTERM', () => {}); console.log(process.pid); ${idle}`;
+    const dockerCode = `const c = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(helperCode)}], { stdio: ['ignore', 'inherit', 'inherit'] }); ${idle}`;
+    let docker!: ChildProcess;
+    spawnMock.mockImplementation((_command, _args, options) => {
+      docker = realSpawn(process.execPath, ["-e", dockerCode], options);
+      return docker;
+    });
+    const master = realSpawn(process.execPath, ["-e", idle], { detached: true, stdio: "ignore" });
+    const masterClosed = new Promise<void>((resolve) => master.once("close", () => resolve()));
+    let helper = 0;
+    // An exited process nothing has collected yet still answers kill(pid, 0); killCliTree counts it as stopped (procs.ts).
+    const alive = (pid: number) => {
+      try { process.kill(pid, 0); } catch { return false; }
+      try {
+        const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+        return !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]);
+      } catch { return process.platform !== "linux"; }
+    };
+    const result = defaultRunner(["info"], { timeoutMs: failure === "timeout" ? 1_000 : 20_000 });
+    const rejected = expect(result).rejects.toThrow(failure === "timeout" ? "command timed out" : "stdin failed");
+    try {
+      helper = Number(await new Promise<string>((resolve) => docker.stdout!.once("data", (chunk) => resolve(String(chunk).trim()))));
+      expect(alive(helper)).toBe(true);
+      if (failure === "stdin") docker.stdin!.emit("error", new Error("write EPIPE"));
+      await rejected;
+      expect(alive(helper)).toBe(false);
+      expect(docker.exitCode !== null || docker.signalCode !== null).toBe(true);
+      expect(docker.stdin!.destroyed && docker.stdout!.destroyed && docker.stderr!.destroyed).toBe(true);
+      expect(alive(master.pid!)).toBe(true);
+      spawnMock.mockImplementation((_command, _args, options) => realSpawn(process.execPath, ["-e", "console.log('recovered')"], options));
+      await expect(defaultRunner(["info"], { timeoutMs: 2_000 })).resolves.toMatchObject({ stdout: "recovered\n" });
+    } finally {
+      await realStop(docker, 0);
+      if (helper && alive(helper)) process.kill(helper, "SIGKILL");
+      if (master.pid && alive(master.pid)) master.kill("SIGKILL");
+      await masterClosed;
+    }
+  }, 15_000);
+});

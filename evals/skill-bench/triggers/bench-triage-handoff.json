@@ -1,0 +1,37 @@
+{
+  "skill": "bench-triage-handoff",
+  "triggerTerms": ["triage"],
+  "notes": "E4 trigger-eval fixture set, data only: no router runs these yet. shouldTrigger texts name a triage task and contain a declared trigger term; shouldNotTrigger texts contain none; nearMiss texts contain a term (or close variant) but describe work the skill must not fire on — today's substring matcher would over-trigger on every near miss, which is exactly what R3's router has to fix. This set doubles as R3's validation suite.",
+  "shouldTrigger": {
+    "train": [
+      { "id": "st-1", "text": "Please triage the support queue and tell me what deserves attention.", "because": "direct request to triage a queue" },
+      { "id": "st-2", "text": "Can you triage yesterday's incident reports and rank the follow-ups?", "because": "incident triage with a ranking deliverable" },
+      { "id": "st-3", "text": "Triage my inbox from the weekend and flag anything urgent.", "because": "inbox triage with an urgency flag" },
+      { "id": "st-4", "text": "I need someone to triage the bug backlog before the release meeting.", "because": "backlog triage on a deadline" }
+    ],
+    "heldOut": [
+      { "id": "st-5", "text": "Triage the crash reports from the beta build and group them by cause.", "because": "crash-report triage with grouping" },
+      { "id": "st-6", "text": "Please triage the job applicants into yes / maybe / no.", "because": "applicant triage with an explicit scheme" },
+      { "id": "st-7", "text": "Could you triage the open PRs and mark which ones are stale?", "because": "PR triage for staleness" }
+    ]
+  },
+  "shouldNotTrigger": {
+    "train": [
+      { "id": "snt-1", "text": "Summarize the meeting notes from the design review.", "because": "summarization, no triage task" },
+      { "id": "snt-2", "text": "Draft a launch announcement for the mobile app.", "because": "writing task" },
+      { "id": "snt-3", "text": "Why does the export drop rows with empty ids?", "because": "debugging question" },
+      { "id": "snt-4", "text": "Book the conference room for Tuesday at ten.", "because": "scheduling request" }
+    ],
+    "heldOut": [
+      { "id": "snt-5", "text": "Refactor the parser to use the shared tokenizer.", "because": "code change, no prioritization" },
+      { "id": "snt-6", "text": "What did the customer say about the new dashboard?", "because": "recall question" },
+      { "id": "snt-7", "text": "Set up the nightly backup verification.", "because": "ops setup, not triage" }
+    ]
+  },
+  "nearMiss": [
+    { "id": "nm-1", "text": "I'm reading the novel Triage — just tracking my reading list, nothing to do.", "because": "the term is a book title, not a task" },
+    { "id": "nm-2", "text": "The ER triage poster needs a higher-resolution export for print.", "because": "a design/print task that mentions triage" },
+    { "id": "nm-3", "text": "Retriage is not a word; fix that typo in my process doc.", "because": "substring hit inside another word, editing task" },
+    { "id": "nm-4", "text": "Don't triage anything today, I'm off call — just log the receipts.", "because": "explicit negation of the task" }
+  ]
+}

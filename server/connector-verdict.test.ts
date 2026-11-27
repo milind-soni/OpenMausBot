@@ -1,0 +1,267 @@
+import { describe, expect, it } from "vitest";
+
+import type { ConnectorToolGrant } from "../shared/wire.ts";
+import {
+  APP_SANDBOX_REFUSAL,
+  appSandboxAllowed,
+  appSandboxRule,
+  COMPOSIO_MULTI_EXECUTE_TOOL,
+  connectorCallFromFrame,
+  connectorRefusalText,
+  connectorScopeRefusalText,
+  connectorUnrecognizedText,
+  evaluateConnectorTools,
+  serviceSlugFor,
+  serviceSlugForCandidates,
+} from "./connector-verdict.ts";
+
+const toolsCall = (name: string, args: unknown) => ({
+  jsonrpc: "2.0",
+  id: 7,
+  method: "tools/call",
+  params: { name, arguments: args },
+});
+
+const multiExecute = (args: unknown) => toolsCall(COMPOSIO_MULTI_EXECUTE_TOOL, args);
+
+describe("connectorCallFromFrame", () => {
+  it("passes non-tool traffic and meta-tools through untouched", () => {
+    expect(connectorCallFromFrame({ jsonrpc: "2.0", id: 1, method: "initialize" })).toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame({ jsonrpc: "2.0", id: 2, method: "tools/list" })).toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame(null)).toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame("notifications/initialized")).toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame(toolsCall("COMPOSIO_SEARCH_TOOLS", { query: "gmail" }))).toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame(toolsCall("COMPOSIO_GET_TOOL_SCHEMAS", { tools: ["GMAIL_SEND_EMAIL"] })))
+      .toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame(toolsCall("GMAIL_MANAGE_CONNECTIONS", {}))).toEqual({ kind: "passthrough" });
+    expect(connectorCallFromFrame(toolsCall("SLACK_WAIT_FOR_CONNECTIONS", {}))).toEqual({ kind: "passthrough" });
+  });
+
+  it("reads a direct per-toolkit call", () => {
+    expect(connectorCallFromFrame(toolsCall("GMAIL_SEND_EMAIL", { to: "a@b.c" })))
+      .toEqual({ kind: "tools", invoked: "GMAIL_SEND_EMAIL", names: ["GMAIL_SEND_EMAIL"] });
+    expect(connectorCallFromFrame(toolsCall("_1PASSWORD_GET_ITEM", { item_id: "i1" })))
+      .toEqual({ kind: "tools", invoked: "_1PASSWORD_GET_ITEM", names: ["_1PASSWORD_GET_ITEM"] });
+  });
+
+  it("reads every target from MULTI_EXECUTE, single and batched", () => {
+    expect(connectorCallFromFrame(multiExecute({
+      tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {} }, { tool_slug: "SLACK_POST_MESSAGE", arguments: {} }],
+      sync_response_to_workbench: false,
+    }))).toEqual({
+      kind: "tools",
+      invoked: COMPOSIO_MULTI_EXECUTE_TOOL,
+      names: ["GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"],
+    });
+    expect(connectorCallFromFrame(multiExecute({
+      tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {} }],
+      sync_response_to_workbench: false,
+    }))).toEqual({ kind: "tools", invoked: COMPOSIO_MULTI_EXECUTE_TOOL, names: ["GMAIL_SEND_EMAIL"] });
+    expect(connectorCallFromFrame(multiExecute({ tool_slug: "GMAIL_SEND_EMAIL", arguments: {} })))
+      .toEqual({ kind: "tools", invoked: COMPOSIO_MULTI_EXECUTE_TOOL, names: ["GMAIL_SEND_EMAIL"] });
+  });
+
+  it("denies unrecognized shapes by default", () => {
+    expect(connectorCallFromFrame(multiExecute({ sync_response_to_workbench: false })).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(multiExecute({ tools: "GMAIL_SEND_EMAIL" })).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(multiExecute({ tools: [] })).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(multiExecute({ tools: [{ arguments: {} }] })).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(multiExecute({ tools: [{ tool_slug: 42, arguments: {} }] })).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(multiExecute("send the email")).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(multiExecute(null)).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame(toolsCall("gmail_send_email", {})).kind).toBe("unrecognized");
+    expect(connectorCallFromFrame({ jsonrpc: "2.0", id: 3, method: "tools/call", params: {} }).kind)
+      .toBe("unrecognized");
+    expect(connectorCallFromFrame({ jsonrpc: "2.0", id: 4, method: "tools/call" }).kind).toBe("unrecognized");
+  });
+});
+
+describe("appSandboxRule", () => {
+  const granted = {};
+  it("opens only a direct call to the apps' sandbox, and only while the turn runs at Full access", () => {
+    let full = true;
+    const level = () => full;
+    for (const name of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"]) {
+      const rule = appSandboxRule(toolsCall(name, { code: "print(1)" }), level);
+      expect(rule.direct).toBe(true);
+      expect(rule.open(granted)).toBe(true);
+      expect(rule.refusal).toBe(APP_SANDBOX_REFUSAL);
+    }
+    const direct = appSandboxRule(toolsCall("COMPOSIO_REMOTE_WORKBENCH", {}), level);
+    full = false;
+    expect(direct.open(granted), "asked again at dispatch: the level dropped meanwhile").toBe(false);
+    full = true;
+    const wrapped = appSandboxRule(multiExecute({ tools: [{ tool_slug: "COMPOSIO_REMOTE_WORKBENCH", arguments: {} }] }), level);
+    expect(wrapped.direct).toBe(false);
+    expect(wrapped.open(granted)).toBe(false);
+    expect(wrapped.refusal).not.toBe(APP_SANDBOX_REFUSAL);
+    expect(appSandboxRule(toolsCall("COMPOSIO_SEARCH_TOOLS", {}), level).open(granted)).toBe(false);
+    expect(appSandboxRule({ method: "tools/list" }, level).open(granted)).toBe(false);
+    expect(appSandboxRule(null, level).open(granted)).toBe(false);
+  });
+
+  it("stays shut at Full access for a bot whose scopes limit its apps, and says the read-only setting is why", () => {
+    const rule = appSandboxRule(toolsCall("COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" }), () => true);
+    expect(rule.open({ connectorScopes: { apps: { gmail: "read" } } })).toBe(false);
+    expect(rule.open({ connectorScopes: { apps: { gmail: "write" } } }), "an app left off is a limit too").toBe(false);
+    expect(rule.open({ connectorScopes: { apps: {} } })).toBe(false);
+    expect(appSandboxAllowed({ connectorScopes: { apps: { gmail: "read" } } })).toBe(false);
+    expect(appSandboxAllowed({})).toBe(true);
+    expect(rule.refusal).toContain("read only");
+  });
+});
+
+describe("serviceSlugFor", () => {
+  it("maps a tool name to its service slug", () => {
+    expect(serviceSlugFor("GMAIL_SEND_EMAIL")).toBe("gmail");
+    expect(serviceSlugFor("SLACK_POST_MESSAGE")).toBe("slack");
+    expect(serviceSlugFor("_1PASSWORD_GET_ITEM")).toBe("_1password");
+    expect(serviceSlugFor("GMAIL")).toBeNull();
+    expect(serviceSlugFor("_SEND")).toBeNull();
+  });
+});
+
+describe("serviceSlugForCandidates", () => {
+  it("prefers the longest known slug across an underscore boundary", () => {
+    expect(serviceSlugForCandidates("BLAND_AI_MAKE_CALL", ["bland", "bland_ai"])).toBe("bland_ai");
+    expect(serviceSlugForCandidates("GITHUB_CREATE_ISSUE", ["git", "github"])).toBe("github");
+    expect(serviceSlugForCandidates("_1PASSWORD_GET_ITEM", ["_1password", "password"])).toBe("_1password");
+  });
+
+  it("matches whole slug segments only and reports no match for the caller's fallback", () => {
+    // "git" must not claim GITHUB_* — the candidate has to end at an underscore.
+    expect(serviceSlugForCandidates("GITHUB_CREATE_ISSUE", ["git"])).toBeNull();
+    expect(serviceSlugForCandidates("BLAND_AI_MAKE_CALL", ["gmail", "slack"])).toBeNull();
+    expect(serviceSlugForCandidates("GMAIL_SEND_EMAIL", [])).toBeNull();
+  });
+});
+
+describe("evaluateConnectorTools", () => {
+  it("passes everything for a legacy bot with no grants record", () => {
+    const verdict = evaluateConnectorTools(["GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"], undefined);
+    expect(verdict).toMatchObject({ allowed: true, legacy: true, rule: "composio" });
+  });
+
+  it("denies everything when the grants record is empty", () => {
+    const verdict = evaluateConnectorTools(["GMAIL_SEND_EMAIL"], {});
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.denials).toEqual([{ tool: "GMAIL_SEND_EMAIL", service: "gmail", onGrantedService: false }]);
+  });
+
+  it("treats inherited object keys as no grant", () => {
+    // CONSTRUCTOR_X resolves to "constructor": without the own-property check the prototype's constructor poses as a grant and the relay 500s.
+    const verdict = evaluateConnectorTools(["CONSTRUCTOR_X", "TOSTRING_Y"], {});
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.denials).toEqual([
+      { tool: "CONSTRUCTOR_X", service: "constructor", onGrantedService: false },
+      { tool: "TOSTRING_Y", service: "tostring", onGrantedService: false },
+    ]);
+  });
+
+  it("allows only the exact tools a service's list names", () => {
+    const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: ["GMAIL_SEND_EMAIL"] } };
+    expect(evaluateConnectorTools(["GMAIL_SEND_EMAIL"], grants)).toMatchObject({
+      allowed: true,
+      rule: "connectorTools.gmail",
+    });
+    expect(evaluateConnectorTools(["GMAIL_FETCH_EMAILS"], grants).denials).toEqual([
+      { tool: "GMAIL_FETCH_EMAILS", service: "gmail", onGrantedService: true },
+    ]);
+    expect(evaluateConnectorTools(["SLACK_POST_MESSAGE"], grants).denials).toEqual([
+      { tool: "SLACK_POST_MESSAGE", service: "slack", onGrantedService: false },
+    ]);
+  });
+
+  it("widens to every tool on a star-granted service and denies others", () => {
+    const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: "*" } };
+    expect(evaluateConnectorTools(["GMAIL_SEND_EMAIL", "GMAIL_FETCH_EMAILS"], grants).allowed).toBe(true);
+    expect(evaluateConnectorTools(["SLACK_POST_MESSAGE"], grants).allowed).toBe(false);
+    const onePassword: Record<string, ConnectorToolGrant> = { _1password: { tools: "*" } };
+    expect(evaluateConnectorTools(["_1PASSWORD_GET_ITEM", "_1PASSWORD_LIST_VAULTS"], onePassword).allowed).toBe(true);
+    expect(evaluateConnectorTools(["_1PASSWORD_GET_ITEM"], { _1password: { tools: ["_1PASSWORD_GET_ITEM"] } }).allowed).toBe(true);
+    expect(evaluateConnectorTools(["_1PASSWORD_DELETE_ITEM"], { _1password: { tools: ["_1PASSWORD_GET_ITEM"] } }).allowed).toBe(false);
+  });
+
+  it("keeps an underscored service's tools under its own grant", () => {
+    const grants: Record<string, ConnectorToolGrant> = {
+      bland: { tools: "*" },
+      bland_ai: { tools: ["BLAND_AI_MAKE_CALL"] },
+    };
+    expect(evaluateConnectorTools(["BLAND_AI_MAKE_CALL"], grants, ["bland", "bland_ai"])).toMatchObject({
+      allowed: true,
+      rule: "connectorTools.bland_ai",
+    });
+    expect(evaluateConnectorTools(["BLAND_AI_SEND_SMS"], grants, ["bland", "bland_ai"]).denials).toEqual([
+      { tool: "BLAND_AI_SEND_SMS", service: "bland_ai", onGrantedService: true },
+    ]);
+  });
+
+  it("does not let a plain-prefix grant capture an underscored connected service", () => {
+    // bland_ai is the connected service, so its tools must resolve there
+    // even when the record only holds a wildcard for the plain prefix.
+    const grants: Record<string, ConnectorToolGrant> = { bland: { tools: "*" } };
+    expect(evaluateConnectorTools(["BLAND_AI_MAKE_CALL"], grants, ["bland_ai"]).denials).toEqual([
+      { tool: "BLAND_AI_MAKE_CALL", service: "bland_ai", onGrantedService: false },
+    ]);
+  });
+
+  it("denies a name that maps to no service and judges a batch once per distinct tool", () => {
+    const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: "*" } };
+    const verdict = evaluateConnectorTools(["GMAIL_SEND_EMAIL", "GMAIL_SEND_EMAIL", "GMAIL"], grants);
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.denials).toEqual([{ tool: "GMAIL", service: null, onGrantedService: false }]);
+  });
+});
+
+describe("refusal text", () => {
+  it("names the refused tools and the person, never the grants", () => {
+    const grants: Record<string, ConnectorToolGrant> = {
+      gmail: { tools: "*" },
+      slack: { tools: ["SLACK_POST_MESSAGE"] },
+    };
+    const verdict = evaluateConnectorTools(["SLACK_CREATE_CHANNEL"], grants);
+    const text = connectorRefusalText(verdict.denials);
+    expect(text).toContain("SLACK_CREATE_CHANNEL");
+    expect(text).toContain("Ask the person");
+    expect(text).not.toContain("SLACK_POST_MESSAGE");
+    expect(text).not.toContain("GMAIL");
+  });
+
+  it("tells a bot whose batch wraps the apps' sandbox that it runs only at Full access, by a direct call", () => {
+    const text = connectorRefusalText(evaluateConnectorTools(["COMPOSIO_REMOTE_WORKBENCH"], { gmail: { tools: "*" } }).denials);
+    expect(text).toBe(APP_SANDBOX_REFUSAL);
+    expect(text).toContain("Full access");
+    expect(connectorRefusalText([
+      { tool: "COMPOSIO_REMOTE_WORKBENCH", service: "composio", onGrantedService: false },
+      { tool: "NOTION_CREATE_PAGE", service: "notion", onGrantedService: false },
+    ])).not.toContain("sandbox");
+  });
+
+  it("names every refused tool in a batch", () => {
+    const text = connectorRefusalText([
+      { tool: "SLACK_CREATE_CHANNEL", service: "slack", onGrantedService: true },
+      { tool: "NOTION_CREATE_PAGE", service: "notion", onGrantedService: false },
+    ]);
+    expect(text).toContain("SLACK_CREATE_CHANNEL");
+    expect(text).toContain("NOTION_CREATE_PAGE");
+    expect(text).toContain("are not granted");
+  });
+
+  it("explains an unrecognized shape without pointing at any tool list", () => {
+    const text = connectorUnrecognizedText(COMPOSIO_MULTI_EXECUTE_TOOL, "the tools list was empty");
+    expect(text).toContain(COMPOSIO_MULTI_EXECUTE_TOOL);
+    expect(text).toContain("the tools list was empty");
+    expect(text).toContain("tools: [{ tool_slug, arguments }]");
+    expect(text).toContain("Ask the person");
+  });
+
+  it("tells a scoped bot its call was unreadable before it blames access", () => {
+    const unreadable = connectorCallFromFrame(toolsCall(COMPOSIO_MULTI_EXECUTE_TOOL, { tool_calls: [{ tool_slug: "GMAIL_FETCH_EMAILS" }] }));
+    const text = connectorScopeRefusalText(unreadable, "app", "Scout", "Composio", "Proxy execute");
+    expect(text).toContain("could not read");
+    expect(text).not.toContain("has not been given access");
+    const tools = connectorCallFromFrame(toolsCall("GMAIL_SEND_EMAIL", {}));
+    expect(connectorScopeRefusalText(tools, "app", "Scout", "Gmail", "Send email")).toContain("Scout has not been given access to Gmail");
+    expect(connectorScopeRefusalText(tools, "write", "Scout", "Gmail", "Send email")).toContain("Gmail is read-only for Scout, and Send email would write to it");
+  });
+});

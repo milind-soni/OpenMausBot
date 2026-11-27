@@ -1,0 +1,352 @@
+// macOS privacy enforcement requires the code calling Speech/AVFoundation to launch with its own Info.plist identity.
+// Windows listens through its built-in recognizer, driven by resources/speech-helper-windows.ps1 over stdin/stdout.
+import { execFile, spawn } from "node:child_process";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  unwatchFile,
+  watchFile,
+  writeFileSync,
+} from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { app } from "electron";
+import { createSpeechTranscript } from "./speech-transcript.mjs";
+
+import {
+  buildSpeechHelper,
+  speechHelperBinary,
+  speechHelperBundle,
+} from "./build-speech-helper.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SRC = path.join(__dirname, "resources", "speech-helper.swift");
+const INFO = path.join(__dirname, "resources", "speech-helper-Info.plist");
+const WINDOWS_HELPER = path.join(__dirname, "resources", "speech-helper-windows.ps1");
+// Run by WINDOWS_HELPER from the same session folder when the desktop recognizer lacks the display language.
+const WINDOWS_ONECORE_HELPER = path.join(__dirname, "resources", "speech-helper-windows-onecore.ps1");
+// A signed app bundle must never be rewritten: lazy compilation would break its seal.
+const BUNDLE = app.isPackaged
+  ? path.join(process.resourcesPath, "OpenMausBot Speech.app")
+  : speechHelperBundle;
+const BIN = app.isPackaged
+  ? path.join(BUNDLE, "Contents", "MacOS", "speech-helper")
+  : speechHelperBinary;
+
+let child = null;
+
+function ensureBuilt() {
+  if (app.isPackaged) return;
+  const binaryMtime = existsSync(BIN) ? statSync(BIN).mtimeMs : 0;
+  const stale = binaryMtime < Math.max(statSync(SRC).mtimeMs, statSync(INFO).mtimeMs);
+  if (!stale) return;
+  buildSpeechHelper();
+}
+
+const RELEASE_MODIFIERS = ["control", "option", "shift", "command"];
+const PAGE_GONE = ["render-process-gone", "did-navigate"];
+
+function speechTarget(target) {
+  if (typeof target?.transcript === "function") return {
+      owner: target,
+      transcript: (line) => target.transcript(line),
+      end: (info) => target.end(info),
+      replaced: () => target.replaced(),
+      whenGone: () => () => {},
+    };
+  const send = (channel, body) => {
+    if (!target.isDestroyed()) target.webContents.send(channel, body);
+  };
+  return {
+    owner: target,
+    transcript: (line) => send("speech:transcript", line),
+    end: (info) => send("speech:end", info),
+    replaced: () => {},
+    whenGone: (listener) => {
+      // Electron: a destroyed BrowserWindow throws when its webContents is read.
+      const contents = target.webContents;
+      target.on("closed", listener);
+      for (const event of PAGE_GONE) contents.on(event, listener);
+      return () => {
+        target.removeListener("closed", listener);
+        for (const event of PAGE_GONE) contents.removeListener(event, listener);
+      };
+    },
+  };
+}
+
+/** One helper line at a time: transcripts reach the page only while this session is current; the end says why it stopped. */
+function speechLines(speechSession, sink) {
+  const transcript = createSpeechTranscript();
+  let reportedError = null;
+  let completed = false;
+  return {
+    line(raw) {
+      const line = raw.trim();
+      if (!line) return;
+      try {
+        const parsed = JSON.parse(line);
+        if (typeof parsed.error === "string") reportedError = parsed.error;
+        if (parsed.partial === false && typeof parsed.text === "string") completed = true;
+        // A stopped or replaced helper can flush one last chunk: never into the session that replaced it.
+        if (child === speechSession) sink.transcript(transcript(parsed));
+      } catch {
+      }
+    },
+    end(code) {
+      if (reportedError) {
+        sink.end({ code: 1, reason: reportedError });
+      } else if (completed && code === 0) {
+        sink.end({ code: 0, reason: "completed" });
+      } else {
+        sink.end({ code: 1, reason: "helper-exited" });
+      }
+    },
+  };
+}
+
+const windowsPowerShell = () =>
+  path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+
+// The script is read from the app (inside the asar archive when packaged) and run from a session folder PowerShell can open.
+function startWindowsSpeech(sink, endpointMs) {
+  let sessionDir;
+  let script;
+  try {
+    sessionDir = mkdtempSync(path.join(app.getPath("temp"), "openmausbot-speech-"));
+    script = path.join(sessionDir, "speech-helper.ps1");
+    writeFileSync(script, readFileSync(WINDOWS_HELPER));
+    writeFileSync(path.join(sessionDir, "speech-helper-onecore.ps1"), readFileSync(WINDOWS_ONECORE_HELPER));
+  } catch {
+    if (sessionDir) rmSync(sessionDir, { recursive: true, force: true });
+    sink.end({ code: 1, reason: "helper-start-failed" });
+    return;
+  }
+  const speechSession = { proc: null, owner: sink.owner, target: sink };
+  child = speechSession;
+  const lines = speechLines(speechSession, sink);
+  const forgetWindow = sink.whenGone(() => stopSpeech(sink.owner));
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    forgetWindow();
+    // Windows can still hold the script open for a moment (a virus scan): a folder left in temp must not stop the end.
+    try {
+      rmSync(sessionDir, { recursive: true, force: true });
+    } catch {}
+  };
+  speechSession.cleanup = cleanup;
+  const ended = (end) => {
+    cleanup();
+    if (child !== speechSession) return;
+    child = null;
+    end();
+  };
+  let proc;
+  try {
+    // stdin is the helper's lifeline too: when this app is gone the pipe closes and the helper exits.
+    proc = spawn(
+      windowsPowerShell(),
+      ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-EndpointMs", String(endpointMs)],
+      { stdio: ["pipe", "pipe", "ignore"], windowsHide: true },
+    );
+  } catch {
+    ended(() => sink.end({ code: 1, reason: "helper-start-failed" }));
+    return;
+  }
+  speechSession.proc = proc;
+  speechSession.stop = () => proc.kill();
+  speechSession.finish = () => proc.stdin.write("finish\n");
+  proc.stdin.on("error", () => {});
+  let buf = "";
+  proc.stdout.setEncoding("utf8");
+  proc.stdout.on("data", (chunk) => {
+    buf += chunk;
+    let nl;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      lines.line(buf.slice(0, nl));
+      buf = buf.slice(nl + 1);
+    }
+  });
+  proc.on("close", (code) => {
+    lines.line(buf);
+    buf = "";
+    ended(() => lines.end(code));
+  });
+  proc.on("error", () => ended(() => sink.end({ code: 1, reason: "helper-start-failed" })));
+}
+
+export function speechBusy() {
+  return child !== null;
+}
+
+export function startSpeech(target, options = {}) {
+  const running = child;
+  stopSpeech();
+  running?.target.replaced();
+  const sink = speechTarget(target);
+  if (process.platform !== "darwin" && process.platform !== "win32") {
+    sink.end({ code: 2, reason: "unsupported-platform" });
+    return;
+  }
+  const requested = Number(options?.endpointMs);
+  const endpointMs = Number.isFinite(requested) && requested > 0
+    ? Math.min(5_000, Math.max(250, Math.round(requested)))
+    : 0;
+  if (process.platform === "win32") {
+    startWindowsSpeech(sink, endpointMs);
+    return;
+  }
+  const args = endpointMs ? ["--endpoint-ms", String(endpointMs)] : [];
+  const release = [...new Set(Array.isArray(options?.finishOnRelease) ? options.finishOnRelease : [])]
+    .filter((name) => RELEASE_MODIFIERS.includes(name));
+  if (release.length) args.push("--finish-on-release", release.join(","));
+
+  try {
+    ensureBuilt();
+  } catch {
+    sink.end({ code: 1, reason: "helper-build-failed" });
+    return;
+  }
+
+  // A direct spawn loses the bundle identity and TCC kills it; LaunchServices keeps it. `open` sends stdout/stderr to files, tailed here.
+  const sessionDir = mkdtempSync(path.join(app.getPath("temp"), "openmausbot-speech-"));
+  const outputPath = path.join(sessionDir, "stdout.ndjson");
+  const errorPath = path.join(sessionDir, "stderr.log");
+  const stopPath = path.join(sessionDir, "stop");
+  const finishPath = path.join(sessionDir, "finish");
+  const lifelinePath = path.join(sessionDir, "owner.pipe");
+  writeFileSync(outputPath, "");
+  writeFileSync(errorPath, "");
+
+  let lifeline;
+  const speechSession = {
+    proc: null, outputPath, errorPath, sessionDir,
+    // The Mac helper watches these marker files.
+    stop: () => writeFileSync(stopPath, "stop"),
+    finish: () => writeFileSync(finishPath, "finish"),
+    owner: sink.owner, target: sink,
+  };
+  child = speechSession;
+  const forgetWindow = sink.whenGone(() => stopSpeech(sink.owner));
+  let buf = "";
+  let offset = 0;
+  const lines = speechLines(speechSession, sink);
+
+  const drain = () => {
+    let content;
+    try {
+      content = readFileSync(outputPath, "utf8");
+    } catch {
+      return;
+    }
+    if (content.length <= offset) return;
+    buf += content.slice(offset);
+    offset = content.length;
+    let nl;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      lines.line(buf.slice(0, nl));
+      buf = buf.slice(nl + 1);
+    }
+  };
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (lifeline !== undefined) closeSync(lifeline);
+    forgetWindow();
+    unwatchFile(outputPath, drain);
+    rmSync(sessionDir, { recursive: true, force: true });
+  };
+  speechSession.cleanup = cleanup;
+  const failed = () => {
+    cleanup();
+    if (child !== speechSession) return;
+    child = null;
+    sink.end({ code: 1, reason: "helper-start-failed" });
+  };
+  try {
+    execFile("/usr/bin/mkfifo", ["-m", "600", lifelinePath], { timeout: 5_000 }, (error) => {
+      if (cleaned) return;
+      if (error) {
+        failed();
+        return;
+      }
+      try {
+        const reader = openSync(lifelinePath, constants.O_RDONLY | constants.O_NONBLOCK);
+        try {
+          // Only Electron holds a writer; LaunchServices cannot inherit a lifeline through `open`.
+          lifeline = openSync(lifelinePath, constants.O_WRONLY | constants.O_NONBLOCK);
+        } finally {
+          closeSync(reader);
+        }
+        const proc = spawn(
+          "/usr/bin/open",
+          [
+            "-n",
+            "-g",
+            "-W",
+            "-o",
+            outputPath,
+            "--stderr",
+            errorPath,
+            BUNDLE,
+            "--args",
+            ...args,
+            "--stop-file",
+            stopPath,
+            "--finish-file",
+            finishPath,
+            "--lifeline-file",
+            lifelinePath,
+          ],
+          { stdio: "ignore" },
+        );
+        speechSession.proc = proc;
+        watchFile(outputPath, { interval: 50, persistent: false }, drain);
+        proc.on("close", (code) => {
+          drain();
+          cleanup();
+          // stopSpeech() clears child before the stop marker, so intentional TTS muting never looks like the end of a spoken turn.
+          if (child !== speechSession) return;
+          child = null;
+          lines.end(code);
+        });
+        proc.on("error", failed);
+      } catch {
+        failed();
+      }
+    });
+  } catch {
+    failed();
+  }
+}
+
+const ownedBy = (owner) => child !== null && (owner === undefined || child.owner === owner);
+
+export function stopSpeech(owner) {
+  if (!ownedBy(owner)) return;
+  const speechSession = child;
+  child = null;
+  if (!speechSession.proc) {
+    speechSession.cleanup();
+    return;
+  }
+  try {
+    speechSession.stop();
+  } catch {}
+}
+
+export function finishSpeech(owner) {
+  if (!ownedBy(owner)) return;
+  try {
+    child.finish();
+  } catch {}
+}

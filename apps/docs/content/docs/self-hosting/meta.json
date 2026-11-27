@@ -1,0 +1,12 @@
+{
+  "title": "Self-hosting",
+  "icon": "Server",
+  "pages": [
+    "index",
+    "deploy-vps",
+    "networking",
+    "data-and-backups",
+    "redundancy",
+    "connected-servers"
+  ]
+}

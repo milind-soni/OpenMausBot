@@ -1,0 +1,37 @@
+{
+  "about": [
+    "Clef on Workers AI, from developers.cloudflare.com/workers-ai/models/clef-flash (request example and output schema, Oct 2026).",
+    "POST https://api.cloudflare.com/client/v4/accounts/<account id>/ai/run/@cf/cloudflare/clef-flash (or .../clef for a hard case) with Authorization: Bearer <token>.",
+    "The REST API wraps the model's answer as { result, success, errors, messages }. Clef-omni (@cf/cloudflare/clef-omni) takes the same body plus audio and videos, and is not used."
+  ],
+  "request": {
+    "model": "clef-flash",
+    "state": "Checkout has been failing for every customer for the last hour.",
+    "questions": {
+      "urgent": { "type": "noul", "instructions": "Is this support request urgent?" },
+      "team": {
+        "type": "choice",
+        "instructions": "Which team should handle this request?",
+        "criteria": { "billing": "Payments, invoices, and refunds", "technical": "Outages, errors, and configuration", "sales": "Plans and upgrades" }
+      },
+      "severity": { "type": "score", "instructions": "How severe is the customer impact?", "criteria": ["No impact", "Minor", "Major", "Critical"] }
+    }
+  },
+  "response": {
+    "result": {
+      "model": "clef-flash",
+      "answers": {
+        "urgent": { "type": "noul", "noul": 0.94 },
+        "team": { "type": "choice", "choice": "technical", "probabilities": { "billing": 0.02, "technical": 0.95, "sales": 0.03 }, "confidence": 0.93 },
+        "severity": {
+          "type": "score", "score": 2.6, "legend": { "0": "No impact", "1": "Minor", "2": "Major", "3": "Critical" },
+          "probabilities": { "0": 0.01, "1": 0.04, "2": 0.3, "3": 0.65 }, "confidence": 0.6
+        }
+      },
+      "usage": { "input_tokens": 142, "output_tokens": 0 }
+    },
+    "success": true,
+    "errors": [],
+    "messages": []
+  }
+}

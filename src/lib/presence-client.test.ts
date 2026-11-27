@@ -1,0 +1,53 @@
+import { describe, expect, it } from "vitest";
+
+import { setLanguageChoice } from "./language-preference";
+import { composerKey, duePing, dueTyping, openTarget, PRESENCE_MIN_INTERVAL_MS, presenceBody, shownLanguage } from "./presence-client";
+
+describe("presence client", () => {
+  it("sends the device's zone and the app's language with the desktop source", () => {
+    expect(presenceBody("Asia/Kolkata", "pt-br")).toEqual({ source: "desktop", timeZone: "Asia/Kolkata", language: "pt-br" });
+    expect(presenceBody("", "en")).toEqual({ source: "desktop", language: "en" });
+    expect(presenceBody("UTC", "en", "thread-1")).toEqual({ source: "desktop", timeZone: "UTC", language: "en", threadId: "thread-1" });
+  });
+
+  it("names the pack the app shows: the device's pick, else the server's language", () => {
+    expect(shownLanguage("pt-BR")).toBe("pt-br");
+    setLanguageChoice("es");
+    expect(shownLanguage("pt-br")).toBe("es");
+  });
+
+  it("pings once a minute at most, and at once the first time", () => {
+    expect(duePing(null, 1_000)).toBe(true);
+    expect(duePing(1_000, 1_000 + PRESENCE_MIN_INTERVAL_MS - 1)).toBe(false);
+    expect(duePing(1_000, 1_000 + PRESENCE_MIN_INTERVAL_MS)).toBe(true);
+  });
+
+  it("says typing only with the chat it is typed in", () => {
+    expect(presenceBody("UTC", "en", "thread-1", true)).toEqual({ source: "desktop", timeZone: "UTC", language: "en", threadId: "thread-1", typing: true });
+    expect(presenceBody("UTC", "en", undefined, true)).toEqual({ source: "desktop", timeZone: "UTC", language: "en" });
+  });
+
+  it("knows a key in a chat's composer from any other key or event", () => {
+    const composer = { closest: (selector: string) => (selector === "[data-composer-row]" ? {} : null) };
+    expect(composerKey({ type: "keydown", target: composer as unknown as EventTarget })).toBe(true);
+    expect(composerKey({ type: "pointerdown", target: composer as unknown as EventTarget })).toBe(false);
+    expect(composerKey({ type: "keydown", target: { closest: () => null } as unknown as EventTarget })).toBe(false);
+    expect(composerKey({ type: "keydown", target: null })).toBe(false);
+    expect(composerKey(undefined)).toBe(false);
+  });
+
+  it("tells typing in a chat at once, then once a minute there, and at once in another chat", () => {
+    expect(dueTyping(null, "t1", 1_000)).toBe(true);
+    expect(dueTyping({ threadId: "t1", at: 1_000 }, "t1", 1_000 + PRESENCE_MIN_INTERVAL_MS - 1)).toBe(false);
+    expect(dueTyping({ threadId: "t1", at: 1_000 }, "t2", 1_001)).toBe(true);
+    expect(dueTyping({ threadId: "t1", at: 1_000 }, "t1", 1_000 + PRESENCE_MIN_INTERVAL_MS)).toBe(true);
+  });
+
+  it("reads only a well-formed open target from the answer", () => {
+    expect(openTarget({ ok: true, returned: true, open: { botId: "chief", threadId: "t1" } })).toEqual({ botId: "chief", threadId: "t1" });
+    expect(openTarget({ ok: true, returned: false })).toBeNull();
+    expect(openTarget({ ok: true, returned: true, open: { botId: 5, threadId: "t1" } })).toBeNull();
+    expect(openTarget(null)).toBeNull();
+    expect(openTarget("nope")).toBeNull();
+  });
+});

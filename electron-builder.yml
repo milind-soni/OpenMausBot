@@ -1,0 +1,276 @@
+appId: com.openmausbot.app
+productName: OpenMausBot
+artifactName: OpenMausBot-${version}-${arch}.${ext}
+
+protocols:
+  - name: OpenMausBot package install
+    schemes: [openmausbot]
+
+# In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
+# the NSIS .exe (Windows) from the PUBLIC releases in this source repo.
+# Public → no token on users' machines. Baked into
+# app-update.yml; both metadata files are emitted here even with
+# --publish never, and must be uploaded to the GitHub release alongside the
+# artifacts — a release missing latest.yml leaves every Windows install
+# stranded on its installed version.
+publish:
+  - provider: github
+    owner: milind-soni
+    repo: OpenMausBot
+
+directories:
+  buildResources: build
+  output: release
+
+# electron-builder makes copied directories group-writable by default. The
+# Linux CUA trust boundary requires root-owned package ancestors to be 0755.
+afterPack: ./scripts/after-pack.mjs
+
+# The app is three self-contained pieces, none needing node_modules at
+# runtime: the Electron main/preload (plain .mjs/.cjs), the built UI
+# (Vite → ui/), and the compiled harness server (tsc → server/), both
+# shipped in Resources and run on Electron's own Node via
+# ELECTRON_RUN_AS_NODE (the agentcal-hq pattern).
+files:
+  - electron/**
+  - "!electron/**/*.test.*"
+  - "!electron/resources/speech-helper"
+  - "!electron/resources/speech-helper.swift"
+  - "!electron/resources/speech-helper-Info.plist"
+  - "!electron/resources/OpenMausBot Speech.app/**"
+  # The Teach a skill recorder is gone, but a machine that once ran
+  # `pnpm build:recorder` may still hold its helper build; never ship it.
+  - "!electron/resources/recorder-helper"
+  - "!electron/resources/recorder-helper.swift"
+  - "!electron/resources/recorder-helper-Info.plist"
+  - "!electron/resources/OpenMausBot Recorder.app/**"
+  - "!**/node_modules/**"
+  - src/locales/*.json
+  - "!src/locales/source-hashes.json"
+  - package.json
+
+asar: true
+
+extraResources:
+  # Ship the app's own license terms in every desktop distribution.
+  - from: LICENSE
+    to: licenses/OpenMausBot-LICENSE.txt
+  - from: NOTICE
+    to: licenses/OpenMausBot-NOTICE.txt
+  # cloudflared is distributed under Apache-2.0 as a separate executable.
+  # OpenMausBot itself uses the same full license text; ship another named
+  # copy so the third-party executable's terms remain unambiguous.
+  - from: LICENSE
+    to: licenses/cloudflared-LICENSE.txt
+  - from: third_party/cloudflared/README.md
+    to: licenses/cloudflared-README.md
+  - from: third_party/hpke-js/core-LICENSE.txt
+    to: licenses/hpke-core-LICENSE.txt
+  - from: third_party/hpke-js/common-LICENSE.txt
+    to: licenses/hpke-common-LICENSE.txt
+  # The model provider catalog: models.dev data and OpenCode's refresh logic.
+  - from: third_party/models-dev/LICENSE
+    to: licenses/models-dev-LICENSE.txt
+  - from: third_party/opencode/LICENSE
+    to: licenses/opencode-LICENSE.txt
+  # Orca (MIT): the Google cookies a sign-in import never copies.
+  - from: third_party/orca/LICENSE
+    to: licenses/orca-LICENSE.txt
+  # Code adapted from T3 Code (MIT): the bots' browser egress gate, the Antigravity runtime, citations.
+  - from: third_party/t3-code/LICENSE
+    to: licenses/t3-code-LICENSE.txt
+  # The 1Password SDK and its WebAssembly core (MIT; saved logins from
+  # 1Password, staged in the duckdb resource tree). Neither npm package
+  # carries its license text, so the upstream file travels here.
+  - from: third_party/onepassword-sdk/LICENSE
+    to: licenses/1password-sdk-LICENSE.txt
+  - from: dist
+    to: ui
+  - from: dist-server
+    to: server
+  # the companion sidecar — a separate process because it is the only part
+  # of the app that listens off this machine, and it stays off until asked
+  - from: dist-companion
+    to: companion
+  - from: skills
+    to: skills
+  - from: dist-native/android-platform-tools
+    to: android-platform-tools
+
+mac:
+  # Two single-arch artifacts rather than one universal binary: the app is
+  # architecture-specific, and universal would make users download both halves.
+  # electron-updater picks by filename (arm64-marked files on Apple silicon,
+  # unmarked ones on Intel), so latest-mac.yml must list all four files.
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # the dictation helper is a signed background app — Windows and Linux never see it
+  extraResources:
+    - from: electron/resources/OpenMausBot Speech.app
+      to: OpenMausBot Speech.app
+    # CUA must live outside ASAR. prepare-cua stages the signed executable and
+    # a self-contained JS/native SDK bundle selected for macOS arm64.
+    # ${arch} resolves per built arch — each bundle carries its own natives
+    - from: dist-native/${arch}/cua-driver
+      to: cua-driver
+    - from: dist-native/${arch}/cua-sdk
+      to: cua-sdk
+    - from: dist-native/cloudflared/darwin-${arch}/cloudflared
+      to: cloudflared/cloudflared
+    - from: dist-native/browser/darwin-${arch}
+      to: browser-engine
+    # The Data engine's native modules (DuckDB, resvg; server/data/engine.ts)
+    # as a node_modules tree the server requires at runtime; prepare-duckdb
+    # stages this arch's slice. The copy names the node_modules directory
+    # itself: electron-builder's resource filter drops a root-level
+    # node_modules entry of any tree it copies (app-builder-lib util/filter).
+    - from: dist-native/duckdb/darwin-${arch}/node_modules
+      to: duckdb/node_modules
+  extendInfo:
+    NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
+    NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
+    NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
+    NSLocalNetworkUsageDescription: OpenMausBot connects to your phones and your other computers on this network and on Tailscale.
+    NSBonjourServices:
+      - _openmausbot._tcp
+    NSScreenCaptureUsageDescription: OpenMausBot uses Screen Recording so bots can see this Mac before acting.
+    NSDownloadsFolderUsageDescription: OpenMausBot looks in Downloads for the file your Grok Bot saved when you move it here.
+  # Notarization runs manually after the build (notarytool + staple),
+  # mirroring the BlueyLite ship_release.sh flow.
+  notarize: false
+
+dmg:
+  sign: true
+  # ${arch} is load-bearing: without it the x64 dmg silently overwrites
+  # the arm64 one when both arches build (this section overrides both the
+  # top-level and mac-level artifactName, so it must carry the arch itself)
+  artifactName: OpenMausBot-${version}-${arch}.dmg
+  # x/y are icon centres in points. electron-builder 26.15.3 sizes the window
+  # from build/background.png and ignores dmg.window whenever a background is set.
+  iconSize: 112
+  iconTextSize: 13
+  contents:
+    - x: 180
+      y: 206
+    - x: 540
+      y: 206
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+    - target: zip
+      arch: x64
+  icon: build/icon.ico
+  extraResources:
+    - from: dist-native/cloudflared/win32-x64/cloudflared.exe
+      to: cloudflared/cloudflared.exe
+    - from: dist-native/browser/win32-x64
+      to: browser-engine
+    - from: dist-native/duckdb/win32-x64/node_modules
+      to: duckdb/node_modules
+    # CUA driver and SDK for Windows — must live outside ASAR for native modules
+    - from: dist-native/cua-win32-x64/cua-driver.exe
+      to: cua-driver.exe
+    - from: dist-native/cua-win32-x64/cua-driver-background.exe
+      to: cua-driver-background.exe
+    - from: dist-native/cua-win32-x64/cua-sdk
+      to: cua-sdk
+  # No signing config yet (would go under win.signtoolOptions or
+  # win.azureSignOptions — eb 26 nests it, there is no top-level
+  # win.certificateFile). The installer is unsigned, so SmartScreen shows
+  # "unknown publisher" on first run (README says so). verifyUpdateCodeSignature
+  # defaults true, but electron-updater skips the check when app-update.yml
+  # carries no publisherName — so auto-update still works today. Do NOT set
+  # publisherName without actually signing, or every update is rejected as
+  # untrusted; and once signed, keep the cert subject stable (or list both old
+  # and new in publisherName) or you strand already-installed users.
+
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: OpenMausBot
+  # Versioned, like the .dmg. The README's /latest/download/ button needs a
+  # STABLE filename, so ship a second copy named OpenMausBot-setup.exe on the
+  # release — the same trick as OpenMausBot.dmg beside OpenMausBot-${version}.dmg.
+  artifactName: OpenMausBot-${version}-setup.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch: x64
+    - target: deb
+      arch: x64
+    - target: rpm
+      arch: x64
+  # Keep the vector source in the freedesktop scalable icon hierarchy. A
+  # lone 1024px PNG is not indexed by GNOME's hicolor theme on Ubuntu 24.04.
+  icon: build/icon.svg
+  category: Utility
+  executableName: openmausbot
+  synopsis: Your own team of AI bots, in a chat app
+  description: A local-first chat app for running a team of AI agents.
+  maintainer: Milind Soni <46266943+milind-soni@users.noreply.github.com>
+  vendor: OpenMausBot
+  syncDesktopName: true
+  # The reviewed x64 CLI runtime is staged before packaging and remains
+  # outside ASAR so executable modes and adjacent sidecars are preserved.
+  extraResources:
+    - from: dist-native/cua-linux-x64
+      to: cua-linux-x64
+    - from: dist-native/cloudflared/linux-x64/cloudflared
+      to: cloudflared/cloudflared
+    - from: dist-native/browser/linux-x64
+      to: browser-engine
+    - from: dist-native/duckdb/linux-x64/node_modules
+      to: duckdb/node_modules
+    - from: build/linux-openmausbot-browser.apparmor
+      to: openmausbot-browser.apparmor
+  desktop:
+    entry:
+      Name: OpenMausBot
+      Comment: Your own team of AI bots, in a chat app
+      Keywords: AI;Agents;Chat;Productivity;
+
+deb:
+  packageCategory: utils
+  priority: optional
+  # Add the narrow browser policy's parser without replacing Electron's
+  # default shared-library dependencies.
+  fpm: ["--depends", "apparmor"]
+  # dpkg can preserve legacy directory modes during an upgrade. This
+  # idempotent hook repairs only the exact package-owned CUA path.
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+# Fedora (other RPM distributions are untested). The same hooks as the DEB
+# secure the package directories and the Chromium sandbox; the browser policy
+# step only acts on hosts that have AppArmor, so no apparmor dependency here.
+rpm:
+  # Own the install folder as well, so removing the package leaves no empty directories.
+  # No /usr/lib/.build-id links: another RPM bundling the same Electron binary
+  # would own the same link paths and the install would fail with a file conflict.
+  fpm: ["--directories", "/opt/OpenMausBot", "--rpm-rpmbuild-define", "_build_id_links none"]
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+pacman:
+  packageCategory: utils
+  fpm: ["--depends", "fuse3", "--depends", "gtk3", "--depends", "nss", "--depends", "alsa-lib", "--depends", "libcups", "--depends", "mesa"]
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+# Static AppImage runtime: Ubuntu 24.04 can launch it without legacy FUSE 2.
+toolsets:
+  appimage: "1.0.3"

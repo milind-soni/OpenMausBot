@@ -1,0 +1,199 @@
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { workerPort } from "./testing/worker-port.ts";
+
+const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+const fake = (name: string) => join(SERVER_DIR, "testing", name);
+const PORT = workerPort(18800, 10_000);
+const BASE = `http://127.0.0.1:${PORT}`;
+const posixOnly = describe.skipIf(process.platform === "win32");
+
+interface Msg {
+  id: string;
+  role: string;
+  kind: string;
+  text?: string;
+  turnId?: string;
+  tool?: { name: string };
+  digest?: { turnId: string; tools: Array<{ name: string; count: number }>; files?: { added: string[]; changed: string[] }; hookCoverage: string };
+}
+
+/** One row per engine family with a fake in server/testing; `tools` is what that fake's default turn emits. */
+const ENGINES = [
+  { id: "acp", driver: "grokAgent", cli: "fake-acp-cli.ts", env: {}, tools: ["run"] },
+  { id: "claude", driver: "claudeAgent", cli: "fake-claude-cli.ts", env: {}, tools: ["Bash"] },
+  { id: "codex", driver: "codex", cli: "fake-codex-app-server.ts", env: {}, tools: ["*"] },
+  { id: "pi", driver: "piAgent", cli: "fake-pi-cli.ts", env: { FAKE_PI_MODE: "tooluse" }, tools: ["bash"] },
+] as const;
+
+posixOnly("work digest e2e (every fake engine)", () => {
+  let child: ChildProcess;
+  let home: string;
+  let stderr = "";
+  const gate = () => join(home, "acp.gate");
+  const started = () => join(home, "acp.started");
+
+  const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: body ? { "content-type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const getBot = async (id: string) => (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
+  const waitFor = async (predicate: () => Promise<boolean>, what: string, ms = 30_000) => {
+    const deadline = Date.now() + ms;
+    while (!(await predicate())) {
+      if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}. stderr: ${stderr.slice(-3000)}`);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  };
+  const settled = async (id: string) => {
+    const b = await getBot(id);
+    return !!b && !b.busy && b.messages.some((m: Msg) => m.role === "bot" && m.kind === "text" && m.text);
+  };
+
+  beforeAll(async () => {
+    for (const e of ENGINES) chmodSync(fake(e.cli), 0o755);
+    home = mkdtempSync(join(tmpdir(), "omb-digest-e2e-"));
+    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    const instances: Record<string, unknown> = {};
+    for (const e of ENGINES) {
+      instances[e.id] = { driver: e.driver, environment: e.env, config: { cli: fake(e.cli), fullAuto: true } };
+    }
+    // a gated ACP instance for the file-change test, and a second plain ACP
+    // instance that echoes its prompt so the replay can be read back
+    instances.gated = {
+      driver: "grokAgent",
+      environment: { FAKE_ACP_MODE: "echo-gated", FAKE_ACP_GATE_FILE: gate(), FAKE_ACP_STARTED_FILE: started() },
+      config: { cli: fake("fake-acp-cli.ts"), fullAuto: true },
+    };
+    instances.echo = {
+      driver: "grokAgent",
+      environment: { FAKE_ACP_MODE: "echo-gated" },
+      config: { cli: fake("fake-acp-cli.ts"), fullAuto: true },
+    };
+    writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances }));
+
+    const env: NodeJS.ProcessEnv = { HOME: home, USERPROFILE: home, OMB_PORT: String(PORT) };
+    if (process.env.PATH) env.PATH = process.env.PATH;
+    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: join(SERVER_DIR, ".."),
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stderr!.on("data", (c) => (stderr += c));
+    const deadline = Date.now() + 20_000;
+    for (;;) {
+      try {
+        if ((await fetch(`${BASE}/api/health`)).ok) break;
+      } catch {}
+      if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
+      if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }, 30_000);
+
+  afterAll(async () => {
+    await waitForExit(child, { signal: "SIGTERM" });
+    await removeTempDir(home);
+  });
+
+  it.each(ENGINES)("$id: one settled turn yields exactly one digest naming its tools", async (engine) => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: engine.id, model: "fake-model" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "do one thing" })).status).toBe(202);
+    await waitFor(() => settled(created.id), `${engine.id} to settle`);
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: Msg) => m.kind === "digest"), `${engine.id} digest`);
+
+    const bot = await getBot(created.id);
+    const digests: Msg[] = bot.messages.filter((m: Msg) => m.kind === "digest");
+    const reply: Msg = bot.messages.find((m: Msg) => m.role === "bot" && m.kind === "text" && m.text);
+    expect(digests).toHaveLength(1);
+    const [d] = digests;
+    expect(d!.role).toBe("bot");
+    expect(d!.text).toMatch(/^\[digest\]/);
+    expect(d!.digest?.turnId).toBeTruthy();
+    if (reply.turnId) expect(d!.digest?.turnId).toBe(reply.turnId);
+    const names = d!.digest!.tools.map((t) => t.name);
+    if (engine.tools[0] === "*") expect(names.length).toBeGreaterThan(0);
+    else for (const name of engine.tools) expect(names).toContain(name);
+    const activities: Msg[] = bot.messages.filter((m: Msg) => m.kind === "activity" && m.tool);
+    for (const a of activities) expect(a.turnId).toBe(d!.digest?.turnId);
+    expect(d!.digest!.tools.reduce((n, t) => n + t.count, 0)).toBe(activities.length);
+  }, 45_000);
+
+  it("names the project files a turn changed, and a different engine taking over sees that in its replay", async () => {
+    const project = mkdtempSync(join(tmpdir(), "omb-digest-project-"));
+    writeFileSync(join(project, "README.md"), "hello");
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { cwd: project })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "gated", model: "fake-model" } })).status).toBe(200);
+
+    // the turn is held open by the gate; "the engine" changes a file meanwhile
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "raise the retry limit" })).status).toBe(202);
+    // busy flips at claim, BEFORE the pre-turn checkpoint; the fake's
+    // started marker is written when the prompt reaches it, after that
+    await waitFor(async () => existsSync(started()), "the gated turn to reach the engine");
+    writeFileSync(join(project, "retry.ts"), "export const RETRY_LIMIT = 5;");
+    writeFileSync(gate(), "go");
+    await waitFor(() => settled(created.id), "the gated turn to settle");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: Msg) => m.kind === "digest"), "digest with files");
+    const digest: Msg = (await getBot(created.id)).messages.find((m: Msg) => m.kind === "digest");
+    expect(digest.digest?.files?.added).toEqual(["retry.ts"]);
+
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "echo", model: "fake-model" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "what did you change?" })).status).toBe(202);
+    await waitFor(async () => {
+      const b = await getBot(created.id);
+      return !b.busy && b.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text).length >= 2;
+    }, "the echo engine to reply");
+    const replies: Msg[] = (await getBot(created.id)).messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text);
+    const echoed = replies.at(-1)!.text!;
+    expect(echoed).toContain("did in an earlier turn");
+    expect(echoed).toContain("retry.ts");
+    await removeTempDir(project);
+  }, 60_000);
+
+  it("reads a project that holds a repository when the bot is set to it, and checkpoints the first turn on the folder as that turn finds it", async () => {
+    for (const left of [gate(), started()]) rmSync(left, { force: true });
+    const project = mkdtempSync(join(tmpdir(), "omb-digest-seeded-"));
+    writeFileSync(join(project, "README.md"), "hello");
+    mkdirSync(join(project, ".git"));
+    const created = (await api("POST", "/api/bots")).body.bot;
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "gated", model: "fake-model" } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${created.id}`, { cwd: project })).status).toBe(200);
+
+    // no message yet: the folder is read into the bot's checkpoint, and no snapshot is taken
+    const shadows = join(home, ".openmausbot", "checkpoints", created.id);
+    // A shadow is made as <name>.<pid>.new and renamed into place, and the read-ahead stages the folder after that: wait for
+    // the staged folder in the shadow itself, not for the first index that appears (the draft's, before the rename).
+    const shadow = () => (existsSync(shadows) ? readdirSync(shadows) : []).filter((name) => !name.endsWith(".new")).map((name) => join(shadows, name, ".git")).find((dir) => existsSync(join(dir, "index")));
+    const shadowGit = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", env: { ...process.env, GIT_DIR: shadow()! } }).trim();
+    // The shadow can still be moving into place as it is read: a git that finds no repository there is "not yet".
+    const staged = () => { try { return shadowGit("ls-files") !== ""; } catch { return false; } };
+    await waitFor(async () => shadow() !== undefined && staged(), "the project to be read ahead of the first message");
+    expect(shadowGit("ls-files")).toBe("README.md");
+    expect(shadowGit("log", "--format=%s")).toBe("checkpoint base");
+
+    // the person edits the folder outside the app after it was read; the turn's own snapshot has that edit
+    writeFileSync(join(project, "notes.md"), "written by the person");
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "raise the retry limit" })).status).toBe(202);
+    await waitFor(async () => existsSync(started()), "the gated turn to reach the engine");
+    expect(shadowGit("show", "HEAD:notes.md")).toBe("written by the person");
+    writeFileSync(join(project, "retry.ts"), "export const RETRY_LIMIT = 5;");
+    writeFileSync(gate(), "go");
+    await waitFor(() => settled(created.id), "the gated turn to settle");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: Msg) => m.kind === "digest"), "digest with files");
+    const digest: Msg = (await getBot(created.id)).messages.find((m: Msg) => m.kind === "digest");
+    expect(digest.digest?.files).toMatchObject({ added: ["retry.ts"], changed: [] });
+    await removeTempDir(project);
+  }, 60_000);
+});

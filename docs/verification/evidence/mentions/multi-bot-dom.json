@@ -1,0 +1,344 @@
+{
+  "draftDark": {
+    "mentions": [
+      {
+        "background": "color(srgb 0.126275 0.194039 0.29098)",
+        "color": "color(srgb 0.756471 0.841176 0.962353)",
+        "name": "@Atlas",
+        "palette": "#377FE6",
+        "underline": "rgb(55, 127, 230)"
+      },
+      {
+        "background": "color(srgb 0.278745 0.145098 0.151686)",
+        "color": "color(srgb 0.947059 0.78 0.788235)",
+        "name": "@Juniper",
+        "palette": "#D94B52",
+        "underline": "rgb(217, 75, 82)"
+      },
+      {
+        "background": "color(srgb 0.291922 0.199686 0.120627)",
+        "color": "color(srgb 0.963529 0.848235 0.749412)",
+        "name": "@調査担当",
+        "palette": "#E78531",
+        "underline": "rgb(231, 133, 49)"
+      },
+      {
+        "background": "color(srgb 0.291922 0.199686 0.120627)",
+        "color": "color(srgb 0.963529 0.848235 0.749412)",
+        "name": "@調査担当",
+        "palette": "#E78531",
+        "underline": "rgb(231, 133, 49)"
+      },
+      {
+        "background": "color(srgb 0.278745 0.145098 0.151686)",
+        "color": "color(srgb 0.947059 0.78 0.788235)",
+        "name": "@Juniper",
+        "palette": "#D94B52",
+        "underline": "rgb(217, 75, 82)"
+      },
+      {
+        "background": "color(srgb 0.126275 0.194039 0.29098)",
+        "color": "color(srgb 0.756471 0.841176 0.962353)",
+        "name": "@Atlas",
+        "palette": "#377FE6",
+        "underline": "rgb(55, 127, 230)"
+      },
+      {
+        "background": "color(srgb 0.23984 0.23984 0.23984 / 0.904)",
+        "color": "color(srgb 0.988235 0.988235 0.988235 / 0.88)",
+        "name": "@everyone",
+        "palette": "",
+        "underline": "rgba(252, 252, 252, 0.6)"
+      }
+    ],
+    "plain": [
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " first. "
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " second. "
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " third.\n"
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " reverse. "
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " again. "
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " last.\n"
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": " neutral. @Ghost plain."
+      },
+      {
+        "color": "rgb(252, 252, 252)",
+        "palette": "",
+        "text": "\n"
+      }
+    ]
+  },
+  "draftLight": {
+    "mentions": [
+      {
+        "background": "color(srgb 0.781961 0.837804 0.916863)",
+        "color": "color(srgb 0.136078 0.220784 0.336471)",
+        "name": "@Atlas",
+        "palette": "#377FE6",
+        "underline": "rgb(55, 127, 230)"
+      },
+      {
+        "background": "color(srgb 0.934431 0.788863 0.777569)",
+        "color": "color(srgb 0.326667 0.159608 0.162353)",
+        "name": "@Juniper",
+        "palette": "#D94B52",
+        "underline": "rgb(217, 75, 82)"
+      },
+      {
+        "background": "color(srgb 0.947608 0.843451 0.74651)",
+        "color": "color(srgb 0.343137 0.227843 0.123529)",
+        "name": "@調査担当",
+        "palette": "#E78531",
+        "underline": "rgb(231, 133, 49)"
+      },
+      {
+        "background": "color(srgb 0.947608 0.843451 0.74651)",
+        "color": "color(srgb 0.343137 0.227843 0.123529)",
+        "name": "@調査担当",
+        "palette": "#E78531",
+        "underline": "rgb(231, 133, 49)"
+      },
+      {
+        "background": "color(srgb 0.934431 0.788863 0.777569)",
+        "color": "color(srgb 0.326667 0.159608 0.162353)",
+        "name": "@Juniper",
+        "palette": "#D94B52",
+        "underline": "rgb(217, 75, 82)"
+      },
+      {
+        "background": "color(srgb 0.781961 0.837804 0.916863)",
+        "color": "color(srgb 0.136078 0.220784 0.336471)",
+        "name": "@Atlas",
+        "palette": "#377FE6",
+        "underline": "rgb(55, 127, 230)"
+      },
+      {
+        "background": "color(srgb 0.830902 0.813333 0.784157)",
+        "color": "color(srgb 0.197255 0.190196 0.170588)",
+        "name": "@everyone",
+        "palette": "",
+        "underline": "rgb(107, 101, 89)"
+      }
+    ],
+    "plain": [
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " first. "
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " second. "
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " third.\n"
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " reverse. "
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " again. "
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " last.\n"
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": " neutral. @Ghost plain."
+      },
+      {
+        "color": "rgb(26, 26, 24)",
+        "palette": "",
+        "text": "\n"
+      }
+    ]
+  },
+  "sentLight": [
+    {
+      "background": "color(srgb 0.781961 0.837804 0.916863)",
+      "color": "color(srgb 0.136078 0.220784 0.336471)",
+      "name": "@Atlas",
+      "palette": "#377FE6",
+      "underline": "rgb(55, 127, 230)"
+    },
+    {
+      "background": "color(srgb 0.934431 0.788863 0.777569)",
+      "color": "color(srgb 0.326667 0.159608 0.162353)",
+      "name": "@Juniper",
+      "palette": "#D94B52",
+      "underline": "rgb(217, 75, 82)"
+    },
+    {
+      "background": "color(srgb 0.947608 0.843451 0.74651)",
+      "color": "color(srgb 0.343137 0.227843 0.123529)",
+      "name": "@調査担当",
+      "palette": "#E78531",
+      "underline": "rgb(231, 133, 49)"
+    },
+    {
+      "background": "color(srgb 0.947608 0.843451 0.74651)",
+      "color": "color(srgb 0.343137 0.227843 0.123529)",
+      "name": "@調査担当",
+      "palette": "#E78531",
+      "underline": "rgb(231, 133, 49)"
+    },
+    {
+      "background": "color(srgb 0.934431 0.788863 0.777569)",
+      "color": "color(srgb 0.326667 0.159608 0.162353)",
+      "name": "@Juniper",
+      "palette": "#D94B52",
+      "underline": "rgb(217, 75, 82)"
+    },
+    {
+      "background": "color(srgb 0.781961 0.837804 0.916863)",
+      "color": "color(srgb 0.136078 0.220784 0.336471)",
+      "name": "@Atlas",
+      "palette": "#377FE6",
+      "underline": "rgb(55, 127, 230)"
+    },
+    {
+      "background": "color(srgb 0.830902 0.813333 0.784157)",
+      "color": "color(srgb 0.197255 0.190196 0.170588)",
+      "name": "@everyone",
+      "palette": "",
+      "underline": "rgb(107, 101, 89)"
+    }
+  ],
+  "sentAndDraftDark": [
+    {
+      "background": "color(srgb 0.126275 0.194039 0.29098)",
+      "color": "color(srgb 0.756471 0.841176 0.962353)",
+      "name": "@Atlas",
+      "palette": "#377FE6",
+      "underline": "rgb(55, 127, 230)"
+    },
+    {
+      "background": "color(srgb 0.278745 0.145098 0.151686)",
+      "color": "color(srgb 0.947059 0.78 0.788235)",
+      "name": "@Juniper",
+      "palette": "#D94B52",
+      "underline": "rgb(217, 75, 82)"
+    },
+    {
+      "background": "color(srgb 0.291922 0.199686 0.120627)",
+      "color": "color(srgb 0.963529 0.848235 0.749412)",
+      "name": "@調査担当",
+      "palette": "#E78531",
+      "underline": "rgb(231, 133, 49)"
+    },
+    {
+      "background": "color(srgb 0.291922 0.199686 0.120627)",
+      "color": "color(srgb 0.963529 0.848235 0.749412)",
+      "name": "@調査担当",
+      "palette": "#E78531",
+      "underline": "rgb(231, 133, 49)"
+    },
+    {
+      "background": "color(srgb 0.278745 0.145098 0.151686)",
+      "color": "color(srgb 0.947059 0.78 0.788235)",
+      "name": "@Juniper",
+      "palette": "#D94B52",
+      "underline": "rgb(217, 75, 82)"
+    },
+    {
+      "background": "color(srgb 0.126275 0.194039 0.29098)",
+      "color": "color(srgb 0.756471 0.841176 0.962353)",
+      "name": "@Atlas",
+      "palette": "#377FE6",
+      "underline": "rgb(55, 127, 230)"
+    },
+    {
+      "background": "color(srgb 0.23984 0.23984 0.23984 / 0.904)",
+      "color": "color(srgb 0.988235 0.988235 0.988235 / 0.88)",
+      "name": "@everyone",
+      "palette": "",
+      "underline": "rgba(252, 252, 252, 0.6)"
+    },
+    {
+      "background": "color(srgb 0.126275 0.194039 0.29098)",
+      "color": "color(srgb 0.756471 0.841176 0.962353)",
+      "name": "@Atlas",
+      "palette": "#377FE6",
+      "underline": "rgb(55, 127, 230)"
+    },
+    {
+      "background": "color(srgb 0.278745 0.145098 0.151686)",
+      "color": "color(srgb 0.947059 0.78 0.788235)",
+      "name": "@Juniper",
+      "palette": "#D94B52",
+      "underline": "rgb(217, 75, 82)"
+    },
+    {
+      "background": "color(srgb 0.291922 0.199686 0.120627)",
+      "color": "color(srgb 0.963529 0.848235 0.749412)",
+      "name": "@調査担当",
+      "palette": "#E78531",
+      "underline": "rgb(231, 133, 49)"
+    },
+    {
+      "background": "color(srgb 0.291922 0.199686 0.120627)",
+      "color": "color(srgb 0.963529 0.848235 0.749412)",
+      "name": "@調査担当",
+      "palette": "#E78531",
+      "underline": "rgb(231, 133, 49)"
+    },
+    {
+      "background": "color(srgb 0.278745 0.145098 0.151686)",
+      "color": "color(srgb 0.947059 0.78 0.788235)",
+      "name": "@Juniper",
+      "palette": "#D94B52",
+      "underline": "rgb(217, 75, 82)"
+    },
+    {
+      "background": "color(srgb 0.126275 0.194039 0.29098)",
+      "color": "color(srgb 0.756471 0.841176 0.962353)",
+      "name": "@Atlas",
+      "palette": "#377FE6",
+      "underline": "rgb(55, 127, 230)"
+    },
+    {
+      "background": "color(srgb 0.23984 0.23984 0.23984 / 0.904)",
+      "color": "color(srgb 0.988235 0.988235 0.988235 / 0.88)",
+      "name": "@everyone",
+      "palette": "",
+      "underline": "rgba(252, 252, 252, 0.6)"
+    }
+  ],
+  "errors": []
+}

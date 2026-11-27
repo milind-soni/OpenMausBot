@@ -1,0 +1,405 @@
+import { useState } from "react";
+import { Pencil, RotateCw, Trash2 } from "lucide-react";
+import { api, useStore, type InstanceInfo } from "@/state/store";
+import { t } from "@/lib/i18n";
+import { keySaved } from "@/lib/product-events";
+import { addedServers } from "@/lib/openai-compat-endpoints";
+import { cn } from "@/lib/cn";
+import { KEY_FIELD } from "./keys/KeyRow";
+import { Select } from "./Select";
+
+export function modelIds(text: string): string[] {
+  return [...new Set(text.split(/[,，、\s]+/).map((id) => id.trim()).filter(Boolean))];
+}
+
+const INPUT = cn(KEY_FIELD, "font-sans");
+/** A slow computer can take minutes before a local model's first words, so the wait is the person's call. */
+export const REPLY_WAIT_CHOICES = [5, 10, 20, 30, 60] as const;
+const EDIT_LABEL = "flex flex-col gap-1 text-[12px] leading-4 text-ink-secondary";
+const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
+/** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
+export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
+const GEMINI_KEY_URL = "https://aistudio.google.com/api-keys";
+
+/** The server accepts at most this many model IDs per server, each up to this many characters. */
+const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
+const withinModelIdLimits = (ids: string[]) => ids.length <= MODEL_ID_LIMITS.count && ids.every((id) => id.length <= MODEL_ID_LIMITS.length);
+
+const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[]; url?: string; apiKey?: string }): Promise<{ instances?: unknown; warning?: unknown }> =>
+  api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify(settings) });
+
+/** The server keeps a saved key only for the origin (scheme, host and port) it was entered for
+ * (server/openai-compat-endpoints.ts), so https to http counts as a change. */
+export function originChanged(saved: string | undefined, next: string): boolean {
+  try { return !saved || new URL(next.trim()).origin !== new URL(saved).origin; } catch { return false; }
+}
+
+function ReplyWaitSelect({ server, disabled, onPick }: { server: InstanceInfo; disabled: boolean; onPick: (minutes: number | null) => void }) {
+  return (
+    <Select
+      size="sm"
+      className="shrink-0"
+      value={server.replyWaitMinutes ?? ""}
+      onChange={(event) => onPick(event.target.value ? Number(event.target.value) : null)}
+      disabled={disabled}
+      aria-label={t("apiInstances.replyWaitFor", { name: server.displayName })}
+      title={t("apiInstances.replyWaitHint")}
+    >
+      <option value="">{t("apiInstances.replyWaitDefault")}</option>
+      {[...new Set([...REPLY_WAIT_CHOICES, ...(server.replyWaitMinutes ? [server.replyWaitMinutes] : [])])].sort((a, b) => a - b).map((minutes) => (
+        <option key={minutes} value={minutes}>{t("apiInstances.replyWaitMinutes", { minutes: String(minutes) })}</option>
+      ))}
+    </Select>
+  );
+}
+
+/** The built-in server whose base URL is set above, often a local Ollama: the same wait as an added server. */
+export function BuiltInReplyWait() {
+  const { state, dispatch, refreshInstances } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const server = state.instances.find((instance) => instance.instanceId === "openaiCompat" && instance.driverKind === "openai-compat");
+  if (!server || !state.config?.openaiCompat?.url) return null;
+  const pick = (minutes: number | null) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    void saveSettings(server.instanceId, { replyWaitMinutes: minutes })
+      .then(async ({ instances }) => {
+        if (Array.isArray(instances)) dispatch({ type: "instances", instances: instances as InstanceInfo[] });
+        else await refreshInstances({ reportErrors: true });
+      })
+      .catch((e: Error) => setError(e.message || t("apiInstances.failed")))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <ReplyWaitSelect server={server} disabled={busy} onPick={pick} />
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.replyWaitHint")}</p>
+      {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
+    </div>
+  );
+}
+
+export function OtherOpenAiCompatServers() {
+  const { state } = useStore();
+  return <AddedServers servers={addedServers(state.instances)} />;
+}
+
+function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> }) {
+  const { dispatch, refreshInstances } = useStore();
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const [models, setModels] = useState("");
+  const [busy, setBusy] = useState<"add" | "other" | null>(null);
+  /** The last failure, and the server whose model-ID editor it belongs to (shown there instead of below the add form). */
+  const [error, setError] = useState<{ text: string; at?: string } | null>(null);
+  /** The server whose model IDs are open for editing, and the text being edited. */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  /** The open server's base URL and a new key; an empty key keeps the saved one. */
+  const [editUrl, setEditUrl] = useState("");
+  const [editKey, setEditKey] = useState("");
+  /** The server saved at an address whose model list could not be read: the open editor says so in one line. */
+  const [unreadable, setUnreadable] = useState<string | null>(null);
+  const ready = Boolean(name.trim() && url.trim() && key.trim());
+
+  const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown; warning?: unknown }>, onDone?: (warned: boolean) => void, at?: string) => {
+    if (busy) return;
+    setBusy(kind);
+    setError(null);
+    setUnreadable(null);
+    void request()
+      .then(async ({ instances, warning }) => {
+        if (Array.isArray(instances)) dispatch({ type: "instances", instances: instances as InstanceInfo[] });
+        else await refreshInstances({ reportErrors: true });
+        onDone?.(Boolean(warning));
+      })
+      .catch((e: Error) => setError({ text: e.message || t("apiInstances.failed"), at }))
+      .finally(() => setBusy(null));
+  };
+
+  const add = () => ready && run(
+    "add",
+    () => api("/api/instances/openai-compat", {
+      method: "POST",
+      body: JSON.stringify({ displayName: name.trim(), url: url.trim(), key: key.trim(), ...(modelIds(models).length ? { models: modelIds(models) } : {}) }),
+    }).then(
+      (added) => { keySaved("custom_endpoint", "settings", "unverified"); return added; },
+      (cause: unknown) => { keySaved("custom_endpoint", "settings", "error"); throw cause; },
+    ),
+    () => { setName(""); setUrl(""); setKey(""); setModels(""); },
+  );
+
+  return (
+    <div data-api-keys-other>
+      <div className="mb-0.5 text-[13px] font-medium leading-[18px] text-ink">{t("apiInstances.title")}</div>
+      <p className="mb-2 text-[12px] leading-4 text-ink-secondary">{t("apiInstances.subtitle")}</p>
+      {servers.length === 0 && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.empty")}</p>}
+      {servers.map((server) => {
+        const newUrl = editUrl.trim().replace(/\/+$/, "");
+        const urlChanged = newUrl !== (server.url ?? "");
+        const needsKey = urlChanged && !editKey.trim() && !server.placeholderKey && originChanged(server.url, newUrl);
+        return (
+        <div key={server.instanceId} className="py-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[13px] leading-5 text-ink">{server.displayName}</div>
+              {server.url && <div className="truncate text-[12px] leading-4 text-ink-secondary">{server.url}</div>}
+            </div>
+            <ReplyWaitSelect
+              server={server}
+              disabled={busy !== null}
+              onPick={(minutes) => run("other", () => saveSettings(server.instanceId, { replyWaitMinutes: minutes }))}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setEditText((server.managedModels ?? []).join(", "));
+                setEditUrl(server.url ?? "");
+                setEditKey("");
+                setEditing(editing === server.instanceId ? null : server.instanceId);
+                setError(null);
+                setUnreadable(null);
+              }}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.editServer", { name: server.displayName })}
+              aria-expanded={editing === server.instanceId}
+              title={t("apiInstances.editServer", { name: server.displayName })}
+              className={ICON_BUTTON}
+            >
+              <Pencil size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}/refresh-models`, { method: "POST" }))}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.refreshModels", { name: server.displayName })}
+              title={t("apiInstances.refreshModels", { name: server.displayName })}
+              className={ICON_BUTTON}
+            >
+              <RotateCw size={13} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => run("other", () => api(`/api/instances/${encodeURIComponent(server.instanceId)}`, { method: "DELETE" }))}
+              disabled={busy !== null}
+              aria-label={t("apiInstances.remove", { name: server.displayName })}
+              title={t("apiInstances.remove", { name: server.displayName })}
+              className={`${ICON_BUTTON} hover:bg-danger/10 hover:text-danger`}
+            >
+              <Trash2 size={13} aria-hidden="true" />
+            </button>
+          </div>
+          {editing === server.instanceId && (
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <label className={EDIT_LABEL}>
+                {t("apiInstances.url")}
+                <input type="url" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} placeholder="https://api.example.com/v1"
+                  aria-label={t("apiInstances.urlFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={INPUT} />
+              </label>
+              <label className={EDIT_LABEL}>
+                {t("apiInstances.key")}
+                <input type="password" value={editKey} onChange={(e) => setEditKey(e.target.value)} placeholder={t("apiInstances.keepKey")}
+                  aria-label={t("apiInstances.keyFor", { name: server.displayName })} autoComplete="off" disabled={busy !== null} className={INPUT} />
+              </label>
+              {needsKey && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.newHostKey")}</p>}
+              <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}
+                aria-label={t("apiInstances.modelsFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={INPUT} />
+              <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.editModelsHint")}</p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ids = modelIds(editText);
+                    if (!withinModelIdLimits(ids)) {
+                      setError({ text: t("apiInstances.modelsLimit", MODEL_ID_LIMITS), at: server.instanceId });
+                      return;
+                    }
+                    const settings = { models: ids, ...(urlChanged ? { url: newUrl } : {}), ...(editKey.trim() ? { apiKey: editKey.trim() } : {}) };
+                    run("other", () => saveSettings(server.instanceId, settings), (warned) => {
+                      setEditKey("");
+                      // Saved, but the new address did not list its models: the editor stays open to say so.
+                      if (warned) setUnreadable(server.instanceId);
+                      else setEditing(null);
+                    }, server.instanceId);
+                  }}
+                  disabled={busy !== null || needsKey}
+                  className="ui-button"
+                >
+                  {t("common.save")}
+                </button>
+                <button type="button" onClick={() => { setEditing(null); setEditKey(""); }} disabled={busy !== null} className="ui-button">{t("common.cancel")}</button>
+              </div>
+              {error?.at === server.instanceId && <div role="alert" className="text-[12px] leading-4 text-danger">{error.text}</div>}
+              {unreadable === server.instanceId && <p role="status" className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.modelsUnreadable")}</p>}
+            </div>
+          )}
+        </div>
+        );
+      })}
+      <div className="mt-2 flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); }}
+          disabled={busy !== null}
+          className="ui-button self-end"
+        >
+          {t("apiInstances.geminiPreset")}
+        </button>
+        {url.trim() === GEMINI_PRESET.url && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.geminiKeyHint")}</p>}
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
+          spellCheck={false} disabled={busy !== null} className={INPUT} />
+        <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}
+          spellCheck={false} disabled={busy !== null} className={INPUT} />
+        <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("apiInstances.key")} aria-label={t("apiInstances.key")}
+          autoComplete="off" disabled={busy !== null} className={INPUT} />
+        <input value={models} onChange={(e) => setModels(e.target.value)} placeholder={t("apiInstances.models")} aria-label={t("apiInstances.models")}
+          spellCheck={false} disabled={busy !== null} className={INPUT} />
+        <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.modelsHint")}</p>
+        <button
+          type="button"
+          onClick={add}
+          disabled={busy !== null || !ready}
+          className="ui-button self-end"
+        >
+          {busy === "add" ? t("apiInstances.adding") : t("apiInstances.add")}
+        </button>
+      </div>
+      {error && !error.at && <div className="mt-1 text-[12px] text-danger">{error.text}</div>}
+    </div>
+  );
+}
+
+/** Adds one OpenAI-compatible server from a preset panel (LM Studio, Google AI Studio); add resolves true once it is saved. */
+function useAddServer() {
+  const { dispatch, refreshInstances } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const add = (body: { displayName: string; url: string; key: string; catalog?: string }): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    return api("/api/instances/openai-compat", { method: "POST", body: JSON.stringify(body) }).then(
+      async (created) => {
+        keySaved("custom_endpoint", "settings", "unverified");
+        if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
+        else await refreshInstances({ reportErrors: true });
+        return true;
+      },
+      (cause: unknown) => {
+        keySaved("custom_endpoint", "settings", "error");
+        setError(cause instanceof Error && cause.message ? cause.message : t("apiInstances.failed"));
+        return false;
+      },
+    ).finally(() => setBusy(false));
+  };
+  return { busy, error, add };
+}
+
+export const LM_STUDIO_PLACEHOLDER_KEY = "lm-studio";
+
+export function lmStudioBaseUrl(port: string): string | null {
+  const text = port.trim();
+  if (!/^[1-9]\d{0,4}$/.test(text)) return null;
+  const value = Number(text);
+  if (value > 65535) return null;
+  return `http://127.0.0.1:${value}/v1`;
+}
+
+export function LmStudioServer({ heading = true }: { heading?: boolean } = {}) {
+  const { state } = useStore();
+  const added = addedServers(state.instances);
+  const [port, setPort] = useState("1234");
+  const [token, setToken] = useState("");
+  const { busy, error, add: addServer } = useAddServer();
+  const url = lmStudioBaseUrl(port);
+  const present = Boolean(url && added.some((server) => server.url === url));
+
+  const add = () => {
+    if (busy || !url || present) return;
+    void addServer({ displayName: "LM Studio", url, key: token.trim() || LM_STUDIO_PLACEHOLDER_KEY, catalog: "lmstudio" })
+      .then((added) => { if (added) setToken(""); });
+  };
+
+  return (
+    <div>
+      {heading && <div className="text-[13px] text-ink">{t("lmStudio.title")}</div>}
+      <p className={cn("text-[12px] leading-4 text-ink-secondary", heading && "mt-1")}>{t("lmStudio.desc")}</p>
+      <div className="mt-2 flex flex-col gap-1.5">
+        <label className="flex flex-col gap-1.5 text-[13px] font-medium leading-[18px] text-ink">
+          {t("lmStudio.port")}
+          <input
+            inputMode="numeric"
+            value={port}
+            onChange={(event) => setPort(event.target.value)}
+            aria-label={t("lmStudio.port")}
+            spellCheck={false}
+            disabled={busy}
+            className={INPUT}
+          />
+        </label>
+        <input
+          type="password"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          placeholder={t("lmStudio.token")}
+          aria-label={t("lmStudio.token")}
+          autoComplete="off"
+          disabled={busy}
+          className={INPUT}
+        />
+        <p className="text-[12px] leading-4 text-ink-secondary">{t("lmStudio.tokenHint")}</p>
+        {url && <p className="truncate text-[12px] leading-4 text-ink-secondary">{url}</p>}
+        <button
+          type="button"
+          onClick={add}
+          disabled={busy || !url || present}
+          className="ui-button self-end"
+        >
+          {busy ? t("lmStudio.adding") : t("lmStudio.add")}
+        </button>
+        {present && <p className="text-[12px] text-ink-secondary">{t("lmStudio.added")}</p>}
+      </div>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** True once a server at Google's Gemini address (any path, as the server checks it) is added, so the Providers list stops offering Google AI Studio. */
+export function hasGeminiServer(instances: readonly InstanceInfo[]): boolean {
+  const origin = new URL(GEMINI_PRESET.url).origin;
+  return addedServers(instances).some((server) => {
+    try {
+      return server.url !== undefined && new URL(server.url).origin === origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Google AI Studio in the Providers list: a Gemini API key, added as an OpenAI-compatible server at Google's address. */
+export function GeminiServer() {
+  const [key, setKey] = useState("");
+  const { busy, error, add: addServer } = useAddServer();
+  const add = () => {
+    if (busy || !key.trim()) return;
+    void addServer({ displayName: GEMINI_PRESET.name, url: GEMINI_PRESET.url, key: key.trim() })
+      .then((added) => { if (added) setKey(""); });
+  };
+
+  return (
+    <div data-gemini-server="">
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("geminiServer.desc")}</p>
+      <a href={GEMINI_KEY_URL} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[12px] leading-4 text-accent-text hover:underline">{t("geminiServer.getKey")}</a>
+      <div className="mt-2 flex flex-col gap-1.5">
+        <input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder={t("geminiServer.key")} aria-label={t("geminiServer.key")}
+          autoComplete="off" disabled={busy} className={INPUT} />
+        <button type="button" onClick={add} disabled={busy || !key.trim()} className="ui-button self-end">
+          {busy ? t("apiInstances.adding") : t("geminiServer.add")}
+        </button>
+      </div>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}

@@ -1,0 +1,308 @@
+// Real server + injected MCP tools; only the provider's planning is scripted.
+// Persisted Full grants below belong exclusively to this stopped fixture.
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { expect, it } from "vitest";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { waitForExit } from "./testing/cleanup.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
+
+it("applies requested Full Access workflows through MCP without duplicate approvals, and the same changes apply in an Ask task with Undo", async () => {
+  const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
+  const { url, dataDir, logPath } = fixture.info;
+  const planPath = join(dataDir, "room-plan.json");
+  const plans: Record<string, { turns: any[] }> = {};
+  const evidence: unknown[] = [];
+  const guardedRoutes = new Map<string, string>();
+  let restarted: ChildProcess | undefined;
+  const providerTurns = (): any[] => existsSync(`${planPath}.evidence.jsonl`)
+    ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+  const api = async (method: string, path: string, body?: unknown, status = 200, token?: string) => {
+    const response = await fetch(`${url}${path}`, { method,
+      headers: { "content-type": "application/json", origin: url, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10_000),
+    });
+    const result = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(result)}`).toBe(status);
+    if (method !== "GET") evidence.push({ method, path, body, status: response.status, result });
+    return result;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", url]) as Promise<any>;
+  const bots = async () => (await api("GET", "/api/bots")).bots as any[];
+  const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
+  const unanswered = async (threadId: string) => (await messages(threadId)).filter(message => message.card && !message.card.answered && !message.card.dismissed);
+  const step = (tool: string, args: unknown, expectError = false) => ({ tool, arguments: args, expectError });
+  const run = async (bot: any, threadId: string, text: string, steps: any[], options: { pending?: boolean; resumeReply?: string; guarded?: "ask" | "full" } = {}) => {
+    const before = providerTurns().length;
+    const reply = `Fixture result ${before}: ${text}`;
+    (plans[bot.id] ??= { turns: [] }).turns.push({ steps, reply });
+    if (options.resumeReply) plans[bot.id].turns.push({ reply: options.resumeReply });
+    writeFileSync(planPath, JSON.stringify(plans));
+    const guardedInput = options.guarded ? { threadId, text, sendId: randomUUID(), expectedApprovalMode: options.guarded,
+      expectedActiveLeafId: (await api("GET", `/api/threads/${threadId}/messages?limit=1`)).activeLeafId } : undefined;
+    const accepted = guardedInput ? await api("POST", `/api/bots/${bot.id}/messages/guarded`, guardedInput, 202)
+      : await cli("send", "--bot", bot.id, "--task", threadId, "--text", text);
+    const expectedTurns = options.resumeReply ? 3 : 1; // caller, requested teammate, caller's one summary
+    await expect.poll(() => providerTurns().length, { timeout: 25_000 }).toBe(before + expectedTurns);
+    expect((await cli("wait", "--bot", bot.id, "--task", threadId, "--timeout", "25")).status).toBe(options.pending ? "needs-user" : "settled");
+    const turns = providerTurns().slice(before);
+    const caller = turns.find(turn => turn.botId === bot.id);
+    expect(caller.threadId).toBe(threadId);
+    expect(caller.evidence.filter((entry: any) => entry.step)).toHaveLength(steps.length);
+    for (const [index, call] of caller.evidence.filter((entry: any) => entry.step).entries()) {
+      expect(Boolean(call.response.error || call.response.result?.isError)).toBe(Boolean(steps[index].expectError));
+    }
+    expect((await messages(threadId)).filter(message => message.role === "bot" && message.text === reply)).toHaveLength(1);
+    if (!options.pending) expect(await unanswered(threadId)).toHaveLength(0);
+    // A settled immediate tool result must not queue a later setup continuation.
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(providerTurns()).toHaveLength(before + expectedTurns);
+    if (guardedInput) {
+      const route = `/api/bots/${bot.id}/requests/${guardedInput.sendId}?threadId=${threadId}`;
+      guardedRoutes.set(threadId, route);
+      const snapshot = await api("GET", route);
+      expect(snapshot).toMatchObject({ messageId: accepted.message.id, phase: options.pending ? "waiting" : "settled" });
+      expect(snapshot.messages.filter((message: any) => message.turnTerminal).every((message: any) => message.requestMessageId === accepted.message.id)).toBe(true);
+      expect((await api("POST", `/api/bots/${bot.id}/messages/guarded`, guardedInput, 202)).message.id).toBe(accepted.message.id);
+      expect(providerTurns()).toHaveLength(before + expectedTurns);
+    }
+    return caller;
+  };
+  const restart = async () => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"].includes(key.toUpperCase()) && value) env[key.toUpperCase()] = value;
+    }
+    Object.assign(env, {
+      HOME: dataDir, USERPROFILE: dataDir, OMB_DATA_DIR: dataDir,
+      APPDATA: join(dataDir, "AppData", "Roaming"), LOCALAPPDATA: join(dataDir, "AppData", "Local"),
+      XDG_CONFIG_HOME: join(dataDir, ".config"), XDG_CACHE_HOME: join(dataDir, ".cache"),
+      XDG_DATA_HOME: join(dataDir, ".local", "share"), HERMES_HOME: join(dataDir, ".hermes"),
+      TEMP: join(dataDir, "tmp"), TMP: join(dataDir, "tmp"), TMPDIR: join(dataDir, "tmp"),
+      OMB_PORT: new URL(url).port, OMB_WEBHOOK_PORT: String(Number(new URL(url).port) + 1), PATH: dirname(process.execPath),
+      FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: fixture.fixtureDumpPath,
+    });
+    const log = openSync(logPath, "a", 0o600);
+    restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: ["ignore", log, log],
+    });
+    closeSync(log);
+    await expect.poll(async () => {
+      expect(restarted?.exitCode, `see ${logPath}`).toBeNull();
+      try { return (await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1000) })).ok; }
+      catch { return false; }
+    }, { timeout: 20_000 }).toBe(true);
+  };
+  try {
+    const chief = (await cli("new-bot", "--name", "Clive", "--section", "Operations")).bot;
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
+    const ask = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Ask sibling" }, 201)).task;
+    const peer = (await cli("new-bot", "--name", "Ada", "--section", "Operations")).bot;
+    // Ada's own level is an explicit Ask, so the Chief's Full has something to raise.
+    await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" });
+    const inverse = (await cli("new-bot", "--name", "Thread Full", "--section", "Private")).bot;
+    const modelSelection = chief.modelSelection;
+    await api("PATCH", "/api/config", { features: { skillAuthoring: true } });
+
+    // This is fixture setup, not a production grant endpoint or bypass flag.
+    // Stop the exact owned server before changing its disposable persisted data.
+    await waitForExit(fixture.child, { signal: "SIGTERM" });
+    const savedBots = readRegistry(dataDir).bots;
+    const savedChief = savedBots.find((bot: any) => bot.id === chief.id);
+    savedChief.approvalMode = "full"; savedChief.autoApprove = false;
+    for (const task of savedChief.tasks) {
+      task.approvalMode = task.threadId === ask.threadId ? "ask" : "full";
+      task.autoApprove = false;
+    }
+    const savedInverse = savedBots.find((bot: any) => bot.id === inverse.id);
+    savedInverse.approvalMode = "ask"; savedInverse.autoApprove = false;
+    savedInverse.tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode = "full";
+    writeRegistry(dataDir, { bots: savedBots });
+    await restart();
+    expect((await api("GET", "/api/health")).capabilities).toMatchObject({ guardedFullAccess: 1 });
+    expect((await api("GET", "/api/health")).capabilities.sharedWorkspaceFullAccess).toBeUndefined();
+    const request = { threadId: chief.activeTaskId, text: "WRONG_MODE_MUST_NOT_RUN", sendId: randomUUID(),
+      expectedActiveLeafId: (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=1`)).activeLeafId };
+    expect((await api("POST", `/api/bots/${chief.id}/messages/guarded`, request, 409)).code).toBe("guarded_permissions");
+    expect((await api("POST", `/api/bots/${chief.id}/messages/guarded`, { ...request, threadId: ask.threadId, expectedApprovalMode: "full", expectedActiveLeafId: null }, 409)).code).toBe("guarded_permissions");
+    await api("POST", `/api/bots/${chief.id}/tasks`, { title: "No operator grant", approvalMode: "full" }, 403);
+    expect(providerTurns()).toHaveLength(0);
+    evidence.push({ setup: "fixture-only persisted modes", restartedPid: restarted?.pid, modes: [
+      { botId: chief.id, default: "full", fullTask: chief.activeTaskId, askTask: ask.threadId },
+      { botId: inverse.id, default: "ask", fullTask: inverse.activeTaskId },
+    ] });
+
+    const skill = (name: string, instruction: string) => `---\nname: ${name}\ndescription: Summarize fixture-only monthly activity.\n---\n\n# Monthly fixture review\n\n${instruction}\n`;
+    const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" };
+    const specialist = (name: string, section: string) => ({ action: "create", key: name,
+      fields: { name, title: "Research specialist", soul: "Use only fixture evidence.", section, modelSelection } });
+    const created = await run(chief, chief.activeTaskId,
+      "Set up my monthly reporting profile, save its reusable skill, schedule 9am New York time on the first of each month, and create Mira in Research.", [
+        step("propose_profile", { title: "Monthly reporting Chief", soul: "Report only verified fixture results.", reason: "Requested reporting profile" }),
+        step("list_triggers", {}),
+        step("create_trigger", { when: "schedule", name: "Monthly fixture report", instructions: "Summarize fixture-only monthly results.", schedule }),
+        step("skills_list", {}),
+        step("skill_manage", { action: "create", skill_md: skill("monthly-fixture-review", "Read fixture notes and summarize the month."), source: "conversation" }),
+        step("list_team_setup", {}),
+        step("propose_team_setup", { reason: "Requested Research specialist and Chief description", newTeams: ["Research"], operations: [
+          specialist("Mira", "Research"), { action: "update", botId: chief.id, fields: { description: "Coordinates monthly fixture reports" } },
+        ] }),
+        step("create_bot", { name: "Theo", role: "Totals checker", instructions: "Check fixture totals before each report." }),
+      ], { guarded: "full" });
+    expect(created.permissionMode).toBe("bypassPermissions");
+    for (const entry of created.evidence.filter((item: any) => ["propose_profile", "create_trigger", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
+      // Triggers never wait on anything: their tool says so in its own words.
+      expect(entry.response.result.content[0].text).toContain(entry.step.tool === "create_trigger" ? "Do not ask for confirmation" : "No additional confirmation is needed");
+      expect(entry.response.result.content[0].text).not.toContain("End this turn and wait");
+    }
+    const updatedChief = (await bots()).find(bot => bot.id === chief.id);
+    expect(updatedChief).toMatchObject({ title: "Monthly reporting Chief", description: "Coordinates monthly fixture reports", soul: "Report only verified fixture results.", approvalMode: "full", managedSections: ["Research"] });
+    const createdTheo = created.evidence.find((item: any) => item.step?.tool === "create_bot");
+    expect(createdTheo.response.result.content[0].text).toMatch(/^Created @Theo in Operations/);
+    expect((await bots()).find(bot => bot.name === "Theo")).toMatchObject({ section: "Operations", title: "Totals checker",
+      soul: "Check fixture totals before each report.", approvalMode: "full", autoApprove: false });
+    const mira = (await bots()).find(bot => bot.name === "Mira");
+    expect(mira).toMatchObject({ section: "Research", approvalMode: "full", autoApprove: false });
+    const apps = (bot: any) => ({ composio: bot.composio, connectorTools: bot.connectorTools, connectorScopes: bot.connectorScopes, mcpServers: bot.mcpServers });
+    for (const made of [mira, (await bots()).find(bot => bot.name === "Theo")]) expect(apps(made)).toEqual(apps(updatedChief));
+    const routine = (await api("GET", "/api/routines")).routines.find((item: any) => item.name === "Monthly fixture report");
+    expect(routine).toMatchObject({ botId: chief.id, enabled: true, schedule });
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills).toEqual(expect.arrayContaining([expect.objectContaining({ name: "monthly-fixture-review", enabled: true })]));
+    await expect.poll(async () => (await api("GET", "/api/decisions")).decisions
+      .filter((row: any) => row.threadId === chief.activeTaskId && ["schedule_routine", "stage_skill", "update_profile"].includes(row.tool))
+      .map((row: any) => `${row.tool}:${row.decision}:${row.source}`).sort())
+      .toEqual(["schedule_routine:auto-approved:full-access", "stage_skill:auto-approved:full-access", "update_profile:auto-approved:full-access"]);
+
+    const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
+    const lateToken = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    await api("POST", "/api/internal/team-setup-requests", { plan: { reason: "Late fixture token", operations: [specialist("Must not exist", "Operations")] } }, 401, lateToken);
+
+    await run(chief, chief.activeTaskId, "Update the named monthly skill, pause the report, update Mira, then delete Mira as requested.", [
+      step("skill_manage", { action: "update", skill_name: "monthly-fixture-review", skill_md: skill("monthly-fixture-review", "Read fixture notes, verify totals, and report missing data."), source: "conversation" }),
+      step("list_triggers", {}), step("manage_trigger", { action: "pause", trigger_id: routine.id }),
+      step("propose_team_setup", { reason: "Requested Mira update", operations: [{ action: "update", botId: mira.id, fields: { title: "Verified research specialist" } }] }),
+      step("propose_bot_deletion", { bot_id: mira.id, reason: "User explicitly requested removal after the fixture check" }),
+      step("propose_team_setup", { reason: "Out-of-scope fixture check", operations: [{ action: "update", botId: inverse.id, fields: { title: "Must not apply" } }] }, true),
+    ]);
+    expect((await bots()).some(bot => bot.id === mira.id)).toBe(false);
+    expect((await api("GET", "/api/routines")).routines.find((item: any) => item.id === routine.id)).toMatchObject({ enabled: false, nextRunAt: null, schedule });
+    expect((await api("GET", `/api/bots/${chief.id}/skills/monthly-fixture-review`)).text).toContain("verify totals");
+    const updatedSkills = await api("GET", `/api/bots/${chief.id}/skills`);
+    expect(updatedSkills.skills).toEqual([expect.objectContaining({ name: "monthly-fixture-review", enabled: true })]);
+    expect(updatedSkills.staged).toHaveLength(0);
+
+    plans[peer.id] = { turns: [{ reply: "Fixture peer verified the reporting instructions." }] };
+    await run(chief, chief.activeTaskId, "Have Ada independently verify the fixture reporting instructions and return the result.", [
+      step("coordinate_bots", { bot_ids: [peer.id], request_key: "verify-monthly", message: "Verify the fixture reporting instructions and state your result." }),
+    ], { guarded: "full", resumeReply: "Ada verified the fixture reporting instructions; requested work is complete." });
+    const handoffs = readHandoffs(dataDir);
+    expect(handoffs.length).toBeGreaterThan(0);
+    expect(handoffs.every((node: any) => node.status === "completed")).toBe(true);
+    expect(providerTurns().filter(turn => turn.botId === peer.id)).toHaveLength(1);
+    const peerTurn = providerTurns().find(turn => turn.botId === peer.id)!;
+    expect(peerTurn.permissionMode).toBe("bypassPermissions");
+    expect((await bots()).find(bot => bot.id === peer.id).approvalMode ?? "ask").toBe("ask");
+    expect(await unanswered(peerTurn.threadId)).toHaveLength(0);
+    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — handed on by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(true);
+    evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
+
+    const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and add a specialist in this Ask task.", [
+      step("propose_profile", { title: "Applied in Ask", reason: "Applies at every level" }),
+      step("create_trigger", { when: "schedule", name: "Own Ask report", instructions: "Report from the Ask task.", schedule }),
+      step("skill_manage", { action: "create", skill_md: skill("own-ask-review", "Applies at once as the bot's own skill."), source: "conversation" }),
+      step("propose_team_setup", { reason: "Ask task specialist", operations: [specialist("Ask specialist", "Operations")] }),
+    ], { guarded: "ask" });
+    expect(askTurn.permissionMode).not.toBe("bypassPermissions");
+    expect(await unanswered(ask.threadId)).toHaveLength(0);
+    expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Applied in Ask");
+    expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(true);
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(2);
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review" && item.enabled)).toBe(true);
+    const receipts = (await messages(ask.threadId)).filter(message => message.card?.autoApplied);
+    expect(receipts.map(message => Boolean(message.card.profileRequest || message.card.routineRequest || message.card.skillRequest || message.card.teamSetupRequest)))
+      .toEqual([true, true, true, true]);
+    for (const receipt of receipts) {
+      expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ ok: true, undone: true });
+      expect(await api("POST", `/api/threads/${ask.threadId}/undo`, { requestId: receipt.card.requestId })).toMatchObject({ alreadyUndone: true });
+    }
+    expect((await messages(ask.threadId)).filter(message => message.card?.autoApplied).every(message => message.card.undone)).toBe(true);
+    expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
+    expect((await api("GET", "/api/routines")).routines).toHaveLength(1);
+    expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills.some((item: any) => item.name === "own-ask-review")).toBe(false);
+    expect((await bots()).some(bot => bot.name === "Ask specialist")).toBe(false);
+
+    const inverseTurn = await run(inverse, inverse.activeTaskId, "Apply my requested title in this Full Access task even though my bot default is Ask.", [
+      step("propose_profile", { title: "Applied from Full task", reason: "User requested this title" }),
+    ], { guarded: "full" });
+    expect(inverseTurn.permissionMode).toBe("bypassPermissions");
+    expect((await bots()).find(bot => bot.id === inverse.id)).toMatchObject({ title: "Applied from Full task", approvalMode: "ask" });
+    expect(await unanswered(chief.activeTaskId)).toHaveLength(0);
+    expect(providerTurns()).toHaveLength(7);
+    const persisted = readRegistry(dataDir).bots;
+    expect(persisted.find((bot: any) => bot.id === chief.id)).toMatchObject({ title: "Monthly reporting Chief", approvalMode: "full" });
+    expect(persisted.find((bot: any) => bot.id === chief.id).tasks.find((task: any) => task.threadId === ask.threadId).approvalMode).toBe("ask");
+    expect(persisted.find((bot: any) => bot.id === inverse.id)).toMatchObject({ title: "Applied from Full task", approvalMode: "ask" });
+    expect(persisted.find((bot: any) => bot.id === inverse.id).tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode).toBe("full");
+    expect(persisted.find((bot: any) => bot.id === peer.id).approvalMode).not.toBe("full");
+    expect(persisted.find((bot: any) => bot.id === peer.id).tasks.find((task: any) => task.threadId === peerTurn.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+    expect(JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8")).routines[0]).toMatchObject({ enabled: false, schedule });
+    evidence.push({ persistedBots: persisted, routines: await api("GET", "/api/routines"), handoffs,
+      fullMessages: await messages(chief.activeTaskId), askMessages: await messages(ask.threadId), inverseMessages: await messages(inverse.activeTaskId) });
+
+    const interrupted = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Restart while awaiting teammate" }, 201)).task;
+    const gate = join(dataDir, "restart-peer.gate");
+    const peerWorking = join(dataDir, "restart-peer.ready");
+    plans[chief.id].turns.push({ steps: [step("coordinate_bots", { bot_ids: [peer.id], request_key: "restart-proof", message: "Wait at the isolated fixture gate." })],
+      reply: "Assigned the restart check" }, { reply: "Reviewed the resumed check" });
+    plans[peer.id].turns.push({ gateFile: gate, readyFile: peerWorking, reply: "The gated check finished" });
+    writeFileSync(planPath, JSON.stringify(plans));
+    const pendingInput = { threadId: interrupted.threadId, text: "Coordinate the gated restart check.", sendId: randomUUID(), expectedActiveLeafId: null, expectedApprovalMode: "full" };
+    const pendingReceipt = await api("POST", `/api/bots/${chief.id}/messages/guarded`, pendingInput, 202);
+    const pendingRoute = `/api/bots/${chief.id}/requests/${pendingInput.sendId}?threadId=${interrupted.threadId}`;
+    await expect.poll(async () => {
+      const snapshot = await api("GET", pendingRoute);
+      return snapshot.phase === "waiting" && snapshot.messages.some((message: any) => message.turnTerminal && message.turnSucceeded);
+    }, { timeout: 25_000 }).toBe(true);
+    const beforeSnapshot = await api("GET", pendingRoute);
+    expect(beforeSnapshot.messages[0]).toMatchObject({ id: pendingReceipt.message.id, requestPending: true });
+    expect(beforeSnapshot.executionId).toEqual(expect.any(String));
+    // Ada's turn is running in its engine. Ada's request can still be queued
+    // when the Chief's turn ends, and a restart then cuts nothing: it simply
+    // runs once afterwards, with nothing to say about a restart.
+    await expect.poll(() => existsSync(peerWorking), { timeout: 25_000 }).toBe(true);
+    await waitForExit(restarted, { signal: "SIGTERM" });
+    const beforeRestart = providerTurns().length;
+    await restart();
+    writeFileSync(gate, "open");
+    await expect.poll(async () => (await messages(interrupted.threadId)).some(message => message.text === "Reviewed the resumed check"), { timeout: 25_000 }).toBe(true);
+    const [rerun, review] = providerTurns().slice(beforeRestart);
+    expect(providerTurns()).toHaveLength(beforeRestart + 2);
+    expect(rerun).toMatchObject({ botId: peer.id, resumed: false, permissionMode: "bypassPermissions" });
+    expect(JSON.stringify(rerun.prompt)).toContain("this turn continues it");
+    expect(review).toMatchObject({ botId: chief.id, threadId: interrupted.threadId, resumed: true });
+    expect(JSON.stringify(review.prompt)).toContain("A restart cut these teammates' turns: Ada (resumed once in place");
+    const recovered = await api("GET", pendingRoute);
+    expect(recovered).toMatchObject({ phase: "untracked", activeTurnId: null });
+    expect(recovered.executionId).not.toBe(beforeSnapshot.executionId);
+    expect(recovered.messages[0]).toMatchObject({ id: pendingReceipt.message.id, requestPending: true });
+    expect(recovered.messages.some((message: any) => message.turnTerminal && message.text === "Assigned the restart check" && message.turnSucceeded)).toBe(true);
+    expect((await api("GET", guardedRoutes.get(inverse.activeTaskId)!)).phase).toBe("settled");
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(providerTurns()).toHaveLength(beforeRestart + 2);
+    evidence.push({ restartWhileAwaiting: { phase: recovered.phase, teammateRerunOnce: true, chiefResumedOnce: true, completedRequestStillSettled: true } });
+    expect(readFileSync(logPath, "utf8")).not.toMatch(/ReferenceError|change listener threw|Unexpected extra fixture turn/);
+  } finally {
+    await waitForExit(restarted, { signal: "SIGTERM" });
+    const evidencePath = `${logPath}.full-access.json`;
+    writeFileSync(evidencePath, JSON.stringify({ fixture: fixture.info, evidence, providerTurns: providerTurns().map(turn => ({
+      botId: turn.botId, threadId: turn.threadId, turnIndex: turn.turnIndex, permissionMode: turn.permissionMode,
+      resumed: turn.resumed, calls: turn.evidence.filter((entry: any) => entry.step),
+    })) }, null, 2));
+    console.info(JSON.stringify({ logPath, evidencePath }));
+    await fixture.close();
+  }
+}, 150_000);

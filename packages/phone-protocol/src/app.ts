@@ -1,0 +1,570 @@
+// Chat apps: HTML in a sandboxed frame inside a chat row, speaking the MCP Apps bridge
+// (io.modelcontextprotocol/ui, SEP-1865). Bot HTML (show_html) and an MCP server's UI
+// (_meta.ui.resourceUri) share the one wire kind, `app`.
+import { CONNECTOR_TOOL_NAME_PATTERN } from "./wire.ts";
+
+export const APP_MIME = "text/html;profile=mcp-app";
+export const APP_PROTOCOL_VERSION = "2026-01-26";
+export const APP_EXTENSION_KEY = "io.modelcontextprotocol/ui";
+
+export const APP_LIMITS = {
+  /** show_html `html` or `jsx`, UTF-8 bytes after trimming. */
+  htmlBytes: 256 * 1024,
+  title: 80,
+  fallback: 1_500,
+  fallbackExcerpt: 600,
+  heightMin: 80,
+  heightMax: 720,
+  /** ui/message text, and the appMessage on the send route. */
+  messageText: 4_000,
+  /** ui/update-model-context text, stored per row. */
+  contextText: 4_000,
+  /** The result line of an app row's "Done" note. */
+  doneText: 300,
+  /** An MCP server's UI resource, decoded. */
+  mcpHtmlBytes: 2 * 1024 * 1024,
+  /** tools/call arguments on the rpc route. */
+  rpcArgumentsBytes: 64 * 1024,
+  /** resources/read through the rpc route. */
+  rpcResourceBytes: 8 * 1024 * 1024,
+  /** appMessage sends per app row per hour. */
+  messagesPerHour: 20,
+  /** rpc calls per app row per minute. */
+  rpcPerMinute: 60,
+  /** mausbot.data.query: rows and JSON bytes of rows one answer holds, the SQL's length, and its wall clock. */
+  pageQueryRows: 5_000,
+  pageQueryBytes: 1_000_000,
+  pageQuerySqlChars: 20_000,
+  pageQueryMs: 10_000,
+  /** mausbot.state: a key's characters, one value's JSON bytes, all of a page's values, and its keys. */
+  pageStateKeyChars: 200,
+  pageStateValueBytes: 64 * 1024,
+  pageStateBytes: 256 * 1024,
+  pageStateKeys: 200,
+  /** show_html `uses` connector tools: connected apps and MCP servers one page names, and tools in all. */
+  pageConnectors: 8,
+  pageConnectorTools: 24,
+  /** mausbot.connectors.call: arguments' JSON bytes, the answer's JSON bytes before it is cut, its wall clock, a tool's
+   * own error text, and calls per page and per bot and connector each minute. */
+  pageConnectorArgsBytes: 64 * 1024,
+  pageConnectorResultBytes: 512 * 1024,
+  pageConnectorMs: 60_000,
+  pageConnectorErrorChars: 1_000,
+  pageConnectorCallsPerMinute: 30,
+  connectorCallsPerMinute: 60,
+} as const;
+
+/** What a bot's page may ask the host for beyond the bridge's basics, declared with show_html `uses`: `data`, read-only
+ * SQL on its bot's database; `state`, a small store of its own that its later versions keep. */
+export const APP_USES = ["data", "state"] as const;
+export type AppUse = (typeof APP_USES)[number];
+
+/** Connector tools a bot's page declared it calls (show_html `uses`), each tool by its exact name: a connected app's by its
+ * toolkit (`connector`, as "gmail:GMAIL_FETCH_EMAILS" in `uses`), or an MCP server's by the server's name (`server`, as
+ * "mcp:notes:search"). Calls run with the viewing person's own connection and the bot's own grants. */
+export type AppConnectorUse = { connector: string; tools: string[] } | { server: string; tools: string[] };
+
+/** Versions of one bot page kept for stepping back, the current one included. */
+export const APP_PAGE_VERSIONS = 10;
+
+export type AppSource = "html" | "mcp";
+
+/** Origins a frame may reach, after the host's filter. `refused`: what a server asked for and the
+ * filter dropped. */
+export interface AppNetwork {
+  connect: string[];
+  resources: string[];
+  refused?: string[];
+}
+
+/** The latest ui/update-model-context of one app row, delivered with the person's next message in
+ * its thread. */
+export interface AppContextState {
+  text: string;
+  at: number;
+  delivered: boolean;
+}
+
+/** The last change an MCP app made from its own card: a tool the bot could call too, not read-only, that did
+ * not fail. Shown under the card, so a reopened conversation does not look as if it was never sent. */
+export interface AppDoneState {
+  /** the tool's title, else its name */
+  tool: string;
+  /** the result's plain text, one line */
+  text?: string;
+  /** an https link the result names (html_url, else url) */
+  url?: string;
+  at: number;
+}
+
+export interface AppMcpRef {
+  /** the mount name in config.json mcpServers */
+  server: string;
+  /** initialize serverInfo.title ?? name */
+  serverTitle?: string;
+  tool: string;
+  /** ui://... */
+  resourceUri: string;
+  isError?: boolean;
+}
+
+/** Never carries the HTML: a client fetches the AppDocument when it mounts the frame. */
+export interface AppPayload {
+  v: 1;
+  source: AppSource;
+  /** Header title, one line, ≤ 80 chars. Bot HTML: the bot's title. MCP:
+   * the tool's title, else its name. */
+  title: string;
+  /** Content id of the stored document; a new value means the frame must reload. Empty when nothing
+   * could be stored (`blocked`): the row then shows only its text. */
+  doc: string;
+  /** 0, bumped each time show_html replaces the page. */
+  rev: number;
+  /** Content ids of the versions before `doc`, oldest first, at most APP_PAGE_VERSIONS - 1: the last one is
+   * rev - 1. */
+  history?: string[];
+  /** Bot HTML whose document is a React component file (show_html `jsx`), wrapped in the page shell when served. */
+  format?: "jsx";
+  /** UTF-8 bytes of the HTML, for the info popover. */
+  bytes: number;
+  /** Initial height in px before the frame reports its own (show_html
+   * `height`, clamped 80..720). */
+  height?: number;
+  /** Draw the host's border and background (MCP prefersBorder; bot HTML: true). */
+  border: boolean;
+  /** Origins the frame may reach, after the host's filter, for the info popover. */
+  network: AppNetwork;
+  mcp?: AppMcpRef;
+  /** The latest ui/update-model-context, delivered with the person's next
+   * message in this thread. */
+  context?: AppContextState;
+  done?: AppDoneState;
+  /** Why the document could not be stored or read when the row was written
+   * (`too-large`, or an MCP server that was signed out or unreachable). The
+   * row is still written, with its text. */
+  blocked?: AppBlockedReason;
+  /** A page from a folder that reloads in place when a file in its folder changes (show_html `live`). */
+  live?: true;
+}
+
+/** A user row an app's ui/message sent. */
+export interface AppFromRef {
+  messageId: string;
+  title: string;
+}
+
+/** One part of a bot's page the person pointed at, as its chip on their message reads. `label` is the page's own
+ * words. */
+export interface AppPointedRef {
+  appId: string;
+  label: string;
+}
+
+/** Why an app's server calls are off, or why its document is missing. `unavailable`: the UI resource
+ * could not be read when the row was written (offline, wrong mime type). */
+export type AppBlockedReason = "signed-out" | "server-removed" | "server-disabled" | "apps-off" | "too-large" | "unavailable";
+
+/** What the frame may do right now; hostCapabilities is built from this. */
+export interface AppCan {
+  serverTools: boolean;
+  serverResources: boolean;
+  message: boolean;
+  openLinks: boolean;
+  modelContext: boolean;
+  /** A bot's page that declared `data` or `state` (show_html `uses`), outside a room. */
+  data?: boolean;
+  state?: boolean;
+  /** The connector tools the page declared, outside a room; whether each can run is decided when it is called. */
+  connectors?: AppConnectorUse[];
+}
+
+export interface AppToolDefinition {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema?: object;
+  annotations?: object;
+  _meta?: object;
+}
+
+export interface AppToolResult {
+  content: unknown[];
+  structuredContent?: unknown;
+  _meta?: Record<string, unknown>;
+  isError?: boolean;
+}
+
+/** What a client fetches to mount a frame (GET /api/threads/:threadId/messages/:messageId/app), never
+ * part of a thread load. A document with `tool` is an MCP app; one without is bot HTML. */
+export interface AppDocument {
+  v: 1;
+  messageId: string;
+  rev: number;
+  /** Set verbatim as the iframe's srcdoc. Starts with
+   * `<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="…">`. */
+  srcdoc: string;
+  /** The policy in that meta, repeated for phone network enforcement. */
+  csp: string;
+  network: { connect: string[]; resources: string[] };
+  /** MCP only: hostContext.toolInfo.tool, and the two notifications. */
+  tool?: AppToolDefinition;
+  toolInput?: Record<string, unknown>;
+  toolResult?: AppToolResult;
+  can: AppCan;
+  /** Why serverTools/serverResources are off: drawn as a strip under the frame. */
+  blocked?: { reason: AppBlockedReason; text: string };
+  /** Shown in a room, to everyone who can see it: view-only. `can` has message, modelContext, serverTools and
+   * serverResources off, and a bot's page reads `mausbot.room === true`. */
+  room?: true;
+}
+
+/** Why a room refuses what an app or a widget would do for the person: nobody in a room speaks for the others. */
+export const ROOM_VIEW_ONLY = "In a room, pages, apps and widgets are view-only: they cannot send messages or tell a bot what anyone sees.";
+
+/** Exactly one of `html` (wrapped when it was a fragment), `jsx` and `path` (a folder with index.html, or an .html
+ * file, in the bot's own folders), none yet scrubbed of secrets. */
+export interface ShowHtmlInput {
+  html?: string;
+  jsx?: string;
+  path?: string;
+  title: string;
+  height?: number;
+  fallbackText?: string;
+  /** Show the page without the card frame (still in its sandboxed frame). */
+  frameless?: boolean;
+  /** Reload the page in place whenever a file in its folder changes; only with `path`. */
+  live?: boolean;
+  uses?: AppUse[];
+  /** Given exactly when `uses` is. */
+  connectors?: AppConnectorUse[];
+}
+
+export interface UpdateHtmlInput {
+  appId: string;
+  html?: string;
+  jsx?: string;
+  path?: string;
+  title?: string;
+  /** Change whether the page has the card frame; kept as it was when omitted. */
+  frameless?: boolean;
+  /** Turn reloading on folder changes on (only with `path`) or off; kept as it was when omitted. */
+  live?: boolean;
+  /** Kept as the page's current version declared when omitted. */
+  uses?: AppUse[];
+  /** Given exactly when `uses` is. */
+  connectors?: AppConnectorUse[];
+}
+
+export type AppInputResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+export function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length) {
+      const next = text.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) { bytes += 4; index += 1; } else bytes += 3;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+export function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** A fragment gets a minimal document, so the CSP meta can lead its head. */
+export function wrapHtmlFragment(html: string): string {
+  if (/<(?:html|body)[\s>/]/i.test(html) || /<(?:html|body)$/i.test(html)) return html;
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
+}
+
+function checkHtml(value: unknown): AppInputResult<string> {
+  if (typeof value !== "string") return { ok: false, error: "html: must be a string holding one HTML document." };
+  const html = value.trim();
+  if (!html) return { ok: false, error: "html: is empty; send one HTML document with inline style and script." };
+  const bytes = utf8Bytes(html);
+  if (bytes > APP_LIMITS.htmlBytes) {
+    return { ok: false, error: `html: is ${bytes} bytes, over the ${APP_LIMITS.htmlBytes}-byte limit; load libraries from a CDN and embed less data.` };
+  }
+  return { ok: true, value: wrapHtmlFragment(html) };
+}
+
+function checkJsx(value: unknown): AppInputResult<string> {
+  if (typeof value !== "string") return { ok: false, error: "jsx: must be a string holding one React component file." };
+  const jsx = value.trim();
+  if (!jsx) return { ok: false, error: "jsx: is empty; send one React component file with a default export." };
+  const bytes = utf8Bytes(jsx);
+  if (bytes > APP_LIMITS.htmlBytes) return { ok: false, error: `jsx: is ${bytes} bytes, over the ${APP_LIMITS.htmlBytes}-byte limit; embed less data.` };
+  if (!/\bexport\s+default\b/.test(jsx)) return { ok: false, error: "jsx: needs `export default` of the page's component." };
+  return { ok: true, value: jsx };
+}
+
+function checkPage(input: Record<string, unknown>): AppInputResult<{ html: string } | { jsx: string } | { path: string }> {
+  const given = (value: unknown) => value !== undefined && value !== null;
+  if ([input.html, input.jsx, input.path].filter(given).length > 1) return { ok: false, error: "Send one of html, jsx or path." };
+  if (given(input.path)) {
+    const path = typeof input.path === "string" ? input.path.trim() : "";
+    if (!path || path.length > 4_096) return { ok: false, error: "path: the folder with index.html, or the .html file, in your working folder." };
+    return { ok: true, value: { path } };
+  }
+  if (given(input.jsx)) {
+    const jsx = checkJsx(input.jsx);
+    return jsx.ok ? { ok: true, value: { jsx: jsx.value } } : jsx;
+  }
+  const html = checkHtml(input.html);
+  return html.ok ? { ok: true, value: { html: html.value } } : html;
+}
+
+function checkTitle(value: unknown): AppInputResult<string> {
+  if (typeof value !== "string") return { ok: false, error: "title: must be a string of 1 to 80 characters." };
+  const title = oneLine(value);
+  if (!title || title.length > APP_LIMITS.title) return { ok: false, error: "title: must be 1 to 80 characters on one line." };
+  return { ok: true, value: title };
+}
+
+function checkFrameless(value: unknown): AppInputResult<boolean | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (typeof value !== "boolean") return { ok: false, error: "frameless: must be true or false." };
+  return { ok: true, value };
+}
+
+function checkLive(value: unknown, path: string | undefined): AppInputResult<boolean | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (typeof value !== "boolean") return { ok: false, error: "live: must be true or false." };
+  if (value && path === undefined) return { ok: false, error: "live: only a page from a folder (path) can be live." };
+  return { ok: true, value };
+}
+
+const USES_HELP = 'uses: a list of "data", "state" and connector tools by exact name: "gmail:GMAIL_FETCH_EMAILS" for a connected app, '
+  + '"mcp:<server>:<tool>" for an MCP server; no wildcards. E.g. ["data", "gmail:GMAIL_FETCH_EMAILS"].';
+const TOOLKIT_NAME = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
+const SERVER_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
+const SERVER_TOOL_NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+
+type ConnectorEntry = { kind: "connector" | "server"; name: string; tool: string };
+type DeclaredUses = { uses: AppUse[]; connectors: AppConnectorUse[] };
+
+/** A connected app's own tool, by exact name: never Composio's own tools or its connection tools. */
+function connectorToolProblem(toolkit: string, tool: string): string | null {
+  if (!TOOLKIT_NAME.test(toolkit) || toolkit === "composio") return `uses: "${toolkit}" is not a connected app's name.`;
+  if (!CONNECTOR_TOOL_NAME_PATTERN.test(tool) || !tool.startsWith(`${toolkit.toUpperCase()}_`)) {
+    return `uses: "${tool}" is not one of ${toolkit}'s tools; name each tool exactly, e.g. "gmail:GMAIL_FETCH_EMAILS".`;
+  }
+  if (/_(?:MANAGE|WAIT_FOR)_CONNECTIONS$/.test(tool)) return `uses: a page cannot call ${tool}.`;
+  return null;
+}
+
+function connectorEntries(item: unknown): AppInputResult<ConnectorEntry[]> {
+  if (typeof item === "string") {
+    const parts = item.trim().split(":").map((part) => part.trim());
+    if (parts.length === 3 && parts[0]!.toLowerCase() === "mcp") return { ok: true, value: [{ kind: "server", name: parts[1]!.toLowerCase(), tool: parts[2]! }] };
+    if (parts.length === 2) return { ok: true, value: [{ kind: "connector", name: parts[0]!.toLowerCase(), tool: parts[1]!.toUpperCase() }] };
+    return { ok: false, error: USES_HELP };
+  }
+  if (!isRecord(item)) return { ok: false, error: USES_HELP };
+  const server = typeof item.server === "string" ? item.server : undefined;
+  const connector = [item.connector, item.app, item.toolkit].find((value): value is string => typeof value === "string");
+  if ((server === undefined) === (connector === undefined)) return { ok: false, error: USES_HELP };
+  const given = item.tools ?? item.tool;
+  const tools = typeof given === "string" ? given.split(",") : Array.isArray(given) ? given : null;
+  if (!tools?.length || tools.some((tool) => typeof tool !== "string")) return { ok: false, error: USES_HELP };
+  return {
+    ok: true,
+    value: (tools as string[]).map((tool) => server !== undefined
+      ? { kind: "server" as const, name: server.trim().toLowerCase(), tool: tool.trim() }
+      : { kind: "connector" as const, name: connector!.trim().toLowerCase(), tool: tool.trim().toUpperCase() }),
+  };
+}
+
+function groupConnectors(entries: ConnectorEntry[]): AppInputResult<AppConnectorUse[]> {
+  const groups = new Map<string, AppConnectorUse>();
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.tool.includes("*")) return { ok: false, error: "uses: name each tool exactly; wildcards are not allowed." };
+    if (entry.kind === "connector") {
+      const problem = connectorToolProblem(entry.name, entry.tool);
+      if (problem) return { ok: false, error: problem };
+    } else if (!SERVER_NAME.test(entry.name) || !SERVER_TOOL_NAME.test(entry.tool)) {
+      return { ok: false, error: `uses: "mcp:${entry.name}:${entry.tool}" does not name an MCP server and one of its tools.` };
+    }
+    const key = `${entry.kind}\u0000${entry.name}`;
+    const group = groups.get(key) ?? (entry.kind === "connector" ? { connector: entry.name, tools: [] } : { server: entry.name, tools: [] });
+    groups.set(key, group);
+    if (group.tools.includes(entry.tool)) continue;
+    group.tools.push(entry.tool);
+    count += 1;
+  }
+  if (groups.size > APP_LIMITS.pageConnectors || count > APP_LIMITS.pageConnectorTools) {
+    return { ok: false, error: `uses: at most ${APP_LIMITS.pageConnectors} connected apps or servers and ${APP_LIMITS.pageConnectorTools} tools in all.` };
+  }
+  return { ok: true, value: [...groups.values()] };
+}
+
+/** A list of names; a string holding one name, several separated by commas, or a JSON list is read as that list. An entry
+ * may also be an object, {connector, tools} or {server, tools}. */
+function checkUses(value: unknown): AppInputResult<DeclaredUses | undefined> {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  let list: unknown = value;
+  if (typeof list === "string") {
+    const text = list.trim();
+    try { list = text.startsWith("[") ? JSON.parse(text) : text.split(","); } catch { return { ok: false, error: USES_HELP }; }
+  }
+  if (!Array.isArray(list)) return { ok: false, error: USES_HELP };
+  const uses: AppUse[] = [];
+  const entries: ConnectorEntry[] = [];
+  for (const item of list) {
+    const name = typeof item === "string" ? item.trim().toLowerCase() : "";
+    if ((APP_USES as readonly string[]).includes(name)) {
+      if (!uses.includes(name as AppUse)) uses.push(name as AppUse);
+      continue;
+    }
+    const found = connectorEntries(item);
+    if (!found.ok) return found;
+    entries.push(...found.value);
+  }
+  const connectors = groupConnectors(entries);
+  return connectors.ok ? { ok: true, value: { uses, connectors: connectors.value } } : connectors;
+}
+
+/** `uses` as one list of strings, the form checkUses reads back. */
+export function appUsesList(uses: readonly AppUse[], connectors: readonly AppConnectorUse[] = []): string[] {
+  return [...uses, ...connectors.flatMap((group) => group.tools.map((tool) => ("server" in group ? `mcp:${group.server}:${tool}` : `${group.connector}:${tool}`)))];
+}
+
+export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
+  if (!isRecord(input)) return { ok: false, error: "show_html needs {html, jsx or path, title, height?, fallback_text?}." };
+  const page = checkPage(input);
+  if (!page.ok) return page;
+  const title = checkTitle(input.title);
+  if (!title.ok) return title;
+  const out: ShowHtmlInput = { ...page.value, title: title.value };
+  const frameless = checkFrameless(input.frameless);
+  if (!frameless.ok) return frameless;
+  if (frameless.value) out.frameless = true;
+  const live = checkLive(input.live, out.path);
+  if (!live.ok) return live;
+  if (live.value) out.live = true;
+  const uses = checkUses(input.uses);
+  if (!uses.ok) return uses;
+  if (uses.value?.uses.length || uses.value?.connectors.length) {
+    out.uses = uses.value.uses;
+    out.connectors = uses.value.connectors;
+  }
+  if (input.height !== undefined && input.height !== null) {
+    if (typeof input.height !== "number" || !Number.isFinite(input.height)) return { ok: false, error: "height: must be a number of pixels, 80 to 720." };
+    out.height = Math.round(Math.min(APP_LIMITS.heightMax, Math.max(APP_LIMITS.heightMin, input.height)));
+  }
+  if (input.fallback_text !== undefined && input.fallback_text !== null) {
+    if (typeof input.fallback_text !== "string") return { ok: false, error: "fallback_text: must be a string." };
+    const fallback = input.fallback_text.trim();
+    if (fallback.length > APP_LIMITS.fallback) return { ok: false, error: `fallback_text: must be at most ${APP_LIMITS.fallback} characters.` };
+    if (fallback) out.fallbackText = fallback;
+  }
+  return { ok: true, value: out };
+}
+
+export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlInput> {
+  if (!isRecord(input)) return { ok: false, error: "Replacing a page needs {app_id, html, jsx or path, title?}." };
+  if (typeof input.app_id !== "string" || !/^[\w-]{1,128}$/.test(input.app_id.trim())) {
+    return { ok: false, error: "app_id: is required, the id show_html returned." };
+  }
+  const page = checkPage(input);
+  if (!page.ok) return page;
+  const out: UpdateHtmlInput = { appId: input.app_id.trim(), ...page.value };
+  const frameless = checkFrameless(input.frameless);
+  if (!frameless.ok) return frameless;
+  if (frameless.value !== undefined) out.frameless = frameless.value;
+  const live = checkLive(input.live, out.path);
+  if (!live.ok) return live;
+  if (live.value !== undefined) out.live = live.value;
+  const uses = checkUses(input.uses);
+  if (!uses.ok) return uses;
+  if (uses.value !== undefined) {
+    out.uses = uses.value.uses;
+    out.connectors = uses.value.connectors;
+  }
+  if (input.title !== undefined && input.title !== null) {
+    const title = checkTitle(input.title);
+    if (!title.ok) return title;
+    out.title = title.value;
+  }
+  return { ok: true, value: out };
+}
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", "#39": "'" };
+
+/** A preview, not a parser or a sanitizer: it only ever feeds the row's readable fallback. */
+export function htmlVisibleText(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, " ")
+    .replace(/<(script|style|template|noscript|title|head)\b[\s\S]*?(?:<\/\1\s*>|$)/gi, " ")
+    .replace(/<[^>]*>?/g, " ")
+    .replace(/&(#\d+|#x[\da-f]+|[a-z]+\d*);/gi, (whole, name: string) => {
+      const lower = name.toLowerCase();
+      if (ENTITIES[lower] !== undefined) return ENTITIES[lower]!;
+      const code = lower.startsWith("#x") ? Number.parseInt(lower.slice(2), 16) : lower.startsWith("#") ? Number.parseInt(lower.slice(1), 10) : NaN;
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? String.fromCodePoint(code) : whole;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function clip(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
+}
+
+export function htmlFallbackText(title: string, html: string, fallbackText?: string): string {
+  const given = fallbackText?.trim();
+  if (given) return clip(given, APP_LIMITS.fallback);
+  const visible = clip(htmlVisibleText(html), APP_LIMITS.fallbackExcerpt);
+  return clip(visible ? `[App] ${title}\n${visible}` : `[App] ${title}`, APP_LIMITS.fallback);
+}
+
+export function mcpAppFallbackText(serverTitle: string, toolTitle: string, result: { content?: unknown } | undefined): string {
+  const texts = Array.isArray(result?.content)
+    ? result.content.flatMap((block) => (isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : []))
+    : [];
+  const excerpt = clip(oneLine(texts.join(" ")), APP_LIMITS.fallbackExcerpt);
+  const head = `${oneLine(serverTitle)} · ${oneLine(toolTitle)}`;
+  return clip(excerpt ? `${head}\n${excerpt}` : head, APP_LIMITS.fallback);
+}
+
+const httpsLink = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length <= 2_048 && /^https:\/\/[^\s"'<>]+$/.test(value) ? value : undefined;
+const namedLink = (value: unknown): string | undefined => (isRecord(value) ? httpsLink(value.html_url) ?? httpsLink(value.url) : undefined);
+
+/** A JSON text block gives only its link; plain text gives the note's line and, failing a named link, its first
+ * https link. */
+export function appDoneOf(tool: string, result: { content?: unknown; structuredContent?: unknown }, at: number): AppDoneState {
+  let url = namedLink(result.structuredContent);
+  let text: string | undefined;
+  for (const block of Array.isArray(result.content) ? result.content : []) {
+    if (!isRecord(block) || block.type !== "text" || typeof block.text !== "string") continue;
+    const raw = block.text.trim();
+    let parsed: unknown;
+    try { parsed = /^[{[]/.test(raw) ? JSON.parse(raw) : undefined; } catch { parsed = undefined; }
+    if (parsed !== undefined) { url ??= namedLink(parsed); continue; }
+    url ??= httpsLink(/https:\/\/[^\s"'<>)\]]+/.exec(raw)?.[0]);
+    text ??= clip(oneLine(raw), APP_LIMITS.doneText) || undefined;
+  }
+  return { tool, ...(text ? { text } : {}), ...(url ? { url } : {}), at };
+}
+
+export function appBlockedText(reason: AppBlockedReason, server?: string): string {
+  const name = server?.trim() || "This app's server";
+  switch (reason) {
+    case "signed-out": return `Sign in to ${name} again`;
+    case "server-removed": return `${name} is no longer connected`;
+    case "server-disabled": return `${name} is switched off in Settings`;
+    case "apps-off": return `Apps from ${name} are switched off in Settings`;
+    case "too-large": return "This app is too large to store";
+    case "unavailable": return `${name} did not send this app's page`;
+  }
+}

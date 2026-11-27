@@ -1,0 +1,102 @@
+{
+  "id": "routine-deferral",
+  "title": "A routine due while its target bot is busy defers instead of failing, then runs when the bot frees",
+  "behavior": "A routine run whose target bot is mid-turn is stamped deferredAt and stays queued (no silent drop, no failure); the moment the target frees, the run dispatches and completes.",
+  "issue": 1503,
+  "world": "coordination",
+  "gates": [
+    "busyHold"
+  ],
+  "bots": [
+    {
+      "key": "worker",
+      "name": "Night worker",
+      "turns": [
+        {
+          "gate": "busyHold",
+          "reply": "Long analysis finished"
+        },
+        {
+          "reply": "Nightly export produced"
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "setConfig",
+      "config": {
+        "threads": {
+          "maxConcurrentPerBot": 1
+        }
+      }
+    },
+    {
+      "kind": "send",
+      "bot": "worker",
+      "text": "Run the long analysis now."
+    },
+    {
+      "kind": "waitForBusy",
+      "bot": "worker",
+      "busy": true,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "createRoutine",
+      "routine": "nightly",
+      "bot": "worker",
+      "prompt": "Produce the nightly export summary."
+    },
+    {
+      "kind": "runRoutine",
+      "routine": "nightly"
+    },
+    {
+      "kind": "waitForRoutineRun",
+      "routine": "nightly",
+      "status": "queued",
+      "timeoutMs": 15000
+    },
+    {
+      "kind": "snapshotRoutineRun",
+      "routine": "nightly",
+      "saveAs": "heldBehindBusy"
+    },
+    {
+      "kind": "writeGate",
+      "gate": "busyHold"
+    },
+    {
+      "kind": "waitForBusy",
+      "bot": "worker",
+      "busy": false,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "waitForRoutineRun",
+      "routine": "nightly",
+      "status": "completed",
+      "timeoutMs": 30000
+    }
+  ],
+  "assertions": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "worker"
+    },
+    {
+      "kind": "routineRunSnapshot",
+      "of": "heldBehindBusy",
+      "status": "queued",
+      "deferred": true
+    },
+    {
+      "kind": "turnOrder",
+      "bots": [
+        "worker",
+        "worker"
+      ]
+    }
+  ]
+}

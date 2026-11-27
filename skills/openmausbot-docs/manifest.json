@@ -1,0 +1,31 @@
+{
+  "id": "openmausbot-docs",
+  "name": "OpenMausBot Docs",
+  "version": "0.1.0",
+  "description": "Answer how OpenMausBot itself is configured, from this install's files and the app's own docs.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "openmausbot",
+    "open mausbot",
+    "mausbot settings",
+    "mausbot config",
+    "mausbot 设置",
+    "mausbot 配置",
+    "omb settings",
+    "omb config",
+    "approval level",
+    "bot's routines",
+    "bot routines",
+    "bot's memory",
+    "bot memory",
+    "multi-device",
+    "multiple devices",
+    "more than one device",
+    "between devices",
+    "bots on my second computer",
+    "bots on my other computer",
+    "bots on more than one computer",
+    "bots on my phone"
+  ],
+  "requiredCapabilities": []
+}

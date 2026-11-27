@@ -1,0 +1,222 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import {
+  botCycleStep,
+  filterShortcutGroups,
+  isDictationToggle,
+  isSidebarToggle,
+  SHORTCUT_GROUPS,
+  shortcutGroupsFor,
+  shouldOpenKeyboardShortcuts,
+  shortcutKeysForPlatform,
+  shortcutDescription,
+} from "./keyboard-shortcuts";
+import { setLocale } from "./i18n";
+
+afterEach(() => setLocale("en"));
+
+describe("keyboard-shortcuts", () => {
+  it("localizes the follow-up shortcut without changing its English description", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    const followUp = items.find((item) => item.id === "send-follow-up")!;
+    expect(shortcutDescription(followUp)).toBe(followUp.description);
+    setLocale("pt-br");
+    expect(shortcutDescription(followUp)).toBe("Enquanto um bot trabalha: colocar na fila em vez de enviar agora, ou o contrário");
+    expect(shortcutDescription(items.find((item) => item.id === "toggle-sidebar")!)).toBe("Recolher ou expandir a barra lateral");
+  });
+
+  it("keeps an uncatalogued shortcut's own description", () => {
+    setLocale("pt-br");
+    expect(shortcutDescription({ id: "future-shortcut", description: "Future action", macKeys: [], winKeys: [] })).toBe("Future action");
+  });
+
+  it("lists ⌘\\ or Ctrl+\\ for collapsing the sidebar, and matches only that chord", () => {
+    const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "toggle-sidebar")!;
+    expect(item).toMatchObject({ description: "Collapse or expand the sidebar", macKeys: ["⌘", "\\"], winKeys: ["Ctrl", "\\"] });
+    const chord = { key: "\\", metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false };
+    expect(isSidebarToggle(chord)).toBe(true);
+    expect(isSidebarToggle({ ...chord, metaKey: false, ctrlKey: true })).toBe(true);
+    expect(isSidebarToggle({ ...chord, metaKey: false })).toBe(false);
+    expect(isSidebarToggle({ ...chord, shiftKey: true })).toBe(false);
+    expect(isSidebarToggle({ ...chord, defaultPrevented: true })).toBe(false);
+  });
+
+  it("defines unique IDs and non-empty key lists for all shortcuts", () => {
+    const ids = new Set<string>();
+
+    for (const group of SHORTCUT_GROUPS) {
+      expect(group.category.length).toBeGreaterThan(0);
+      expect(group.items.length).toBeGreaterThan(0);
+
+      for (const item of group.items) {
+        expect(ids.has(item.id)).toBe(false);
+        ids.add(item.id);
+
+        expect(item.description.length).toBeGreaterThan(0);
+        expect(item.macKeys.length).toBeGreaterThan(0);
+        expect(item.winKeys.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("resolves correct keys for Mac and Windows", () => {
+    const sampleItem = {
+      id: "test",
+      description: "Test shortcut",
+      macKeys: ["⌘", "K"],
+      winKeys: ["Ctrl", "K"],
+    };
+
+    expect(shortcutKeysForPlatform(sampleItem, true)).toEqual(["⌘", "K"]);
+    expect(shortcutKeysForPlatform(sampleItem, false)).toEqual(["Ctrl", "K"]);
+  });
+
+  it("filters shortcut groups by search query", () => {
+    const all = filterShortcutGroups(SHORTCUT_GROUPS, "");
+    expect(all.length).toBe(SHORTCUT_GROUPS.length);
+
+    const nav = filterShortcutGroups(SHORTCUT_GROUPS, "palette");
+    expect(nav.length).toBe(1);
+    expect(nav[0]?.items[0]?.id).toBe("command-palette");
+
+    const byKey = filterShortcutGroups(SHORTCUT_GROUPS, "Esc", true);
+    expect(byKey.some((g) => g.items.some((i) => i.id === "close-panel"))).toBe(true);
+
+    const empty = filterShortcutGroups(SHORTCUT_GROUPS, "nonexistent-query-12345");
+    expect(empty.length).toBe(0);
+  });
+
+  it("lists the Live call chords", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    expect(items.find((item) => item.id === "live-call-mute")).toMatchObject({ macKeys: ["⌘", "⇧", "M"], winKeys: ["Ctrl", "Shift", "M"] });
+    expect(items.find((item) => item.id === "live-call-hang-up")).toMatchObject({ macKeys: ["⌘", "⇧", "H"], winKeys: ["Ctrl", "Shift", "H"] });
+  });
+
+  it("draws the send and new-line rows from the send key choice", () => {
+    const row = (groups: readonly typeof SHORTCUT_GROUPS[number][], id: string) => groups.flatMap((group) => group.items).find((item) => item.id === id)!;
+    expect(shortcutGroupsFor("enter")).toBe(SHORTCUT_GROUPS);
+    expect(row(SHORTCUT_GROUPS, "send-message")).toMatchObject({ macKeys: ["Return"], winKeys: ["Enter"] });
+    expect(row(SHORTCUT_GROUPS, "new-line")).toMatchObject({ macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] });
+    const shift = shortcutGroupsFor("shift-enter");
+    expect(row(shift, "send-message")).toMatchObject({ macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] });
+    expect(row(shift, "new-line")).toMatchObject({ macKeys: ["Return"], winKeys: ["Enter"] });
+    const mod = shortcutGroupsFor("mod-enter");
+    expect(row(mod, "send-message")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
+    expect(row(mod, "new-line")).toMatchObject({ macKeys: ["Return"], winKeys: ["Enter"] });
+    // The other of steer and queue: Ctrl/⌘ with the send key, so Shift joins it when Ctrl/⌘+Enter already sends.
+    expect(row(SHORTCUT_GROUPS, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
+    expect(row(shift, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
+    expect(row(mod, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "⇧", "Return"], winKeys: ["Ctrl", "Shift", "Enter"] });
+    for (const groups of [shift, mod]) {
+      expect(row(groups, "save-bulletin")).toBe(row(SHORTCUT_GROUPS, "save-bulletin"));
+      expect(row(groups, "send-message").description).toBe("Send message");
+      expect(groups.map((group) => group.items.map((item) => item.id))).toEqual(SHORTCUT_GROUPS.map((group) => group.items.map((item) => item.id)));
+    }
+  });
+
+  it("lists previous/next in handler order and excludes pointer gestures", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    const switchBot = items.find((item) => item.id === "switch-bot")!;
+    expect(switchBot.macKeys.at(-1)).toBe("[ / ]");
+    expect(switchBot.winKeys.at(-1)).toBe("[ / ]");
+    expect(items.some((item) => [...item.macKeys, ...item.winKeys].includes("Double-click"))).toBe(false);
+  });
+});
+
+describe("keyboard shortcut opening guard", () => {
+  class Target extends EventTarget {
+    constructor(readonly selector: string | null = null, readonly isContentEditable = false) { super(); }
+    closest(selectors: string) { return this.selector && selectors.split(", ").includes(this.selector) ? this : null; }
+  }
+  const event = (key: string, overrides: Partial<KeyboardEvent> = {}) => ({
+    key, target: new Target(), defaultPrevented: false, isComposing: false,
+    metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...overrides,
+  }) as KeyboardEvent;
+
+  beforeEach(() => vi.stubGlobal("HTMLElement", Target));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("accepts help keys outside editing controls", () => {
+    expect(shouldOpenKeyboardShortcuts(event("?", { shiftKey: true }))).toBe(true);
+    expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true }))).toBe(true);
+    expect(shouldOpenKeyboardShortcuts(event("/", { ctrlKey: true }))).toBe(true);
+    expect(shouldOpenKeyboardShortcuts(event("/"))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("k", { metaKey: true }))).toBe(false);
+  });
+
+  it.each(["input", "textarea", "select", "dialog", "[role=dialog]"])("does not open from %s", (selector) => {
+    const target = new Target(selector);
+    expect(shouldOpenKeyboardShortcuts(event("?", { target }))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("/", { target, metaKey: true }))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("/", { target, ctrlKey: true }))).toBe(false);
+  });
+
+  it("respects editable ancestors, composition, handled events, and extra modifiers", () => {
+    for (const overrides of [
+      { target: new Target(null, true) }, { isComposing: true },
+      { defaultPrevented: true }, { altKey: true },
+    ]) {
+      expect(shouldOpenKeyboardShortcuts(event("?", overrides))).toBe(false);
+      expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, ...overrides }))).toBe(false);
+    }
+    expect(shouldOpenKeyboardShortcuts(event("?", { ctrlKey: true }))).toBe(false);
+    expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, shiftKey: true }))).toBe(false);
+  });
+});
+
+describe("botCycleStep", () => {
+  it("steps forward on ] and back on [, as macOS reports them with ⌘⇧", () => {
+    expect(botCycleStep({ key: "]" })).toBe(1);
+    expect(botCycleStep({ key: "[" })).toBe(-1);
+  });
+
+  it("also steps on } and {, which Ctrl+Shift reports on Windows and Linux", () => {
+    expect(botCycleStep({ key: "}" })).toBe(1);
+    expect(botCycleStep({ key: "{" })).toBe(-1);
+  });
+
+  it("ignores other keys", () => {
+    expect(botCycleStep({ key: "+" })).toBeNull();
+    expect(botCycleStep({ key: "1" })).toBeNull();
+  });
+
+  describe("isDictationToggle", () => {
+    const key = (init: Partial<KeyboardEvent>) => ({
+      key: "d", code: "KeyD", metaKey: false, ctrlKey: false, shiftKey: false, altKey: false,
+      defaultPrevented: false, isComposing: false, ...init,
+    });
+
+    it("is ⌘D on macOS and Ctrl+D elsewhere", () => {
+      expect(isDictationToggle(key({ metaKey: true }), true)).toBe(true);
+      expect(isDictationToggle(key({ ctrlKey: true }), false)).toBe(true);
+      expect(isDictationToggle(key({ key: "D", metaKey: true }), true)).toBe(true);
+    });
+
+    it("leaves Ctrl+D on macOS to the text field and the Windows key alone elsewhere", () => {
+      expect(isDictationToggle(key({ ctrlKey: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true }), false)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, ctrlKey: true }), true)).toBe(false);
+    });
+
+    it("ignores Shift, Option/Alt, plain D, input-method composition and handled keys", () => {
+      expect(isDictationToggle(key({}), true)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, shiftKey: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ ctrlKey: true, altKey: true }), false)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, isComposing: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ metaKey: true, defaultPrevented: true }), true)).toBe(false);
+    });
+
+    it("uses the physical key only when the layout types no Latin letter there", () => {
+      expect(isDictationToggle(key({ key: "в", metaKey: true }), true)).toBe(true);
+      expect(isDictationToggle(key({ key: "e", metaKey: true }), true)).toBe(false);
+      expect(isDictationToggle(key({ key: "d", code: "KeyH", metaKey: true }), true)).toBe(true);
+    });
+
+    it("is listed in the shortcuts sheet", () => {
+      const item = SHORTCUT_GROUPS.flatMap((group) => group.items).find((entry) => entry.id === "dictation-toggle")!;
+      expect(shortcutKeysForPlatform(item, true)).toEqual(["⌘", "D"]);
+      expect(shortcutKeysForPlatform(item, false)).toEqual(["Ctrl", "D"]);
+      expect(shortcutDescription(item)).toBe("Start or stop dictation");
+    });
+  });
+});

@@ -1,0 +1,7 @@
+{
+  "minScore": 0.75,
+  "maxDrift": 0.25,
+  "turnTimeoutMs": 240000,
+  "judgeTimeoutMs": 120000,
+  "maxJudgeRetries": 1
+}

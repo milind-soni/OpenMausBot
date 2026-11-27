@@ -1,0 +1,13 @@
+{
+  "id": "create-verification-skill",
+  "name": "Create Verification Skill",
+  "version": "0.1.0",
+  "description": "Write one verification skill for a specific app or project.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "/create-verification-skill",
+    "create a verification skill",
+    "make a verification skill"
+  ],
+  "requiredCapabilities": ["skillAuthoring"]
+}

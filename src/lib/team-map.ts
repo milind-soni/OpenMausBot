@@ -1,0 +1,117 @@
+import { t } from "./i18n";
+
+export interface TeamMapBot {
+  id: string;
+  name: string;
+  hidden?: boolean;
+  section?: string;
+  chiefOfStaff?: boolean;
+  busy?: boolean;
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
+}
+
+export interface TeamMapSnapshot {
+  collaborations: Array<{ groupId: string; botIds: [string, string]; lastAt: number }>;
+  queued: Array<{ sourceBotId: string; targetBotId: string; reason?: string; threadId?: string; groupId?: string }>;
+  running: Array<{ sourceBotId: string; targetBotId: string; threadId: string; groupId?: string }>;
+}
+
+export interface TeamMapSection<T extends TeamMapBot = TeamMapBot> {
+  key: string;
+  name: string;
+  chiefs: T[];
+  members: T[];
+}
+
+export type TeamMapEdge = {
+  sourceBotId: string;
+  targetBotId: string;
+  state: "running" | "queued" | "connected";
+  reason?: string;
+  groupId?: string;
+  threadId?: string;
+  lastAt?: number;
+};
+
+export interface TeamMapStatus {
+  label: string;
+  tone: "success" | "warning" | "danger" | "idle";
+}
+
+export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
+  collaborations: [],
+  queued: [],
+  running: [],
+};
+
+export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: string[] = []): TeamMapSection<T>[] {
+  const sections = new Map<string, T[]>();
+  for (const bot of bots) {
+    if (bot.hidden) continue;
+    const key = bot.section?.trim() || "";
+    sections.set(key, [...(sections.get(key) ?? []), bot]);
+  }
+  for (const name of names) {
+    const key = name.trim();
+    if (key && !sections.has(key)) sections.set(key, []);
+  }
+  return [...sections].map(([key, sectionBots]) => ({
+    key,
+    name: key || t("teamSettings.general"),
+    chiefs: sectionBots.filter((bot) => bot.chiefOfStaff),
+    members: sectionBots.filter((bot) => !bot.chiefOfStaff),
+  }));
+}
+
+export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot): TeamMapEdge[] {
+  const visible = new Set(bots.filter((bot) => !bot.hidden).map((bot) => bot.id));
+  const edges = new Map<string, TeamMapEdge>();
+  const key = (sourceBotId: string, targetBotId: string) => [sourceBotId, targetBotId].sort().join(":");
+  for (const collaboration of snapshot.collaborations) {
+    const [sourceBotId, targetBotId] = collaboration.botIds;
+    if (!visible.has(sourceBotId) || !visible.has(targetBotId)) continue;
+    edges.set(key(sourceBotId, targetBotId), {
+      sourceBotId,
+      targetBotId,
+      state: "connected",
+      groupId: collaboration.groupId,
+      lastAt: collaboration.lastAt,
+    });
+  }
+  for (const delegation of snapshot.queued) {
+    if (!visible.has(delegation.sourceBotId) || !visible.has(delegation.targetBotId)) continue;
+    edges.set(key(delegation.sourceBotId, delegation.targetBotId), {
+      sourceBotId: delegation.sourceBotId,
+      targetBotId: delegation.targetBotId,
+      state: "queued",
+      reason: delegation.reason,
+      groupId: delegation.groupId,
+      threadId: delegation.threadId,
+    });
+  }
+  for (const delegation of snapshot.running) {
+    if (!visible.has(delegation.sourceBotId) || !visible.has(delegation.targetBotId)) continue;
+    edges.set(key(delegation.sourceBotId, delegation.targetBotId), {
+      sourceBotId: delegation.sourceBotId,
+      targetBotId: delegation.targetBotId,
+      state: "running",
+      groupId: delegation.groupId,
+      threadId: delegation.threadId,
+    });
+  }
+  return [...edges.values()].sort((a, b) => {
+    const priority = { running: 0, queued: 1, connected: 2 } as const;
+    return priority[a.state] - priority[b.state] || (b.lastAt ?? 0) - (a.lastAt ?? 0);
+  });
+}
+
+export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
+  if (bot.activity === "waiting-on-you") return { label: t("canvas.status.waiting"), tone: "warning" };
+  if (bot.activity === "dead" || bot.activity === "no-signal") return { label: t("canvas.status.noSignal"), tone: "danger" };
+  if (bot.busy || bot.activity === "working") return { label: t("canvas.status.working"), tone: "success" };
+  return { label: t("canvas.status.ready"), tone: "idle" };
+}
+
+export function teamMapBotCount(count: number): string {
+  return count === 1 ? t("canvas.botCountOne") : t("canvas.botCount", { count });
+}

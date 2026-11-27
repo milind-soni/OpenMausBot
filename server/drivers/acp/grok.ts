@@ -1,0 +1,656 @@
+// Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
+// subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { parse as parseYaml } from "yaml";
+
+import type { ModelCatalog, SendTurnInput } from "../../contracts.ts";
+import { harnessHome, splitCliString } from "../../env-path.ts";
+import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
+import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
+import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { LiveSwitchRefused } from "./driver-hooks.ts";
+import { grokLoginCheck } from "./grok-sign-in.ts";
+import { closeEndsBackgroundWork } from "./background-work.ts";
+import { readGrokFollowUp } from "./grok-follow-up.ts";
+import { GROK_CANCEL_META, GROK_INITIALIZE_META, GROK_PROMPT_COMPLETION, grokPromptOutcome, grokReportedFailure } from "./grok-signals.ts";
+import type { AcpPromptSteer } from "./steer.ts";
+import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
+import type { AcpQuestionRequest } from "./question-requests.ts";
+import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
+import { OWN_APPS_SERVER } from "../../../shared/own-apps.ts";
+import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById, repeatsQuestionText } from "../../../shared/ask-question.ts";
+
+export const STATIC_GROK_MODELS: ModelCatalog = bundledEngineCatalog("grok");
+
+const SLUG = ENGINE_MODEL_ID.grok;
+
+/** `$GROK_HOME`, else `~/.grok`: Grok's sign-in, config and catalog. */
+export function grokHome(env: Record<string, string | undefined> = process.env): string {
+  return env.GROK_HOME || harnessHome("grok", env);
+}
+
+export function grokSignedIn(env: Record<string, string | undefined>): boolean {
+  return existsSync(join(grokHome(env), "auth.json"));
+}
+
+const grokLogin = grokLoginCheck();
+/** The engine's status: an auth.json whose login `grok models` reports gone (expired, revoked) is signed out too. */
+export function grokAuthenticated(cli: string, env: Record<string, string | undefined>): Promise<boolean> {
+  return grokLogin(cli, env, join(grokHome(env), "auth.json"));
+}
+
+/** The sign-out probe: an auth.json that cannot be read is `unknown`, so sign-out refuses instead of reporting a
+ * removal that never happened. `grokSignedIn` keeps its boolean contract for turn gating. */
+export function grokSignInState(env: Record<string, string | undefined>): DeviceSignInState {
+  try {
+    statSync(join(grokHome(env), "auth.json"));
+    return "signed-in";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "signed-out" : "unknown";
+  }
+}
+
+function grokLoginFailure(output: string): string {
+  if (/(unexpected argument|unrecognized (argument|option)|unknown option).*device-(auth|code)/i.test(output)) {
+    return "This server's Grok is too old to sign in with a code. Update Grok on the server, then try again.";
+  }
+  if (/device-code login is not available/i.test(output)) {
+    return "This Grok account can't sign in with a code. Use an xAI API key instead.";
+  }
+  if (/expired/i.test(output)) return "The Grok sign-in code expired. Start sign-in again for a new code.";
+  if (/denied|rejected/i.test(output)) return "Grok sign-in was declined in the browser. Start sign-in again to try once more.";
+  return "Grok sign-in did not finish. Check the server's connection, then try again.";
+}
+
+/** `grok login --device-auth` / `grok logout` on the grok.com subscription (grok 1.0.25 and 1.0.41). The stored auth.json
+ * confirms them: `grok models` also reports the login, but takes seconds, and only the engine's status waits for it. */
+export const GROK_DEVICE_SIGN_IN: DeviceSignIn = {
+  provider: "grok",
+  product: "Grok",
+  account: "Grok",
+  homeEnv: "GROK_HOME",
+  homeDir: ".grok",
+  loginArgs: ["login", "--device-auth"],
+  logoutArgs: ["logout"],
+  install: "Install it with xAI's installer (https://x.ai/cli), then try again.",
+  failure: grokLoginFailure,
+  signedIn: grokSignedIn,
+  signInState: grokSignInState,
+};
+
+function unquote(raw: string): string {
+  const value = raw.trim();
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\"/g, '"');
+  }
+  return value;
+}
+
+/** Local slugs from ~/.grok/config.toml, which `grok -m <slug>` accepts, plus the cloud defaults. */
+export function readGrokModelCatalog(env: Record<string, string | undefined> = process.env): ModelCatalog {
+  const fixed = currentEngineCatalog("grok");
+  const path = join(grokHome(env), "config.toml");
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return fixed;
+  }
+
+  const options = fixed.options.map((o) => ({ ...o }));
+  const seen = new Set(options.map((o) => o.id));
+  let configuredDefault: string | null = null;
+  let current: { slug: string; name?: string } | null = null;
+  let inModels = false;
+
+  const flush = () => {
+    if (!current || !SLUG.test(current.slug) || seen.has(current.slug)) {
+      current = null;
+      return;
+    }
+    seen.add(current.slug);
+    options.push({ id: current.slug, label: current.name || current.slug, custom: true });
+    current = null;
+  };
+
+  for (const line of text.split(/\r?\n/)) {
+    const stripped = line.trim();
+    if (stripped === "[models]") {
+      flush();
+      inModels = true;
+      continue;
+    }
+    if (stripped.startsWith("[model.") && stripped.endsWith("]")) {
+      flush();
+      inModels = false;
+      let inner = stripped.slice("[model.".length, -1);
+      if (inner.startsWith('"') && inner.endsWith('"')) inner = inner.slice(1, -1);
+      current = { slug: inner };
+      continue;
+    }
+    if (stripped.startsWith("[")) {
+      flush();
+      inModels = false;
+      continue;
+    }
+    if (!stripped || stripped.startsWith("#") || !stripped.includes("=")) continue;
+    const eq = stripped.indexOf("=");
+    const key = stripped.slice(0, eq).trim();
+    const value = unquote(stripped.slice(eq + 1));
+    if (current && key === "name" && value) current.name = value;
+    if (!current && inModels && key === "default") configuredDefault = value;
+  }
+  flush();
+
+  return {
+    default: configuredDefault && seen.has(configuredDefault) ? configuredDefault : fixed.default,
+    options,
+  };
+}
+
+/** What a person reads when Grok refused `model` and its session listed the models this sign-in offers without it; null
+ * when the session listed none, or listed this one (then the refusal was something else). */
+export function grokModelNotOffered(model: string, sessionModels: readonly { modelId?: string }[]): string | null {
+  const offered = [...new Set(sessionModels.map((entry) => entry.modelId).filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (offered.length === 0 || offered.includes(model)) return null;
+  const list = offered.length === 1 ? offered[0] : `${offered.slice(0, -1).join(", ")} and ${offered.at(-1)}`;
+  // "can't use the model" keeps a routine from retrying a run that would be refused the same way (retry.ts).
+  return `Grok can't use the model ${model} here: this Grok sign-in offers ${list}, so choose ${offered.length === 1 ? "it" : "one of those"} for this bot.`;
+}
+
+/** Grok's answer to set_model for a model it does not know: JSON-RPC invalid params, or its "unknown model id" words. */
+function unknownGrokModel(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === -32602 || /\bunknown model\b/i.test(error instanceof Error ? error.message : String(error));
+}
+
+function suggestGrokSlug(host: string, model: string, taken: Set<string>): string {
+  let base = `${host}-${model}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  if (!base || !/^[a-z]/.test(base)) base = `m-${base || "model"}`;
+  let slug = base;
+  let n = 2;
+  while (taken.has(slug)) {
+    slug = `${base}-${n}`;
+    n += 1;
+  }
+  return slug;
+}
+
+function quoteToml(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/** Write a [model.slug] block so `grok -m` can reach the injected host. */
+export function ensureGrokInjectSlug(
+  modelId: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const inject = decodeInjectId(modelId);
+  if (!inject) return modelId;
+  const host = localHost(inject.host);
+  if (!host) return modelId;
+
+  const path = join(grokHome(env), "config.toml");
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    text = "";
+  }
+
+  const taken = new Set<string>(currentEngineCatalog("grok").options.map((option) => option.id));
+  let current: { slug: string; model?: string; baseUrl?: string } | null = null;
+  const flush = () => {
+    if (!current) return;
+    taken.add(current.slug);
+    if (current.model === inject.model && current.baseUrl === host.baseUrl) {
+      found = current.slug;
+    }
+    current = null;
+  };
+  let found: string | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const stripped = line.trim();
+    if (stripped.startsWith("[model.") && stripped.endsWith("]")) {
+      flush();
+      let inner = stripped.slice("[model.".length, -1);
+      if (inner.startsWith('"') && inner.endsWith('"')) inner = inner.slice(1, -1);
+      current = { slug: inner };
+      continue;
+    }
+    if (stripped.startsWith("[")) {
+      flush();
+      continue;
+    }
+    if (!current || !stripped.includes("=")) continue;
+    const eq = stripped.indexOf("=");
+    const key = stripped.slice(0, eq).trim();
+    const value = unquote(stripped.slice(eq + 1));
+    if (key === "model") current.model = value;
+    if (key === "base_url") current.baseUrl = value;
+  }
+  flush();
+  if (found) return found;
+
+  const slug = suggestGrokSlug(inject.host, inject.model, taken);
+  const heading = /[^a-z0-9_-]/i.test(slug) ? `[model."${slug}"]` : `[model.${slug}]`;
+  const block = [
+    heading,
+    `model = ${quoteToml(inject.model)}`,
+    `base_url = ${quoteToml(host.baseUrl)}`,
+    `name = ${quoteToml(`${inject.model} (${host.label})`)}`,
+    `api_backend = "chat_completions"`,
+    `api_key = ${quoteToml(hostApiKey(host, env))}`,
+    "",
+  ].join("\n");
+  const next = text && !text.endsWith("\n") ? `${text}\n\n${block}` : `${text}${text ? "\n" : ""}${block}`;
+  writeFileSync(path, next);
+  return slug;
+}
+
+/** Grok 1.0.25 consumes native image blocks but advertises image:false; other versions negotiate. */
+export function grokAcceptsUnadvertisedImages(init: unknown): boolean {
+  const meta = (init as { _meta?: { grokShell?: unknown; agentVersion?: unknown } } | null)?._meta;
+  if (meta?.grokShell !== true || typeof meta.agentVersion !== "string") return false;
+  const version = /^1\.0\.(\d+)$/.exec(meta.agentVersion);
+  return Boolean(version && Number(version[1]) >= 25);
+}
+
+interface GrokToolConfig { id: string; name_override?: string; [key: string]: unknown }
+interface GrokScopeProfile {
+  name: string;
+  description: string;
+  toolConfig: { tools: GrokToolConfig[]; [key: string]: unknown };
+  injectDefaultTools?: boolean;
+  tools?: string[];
+  disallowedTools?: string[];
+  [key: string]: unknown;
+}
+
+// Original names in the official 1.0.41 default registry, never owner strings.
+const GROK_NATIVE_TOOLS = [
+  ["read_file", "GrokBuild:read_file"], ["search_replace", "GrokBuild:search_replace"], ["write", "OpenCode:write"],
+  ["run_terminal_command", "GrokBuild:run_terminal_cmd"], ["list_dir", "GrokBuild:list_dir"], ["grep", "GrokBuild:grep"],
+  ["kill_command_or_subagent", "GrokBuild:kill_task"], ["todo_write", "GrokBuild:todo_write"],
+  ["get_command_or_subagent_output", "GrokBuild:get_task_output"], ["spawn_subagent", "GrokBuild:task"],
+  ["scheduler_create", "GrokBuild:scheduler_create"], ["scheduler_delete", "GrokBuild:scheduler_delete"], ["scheduler_list", "GrokBuild:scheduler_list"],
+  ["monitor", "GrokBuild:monitor"], ["search_tool", "GrokBuild:search_tool"], ["use_tool", "GrokBuild:use_tool"],
+  ["workflow", "GrokBuild:workflow"], ["enter_plan_mode", "GrokBuild:enter_plan_mode"], ["exit_plan_mode", "GrokBuild:exit_plan_mode"],
+  ["ask_user_question", "GrokBuild:ask_user_question"], ["send_feedback", "GrokBuild:send_feedback"],
+  ["image_gen", "GrokBuild:image_gen"], ["image_edit", "GrokBuild:image_edit"],
+  ["image_to_video", "GrokBuild:image_to_video"], ["reference_to_video", "GrokBuild:reference_to_video"],
+] as const;
+
+export function grokInheritedProfile(cli: string, env: Record<string, string | undefined>, cwd: string): GrokScopeProfile | undefined {
+  const unsupported = () => { throw new Error("Grok's existing agent profile cannot be safely intersected with tool selection. Use a profile file with explicit tools or a separate default Grok account."); };
+  if ((env.GROK_AGENT && env.GROK_AGENT !== "grok-build") || env.GROK_CONFIG || env.GROK_CONFIG_PATH) return unsupported();
+  const args = splitCliString(cli);
+  // The CLI applies operator filters after ACP's profile, so unverified overrides refuse.
+  if (args.some(arg => /^(--tools|--disallowed-tools|--disallowedTools|--agent)(=|$)/.test(arg))) return unsupported();
+  const flags = args.flatMap((arg, index) => arg === "--agent-profile" || arg.startsWith("--agent-profile=") ? [index] : []);
+  if (flags.length > 1) return unsupported();
+  const flag = flags[0] ?? -1;
+  let path = flag >= 0 ? (args[flag]!.includes("=") ? args[flag]!.slice(args[flag]!.indexOf("=") + 1) : args[flag + 1]) : undefined;
+  if (flag >= 0 && (!path || path.startsWith("-"))) return unsupported();
+  const files = [join(grokHome(env), "config.toml")];
+  for (let directory = resolve(cwd);;) {
+    const file = join(directory, ".grok", "config.toml"); if (!files.includes(file)) files.push(file);
+    const parent = dirname(directory); if (parent === directory) break; directory = parent;
+  }
+  for (const file of files) {
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8"); if (text.length > 262_144) return unsupported();
+    // A small TOML subset over the whole file; unsupported syntax refuses the scoped turn.
+    let section = "";
+    for (const line of text.split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith("#"))) {
+      const header = /^\[([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)\]\s*(?:#.*)?$/.exec(line);
+      if (header) { section = header[1]!; if (section.startsWith("agent.")) return unsupported(); continue; }
+      const assignment = /^([A-Za-z0-9_-]+)\s*=\s*(.+)$/.exec(line);
+      if (!assignment || /'''|"""/.test(assignment[2]!) || (!section && assignment[1] === "agent")) return unsupported();
+      if (section !== "agent") continue;
+      const match = /^(name|definition)\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')\s*(?:#.*)?$/.exec(line);
+      if (!match) return unsupported();
+      let value: string;
+      try { value = match[2]!.startsWith('"') ? JSON.parse(match[2]!) as string : match[2]!.slice(1, -1); }
+      catch { return unsupported(); }
+      // Grok expands environment variables in paths.
+      if (value.includes("$") || !value) return unsupported();
+      if (match[1] === "name" && value !== "grok-build") return unsupported();
+      if (match[1] === "definition" && flag < 0) {
+        if (path !== undefined && path !== value) return unsupported();
+        path = value;
+      }
+    }
+  }
+  if (!path) return;
+  const text = readFileSync(resolve(cwd, path), "utf8"); if (text.length > 262_144) return unsupported();
+  const match = /^\s*---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/.exec(text);
+  if (!match) return unsupported();
+  const profile = parseYaml(match[1]!) as Partial<GrokScopeProfile> | null;
+  if (!profile || typeof profile.name !== "string" || typeof profile.description !== "string"
+    || (profile.tools !== undefined && (!Array.isArray(profile.tools) || !profile.tools.every((tool) => typeof tool === "string")))
+    || (profile.disallowedTools !== undefined && (!Array.isArray(profile.disallowedTools) || !profile.disallowedTools.every((tool) => typeof tool === "string")))) return unsupported();
+  const toolConfig = profile.toolConfig ?? { tools: GROK_NATIVE_TOOLS.map(([name, id]) => ({ id, name_override: name })) };
+  if (!Array.isArray(toolConfig.tools) || !toolConfig.tools.every((tool) => typeof tool?.id === "string" && (tool.name_override === undefined || typeof tool.name_override === "string"))) return unsupported();
+  return { ...profile, name: profile.name, description: profile.description, toolConfig, ...(match[2]?.trim() ? { promptBody: match[2].trim() } : {}) };
+}
+
+/** A curated registry: empty/unknown selections never inherit Grok's defaults. */
+export function grokToolScopeProfile(scope: unknown, init: unknown, inherited?: GrokScopeProfile, hasMcp = false): GrokScopeProfile {
+  const parsed = parseToolScope(scope);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const meta = (init as { _meta?: { grokShell?: unknown; agentVersion?: unknown } } | null)?._meta;
+  if (meta?.grokShell !== true || meta.agentVersion !== "1.0.41") {
+    throw new Error("This Grok runtime does not have verified native tool selection. Use Grok 1.0.41 or Pi; update Grok support before using another version.");
+  }
+  if (hasMcp && (!allowsTool(scope, { kind: "native", name: "search_tool" }) || !allowsTool(scope, { kind: "native", name: "use_tool" }))) {
+    throw new Error("Grok requires native:search_tool and native:use_tool to find and call selected MCP tools. Allow both explicitly or use Pi.");
+  }
+  const candidates = inherited?.toolConfig.tools ?? GROK_NATIVE_TOOLS.map(([name, id]) => ({ id, name_override: name }));
+  const selected = candidates.filter((tool) => {
+    const name = tool.name_override ?? GROK_NATIVE_TOOLS.find(([, id]) => id === tool.id)?.[0];
+    return name !== undefined && allowsTool(scope, { kind: "native", name })
+      && (!inherited?.tools?.length || inherited.tools.includes(name) || inherited.tools.includes(tool.id))
+      && !inherited?.disallowedTools?.some((denied) => denied === name || denied === tool.id);
+  });
+  // Grok rejects an empty curated construction.
+  return {
+    ...inherited, name: inherited?.name ?? "openmausbot-tools", description: inherited?.description ?? "Owner-selected tools",
+    injectDefaultTools: false, discoverSkills: false,
+    toolConfig: { ...inherited?.toolConfig, tools: selected.length ? selected : [{ id: "GrokBuild:read_file", name_override: "read_file" }] },
+    tools: [], disallowedTools: [...new Set([...(inherited?.disallowedTools ?? []), ...(selected.length ? [] : ["read_file"])])],
+  };
+}
+
+/** grok 1.0.89: with `[ui] follow_up_behavior = "steer"` in config.toml, a second `session/prompt` is injected into the running
+ * turn at its next safe point and answers `cancelled` with `_meta.completionKind: "removedFromQueue"` and no tokens; with the
+ * default "queue" it waits for the turn to end. `initialize` does not report the setting, and `GROK_CONFIG` cannot set `ui`. */
+export const GROK_STEER: AcpPromptSteer = {
+  kind: "prompt",
+  enabled: (env) => {
+    try {
+      return readGrokFollowUp(readFileSync(join(grokHome(env), "config.toml"), "utf8")).value === "steer";
+    } catch {
+      return false;
+    }
+  },
+  folded: (response) => (response as { _meta?: { completionKind?: unknown } } | null)?._meta?.completionKind === "removedFromQueue",
+};
+
+/** grok 1.0.89 (auto_wake, on by default): a background subagent or shell command that finishes after the turn wakes a turn
+ * no `session/prompt` asked for; `session/close` ends it and `session/load` of the same id brings the history back. */
+const GROK_BACKGROUND = closeEndsBackgroundWork();
+
+/** Turns on Grok's mid-turn steering for a signed-in account, unless its config.toml already sets `follow_up_behavior`. */
+export function ensureGrokSteer(env: Record<string, string | undefined> = process.env): void {
+  if (!grokSignedIn(env)) return;
+  const path = join(grokHome(env), "config.toml");
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+  }
+  const found = readGrokFollowUp(text);
+  if (found.present || found.unclear || (found.insertAt === undefined && found.uiElsewhere)) return;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const line = `follow_up_behavior = "steer"${eol}`;
+  const next = found.insertAt !== undefined
+    ? text.slice(0, found.insertAt) + (text.slice(0, found.insertAt).endsWith("\n") ? "" : eol) + line + text.slice(found.insertAt)
+    : `${text}${text && !text.endsWith("\n") ? eol : ""}${text ? eol : ""}[ui]${eol}${line}`;
+  // config.toml can hold `api_key` values (ensureGrokInjectSlug writes them), so the staged copy is private from its first byte.
+  const staged = `${path}.omb-${process.pid}.tmp`;
+  try {
+    writeFileSync(staged, next, { mode: 0o600, flag: "wx" });
+    renameSync(staged, path);
+  } catch {
+    rmSync(staged, { force: true });
+    // Grok then keeps queueing mid-turn messages, its default.
+  }
+}
+
+/** Grok's `ask_user_question` blocks its turn on this extension request (xai-org/grok-build ask_user_question/types.rs);
+ * ACP's Rust SDK adds the `_` prefix on the wire. Answers are keyed by Grok's question text, one label per pick; own
+ * words ride as "Other" with the text in annotations[].notes. */
+export const GROK_ASK_USER_QUESTION: AcpQuestionRequest = {
+  cancelled: { outcome: "cancelled" },
+  parse(params) {
+    const raw = (params as { questions?: unknown } | null)?.questions;
+    // Refused whole: answering only the first ones would read the rest as accepted.
+    if (!Array.isArray(raw) || raw.length > MAX_QUESTIONS) return null;
+    // The index is the id, so each card question maps back to Grok's exact text; `multi_select` is its model-facing name.
+    const parsed = parseProtocolAskQuestions(raw.map((entry, index) =>
+      entry && typeof entry === "object"
+        ? { ...entry, id: String(index), multiSelect: entry.multiSelect === true || entry.multi_select === true }
+        : entry));
+    if (!parsed || repeatsQuestionText(parsed)) return null;
+    return {
+      questions: parsed.map(({ question }) => question),
+      answered(message) {
+        const byId = questionAnswersById(message, parsed);
+        // Null prototype: a question text such as __proto__ is a real key.
+        const answers: Record<string, string[]> = Object.create(null);
+        const annotations: Record<string, { notes: string }> = Object.create(null);
+        for (const { id, question } of parsed) {
+          const reply = byId[id];
+          if (reply === undefined) continue;
+          const text = (raw[Number(id)] as { question: string }).question;
+          const { labels, other } = pickedOptionLabels(reply, question);
+          answers[text] = other === undefined ? labels : [...labels, "Other"];
+          if (other !== undefined) annotations[text] = { notes: other };
+        }
+        if (!Object.keys(answers).length) return null;
+        return { outcome: "accepted", answers, ...(Object.keys(annotations).length ? { annotations } : {}) };
+      },
+    };
+  },
+};
+
+/** The process contract leaves out the model and effort that configureSession changes in a live session, keeping only
+ * whether each is set. A narrowed tool profile carries the model, so there a change still starts a new process. */
+function grokContractArgs(args: string[], turn: SendTurnInput): string[] {
+  if (narrowsNativeTools(turn.toolScope)) return args;
+  return args.map((arg, index) => index > 0 && (args[index - 1] === "-m" || args[index - 1] === "--reasoning-effort") ? "set" : arg);
+}
+
+/** grok 1.0.x can leave session/load unanswered once it has replayed the history. The replay is taken to be one burst
+ * from its own session files, so two seconds without an update ends it. */
+const GROK_LOAD_REPLAY_QUIET_MS = 2_000;
+
+/** grok 1.0.41 reports effort as the `reasoning_effort` select (category `thought_level`) of session/new's and
+ * session/load's configOptions, and session/set_config_option answers with the whole updated list. A load that went
+ * quiet reported no options, so the documented id is tried. */
+async function setGrokEffort(
+  request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
+  sessionId: string,
+  effort: string,
+  configOptions: ReadonlyArray<{ id?: unknown; category?: unknown }>,
+): Promise<void> {
+  const offered = configOptions.find((entry) => entry.id === "reasoning_effort" || entry.category === "thought_level")?.id;
+  const configId = typeof offered === "string" ? offered : "reasoning_effort";
+  let reply: { configOptions?: Array<{ id?: unknown; currentValue?: unknown }> } | undefined;
+  try {
+    reply = await request("session/set_config_option", { sessionId, configId, value: effort }, 15_000);
+  } catch (e) {
+    throw new LiveSwitchRefused(`Grok rejected effort "${effort}": ${(e as Error).message}`);
+  }
+  if (reply?.configOptions?.find((entry) => entry.id === configId)?.currentValue !== effort) {
+    throw new LiveSwitchRefused(`Grok did not switch to effort "${effort}".`);
+  }
+}
+
+/** Only `allow-edits-session` of grok's `allow_always` options ends with the session; the others save a grant beyond it:
+ * `always-allow` stops asking about bash commands in the project (1.0.41), and the 1.0.25 binary also names
+ * `allow-always-command`, `allow-always-mcp`, `allow-always-domain` and `enable-always-approve` (every request). Without
+ * the session option, "this session" allows once and the driver remembers the exact operation. A question's options are
+ * its answers and stay as offered. */
+const GROK_SESSION_ALLOW = "allow-edits-session";
+export function grokPermissionRequest(params: Record<string, any>): Record<string, any> {
+  if (String(params.toolCall?.toolCallId ?? "").startsWith("interaction_") || !Array.isArray(params.options)) return params;
+  return {
+    ...params,
+    options: params.options.filter((option: { optionId?: unknown; kind?: unknown }) =>
+      option?.kind !== "allow_always" || option.optionId === GROK_SESSION_ALLOW),
+  };
+}
+
+const support: AcpSupport = {
+  driverKind: "grokAgent",
+  questionRequests: {
+    "_x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
+    "x.ai/ask_user_question": GROK_ASK_USER_QUESTION,
+  },
+  askTool: "ask_user_question",
+  displayName: "Grok",
+  images: true,
+  acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
+  get models() { return currentEngineCatalog("grok"); },
+  resolveModels: (env) => mergeLocalInject(readGrokModelCatalog(env), env),
+  // Grok's levels vary by model and the CLI validates lazily (a rejected level only logs); grok-4.5 rejects xhigh.
+  effortLevels: ["low", "medium", "high"],
+  defaultCli: "grok",
+  nativeSource: "grok.acp",
+  ownMcpOverHttp: "advertised",
+  loginNote: "Grok is not signed in to your grok.com account — choose Sign in to Grok in engine setup",
+
+  // No Windows one-liner: the installer is a POSIX shell script.
+  install: {
+    command: {
+      darwin: "curl -fsSL https://x.ai/cli/install.sh | bash",
+      linux: "curl -fsSL https://x.ai/cli/install.sh | bash",
+    },
+    docsUrl: "https://x.ai/cli",
+    signInCommand: "grok login",
+  },
+  deviceSignIn: GROK_DEVICE_SIGN_IN,
+  steer: GROK_STEER,
+  backgroundWork: GROK_BACKGROUND,
+  initializeMeta: GROK_INITIALIZE_META,
+  cancelMeta: GROK_CANCEL_META,
+  promptCompletion: GROK_PROMPT_COMPLETION,
+  promptOutcome: grokPromptOutcome,
+  reportedFailure: grokReportedFailure,
+
+  // With the instance HOME/GROK_HOME: ensureGrokInjectSlug defaults to process.env.
+  resolveTurnModel: (model, env) => (model ? ensureGrokInjectSlug(model, env) : model),
+
+  // --permission-mode is global; -m and --reasoning-effort only apply between `agent` and `stdio`
+  // (Grok 1.0.6; -m first is taken as a TUI option and ignored). Auto selects Grok's native
+  // classifier, never bypassPermissions. xai-org/grok-build@37949780 crates/codegen/xai-grok-pager-bin/src/main.rs:1259-1273.
+  spawnArgs: (config, turn) => [
+    "--permission-mode",
+    config.fullAuto
+      ? "bypassPermissions"
+      : turn.approvalMode === "auto" ? "auto" : turn.approvalMode === "edits" ? "acceptEdits" : "default",
+    "agent",
+    ...(turn.toolScope !== undefined ? ["--no-leader"] : []),
+    ...(turn.model ? ["-m", turn.model] : []),
+    // Long form: `--effort` is only an alias.
+    ...(turn.effort ? ["--reasoning-effort", turn.effort] : []),
+    "stdio",
+  ],
+  oneShotModel: (model, env) => {
+    const resolved = ensureGrokInjectSlug(model, env);
+    return resolved !== "default" && SLUG.test(resolved) ? resolved : undefined;
+  },
+  spawnContractArgs: (config, turn) => grokContractArgs(support.spawnArgs(config, turn), turn),
+  loadReplayQuietMs: (turn) => narrowsNativeTools(turn.toolScope) ? undefined : GROK_LOAD_REPLAY_QUIET_MS,
+  permissionRequest: grokPermissionRequest,
+
+  toolScopeSessionParams: (turn, init, hasMcp, { config, env, cwd }) => {
+    if (!narrowsNativeTools(turn.toolScope)) return {};
+    const profile = grokToolScopeProfile(turn.toolScope, init, grokInheritedProfile(config.cli, env, cwd), hasMcp);
+      // Changing harnesses after session/new can discard an ACP profile and restore default tools.
+    if (turn.model) profile.model = ensureGrokInjectSlug(turn.model, env);
+    return { _meta: { agentProfile: profile } };
+  },
+  toolScopeCacheKey: ({ config, env, cwd }) => JSON.stringify(grokInheritedProfile(config.cli, env, cwd) ?? null),
+
+  // -m on argv is not enough: session/new still starts on [models].default.
+  async configureSession({ request, sessionId, turn, sessionModels, currentModelId, currentEffort, effortApplied, configOptions }) {
+    if (turn.toolScope !== undefined) {
+      const available = new Set([
+        ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
+        ...(turn.integrations?.browser ? ["browser"] : []), ...(turn.integrations?.localComputer ? ["computer"] : []),
+        ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.email ? ["email"] : []), ...(turn.integrations?.device ? ["device"] : []),
+        ...Object.keys(turn.integrations?.custom ?? {}),
+      ].filter((name) => canUseMcpServer(turn.toolScope, name)));
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const reply = await request("_x.ai/mcp/list", { sessionId, cache: true }, 10_000);
+        const catalog = reply?.result;
+        if (!Array.isArray(catalog?.servers)) throw new Error("Grok could not confirm its MCP catalog. No prompt was sent.");
+        for (const server of catalog.servers) {
+          if (server?.session?.enabled === false) continue;
+          if (!available.has(server?.name)) throw new Error("Grok has an MCP connection outside the bot's selection. Remove the MCP servers from Grok's own settings, "
+            + "or set Tool selection back to all tools in this bot's settings (Access). No prompt was sent.");
+          if (Array.isArray(server?.session?.tools) && server.session.tools.some((tool: { name?: unknown }) => typeof tool.name !== "string" || !allowsTool(turn.toolScope, { kind: "mcp", server: server.name, name: tool.name }))) {
+            throw new Error("Grok could not enforce the selected MCP catalog. No prompt was sent.");
+          }
+        }
+        if (catalog.sessionMcpResolved === true) {
+          if ([...available].some((name) => !catalog.servers.some((server: { name?: string; session?: { enabled?: boolean; status?: string } }) => server.name === name && server.session?.enabled === true && server.session.status === "ready"))) {
+            throw new Error("Grok could not connect a selected MCP server. No prompt was sent.");
+          }
+          break;
+        }
+        if (Date.now() >= deadline) throw new Error("Grok did not confirm its selected MCP catalog in time. No prompt was sent.");
+        await delay(50);
+      }
+    }
+    // Repeating set_model can rebuild the harness, dropping its MCP catalog, or reject a valid resumed profile.
+    if (turn.model && currentModelId !== turn.model) {
+      if (narrowsNativeTools(turn.toolScope)) {
+        throw new Error("Grok could not confirm the selected model without replacing its tool profile. Start a new conversation or choose a model with a supported Grok profile. No prompt was sent.");
+      }
+      try {
+        await request("session/set_model", { sessionId, modelId: turn.model });
+      } catch (e) {
+        // Refused as unknown, and missing from the models this sign-in offers: this turn ends at once, since a new process
+        // would be refused the same way, and the process is retired, so the next turn reads the list afresh.
+        const notOffered = unknownGrokModel(e) ? grokModelNotOffered(turn.model, sessionModels) : null;
+        if (notOffered) throw Object.assign(new Error(notOffered), { acpSessionFailure: true });
+        throw new LiveSwitchRefused(
+          `Grok rejected model "${turn.model}" via session/set_model: ${(e as Error).message}. ` +
+            `Check that grok is current (1.0.6+ supports it) and that this slug exists in ~/.grok/config.toml.`,
+        );
+      }
+    }
+    if (effortApplied && turn.effort !== undefined && turn.effort !== currentEffort) {
+      await setGrokEffort(request, sessionId, turn.effort, configOptions);
+      effortApplied(turn.effort);
+    }
+  },
+
+  // A leaked API key silently flips the grok.com subscription to pay-as-you-go.
+  transformEnv: (env) => {
+    delete env.XAI_API_KEY;
+  },
+  applyTurnEnv: (env, { toolScope }) => {
+    ensureGrokSteer(env);
+    if (toolScope !== undefined) {
+      // These env switches outrank account defaults in the verified runtime.
+      env.GROK_MANAGED_MCPS_ENABLED = "false";
+      env.GROK_MANAGED_MCP_GATEWAY_TOOLS_ENABLED = "false";
+      if (narrowsNativeTools(toolScope)) {
+        if (env.GROK_AGENT && env.GROK_AGENT !== "grok-build") {
+          throw new Error("Grok's existing agent profile cannot be safely intersected with tool selection. Use a separate default Grok account.");
+        }
+        // A model's agent_type otherwise takes priority over ACP profiles.
+        env.GROK_AGENT = "grok-build";
+      }
+    }
+  },
+
+  pickAuthMethod: (methods) => ["cached_token", "grok.com"].find((id) => methods.some((m) => m.id === id)) ?? null,
+  authFailure: "fail",
+  isAuthenticated: (env, config) => grokAuthenticated(config.cli, env),
+
+  // `--append-system-prompt`/`--rules` do not reach the agent-stdio system prompt (1.0.0).
+  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
+};
+
+export const GrokAgentDriver = createAcpDriver(support);
