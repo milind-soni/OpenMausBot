@@ -1,9 +1,10 @@
 // Dev-only gallery of "This computer and My Cloud together" on by default, served at /together-preview.html; not in the
 // packaged app. It mounts the real rail, sidebar and notice over fake bridges, with no server behind them.
 // ?view=before|after|notice|notice-cloud-home|notice-off|rail-before|rail-after|rail-cloud-home&mode=simple|advanced&skin=midnight|daylight&lang=pt-br
-// What's new carrying the notice as its first slide: ?view=whats-new|whats-new-commands|whats-new-off|whats-new-cloud-home
-//   &slide=1..4 (the slide on screen) &who=team (a plan and a team: the Cloud's and the team's news) |own (a plan of one's
-//   own: Start a Team) |none (no plan: the selling Cloud and Team slides) &seen=1 (What's new of the release before was seen)
+// What's new, with the notice as its last slide: ?view=whats-new|whats-new-commands|whats-new-off|whats-new-cloud-home
+//   &slide=1..6 (the slide on screen) &who=team (a plan and a team: the Cloud's and the team's news) |own (a plan of one's
+//   own: Start a Team) |none (no plan: the selling Cloud and Team slides) |admin (a Team Cloud's Owner or Admin on its page:
+//   Invite your team) &together=0 (main does not call the notice due)
 // The one list: ?page=cloud (My Cloud's own page), ?home=cloud (the person's home is My Cloud),
 // ?other=asleep|waking|offline|signin (the other place lists no rows and says why), and ?arranged=1 (the person dragged
 // Scout under Git Tasks and Atlas into Finance).
@@ -17,7 +18,7 @@ import { PlacesRail } from "@/components/PlacesRail";
 import { Sidebar } from "@/components/Sidebar";
 import { TogetherNotice } from "@/components/TogetherNotice";
 import { WhatsNewPopup } from "@/components/whats-new/WhatsNewPopup";
-import { whatsNewCarousel, whatsNewView } from "@/lib/whats-new";
+import { whatsNewAudience, whatsNewCarousel, whatsNewView } from "@/lib/whats-new";
 import { loadLocale } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
@@ -93,8 +94,11 @@ const ACCOUNT: CloudAccountState = { status: "connected", account: { id: "a", em
   ? { entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } }
   : { entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: AT + 30 * 86_400_000, version: 2 },
     ...(who === "team" ? { teams: [{ id: "t1", name: "Design Studio", role: "member" as const, machine: null }] } : {}) }) };
-const carousel = whatsNew ? whatsNewCarousel({ plans: whatsNewView(ACCOUNT, OFFER), teamSold: true, modelgo: true, addKey: true, together: true, seen: params.get("seen") === "1",
-  team: who === "team" ? { kind: "got-it" } : { kind: "start", inApp: who === "own", url: "" } }) : null;
+const admin = who === "admin", audience = whatsNewAudience(ACCOUNT);
+const carousel = whatsNew ? whatsNewCarousel({ plans: admin ? "none" : whatsNewView(ACCOUNT, OFFER), teamSold: true,
+  cloud: admin || audience === "own" || audience === "team", apps: { place: admin ? "cloud" : "computer", install: !admin },
+  together: !admin && audience !== "none" && params.get("together") !== "0",
+  team: admin ? { kind: "invite", url: "https://cloud.openmausbot.com/team/t1/people?invite=1" } : who === "team" ? { kind: "got-it" } : { kind: "start", inApp: who === "own", url: "" } }) : null;
 const noop = () => {};
 
 /** The slide asked for, as the person gets there: its dot; and the list switch turned off for whats-new-off. */
@@ -134,7 +138,7 @@ function Gallery() {
         <div className="flex h-full w-[280px] shrink-0 max-sm:w-full"><Sidebar open onClose={() => {}} /></div>
         <div className="min-w-0 flex-1 bg-canvas max-sm:hidden" />
         {view.startsWith("notice") && <TogetherNotice onClose={() => {}} />}
-        {carousel && typeof carousel === "object" && <WhatsNewPopup view={carousel} report={noop} onBuy={noop} onAddKey={noop} onDone={noop} />}
+        {carousel && typeof carousel === "object" && <WhatsNewPopup view={carousel} report={noop} onBuy={noop} onOpenApps={noop} onDone={noop} />}
       </div>
     </StoreContext.Provider>
   );

@@ -9,13 +9,12 @@ import { track } from "@/lib/analytics";
 import { announcementConditions, announcementPlan, announcementPlatform, announcementSurface, markLaunchAnnouncement, pickAnnouncement, providersRestricted, rememberCardSeen, rememberSponsorDay,
   reportAnnouncement, SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards, type SeenRecord } from "@/lib/announcements";
 import { boatOfferRuns } from "@/lib/boat-offer";
-import { modelgoOfferable } from "@/lib/modelgo-offer";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, TOGETHER_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PREVIOUS_WHATS_NEW_NOTICE, PRODUCT_HUNT_NOTICE, TOGETHER_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { rememberNoticeSeen } from "@/lib/announcement-history";
 import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
 import { useTwoPlaces } from "@/lib/two-places";
@@ -150,11 +149,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const branded = brandStatus().source === "file", team = Boolean(state.config?.team);
   const liveCall = Boolean(state.liveCall && state.liveCall.status !== "ended");
   // What's new, once per person on every page but a branded build's. Its plan slides: This computer's page of a desktop that
-  // sells MausBot Cloud, never one an organization runs.
+  // sells MausBot Cloud, never one an organization runs. Its last slide is the notice of the bots together, for whom that
+  // notice is due and was never drawn; closed before that slide, the corner notice shows it on a later launch.
   const whatsNewSeen = noticeSeen(record, WHATS_NEW_NOTICE) || Boolean(desktopState?.seen.includes(WHATS_NEW_NOTICE));
-  // It comes once more, with the notice of the bots together first, for whom that notice is due and was never drawn.
   const togetherSlide = togetherSlideDue({ here: local && !remote && !branded, due: togetherDue, drawn: togetherDrawn, kept: togetherSlideKept });
-  const whatsNewHere = !branded && (!whatsNewSeen || togetherSlide !== false);
+  const whatsNewHere = !branded && !whatsNewSeen;
   const plansDue = !whatsNewHere || !bridge || !desktop || organization === true ? false : !desktopState || organization === null ? null : desktopState.cloud;
   const whatsNewFor = plansDue === false ? null : whatsNewAudience(account);
   const wantOffer = Boolean(bridge?.offer) && ((introAllowed && view !== null && buyOfferAllowed(view) && stage !== "done")
@@ -189,9 +188,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const teams = teamsAction({ team: state.config?.team, viewer, account, canAddCloud: Boolean(bridge) });
   // Owed while it has a slide for this person (or may, while that is read): the Teams popup and the sponsor's card it took
   // in wait for it, and count as seen with it.
+  // A Cloud this person has: this page is one, or this desktop's sign-in has a plan of its own or a team's.
+  const hasCloud = viewer?.cloudHome === true || whatsNewFor === "own" || whatsNewFor === "team";
   const whatsNewState = !whatsNewHere ? "none" : togetherSlide === null ? "loading" : whatsNewCarousel({ plans, team: organization === true ? null : teams, teamSold,
-    modelgo: sponsorsHere && modelgoOfferable(state.config?.managedPolicy), addKey: viewer?.canSave !== false, staging: account?.staging === true,
-    together: togetherSlide, seen: whatsNewSeen });
+    cloud: hasCloud, apps: { place: state.config?.cloudHome === true ? "cloud" : "computer", install: local && !remote && Boolean(window.ogb?.appInstall) },
+    staging: account?.staging === true, together: togetherSlide });
   const whatsNew = typeof whatsNewState === "object" ? whatsNewState : null;
   const whatsNewOwed = whatsNewState !== "none";
   const whatsNewBlocked = useOtherDialogOpen(whatsNewOwed, true) || liveCall;
@@ -373,9 +374,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       if (action === "seen" && slide === "together" && !togetherSlideKept) { setTogetherSlideKept(true); void togetherSlideShown(); }
       reportWhatsNew(action, slide, whatsNew);
     };
-    const done = () => { close(); rememberNoticeSeen(WHATS_NEW_NOTICE, record, writer, [TEAMS_NOTICE, MODELGO_OFFER_NOTICE, EARLIER_WHATS_NEW_NOTICE]); };
+    const done = () => { close(); rememberNoticeSeen(WHATS_NEW_NOTICE, record, writer, [PREVIOUS_WHATS_NEW_NOTICE, EARLIER_WHATS_NEW_NOTICE, TEAMS_NOTICE, MODELGO_OFFER_NOTICE]); };
     return <WhatsNewPopup view={whatsNew} report={report} onDone={done} onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })}
-      onAddKey={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })} />;
+      onOpenApps={() => dispatch({ type: "showPublishedApps" })} />;
   }
 
   if (notice === UPDATES_CONSENT_NOTICE && consent.state) {

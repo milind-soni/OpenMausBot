@@ -11,7 +11,7 @@ import { TogetherNotice } from "../TogetherNotice";
 import { WhatsNewPopup } from "./WhatsNewPopup";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-const VIEW: WhatsNewView = { slides: ["together", "cloudNews", "teamNews"], audience: "own", signedIn: true, staging: false, plans: {} };
+const VIEW: WhatsNewView = { slides: ["cloudNews", "teamNews", "together"], audience: "own", signedIn: true, staging: false, plans: {} };
 
 let host: HTMLDivElement, root: Root, said: PlacesTogetherState, lent: boolean, steps: Array<[WhatsNewAction, WhatsNewSlide]>;
 const state = (over: Partial<PlacesTogetherState> = {}): PlacesTogetherState => ({ v: 1, available: true, on: true, here: "computer",
@@ -25,7 +25,7 @@ const page = {
   noticeDone: vi.fn(async () => {}),
   setCommands: vi.fn(async (on: boolean) => { lent = on; return on; }),
 };
-const props = { report: vi.fn((action: WhatsNewAction, slide: WhatsNewSlide) => void steps.push([action, slide])), onBuy: vi.fn(), onAddKey: vi.fn(), onDone: vi.fn() };
+const props = { report: vi.fn((action: WhatsNewAction, slide: WhatsNewSlide) => void steps.push([action, slide])), onBuy: vi.fn(), onOpenApps: vi.fn(), onDone: vi.fn() };
 const flush = async () => { for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve(); }); };
 const show = async (view: WhatsNewView = VIEW) => { await act(async () => { root.render(createElement(WhatsNewPopup, { view, ...props })); }); await flush(); };
 const q = (selector: string) => host.querySelector<HTMLElement>(`[data-whats-new-slide]:not([inert]) ${selector}`);
@@ -35,6 +35,8 @@ const key = async (name: string) => {
   await act(async () => { (document.activeElement ?? document.body).dispatchEvent(event); });
   return event;
 };
+/** The carousel opened, then walked to its last slide, the notice's. */
+const showTogether = async () => { await show(); await key("ArrowRight"); await key("ArrowRight"); await flush(); };
 const focused = () => document.activeElement!.getAttribute("aria-labelledby") || (document.activeElement as HTMLElement).textContent || document.activeElement!.getAttribute("aria-label");
 /** What the bridge was asked, in order: the same calls from the slide as from the corner notice. */
 const writes = () => [
@@ -54,20 +56,23 @@ afterEach(async () => {
 });
 
 describe("What's new's together slide", () => {
-  it("comes first, with the notice's words and its two switches: the list on, commands off as lending says, and no buy button", async () => {
+  it("comes last, with the notice's words and its two switches: the list on, commands off as lending says, and no buy button", async () => {
     await show();
+    expect(host.querySelector("[data-whats-new]")!.getAttribute("data-whats-new")).toBe("cloudNews");
+    expect(steps, "opened on the first slide: the notice's is not seen").toEqual([["seen", "cloudNews"]]);
+    await key("ArrowRight"); await key("ArrowRight"); await flush();
     expect(host.querySelector("[data-whats-new]")!.getAttribute("data-whats-new")).toBe("together");
     expect(q("h2")!.textContent).toBe("Your bots are in one list now");
     expect(q("[data-together-notice-list]")!.getAttribute("aria-checked")).toBe("true");
     expect(q("[data-together-notice-commands]")!.getAttribute("aria-checked")).toBe("false");
     expect(host.querySelector("[data-whats-new-slide='together']")!.textContent).toContain("work a Cloud bot hands to a bot here runs without commands");
-    expect(q("[data-whats-new-got-it]"), "not the last slide: Next, not Got it").toBeNull();
+    expect(q("[data-whats-new-got-it]")!.textContent, "the last slide, which only tells: Got it").toBe("Got it");
     expect(page.noticeShown, "the carousel tells main when it is seen, not the slide on its own").not.toHaveBeenCalled();
-    expect(steps).toEqual([["seen", "together"]]);
+    expect(steps).toEqual([["seen", "cloudNews"], ["next", "cloudNews"], ["seen", "teamNews"], ["next", "teamNews"], ["seen", "together"]]);
   });
 
   it("the switches write the same state as the corner notice's: the list off, then back on, and commands on through main's own question", async () => {
-    await show();
+    await showTogether();
     await click("[data-together-notice-list]");
     expect(q("[data-together-notice-off]")!.textContent).toContain("show apart again");
     expect(q("[data-together-notice-commands]")).toBeNull();
@@ -91,7 +96,7 @@ describe("What's new's together slide", () => {
 
   it("a failed switch says so on the slide and leaves the carousel up", async () => {
     page.setCommands.mockRejectedValueOnce(new Error("no"));
-    await show();
+    await showTogether();
     await click("[data-together-notice-commands]");
     expect(q("[role='alert']")!.textContent).toBe("That couldn't be saved. Try again.");
     expect(q("[data-together-notice-commands]")!.getAttribute("aria-checked")).toBe("false");
@@ -100,19 +105,19 @@ describe("What's new's together slide", () => {
 
   it("keyboard as before: Tab reaches both switches and stays inside, the arrows move slides, Escape closes", async () => {
     await show();
-    const order: Array<string | null> = [];
-    for (let i = 0; i < 4; i++) { expect((await key("Tab")).defaultPrevented).toBe(true); order.push(focused()); }
-    expect(order).toEqual(["whats-new-together-list", "whats-new-together-commands", "Not now", "Slide 1 of 3"]);
-    await key("ArrowRight");
-    expect(host.querySelector("[data-whats-new]")!.getAttribute("data-whats-new")).toBe("cloudNews");
     expect(q("h2")!.textContent).toBe("What's new in MausBot Cloud");
     expect(q("button.ui-button-primary"), "a slide that only tells has no buy button").toBeNull();
     await key("ArrowRight");
     expect(q("h2")!.textContent).toBe("What's new for your team");
-    expect(q("[data-whats-new-got-it]")!.textContent, "the last telling slide ends with Got it").toBe("Got it");
+    expect(q("[data-whats-new-got-it]"), "not the last slide: Next, not Got it").toBeNull();
+    await key("ArrowRight");
+    expect(host.querySelector("[data-whats-new]")!.getAttribute("data-whats-new")).toBe("together");
+    const order: Array<string | null> = [];
+    for (let i = 0; i < 4; i++) { expect((await key("Tab")).defaultPrevented).toBe(true); order.push(focused()); }
+    expect(order, "no Not now on a slide that only tells").toEqual(["whats-new-together-list", "whats-new-together-commands", "Got it", "Slide 1 of 3"]);
     expect((await key("Escape")).defaultPrevented).toBe(true);
     expect(props.onDone).toHaveBeenCalledTimes(1);
-    expect(steps.at(-1)).toEqual(["close", "teamNews"]);
+    expect(steps.at(-1)).toEqual(["close", "together"]);
   });
 
   it("alone, it ends with Got it, counted on its slide; before main has turned the default on it still shows the list on", async () => {

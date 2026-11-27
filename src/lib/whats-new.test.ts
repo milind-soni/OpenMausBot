@@ -108,77 +108,80 @@ describe("the funnel", () => {
   });
 
   it("counts each step with its slide, who it was for and the campaign; never an email, a name or an address", () => {
-    expect(WHATS_NEW_NOTICE).toBe("whats-new-2026-11b");
+    expect(WHATS_NEW_NOTICE).toBe("whats-new-2026-11c");
     reportWhatsNew("seen", "pro", { audience: "none", signedIn: false });
     reportWhatsNew("start_team", "team", { audience: "own", signedIn: true });
     reportWhatsNew("invite", "team", { audience: "other", signedIn: false, team: { kind: "invite", url: "https://x.test/team/t1/people" } });
+    reportWhatsNew("open_apps", "apps", { audience: "other", signedIn: false });
+    reportWhatsNew("got_it", "teamNews", { audience: "other", signedIn: true });
     reportWhatsNew("next", "team", { audience: "other", signedIn: false }, "whats-new-2026-11");
     expect(vi.mocked(track).mock.calls).toEqual([
       ["whats_new", { action: "seen", slide: "pro", audience: "no_plan", signed_in: false, campaign: WHATS_NEW_NOTICE }],
       ["whats_new", { action: "start_team", slide: "team", audience: "own_plan", signed_in: true, campaign: WHATS_NEW_NOTICE }],
       ["whats_new", { action: "invite", slide: "team", audience: "team_admin", signed_in: false, campaign: WHATS_NEW_NOTICE }],
+      ["whats_new", { action: "open_apps", slide: "apps", audience: "other", signed_in: false, campaign: WHATS_NEW_NOTICE }],
+      ["whats_new", { action: "got_it", slide: "teamNews", audience: "other", signed_in: true, campaign: WHATS_NEW_NOTICE }],
       ["whats_new", { action: "next", slide: "team", audience: "other", signed_in: false, campaign: "whats-new-2026-11" }],
     ]);
-  });
-
-  it("the sponsor's slide counts on whats_new and, as its card did, on modelgo_offer with place popup and the campaign", () => {
-    const view = { audience: "none" as const, signedIn: false };
-    for (const action of ["seen", "get_key", "add_key", "not_now", "close", "next", "back"] as const) reportWhatsNew(action, "modelgo", view);
-    const sponsor = vi.mocked(track).mock.calls.filter(([event]) => event === "modelgo_offer");
-    expect(sponsor).toEqual([["shown", "get_key", "add_key", "not_now", "close"].map(action => ["modelgo_offer", { action, place: "popup", campaign: WHATS_NEW_NOTICE }])].flat());
-    expect(vi.mocked(track).mock.calls.filter(([event]) => event === "whats_new")).toHaveLength(7);
-    vi.mocked(track).mockClear();
-    reportWhatsNew("get_pro", "pro", view);
-    expect(vi.mocked(track).mock.calls.map(([event]) => event), "no sponsor event for another slide").toEqual(["whats_new"]);
+    expect(vi.mocked(track).mock.calls.some(([event]) => event === "modelgo_offer"), "no slide is the sponsor's now").toBe(false);
   });
 });
 
-describe("the three slides: the new Cloud, Team and the sponsor's", () => {
+describe("the slides: Apps, Publish, then the Cloud and Team, then the notice of the bots together", () => {
   const start = (inApp = false) => ({ kind: "start" as const, inApp, url: "https://cloud.openmausbot.com/pro/buy?plan=team&src=app_whats_new_teams" });
   const invite = { kind: "invite" as const, url: "https://cloud.openmausbot.com/team/t1/people?invite=1" };
+  const apps = { place: "computer" as const, install: true };
   const carousel = (extra: Partial<Parameters<typeof whatsNewCarousel>[0]> = {}) =>
-    whatsNewCarousel({ plans: whatsNewView({ status: "signed-out" }, OFFER), team: start(), modelgo: true, addKey: true, ...extra });
+    whatsNewCarousel({ plans: whatsNewView({ status: "signed-out" }, OFFER), team: start(), cloud: false, apps, ...extra });
+  const slides = (extra: Partial<Parameters<typeof whatsNewCarousel>[0]> = {}) => (carousel(extra) as WhatsNewView).slides;
 
-  it("no plan on this desktop: all three, in order, each with its plan's terms", () => {
+  it("no plan on this desktop: Apps, Publish, the new Cloud and Team, the plans with their terms", () => {
     const view = carousel() as WhatsNewView;
-    expect(view.slides).toEqual(["pro", "team", "modelgo"]);
+    expect(view.slides).toEqual(["apps", "publish", "pro", "team"]);
     expect(view.team).toEqual({ kind: "start", inApp: false });
     expect(view.plans).toEqual({ pro: { name: "Pro", terms: "Pro · $49/month + tax · 14-day money-back" }, team: { name: "Team", terms: "Free for 3 days, then $40/month + tax" } });
-    expect(view.audience).toBe("none"); expect(view.addKey).toBe(true);
+    expect(view.audience).toBe("none"); expect(view.apps).toEqual(apps);
   });
 
-  it("a plan of one's own: Team, in the app's own Add a Cloud, and the sponsor's", () => {
-    const view = carousel({ plans: whatsNewView(onPlan("pro"), OFFER), team: start(true) }) as WhatsNewView;
-    expect(view.slides).toEqual(["team", "modelgo"]); expect(view.team).toEqual({ kind: "start", inApp: true }); expect(view.audience).toBe("own");
+  it("a plan of one's own: what is new on their Cloud, and Team in the app's own Add a Cloud", () => {
+    const view = carousel({ plans: whatsNewView(onPlan("pro"), OFFER), team: start(true), cloud: true }) as WhatsNewView;
+    expect(view.slides).toEqual(["apps", "publish", "cloudNews", "team"]); expect(view.team).toEqual({ kind: "start", inApp: true }); expect(view.audience).toBe("own");
   });
 
-  it("a page that sells no plan (a Cloud's, a browser, a remote client): Team on the website at the listed price, and the sponsor's", () => {
+  it("in a team, on this desktop or as a Team Cloud's member: what is new on the Cloud and in the team, never a button that sells", () => {
+    const view = carousel({ plans: "none", team: { kind: "got-it" }, cloud: true }) as WhatsNewView;
+    expect(view.slides).toEqual(["apps", "publish", "cloudNews", "teamNews"]);
+    expect(view.team).toBeUndefined(); expect(view.plans).toEqual({});
+  });
+
+  it("a Team Cloud's Owner or Admin on its page: Invite your team, with no price, after what is new on the Cloud", () => {
+    const view = carousel({ plans: "none", team: invite, cloud: true, apps: { place: "cloud", install: false } }) as WhatsNewView;
+    expect(view.slides).toEqual(["apps", "publish", "cloudNews", "team"]); expect(view.team).toEqual(invite); expect(view.plans).toEqual({});
+    expect(view.apps).toEqual({ place: "cloud", install: false });
+  });
+
+  it("a page that sells no plan and knows of no Cloud (a browser, a remote client): Team on the website at the listed price", () => {
     const view = carousel({ plans: "none", staging: true }) as WhatsNewView;
-    expect(view.slides).toEqual(["team", "modelgo"]);
+    expect(view.slides).toEqual(["apps", "publish", "team"]);
     expect(view.plans).toEqual({ team: { name: "Team", terms: "$40 a month for 2 people, $20 for each extra person." } });
     expect(view.audience).toBe("other"); expect(view.staging).toBe(true);
   });
 
-  it("a Team Cloud's Owner or Admin: Invite your team and the sponsor's, with no price", () => {
-    const view = carousel({ plans: "none", team: invite }) as WhatsNewView;
-    expect(view.slides).toEqual(["team", "modelgo"]); expect(view.team).toEqual(invite); expect(view.plans).toEqual({});
-  });
-
-  it("someone already in a team, or a Team Cloud's member, gets no Team slide; with no sponsor either, nothing at all", () => {
-    expect((carousel({ plans: "none", team: { kind: "got-it" } }) as WhatsNewView).slides).toEqual(["modelgo"]);
-    expect(carousel({ plans: "none", team: { kind: "got-it" }, modelgo: false })).toBe("none");
-    expect(carousel({ plans: "none", team: null, modelgo: false })).toBe("none");
-  });
-
-  it("where ModelGo may not be offered, no sponsor's slide; the plan slides stay", () => {
-    expect((carousel({ modelgo: false }) as WhatsNewView).slides).toEqual(["pro", "team"]);
+  it("an organization's desktop: no team slide of any kind; Apps and Publish still", () => {
+    expect(slides({ plans: "none", team: null })).toEqual(["apps", "publish"]);
+    expect(slides({ plans: "none", team: null, cloud: true })).toEqual(["apps", "publish", "cloudNews"]);
   });
 
   it("an offer that sells no Team plan drops the Team slide; one not read keeps it at the listed price", () => {
     const noTeam = { ...OFFER, plans: OFFER.plans.filter(plan => plan.tier !== "team") };
-    expect((carousel({ plans: whatsNewView(free, noTeam), teamSold: false }) as WhatsNewView).slides).toEqual(["pro", "modelgo"]);
-    expect((carousel({ plans: "none", teamSold: undefined }) as WhatsNewView).slides).toEqual(["team", "modelgo"]);
-    expect((carousel({ plans: "none", team: invite, teamSold: false }) as WhatsNewView).slides, "inviting needs no plan to sell").toEqual(["team", "modelgo"]);
+    expect(slides({ plans: whatsNewView(free, noTeam), teamSold: false })).toEqual(["apps", "publish", "pro"]);
+    expect(slides({ plans: "none", teamSold: undefined })).toEqual(["apps", "publish", "team"]);
+    expect(slides({ plans: "none", team: invite, teamSold: false }), "inviting needs no plan to sell").toEqual(["apps", "publish", "team"]);
+  });
+
+  it("the notice of the bots together comes last, after the Cloud and the team", () => {
+    expect(slides({ plans: "none", team: { kind: "got-it" }, cloud: true, together: true })).toEqual(["apps", "publish", "cloudNews", "teamNews", "together"]);
+    expect(slides({ plans: whatsNewView(onPlan("pro"), OFFER), team: start(true), cloud: true, together: true })).toEqual(["apps", "publish", "cloudNews", "team", "together"]);
   });
 
   it("waits while the plan slides are read", () => {
@@ -186,46 +189,16 @@ describe("the three slides: the new Cloud, Team and the sponsor's", () => {
   });
 });
 
-describe("the update that brings bots together: which slides, for whom", () => {
-  const offerTeam = { kind: "start" as const, inApp: false, url: "" };
-  const slides = (account: CloudAccountState, over: Partial<Parameters<typeof whatsNewCarousel>[0]> = {}) => {
-    const plans = whatsNewView(account, OFFER), teams = whatsNewAudience(account) === "team" ? { kind: "got-it" as const } : { ...offerTeam, inApp: whatsNewAudience(account) === "own" };
-    const view = whatsNewCarousel({ plans, team: teams, teamSold: true, modelgo: true, addKey: true, ...over });
-    return typeof view === "object" ? view.slides : view;
-  };
-  const inTeam = onPlan("pro", { teams: [team] });
-
-  it("updater from 0.1.181 (What's new not seen): the notice's slide first, then the Cloud and the team, then the sponsor's", () => {
-    const due = togetherSlideDue({ here: true, due: true, drawn: false, kept: false });
-    expect(due).toBe(true);
-    expect(slides(inTeam, { together: due === true, seen: false })).toEqual(["together", "cloudNews", "teamNews", "modelgo"]);
-    expect(slides(onPlan("pro"), { together: true }), "a plan of one's own: Team is still offered, as before").toEqual(["together", "cloudNews", "team", "modelgo"]);
-    expect(slides({ status: "signed-out" }, { together: true }), "sold to: the selling slides, unchanged").toEqual(["together", "pro", "team", "modelgo"]);
-    expect(slides(inTeam), "before this release, for the same person: the sponsor's alone").toEqual(["modelgo"]);
-  });
-
-  it("updater from 0.1.182 with the corner notice already drawn: no slide, and What's new it saw stays seen", () => {
-    expect(togetherSlideDue({ here: true, due: true, drawn: true, kept: false })).toBe(false);
-    expect(togetherSlideDue({ here: true, due: false, drawn: false, kept: false }), "closed: main no longer calls it due").toBe(false);
-    expect(slides(inTeam, { together: false, seen: true })).toBe("none");
-  });
-
-  it("updater from 0.1.182 who saw What's new but never the notice: the notice, the Cloud and the team again, never the sponsor's twice", () => {
+describe("the notice of the bots together, as What's new's last slide: for whom", () => {
+  it("where its corner notice would show, while main calls it due and it was never drawn", () => {
     expect(togetherSlideDue({ here: true, due: true, drawn: false, kept: false })).toBe(true);
-    expect(slides(inTeam, { together: true, seen: true })).toEqual(["together", "cloudNews", "teamNews"]);
-    expect(slides(onPlan("pro"), { together: true, seen: true })).toEqual(["together", "cloudNews", "team"]);
-  });
-
-  it("fresh install: What's new as before, with the slide when main says the notice is due (AppNotices falls back to the corner when What's new can't show)", () => {
-    expect(togetherSlideDue({ here: true, due: false, drawn: false, kept: false }), "no My Cloud yet: nothing to bring together").toBe(false);
-    expect(slides(free, { together: false, seen: false })).toEqual(["pro", "team", "modelgo"]);
+    expect(togetherSlideDue({ here: true, due: true, drawn: true, kept: false }), "drawn in the corner before: the corner keeps it").toBe(false);
+    expect(togetherSlideDue({ here: true, due: false, drawn: false, kept: false }), "closed, or no My Cloud to bring together").toBe(false);
   });
 
   it("not eligible: another place's page, a branded build or a browser never gets the slide; while main has not answered it waits; once shown it stays", () => {
     expect(togetherSlideDue({ here: false, due: true, drawn: false, kept: false })).toBe(false);
     expect(togetherSlideDue({ here: true, due: null, drawn: false, kept: false })).toBeNull();
     expect(togetherSlideDue({ here: true, due: false, drawn: true, kept: true }), "kept in the carousel that showed it").toBe(true);
-    expect(slides(inTeam, { together: false, seen: true })).toBe("none");
-    expect(slides(inTeam, { together: true, seen: true, team: null }), "an organization's desktop: no team slide of any kind").toEqual(["together", "cloudNews"]);
   });
 });
