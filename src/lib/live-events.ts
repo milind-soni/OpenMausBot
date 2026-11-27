@@ -1,5 +1,5 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
-import { websocketEvents } from "./websocket-events";
+import { isDirectWebBrowser, websocketEvents } from "./websocket-events";
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
 import { relayEventSource, relayLink, type LiveEventSourceLike } from "./relay-server";
@@ -11,7 +11,6 @@ export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
 export const LIVE_EVENTS_RETRY_MIN_MS = 500;
 export const LIVE_EVENTS_RETRY_MAX_MS = 10_000;
-let browserFellBack = false;
 const RETRY_LIVE_EVENTS = "omb:retry-live-events";
 
 /** What the page's live connection is doing, by a fixed word: the app's 30-second "still waiting" event names it. */
@@ -45,7 +44,6 @@ interface ListenerTarget {
 export interface LiveEventsPlatform {
   createEventSource: (url: string) => LiveEventSourceLike;
   createWebSocket?: (url: string) => LiveEventSourceLike;
-  onTransportFallback?: () => void;
   windowTarget?: ListenerTarget;
   documentTarget?: ListenerTarget;
   isVisible: () => boolean;
@@ -177,16 +175,14 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
       native.onmessage = (event) => adapter.onmessage?.(event);
       return adapter;
     });
-  if (!overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
+  const socket = overrides.createWebSocket ?? (!overrides.createEventSource && isDirectWebBrowser() ? websocketEvents : undefined);
+  if (!socket && !overrides.createEventSource && !NativeEventSource && !relayLink()) return null;
 
   const browserWindow = globalThis.window;
   const browserDocument = globalThis.document;
-  const directSocket = !overrides.createEventSource && !browserFellBack && browserWindow && !browserWindow.ogb?.platform &&
-    !relayLink() && new URLSearchParams(browserWindow.location.search).get("liveTransport") !== "sse" && globalThis.WebSocket;
   return {
     createEventSource,
-    createWebSocket: overrides.createWebSocket ?? (directSocket ? websocketEvents : undefined),
-    onTransportFallback: overrides.onTransportFallback ?? (() => { browserFellBack = true; }),
+    createWebSocket: socket,
     windowTarget:
       overrides.windowTarget ??
       (browserWindow
@@ -225,7 +221,8 @@ export function openLiveEvents(
   const retryMaxMs = Math.max(retryMinMs, handlers.retryMaxMs ?? LIVE_EVENTS_RETRY_MAX_MS);
   const staleCheckMs = Math.min(10_000, Math.max(250, staleMs / 2));
 
-  let transport: "first" | "healthy" | "retry" | "sse" = platform.createWebSocket ? "first" : "sse";
+  const socketFeed = Boolean(platform.createWebSocket);
+  const createSource = platform.createWebSocket ?? platform.createEventSource;
   let helloReceived = false;
   let helloBudget = 3_000;
   let stopped = false;
@@ -282,26 +279,15 @@ export function openLiveEvents(
     }, delay);
   };
 
-  const transportFailed = () => {
-    if (transport === "healthy") transport = "retry";
-    else if (transport !== "sse") {
-      transport = "sse";
-      platform.onTransportFallback?.();
-    }
-  };
-
-  const connectionLost = (current: LiveEventSourceLike, transportFailure = true) => {
+  const connectionLost = (current: LiveEventSourceLike) => {
     if (stopped || source !== current) return;
-    const previousTransport = transport;
-    if (transportFailure && !holdReason(platform)) transportFailed();
     closeSource();
     handlers.onError?.();
-    if (previousTransport !== "sse" && transport === "sse" && !holdReason(platform)) connect();
-    else scheduleReconnect();
+    scheduleReconnect();
   };
 
   const updateHelloDeadline = () => {
-    if (!source || helloReceived || transport === "sse") return;
+    if (!source || helloReceived || !socketFeed) return;
     if (holdReason(platform)) {
       if (helloTimer !== undefined) {
         helloBudget = Math.max(0, helloBudget - (platform.now() - helloStartedAt));
@@ -324,12 +310,10 @@ export function openLiveEvents(
     let current: LiveEventSourceLike;
     try {
       sourceScreens = screensWanted();
-      const createSource = transport === "sse" ? platform.createEventSource : platform.createWebSocket!;
       helloReceived = false;
       helloBudget = 3_000;
       current = createSource(liveEventsUrl({ since: cursor, screens: sourceScreens }));
     } catch {
-      transportFailed();
       handlers.onError?.();
       scheduleReconnect();
       return;
@@ -339,7 +323,7 @@ export function openLiveEvents(
     updateHelloDeadline();
     lastHeardAt = platform.now();
     current.onopen = () => {
-      if (stopped || source !== current || transport !== "sse") return;
+      if (stopped || source !== current || socketFeed) return;
       lastHeardAt = platform.now();
       livePhaseNow = "open";
       handlers.onOpen?.();
@@ -352,7 +336,7 @@ export function openLiveEvents(
       const frame = parseLiveFrame(event.data);
       if (!frame) return;
 
-      if (transport !== "sse" && !helloReceived && frame.kind !== "hello") return;
+      if (socketFeed && !helloReceived && frame.kind !== "hello") return;
 
       if (isLivePing(frame)) {
         // An open event only proves a handshake; a ping proves the stream stayed usable.
@@ -361,12 +345,11 @@ export function openLiveEvents(
       }
 
       if (frame.kind === "hello") {
-        if (transport !== "sse" && !helloReceived) {
+        if (socketFeed && !helloReceived) {
           if (typeof frame.resumed !== "boolean" || typeof frame.cursor !== "string") return;
           helloReceived = true;
           clearTimeout(helloTimer);
           helloTimer = undefined;
-          if (transport === "first") transport = "healthy";
           livePhaseNow = "open";
           handlers.onOpen?.();
         }
@@ -397,7 +380,7 @@ export function openLiveEvents(
             }
             if (!loaded) {
               pendingSnapshot = null;
-              connectionLost(current, false);
+              connectionLost(current);
               return;
             }
             cursor = pending.newestFrameCursor ?? pending.boundaryCursor;
@@ -442,9 +425,8 @@ export function openLiveEvents(
   const recover = () => {
     // Background tabs suspend timers and network delivery: recover once on wake.
     if (stopped || !platform.isOnline() || !platform.isVisible() || cloudAsleep()) return;
-    if (source && transport !== "sse" && !helloReceived) return;
+    if (source && socketFeed && !helloReceived) return;
     if (!source || shouldReconnectLiveEvents(lastHeardAt, platform.now(), staleMs)) {
-      if (source) transportFailed();
       reconnectNow(source !== null);
     }
   };

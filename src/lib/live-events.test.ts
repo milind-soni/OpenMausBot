@@ -533,13 +533,12 @@ describe("the WebSocket feed", () => {
   function socketHarness() {
     const h = harness();
     const sockets: FakeEventSource[] = [];
-    const fallback = vi.fn();
-    const platform = { ...h.platform, onTransportFallback: fallback, createWebSocket: (url: string) => {
+    const platform = { ...h.platform, createWebSocket: (url: string) => {
       const socket = new FakeEventSource(url);
       sockets.push(socket);
       return socket;
     } };
-    return { ...h, sockets, fallback, platform };
+    return { ...h, sockets, platform };
   }
 
   it("requires hello, bounds a silent upgrade and ignores its late callbacks", () => {
@@ -553,13 +552,13 @@ describe("the WebSocket feed", () => {
     expect(onOpen).not.toHaveBeenCalled();
     vi.advanceTimersByTime(3_000);
     expect(socket.close).toHaveBeenCalledOnce();
-    expect(h.sources).toHaveLength(1);
+    expect(h.sources).toHaveLength(0);
     late({ data: JSON.stringify({ kind: "message" }), lastEventId: "lost:2" });
     expect(onFrame).not.toHaveBeenCalled();
     stop();
   });
 
-  it("replays from the committed cursor once then remains on SSE", async () => {
+  it("reconnects repeatedly over WebSocket from the committed cursor", async () => {
     const h = socketHarness();
     const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, h.platform);
     h.sockets[0]!.message({ kind: "hello", cursor: "epoch:1", resumed: false });
@@ -572,13 +571,11 @@ describe("the WebSocket feed", () => {
     expect(h.sockets[1]!.url).toContain("since=epoch%3A2");
     h.sockets[1]!.message({ kind: "hello", cursor: "epoch:2", resumed: true });
     h.sockets[1]!.error();
-    expect(h.sources).toHaveLength(1);
-    expect(h.sources[0]!.url).toContain("since=epoch%3A2");
-    expect(h.fallback).toHaveBeenCalledOnce();
-    h.sources[0]!.error();
-    expect(h.sources).toHaveLength(1);
+    expect(h.sources).toHaveLength(0);
     vi.advanceTimersByTime(1_000);
-    expect(h.sources).toHaveLength(2);
+    expect(h.sockets).toHaveLength(3);
+    expect(h.sockets[2]!.url).toContain("since=epoch%3A2");
+    expect(h.sources).toHaveLength(0);
     stop();
   });
 
@@ -600,7 +597,8 @@ describe("the WebSocket feed", () => {
     expect(h.sockets).toHaveLength(1);
     expect(h.sources).toHaveLength(0);
     vi.advanceTimersByTime(1);
-    expect(h.sources).toHaveLength(1);
+    expect(h.sockets[0]!.close).toHaveBeenCalledOnce();
+    expect(h.sources).toHaveLength(0);
     stop();
   });
 
@@ -644,13 +642,15 @@ describe("the WebSocket feed", () => {
     stop();
   });
 
-  it("falls back when constructing a WebSocket throws", () => {
+  it("retries WebSocket when construction fails", () => {
     const h = harness();
+    const socket = vi.fn(() => { throw new Error("unsupported"); });
     const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, {
-      ...h.platform, createWebSocket: () => { throw new Error("unsupported"); }, onTransportFallback: vi.fn(),
+      ...h.platform, createWebSocket: socket,
     });
     vi.advanceTimersByTime(500);
-    expect(h.sources).toHaveLength(1);
+    expect(socket).toHaveBeenCalledTimes(2);
+    expect(h.sources).toHaveLength(0);
     stop();
   });
 
@@ -676,7 +676,7 @@ describe("browser transport selection", () => {
     return { sockets, streams, open };
   }
 
-  it.each(["", "?liveTransport=auto"])("uses WebSocket for a direct browser at /%s", (search) => {
+  it.each(["", "?liveTransport=auto", "?liveTransport=sse"])("uses WebSocket for a direct browser at /%s", (search) => {
     const h = browser(search);
     const stop = h.open();
     expect(h.sockets).toHaveLength(1);
@@ -687,7 +687,6 @@ describe("browser transport selection", () => {
   });
 
   it.each([
-    { search: "?liveTransport=sse", desktop: false },
     { search: "", desktop: true },
     { search: "?liveTransport=auto", desktop: true },
   ])("keeps SSE for $search with desktop=$desktop", ({ search, desktop }) => {

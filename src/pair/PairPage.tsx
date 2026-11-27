@@ -1,3 +1,4 @@
+import { isDirectWebBrowser } from "../lib/websocket-events";
 import { useEffect, useState } from "react";
 import { DesktopWorkspaceSwitcher } from "../components/DesktopWorkspaceSwitcher";
 import { productName } from "../lib/brand";
@@ -122,7 +123,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
     void readSessionState().then(setSession);
   }, []);
 
-  const connected = isConnected(session);
+  const connected = isDirectWebBrowser() ? session?.kind === "session" : isConnected(session);
   const emailOffered = environment?.capabilities.emailSignIn === true;
   const cloudHome = environment?.capabilities.cloudHome === true;
   const ownServer = !cloudHome && environment?.capabilities.cloudTeam !== true;

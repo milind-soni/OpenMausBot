@@ -1,4 +1,8 @@
-import type { LiveEventSourceLike } from "./relay-server";
+import { relayLink, type LiveEventSourceLike } from "./relay-server";
+
+export function isDirectWebBrowser(): boolean {
+  return typeof window !== "undefined" && !window.ogb?.platform && !relayLink();
+}
 
 export function websocketEvents(url: string): LiveEventSourceLike {
   const endpoint = new URL(url, window.location.href);
