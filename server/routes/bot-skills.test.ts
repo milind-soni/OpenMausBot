@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -7,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { provideGithubSignIn } from "../github/token.ts";
 import { json, readBody } from "../harness/http.ts";
+import { IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkillFile, readImportedSkills, storeImportedSkills } from "../imported-skills.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
@@ -243,11 +245,36 @@ describe("whose GitHub sign-in a bot import uses", () => {
 
 const learned = (name: string) => `---\nname: ${name}\ndescription: A skill.\n---\n\n# ${name}\n\nSteps.\n`;
 
+/** One skill from this computer, kept in the real imported store; its source folder is made unless `withSource` is false. */
+function storeImported(name: string, sourceFolder: string, withSource = true): string {
+  const text = learned(name);
+  if (withSource) {
+    mkdirSync(sourceFolder, { recursive: true });
+    writeFileSync(join(sourceFolder, "SKILL.md"), text);
+  }
+  expect(storeImportedSkills([{
+    name,
+    skillMd: text,
+    files: [],
+    entry: {
+      description: "A skill.",
+      source: "claudeCode",
+      root: dirname(sourceFolder),
+      origin: sourceFolder,
+      label: sourceFolder,
+      sha256: createHash("sha256").update(text).digest("hex"),
+      warnings: [],
+    },
+  }])).toMatchObject([{ name, stored: true }]);
+  return text;
+}
+
 describe("removing a skill from one bot", () => {
-  it("deletes a bot-owned skill, unassigns a shared one from that bot only, and refuses an imported one", async () => {
+  it("deletes a bot-owned skill, unassigns a shared one from that bot only, removes an imported one for that bot, and clears a stale import", async () => {
     const owned = `owned-${Math.random().toString(36).slice(2, 8)}`;
     const shared = `shared-${Math.random().toString(36).slice(2, 8)}`;
     const brought = `brought-${Math.random().toString(36).slice(2, 8)}`;
+    const stale = `stale-${Math.random().toString(36).slice(2, 8)}`;
     const first = `bot-${Math.random().toString(36).slice(2, 8)}`;
     const second = `bot-${Math.random().toString(36).slice(2, 8)}`;
     const third = `bot-${Math.random().toString(36).slice(2, 8)}`;
@@ -260,6 +287,9 @@ describe("removing a skill from one bot", () => {
     expect(installSkill(first, "private:test", [{ path: "SKILL.md", content: learned(owned) }])).toMatchObject({ name: owned });
     expect(installLibrarySkill({ name: shared, instructions: text, source: "lib", reviewState: "approved" })).toMatchObject({ name: shared });
     expect(setLibrarySkillEveryBot(shared, true)).toMatchObject({ everyBot: true });
+    const broughtSource = join(DATA_DIR, "test-source-skills", brought);
+    const broughtText = storeImported(brought, broughtSource);
+    storeImported(stale, join(DATA_DIR, "test-source-skills", stale), false);
     const store = {
       bot: (id: string) => bots.get(id),
       get bots() { return [...bots.values()]; },
@@ -273,8 +303,8 @@ describe("removing a skill from one bot", () => {
     const routes = [createBotSkillsRoutes({
       store,
       cfg: { features: { skillsLibrary: true } } as AppConfig,
-      listBotSkills: () => [
-        { name: brought, origin: "imported" },
+      listBotSkills: (bot) => [
+        ...importedSkillListings(bot.id, new Set()),
         { name: "engine-notes", origin: "native" },
       ] as never,
       readBotSkillFile: () => null,
@@ -293,6 +323,14 @@ describe("removing a skill from one bot", () => {
       const response = await fetch(`${base}${path}`, { method });
       return { status: response.status, body: await response.json() as { error?: string; skills?: Array<{ name: string }> } };
     };
+    const patch = async (botId: string, name: string, enabled: boolean) => {
+      const response = await fetch(`${base}/api/bots/${botId}/skills/${name}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      return { status: response.status, body: await response.json() as { skill?: { name: string; enabled: boolean } } };
+    };
 
     expect((await call("DELETE", `/api/bots/${first}/skills/${owned}`)).status).toBe(200);
     expect(listSkills(first).map((skill) => skill.name)).not.toContain(owned);
@@ -306,9 +344,37 @@ describe("removing a skill from one bot", () => {
     expect(resolveBotSkills(third, []).map((skill) => skill.name)).toContain(shared);
     expect((await call("GET", `/api/bots/${first}/skills`)).body.skills?.map((skill) => skill.name)).not.toContain(shared);
 
-    const refused = await call("DELETE", `/api/bots/${first}/skills/${brought}`);
-    expect(refused.status).toBe(404);
-    expect(refused.body.error).toMatch(/can't be removed from one bot/);
+    const removed = await call("DELETE", `/api/bots/${first}/skills/${brought}`);
+    expect(removed.status).toBe(200);
+    expect(removed.body).toEqual({ ok: true, scope: "bot", sourceFilesTouched: false });
+    expect(importedSkillListings(first, new Set()).map((skill) => skill.name)).not.toContain(brought);
+    expect((await call("GET", `/api/bots/${first}/skills`)).body.skills?.map((skill) => skill.name)).not.toContain(brought);
+    expect(importedSkillListings(second, new Set()).map((skill) => skill.name)).toContain(brought);
+    expect(importedSkillsFor(second, new Set()).map((skill) => skill.name)).toContain(brought);
+    expect(readImportedSkillFile(brought)).toBe(broughtText);
+    expect(readFileSync(join(broughtSource, "SKILL.md"), "utf8")).toBe(broughtText);
+    expect(readImportedSkills()[brought]).toBeDefined();
+    // The one copy every bot shares is only cleared when its source folder is gone.
+    const kept = await call("DELETE", `/api/bots/${second}/skills/${brought}?scope=all-bots`);
+    expect(kept.status).toBe(409);
+    expect(kept.body.error).toMatch(/still has its source folder/);
+    expect(readImportedSkills()[brought]).toBeDefined();
+
+    const cleared = await call("DELETE", `/api/bots/${first}/skills/${stale}?scope=all-bots`);
+    expect(cleared.status).toBe(200);
+    expect(cleared.body).toEqual({ ok: true, scope: "all-bots", sourceFilesTouched: false });
+    expect(readImportedSkills()[stale]).toBeUndefined();
+    expect(existsSync(join(IMPORTED_SKILLS_DIR, stale))).toBe(false);
+    expect((await call("GET", `/api/bots/${second}/skills`)).body.skills?.map((skill) => skill.name)).not.toContain(stale);
+
+    // The switch still works for an imported skill another bot keeps, and brings one back to the bot it was removed from.
+    expect(await patch(second, brought, false)).toMatchObject({ status: 200, body: { skill: { name: brought, enabled: false } } });
+    expect(importedSkillsFor(second, new Set()).map((skill) => skill.name)).not.toContain(brought);
+    expect(await patch(second, brought, true)).toMatchObject({ status: 200, body: { skill: { name: brought, enabled: true } } });
+    expect(importedSkillsFor(second, new Set()).map((skill) => skill.name)).toContain(brought);
+    expect(await patch(first, brought, true)).toMatchObject({ status: 200, body: { skill: { name: brought, enabled: true } } });
+    expect(importedSkillListings(first, new Set()).map((skill) => skill.name)).toContain(brought);
+
     const native = await call("DELETE", `/api/bots/${first}/skills/engine-notes`);
     expect(native.status).toBe(404);
     expect(native.body.error).toMatch(/can't be removed here/);
@@ -320,12 +386,12 @@ describe("removing a skill from one bot", () => {
       body: JSON.stringify({ skills: [shared] }),
     });
     expect(put.status).toBe(200);
-    const cleared = await fetch(`${base}/api/bots/${first}/skills-library`, {
+    const clearedAssignments = await fetch(`${base}/api/bots/${first}/skills-library`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ skills: [] }),
     });
-    expect(cleared.status).toBe(200);
+    expect(clearedAssignments.status).toBe(200);
     expect(resolveBotSkills(first, []).map((skill) => skill.name)).toContain(shared);
   });
 

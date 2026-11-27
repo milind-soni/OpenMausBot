@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import { claudeDisabledNativeSkillRules } from "./drivers/claude-unusable-tools.ts";
 import { codexDisabledNativeSkillArgs, codexTurnConfigArgs, GUEST_CONFINED_CODEX_ARGS } from "./drivers/codex-guest.ts";
-import { setImportedSkillEnabled, storeImportedSkills } from "./imported-skills.ts";
+import { removeImportedSkillForBot, setImportedSkillEnabled, storeImportedSkills } from "./imported-skills.ts";
 import { deniedNativeSkills, isNativeSkillEnabled, setNativeSkillEnabled } from "./native-skill-choices.ts";
 
 // HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
@@ -101,5 +101,27 @@ describe("Codex skills.config overrides for a bot's switched-off skills", () => 
     setNativeSkillEnabled("bot-a", "rex", true);
     expect(isNativeSkillEnabled("bot-a", "rex")).toBe(true);
     expect(paths(codexDisabledNativeSkillArgs("bot-a", env))).toEqual([]);
+  });
+
+  it("keeps a removed imported skill's native copy off for that bot, and restores it when the skill is switched back on", () => {
+    plant(join(HOME, "brought"), "renamed-folder");
+    storeImportedSkills([{
+      name: "rex",
+      entry: {
+        description: "Works with rex.", source: "codex", root: join(HOME, "brought"), origin: join(HOME, "brought", "renamed-folder"),
+        label: "rex", sha256: createHash("sha256").update(skillMd("rex")).digest("hex"), warnings: [],
+      },
+      skillMd: skillMd("rex"),
+      files: [],
+    }]);
+    expect(removeImportedSkillForBot("bot-a", "rex")).toEqual({ removed: true });
+    expect(isNativeSkillEnabled("bot-a", "rex")).toBe(false);
+    // The same removal for a bot whose native switch was already off: switching the import back on does not override it.
+    expect(removeImportedSkillForBot("bot-b", "rex")).toEqual({ removed: true });
+    setNativeSkillEnabled("bot-b", "rex", false);
+    expect(setImportedSkillEnabled("bot-a", "rex", true)).not.toHaveProperty("error");
+    expect(isNativeSkillEnabled("bot-a", "rex")).toBe(true);
+    expect(setImportedSkillEnabled("bot-b", "rex", true)).not.toHaveProperty("error");
+    expect(isNativeSkillEnabled("bot-b", "rex")).toBe(false);
   });
 });
