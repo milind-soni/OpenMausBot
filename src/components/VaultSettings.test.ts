@@ -317,6 +317,35 @@ describe("Settings → Vault: logins", () => {
     expect(host.querySelector("[data-bitwarden]")).toBeNull();
   });
 
+  it("explains why a connected Bitwarden account lists 0 logins and secrets", async () => {
+    for (const [empty, needle] of [
+      [{ total: 0, hiddenPasswords: 0, noWebsite: 0 }, "Bitwarden returned 0 items"],
+      [{ total: 3, hiddenPasswords: 2, noWebsite: 0 }, "hidden by collection permissions"],
+      [{ total: 2, hiddenPasswords: 0, noWebsite: 2 }, "no website address"],
+      [{ total: 2, hiddenPasswords: 0, noWebsite: 0 }, "website logins with passwords"],
+    ] as const) {
+      fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF, bitwarden: { connected: true, account: "bots@acme.test", items: 0, empty } });
+      await render();
+      expect(host.querySelector("[data-bitwarden-empty-hint]")?.textContent).toContain(needle);
+      act(() => root.unmount());
+      root = createRoot(host);
+    }
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF, bitwarden: { connected: true, account: "bots@acme.test", items: 0, error: "Bitwarden could not be read.", empty: { total: 0, hiddenPasswords: 0, noWebsite: 0 } } });
+    await render();
+    expect(host.querySelector("[data-bitwarden-empty-hint]")).toBeNull();
+    act(() => root.unmount());
+    root = createRoot(host);
+    fixture.api
+      .mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF, bitwarden: { connected: true, account: "bots@acme.test", items: 0, empty: { total: 0, hiddenPasswords: 0, noWebsite: 0 } } })
+      .mockRejectedValueOnce(new Error("Bitwarden stayed locked."));
+    await render();
+    expect(host.querySelector("[data-bitwarden-empty-hint]")?.textContent).toContain("Bitwarden returned 0 items");
+    await click("Refresh");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host.querySelector("[role=alert]")?.textContent).toBe("Bitwarden stayed locked.");
+    expect(host.querySelector("[data-bitwarden-empty-hint]")).toBeNull();
+  });
+
   it("is for admins only", async () => {
     fixture.admin = false;
     await render();

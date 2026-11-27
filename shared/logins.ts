@@ -70,6 +70,16 @@ export interface OnePasswordStatus {
   error?: string;
 }
 
+/** Why a connected Bitwarden account lists 0 logins and secrets: counts only, never item names or values. */
+export interface BitwardenEmptySummary {
+  /** Active items returned by Bitwarden before OpenMausBot filters them. */
+  total: number;
+  /** Login items skipped because they had no password (including hidden-password collections). */
+  hiddenPasswords: number;
+  /** Login items with a password that had no usable http(s) website address. */
+  noWebsite: number;
+}
+
 /** Bitwarden, connected through its command line tool with an account's API key and master password, none of which
  * leaves the server. `server`: the Bitwarden server's host; `account`: the address the account signs in with. */
 export interface BitwardenStatus {
@@ -78,6 +88,8 @@ export interface BitwardenStatus {
   account?: string;
   /** How many logins and secrets it lists. */
   items?: number;
+  /** Set once loaded when connected with 0 listed items and no error. */
+  empty?: BitwardenEmptySummary;
   error?: string;
 }
 
@@ -141,7 +153,9 @@ export function normalizeLoginHost(raw: unknown): string | null {
   if (!text || text.length > 2048 || /[\u0000- \u007f\\]/u.test(text)) return null;
   let url: URL;
   try {
-    url = new URL(/^[a-z][a-z\d+.-]*:/i.test(text) ? text : `https://${text}`);
+    // Treat bare host:port entries (common in Bitwarden Host match URIs) as https:// rather than an unknown URL scheme.
+    const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(text) && !/^[a-z\d.-]+:\d+(?:$|[/?#])/i.test(text);
+    url = new URL(hasScheme ? text : `https://${text}`);
   } catch {
     return null;
   }

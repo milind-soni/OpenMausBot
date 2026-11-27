@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Loader2 } from "lucide-react";
 
-import { BITWARDEN_SERVERS, type BitwardenStatus } from "../../shared/logins";
+import { BITWARDEN_SERVERS, type BitwardenEmptySummary, type BitwardenStatus } from "../../shared/logins";
 import { t } from "@/lib/i18n";
 import { connectBitwarden, disconnectBitwarden, refreshBitwarden } from "@/lib/logins";
 import { Select } from "./Select";
@@ -11,6 +11,13 @@ import { SettingsDialog } from "./settings/SettingsDialog";
 // Security: the API key and master password are typed here once and never come back; the form forgets them once sent.
 
 const SELF_HOSTED = "self-hosted";
+
+function emptyHint(empty: BitwardenEmptySummary): string {
+  if (empty.total === 0) return t("settings.vault.bitwarden.emptyVault");
+  if (empty.hiddenPasswords > 0) return t("settings.vault.bitwarden.emptyHiddenPasswords", { total: String(empty.total), count: String(empty.hiddenPasswords) });
+  if (empty.noWebsite > 0) return t("settings.vault.bitwarden.emptyNoWebsite", { total: String(empty.total), count: String(empty.noWebsite) });
+  return t("settings.vault.bitwarden.emptyUnsupported", { total: String(empty.total) });
+}
 
 /** Bitwarden in Settings → Vault, beside 1Password: one row with its state, and a small dialog to connect it. */
 export function BitwardenConnection({ status, disabled, team, onChange }: {
@@ -60,6 +67,9 @@ export function BitwardenConnection({ status, disabled, team, onChange }: {
         </> : <button type="button" className="ui-button" disabled={disabled} onClick={() => setOpen(true)}>{t("settings.vault.bitwarden.connect")}</button>}
       </div>
       {team && <p className="text-[12px] leading-4 text-ink-tertiary" data-bitwarden-team>{t("settings.vault.bitwarden.team")}</p>}
+      {status.connected && !status.error && !error && (status.items ?? 0) === 0 && status.empty && (
+        <p className="text-[12px] leading-4 text-ink-tertiary" data-bitwarden-empty-hint>{emptyHint(status.empty)}</p>
+      )}
       {status.connected && status.error && <p role="alert" className="text-[12px] leading-4 text-danger">{status.error}</p>}
       {error && !open && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
       {open && !status.connected && (
