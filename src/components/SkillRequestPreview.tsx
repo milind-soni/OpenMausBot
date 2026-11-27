@@ -28,7 +28,7 @@ export function SkillRequestPreview({ request }: { request: SkillRequestCardData
     <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-secondary">
         <span>
-          {t(REVIEW[request.action][request.references?.length ? 1 : 0])}
+          {t(request.teammates ? "skills.request.reviewTeammates" : REVIEW[request.action][request.references?.length ? 1 : 0])}
         </span>
         <span className="font-mono" title={`sha256 ${reviewedSha256}`}>
           sha256 {reviewedSha256.slice(0, 8)}

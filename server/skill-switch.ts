@@ -29,6 +29,11 @@ export interface SkillSwitchTarget {
   gist: string;
 }
 
+/** Digest of a skill's kind and full SKILL.md: what an approval or an Undo binds to. */
+export function skillContentSha256(skill: Pick<SwitchableSkill, "kind"> & { text: string }): string {
+  return createHash("sha256").update(`${skill.kind}\0${skill.text}`).digest("hex");
+}
+
 /** Refuses what a bot may not change on its own card, before any card is shown. */
 export function skillSwitchTarget(
   name: string,
@@ -55,7 +60,7 @@ export function skillSwitchTarget(
   return {
     preview,
     sha256: createHash("sha256").update(preview).digest("hex"),
-    contentSha256: createHash("sha256").update(`${skill.kind}\0${skill.text}`).digest("hex"),
+    contentSha256: skillContentSha256({ kind: skill.kind, text: skill.text }),
     ...(skill.source ? { source: redactSecretsInText(skill.source) } : {}),
     gist: redactSecretsInText(skill.description ?? "").replace(/\s+/g, " ").trim().slice(0, STAGED_GIST_MAX),
   };

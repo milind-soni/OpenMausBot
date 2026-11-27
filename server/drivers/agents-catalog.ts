@@ -115,6 +115,8 @@ const TRIGGER_FIELDS_SCHEMA = {
 const MESSAGE_MAX = 12_000;
 
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
+const CHIEF_SKILL_ACTION = "teammates";
+const CHIEF_SKILLS_TARGET = " A Chief of Staff may switch teammates' skills in one go (action teammates).";
 const APPLIES_AT_ONCE = " It applies at once, with an Undo where possible: read the result before saying it did.";
 const APPLIES_OUTCOME = APPLIES_AT_ONCE + " It never raises another bot's execution permissions.";
 
@@ -735,12 +737,12 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
+      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it." + CHIEF_SKILLS_TARGET + " Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete"] },
+        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete", "teammates"] },
         skill_name: { type: "string", description: "Every action but create and import: the exact name from skills_list." },
         skill_md: { type: "string", description: "create or update: the full SKILL.md with its YAML frontmatter." },
         references: {
@@ -761,6 +763,22 @@ const TOOL_DEFINITIONS = [
         base_revision: { type: "string", description: "To update a skill shared with your team: its revision from skills_list." },
         source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link." },
         all_bots: { type: "boolean", description: "create/import: on all the person's bots, if they asked." },
+        changes: {
+          type: "array",
+          minItems: 1,
+          maxItems: 40,
+          description: "teammates: all apply or none do.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              bot_id: { type: "string", description: "From list_bots." },
+              skill_name: { type: "string" },
+              on: { type: "boolean" },
+            },
+            required: ["bot_id", "skill_name", "on"],
+          },
+        },
       },
       required: ["action"],
     },
@@ -880,6 +898,11 @@ function catalogTools(profile: CatalogProfile) {
   const ROLE_TOOLS = profile.chief
     ? RESEARCH_READY_TOOLS
     : RESEARCH_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
+      if (tool.name === "skill_manage") {
+        const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "changes")
+          .map(([key, value]) => [key, key === "action" && Array.isArray(value.enum) ? { ...value, enum: value.enum.filter((option: string) => option !== CHIEF_SKILL_ACTION) } : value]));
+        return { ...tool, description: tool.description.replace(CHIEF_SKILLS_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
+      }
       if (!CHIEF_TARGET_TOOL_NAMES.has(tool.name)) return tool;
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => !CHIEF_TARGET_FIELDS.has(key)));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
