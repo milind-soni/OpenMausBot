@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCoordinator, type Coordinator, type CoordinateBotsCall, type CoordinatorHost, type HandoffView } from "../coordinator.ts";
+import type { CoordinateResult } from "../peer-delivery.ts";
 import type { RemoteResult, RemoteTeammate } from "../remote-teammates.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { createRemoteHandoff, REMOTE_REWORK_MAX, remoteBotId, type RemoteHandoffContext, type RemoteHandoffDeps } from "./remote-teammate-handoff.ts";
@@ -359,20 +360,44 @@ describe("remote teammate hand-off: the teammate's turn", () => {
 });
 
 describe("remote teammate hand-off: rework", () => {
-  it("stops rework to a teammate on another server after the limit under one request, and counts each request apart", async () => {
+  /** Lets a handed turn finish on the other server, so the next round of the same brief meets a terminal sibling, not the duplicate path. */
+  const settled = async (s: ReturnType<typeof setup>, sent: CoordinateResult) => {
+    const requestId = (sent.body.receipts as Array<{ requestId?: string }>)[0]!.requestId;
+    await s.coordinator.tick();
+    if (requestId) await vi.waitFor(() => expect(s.coordinator.node(requestId)?.status).toBe("completed"));
+    return sent;
+  };
+  const reworked = async (s: ReturnType<typeof setup>, message: string, context?: RemoteHandoffContext) =>
+    settled(s, await s.remote.coordinate(call([REMOTE], { rework: true, message }), context ?? s.context, local));
+
+  it("stops reworking one assignment to a teammate on another server after the limit, and counts each request apart", async () => {
     let clock = 1_000;
-    const s = setup({ now: () => clock });
-    const rework = (round: number) => s.remote.coordinate(call([REMOTE], { rework: true, message: `Fix round ${round}` }), s.context, local);
-    for (let round = 1; round <= REMOTE_REWORK_MAX; round++) expect((await rework(round)).status).toBe(200);
-    const refused = await rework(REMOTE_REWORK_MAX + 1);
+    const s = setup({ now: () => clock, send: vi.fn(async () => reply("Done.")) });
+    for (let round = 1; round <= REMOTE_REWORK_MAX; round++) expect((await reworked(s, "Fix it")).status).toBe(200);
+    const refused = await reworked(s, "Fix it");
     expect(refused.status).not.toBe(200);
     expect((refused.body.receipts as Array<{ outcome: string; detail: string }>)[0]).toMatchObject({ outcome: "failed", detail: expect.stringContaining(`past the limit of ${REMOTE_REWORK_MAX}`) });
     expect(s.coordinator.children("gen-1")).toHaveLength(REMOTE_REWORK_MAX);
 
     s.coordinator.beginTurn({ id: "gen-2", address: { botId: "chief-id", threadId: "chief-chat" }, brief: "Next", level: "full", origin: { kind: "user", request: "Next" } });
-    expect((await s.remote.coordinate(call([REMOTE], { rework: true, message: "Fix it" }), { ...s.context, generation: "gen-2" }, local)).status).toBe(200);
+    expect((await reworked(s, "Fix it", { ...s.context, generation: "gen-2" })).status).toBe(200);
 
     clock += 6 * 60 * 60_000 + 1;
-    expect((await rework(REMOTE_REWORK_MAX + 2)).status).toBe(200);
+    expect((await reworked(s, "Fix it")).status).toBe(200);
+  });
+
+  it("counts rework of each assignment apart, so different tasks under one request never share a count", async () => {
+    const s = setup({ send: vi.fn(async () => reply("Done.")) });
+    // A rework round is handed from a resumed turn of the request's own node, as production runs it.
+    const from = { ...s.context, parentId: "gen-1" };
+    for (let round = 1; round <= REMOTE_REWORK_MAX; round++) {
+      expect((await reworked(s, "Fix the login bug", from)).status).toBe(200);
+      expect((await reworked(s, "Fix the deploy script", from)).status).toBe(200);
+    }
+    const fifth = await reworked(s, "Fix the login bug", from);
+    expect((fifth.body.receipts as Array<{ outcome: string; detail: string }>)[0]).toMatchObject({ outcome: "failed", detail: expect.stringContaining(`past the limit of ${REMOTE_REWORK_MAX}`) });
+    expect((await reworked(s, "Fix the deploy script", from)).status).not.toBe(200);
+    expect((await reworked(s, "Fix the stylesheet", from)).status).toBe(200);
+    expect(s.coordinator.children("gen-1")).toHaveLength(2 * REMOTE_REWORK_MAX + 1);
   });
 });

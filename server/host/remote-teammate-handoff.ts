@@ -33,8 +33,9 @@ const REPLY_CHARS = 20_000;
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 /** The work thread of a hand-off with `thread: "new"` starts with this, after the teammate's address: it never goes on in an earlier conversation. */
 const NEW_THREAD = "new:";
-/** Rework sent to one teammate on another server under one request. Each round is a turn there on its owner's key and
- * nothing there sees the loop, so a worker here and a checker there that never agree stop after this many. */
+/** Rework rounds of one assignment to one teammate on another server: the same brief handed from the same turn. Each
+ * round is a turn there on its owner's key and nothing there sees the loop, so a worker here and a checker there that
+ * never agree stop after this many; rework of a different assignment counts apart. */
 export const REMOTE_REWORK_MAX = 4;
 const REWORK_KEPT_MS = 6 * 60 * 60_000;
 
@@ -140,7 +141,7 @@ export function createRemoteHandoff(deps: RemoteHandoffDeps) {
       const receipt = (outcome: PeerDeliveryReceipt["outcome"], detail: string, more: Partial<PeerDeliveryReceipt> = {}): PeerDeliveryReceipt => ({ botId, botName: teammate.name, outcome, detail: clip(detail, 400), ...more });
       const problem = unsupported(call, context);
       if (problem) { refused.push(problem); receipts.push(receipt("failed", problem)); continue; }
-      const reworkKey = call.rework ? `${coordinator.node(context.parentId ?? context.generation)?.rootId ?? context.address.threadId}\u0000${teammate.id}` : undefined;
+      const reworkKey = call.rework ? `${context.parentId ?? context.generation}\u0000${teammate.id}\u0000${call.message}` : undefined;
       for (const [key, entry] of reworkSent) if (now() - entry.at > REWORK_KEPT_MS) reworkSent.delete(key);
       if (reworkKey && (reworkSent.get(reworkKey)?.count ?? 0) >= REMOTE_REWORK_MAX) {
         const stop = `coordinate_bots was not run: this would be rework number ${REMOTE_REWORK_MAX + 1} sent to ${teammate.name} on another server for the same request, past the limit of ${REMOTE_REWORK_MAX}, so nothing was sent. Stop here: give the person the latest result and say what is still open, with ${teammate.name}'s last reply.`;
