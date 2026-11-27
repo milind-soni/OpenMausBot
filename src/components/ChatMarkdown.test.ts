@@ -840,6 +840,18 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain('title="Preview page: 100%41 report.html"');
   });
 
+  it("constrains long file paths to max-w-full and applies break-all to prevent bubble overflow", () => {
+    const longPath = "C:\\Users\\frank\\Documents\\Playground\\ObsidianVault\\Projects\\autofabric\\research\\paper\\formal_verification_receipt.json";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "已保存到 `" + longPath + "`",
+      message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(html).toContain("max-w-full");
+    expect(html).toContain("min-w-0");
+    expect(html).toContain("break-all");
+    expect(html).toContain("shrink-0");
+  });
+
   it("names a delivered copy by its literal file name, without decoding it", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "[Report](/old/100%41.html)", message: { threadId: "thread-1", messageId: "message-1" },
