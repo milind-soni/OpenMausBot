@@ -38,15 +38,17 @@ export interface SessionBudgetOptions {
   leftOut?: (left: () => LeftOutTools[]) => void;
 }
 
-/** The tools one server of a session leaves out of its list to fit its share. */
-export interface LeftOutTools { server: string; tools: string[] }
+/** The tools one server of a session leaves out of its list to fit its share. `unknown`: a relay that has not answered
+ * and recorded its list yet, so what it leaves out cannot be named. */
+export interface LeftOutTools { server: string; tools: string[]; unknown?: true }
 
 /** What `lists` leave out under `shares`, by server, as each list's own fit chooses (fitToolListWithinShare). */
 export function leftOutTools(lists: ReadonlyArray<{ server: string; tools: readonly ListedTool[] | number; share: number | undefined; record?: string }>): LeftOutTools[] {
   return lists.flatMap(({ server, tools: planned, share, record }) => {
     // A relay set aside a reserve is sized by the list it recorded since, once it has answered.
     const tools = typeof planned === "number" && record ? readRecordedToolList(record) ?? planned : planned;
-    if (typeof tools === "number" || share === undefined) return [];
+    if (share === undefined) return [];
+    if (typeof tools === "number") return record ? [{ server, tools: [], unknown: true as const }] : [];
     const { left } = fitToolListWithinShare(tools, share);
     return left.length ? [{ server, tools: left }] : [];
   });
@@ -54,9 +56,16 @@ export function leftOutTools(lists: ReadonlyArray<{ server: string; tools: reado
 
 /** The line a turn carries while its session's lists leave tools out, so the bot knows what it cannot call and why. */
 export function leftOutToolsNote(left: readonly LeftOutTools[]): string | undefined {
-  if (!left.length) return undefined;
-  return `[Tools left out] To fit this engine's limit on tool definitions, this session does not list: ${left.map(({ server, tools }) => `${server}: ${tools.join(", ")}`).join("; ")}. `
-    + "They cannot be called here. If the task needs one, tell the person which, and that turning off a server this bot does not need brings it back.";
+  const named = left.filter((entry) => !entry.unknown && entry.tools.length);
+  const unknown = left.filter((entry) => entry.unknown).map((entry) => entry.server);
+  if (!named.length && !unknown.length) return undefined;
+  const listed = named.length
+    ? `To fit this engine's limit on tool definitions, this session does not list: ${named.map(({ server, tools }) => `${server}: ${tools.join(", ")}`).join("; ")}. They cannot be called here. `
+    : "";
+  const unsure = unknown.length
+    ? `This list may be incomplete: ${unknown.join(", ")} ${unknown.length === 1 ? "has" : "have"} not reported ${unknown.length === 1 ? "its" : "their"} tools yet, so any ${unknown.length === 1 ? "it leaves" : "they leave"} out to fit the limit cannot be named here. `
+    : "";
+  return `[Tools left out] ${listed}${unsure}If the task needs a tool that is missing, tell the person which, and that turning off a server this bot does not need brings it back.`;
 }
 
 export function toolListRecordPath(recordsDir: string, botId: string, server: string): string {

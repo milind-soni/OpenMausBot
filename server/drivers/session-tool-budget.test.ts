@@ -24,7 +24,7 @@ import { agentsToolList } from "./agents-mcp.ts";
 import { antigravityCliTakesHttpMcp, antigravityCliToolBudget } from "./antigravity-acp.ts";
 import { acpSessionMcpServers } from "./own-mcp-http.ts";
 import { withSessionToolShares } from "./own-mcp-session-budget.ts";
-import { SESSION_TOOL_BUDGET_ENV, UNKNOWN_LIST_RESERVE, withSessionToolBudget } from "./session-tool-budget.ts";
+import { leftOutToolsNote, SESSION_TOOL_BUDGET_ENV, UNKNOWN_LIST_RESERVE, withSessionToolBudget } from "./session-tool-budget.ts";
 import { acpMcpServers, type AcpMcpServer } from "./turn-mcp.ts";
 import type { SendTurnInput } from "../contracts.ts";
 
@@ -199,5 +199,18 @@ describe("the session's tool budget over every server", () => {
     for (const [name, tools] of Object.entries(OWN)) expect(share(name)).toBeGreaterThanOrEqual(toolListFloorBytes(tools));
     expect(share("composio")).toBeGreaterThan(UNKNOWN_LIST_RESERVE);
     expect(["agents", "browser", "data", "composio"].reduce((sum, name) => sum + share(name), 0)).toBeLessThanOrEqual(ANTIGRAVITY_CLI_TOOL_BUDGET);
+  });
+});
+
+describe("the line naming what a session leaves out", () => {
+  it("names each tool left out, and each relay whose list is not known yet as a gap in the line", () => {
+    expect(leftOutToolsNote([])).toBeUndefined();
+    expect(leftOutToolsNote([{ server: "data", tools: [] }])).toBeUndefined();
+    const both = leftOutToolsNote([{ server: "data", tools: ["data_export", "data_show"] }, { server: "composio", tools: [], unknown: true }])!;
+    expect(both).toMatch(/^\[Tools left out\] .*does not list: data: data_export, data_show\. They cannot be called here\. /);
+    expect(both).toContain("This list may be incomplete: composio has not reported its tools yet");
+    const only = leftOutToolsNote([{ server: "composio", tools: [], unknown: true }, { server: "shop", tools: [], unknown: true }])!;
+    expect(only).not.toContain("does not list");
+    expect(only).toContain("This list may be incomplete: composio, shop have not reported their tools yet");
   });
 });

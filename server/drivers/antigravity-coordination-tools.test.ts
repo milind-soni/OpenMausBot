@@ -125,12 +125,14 @@ describe("a native Antigravity CLI thread over the session's tool budget", () =>
     const note = () => (JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")) as Array<{ text?: string }>)
       .map((block) => block.text ?? "").find((text) => text.startsWith("[Tools left out]"));
     // `relaysAnswered` false: the turn was set up before any relay had answered and recorded its list, as only this fake
-    // allows (the CLI lists every server's tools on session setup, before the prompt), so it can name only OpenMausBot's own.
+    // allows (the CLI lists every server's tools on session setup, before the prompt), so it can name only OpenMausBot's own
+    // and must say which relays it could not size and that the list may be incomplete.
+    const OWN = ["agents", "browser", "data"];
     const check = (sent: Sent[], relaysAnswered = true) => {
       expect(sent.map((server) => server.name).sort()).toEqual(Object.keys(LISTS).sort());
       const lists = shown(sent);
       // The turn names what the lists left out, server by server, so the bot knows what it cannot call.
-      const left = Object.entries(LISTS).filter(([server]) => relaysAnswered || ["agents", "browser", "data"].includes(server)).flatMap(([server, tools]) => {
+      const left = Object.entries(LISTS).filter(([server]) => relaysAnswered || OWN.includes(server)).flatMap(([server, tools]) => {
         const kept = new Set(lists[server]!.map((tool) => tool.name));
         return tools.filter((tool) => !kept.has(tool.name)).map((tool) => `${server}/${tool.name}`);
       });
@@ -140,13 +142,15 @@ describe("a native Antigravity CLI thread over the session's tool budget", () =>
         expect(named).toMatch(new RegExp(`(?:: |; )${server}: (?:[^;]*, )?${name}(?:[,;.]|$)`));
       }
       if (relaysAnswered && !left.length) expect(note()).toBeUndefined();
+      const unsure = /This list may be incomplete: ([^.]*?) ha(?:s|ve) not reported/.exec(named)?.[1]?.split(", ") ?? [];
+      expect(unsure.sort()).toEqual(relaysAnswered ? [] : Object.keys(LISTS).filter((server) => !OWN.includes(server)).sort());
       for (const name of COORDINATION_TOOLS) expect(named).not.toMatch(new RegExp(`\\b${name}\\b`));
       for (const name of COORDINATION_TOOLS) expect(lists.agents!.map((tool) => tool.name)).toContain(name);
       // Counted as the CLI counts them, each tool by its own name.
       const all = Object.values(lists).flat();
       expect(definitionListBytes(all)).toBeLessThanOrEqual(ANTIGRAVITY_CLI_TOOL_LIMIT);
       expect(cliDrops(all, ANTIGRAVITY_CLI_TOOL_LIMIT)).toEqual([]);
-      return lists;
+      return { lists, left, named };
     };
 
     // session/new: nothing recorded yet, so the person's servers are sized by a reserve.
@@ -169,11 +173,16 @@ describe("a native Antigravity CLI thread over the session's tool budget", () =>
     expect(setups().filter((method) => method !== "session/set_model")).toEqual(["session/new", "session/resume"]);
     const resumed = sentNow();
     expect(Number(envOf(resumed.find((server) => server.name === "shop")!)[TOOL_LIST_SHARE_ENV])).toBeGreaterThan(0);
-    const lists = check(resumed);
+    const { lists, left, named } = check(resumed);
+    // Over the budget: the resumed session leaves tools out and names each of them.
+    expect(left.length).toBeGreaterThan(0);
 
-    // A third turn in the resumed live session: no new setup, the same lists.
+    // A third turn in the resumed live session: no new setup, the same lists, and the same tools named as left out.
     await turn("third", { resumeCursor: sessionId });
     expect(setups().filter((method) => method !== "session/set_model")).toEqual(["session/new", "session/resume"]);
     expect(shown(sentNow())).toEqual(lists);
+    const third = check(sentNow());
+    expect(third.left).toEqual(left);
+    expect(third.named).toBe(named);
   }, 120_000);
 });
