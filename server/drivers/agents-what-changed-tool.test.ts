@@ -36,7 +36,7 @@ describe("what_changed inline request size", () => {
   });
 
   it("counts JSON escaping and preserves the serialized request", async () => {
-    const args = { original_text: '\"\\\n界🙂', edited_text: "updated", start: 2 };
+    const args = { original_text: '"\\\n界🙂', edited_text: "updated", start: 2 };
     const f = context();
     expect(await callWhatChangedTool(args, f.context)).toEqual({ text: "comparison" });
     expect(f.apiResponse).toHaveBeenCalledWith("/api/internal/what-changed", { method: "POST", body: JSON.stringify(args) });
