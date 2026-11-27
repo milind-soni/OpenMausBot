@@ -13,6 +13,7 @@ import {
   type LiveEventsPlatform,
 } from "./live-events";
 import { cloudAsleep, markCloudAwake, resetCloudPowerForTests } from "./cloud-power";
+import { setRelayLink } from "./relay-server";
 import { resetTurnLive, turnLive } from "@/state/turn-status";
 
 class FakeTarget {
@@ -95,7 +96,7 @@ function harness(options?: { online?: boolean; visible?: boolean; now?: number }
 }
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => { vi.useRealTimers(); resetCloudPowerForTests(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); setRelayLink(null); resetCloudPowerForTests(); });
 
 describe("live events URL", () => {
   it("builds cold and resumable stream URLs", () => {
@@ -524,6 +525,187 @@ describe("the live connection's phase, which the 30-second still-waiting event n
     expect(livePhase()).toBe("opening");
     test.sources.at(-1)!.error();
     expect(livePhase()).toBe("retrying");
+    stop();
+  });
+});
+
+describe("the WebSocket feed", () => {
+  function socketHarness() {
+    const h = harness();
+    const sockets: FakeEventSource[] = [];
+    const fallback = vi.fn();
+    const platform = { ...h.platform, onTransportFallback: fallback, createWebSocket: (url: string) => {
+      const socket = new FakeEventSource(url);
+      sockets.push(socket);
+      return socket;
+    } };
+    return { ...h, sockets, fallback, platform };
+  }
+
+  it("requires hello, bounds a silent upgrade and ignores its late callbacks", () => {
+    const h = socketHarness();
+    const onOpen = vi.fn();
+    const onFrame = vi.fn();
+    const stop = openLiveEvents({ onFrame, onOpen, onSnapshotRequired: async () => true }, h.platform);
+    const socket = h.sockets[0]!;
+    const late = socket.onmessage!;
+    socket.message({ kind: "ping" });
+    expect(onOpen).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(3_000);
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(h.sources).toHaveLength(1);
+    late({ data: JSON.stringify({ kind: "message" }), lastEventId: "lost:2" });
+    expect(onFrame).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("replays from the committed cursor once then remains on SSE", async () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, h.platform);
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:1", resumed: false });
+    await Promise.resolve();
+    h.sockets[0]!.message({ kind: "bot" }, "epoch:2");
+    const error = h.sockets[0]!.onerror!;
+    error(); error();
+    vi.advanceTimersByTime(500);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.sockets[1]!.url).toContain("since=epoch%3A2");
+    h.sockets[1]!.message({ kind: "hello", cursor: "epoch:2", resumed: true });
+    h.sockets[1]!.error();
+    expect(h.sources).toHaveLength(1);
+    expect(h.sources[0]!.url).toContain("since=epoch%3A2");
+    expect(h.fallback).toHaveBeenCalledOnce();
+    h.sources[0]!.error();
+    expect(h.sources).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    expect(h.sources).toHaveLength(2);
+    stop();
+  });
+
+  it("resumes the remaining hello budget after a hidden or offline interval", () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, { ...h.platform, now: Date.now });
+    vi.advanceTimersByTime(2_000);
+    h.setVisible(false);
+    h.documentTarget.emit("visibilitychange");
+    vi.advanceTimersByTime(60_000);
+    h.setOnline(false);
+    h.windowTarget.emit("offline");
+    h.setVisible(true);
+    h.documentTarget.emit("visibilitychange");
+    vi.advanceTimersByTime(60_000);
+    h.setOnline(true);
+    h.windowTarget.emit("online");
+    vi.advanceTimersByTime(999);
+    expect(h.sockets).toHaveLength(1);
+    expect(h.sources).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(h.sources).toHaveLength(1);
+    stop();
+  });
+
+  it("clears the handshake timer after hello and releases all timers on close", async () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, h.platform);
+    expect(vi.getTimerCount()).toBe(2);
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:1", resumed: false });
+    await Promise.resolve();
+    expect(vi.getTimerCount()).toBe(1);
+    stop();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps snapshot failure separate from transport failure", async () => {
+    const h = socketHarness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => false }, h.platform);
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:1", resumed: false });
+    await Promise.resolve();
+    vi.advanceTimersByTime(500);
+    expect(h.sockets).toHaveLength(2);
+    expect(h.sources).toHaveLength(0);
+    expect(h.sockets[1]!.url).not.toContain("since=");
+    stop();
+  });
+  it("does not commit a snapshot that completes after socket loss", async () => {
+    const h = socketHarness();
+    let finish: (loaded: boolean) => void = () => {};
+    const snapshot = new Promise<boolean>((resolve) => { finish = resolve; });
+    const opened = vi.fn();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onOpen: opened, onSnapshotRequired: () => snapshot }, h.platform);
+    h.sockets[0]!.open();
+    expect(opened).not.toHaveBeenCalled();
+    h.sockets[0]!.message({ kind: "hello", cursor: "epoch:4", resumed: false });
+    h.sockets[0]!.message({ kind: "bot" }, "epoch:5");
+    h.sockets[0]!.error();
+    finish(true);
+    await Promise.resolve();
+    vi.advanceTimersByTime(500);
+    expect(h.sockets[1]!.url).not.toContain("since=");
+    stop();
+  });
+
+  it("falls back when constructing a WebSocket throws", () => {
+    const h = harness();
+    const stop = openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, {
+      ...h.platform, createWebSocket: () => { throw new Error("unsupported"); }, onTransportFallback: vi.fn(),
+    });
+    vi.advanceTimersByTime(500);
+    expect(h.sources).toHaveLength(1);
+    stop();
+  });
+
+});
+
+describe("browser transport selection", () => {
+  function browser(search = "", desktop = false) {
+    const sockets: FakeEventSource[] = [];
+    const streams: FakeEventSource[] = [];
+    vi.stubGlobal("window", Object.assign(new FakeTarget(), {
+      location: new URL(`https://example.test/${search}`),
+      ...(desktop ? { ogb: { platform: "linux" } } : {}),
+    }));
+    vi.stubGlobal("WebSocket", class extends FakeEventSource {
+      constructor(url: URL) { super(url.href); sockets.push(this); }
+    });
+    vi.stubGlobal("EventSource", class extends FakeEventSource {
+      constructor(url: string) { super(url); streams.push(this); }
+    });
+    const open = () => openLiveEvents({ onFrame: vi.fn(), onSnapshotRequired: async () => true }, {
+      isVisible: () => true, isOnline: () => true, documentTarget: new FakeTarget(),
+    });
+    return { sockets, streams, open };
+  }
+
+  it.each(["", "?liveTransport=auto"])("uses WebSocket for a direct browser at /%s", (search) => {
+    const h = browser(search);
+    const stop = h.open();
+    expect(h.sockets).toHaveLength(1);
+    expect(h.sockets[0]!.url).toContain("wss://example.test/api/events?");
+    expect(h.streams).toHaveLength(0);
+    stop();
+    expect(h.sockets[0]!.close).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { search: "?liveTransport=sse", desktop: false },
+    { search: "", desktop: true },
+    { search: "?liveTransport=auto", desktop: true },
+  ])("keeps SSE for $search with desktop=$desktop", ({ search, desktop }) => {
+    const h = browser(search, desktop);
+    const stop = h.open();
+    expect(h.sockets).toHaveLength(0);
+    expect(h.streams).toHaveLength(1);
+    stop();
+  });
+
+  it("keeps the relay link ahead of direct browser transports", () => {
+    const h = browser();
+    const fetch = vi.fn(async () => new Response("", { headers: { "content-type": "text/event-stream" } }));
+    setRelayLink({ fetch, close: vi.fn() });
+    const stop = h.open();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/events?"), expect.any(Object));
+    expect(h.sockets).toHaveLength(0);
+    expect(h.streams).toHaveLength(0);
     stop();
   });
 });

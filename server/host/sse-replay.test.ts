@@ -4,12 +4,12 @@ import { ReplayBuffer, type ReplayFrame } from "./sse-replay.ts";
 
 const frame = (seq: number, chars = 10, kind = "message"): ReplayFrame => {
   const text = `${seq}:`.padEnd(chars, "x");
-  return { seq, kind, frame: text, clientFrame: text, payload: { kind } };
+  return { seq, kind, json: text, clientJson: text, payload: { kind } };
 };
 const seqs = (buffer: ReplayBuffer) => [...buffer].map((entry) => entry.seq);
 /** What a stream resuming after `since` is sent: a slot with no frame is skipped. */
 const replayed = (buffer: ReplayBuffer, since: number) =>
-  [...buffer].filter((entry) => entry.seq > since && (entry.frame !== null || entry.clientFrame !== null || entry.payload !== null)).map((entry) => entry.seq);
+  [...buffer].filter((entry) => entry.seq > since && (entry.json !== null || entry.clientJson !== null || entry.payload !== null)).map((entry) => entry.seq);
 
 describe("ReplayBuffer", () => {
   it("keeps the newest frames up to its count", () => {
@@ -26,7 +26,7 @@ describe("ReplayBuffer", () => {
 
   it("counts a member frame that differs from the admin frame", () => {
     const buffer = new ReplayBuffer(500, 1_000);
-    for (let seq = 1; seq <= 4; seq++) buffer.push({ ...frame(seq, 200), clientFrame: "y".repeat(200) });
+    for (let seq = 1; seq <= 4; seq++) buffer.push({ ...frame(seq, 200), clientJson: "y".repeat(200) });
     expect(seqs(buffer)).toEqual([4]);
   });
 
