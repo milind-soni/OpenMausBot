@@ -1,5 +1,0 @@
-{
-  "title": "Connected apps",
-  "icon": "PlugZap",
-  "pages": ["index", "multiple-accounts", "github-sign-in", "self-hosted-composio"]
-}
