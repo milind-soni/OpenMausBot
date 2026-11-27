@@ -16,7 +16,7 @@ export const OBJECT_BODY_IDS = [
   "obj-palette", "obj-rocket", "obj-witch-hat",
   // Mascot rebrand candidates (moodboard-bodies.ts).
   "obj-ninja-ball", "obj-infinity-eyes", "obj-drop-face", "obj-fireball", "obj-chibi-ninja", "obj-plush-ninja",
-  "obj-tall-ears", "obj-cat-mask", "obj-maus-hood", "obj-maus-helmet", "obj-maus-ninja",
+  "obj-tall-ears", "obj-cat-mask", "obj-maus-hood", "obj-maus-helmet", "obj-maus-ninja", "obj-maus-bolt",
 ] as const;
 
 export type ObjectBodyId = (typeof OBJECT_BODY_IDS)[number];
