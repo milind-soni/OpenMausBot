@@ -27,21 +27,28 @@ export function refusesRequestSize(status: number, body: string): boolean {
   return error?.code === "context_length_exceeded" || CONTEXT_REFUSALS.has(error?.type);
 }
 
+/** The window a refused request was counted against: llama.cpp's n_ctx, its context per slot. */
+export function refusedWindow(body: string): number | undefined {
+  const window = bodyError(body)?.n_ctx;
+  return typeof window === "number" && Number.isSafeInteger(window) && window > 0 ? window : undefined;
+}
+
 /** The share of a refused request that fits the window its provider counted (llama.cpp's n_ctx of n_prompt_tokens). */
 export function shareThatFits(body: string): number | undefined {
-  const error = bodyError(body);
-  const window = error?.n_ctx, prompt = error?.n_prompt_tokens;
-  if (typeof window !== "number" || typeof prompt !== "number" || window <= 0 || prompt < window) return undefined;
+  const window = refusedWindow(body), prompt = bodyError(body)?.n_prompt_tokens;
+  if (window === undefined || typeof prompt !== "number" || prompt < window) return undefined;
   return window / prompt * WINDOW_FILLED_BY_RESEND;
 }
 
 export class RequestTooLargeError extends Error {
   readonly bytes: number;
   readonly fits: number | undefined;
-  constructor(message: string, bytes: number, fits?: number) {
+  readonly window: number | undefined;
+  constructor(message: string, bytes: number, fits?: number, window?: number) {
     super(message);
     this.bytes = bytes;
     this.fits = fits;
+    this.window = window;
   }
 }
 
@@ -118,13 +125,19 @@ export function smallerResend(
     sizes[index] = size;
     out[index] = next;
   };
+  // A tool result goes with the call it answers: OpenAI and Groq refuse a request that has one without the other.
+  const dropWithResults = (index: number) => {
+    replace(index, null);
+    for (let next = index + 1; next < requestAt && messages[next]!.role === "tool"; next++) replace(next, null);
+  };
   const shrinkable = messages.flatMap((message, index) => index === requestAt || message.role === "system" ? [] : [index]);
   const latestCalls = messages.findLastIndex((message) => message.role === "assistant" && Boolean(message.tool_calls?.length));
   const steps = [
     ...shrinkable.filter((index) => imagesIn(messages[index]!)).map((index) => () => replace(index, withoutImages(out[index]!))),
     ...shrinkable.filter((index) => index > requestAt && messages[index]!.role === "tool" && sizes[index]! > LONG_TOOL_OUTPUT_BYTES)
       .map((index) => () => replace(index, shortenedToolOutput(out[index]!))),
-    ...shrinkable.filter((index) => index < requestAt && omittedBefore(messages[index]!) === undefined).map((index) => () => replace(index, null)),
+    ...shrinkable.filter((index) => index < requestAt && messages[index]!.role !== "tool" && omittedBefore(messages[index]!) === undefined)
+      .map((index) => () => dropWithResults(index)),
     ...shrinkable.filter((index) => index > requestAt && index < latestCalls && messages[index]!.role === "tool"
       && sizes[index]! > bytesOf(omittedToolOutput(messages[index]!))).map((index) => () => replace(index, omittedToolOutput(out[index]!))),
   ];

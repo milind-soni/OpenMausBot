@@ -7691,7 +7691,7 @@ async function beginTurn(
         if ((m.roomRequest.phase === "request" && m.roomRequest.id === opts.coordination.id) ||
           (m.roomRequest.phase === "result" && coordinationChildren?.has(m.roomRequest.id))) skipTranscript.add(m.id);
       }
-      const { context, replayable, record, selection } = replayInputs(bot, threadId, activeMessages, skipTranscript);
+      const { context, replayable, record, selection } = replayInputs(bot, threadId, activeMessages, skipTranscript, { instance, model, task });
       const contextOrder = context.map(m => m.id);
       const transcript = selection.transcript.map(({ role, text }) => ({ role, text }));
       // Engines keep a session in the folder it started in, so a thread that follows its bot to the bot's working folder starts a new one there.
