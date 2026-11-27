@@ -17,6 +17,7 @@ import { readStdioLines } from "./stdio-lines.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 import { TOOL_LIST_RECORD_ENV, TOOL_LIST_SHARE_ENV, toolsListResultForSessionShare } from "./tool-list-share.ts";
+import { textOnlyToolsFromEnv, withoutResultImages } from "./mcp-text-only.ts";
 
 type Json = Record<string, unknown>;
 
@@ -48,6 +49,8 @@ const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const TOOL_LIMIT = toolLimitFromEnv(process.env);
+/** Read from the process env, so the plain (non --config-env) mounts an ACP engine spawns carry it. */
+const TEXT_ONLY_TOOLS = textOnlyToolsFromEnv(process.env);
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -418,6 +421,9 @@ readStdioLines(child.stdout, (line) => {
     message.result = toolsListResultForSessionShare(message.result, process.env, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
   if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
+  if (TEXT_ONLY_TOOLS && request?.kind === "call" && message.error === undefined && isRecord(result) && withoutResultImages(result)) {
+    process.stderr.write(`mcp-gate(${NAME}): replaced an image in ${request.tool}'s result with a note: this model reads text only\n`);
+  }
   if (request?.kind === "call" && request.trim && isRecord(result)) {
     try {
       if (trimCallResult(result, request.tool)) {

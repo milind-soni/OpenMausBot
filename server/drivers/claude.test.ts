@@ -16,12 +16,9 @@ import { claudeHookSettings } from "./claude-hooks.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
-  claudeCliSupports,
-  claudeCliUpdate,
   ClaudeDriver,
   createPermissionBroker,
   hookTokenFile,
-  parseClaudeCliVersion,
   permissionSocketPath,
   readClaudeAuthSettings,
   claudeCostSnapshot,
@@ -30,6 +27,7 @@ import {
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
+import { claudeCliSupports, claudeCliUpdate, parseClaudeCliVersion } from "./claude-cli-version.ts";
 import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { sumNativeTurnResults } from "./claude-turn-result.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
@@ -1708,6 +1706,51 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--system-prompt-snapshot");
     expect(seen.prompt.message.content).toContain("Add the new header row.");
+  });
+
+  it("does not resume a session holding a system prompt the CLI cannot refresh, and rebuilds from the recovery text", async () => {
+    const dump = join(scratch, "stale-recorded-prompt.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-stale-recorded-prompt", text: "one", system: "Always answer MARK_V1." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+
+    const rebuild = "[Your previous session for this conversation could not be resumed, so this is a new session.] one";
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-stale-recorded-prompt", text: "two", system: "Always answer MARK_V2.", resumeCursor: announced, recoveryText: rebuild,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--system-prompt-snapshot");
+    expect(seen.argv).not.toContain("--resume");
+    expect(seen.argv).toContain("--session-id");
+    expect(seen.systemPromptFile).toBe("Always answer MARK_V2.");
+    const content = seen.prompt.message.content;
+    expect(typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("")).toBe(rebuild);
+    expect(recorder.events.filter((e) => e.type === "session.started").at(-1)).toMatchObject({ rebuilt: true });
+
+    // From then on the replacement session resumes normally.
+    const replacement = (recorder.events.filter((e) => e.type === "session.started").at(-1) as { sessionId: string }).sessionId;
+    const rebuiltPid = seen.pid;
+    const third = await instance.adapter.sendTurn({ threadId: "t-stale-recorded-prompt", text: "three", effort: "high", system: "Always answer MARK_V2.", resumeCursor: replacement });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
+    const resumed = JSON.parse(readFileSync(dump, "utf8"));
+    expect(resumed.pid).not.toBe(rebuiltPid);
+    expect(resumed.argv[resumed.argv.indexOf("--resume") + 1]).toBe(replacement);
+  });
+
+  it("resumes a session on a CLI without the snapshot flag when the system prompt is unchanged", async () => {
+    const dump = join(scratch, "unchanged-recorded-prompt.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-unchanged-recorded-prompt", text: "one", system: "You are Testy." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstPid = dumpedPid(dump);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({ threadId: "t-unchanged-recorded-prompt", text: "two", effort: "high", system: "You are Testy.", resumeCursor: announced });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.pid).not.toBe(firstPid);
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe(announced);
   });
 
   it("replaces the previous computer prompt when a normal conversation changes its place", async () => {
@@ -3831,7 +3874,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       await instance.dispose();
       await create(undefined, { FAKE_CLAUDE_COST_STATE: costState });
     }
-    const second = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const second = await instance.adapter.sendTurn({ threadId, text: "two", effort: "high", system: "Before.", systemStable: "Before.", resumeCursor: announced });
     const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);
     expect([firstDone, secondDone].map((e) => (e as { cost?: unknown }).cost)).toEqual([0.01, 0.01]);
@@ -3847,10 +3890,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const first = await instance.adapter.sendTurn({ threadId, text: "one", system: "Before.", systemStable: "Before." });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
-    const failed = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const failed = await instance.adapter.sendTurn({ threadId, text: "two", effort: "high", system: "Before.", systemStable: "Before.", resumeCursor: announced });
     expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false, cost: null });
     const launch = dumpedPid(dump);
-    const third = await instance.adapter.sendTurn({ threadId, text: "three", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const third = await instance.adapter.sendTurn({ threadId, text: "three", effort: "high", system: "Before.", systemStable: "Before.", resumeCursor: announced });
     const thirdDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
     expect(dumpedPid(dump)).toBe(launch);
     expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);

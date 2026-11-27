@@ -1,5 +1,5 @@
-// The chat runtime may resend a stream the provider closed before any completion marker; these
-// tests pin that one protocol error's retry and the guards that keep a resend side-effect free.
+// A stream cut retries the one model call even after a tool call ran earlier in the turn, but never once
+// this call streamed text; these tests pin that resend and the side-effect budget it keeps.
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,18 +66,18 @@ describe("createOpenAIChatRuntime stream truncation retry", () => {
     expect(requests).toBe(3);
   });
 
-  it("does not resend once answer text streamed, even with a clean retry available", async () => {
-    const { events, requests } = await runTurn([
-      () => sse('data: {"choices":[{"index":0,"delta":{"content":"Hel"}}]}\n\n'),
-      answer,
-    ]);
+  it.each([
+    ["a plain cut", () => sse('data: {"choices":[{"index":0,"delta":{"content":"Hel"}}]}\n\n'), "Stream ended before completion"],
+    ["a terminated chunk", () => sse('data: {"choices":[{"index":0,"delta":{"content":"Hel"}}]}\n\n' + 'data: {"error":"terminated"}\n\n'), "terminated"],
+  ])("does not resend %s once answer text streamed, even with a clean retry available", async (_name, cut, message) => {
+    const { events, requests } = await runTurn([cut, answer]);
     expect(events.some((event) => event.type === "turn.retrying")).toBe(false);
-    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: "Stream ended before completion" });
-    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "error" });
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: expect.stringContaining(message) });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
     expect(requests).toBe(1);
   });
 
-  it("does not resend a truncation after a tool call ran, so its effect happens once", async () => {
+  it("resends a cut in a round after a tool call ran, without running the tool twice", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-chat-trunc-tool-"));
     const script = join(dir, "fake-mcp.mjs");
     const receipt = join(dir, "receipt.log");
@@ -105,8 +105,8 @@ describe("createOpenAIChatRuntime stream truncation retry", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
       if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
       bodies.push(JSON.parse(String(init?.body)));
-      // The tool result goes back up, and that second attempt's stream is the truncation.
-      return new Response(bodies.length === 1 ? callBody : "", { headers: { "content-type": "text/event-stream" } });
+      // The tool call runs first, the next round's stream is the cut, and its resend answers clean.
+      return bodies.length === 1 ? sse(callBody) : bodies.length === 2 ? truncated() : answer();
     }));
     const instance = await OpenAICompatDriver.create({
       instanceId: "trunc", displayName: "Synthetic", enabled: true,
@@ -121,11 +121,12 @@ describe("createOpenAIChatRuntime stream truncation retry", () => {
         integrations: { custom: { fx: { command: script, args: [], env: {} } } },
       });
       await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
-      expect(bodies).toHaveLength(2);
-      expect(bodies[1]?.messages.some((message) => message.role === "tool")).toBe(true);
-      expect(events.some((event) => event.type === "turn.retrying")).toBe(false);
-      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ message: "Stream ended before completion" });
-      expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "error" });
+      expect(bodies).toHaveLength(3);
+      expect(bodies[2]?.messages.some((message) => message.role === "tool")).toBe(true);
+      expect(events.filter((event) => event.type === "turn.retrying"))
+        .toEqual([expect.objectContaining({ attempt: 1, reason: "stream_truncated" })]);
+      expect(events.find((event) => event.type === "runtime.error")).toBeUndefined();
+      expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
       expect(readFileSync(receipt, "utf8").trim().split("\n")).toEqual(["write"]);
     } finally {
       await instance.dispose();
