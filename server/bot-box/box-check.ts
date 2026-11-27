@@ -47,10 +47,11 @@ export async function boxExec(command: readonly string[], env: Record<string, st
       const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, windowsHide: true, stdio: [piped ? "ignore" : "inherit", piped ? "pipe" : "inherit", piped ? "pipe" : "inherit", ...wrapped.extraFds] });
       for (const fd of wrapped.extraFds) try { closeSync(fd); } catch {}
       let stdout = "", stderr = "";
-      child.stdout?.on("data", (chunk) => { stdout += chunk; });
-      child.stderr?.on("data", (chunk) => { stderr += chunk; });
+      // UTF-8 decoded across chunks, and the answer given on "close", once both streams have ended.
+      child.stdout?.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+      child.stderr?.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
       child.once("error", (error) => resolve({ code: 126, stdout, stderr: `${stderr}the box could not start: ${error.message}` }));
-      child.once("exit", (code, signal) => resolve({ code: code ?? (signal ? 128 : 1), stdout, stderr }));
+      child.once("close", (code, signal) => resolve({ code: code ?? (signal ? 128 : 1), stdout, stderr }));
     });
   } finally {
     wrapped.release();

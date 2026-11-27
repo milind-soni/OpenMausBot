@@ -15,6 +15,8 @@ const available = detection.box === "bwrap" && detection.tools !== null;
 const root = mkdtempSync(join(tmpdir(), "omb-box-real-"));
 /** The CPU list is checked only where the host has one to put in the box. */
 const cpuList = existsSync("/sys/devices/system/cpu/possible");
+/** Warn-only, and failing wherever the box lets a bot make user namespaces (today: everywhere; docs/bot-box.md, Limits). */
+const NESTED = "nested-userns-blocked";
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubblewrap works here" : `skipped: ${detection.reason}`})`, () => {
@@ -26,8 +28,9 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
   it("passes every check inside a real box", async () => {
     const result = await runBoxSelfCheck(options());
     expect(result.error).toBeUndefined();
-    expect(result.failed).toEqual([]);
-    expect(result.total).toBe((process.arch === "x64" ? 31 : 30) + (cpuList ? 1 : 0));
+    expect(result.failed.filter((id) => id !== NESTED)).toEqual([]);
+    expect(result.total).toBe((process.arch === "x64" ? 32 : 31) + (cpuList ? 1 : 0));
+    expect(result.results.find((check) => check.id === NESTED)?.detail).toMatch(/a bot can make user namespaces|refused|unshare: /);
     expect(result.results.map((check) => check.id)).toEqual(expect.arrayContaining([...(cpuList ? ["cpu-list-readable"] : []), "engine-runs", "engine-read-only", "no-provider-key-in-env", "broker-call-works", "broker-wrong-token-refused", "broker-other-grant-refused", "broker-key-not-on-disk", "base-url-is-broker"]));
   }, 120_000);
 
@@ -46,7 +49,7 @@ describe.skipIf(!available)(`the real box (${detection.box === "bwrap" ? "bubble
       expect(result.error, mutation).toBeUndefined();
       for (const id of checks) expect(result.failed, `${mutation} should fail ${id}`).toContain(id);
       // share-net drops the two isolated-network checks instead of failing them; everything else holds.
-      const other = result.failed.filter((id) => !checks.includes(id));
+      const other = result.failed.filter((id) => !checks.includes(id) && id !== NESTED);
       expect(other, `${mutation} broke more than it should`).toEqual([]);
     }
   }, 300_000);

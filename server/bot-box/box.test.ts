@@ -196,7 +196,7 @@ describe("BotBox", () => {
     boxes.push(box);
     const lines: string[] = [];
     const detection = await box.start({
-      dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_BOT_BOX: "required", OMB_IMAGE: "server" }, log: (line) => lines.push(line),
+      dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_BOT_BOX: "required", OMB_SERVER_IMAGE: "1" }, log: (line) => lines.push(line),
       detect: () => ({ box: "off", reason: "userns-refused", tools: null }),
     });
     expect(detection.box).toBe("off");
@@ -213,15 +213,71 @@ describe("BotBox", () => {
     const box = new BotBox();
     boxes.push(box);
     const lines: string[] = [];
-    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_IMAGE: "server" }, log: (line) => lines.push(line), detect: () => ({ box: "off", reason: "userns-refused", tools: null }) });
+    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_SERVER_IMAGE: "1" }, log: (line) => lines.push(line), detect: () => ({ box: "off", reason: "userns-refused", tools: null }) });
     expect(box.refusing()).toBe(false);
     expect(box.wrap({ command: "claude", args: [], env: {} })).toBeNull();
     expect(box.sandboxStatus()).toEqual({ state: "off", reason: "userns-refused", required: false, checks: null });
-    expect(lines[0]).toMatch(/^bot box: off \(userns-refused\): bots run beside the server, able to read its settings, keys and each other's files\. On a server installed with deploy\/install\.sh, run the install command again/);
+    expect(lines[0]).toMatch(/^bot box: off \(userns-refused\): bots run beside the server, able to read its settings and keys\. On a server installed with deploy\/install\.sh, run the install command again/);
     const off = new BotBox();
     boxes.push(off);
     await off.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_IMAGE: "server", OMB_BOT_BOX: "0" }, log: () => {} });
     expect(off.sandboxStatus()).toEqual({ state: "off", reason: "switched-off", required: false, checks: null });
+  });
+
+  it.skipIf(process.platform === "win32")("required and running: a self-check that fails a must-pass check, or gives no answer, refuses every spawn; a warning never does", async () => {
+    const started = async (env: Record<string, string>) => {
+      const box = new BotBox();
+      boxes.push(box);
+      const lines: string[] = [];
+      await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env, log: (line) => lines.push(line),
+        detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
+      return { box, lines };
+    };
+    const warned = await started({ OMB_BOT_BOX: "required", OMB_SERVER_IMAGE: "1" });
+    warned.box.noteChecks({ passed: 30, total: 32, failed: ["hostname-private", "nested-userns-blocked"], at: 1 }, (line) => warned.lines.push(line));
+    expect(warned.box.refusing()).toBe(false);
+    expect(warned.box.wrap({ command: "/usr/bin/true", args: [], env: { PATH: "/usr/bin" } })?.command).toBe("/usr/bin/bwrap");
+    expect(warned.box.sandboxStatus()).toEqual({ state: "on", reason: null, required: true, checks: { passed: 30, total: 32, failed: ["hostname-private", "nested-userns-blocked"], warned: ["hostname-private", "nested-userns-blocked"] } });
+
+    const failed = await started({ OMB_BOT_BOX: "required", OMB_SERVER_IMAGE: "1" });
+    failed.box.noteChecks({ passed: 31, total: 33, failed: ["config-hidden", "nested-userns-blocked"], at: 1 }, (line) => failed.lines.push(line));
+    expect(failed.box.refusing()).toBe(true);
+    expect(() => failed.box.wrap({ command: "/usr/bin/true", args: [], env: {} })).toThrow(/requires the bots' sandbox, and its self-check failed a check that must pass/);
+    try { failed.box.wrap({ command: "/usr/bin/true", args: [], env: {} }); } catch (error) { expect((error as { code?: string; reason?: string })).toMatchObject({ code: "EBOXREQUIRED", reason: "self-check-failed" }); }
+    expect(failed.box.sandboxStatus()).toMatchObject({ state: "refusing", reason: "self-check-failed", required: true, checks: { failed: ["config-hidden", "nested-userns-blocked"], warned: ["nested-userns-blocked"] } });
+    expect(failed.lines.at(-1)).toBe("bot box: REQUIRED and its self-check failed (config-hidden): every bot's command is refused until the server starts again with a self-check that passes.");
+
+    const silent = await started({ OMB_BOT_BOX: "required", OMB_SERVER_IMAGE: "1" });
+    silent.box.noteChecks({ passed: 0, total: 0, failed: [], at: 1, error: "the probe did not answer within 60000 ms" }, () => {});
+    expect(silent.box.refusing()).toBe(true);
+
+    // Not required (a server image someone runs by hand): the failure is shown, and bots run as before.
+    const shown = await started({ OMB_SERVER_IMAGE: "1" });
+    shown.box.noteChecks({ passed: 31, total: 32, failed: ["config-hidden"], at: 1 }, () => {});
+    expect(shown.box.refusing()).toBe(false);
+    expect(shown.box.sandboxStatus()).toMatchObject({ state: "on", checks: { failed: ["config-hidden"], warned: [] } });
+  });
+
+  it.skipIf(process.platform === "win32")("a box found but unable to open its gates: the server keeps running, refusing every spawn where required, off elsewhere", async () => {
+    const blocked = () => { const dataDir = temp(); writeFileSync(join(dataDir, "box"), "a file where the box's folder goes"); return dataDir; };
+    const tools = { box: "bwrap" as const, reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } };
+    const required = new BotBox();
+    boxes.push(required);
+    const lines: string[] = [];
+    const detection = await required.start({ dataDir: blocked(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_BOT_BOX: "required", OMB_SERVER_IMAGE: "1" }, log: (line) => lines.push(line), detect: () => tools });
+    expect(detection).toEqual({ box: "off", reason: "start-failed", tools: null });
+    expect(required.enabled()).toBe(false);
+    expect(required.refusing()).toBe(true);
+    expect(() => required.wrap({ command: "claude", args: [], env: {} })).toThrow(/could not start: it could not open its gates/);
+    expect(required.sandboxStatus()).toEqual({ state: "refusing", reason: "start-failed", required: true, checks: null });
+    expect(lines[0]).toMatch(/^bot box: could not start: /);
+    expect(lines[1]).toMatch(/^bot box: REQUIRED but it could not start \(start-failed\)/);
+    const optional = new BotBox();
+    boxes.push(optional);
+    await optional.start({ dataDir: blocked(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_SERVER_IMAGE: "1" }, log: () => {}, detect: () => tools });
+    expect(optional.refusing()).toBe(false);
+    expect(optional.wrap({ command: "claude", args: [], env: {} })).toBeNull();
+    expect(optional.sandboxStatus()).toEqual({ state: "off", reason: "start-failed", required: false, checks: null });
   });
 
   it("shows nothing new where nobody asked for the box this way: the desktop app, a Cloud, a server from source", async () => {
@@ -245,8 +301,9 @@ describe("BotBox", () => {
     expect(box.refusing()).toBe(false);
     expect(box.wrap({ command: "/usr/bin/codex", args: [], env: { PATH: "/usr/bin" } })?.command).toBe("/usr/bin/bwrap");
     expect(box.sandboxStatus()).toEqual({ state: "on", reason: null, required: true, checks: null });
-    box.noteChecks({ passed: 30, total: 31, failed: ["config-hidden"], at: 1 });
-    expect(box.sandboxStatus()?.checks).toEqual({ passed: 30, total: 31, failed: ["config-hidden"] });
+    box.noteChecks({ passed: 30, total: 31, failed: ["egress-public-allowed"], at: 1 }, () => {});
+    expect(box.sandboxStatus()?.checks).toEqual({ passed: 30, total: 31, failed: ["egress-public-allowed"], warned: ["egress-public-allowed"] });
+    expect(box.refusing()).toBe(false);
   });
 
   it("off: no relay", async () => {

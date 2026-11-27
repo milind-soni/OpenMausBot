@@ -21,10 +21,14 @@ describe("deciding whether turns are boxed", () => {
     expect(detectBox({ env: { OMB_BOT_BOX: "1" }, ...working }).box).toBe("bwrap");
   });
 
-  it("tries the box by default in the server image (OMB_IMAGE=server), takes `required` as on, and leaves every other place alone", () => {
+  it("tries the box by default in the server image (OMB_SERVER_IMAGE=1), takes `required` as on, and leaves every other place alone", () => {
     const working = { platform: "linux" as const, probe: () => true, which: tools({ bwrap: "/usr/bin/bwrap", socat: "/usr/bin/socat" }) };
     const refusing = { platform: "linux" as const, probe: () => false, which: tools({ bwrap: "/usr/bin/bwrap" }) };
+    expect(serverImage({ OMB_SERVER_IMAGE: "1" })).toBe(true);
     expect(serverImage({ OMB_IMAGE: "server" })).toBe(true);
+    // An install's .env names the image in OMB_IMAGE; loaded into the container, it never hides the image's own marker.
+    expect(serverImage({ OMB_SERVER_IMAGE: "1", OMB_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.186" })).toBe(true);
+    expect(serverImage({ OMB_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.186" })).toBe(false);
     expect(serverImage({ OMB_IMAGE: "ghcr.io/milind-soni/openmausbot:v0.1.182" })).toBe(false);
     expect(boxWanted({ OMB_BOT_BOX: "required" })).toBe("required");
     expect(boxWanted({ OMB_BOT_BOX: " Required " })).toBe("required");

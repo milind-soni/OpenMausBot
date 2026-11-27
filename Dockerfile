@@ -274,12 +274,13 @@ COPY --from=build --chown=maus:maus /src/dist ./dist
 COPY --from=build --chown=maus:maus /src/skills ./skills
 # `docker compose exec omb openmausbot pair`: the commands the CLI prints start the same way.
 RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/local/bin/openmausbot && chmod 0755 /usr/local/bin/openmausbot
-# OMB_IMAGE=server: this container is a server, never someone's own computer,
+# OMB_SERVER_IMAGE=1: this container is a server, never someone's own computer,
 # so the server tries the bots' sandbox at start (server/bot-box/detect.ts).
 # The installer's compose.box.yaml makes it required (OMB_BOT_BOX=required).
+# Not OMB_IMAGE, which .env uses for the image's own name.
 ENV HOME=/data \
     OMB_CLI_PREFIX="docker compose exec omb openmausbot" \
-    OMB_IMAGE=server
+    OMB_SERVER_IMAGE=1
 VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

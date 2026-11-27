@@ -3,8 +3,11 @@
 # do not let a container build a sandbox of its own, so this installs the two profiles that let the server's container
 # run bubblewrap and nothing more: the same two the MausBot connector installs for a Cloud (connector/profiles).
 #
-#   sudo sh deploy/box/prepare-host.sh            installs both (again: it replaces them with these copies)
-#   sudo sh deploy/box/prepare-host.sh --remove   unloads and removes both, unless a container still runs under them
+#   sudo sh deploy/box/prepare-host.sh            installs both (again: it replaces them with these copies, unless they
+#                                                 differ and another container may run under them)
+#   sudo sh deploy/box/prepare-host.sh --remove   unloads and removes both, unless a container may still run under them
+#
+# "May": when Docker cannot be asked about every container, the profiles count as in use, and are kept as they are.
 #
 # The installer (deploy/install.sh) runs it with MAUSBOT_PROFILES_DIR naming the profiles it downloaded, and its
 # --uninstall runs it with --remove. By hand, start the server with deploy/box/compose.box.yaml added afterwards.
@@ -24,20 +27,33 @@ fail() {
   exit 1
 }
 
-# Whether any container on this host, running or stopped, was started under the sandbox's AppArmor profile.
-profile_in_use() {
-  command -v docker >/dev/null 2>&1 || return 1
-  for id in $(docker ps -aq 2>/dev/null); do
-    [ "$(docker inspect -f '{{.AppArmorProfile}}' "$id" 2>/dev/null || true)" != "$profile" ] || return 0
+# Who runs under the sandbox's AppArmor profile, among every container on this host, running or stopped: none, own (only
+# containers of the Compose project MAUSBOT_OWN_PROJECT, the installer's own server), others, or unknown when Docker could
+# not list them all or tell about one of them.
+profile_users() {
+  command -v docker >/dev/null 2>&1 || { echo none; return; }
+  ids=$(docker ps -aq 2>/dev/null) || { echo unknown; return; }
+  users=none
+  for id in $ids; do
+    seen=$(docker inspect -f '{{.AppArmorProfile}}|{{index .Config.Labels "com.docker.compose.project"}}' "$id" 2>/dev/null) || { echo unknown; return; }
+    [ "${seen%%|*}" = "$profile" ] || continue
+    if [ -n "${MAUSBOT_OWN_PROJECT:-}" ] && [ "${seen#*|}" = "$MAUSBOT_OWN_PROJECT" ]; then users=own; else echo others; return; fi
   done
-  return 1
+  echo "$users"
 }
 
 remove() {
-  if profile_in_use; then
-    echo "The sandbox's profiles stay: a container on this server still runs under them (a MausBot connector's, or another install's)."
-    return 0
-  fi
+  case "$(profile_users)" in
+    none) ;;
+    unknown)
+      echo "The sandbox's profiles stay: Docker could not say whether a container still runs under them."
+      return 0
+      ;;
+    *)
+      echo "The sandbox's profiles stay: a container on this server still runs under them (a MausBot connector's, or another install's)."
+      return 0
+      ;;
+  esac
   if [ -f "$apparmor_dir/$profile" ] && command -v apparmor_parser >/dev/null 2>&1; then
     apparmor_parser -R "$apparmor_dir/$profile" >/dev/null 2>&1 || true
   fi
@@ -70,9 +86,20 @@ if [ "$enabled" != Y ] || ! command -v apparmor_parser >/dev/null 2>&1; then
   fail "This server is missing AppArmor or its tools, which the bots' sandbox needs. Run: sudo apt-get install -y apparmor  then restart the server and run this again."
 fi
 
+# A copy that differs from what is installed replaces it only when no other container may run under it: a connector's
+# Cloud keeps the profile it was started with, and the copy already there serves this server too.
+users=$(profile_users)
+case "$users" in
+  none | own) replace=yes ;;
+  *) replace=no ;;
+esac
+if [ "$replace" = no ] && { { [ -f "$etc_dir/$seccomp" ] && ! cmp -s "$profiles/$seccomp" "$etc_dir/$seccomp"; } || { [ -f "$apparmor_dir/$profile" ] && ! cmp -s "$profiles/$profile.apparmor" "$apparmor_dir/$profile"; }; }; then
+  if [ "$users" = unknown ]; then why="Docker could not say whether a container runs under them"; else why="another container runs under them"; fi
+  echo "The sandbox's profiles on this server differ from this copy, and $why: they are kept as they are."
+fi
 install -d -m 0755 "$etc_dir"
-install -m 0644 "$profiles/$seccomp" "$etc_dir/$seccomp"
-install -m 0644 "$profiles/$profile.apparmor" "$apparmor_dir/$profile"
+if [ "$replace" = yes ] || [ ! -f "$etc_dir/$seccomp" ]; then install -m 0644 "$profiles/$seccomp" "$etc_dir/$seccomp"; fi
+if [ "$replace" = yes ] || [ ! -f "$apparmor_dir/$profile" ]; then install -m 0644 "$profiles/$profile.apparmor" "$apparmor_dir/$profile"; fi
 apparmor_parser -r -W "$apparmor_dir/$profile" || fail "AppArmor refused the sandbox's profile (its message is above)."
 if [ -r "$sysroot/sys/kernel/security/apparmor/profiles" ] && ! grep -q "^$profile " "$sysroot/sys/kernel/security/apparmor/profiles"; then
   fail "AppArmor did not load the sandbox's profile. Restart the server and run this again."

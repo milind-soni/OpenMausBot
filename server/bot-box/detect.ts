@@ -1,5 +1,5 @@
 // Whether this machine can run the bot box, decided once at boot: on by default on a Cloud home, tried by default in the
-// self-hosted server image (OMB_IMAGE=server), off everywhere else unless OMB_BOT_BOX=1, and never on without a working
+// self-hosted server image (OMB_SERVER_IMAGE=1), off everywhere else unless OMB_BOT_BOX=1, and never on without a working
 // unprivileged bubblewrap (a kernel that refuses user namespaces, or an image without bwrap, reports `off` with its
 // reason rather than running turns unboxed by surprise: the report says so, and the Admin shows it).
 // OMB_BOT_BOX=required (the installer's compose.box.yaml) is on with no way down: when the box cannot start, bot spawns
@@ -13,7 +13,7 @@ export type BoxKind = "bwrap" | "gvisor" | "user" | "off";
 export interface BoxDetection {
   box: BoxKind;
   /** Why the box is off, as a fixed code; never free text from a tool. */
-  reason: "switched-off" | "not-linux" | "no-bwrap" | "userns-refused" | "not-cloud" | null;
+  reason: "switched-off" | "not-linux" | "no-bwrap" | "userns-refused" | "not-cloud" | "start-failed" | null;
   /** The found tools, when the box is on. */
   tools: { bwrap: string; socat: string | null } | null;
 }
@@ -31,10 +31,14 @@ export function cloudRole(env: Record<string, string | undefined>): boolean {
   return env.OMB_CLOUD_ROLE === "home" || env.OMB_CLOUD_ROLE === "team";
 }
 
-/** The self-hosted server image (the Dockerfile's `server` target sets OMB_IMAGE=server): a server, never someone's own
- * computer, so it tries the box by default. */
+/** The image's own marker, set by the Dockerfile's `server` target. Not OMB_IMAGE: an install's .env names the image in
+ * OMB_IMAGE, and a Compose file that loads .env into the container (`env_file: .env`) would replace the marker. */
+export const SERVER_IMAGE_ENV = "OMB_SERVER_IMAGE";
+
+/** The self-hosted server image: a server, never someone's own computer, so it tries the box by default. Builds of this
+ * branch before the rename said OMB_IMAGE=server, which still counts when it is exactly that. */
 export function serverImage(env: Record<string, string | undefined>): boolean {
-  return env.OMB_IMAGE === "server";
+  return env[SERVER_IMAGE_ENV] === "1" || env.OMB_IMAGE === "server";
 }
 
 /** `OMB_BOT_BOX`: unset (Cloud homes on, the server image tries, others off), 0/off, 1/on/bwrap, required. */

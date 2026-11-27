@@ -15,6 +15,11 @@ on:
       - deploy/update.sh
       - deploy/update-runner.sh
       - connector/profiles/**
+      - server/bot-box/**
+      - server/procs.ts
+      - server/drivers/**
+      - server/engine-homes/**
+      - shared/bot-sandbox.ts
       - deploy/Caddyfile
       - deploy/docker-compose.yml
       - scripts/server-installer.test.ts
@@ -64,12 +69,12 @@ jobs:
             echo "free for Docker now: $(free_gb) GB"
           fi
       - name: This checkout's server image, served from a registry on the runner
-        # Only an image with the bots' sandbox (OMB_IMAGE=server) can show the installer turning it on; until a release
+        # Only an image with the bots' sandbox (OMB_SERVER_IMAGE=1) can show the installer turning it on; until a release
         # has it, this checkout's is built and installed instead.
         id: image
         run: |
           set -euo pipefail
-          if ! grep -q 'OMB_IMAGE=server' Dockerfile; then
+          if ! grep -q 'OMB_SERVER_IMAGE=1' Dockerfile; then
             echo "this checkout's image has no hardened profile; installing the published release"
             exit 0
           fi

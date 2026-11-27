@@ -6,7 +6,7 @@
 # ends in .internal, for which Caddy issues a certificate of its own CA at once, so HTTPS through Caddy is checked too:
 # after every way the server restarts without Caddy, and after the documented backup and restore.
 # The files the installer places (update.sh, the sandbox's host preparation) come from this checkout. Where the image
-# has the bots' sandbox (OMB_IMAGE=server) it must be on, required and holding: a bot cannot read config.json. With
+# has the bots' sandbox (OMB_SERVER_IMAGE=1) it must be on, required and holding: a bot cannot read config.json. With
 # OMB_INSTALL_IMAGE set (the workflow builds this checkout's image and serves it from a registry on the runner), that
 # image is installed instead of the published release, and at the end an install of the release before the sandbox
 # (OLD_IMAGE) is updated to it with update.sh, as an existing server is: it keeps working, says the sandbox is off and
@@ -152,7 +152,7 @@ esac
 
 step "the bots' sandbox: on and holding where the image has it, left out with a sentence where it does not"
 if sudo grep -qx "COMPOSE_FILE=compose.yaml:compose.box.yaml" "$DIR/.env"; then
-  contains "$OUT/install.txt" "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files." "the install did not say the sandbox is on"
+  contains "$OUT/install.txt" "The bots' sandbox is on: a bot cannot read the server's settings, keys or database, or other bots' work folders." "the install did not say the sandbox is on"
   sudo cmp "$ROOT/deploy/box/compose.box.yaml" "$DIR/compose.box.yaml" || fail "the sandbox's Compose settings are not the repository's"
   sudo cmp "$ROOT/connector/profiles/seccomp-omb-home.json" /etc/mausbot/seccomp-omb-home.json || fail "the seccomp profile on the host is not the repository's"
   sudo grep -q '^omb-home-narrow ' /sys/kernel/security/apparmor/profiles || fail "the AppArmor profile is not loaded"
@@ -353,7 +353,7 @@ if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then
   healthy_again
   [ "$(sudo cat "$DIR/data/e2e-update-marker")" = kept-through-update ] || fail "the update lost the data"
   container=$(cd "$DIR" && sudo docker compose ps -q omb)
-  sudo docker inspect -f '{{json .Config.Env}}' "$container" | grep -qF '"OMB_IMAGE=server"' || fail "the update did not start this version"
+  sudo docker inspect -f '{{json .Config.Env}}' "$container" | grep -qF '"OMB_SERVER_IMAGE=1"' || fail "the update did not start this version"
   (cd "$DIR" && sudo docker compose logs omb 2>&1) | grep -F "bot box: off (userns-refused): bots run beside the server" || fail "the updated server did not say its bots run without the sandbox"
   engines=$( (cd "$DIR" && sudo docker compose exec -T omb curl -sf http://127.0.0.1:8799/api/health/engines) )
   jq -e '.sandbox == null' <<<"$engines" >/dev/null || fail "the updated server refuses bots: $engines"
@@ -364,7 +364,7 @@ if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then
 
   step "the command Settings names, the installer run again, turns the sandbox on and makes it required"
   install_until_https "$OUT/switch-on.txt"
-  contains "$OUT/switch-on.txt" "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files." "the installer did not turn the sandbox on"
+  contains "$OUT/switch-on.txt" "The bots' sandbox is on: a bot cannot read the server's settings, keys or database, or other bots' work folders." "the installer did not turn the sandbox on"
   sudo grep -qx "COMPOSE_FILE=compose.yaml:compose.box.yaml" "$DIR/.env" || fail "the installer did not add the sandbox's settings"
   status=$(sandbox_status)
   echo "Settings shows: $status"
@@ -372,9 +372,20 @@ if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then
   [ "$(sudo cat "$DIR/data/e2e-update-marker")" = kept-through-update ] || fail "turning the sandbox on touched the data"
 
   step "a new container for a sandboxed install, as update.sh's swap makes one, comes back required and on"
-  (cd "$DIR" && sudo docker compose up -d --force-recreate omb >/dev/null 2>&1) && healthy_again
+  (cd "$DIR" && sudo docker compose up -d --force-recreate omb >/dev/null 2>&1) || fail "the container could not be made again"
+  healthy_again
   status=$(sandbox_status)
   jq -e '.state == "on" and .required == true' <<<"$status" >/dev/null || fail "the sandbox did not survive an update: $status"
+
+  step "update.sh never moves this sandboxed install to the release before the sandbox, --allow-older or not"
+  status=0
+  # shellcheck disable=SC2024 # the evidence file is the runner's, not root's
+  sudo "$DIR/update.sh" --image "$OLD_IMAGE" --allow-older >"$OUT/downgrade.txt" 2>&1 || status=$?
+  cat "$OUT/downgrade.txt"
+  [ "$status" = 4 ] || fail "update.sh exited $status moving a sandboxed install to an image without the sandbox"
+  contains "$OUT/downgrade.txt" "This install runs its bots in the sandbox, and" "update.sh did not say why it refused"
+  status=$(sandbox_status)
+  jq -e '.state == "on" and .required == true' <<<"$status" >/dev/null || fail "the refused update changed the server: $status"
   sudo sh "$ROOT/deploy/install.sh" --uninstall >/dev/null
 fi
 

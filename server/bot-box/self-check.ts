@@ -151,13 +151,15 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   wrapped.env[PROBE_SPEC_ENV] = JSON.stringify(spec);
   let stdout = "", stderr = "";
   const results = await new Promise<ProbeResult[] | string>((resolve) => {
-    const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: ["ignore", "pipe", "pipe", ...wrapped.extraFds] });
+    const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe", ...wrapped.extraFds] });
     for (const fd of wrapped.extraFds) try { closeSync(fd); } catch {}
     const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(`the probe did not answer within ${options.timeoutMs ?? 60_000} ms`); }, options.timeoutMs ?? 60_000);
-    child.stdout?.on("data", (chunk) => { stdout += chunk; });
-    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    // UTF-8 decoded across chunks, and read on "close", once both streams have ended: on "exit" the last line may not
+    // have arrived, and a required box would refuse every bot over a self-check that passed.
+    child.stdout?.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr?.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
     child.once("error", (error) => { clearTimeout(timer); resolve(`the box could not start: ${error.message}`); });
-    child.once("exit", (code) => {
+    child.once("close", (code) => {
       clearTimeout(timer);
       try { resolve((JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as { results: ProbeResult[] }).results); } catch { resolve(`the probe exited with ${code}: ${stderr.slice(-400)}`); }
     });

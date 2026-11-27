@@ -33,7 +33,7 @@ settings() {
   # WARN-ONLY SANDBOX CHECKS. The self-check's results that do not stop an install when they fail: none of them lets a
   # bot reach what it must not, or stops bots working. Every other check, and any check this list has never heard
   # of, stops it. A result that carries its own "severity" says so itself and this list is not asked.
-  SANDBOX_WARN_ONLY="keyring-denied hostname-private cpu-list-readable fly-api-hidden egress-public-allowed"
+  SANDBOX_WARN_ONLY="keyring-denied hostname-private cpu-list-readable fly-api-hidden egress-public-allowed nested-userns-blocked"
   SECCOMP=seccomp-omb-home.json
   APPARMOR_PROFILE=omb-home-narrow
   PROJECT=openmausbot
@@ -509,7 +509,7 @@ registry_get() { # path-under-the-repository media-types: the registry's answer,
   printf 'header = "Authorization: Bearer %s"\n' "$REGISTRY_TOKEN" | curl -K - -fsSL --max-time 20 -H "Accept: $2" "https://ghcr.io/v2/$IMAGE_REPO/$1" 2>/dev/null
 }
 
-# Whether the image a tag or digest names runs the bots' sandbox (OMB_IMAGE=server in its settings), read from the
+# Whether the image a tag or digest names runs the bots' sandbox (OMB_SERVER_IMAGE=1 in its settings), read from the
 # registry without downloading it: yes, no, or nothing when the registry did not say.
 registry_sandbox() { # tag or sha256:digest
   [ -n "$REGISTRY_TOKEN" ] || REGISTRY_TOKEN=$(registry_token || true)
@@ -529,7 +529,7 @@ registry_sandbox() { # tag or sha256:digest
   [ -n "$config" ] || return 0
   case "$(registry_get "blobs/$config" "application/vnd.oci.image.config.v1+json, application/vnd.docker.container.image.v1+json")" in
     '') ;;
-    *'"OMB_IMAGE=server"'*) echo yes ;;
+    *'"OMB_SERVER_IMAGE=1"'* | *'"OMB_IMAGE=server"'*) echo yes ;;
     *) echo no ;;
   esac
 }
@@ -542,7 +542,7 @@ note_sandbox() { # tag or sha256:digest
       fix "This install runs its bots in the sandbox, and the version chosen ($1) has none, so it would run them without it. Name a version that has it with OMB_INSTALL_IMAGE, or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
       return
     fi
-    note "This version has no bots' sandbox, so bots would run beside the server, able to read its settings, keys and each other's files. That is only for a server you alone sign in to; run this again once a version with the sandbox is out."
+    note "This version has no bots' sandbox, so bots would run beside the server, able to read its settings and keys. That is only for a server you alone sign in to; run this again once a version with the sandbox is out."
   fi
 }
 
@@ -900,10 +900,11 @@ fetch_sandbox() {
     fetch "connector/profiles/$APPARMOR_PROFILE.apparmor" "$INSTALL_DIR/box/profiles/$APPARMOR_PROFILE.apparmor"
 }
 
-# An image that runs the hardened profile says so in its settings (OMB_IMAGE=server).
+# An image that runs the hardened profile says so in its settings: OMB_SERVER_IMAGE=1 (OMB_IMAGE=server in builds from
+# before the rename). update.sh's image_has_sandbox reads the same two; scripts/server-installer.test.ts holds them equal.
 image_has_sandbox() {
-  case "$(docker image inspect -f '{{json .Config.Env}}' "$IMAGE" 2>/dev/null || true)" in
-    *'"OMB_IMAGE=server"'*) return 0 ;;
+  case "$(docker image inspect -f '{{json .Config.Env}}' "$1" 2>/dev/null || true)" in
+    *'"OMB_SERVER_IMAGE=1"'* | *'"OMB_IMAGE=server"'*) return 0 ;;
   esac
   return 1
 }
@@ -929,17 +930,20 @@ prepare_sandbox() {
     note "Bots will run without the sandbox, as asked; Settings shows it as switched off."
     return
   fi
-  rm -f "$INSTALL_DIR/compose.nobox.yaml"
-  if ! image_has_sandbox; then
+  # compose.nobox.yaml stays until .env names other files: removed earlier, a failed download or preparation below would
+  # leave .env naming a file that is gone, and every later `docker compose` and update would fail.
+  if ! image_has_sandbox "$IMAGE"; then
     # An image from before the sandbox ignores compose.box.yaml's OMB_BOT_BOX=required: it would run the bots unconfined.
     if install_has_sandbox; then
-      # .env already names the new image: the running container's goes back, so a later `docker compose up` cannot
-      # start the one without the sandbox.
-      running=$(docker inspect -f '{{.Config.Image}}' "$(compose ps -q omb 2>/dev/null | head -n 1)" 2>/dev/null || true)
-      if [ -n "$running" ]; then set_env OMB_IMAGE "$running"; fi
+      # .env already names the new image: the server's container's goes back (running or not), else what .env named
+      # before this run, so a later `docker compose up` cannot start the one without the sandbox.
+      kept=$(docker inspect -f '{{.Config.Image}}' "$(compose ps -a -q omb 2>/dev/null | head -n 1)" 2>/dev/null || true)
+      [ -n "$kept" ] || kept=$PREVIOUS_IMAGE
+      if [ -n "$kept" ]; then set_env OMB_IMAGE "$kept"; fi
       fail "This install runs its bots in the sandbox, and $IMAGE has none, so it would run them without it. The server was not restarted. Name a version that has the sandbox with OMB_INSTALL_IMAGE, or run this again with --no-sandbox, on a server you alone sign in to."
     fi
     unset_env COMPOSE_FILE
+    rm -f "$INSTALL_DIR/compose.nobox.yaml"
     SANDBOX=absent
     note "This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it."
     return
@@ -949,10 +953,17 @@ prepare_sandbox() {
   fi
   say "Preparing this server for the bots' sandbox..."
   note "The sandbox's files are $SOURCE_NAME."
-  MAUSBOT_PROFILES_DIR="$INSTALL_DIR/box/profiles" sh "$INSTALL_DIR/box/prepare-host.sh" >/dev/null ||
+  MAUSBOT_OWN_PROJECT="$PROJECT" MAUSBOT_PROFILES_DIR="$INSTALL_DIR/box/profiles" sh "$INSTALL_DIR/box/prepare-host.sh" >/dev/null ||
     fail "This server could not be prepared for the bots' sandbox (the reason is above). Fix that and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
   set_env COMPOSE_FILE compose.yaml:compose.box.yaml
+  rm -f "$INSTALL_DIR/compose.nobox.yaml"
   SANDBOX=on
+}
+
+# The self-check failed: the server it just started is stopped, so it never serves bots outside a sandbox that holds.
+sandbox_fail() { # why
+  compose_quietly stop omb || true
+  fail "$1 MausBot was stopped, so no bot runs until this is fixed. To see why: cd $INSTALL_DIR && sudo docker compose start omb && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints. Then run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
 }
 
 sandbox_field() { # result name: that field of one result of the self-check
@@ -964,15 +975,14 @@ sandbox_field() { # result name: that field of one result of the self-check
 check_sandbox_runs() {
   [ "$SANDBOX" = on ] || return 0
   say "Checking that the bots' sandbox holds..."
-  see="See it with: cd $INSTALL_DIR && sudo docker compose exec omb node dist-server/bot-box/box-check.js --public=none  and send us what it prints."
   report=$(compose exec -T omb node dist-server/bot-box/box-check.js --public=none 2>/dev/null | tr -d '\n' || true)
   case "$report" in
     *'"box":"bwrap"'*'"results":[{'*) ;;
-    *) fail "MausBot is running, but its bots' sandbox gave no answer to its self-check, so bots may not be separated from the server. $see" ;;
+    *) sandbox_fail "MausBot's bots' sandbox gave no answer to its self-check, so bots may not be separated from the server." ;;
   esac
   case "$report" in
     *'"id":"config-hidden","ok":true'*) ;;
-    *) fail "MausBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden), so bots are not safely separated from the server. $see" ;;
+    *) sandbox_fail "MausBot's sandbox self-check did not show that a bot cannot read the server's settings (config-hidden), so bots are not safely separated from the server." ;;
   esac
   stopping=""
   set -f
@@ -990,7 +1000,7 @@ check_sandbox_runs() {
       case " $SANDBOX_WARN_ONLY " in *" $id "*) [ -z "$id" ] || severity=warn ;; esac
     fi
     if [ "$severity" = warn ]; then
-      note "The sandbox's self-check did not pass $id${detail:+ ($detail)}. Bots are still kept from the server's settings and from each other; tell us about it."
+      note "The sandbox's self-check did not pass $id${detail:+ ($detail)}, a check that only warns: bots are still kept from the server's settings and keys."
     else
       stopping="$stopping ${id:-an unnamed check}${detail:+ ($detail)},"
     fi
@@ -1003,8 +1013,9 @@ check_sandbox_runs() {
       *) case "$report" in *'"ok":false'*) ;; *) stopping=" checks it did not name," ;; esac ;;
     esac
   fi
-  [ -z "$stopping" ] || fail "MausBot is running, but its bots' sandbox failed its self-check:${stopping%,}. Bots are not safely separated from the server. $see"
-  say "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files."
+  [ -z "$stopping" ] || sandbox_fail "MausBot's bots' sandbox failed its self-check:${stopping%,}. Bots are not safely separated from the server."
+  say "The bots' sandbox is on: a bot cannot read the server's settings, keys or database, or other bots' work folders."
+  note "Bots on this server share one home folder for their AI engines, so a bot can read what other bots' engines keep there (their conversation history and settings), and the bots' web browser runs outside the sandbox. Give sign-ins to this server only to people who may see each other's bots' work."
 }
 
 # A new data folder is handed to the user the image runs as. A folder that already exists is never touched.
@@ -1066,6 +1077,7 @@ install_server() {
   say "Installing MausBot in $INSTALL_DIR..."
   if [ -d "$INSTALL_DIR/data" ]; then close_to_others "$INSTALL_DIR/data"; fi
   make_folders "$INSTALL_DIR" "$INSTALL_DIR/caddy" "$INSTALL_DIR/caddy/data" "$INSTALL_DIR/caddy/config"
+  PREVIOUS_IMAGE=$(env_value OMB_IMAGE)
   write_compose
   write_caddyfile
   write_settings

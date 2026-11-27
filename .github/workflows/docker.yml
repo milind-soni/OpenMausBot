@@ -19,10 +19,17 @@ on:
       - pnpm-lock.yaml
       - .github/workflows/docker.yml
   pull_request:
+    # The bots' sandbox and what runs in it get the real box (the smoke below) before they merge, not after.
     paths:
       - Dockerfile
       - .dockerignore
       - deploy/**
+      - server/bot-box/**
+      - server/procs.ts
+      - server/drivers/**
+      - server/engine-homes/**
+      - shared/bot-sandbox.ts
+      - connector/profiles/**
       - .github/workflows/docker.yml
 
 permissions:
@@ -242,7 +249,42 @@ jobs:
           # And the check has teeth: with the data folder's cover taken away, the self-check says config.json is readable.
           bound=$(docker exec omb-box node dist-server/bot-box/box-check.js --public=none --mutate=bind-data || true)
           jq -e '.failed | index("config-hidden") != null' <<<"$bound"
+          # The server's own self-check, a few seconds after start: it passes here (a check that only warns never refuses
+          # bots), so a required box keeps taking bots' commands.
+          selfcheck() { # container: waits for the server's own self-check line
+            for i in $(seq 1 60); do
+              if docker logs "$1" 2>&1 | grep -E "bot box: (self-check [0-9]+/[0-9]+|self-check could not run|self-check failed to run)"; then return 0; fi
+              sleep 2
+            done
+            docker logs "$1"; echo "$1 never ran its self-check"; return 1
+          }
+          selfcheck omb-box
+          jq -e '.sandbox == null' <<<"$(engines omb-box)"
+
+          # M1, an experiment that never fails this job: can a confined command make a user namespace of its own, and
+          # what bubblewrap's --disable-userns would break (Chrome with its own sandbox, as the bots' browser runs it).
+          echo "::group::nested user namespaces (experiment)"
+          docker exec omb-box bwrap --version || true
+          if confined unshare --user true; then echo "M1: today a confined command CAN make a user namespace"; else echo "M1: today a confined command cannot make a user namespace"; fi
+          nouserns='bwrap --unshare-user --unshare-pid --unshare-ipc --die-with-parent --disable-userns --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run'
+          if docker exec omb-box sh -c "$nouserns true"; then echo "M1: bwrap --disable-userns runs here"; else echo "M1: bwrap --disable-userns does not run here"; fi
+          if docker exec omb-box sh -c "$nouserns unshare --user true"; then echo "M1: with --disable-userns a nested user namespace was still made"; else echo "M1: with --disable-userns a nested user namespace is refused"; fi
+          page="data:text/html,<p>m1-chrome-ok</p>"
+          chrome='/opt/openmausbot-browser/chrome --headless=new --no-first-run --disable-gpu --user-data-dir=/tmp/m1-profile --dump-dom'
+          if docker exec omb-box sh -c "timeout 60 bwrap --unshare-user --unshare-pid --die-with-parent --ro-bind / / --proc /proc --dev /dev --tmpfs /tmp --tmpfs /run $chrome '$page'" 2>/dev/null | grep -q m1-chrome-ok; then echo "M1: control: Chrome with its own sandbox starts in a box"; else echo "M1: control: Chrome with its own sandbox does not start in a box"; fi
+          if docker exec omb-box sh -c "timeout 60 $nouserns $chrome '$page'" 2>/tmp/m1-chrome.err | grep -q m1-chrome-ok; then echo "M1: Chrome with its own sandbox starts under --disable-userns"; else echo "M1: Chrome with its own sandbox does NOT start under --disable-userns:"; tail -5 /tmp/m1-chrome.err || true; fi
+          echo "::endgroup::"
           docker stop -t 30 omb-box >/dev/null && docker rm omb-box >/dev/null
+
+          # Required, and the server's own self-check failing a must-pass check (its fixture's data folder left uncovered,
+          # OMB_BOX_SELF_CHECK_MUTATE, which touches only the self-check's own boxes): every bot's command is refused.
+          docker run -d --init --shm-size=512m --name omb-checkfail "${box[@]}" -e OMB_BOT_BOX=required -e OMB_BOX_SELF_CHECK_MUTATE=bind-data openmausbot:ci >/dev/null
+          healthy omb-checkfail
+          selfcheck omb-checkfail
+          for i in $(seq 1 15); do docker logs omb-checkfail 2>&1 | grep -q "bot box: REQUIRED and its self-check failed (" && break; sleep 2; done
+          docker logs omb-checkfail 2>&1 | grep -F "bot box: REQUIRED and its self-check failed (" | grep -F "config-hidden"
+          jq -e '.engines == 0 and .sandbox == "refusing"' <<<"$(engines omb-checkfail)"
+          docker stop -t 30 omb-checkfail >/dev/null && docker rm omb-checkfail >/dev/null
           sudo sh deploy/box/prepare-host.sh --remove
           test ! -e /etc/apparmor.d/omb-home-narrow && test ! -e /etc/mausbot/seccomp-omb-home.json
       - name: Cloud Pro home image (--target cloud-home) boots, stays private and pairs on a signed request

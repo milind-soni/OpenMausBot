@@ -58,7 +58,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import type { KeepWarmContract } from "./claude-keepwarm.ts"; import { claudeForks } from "./claude-warm-summary.ts";
-import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
+import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, backgroundIsolated, spawnBackgroundCall } from "./claude-background.ts"; import { botBox } from "../bot-box/box.ts"; import { withEndpointFolder } from "./claude-endpoint-folder.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts"; import { readToolPaths } from "../own-file-reads.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { claudeToolDraft } from "./tool-progress.ts"; import { redactSecretsInText } from "../../shared/redact.ts"; import { foldTranscriptImages, imageFoldTarget, transcriptImagesOver } from "./claude-transcript-images.ts";
@@ -1781,7 +1781,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         }
         const model = named ?? config.managedModels?.[0] ?? config.endpointModels?.[0] ?? "claude-haiku-5-5";
         const env = environment(config.endpointModels ? undefined : model);
-        const args = backgroundCallArgs({ model, outputFormat: onUsage ? "json" : "text", supports: (flag) => cliVersion !== null && claudeCliSupports(cliVersion, flag), isolated: !inheritsUserConfig(env) });
+        const args = backgroundCallArgs({ model, outputFormat: onUsage ? "json" : "text", supports: (flag) => cliVersion !== null && claudeCliSupports(cliVersion, flag), isolated: backgroundIsolated(inheritsUserConfig(env), botBox.enabled() || botBox.refusing()) });
         const { child, removeCwd } = spawnBackgroundCall(config.cli, args, env);
         let stdout = "";
         let stderr = "";

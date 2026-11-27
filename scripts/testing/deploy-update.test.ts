@@ -137,6 +137,30 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(calls.slice(calls.indexOf("compose stop"), calls.findIndex((call) => call.includes("--entrypoint cp"))).some((call) => call.includes("{{.State.Running}}"))).toBe(true);
   });
 
+  it("never moves an install whose bots run in the sandbox to an image without it, --allow-older or not", () => {
+    const boxed = "DOMAIN=maus.example.test\nCOMPOSE_FILE=docker-compose.yml:compose.box.yaml\n";
+    const refused = install();
+    writeFileSync(join(refused.deploy, ".env"), boxed);
+    for (const args of [[], ["--image", NEW.refs[1]!, "--allow-older"]]) {
+      const run = refused.run(args);
+      expect(run.status, run.stdout + run.stderr).toBe(4);
+      expect(run.said.at(-1)).toBe("This install runs its bots in the sandbox, and 0.1.151 has none, so it would run them without it. Nothing was changed. To move to it anyway, first take the sandbox away: run the install command again with --no-sandbox (only on a server you alone sign in to), then run this again.");
+    }
+    expect(refused.env()).toBe(boxed);
+    expect(refused.copies()).toEqual([]);
+    expect(refused.calls()).not.toContain("compose stop");
+    expect(refused.state().containers.omb).toMatchObject({ image: OLD.id, status: "running" });
+    expect(refused.journal()).toBe(false);
+    // An image with the sandbox goes ahead, and so does any image where the install has no sandbox to lose.
+    const sandboxed = install({ env: ["PATH=/usr/bin", "OMB_SERVER_IMAGE=1"] });
+    writeFileSync(join(sandboxed.deploy, ".env"), boxed);
+    const updated = sandboxed.run();
+    expect(updated.status, updated.stdout + updated.stderr).toBe(0);
+    expect(sandboxed.state().containers.omb).toMatchObject({ image: NEW.id, status: "running" });
+    const plain = install();
+    expect(plain.run().status).toBe(0);
+  });
+
   it("changes nothing when it is run again", () => {
     const box = install();
     expect(box.run().status).toBe(0);
