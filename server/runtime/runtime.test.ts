@@ -830,6 +830,20 @@ describe("access rechecked while work runs", () => {
     invariants(w);
   });
 
+  it("masks a secret in a short result too, before it is kept", async () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+    const secret = "sk-ant-abcdefghijklmnopqrstuvwxyz012345";
+    await w.runner.release(child.id, { kind: "completed", text: `Done. The key is ${secret}.` });
+    const row = w.store.get(child.id)!;
+    expect(row.result).not.toContain(secret);
+    expect(row.result).toMatch(/^Done\. The key is /);
+    expect(row.resultChars).toBeUndefined();
+    invariants(w);
+  });
+
   it("drops a kept long result once the record's own result is short again", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());

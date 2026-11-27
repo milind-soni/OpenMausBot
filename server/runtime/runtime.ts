@@ -949,8 +949,8 @@ export class Runtime {
   /** The record holds a result's head; a longer one is kept whole beside it, so its end is never lost. A failed keep
    * leaves resultChars set with nothing beside it, which the reader reports as cut, never as the whole text. */
   private keepResult(n: Assignment, said: string, saidChars?: number): void {
-    // A long result is masked before the cut, as an answer is, so a secret is never kept half shown at the record's edge.
-    const text = said.length > RESULT_MAX || (saidChars ?? 0) > said.length ? redactSecretsInText(said) : said;
+    // Every result is masked, short or long, before it is cut or kept, so a secret is never stored or shown half kept.
+    const text = redactSecretsInText(said);
     // saidChars: the reply was already cut before it got here (handoffReply); the reader must still say its end is lost.
     const whole = Math.max(text.length, saidChars !== undefined && saidChars > said.length ? text.length + saidChars - said.length : 0);
     const long = whole > RESULT_MAX;
