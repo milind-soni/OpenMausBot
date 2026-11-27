@@ -37,4 +37,14 @@ describe("ids and files cross the boundary, words never do", () => {
     expect(intoPlace({ url: "/api/threads/t1/messages/m1/file?media=abc" })).toEqual({ url: "/api/threads/cloud%3At1/messages/m1/file?media=abc" });
     expect(intoPlace({ message: { url: "/api/threads/t1/messages/m1/file?media=abc" } })).toEqual({ message: { url: "/api/threads/t1/messages/m1/file?media=abc" } });
   });
+
+  it("leaves a card's own data alone: a routine run's, a data result's and a burst's", () => {
+    const message = { threadId: "t1", routineRun: { data: { botId: "x", threadId: "y" } }, dataResult: { botId: "x", cardId: "c" }, burst: { extra: { fromThreadId: "z" } } };
+    const placed = intoPlace(message) as typeof message;
+    expect(placed.threadId).toBe("cloud:t1");
+    expect(placed.routineRun).toEqual(message.routineRun);
+    expect(placed.dataResult).toEqual(message.dataResult);
+    expect(placed.burst).toEqual(message.burst);
+    expect(outOfPlace({ dataResult: { botId: "cloud:x" } })).toEqual({ dataResult: { botId: "cloud:x" } });
+  });
 });

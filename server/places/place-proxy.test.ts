@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
-import { createPlaceProxy, frameForBot, parsePlaceSession, placedPath, type PlaceProxy } from "./place-proxy.ts";
+import { createPlaceProxy, frameForBot, parsePlaceSession, placedPath, relayFrames, type PlaceProxy } from "./place-proxy.ts";
 
 const TOKEN = "omb_sess_test-token-0123456789";
 const OWNER = "o".repeat(43);
@@ -276,14 +276,20 @@ describe("what the fix round closed", () => {
   it("forwards a message's file, and hands back its media link on the conversation's place route", async () => {
     await (await ask("/api/bots/cloud%3Ascout?messages=80")).text();
     seen.length = 0;
-    answerWith = (_req, res) => void res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ url: "/api/threads/t1/messages/m1/file?media=abc-123", mime: "video/mp4" }));
+    // What the gallery does for a video: ask for a link (the answer says it is one), check it is this message's own
+    // route, then let the <video> element fetch it in ranges.
+    answerWith = (_req, res) => void res.writeHead(200, { "content-type": "application/json", "x-openmausbot-media": "1" }).end(JSON.stringify({ url: "/api/threads/t1/messages/m1/file?media=abc-123", mime: "video/mp4" }));
     const linked = await ask("/api/threads/cloud%3At1/messages/m1/file", { method: "POST", body: JSON.stringify({ path: "cloud--aa11-bb22.png", media: true }) });
     expect(linked.status).toBe(200);
-    expect(await linked.json()).toEqual({ url: "/api/threads/cloud%3At1/messages/m1/file?media=abc-123", mime: "video/mp4" });
+    expect(linked.headers.get("x-openmausbot-media")).toBe("1");
+    const link = await linked.json() as { url: string; mime: string };
+    expect(link).toEqual({ url: "/api/threads/cloud%3At1/messages/m1/file?media=abc-123", mime: "video/mp4" });
+    const route = `/api/threads/${encodeURIComponent("cloud:t1")}/messages/${encodeURIComponent("m1")}/file?media=`;
+    expect(link.url.startsWith(route) && /^[\w-]+$/.test(link.url.slice(route.length))).toBe(true);
     expect(seen[0]).toMatchObject({ method: "POST", url: "/api/threads/t1/messages/m1/file" });
     expect(JSON.parse(seen[0]!.body)).toEqual({ path: "/data/attachments/aa11-bb22.png", media: true });
     answerWith = (_req, res) => void res.writeHead(206, { "content-type": "video/mp4", "content-range": "bytes 0-2/10", "accept-ranges": "bytes", "content-length": "3" }).end(Buffer.from([1, 2, 3]));
-    const played = await ask("/api/threads/cloud%3At1/messages/m1/file?media=abc-123", { headers: { range: "bytes=0-2" } });
+    const played = await ask(link.url, { headers: { range: "bytes=0-2" } });
     expect(played.status).toBe(206);
     expect(played.headers.get("content-range")).toBe("bytes 0-2/10");
     expect(seen.at(-1)).toMatchObject({ url: "/api/threads/t1/messages/m1/file?media=abc-123", range: "bytes=0-2" });
@@ -371,5 +377,65 @@ describe("what the fix round closed", () => {
     while (!text.includes("ours")) text += decoder.decode((await reader.read()).value);
     expect(text).not.toContain("theirs");
     stop.abort();
+  });
+});
+
+describe("the delta round", () => {
+  it("passes a JSON file a bot made through byte for byte, as a download this origin never runs", async () => {
+    const file = JSON.stringify({ botId: "scout", threadId: "t1", path: "/data/x.json", url: "/api/threads/t1/messages/m1/file?media=a", source: "/Users/someone/x.json", nested: { fromBotId: "atlas" } }, null, 2);
+    answerWith = (_req, res) => void res.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-disposition": "inline; filename=\"x.json\"" }).end(file);
+    for (const [path, init] of [["/api/attachments/cloud--x.json", {}], ["/api/threads/cloud%3At1/messages/m1/file", { method: "POST", body: JSON.stringify({ path: "/data/x.json" }) }]] as const) {
+      const answer = await ask(path, init);
+      expect(await answer.text(), path).toBe(file);
+      expect(answer.headers.get("content-disposition"), path).toBe('attachment; filename="x.json"');
+      expect(answer.headers.get("x-content-type-options"), path).toBe("nosniff");
+      expect(answer.headers.get("content-security-policy"), path).toBe("sandbox; default-src 'none'");
+    }
+  });
+
+  it("hands a range past the end, and any other refusal of a file, to the page with its own status", async () => {
+    answerWith = (_req, res) => void res.writeHead(416, { "content-type": "text/plain", "content-range": "bytes */10" }).end("");
+    const answer = await ask("/api/threads/cloud%3At1/messages/m1/file?media=abc", { headers: { range: "bytes=50-60" } });
+    expect(answer.status).toBe(416);
+    expect(answer.headers.get("content-range")).toBe("bytes */10");
+    answerWith = (_req, res) => void res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "no such file" }));
+    const gone = await ask("/api/attachments/cloud--x.png");
+    expect(gone.status).toBe(404);
+    expect(await gone.json()).toEqual({ error: "no such file" });
+  });
+
+  it("bounds the wait for a file's answer, never the download itself while its bytes keep coming", async () => {
+    local.closeAllConnections();
+    await new Promise((done) => local.close(done));
+    proxy = createPlaceProxy({ requestMs: 1_000, idleMs: 2_000 });
+    proxy.setOwnerToken(OWNER);
+    proxy.setSession({ origin: cloudUrl, token: TOKEN });
+    local = createServer((req, res) => {
+      const url = new URL(req.url!, "http://127.0.0.1");
+      void proxy.route({ req, res, url, path: url.pathname, method: req.method!, auth: callerAuth, json, readBody });
+    });
+    localUrl = await listen(local);
+    answerWith = (_req, res) => {
+      res.writeHead(200, { "content-type": "application/zip" });
+      let sent = 0;
+      const tick = setInterval(() => { res.write(Buffer.alloc(1_000, sent)); if (++sent === 10) { clearInterval(tick); res.end(); } }, 300);
+    };
+    const answer = await ask("/api/attachments/cloud--big.zip");
+    expect((await answer.arrayBuffer()).byteLength).toBe(10_000);
+  });
+});
+
+describe("relaying the stream", () => {
+  it("writes nothing once the session went, even an event already read", async () => {
+    const stop = new AbortController();
+    const written: string[] = [];
+    async function* events() {
+      yield { id: "s:1", data: JSON.stringify({ kind: "message", threadId: "t1", message: { id: "a", text: "first" } }) };
+      stop.abort();
+      yield { id: "s:2", data: JSON.stringify({ kind: "message", threadId: "t1", message: { id: "b", text: "after" } }) };
+    }
+    await relayFrames(events(), { bot: "scout", threads: new Set(["t1"]), signal: stop.signal, write: async (chunk) => { written.push(chunk); return true; } });
+    expect(written.join("")).toContain("first");
+    expect(written.join("")).not.toContain("after");
   });
 });

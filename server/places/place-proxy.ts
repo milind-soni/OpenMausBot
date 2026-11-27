@@ -29,6 +29,13 @@ const SESSION_TOKEN = /^omb_sess_[\w-]{8,256}$/;
 const OWN_ID = /^[\w-]{1,128}$/;
 /** How long one forwarded request may take: a send on a Cloud that has to start first takes about 20 s. */
 const REQUEST_MS = 90_000;
+/** How long a file's bytes may stall once they started coming: a big download runs as long as it keeps moving. */
+const IDLE_MS = 60_000;
+/** My Cloud's routes that answer with a file's bytes (or a link or a list for one): never rewritten, always served as
+ * bytes this origin never runs. Everything else forwarded is the app's own JSON, rewritten into this page's ids. */
+const BYTE_ROUTE = /^\/api\/(?:threads\/[\w-]+\/messages\/[\w-]+\/(?:file|image)|attachments\/[\w-][\w.-]*)$/;
+/** Headers of My Cloud's file answers that the page reads: a folder's list, a link a player can play, a kept original. */
+const PAGE_FILE_HEADERS = ["x-openmausbot-folder", "x-openmausbot-media", "x-openmausbot-kept-original"];
 const BODY_MAX = 4_000_000;
 /** The most file names kept to send back a message that names one. */
 const FILES_KEPT = 5_000;
@@ -159,6 +166,7 @@ export function servedFileHeaders(upstream: Pick<Response, "headers">): Record<s
     const value = upstream.headers.get(name);
     if (value && /^[\w ,=/*-]{1,200}$/.test(value)) headers[name] = value;
   }
+  for (const name of PAGE_FILE_HEADERS) if (upstream.headers.get(name) === "1") headers[name] = "1";
   if (!INLINE_IMAGE.test(type) && !INLINE_AUDIO.test(type)) {
     const named = /filename\*?=(?:UTF-8'')?"?([^";]{1,200})"?/i.exec(upstream.headers.get("content-disposition") ?? "")?.[1];
     const safe = named ? named.replace(/[^\w .()-]/g, "_") : "";
@@ -178,6 +186,21 @@ async function written(res: ServerResponse, chunk: string | Uint8Array): Promise
     res.once("drain", drained);
     res.once("close", closed);
   });
+}
+
+/** My Cloud's stream events, as the page gets them: only the bot's frames, in its ids, each written once the page took
+ * the last. Nothing is written once `signal` aborts (the session changed or went), even an event already read. */
+export async function relayFrames(events: AsyncIterable<{ id: string | null; data: string }>, { bot, threads, signal, remember = () => {}, write }: {
+  bot: string; threads: Set<string>; signal: AbortSignal; remember?: (name: string, path: string) => void; write: (chunk: string) => Promise<boolean>;
+}): Promise<void> {
+  for await (const event of events) {
+    if (signal.aborted) return;
+    let frame: unknown;
+    try { frame = JSON.parse(event.data); } catch { continue; }
+    const kept = frameForBot(frame, bot, threads);
+    if (kept === null) continue;
+    if (!(await write(`${event.id ? `id: ${event.id}\n` : ""}data: ${JSON.stringify(intoPlace(kept, remember))}\n\n`))) return;
+  }
 }
 
 /** Events in the text/event-stream format, one at a time as their blank line arrives: never held for more. */
@@ -216,7 +239,7 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>): AsyncGenerat
  * `fetch`: requests to My Cloud. The session arrives with `setSession` (main, over the private port) and goes with
  * `setSession(null)`; the app's capability with `setOwnerToken`.
  */
-export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch }: { fetch?: Fetch } = {}) {
+export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch, requestMs = REQUEST_MS, idleMs = IDLE_MS }: { fetch?: Fetch; requestMs?: number; idleMs?: number } = {}) {
   let session: PlaceSession | null = null;
   /** Every live stream open on the session: a new session, or none, ends them all at once. */
   const streams = new Set<AbortController>();
@@ -238,7 +261,7 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
 
   /** My Cloud's answer in this page's terms. Its sleeping, sign-in and limit answers are said as My Cloud's, so this
    * page never takes them for its own server going to sleep, its own sign-in ending or its own bot limit. */
-  async function answer(ctx: RouteContext, upstream: Response): Promise<void> {
+  async function answer(ctx: RouteContext, upstream: Response, bytes = false, idle: () => void = () => {}): Promise<void> {
     const { res, json } = ctx;
     if (upstream.status === 503 && upstream.headers.get(CLOUD_POWER_HEADER) === "asleep") {
       await upstream.body?.cancel().catch(() => {});
@@ -249,6 +272,7 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
       return refuse(res, json, 502, "serverError.place.signIn", "place_signin");
     }
     const type = upstream.headers.get("content-type") ?? "";
+    if (bytes) return answerBytes(ctx, upstream, idle);
     if (/^application\/json\b/i.test(type) || !upstream.ok) {
       let body: unknown = null;
       try { body = await upstream.json(); } catch { body = null; }
@@ -259,14 +283,30 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
         const { code: _code, ...said } = placed;
         return json(res, upstream.status === 403 ? 409 : upstream.status, { ...said, code: "place_refused" });
       }
-      // A folder a message names comes back as its list, marked so the page draws it as one.
-      if (upstream.headers.get("x-openmausbot-folder") === "1") res.setHeader("x-openmausbot-folder", "1");
       return json(res, upstream.status, placed);
     }
-    // A file or an image: its bytes as they come, kept by nobody, never run on this origin.
-    res.writeHead(upstream.status, servedFileHeaders(upstream));
+    return answerBytes(ctx, upstream, idle);
+  }
+
+  /** A file route's answer, decided by the route and never by what My Cloud says the bytes are: passed on exactly as
+   * they came (a JSON file a bot made stays byte for byte its own), with the headers that keep this origin from running
+   * them. Only a link a player asked for moves onto the conversation's place route. A refusal (a range past the end,
+   * a file no longer there) reaches the page with its own status. */
+  async function answerBytes(ctx: RouteContext, upstream: Response, idle: () => void): Promise<void> {
+    const { res } = ctx;
+    const headers = servedFileHeaders(upstream);
+    if (upstream.headers.get("x-openmausbot-media") === "1" && upstream.ok) {
+      const said = await upstream.json().catch(() => null) as { url?: unknown; mime?: unknown } | null;
+      const placed = record(said) ? intoPlace({ url: said.url, mime: said.mime }) : {};
+      const body = Buffer.from(JSON.stringify(placed));
+      res.writeHead(upstream.status, { ...headers, "content-type": "application/json", "content-length": String(body.byteLength) });
+      res.end(body);
+      return;
+    }
+    res.writeHead(upstream.status, headers);
     if (!upstream.body) { res.end(); return; }
     for await (const chunk of upstream.body as unknown as AsyncIterable<Uint8Array>) {
+      idle();
       if (!(await written(res, chunk))) { await upstream.body.cancel().catch(() => {}); return; }
     }
     res.end();
@@ -288,11 +328,15 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
     const stop = new AbortController();
     const gone = () => { if (!res.writableEnded) stop.abort(); };
     res.once("close", gone);
+    const bytes = BYTE_ROUTE.test(path);
+    // The wait for My Cloud's answer is bounded; a file's bytes then run as long as they keep moving.
+    let timer = setTimeout(() => stop.abort(), requestMs);
+    const idle = () => { clearTimeout(timer); timer = setTimeout(() => stop.abort(), idleMs); };
     let upstream: Response;
     try {
       upstream = await fetchImpl(`${own.origin}${path}${query}`, {
         method, redirect: "error", cache: "no-store", body,
-        signal: AbortSignal.any([stop.signal, AbortSignal.timeout(REQUEST_MS)]),
+        signal: stop.signal,
         headers: {
           accept: String(req.headers.accept ?? "application/json"), authorization: `Bearer ${own.token}`,
           ...(body !== undefined ? { "content-type": "application/json" } : {}),
@@ -301,11 +345,15 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
         },
       });
     } catch {
+      clearTimeout(timer);
       res.off("close", gone);
       if (res.headersSent || res.destroyed) return;
       return refuse(res, json, 502, "serverError.place.offline", "place_offline");
     }
-    try { await answer(ctx, upstream); } finally { res.off("close", gone); }
+    if (bytes) idle();
+    try { await answer(ctx, upstream, bytes, idle); } catch {
+      if (!res.headersSent) refuse(res, json, 502, "serverError.place.offline", "place_offline"); else res.destroy();
+    } finally { clearTimeout(timer); res.off("close", gone); }
   }
 
   /** The bot's live stream: My Cloud's own stream, opened as the person, cut to this bot's frames and passed on frame by
@@ -353,14 +401,7 @@ export function createPlaceProxy({ fetch: fetchImpl = globalThis.fetch as Fetch 
     // Not awaited: the request is answered, and the stream runs on until either side closes it.
     void (async () => {
       try {
-        for await (const event of sseEvents(upstream.body!)) {
-          if (stop.signal.aborted) break;
-          let frame: unknown;
-          try { frame = JSON.parse(event.data); } catch { continue; }
-          const kept = frameForBot(frame, bot, threads);
-          if (kept === null) continue;
-          if (!(await written(res, `${event.id ? `id: ${event.id}\n` : ""}data: ${JSON.stringify(intoPlace(kept, remember))}\n\n`))) break;
-        }
+        await relayFrames(sseEvents(upstream.body!), { bot, threads, signal: stop.signal, remember, write: (chunk) => written(res, chunk) });
       } catch {
         // The end of either side ends the stream; the page reconnects.
       } finally {

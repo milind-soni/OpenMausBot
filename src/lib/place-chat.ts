@@ -163,6 +163,9 @@ export function keepLive(key: string, cannot: () => void, platform: Platform = b
   /** Opens the stream again once main says My Cloud is awake. `retry`: the stream's own retry, not the person. */
   const look = async (retry: boolean) => {
     if (stopped || source || looking || !platform.visible()) return;
+    // Before the stream has ever opened, main has just readied the session (My Cloud answered it, woken by the click):
+    // the Admin's word may lag behind that, so the first tries go straight on, and after them My Cloud's page opens.
+    if (retry && !opened) { connect(); return; }
     if (!retry && performance.now() - lookedAt < AWAKE_LOOK_MS) return;
     looking = true;
     lookedAt = performance.now();

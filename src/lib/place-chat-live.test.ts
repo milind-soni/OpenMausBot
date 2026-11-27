@@ -66,15 +66,18 @@ it("a dropped stream retries only after main says My Cloud is awake, and never k
   expect(made).toHaveLength(2);
 });
 
-it("a stream that never opens gives the bot to My Cloud's page after its tries", async () => {
+it("a first open that never connects tries again at once, even while the Admin's word lags, then opens My Cloud's page", async () => {
   const cannot = vi.fn();
-  awake.mockResolvedValue(true);
   keepLive("cloud:scout", cannot, platform());
-  for (let i = 0; i < 3; i++) {
-    made.at(-1)!.onerror?.();
-    await vi.advanceTimersByTimeAsync(20_000);
-  }
+  made[0]!.onerror?.();
+  await vi.advanceTimersByTimeAsync(1_000);
+  expect(made).toHaveLength(2);
+  made[1]!.onerror?.();
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(made).toHaveLength(3);
+  made[2]!.onerror?.();
   expect(cannot).toHaveBeenCalledOnce();
+  expect(awake).not.toHaveBeenCalled();
 });
 
 it("reads the bot again as background work when the stream starts over", async () => {

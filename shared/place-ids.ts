@@ -19,16 +19,20 @@ export const placeId = (id: string): string => (isPlaceId(id) ? id : `${PREFIX}$
 /** The id My Cloud itself knows, from the one this page names. */
 export const ownId = (id: string): string => (isPlaceId(id) ? id.slice(PREFIX.length) : id);
 
-/** The keys whose values are a bot's or a conversation's id, or a list of them: `botId`, `threadId`, `fromThreadId`,
- * `mainThreadId`, `botIds`… Only these are rewritten, never words: a message that starts with "cloud:" stays as written. */
-export const ID_KEY = /^(?:[a-z][a-zA-Z]*(?:Bot|Thread)|bot|thread)Ids?$/;
+/** The keys, in the frames and bodies a conversation uses, whose values are a bot's or a conversation's id (or a list
+ * of them). Only these are rewritten, and never inside what anyone wrote or a card's own data (WRITTEN): a message that
+ * starts with "cloud:" stays as written, and a key a bot or a routine chose is never taken for an id. */
+const ID_KEYS = new Set(["botId", "threadId", "mainThreadId", "fromBotId", "fromThreadId", "withBotId", "busyBotId", "waitingForBotId", "fallbackBotId", "botIds", "threadIds"]);
+const idKey = (key: string | null): boolean => key !== null && ID_KEYS.has(key);
 /** A picture of My Cloud's this page shows by its address: a bot's own avatar. */
 const FILE_URL_KEYS = new Set(["avatarUrl"]);
 const FILE_URL = /^\/api\/attachments\/([\w-][\w.-]*)$/;
 /** A link My Cloud's file route gives a <video> or <audio> element: on the conversation's own route. */
 const MEDIA_URL = /^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/file\?media=([\w-]+)$/;
 /** What a bot or a person wrote, or an engine's own words and tool calls: never rewritten, whatever keys they hold. */
-const WRITTEN = new Set(["text", "widget", "app", "tool", "card", "digest", "compaction", "summary", "content", "markdown", "html", "input", "output", "args", "result"]);
+const WRITTEN = new Set(["text", "widget", "app", "tool", "card", "digest", "compaction", "summary", "content", "markdown", "html", "input", "output", "args", "result",
+  // A card's own data: a routine run's, a data result's, a burst's, a goal run's, a settings card's.
+  "data", "extra", "dataResult", "routineRun", "burst", "goalRun", "settingsCard", "automation"]);
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const basename = (path: string): string => path.split(/[\\/]/).pop() ?? "";
@@ -38,9 +42,9 @@ type Way = { ids: Ids; path: (path: string) => string; url: (url: string) => str
 
 function rewrite(value: unknown, way: Way, key: string | null, depth: number): unknown {
   if (depth > 64) return value;
-  if (typeof value === "string") return key !== null && ID_KEY.test(key) ? way.ids(value) : value;
+  if (typeof value === "string") return idKey(key) ? way.ids(value) : value;
   if (Array.isArray(value)) {
-    const listOfIds = key !== null && ID_KEY.test(key);
+    const listOfIds = idKey(key);
     return value.map((item) => (listOfIds && typeof item === "string" ? way.ids(item) : rewrite(item, way, key === "bots" ? "bot" : key === "attachments" ? "attachment" : null, depth + 1)));
   }
   if (!record(value)) return value;
