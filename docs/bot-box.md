@@ -50,11 +50,21 @@ connects to a path inside the box.
 
 ## When it is on
 
-`server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), off everywhere else
-unless `OMB_BOT_BOX=1`; `OMB_BOT_BOX=0` turns it off. It is never on without a working unprivileged bubblewrap: if the
-kernel refuses user namespaces or the image has no `bwrap`, the box reports `off` with the reason, and the Admin shows
-it. The cloud-home image installs `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge does
-the same).
+`server/bot-box/detect.ts`: on by default on a Cloud home (`OMB_CLOUD_ROLE=home` or `team`), tried by default in the
+self-hosted server image (`OMB_IMAGE=server`, set by the Dockerfile's `server` target), off everywhere else (the desktop
+app, a server run from source) unless `OMB_BOT_BOX=1`; `OMB_BOT_BOX=0` turns it off. It is never on without a working
+unprivileged bubblewrap: if the kernel refuses user namespaces or the image has no `bwrap`, the box reports `off` with
+the reason, and the Admin shows it. Both images install `bubblewrap` and `socat` (the in-box bridges; without socat a
+bundled Node bridge does the same).
+
+`OMB_BOT_BOX=required` is on with no way down: when the box cannot start, every spawn it would have wrapped is refused
+(`BoxRequiredError`, `EBOXREQUIRED`) instead of running unboxed, `/api/health/engines` counts no engine (so an update
+that leads there is rolled back by `deploy/update.sh`), and the log says so at every start. The installer
+(`deploy/install.sh`) sets it through `deploy/box/compose.box.yaml`, beside the four `security_opt` lines a stock Docker
+host needs, after preparing the host with `deploy/box/prepare-host.sh`. A self-hosted server's admin sees the state in
+Settings, under Updates (`botSandbox` in `/api/config`, sent only by the server image or with `required`).
+`node dist-server/bot-box/box-check.js --exec -- CMD` runs one command in a box planned as a bot's turn is, in the
+server's own layout.
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 

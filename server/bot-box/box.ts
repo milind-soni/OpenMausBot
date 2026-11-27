@@ -2,6 +2,8 @@
 // boxes reach through unix sockets (egress-gate.ts, harness-gate.ts), and wraps each bot spawn (server/procs.ts spawnCli
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
+// Security: with OMB_BOT_BOX=required a box that could not start refuses each spawn it would have wrapped (wrap throws
+// BoxRequiredError), so a bot never runs unconfined on a server that asked for the box.
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -13,7 +15,8 @@ import { bridgedCommand, type BridgeTools } from "./bridge.ts";
 import { GITHUB_GRANT, boxGithubGit } from "../github/git-access.ts";
 import { brokerRewrite } from "./broker-env.ts";
 import { openCredentialBroker, type BrokerGrant, type CredentialBroker } from "./broker.ts";
-import { detectBox, type BoxDetection, type BoxKind } from "./detect.ts";
+import { boxWanted, detectBox, serverImage, type BoxDetection, type BoxKind } from "./detect.ts";
+import type { BotSandboxStatus } from "../../shared/bot-sandbox.ts";
 import { openBoxEgressGate, type BoxEgressGate } from "./egress-gate.ts";
 import { boxEnvironment } from "./env.ts";
 import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
@@ -212,6 +215,26 @@ export class BoxRunner {
 
 export interface BoxChecks { passed: number; total: number; failed: string[]; at: number }
 
+const REFUSAL_WHY: Record<NonNullable<BoxDetection["reason"]>, string> = {
+  "switched-off": "it is switched off",
+  "not-linux": "this server is not running on Linux",
+  "no-bwrap": "bubblewrap is not installed in this server's image",
+  "userns-refused": "this host does not let the server's container make the sandbox's namespaces (prepare it by running the install command again)",
+  "not-cloud": "it is not on here",
+};
+
+/** A bot spawn refused because the box is required (OMB_BOT_BOX=required) and could not start. `code` lets callers tell
+ * it from a failed spawn. */
+export class BoxRequiredError extends Error {
+  override name = "BoxRequiredError";
+  readonly code = "EBOXREQUIRED";
+  readonly reason: BoxDetection["reason"];
+  constructor(reason: BoxDetection["reason"]) {
+    super(`This server requires the bots' sandbox, and it could not start: ${REFUSAL_WHY[reason ?? "not-cloud"]}. The bot's command was not run. An admin sees why in Settings, under Updates.`);
+    this.reason = reason;
+  }
+}
+
 export interface BoxReport {
   box: BoxKind;
   reason: BoxDetection["reason"];
@@ -273,15 +296,22 @@ export class BotBox {
   private unbrokered = new Set<string>();
   private started: StartOptions | null = null;
   private audiences: BoxAudienceScope | null = null;
+  /** OMB_BOT_BOX=required, and the server image (OMB_IMAGE=server): what start() was told. */
+  private required = false;
+  private shown = false;
 
   /** Detects, and when the box is on opens the gates. Safe to call once; returns what it decided. */
   async start(options: StartOptions): Promise<BoxDetection> {
     this.started = options;
     const env = options.env ?? process.env;
+    this.required = boxWanted(env) === "required";
+    this.shown = this.required || serverImage(env);
     this.detection = (options.detect ?? ((e) => detectBox({ env: e })))(env);
     const log = options.log ?? ((line: string) => console.log(line));
     if (this.detection.box !== "bwrap" || !this.detection.tools) {
-      log(`bot box: off (${this.detection.reason})`);
+      if (this.required) log(`bot box: REQUIRED but it could not start (${this.detection.reason}): every bot's command is refused until it can, because ${REFUSAL_WHY[this.detection.reason ?? "not-cloud"]}.`);
+      else if (this.shown && this.detection.reason !== "switched-off") log(`bot box: off (${this.detection.reason}): bots run beside the server, able to read its settings, keys and each other's files. On a server installed with deploy/install.sh, run the install command again to turn the sandbox on.`);
+      else log(`bot box: off (${this.detection.reason})`);
       return this.detection;
     }
     const dir = join(options.dataDir, "box");
@@ -325,9 +355,13 @@ export class BotBox {
   /** The filter file each box gets, for a self-check. */
   seccomp(): string | null { return this.seccompFile; }
 
-  /** The box for one spawn, or null when turns are not boxed here. */
+  /** The box for one spawn, or null when turns are not boxed here. Throws BoxRequiredError where the box is required
+   * and did not start: the spawn must not run at all. */
   wrap(request: BoxRequest): WrappedSpawn | null {
-    if (!this.runner) return null;
+    if (!this.runner) {
+      if (this.refusing()) throw new BoxRequiredError(this.detection.reason);
+      return null;
+    }
     const wrapped = this.runner.wrap(request);
     this.boxed += 1;
     for (const name of wrapped.unbrokered) this.unbrokered.add(name);
@@ -335,6 +369,17 @@ export class BotBox {
   }
 
   enabled(): boolean { return this.runner !== null; }
+
+  /** The box is required (OMB_BOT_BOX=required) and not running: every spawn it would wrap is refused. */
+  refusing(): boolean { return this.required && this.runner === null && this.started !== null; }
+
+  /** What a self-hosted server's admin sees in Settings; null where nobody asked for the box this way (the desktop app,
+   * a Cloud, a server run from source), so those show nothing new. */
+  sandboxStatus(): BotSandboxStatus | null {
+    if (!this.started || !this.shown) return null;
+    const checks = this.runner && this.checks ? { passed: this.checks.passed, total: this.checks.total, failed: [...this.checks.failed] } : null;
+    return { state: this.runner ? "on" : this.required ? "refusing" : "off", reason: this.runner ? null : this.detection.reason, required: this.required, checks };
+  }
 
   /** A relay for one boxed spawn (BoxRequest.relay), or null when bot spawns are not boxed here. */
   async openRelay(): Promise<BoxRelay | null> {

@@ -4,6 +4,7 @@ import type { ImageComplexity, ImageProvider } from "../../shared/image-generati
 import type { ToolGroup } from "../../shared/tool-groups";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
+import type { BotSandboxStatus } from "../../shared/bot-sandbox";
 
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
 export interface SavedKey { configured: boolean; last4?: string }
@@ -46,6 +47,9 @@ export interface ConfigStatus {
     features: string[];
     license?: { expiresAt: string; expiresInDays: number; graceEndsAt?: string };
   };
+  /** The bots' sandbox on a self-hosted server (Settings, Updates): sent only by the published server image or with
+   * OMB_BOT_BOX=required; absent from the desktop app, a Cloud and older servers. */
+  botSandbox?: BotSandboxStatus;
   /** a fleet agent exists on this server (Settings → Workspaces) */
   fleet?: { available: boolean };
   budgets?: { monthlyUsd?: number; warnAtPercent?: number };

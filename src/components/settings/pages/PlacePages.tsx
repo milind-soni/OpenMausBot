@@ -38,6 +38,7 @@ import { KeysPage } from "../../keys/KeysPage";
 import { KEYS_ANCHOR_FOR_FOCUS } from "../../keys/key-focus";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
 import { ServerUpdateRow } from "../../ServerUpdateRow";
+import { BotSandboxRow } from "../../BotSandboxRow";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
 import { AdvancedPagePart, AdvancedSection } from "../AdvancedSection";
@@ -85,7 +86,7 @@ export function OverviewPage() {
         </div>
       </SettingsRows>
     )}
-    {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} /></SettingsRows></SettingsGroup>}
+    {place.kind === "server" && !ctx.client && !window.ogb?.updater && <SettingsGroup label={t("settings.updates.title")} block="version"><SettingsRows><ServerUpdateRow title={versionLine()} />{ctx.admin && <BotSandboxRow />}</SettingsRows></SettingsGroup>}
     <SettingsGroup label={t("settings.overview.glance")} block="glance">
       <SettingsRows>
         {!ctx.client && <SettingsLinkRow title={t("settings.page.devices")} value={phoneValue} onClick={() => go("devices", "phones")} data={{ "data-glance": "devices" }} />}

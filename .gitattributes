@@ -10,6 +10,8 @@ deploy/podman/*.sh text eol=lf
 # install.sh is piped to sh on a customer's server, and the AppArmor profile is loaded as it is.
 connector/**/*.sh text eol=lf
 connector/profiles/* text eol=lf
+# The bots' sandbox's host preparation and Compose settings: the installer downloads them and runs them as they are.
+deploy/box/* text eol=lf
 # Vendor patch hashes and original notices must survive Windows checkout
 # byte-for-byte. Do not let core.autocrlf rewrite these reviewed inputs.
 third_party/browser/** text eol=lf

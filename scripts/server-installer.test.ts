@@ -40,6 +40,8 @@ interface Server {
   without?: string[];
   /** The umask the installer is started with, as a root shell may have it. */
   umask?: string;
+  /** More files on the made-up server, by their path under its root (etc/mausbot/...). */
+  files?: Record<string, string>;
 }
 
 /** Stand-ins for every tool install.sh asks about the machine, written once: what each answers comes from the run's FAKE_ settings. */
@@ -84,7 +86,7 @@ case "$*" in
     esac
     for last; do :; done
     case "$*" in
-      *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
+      *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host\${1:+ $1} profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
       *deploy/update-runner.sh*) printf '#!/bin/sh\\necho "update-runner $*" >> "$FAKE_LOG"\\nexit "\${FAKE_RUNNER:-0}"\\n' > "$last" ;;
       *) printf 'the repository file\\n' > "$last" ;;
     esac ;;
@@ -146,6 +148,10 @@ function run(args: string[], server: Server = {}, kept?: { dir: string }) {
   if (server.apparmor !== null) writeFileSync(join(sysroot, "sys", "module", "apparmor", "parameters", "enabled"), `${server.apparmor ?? "Y"}\n`);
   if (server.osRelease !== null) {
     writeFileSync(join(sysroot, "etc", "os-release"), server.osRelease ?? 'PRETTY_NAME="Ubuntu 24.04.1 LTS"\nNAME="Ubuntu"\nVERSION_ID="24.04"\nID=ubuntu\nID_LIKE=debian\n');
+  }
+  for (const [path, text] of Object.entries(server.files ?? {})) {
+    mkdirSync(join(sysroot, path, ".."), { recursive: true });
+    writeFileSync(join(sysroot, path), text);
   }
   writeFileSync(join(sysroot, "proc", "meminfo"), `MemTotal:       ${server.memoryKb ?? 8_100_000} kB\nMemFree:         1000000 kB\n`);
   writeFileSync(join(sysroot, "proc", "sys", "user", "max_user_namespaces"), `${server.userns?.max ?? "63000"}\n`);
@@ -355,6 +361,11 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     // Asked for no sandbox, or a registry that does not say: nothing to add.
     expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
     expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
+    // An install whose bots run in the sandbox is never moved to a version without it.
+    const boxed = run(["--domain", "maus.example.com"]);
+    const downgrade = run(["--check", "--domain", "maus.example.com"], registry(""), { dir: boxed.dir });
+    expect(downgrade.status).toBe(1);
+    expect(downgrade.fixes).toEqual(["This install runs its bots in the sandbox, and the version chosen (v0.1.151) has none, so it would run them without it. Name a version that has it with OMB_INSTALL_IMAGE, or add --no-sandbox to install without the sandbox, on a server you alone sign in to."]);
   });
 
   it("reads the newest release without a token, and sends one only when a test run's OMB_INSTALL_GITHUB_TOKEN gives it, never on a command line", () => {
@@ -605,20 +616,59 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(copy.calls.some((call) => call.includes(FILES) && call.includes(" -o "))).toBe(false);
   });
 
-  it("leaves the sandbox out for a version that has none and when asked, and takes its settings back out", () => {
+  it("leaves the sandbox out for a version that has none, and when asked records that it was, so the app says so", () => {
     const first = run(["--domain", "maus.example.com"]);
-    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=");
-    const asked = run(["--no-sandbox"], { apparmor: null }, { dir: first.dir });
+    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+    // A host with no AppArmor and no user namespaces: --no-sandbox is the one way on, and it is not blocked by either check.
+    const asked = run(["--no-sandbox"], { apparmor: null, userns: { max: "0" } }, { dir: first.dir });
     expect(asked.status).toBe(0);
+    expect(asked.fixes).toEqual([]);
     expect(asked.stdout).toContain("note  This server will not be prepared for the bots' sandbox, as asked.");
-    expect(readFileSync(join(first.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
+    expect(asked.stdout).toContain("note  Bots will run without the sandbox, as asked; Settings shows it as switched off.");
+    expect(asked.stdout).not.toContain("user namespaces");
+    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.nobox.yaml\n");
+    expect(readFileSync(join(first.install, "compose.nobox.yaml"), "utf8")).toMatch(/services:\n {2}omb:\n {4}environment:\n {6}OMB_BOT_BOX: "0"\n$/);
+    expect(statSync(join(first.install, "compose.nobox.yaml")).mode & 0o777).toBe(0o644);
     expect(asked.calls.some((call) => call.startsWith("prepare-host"))).toBe(false);
     expect(asked.docker.some((call) => call.includes("box-check"))).toBe(false);
+    // Run again without the flag: the sandbox is back on, and the record of the opt-out is gone.
+    const again = run([], {}, { dir: first.dir });
+    expect(again.status).toBe(0);
+    expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+    expect(existsSync(join(first.install, "compose.nobox.yaml"))).toBe(false);
     const old = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } });
     expect(old.status).toBe(0);
     expect(old.stdout).toContain("note  This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it.");
     expect(readFileSync(join(old.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
     expect(old.calls.some((call) => call.includes("deploy/box/"))).toBe(false);
+  });
+
+  it("never moves an install whose bots run in the sandbox to a version without it, and never restarts it to do so", () => {
+    const boxed = run(["--domain", "maus.example.com"]);
+    const older = run([], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } }, { dir: boxed.dir });
+    expect(older.status).toBe(1);
+    expect(older.stderr).toContain("This install runs its bots in the sandbox, and ghcr.io/milind-soni/openmausbot:v0.1.151 has none, so it would run them without it. The server was not restarted.");
+    expect(older.docker).not.toContain("docker compose up -d --remove-orphans");
+    expect(readFileSync(join(boxed.install, ".env"), "utf8")).toContain("COMPOSE_FILE=compose.yaml:compose.box.yaml\n");
+  });
+
+  it("refuses to prepare the sandbox under a Docker that applies neither AppArmor nor seccomp, and names --no-sandbox", () => {
+    const bare = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_SECURITY: '["name=cgroupns"]' } });
+    expect(bare.status).toBe(1);
+    expect(bare.fixes).toEqual(['Docker on this server does not confine containers with AppArmor and seccomp (["name=cgroupns"]), which the bots\' sandbox needs. Install the current Docker with: curl -fsSL https://get.docker.com | sudo sh  and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to.']);
+    expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], { env: { FAKE_SECURITY: '["name=cgroupns"]' } }).fixes).toEqual([]);
+  });
+
+  it("--uninstall takes the host's preparation back with the installed prepare-host.sh", () => {
+    const installed = run(["--domain", "maus.example.com"]);
+    const prepared = run(["--uninstall"], { files: { "etc/mausbot/seccomp-omb-home.json": "{}" } }, { dir: installed.dir });
+    expect(prepared.status).toBe(0);
+    expect(prepared.calls).toContain(`prepare-host --remove profiles=`);
+    expect(prepared.calls.indexOf("docker compose down --remove-orphans")).toBeLessThan(prepared.calls.indexOf("prepare-host --remove profiles="));
+    // A host the installer never prepared: nothing to take back.
+    const never = run(["--uninstall"], {}, { dir: installed.dir });
+    expect(never.status).toBe(0);
+    expect(never.calls.some((call) => call.startsWith("prepare-host"))).toBe(false);
   });
 
   it("places update.sh as the repository has it, names it as the way to update, and keeps the version it pinned", () => {

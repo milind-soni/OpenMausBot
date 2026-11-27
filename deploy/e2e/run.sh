@@ -6,9 +6,11 @@
 # ends in .internal, for which Caddy issues a certificate of its own CA at once, so HTTPS through Caddy is checked too:
 # after every way the server restarts without Caddy, and after the documented backup and restore.
 # The files the installer places (update.sh, the sandbox's host preparation) come from this checkout. Where the image
-# runs the hardened profile the bots' sandbox must be on and hold: a bot cannot read config.json. With
+# has the bots' sandbox (OMB_IMAGE=server) it must be on, required and holding: a bot cannot read config.json. With
 # OMB_INSTALL_IMAGE set (the workflow builds this checkout's image and serves it from a registry on the runner), that
-# image is installed instead of the published release.
+# image is installed instead of the published release, and at the end an install of the release before the sandbox
+# (OLD_IMAGE) is updated to it with update.sh, as an existing server is: it keeps working, says the sandbox is off and
+# how to turn it on, and the installer run again turns it on. Runs on Ubuntu 22.04 and 24.04.
 #   OUT=<evidence folder> bash deploy/e2e/run.sh
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -29,6 +31,15 @@ PLAIN_INSTALL=("${AS_ROOT[@]}" env "${SETTINGS[@]}" "${UMASK_000[@]}" "$ROOT/dep
 if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then SETTINGS+=("OMB_INSTALL_IMAGE=$OMB_INSTALL_IMAGE"); fi
 INSTALL=("${AS_ROOT[@]}" env "${SETTINGS[@]}" "${UMASK_000[@]}" "$ROOT/deploy/install.sh")
 box_check() { (cd "$DIR" && sudo docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none "$@"); }
+OLD_IMAGE=${OLD_IMAGE:-ghcr.io/milind-soni/openmausbot:v0.1.182}
+OS_VERSION=$(sed -n 's/^VERSION_ID="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' /etc/os-release)
+# The botSandbox field of /api/config, as an admin's session reads it (Settings shows it).
+sandbox_status() {
+  local code token
+  code=$( (cd "$DIR" && sudo docker compose exec -T omb openmausbot pair --label e2e-sandbox) | grep -o 'code=[A-Z2-9-]*' | head -n 1 | cut -d= -f2)
+  token=$( (cd "$DIR" && sudo docker compose exec -T omb curl -sf -X POST -H 'content-type: application/json' -d "{\"code\":\"$code\"}" http://127.0.0.1:8799/api/auth/pair) | jq -r .token)
+  (cd "$DIR" && sudo docker compose exec -T omb curl -sf -H "authorization: Bearer $token" http://127.0.0.1:8799/api/config) | jq -c '.botSandbox'
+}
 
 as_root() { sudo "$@"; }
 step() { printf '\n== %s\n' "$*"; }
@@ -104,6 +115,10 @@ prepare_like_a_server() {
   done
 }
 prepare_like_a_server
+echo "host: Ubuntu $OS_VERSION, kernel $(uname -r)"
+for f in /proc/sys/kernel/apparmor_restrict_unprivileged_userns /proc/sys/user/max_user_namespaces /proc/sys/kernel/unprivileged_userns_clone; do echo "$f: $(cat "$f" 2>/dev/null || echo absent)"; done
+# As a stock Ubuntu 24.04 server has it; a CI runner may relax it. 22.04 has no such setting.
+if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1; fi
 
 step "the checks alone, with a name that points nowhere: one thing to fix, nothing changed"
 status=0
@@ -113,7 +128,7 @@ cat "$OUT/check.txt"
 [ "$status" = 1 ] || fail "--check exited $status, not 1"
 [ "$(grep -c '^  FIX   ' "$OUT/check.txt")" = 1 ] || fail "--check found more than the DNS record to fix"
 contains "$OUT/check.txt" "  FIX   $DOMAIN does not resolve yet." "--check did not name the DNS record"
-for line in "operating system: Ubuntu 24.04" "processor: x86-64" "processor cores:" "memory:" "Docker:" "free disk:" "ports 80 and 443: free" "outbound:" "user namespaces: on" "bots' sandbox: AppArmor is on" "clock: right" "version:"; do
+for line in "operating system: Ubuntu $OS_VERSION" "processor: x86-64" "processor cores:" "memory:" "Docker:" "free disk:" "ports 80 and 443: free" "outbound:" "user namespaces: on" "bots' sandbox: AppArmor is on" "clock: right" "version:"; do
   contains "$OUT/check.txt" "  ok    $line" "--check did not pass: $line"
 done
 [ ! -e "$DIR" ] || fail "--check made $DIR"
@@ -145,6 +160,10 @@ if sudo grep -qx "COMPOSE_FILE=compose.yaml:compose.box.yaml" "$DIR/.env"; then
   [ "$(sudo docker inspect -f '{{.AppArmorProfile}}' "$container")" = omb-home-narrow ] || fail "the server does not run under the sandbox's AppArmor profile"
   [ "$(sudo docker inspect -f '{{.HostConfig.Privileged}} {{json .HostConfig.CapAdd}}' "$container")" = "false null" ] || fail "the server was given privileges"
   (cd "$DIR" && sudo docker compose logs omb 2>&1) | grep -F "bot box: on (bubblewrap" || fail "the server did not start its bot box"
+  sudo docker inspect -f '{{json .Config.Env}}' "$container" | grep -qF '"OMB_BOT_BOX=required"' || fail "the server was not told the sandbox is required"
+  status=$(sandbox_status)
+  echo "Settings shows: $status"
+  jq -e '.state == "on" and .required == true' <<<"$status" >/dev/null || fail "Settings does not show the sandbox on and required: $status"
   # The installer has already judged every result (it stops on all but a few named ones); here, the ones this is about.
   checks=$(box_check || true)
   printf '%s\n' "$checks" >"$OUT/box-check.json"
@@ -298,5 +317,55 @@ step "install again on the kept data"
 cat "$OUT/reinstall.txt"
 contains "$OUT/reinstall.txt" "MausBot is running, but https://$DOMAIN did not answer" "the reinstall did not come back up"
 [ "$(sudo cat "$DIR/data/e2e-marker")" = kept ] || fail "the reinstall touched the data"
+
+step "uninstall takes the host's preparation back"
+sudo sh "$ROOT/deploy/install.sh" --uninstall | tee "$OUT/uninstall-again.txt"
+if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then
+  [ ! -e /etc/mausbot/seccomp-omb-home.json ] || fail "uninstall left the sandbox's seccomp profile"
+  [ ! -e /etc/apparmor.d/omb-home-narrow ] || fail "uninstall left the sandbox's AppArmor profile"
+  if sudo grep -q '^omb-home-narrow ' /sys/kernel/security/apparmor/profiles; then fail "uninstall left the AppArmor profile loaded"; fi
+  contains "$OUT/uninstall-again.txt" "The sandbox's profiles are removed from this server." "uninstall did not say it removed the profiles"
+fi
+
+if [ -n "${OMB_INSTALL_IMAGE:-}" ]; then
+  step "an install from before the sandbox ($OLD_IMAGE), updated with update.sh to this version: it keeps working and says how to turn the sandbox on"
+  sudo rm -rf "$DIR"
+  BEFORE=("${AS_ROOT[@]}" env "${SETTINGS[@]}" "OMB_INSTALL_IMAGE=$OLD_IMAGE" "${UMASK_000[@]}" "$ROOT/deploy/install.sh")
+  install_until_https "$OUT/before.txt" "${BEFORE[@]}"
+  contains "$OUT/before.txt" "has no bots' sandbox yet." "the release before the sandbox was installed with it"
+  if sudo grep -q '^COMPOSE_FILE=' "$DIR/.env"; then fail "an install without the sandbox names Compose files"; fi
+  echo kept-through-update | sudo tee "$DIR/data/e2e-update-marker" >/dev/null
+  status=0
+  # shellcheck disable=SC2024 # the evidence file is the runner's, not root's
+  sudo "$DIR/update.sh" --image "$OMB_INSTALL_IMAGE" --allow-older >"$OUT/update.txt" 2>&1 || status=$?
+  cat "$OUT/update.txt"
+  [ "$status" = 0 ] || fail "update.sh exited $status"
+  healthy_again
+  [ "$(sudo cat "$DIR/data/e2e-update-marker")" = kept-through-update ] || fail "the update lost the data"
+  container=$(cd "$DIR" && sudo docker compose ps -q omb)
+  sudo docker inspect -f '{{json .Config.Env}}' "$container" | grep -qF '"OMB_IMAGE=server"' || fail "the update did not start this version"
+  (cd "$DIR" && sudo docker compose logs omb 2>&1) | grep -F "bot box: off (userns-refused): bots run beside the server" || fail "the updated server did not say its bots run without the sandbox"
+  engines=$( (cd "$DIR" && sudo docker compose exec -T omb curl -sf http://127.0.0.1:8799/api/health/engines) )
+  jq -e '.sandbox == null' <<<"$engines" >/dev/null || fail "the updated server refuses bots: $engines"
+  status=$(sandbox_status)
+  echo "Settings shows: $status"
+  jq -e '.state == "off" and .reason == "userns-refused" and .required == false' <<<"$status" >/dev/null || fail "Settings does not show the sandbox off, with the reason: $status"
+  through_caddy "the update"
+
+  step "the command Settings names, the installer run again, turns the sandbox on and makes it required"
+  install_until_https "$OUT/switch-on.txt"
+  contains "$OUT/switch-on.txt" "The bots' sandbox is on: a bot cannot read the server's settings, keys or other bots' files." "the installer did not turn the sandbox on"
+  sudo grep -qx "COMPOSE_FILE=compose.yaml:compose.box.yaml" "$DIR/.env" || fail "the installer did not add the sandbox's settings"
+  status=$(sandbox_status)
+  echo "Settings shows: $status"
+  jq -e '.state == "on" and .required == true' <<<"$status" >/dev/null || fail "Settings does not show the sandbox on: $status"
+  [ "$(sudo cat "$DIR/data/e2e-update-marker")" = kept-through-update ] || fail "turning the sandbox on touched the data"
+
+  step "a new container for a sandboxed install, as update.sh's swap makes one, comes back required and on"
+  (cd "$DIR" && sudo docker compose up -d --force-recreate omb >/dev/null 2>&1) && healthy_again
+  status=$(sandbox_status)
+  jq -e '.state == "on" and .required == true' <<<"$status" >/dev/null || fail "the sandbox did not survive an update: $status"
+  sudo sh "$ROOT/deploy/install.sh" --uninstall >/dev/null
+fi
 
 printf '\nAll steps passed. Evidence: %s\n' "$OUT"

@@ -38,6 +38,7 @@ import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { productName } from "../brand.ts";
 import { checkEngine, type EngineCheck } from "../engine-check.ts";
+import { botBox } from "../bot-box/box.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
@@ -69,6 +70,8 @@ export interface InstanceRouteDeps {
   checkInstance?(instance: ProviderInstance): Promise<EngineCheck>;
   /** Whether an added server lists its models (server/openai-compat-endpoints.ts); replaced in tests. */
   endpointModelsReadable?(config: { url: string; key: string; catalog?: unknown }): Promise<boolean>;
+  /** The bots' sandbox is required here and did not start, so no engine can start a bot (bot-box/box.ts); replaced in tests. */
+  boxRefusing?(): boolean;
 }
 
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
@@ -134,7 +137,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     }
     // How many engines could start a bot now, never which: the check an update makes that the new version still can
     // (deploy/update.sh), which a shared server lets a local caller without a session make (SERVICE_ALLOW).
+    // Where the bots' sandbox is required and did not start, none can: an update that leads there is rolled back.
     if (method === "GET" && path === "/api/health/engines") {
+      if ((deps.boxRefusing ?? (() => botBox.refusing()))()) return json(res, 200, { app: "openmausbot", engines: 0, sandbox: "refusing" });
       const described = await describeInstances();
       const available = Array.isArray(described) ? described.filter((instance) => Object(Object(instance).snapshot).state === "available").length : 0;
       return json(res, 200, { app: "openmausbot", engines: available });

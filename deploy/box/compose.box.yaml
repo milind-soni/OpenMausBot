@@ -1,0 +1,20 @@
+# Lets the server's container build the bots' sandbox, and makes the sandbox required: with these settings a server
+# whose sandbox cannot start refuses every bot's command instead of running it unconfined (server/bot-box/box.ts).
+# The installer (deploy/install.sh) prepares the host and adds this file by itself (COMPOSE_FILE in .env). By hand,
+# prepare the host once with `sudo sh deploy/box/prepare-host.sh`, then:
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/box/compose.box.yaml up -d
+#
+# No --privileged and no added capability: a seccomp profile and an AppArmor profile that allow bubblewrap's namespaces
+# and mounts and refuse what it never needs, /proc without Docker's masks (a sandbox's own /proc cannot be mounted beside
+# them; the AppArmor profile denies what they hid), and no new privileges. The same settings the MausBot connector gives a
+# Cloud's home container (connector/src/home.ts).
+services:
+  omb:
+    security_opt:
+      - seccomp=/etc/mausbot/seccomp-omb-home.json
+      - apparmor=omb-home-narrow
+      - systempaths=unconfined
+      - no-new-privileges=true
+    environment:
+      OMB_BOT_BOX: required

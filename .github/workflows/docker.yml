@@ -176,6 +176,75 @@ jobs:
           $C stop && $C start && back "docker compose stop, then start (the documented backup)"
           grep -q error <<<"$(body -X POST $H/hooks/wh_nope)"                      # hooks reach the receiver's socket again
           docker compose -f deploy/docker-compose.yml down -v
+      - name: The bots' sandbox in the server image, on a stock host and on a host prepared by deploy/box
+        # A stock Docker host does not let a container build the sandbox: the image then runs as before and says so, and
+        # with OMB_BOT_BOX=required (the installer's compose.box.yaml) it refuses bots' commands instead. On a host
+        # prepared with deploy/box/prepare-host.sh, with compose.box.yaml's four security settings, the real box runs: one
+        # command confined as a bot's turn is, in the server's own layout, cannot read a file in the server's data folder
+        # or reach the host's Docker socket mounted into the server's container, while the server itself can (the controls).
+        run: |
+          set -euo pipefail
+          echo "runner: $(. /etc/os-release && echo "$PRETTY_NAME"), kernel $(uname -r)"
+          for f in /proc/sys/kernel/apparmor_restrict_unprivileged_userns /proc/sys/user/max_user_namespaces /proc/sys/kernel/unprivileged_userns_clone; do echo "$f: $(cat "$f" 2>/dev/null || echo absent)"; done
+          # As a stock Ubuntu 24.04 server has it; a CI runner may relax it.
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1; fi
+          healthy() { # container
+            for i in $(seq 1 40); do
+              if docker exec "$1" curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then return 0; fi
+              sleep 2
+            done
+            docker logs "$1"; echo "$1 never became healthy"; return 1
+          }
+          engines() { docker exec "$1" curl -sf http://127.0.0.1:8799/api/health/engines; }
+
+          # A stock host, the image as published: the server starts as before, the box is off, and the log says why.
+          docker run -d --name omb-stock openmausbot:ci >/dev/null
+          healthy omb-stock
+          docker logs omb-stock 2>&1 | grep -F "bot box: off (userns-refused): bots run beside the server"
+          jq -e '.sandbox == null' <<<"$(engines omb-stock)"
+          docker stop -t 30 omb-stock >/dev/null && docker rm omb-stock >/dev/null
+
+          # A stock host told the box is required: the server starts, refuses every bot's command, and counts no engine.
+          docker run -d --name omb-required -e OMB_BOT_BOX=required openmausbot:ci >/dev/null
+          healthy omb-required
+          docker logs omb-required 2>&1 | grep -F "bot box: REQUIRED but it could not start (userns-refused)"
+          jq -e '.engines == 0 and .sandbox == "refusing"' <<<"$(engines omb-required)"
+          docker stop -t 30 omb-required >/dev/null && docker rm omb-required >/dev/null
+
+          # The host prepared (twice: it is idempotent), the server started with compose.box.yaml's settings.
+          sudo sh deploy/box/prepare-host.sh
+          sudo sh deploy/box/prepare-host.sh
+          sudo grep '^omb-home-narrow ' /sys/kernel/security/apparmor/profiles
+          box=(--security-opt seccomp=/etc/mausbot/seccomp-omb-home.json --security-opt apparmor=omb-home-narrow --security-opt systempaths=unconfined --security-opt no-new-privileges=true)
+          docker run -d --init --shm-size=512m --name omb-box "${box[@]}" -e OMB_BOT_BOX=required -v /var/run/docker.sock:/var/run/docker.sock:ro openmausbot:ci >/dev/null
+          healthy omb-box
+          docker logs omb-box 2>&1 | grep -F "bot box: on (bubblewrap, socat bridges, credential broker, seccomp on)"
+          jq -e '.sandbox == null' <<<"$(engines omb-box)"
+          test "$(docker inspect -f '{{.HostConfig.Privileged}} {{json .HostConfig.CapAdd}}' omb-box)" = "false null"
+          # The self-check, as a hostile bot meets the box: the server's settings and database hidden, the keyring call
+          # refused (made with perl: this image has no python3); only the checks the installer takes as warnings may fail.
+          checks=$(docker exec omb-box node dist-server/bot-box/box-check.js --public=none || true)
+          echo "$checks" | jq -c '{box, passed, total, failed}'
+          jq -r '.results[] | select(.ok | not) | "not passed: \(.id): \(.detail)"' <<<"$checks"
+          jq -e '.box == "bwrap" and ([.results[] | select(.ok) | .id] | index("config-hidden") != null and index("messages-db-hidden") != null and index("keyring-denied") != null)' <<<"$checks"
+          jq -e '(.failed - ["hostname-private", "cpu-list-readable", "fly-api-hidden", "egress-public-allowed"]) == []' <<<"$checks"
+          # One command confined as a bot's turn is, in this server's own layout (box-check.js --exec).
+          confined() { docker exec omb-box node dist-server/bot-box/box-check.js --exec -- "$@"; }
+          docker exec omb-box sh -c 'echo outside-canary > /data/.openmausbot/ci-outside.txt'
+          test "$(confined /bin/echo confined-ran)" = confined-ran                                  # it runs
+          test "$(confined sh -c 'echo mine > own.txt && cat own.txt')" = mine                     # in a folder of its own
+          test "$(docker exec omb-box cat /data/.openmausbot/ci-outside.txt)" = outside-canary      # control: the server reads it
+          if confined cat /data/.openmausbot/ci-outside.txt; then echo "a confined command read the server's data folder"; exit 1; fi
+          docker exec omb-box test -s /data/.openmausbot/messages.db                                # control: the server's database
+          if confined sh -c 'test -e /data/.openmausbot/messages.db || test -e /data/.openmausbot/config.json'; then echo "a confined command sees the server's database or settings"; exit 1; fi
+          docker exec omb-box test -S /var/run/docker.sock                                         # control: the socket is in the container
+          if confined sh -c 'test -e /var/run/docker.sock || test -e /run/docker.sock'; then echo "a confined command reaches the Docker socket"; exit 1; fi
+          # And the check has teeth: with the data folder's cover taken away, the self-check says config.json is readable.
+          bound=$(docker exec omb-box node dist-server/bot-box/box-check.js --public=none --mutate=bind-data || true)
+          jq -e '.failed | index("config-hidden") != null' <<<"$bound"
+          docker stop -t 30 omb-box >/dev/null && docker rm omb-box >/dev/null
+          sudo sh deploy/box/prepare-host.sh --remove
+          test ! -e /etc/apparmor.d/omb-home-narrow && test ! -e /etc/mausbot/seccomp-omb-home.json
       - name: Cloud Pro home image (--target cloud-home) boots, stays private and pairs on a signed request
         # The Fly home machine, built from the same runtime as the image above, with the environment
         # openmaus-cloud's provisioner writes (docs/cloud-pro.md): Caddy on

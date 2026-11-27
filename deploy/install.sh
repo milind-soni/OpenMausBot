@@ -400,11 +400,13 @@ check_outbound() {
   fi
 }
 
+# The bots' sandbox (bubblewrap in the server's container) makes user namespaces. Only the sandbox needs them.
 check_userns() {
+  [ "$SANDBOX" = yes ] || return 0
   max=$(cat "$SYSROOT/proc/sys/user/max_user_namespaces" 2>/dev/null || echo 1)
   clone=$(cat "$SYSROOT/proc/sys/kernel/unprivileged_userns_clone" 2>/dev/null || echo 1)
   if [ "$max" = 0 ] || [ "$clone" != 1 ]; then
-    fix "This server switches off user namespaces, which the bots' sandbox needs. Run: printf 'user.max_user_namespaces=63000\\nkernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/90-mausbot.conf && sudo sysctl --system  and then run this again."
+    fix "This server switches off user namespaces, which the bots' sandbox needs. Run: printf 'user.max_user_namespaces=63000\\nkernel.unprivileged_userns_clone=1\\n' | sudo tee /etc/sysctl.d/90-mausbot.conf && sudo sysctl --system  and then run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
   else
     ok "user namespaces: on"
   fi
@@ -421,7 +423,23 @@ check_sandbox() {
     fix "This server is missing AppArmor or its tools, which the bots' sandbox needs. Run: sudo apt-get install -y apparmor  then restart the server and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
     return
   fi
+  # The sandbox's two profiles are Docker's to apply: a Docker that confines containers with neither would ignore them.
+  if [ "$DOCKER_STATE" = ready ]; then
+    case "$security" in
+      *name=apparmor*name=seccomp* | *name=seccomp*name=apparmor*) ;;
+      *)
+        fix "Docker on this server does not confine containers with AppArmor and seccomp ($security), which the bots' sandbox needs. Install the current Docker with: curl -fsSL https://get.docker.com | sudo sh  and run this again; or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
+        return
+        ;;
+    esac
+  fi
   ok "bots' sandbox: AppArmor is on, so this server can be prepared for it"
+}
+
+# Whether this install already runs its bots in the sandbox (the installer added the sandbox's Compose settings).
+install_has_sandbox() {
+  case ":$(env_value COMPOSE_FILE):" in *:compose.box.yaml:*) return 0 ;; esac
+  return 1
 }
 
 check_clock() {
@@ -506,6 +524,10 @@ registry_sandbox() { # tag or sha256:digest
 note_sandbox() { # tag or sha256:digest
   [ "$SANDBOX" = yes ] || return 0
   if [ "$(registry_sandbox "$1" || true)" = no ]; then
+    if install_has_sandbox; then
+      fix "This install runs its bots in the sandbox, and the version chosen ($1) has none, so it would run them without it. Name a version that has it with OMB_INSTALL_IMAGE, or add --no-sandbox to install without the sandbox, on a server you alone sign in to."
+      return
+    fi
     note "This version has no bots' sandbox, so bots would run beside the server, able to read its settings, keys and each other's files. That is only for a server you alone sign in to; run this again once a version with the sandbox is out."
   fi
 }
@@ -869,13 +891,33 @@ image_has_sandbox() {
   return 1
 }
 
+# --no-sandbox, recorded where the server reads it: OMB_BOT_BOX=0 in a Compose file of the installer's own, so the app
+# shows the sandbox as switched off on purpose, and a later run without the flag takes it away again.
+write_nobox() {
+  write_file "$INSTALL_DIR/compose.nobox.yaml" <<'NOBOX'
+# Written by MausBot's installer (deploy/install.sh) because it ran with --no-sandbox: bots run beside the server,
+# unconfined, and Settings says so. Run the installer again without --no-sandbox to put them in the sandbox.
+services:
+  omb:
+    environment:
+      OMB_BOT_BOX: "0"
+NOBOX
+}
+
 # Sets SANDBOX to on when the server will start with the sandbox's settings, and says why when it will not.
 prepare_sandbox() {
   if [ "$SANDBOX" != yes ]; then
-    unset_env COMPOSE_FILE
+    write_nobox
+    set_env COMPOSE_FILE compose.yaml:compose.nobox.yaml
+    note "Bots will run without the sandbox, as asked; Settings shows it as switched off."
     return
   fi
+  rm -f "$INSTALL_DIR/compose.nobox.yaml"
   if ! image_has_sandbox; then
+    # An image from before the sandbox ignores compose.box.yaml's OMB_BOT_BOX=required: it would run the bots unconfined.
+    if install_has_sandbox; then
+      fail "This install runs its bots in the sandbox, and $IMAGE has none, so it would run them without it. The server was not restarted. Name a version that has the sandbox with OMB_INSTALL_IMAGE, or run this again with --no-sandbox, on a server you alone sign in to."
+    fi
     unset_env COMPOSE_FILE
     SANDBOX=absent
     note "This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it."
@@ -1127,8 +1169,9 @@ run_uninstall() {
   say "Your data is kept in $INSTALL_DIR/data, your settings in $INSTALL_DIR/.env and the HTTPS certificates in $INSTALL_DIR/caddy."
   say "To start it again: $(command_line "--domain $(env_value DOMAIN)")"
   say "This command never deletes your data. To delete it yourself: sudo rm -rf $INSTALL_DIR"
-  if [ -f "$SYSROOT/etc/mausbot/$SECCOMP" ]; then
-    say "The sandbox's two profiles stay on this server: /etc/mausbot/$SECCOMP and /etc/apparmor.d/$APPARMOR_PROFILE."
+  # The host preparation is taken back: the two profiles go, unless a container still runs under them (a connector's).
+  if [ -f "$INSTALL_DIR/box/prepare-host.sh" ] && [ -f "$SYSROOT/etc/mausbot/$SECCOMP" ]; then
+    sh "$INSTALL_DIR/box/prepare-host.sh" --remove || say "The sandbox's profiles could not be removed: /etc/mausbot/$SECCOMP and /etc/apparmor.d/$APPARMOR_PROFILE."
   fi
   if [ -n "$(docker ps -aq --filter name=mausbot-connector 2>/dev/null || true)" ]; then
     say "This server is still connected to MausBot. To disconnect it, run the uninstall command MausBot shows for the connector."

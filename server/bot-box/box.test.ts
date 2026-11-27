@@ -1,10 +1,11 @@
+import { spawnSync } from "node:child_process";
 import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } from "./box.ts";
-import { processStart, seesProcess } from "./box-probe.ts";
+import { keyringDenied, KEYRING_PROBES, processStart, seesProcess } from "./box-probe.ts";
 import { procHidepid } from "./hidepid.ts";
 import { boxUploadsDir, visibleInBox } from "./plan.ts";
 import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
@@ -190,6 +191,64 @@ describe("BotBox", () => {
     expect(existsSync(relay.socketPath)).toBe(false);
   });
 
+  it("required but unable to start: refuses every spawn it would wrap, says why, and tells the admin", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    const lines: string[] = [];
+    const detection = await box.start({
+      dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_BOT_BOX: "required", OMB_IMAGE: "server" }, log: (line) => lines.push(line),
+      detect: () => ({ box: "off", reason: "userns-refused", tools: null }),
+    });
+    expect(detection.box).toBe("off");
+    expect(box.enabled()).toBe(false);
+    expect(box.refusing()).toBe(true);
+    expect(() => box.wrap({ command: "claude", args: [], env: {} })).toThrow(/requires the bots' sandbox, and it could not start: this host does not let/);
+    try { box.wrap({ command: "claude", args: [], env: {} }); } catch (error) { expect((error as { code?: string }).code).toBe("EBOXREQUIRED"); }
+    expect(box.sandboxStatus()).toEqual({ state: "refusing", reason: "userns-refused", required: true, checks: null });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^bot box: REQUIRED but it could not start \(userns-refused\): every bot's command is refused until it can, because this host does not let the server's container make the sandbox's namespaces/);
+  });
+
+  it("the server image, not required: runs as before with the box off, and says so to the admin and in the log", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    const lines: string[] = [];
+    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_IMAGE: "server" }, log: (line) => lines.push(line), detect: () => ({ box: "off", reason: "userns-refused", tools: null }) });
+    expect(box.refusing()).toBe(false);
+    expect(box.wrap({ command: "claude", args: [], env: {} })).toBeNull();
+    expect(box.sandboxStatus()).toEqual({ state: "off", reason: "userns-refused", required: false, checks: null });
+    expect(lines[0]).toMatch(/^bot box: off \(userns-refused\): bots run beside the server, able to read its settings, keys and each other's files\. On a server installed with deploy\/install\.sh, run the install command again/);
+    const off = new BotBox();
+    boxes.push(off);
+    await off.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_IMAGE: "server", OMB_BOT_BOX: "0" }, log: () => {} });
+    expect(off.sandboxStatus()).toEqual({ state: "off", reason: "switched-off", required: false, checks: null });
+  });
+
+  it("shows nothing new where nobody asked for the box this way: the desktop app, a Cloud, a server from source", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: () => {} });
+    expect(box.sandboxStatus()).toBeNull();
+    expect(box.refusing()).toBe(false);
+    const cloud = new BotBox();
+    boxes.push(cloud);
+    await cloud.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_CLOUD_ROLE: "home" }, log: () => {}, detect: () => ({ box: "off", reason: "userns-refused", tools: null }) });
+    expect(cloud.sandboxStatus()).toBeNull();
+    expect(cloud.refusing()).toBe(false);
+    expect(cloud.wrap({ command: "claude", args: [], env: {} })).toBeNull();
+  });
+
+  it.skipIf(process.platform === "win32")("required and on: wraps, and the admin sees the self-check", async () => {
+    const box = new BotBox();
+    boxes.push(box);
+    await box.start({ dataDir: temp(), home: temp(), port: 8799, denyEnv: new Set(), env: { OMB_BOT_BOX: "required" }, log: () => {}, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
+    expect(box.refusing()).toBe(false);
+    expect(box.wrap({ command: "/usr/bin/codex", args: [], env: { PATH: "/usr/bin" } })?.command).toBe("/usr/bin/bwrap");
+    expect(box.sandboxStatus()).toEqual({ state: "on", reason: null, required: true, checks: null });
+    box.noteChecks({ passed: 30, total: 31, failed: ["config-hidden"], at: 1 });
+    expect(box.sandboxStatus()?.checks).toEqual({ passed: 30, total: 31, failed: ["config-hidden"] });
+  });
+
   it("off: no relay", async () => {
     const box = new BotBox();
     boxes.push(box);
@@ -274,6 +333,27 @@ describe("spawnCli goes through the box", () => {
     expect((await run("bot", false)).boxed).toBe(false);
     expect(botBox.report().boxed).toBe(1);
   });
+
+  it.skipIf(process.platform === "win32")("where the box is required and did not start, a bot spawn throws before anything runs; other spawns still run", async () => {
+    const { botBox } = await import("./box.ts");
+    const dir = mkdtempSync(join(tmpdir(), "omb-spawn-"));
+    dirs.push(dir);
+    const marker = join(dir, "ran.txt");
+    await botBox.stop();
+    await botBox.start({ dataDir: join(dir, "data"), home: dir, port: 8799, denyEnv: new Set(), env: { OMB_BOT_BOX: "required" }, log: () => {}, detect: () => ({ box: "off", reason: "no-bwrap", tools: null }) });
+    const spawnIt = (owner: "bot" | "openmausbot", box?: false) => spawnCli("/bin/sh", ["-c", `echo ran > ${marker}`], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin", HOME: dir }, box }, owner);
+    expect(() => spawnIt("bot")).toThrow(/bubblewrap is not installed in this server's image\. The bot's command was not run\./);
+    expect(existsSync(marker)).toBe(false);
+    // A configured server asked into the box is refused too; a spawn of the server's own (a login, a probe) is not.
+    expect(() => spawnCli("/bin/sh", ["-c", `echo ran > ${marker}`], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: "/usr/bin:/bin" }, box: { configured: true } }, "openmausbot")).toThrow(/requires the bots' sandbox/);
+    expect(existsSync(marker)).toBe(false);
+    await waitForExit(spawnIt("openmausbot"), 10_000);
+    expect(readFileSync(marker, "utf8").trim()).toBe("ran");
+    rmSync(marker);
+    await waitForExit(spawnIt("bot", false), 10_000);
+    expect(existsSync(marker)).toBe(true);
+    await botBox.stop();
+  });
 });
 
 describe("BoxRunner.lend", () => {
@@ -309,5 +389,29 @@ describe("the probe tells the server and the canary from a box process with the 
     expect(seesProcess(7, "4321789", () => "4321789")).toBe(true);
     expect(seesProcess(7, "4321789", () => "88")).toBe(false);
     expect(seesProcess(7, "4321789", () => null)).toBe(false);
+  });
+});
+
+describe("the self-check's kernel-keyring call", () => {
+  const missing = { error: Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }), status: null };
+  it("is made with python3 where there is one (a Cloud), else with perl (the server image has no python3)", () => {
+    const asked: string[] = [];
+    expect(keyringDenied((command) => { asked.push(command); return { stdout: "errno 1\n", status: 0 }; })).toEqual([true, "python3: errno 1"]);
+    expect(asked).toEqual(["python3"]);
+    asked.length = 0;
+    expect(keyringDenied((command) => { asked.push(command); return command === "python3" ? missing : { stdout: "errno 1", status: 0 }; })).toEqual([true, "perl: errno 1"]);
+    expect(asked).toEqual(["python3", "perl"]);
+    expect(KEYRING_PROBES.map((probe) => probe.command)).toEqual(["python3", "perl"]);
+  });
+
+  it("fails when the call went through, or when nothing here could make it", () => {
+    expect(keyringDenied(() => ({ stdout: "ok", status: 0 }))).toEqual([false, "python3: ok"]);
+    expect(keyringDenied(() => missing)).toEqual([false, "could not be checked: neither python3 nor perl is here"]);
+  });
+
+  // The perl line itself, run here: an unfiltered process may add a key (ok), or the kernel says why not; never a perl error.
+  it.skipIf(process.platform !== "linux")("the perl line runs as written", () => {
+    const [, detail] = keyringDenied((command, args) => command === "perl" ? spawnSync(command, args, { encoding: "utf8" }) : missing);
+    expect(detail).toMatch(/^perl: (ok|errno \d+)$/);
   });
 });

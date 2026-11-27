@@ -53,6 +53,14 @@ afterEach(() => {
 });
 
 describe("container images", () => {
+  it("gives the self-hosted server the bots' sandbox and says it is a server; the Cloud home keeps its own role", () => {
+    const server = chain("server");
+    const cloud = chain("cloud-home");
+    expect(server.some((step) => step.op === "RUN" && /apt-get install[^&]*\bbubblewrap\b[^&]*\bsocat\b/.test(step.args) && step.args.includes("bwrap --version") && step.args.includes("perl -e"))).toBe(true);
+    expect(server.filter((step) => step.op === "ENV").some((step) => /\bOMB_IMAGE=server\b/.test(step.args))).toBe(true);
+    expect(cloud.filter((step) => step.op === "ENV").some((step) => /\bOMB_IMAGE=/.test(step.args))).toBe(false);
+  });
+
   it("keeps the self-hosted server the default target, and Cloud home a target of the same file", () => {
     expect(all.at(-1)!.name).toBe("server");
     expect(all.find(s => s.name === "cloud-home")!.from).toBe("runtime");

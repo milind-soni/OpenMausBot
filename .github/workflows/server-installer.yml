@@ -1,8 +1,9 @@
 name: Server installer
 
-# The self-hosted server's installer (deploy/install.sh) on a stock ubuntu-24.04 runner, as a person runs it on a fresh
-# server: shellcheck, its checks against made-up servers, then the checks and a real install of the published image
-# (deploy/e2e/run.sh). It talks to no production service and needs no secret of its own: only the workflow's own
+# The self-hosted server's installer (deploy/install.sh) on stock ubuntu-24.04 and ubuntu-22.04 runners, as a person runs
+# it on a fresh server: shellcheck, its checks against made-up servers, then the checks and a real install of this
+# checkout's image with the bots' sandbox on, required and holding, an update to it from the release before the sandbox
+# with update.sh, and the installer run again turning the sandbox on (deploy/e2e/run.sh). It talks to no production service and needs no secret of its own: only the workflow's own
 # GITHUB_TOKEN, read-only, for the installer's lookup of the newest release (OMB_INSTALL_GITHUB_TOKEN).
 on:
   pull_request:
@@ -10,6 +11,7 @@ on:
       - deploy/install.sh
       - deploy/e2e/**
       - deploy/box/**
+      - Dockerfile
       - deploy/update.sh
       - deploy/update-runner.sh
       - connector/profiles/**
@@ -28,15 +30,19 @@ concurrency:
 
 jobs:
   e2e:
-    name: check, install, run again and uninstall on Ubuntu 24.04
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    name: check, install, run again and uninstall on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-22.04]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: shellcheck
-        run: shellcheck deploy/install.sh deploy/update-runner.sh deploy/e2e/run.sh
+        run: shellcheck deploy/install.sh deploy/update-runner.sh deploy/e2e/run.sh deploy/box/prepare-host.sh
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -58,8 +64,8 @@ jobs:
             echo "free for Docker now: $(free_gb) GB"
           fi
       - name: This checkout's server image, served from a registry on the runner
-        # Only an image with the hardened profile can run the bots' sandbox; until a release has it, the published
-        # image cannot show the installer turning the sandbox on, so this checkout's is built and installed instead.
+        # Only an image with the bots' sandbox (OMB_IMAGE=server) can show the installer turning it on; until a release
+        # has it, this checkout's is built and installed instead.
         id: image
         run: |
           set -euo pipefail
@@ -84,6 +90,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: server-installer
+          name: server-installer-${{ matrix.os }}
           path: ${{ runner.temp }}/server-installer
           retention-days: 14

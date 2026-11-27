@@ -34,8 +34,8 @@ The installer ([`deploy/install.sh`](https://github.com/milind-soni/OpenMausBot/
 | Ports | 80 and 443 are free |
 | DNS | the domain resolves to this server's public address |
 | Outbound | HTTPS reaches the image registries (`ghcr.io`, `pkg-containers.githubusercontent.com`, Docker Hub), Let's Encrypt and `raw.githubusercontent.com` |
-| User namespaces | switched on, for the bots' sandbox |
-| Bots' sandbox | AppArmor is on with its tools, as it is on a stock Ubuntu |
+| User namespaces | switched on, for the bots' sandbox (not checked with `--no-sandbox`) |
+| Bots' sandbox | AppArmor is on with its tools, as it is on a stock Ubuntu, and Docker applies AppArmor and seccomp to containers (not checked with `--no-sandbox`) |
 | Clock | within five minutes of the internet's |
 | Version | a MausBot release to install was found |
 
@@ -62,7 +62,13 @@ If Docker is missing, the installer asks before installing it with Docker's offi
 
 It runs the newest release, pinned by its version; once a `stable` channel is published it follows that instead. If that version has no bots' sandbox, the checks (`--check` too) say so before anything is downloaded. It never runs `latest`, which follows every commit. It then waits until the server reports healthy and `https://maus.example.com` answers with a valid certificate, and prints the address.
 
-**The bots' sandbox.** A MausBot version with the hardened profile runs every bot in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/mausbot` and an AppArmor profile in `/etc/apparmor.d`, the two the MausBot connector installs), starts the server with the four security settings in `compose.box.yaml` (no `--privileged`, no added capability), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If a check fails that means a bot could reach something it must not, or that bots would not work, the installer names it and does not report success; so does a self-check that gives no answer, or a check the installer has never heard of. Five checks that are about neither (the kernel keyring, the sandbox's host name, the CPU list, a hosting provider's address, and reaching the public internet) only print a note. For a version without the hardened profile it says the sandbox is not there yet; run the install command again after updating to one that has it. `--no-sandbox` skips all of this, for a server only you sign in to on a host without AppArmor.
+**The bots' sandbox.** A MausBot version with the sandbox runs every bot's engine and commands in a sandbox, away from the server's settings, keys and other bots' files, and Docker's defaults do not let a container build one. For such a version the installer prepares the server (a seccomp profile in `/etc/mausbot` and an AppArmor profile in `/etc/apparmor.d`, the two the MausBot connector installs for a Cloud), starts the server with `compose.box.yaml` (the four security settings, no `--privileged`, no added capability, and `OMB_BOT_BOX=required`), and then runs the server's own self-check, which among other things confirms that a bot cannot read `config.json`. If a check fails that means a bot could reach something it must not, or that bots would not work, the installer names it and does not report success; so does a self-check that gives no answer, or a check the installer has never heard of. Five checks that are about neither (the kernel keyring, the sandbox's host name, the CPU list, a hosting provider's address, and reaching the public internet) only print a note. For a version without the sandbox it says the sandbox is not there yet; run the install command again after updating to one that has it. An install that has the sandbox is never moved to a version without it.
+
+Because the sandbox is required, a server whose sandbox cannot start (the host's profiles removed, a kernel that refuses user namespaces) keeps running but refuses every bot's command, with the reason in the log and in Settings, under Updates; it never runs them unconfined. Settings shows admins "Bots' sandbox: On", "Off" with why, or "Required, not running" with why.
+
+On a host the sandbox cannot use (no AppArmor, user namespaces switched off, a Docker without AppArmor and seccomp), the checks stop with the one line to fix and name `--no-sandbox`, the only way to install without it, for a server only you sign in to. `--no-sandbox` is recorded (`compose.nobox.yaml`, `OMB_BOT_BOX=0`), so Settings shows the sandbox as switched off; running the installer again without it turns the sandbox back on. `--uninstall` takes the host's preparation back: it removes the two profiles, unless a container still runs under them.
+
+**A server installed before the sandbox** keeps working when it updates to a version with it, through `update.sh` or the Update server button: its bots run as before, unconfined, the log says so at every start, and Settings shows the sandbox as off with the command that turns it on, which is the install command run again. Rolling back to a version from before the sandbox runs the bots without it, since that version does not know the setting.
 
 **Sign in as the first admin** with a one-time link made on the server. Run in a terminal, the installer makes one and prints it when it finishes. It does not when its output goes anywhere else, such as a log, because whoever reads the link can sign in as the admin until it is used or expires. To make one yourself:
 
@@ -421,10 +427,11 @@ belongs to anyone but you or the folder's owner; your own run of
 
 **Who can ask.** Only an admin's own signed-in session sees and presses the
 button; members never see it, and Clouds that MausBot runs never show it. The
-request itself is a file in a folder of the server's user, and until the bots'
-sandbox is on for self-hosted servers, bots run as that user: anything running
-on the server as that user, a bot or a prompt injection included, can leave the
-same file. So the runner treats whoever asks as hostile. What any number of
+request itself is a file in a folder of the server's user. Bots in the sandbox
+cannot reach that folder, but on a server without it (installed with
+`--no-sandbox`, or from before the sandbox and not installed again) bots run as
+that user: anything running on the server as that user, a bot or a prompt
+injection included, can leave the same file. So the runner treats whoever asks as hostile. What any number of
 requests can cause:
 
 - For each stable image that is out, at most one update: the server stops, its
