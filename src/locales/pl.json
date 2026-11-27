@@ -2020,7 +2020,6 @@
   "chat.webhookTask": "Zadanie webhooka",
   "chat.viewPayload": "Pokaż dane zdarzenia",
   "chat.sentMidTurn": "wysłano w trakcie tury",
-  "chat.sentMidTurnHint": "Wysłano, gdy bot pracował — zobaczył to przed następnym krokiem, w tej samej turze.",
   "chat.viaCall": "przez rozmowę",
   "chat.callRecord.title": "Rozmowa: {name}",
   "chat.callRecord.label": "Rozmowa na żywo: {title}, {duration}",

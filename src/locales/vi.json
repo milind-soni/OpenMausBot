@@ -1567,7 +1567,6 @@
   "chat.webhookTask": "Nhiệm vụ webhook",
   "chat.viewPayload": "Xem payload sự kiện",
   "chat.sentMidTurn": "đã gửi giữa lượt",
-  "chat.sentMidTurnHint": "Đã gửi khi bot đang xử lý — bot đã ghi nhận tin nhắn này trước bước tiếp theo, trong cùng một lượt.",
   "chat.viaCall": "qua cuộc gọi",
   "chat.callRecord.title": "Cuộc gọi với {name}",
   "chat.callRecord.label": "Cuộc gọi trực tiếp: {title}, {duration}",

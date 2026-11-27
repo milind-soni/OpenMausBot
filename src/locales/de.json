@@ -1074,7 +1074,6 @@
   "chat.webhookTask": "Webhook-Aufgabe",
   "chat.viewPayload": "Ereignis-Payload ansehen",
   "chat.sentMidTurn": "während des Zugs gesendet",
-  "chat.sentMidTurnHint": "Gesendet, während der Bot arbeitete — er hat es vor seinem nächsten Schritt gesehen, im selben Zug.",
   "chat.showFull": "Ganze Nachricht zeigen",
   "chat.showLess": "Weniger zeigen",
   "chat.checkWork.earlierAnswer": "Vor Prüfung {round}",
