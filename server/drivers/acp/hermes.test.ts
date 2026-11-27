@@ -11,6 +11,7 @@ import { resetPathCache } from "../../env-path.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import {
+  HermesAgentDriver,
   HERMES_ACP_MODELS_TIMEOUT_ENV,
   HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS,
   HERMES_CONFIG_MODEL_ID,
@@ -781,5 +782,18 @@ describe("Hermes advertised ACP edit modes", () => {
     expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === recoveredTurn.turnId)).toMatchObject({ ok: true });
     expect(promptCount()).toBe(1);
     expect(modeCalls()).toEqual(["default"]);
+  });
+});
+
+describe("Hermes effort levels", () => {
+  it("declares the reasoning effort levels Hermes accepts", async () => {
+    const instance = await HermesAgentDriver.create({
+      instanceId: "hermes-effort",
+      displayName: "Hermes",
+      environment: {},
+      enabled: true,
+      config: { cli: "hermes", fullAuto: false },
+    });
+    expect(instance.adapter.capabilities.effortLevels).toEqual(["none", "low", "medium", "high", "xhigh"]);
   });
 });

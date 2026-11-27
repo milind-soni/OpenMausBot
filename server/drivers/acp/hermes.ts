@@ -417,6 +417,7 @@ const support: AcpSupport = {
   displayName: "Hermes",
   access: "custom",
   models: EMPTY,
+  effortLevels: ["none", "low", "medium", "high", "xhigh"],
   resolveModels: (env: Record<string, string | undefined>, config: any, _instanceId: string, _fresh?: boolean, allowEnv?: readonly string[]) => resolveHermesModels(env, config, allowEnv),
   resolveTurnModel: (model, env) => {
     // Never inherit a broad or stale compatibility grant from the parent; bind one concrete model.
@@ -466,13 +467,23 @@ const support: AcpSupport = {
     }
     // Decode only: ensure* here would read process.env and rewrite the user's real ~/.hermes/config.yaml.
     const native = hermesAcpModelId(turn.model);
-    if (!native) return;
-    await applySetting(
-      request,
-      "session/set_model",
-      { sessionId, modelId: native },
-      `model "${native}"`,
-    );
+    if (native) {
+      await applySetting(
+        request,
+        "session/set_model",
+        { sessionId, modelId: native },
+        `model "${native}"`,
+      );
+    }
+    // Hermes' ACP maps `reasoning_effort` onto the live agent's reasoning config.
+    if (turn.effort) {
+      await applySetting(
+        request,
+        "session/set_config_option",
+        { sessionId, configId: "reasoning_effort", value: turn.effort },
+        `effort "${turn.effort}"`,
+      );
+    }
   },
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
