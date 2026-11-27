@@ -61,7 +61,7 @@ import { createBrowserReclaim, reclaimable } from "./browser-reclaim.ts";
 import { createCloudBrowser, type HomeReason } from "../cloud-browser/index.ts";
 import { providerOps } from "../cloud-browser/remote.ts";
 import { boatAccount, boatConfigured } from "../boat.ts";
-import { localSchemeRefusal } from "../cloud-browser/guards.ts";
+import { addressGuard, localSchemeRefusal } from "../cloud-browser/guards.ts";
 import { readSignIns, writeSignIns } from "../browser-sites.ts";
 import { browserSessionsDirectory } from "../browser-engine.ts";
 import { BrowserUploadRefusal } from "../browser-upload.ts";
@@ -241,11 +241,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const url = doorUrls.get(session);
     return url !== undefined && spec.env.AGENT_BROWSER_CDP === url;
   }
+  const sandboxAddresses = addressGuard();
   // A tool call that would open Reddit from MausBot Cloud is refused before it reaches the browser. My Chrome is the
   // person's own, outside the egress gate too; on My Cloud a call that can't reach it now says why instead.
   const browserRuntime = new RuntimeRouter(agentBrowserRuntime, chromeEngine, {
     refusal: (session, spec, params) => (cloudBrowser?.attached(session) ? localSchemeRefusal(params) ?? browserEgress.callRefusal(params)
       : attachesToChrome(spec.env) ? null : browserEgress.callRefusal(params)),
+    // A browser in the sandbox is kept from the addresses the home's own browsers are (the egress gate covers those).
+    vet: (session, _spec, params) => (cloudBrowser?.attached(session) ? sandboxAddresses(params) : null),
     // The opt-in engine's browsers wait for the server's room here; agent-browser's wait in browserRoom above. The
     // person's own Chrome runs outside this server, and a close frees room.
     room: (session, spec, params) => (!processRoom || attachesToChrome(spec.env) || (params as { name?: unknown } | null)?.name === "agent_browser_close"

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, s
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { browserRestoreKey, browserSessionsDirectory, closeBrowserSession, inRunningBrowser, startBrowserSession } from "./browser-engine.ts";
+import { browserRestoreKey, browserSessionsDirectory, closeBrowserSession, inRunningBrowser, signInsBackupFile, startBrowserSession } from "./browser-engine.ts";
 import { browserRuntimeEnv } from "./browser-runtime.ts";
 
 export interface SignedInSite {
@@ -209,6 +209,9 @@ function rewriteSavedState(directory: string, session: string, key: string, site
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
   }
+  // The copy kept from before the browser sandbox's last write-back holds the old logins too.
+  try { unlinkSync(join(directory, signInsBackupFile(session))); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 }
 
 /** A session's saved sign-ins (its newest restore file) and when they last changed, for the Cloud's browser sandbox to carry
@@ -226,11 +229,13 @@ export function readSignIns(directory: string, session: string, key: string): { 
 }
 
 /** The sandbox's cookies written back as the session's saved cookies (its storage kept), so a browser that opens in the
- * home sees the sign-ins made in the sandbox. Returns when the file changed. */
+ * home sees the sign-ins made in the sandbox. The copy they replace is kept first as the one backup generation
+ * (signInsBackupFile). Returns when the file changed. */
 export function writeSignIns(directory: string, session: string, key: string, cookies: unknown[]): number {
   const current = readSignIns(directory, session, key);
   const origins = current && current !== "unreadable" ? current.state.origins : [];
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+  if (current && current !== "unreadable") writeState(join(directory, signInsBackupFile(session)), current.state, key);
   const path = join(directory, `${stateBases(session)[0]}.json.enc`);
   writeState(path, { cookies: cookies.filter(isCookie), origins }, key);
   return modified(path);

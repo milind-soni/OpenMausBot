@@ -9,7 +9,7 @@ import { DOWNLOAD_LIMITS, safeFileName } from "../browser/cdp/downloads.ts";
 import type { CloudBrowserRails } from "./rails.ts";
 import type { ComputerOps } from "./remote.ts";
 import { carryIn, carryOut, type SavedCookie } from "./sign-ins.ts";
-import { mergeAtOpen, mergeInSession, prints, sandboxHolds, type SyncStore } from "./sync.ts";
+import { openMerge, prints, sandboxHolds, writeBack, type SyncStore } from "./sync.ts";
 
 /** Where a download lands in the bot's working folder. */
 export const DOWNLOADS_SUBFOLDER = "downloads";
@@ -80,6 +80,8 @@ export class SandboxCompanion {
   #baseline: SavedCookie[] | null = null;
   #syncedAt = 0;
   #syncing = false;
+  /** A write-back of this session was refused (sync.ts's bounds): said once in the log. */
+  #refusalLogged = false;
 
   constructor(deps: CompanionDeps) { this.#deps = deps; }
 
@@ -108,7 +110,7 @@ export class SandboxCompanion {
     const last = sync.load(this.#stamp);
     const sandbox = await carryOut(cdp);
     const home = loaded?.state.cookies ?? [];
-    const { merged, fromSandbox } = mergeAtOpen(home, sandbox, last);
+    const { merged, fromSandbox } = openMerge(home, sandbox, last);
     let homeAt = loaded?.modified ?? 0;
     if (fromSandbox > 0) {
       homeAt = signIns.save(session, merged);
@@ -141,7 +143,18 @@ export class SandboxCompanion {
       const home = signIns.load(session);
       if (home === "unreadable") return;
       const last = sync.load(this.#stamp);
-      const { merged, changed } = mergeInSession(home?.state.cookies ?? [], this.#baseline, current, last);
+      const result = writeBack(home?.state.cookies ?? [], this.#baseline, current, last);
+      if ("refused" in result) {
+        // Nothing moves: the home's copy, the last agreed sync and this baseline stay as they were, so a later write-back is
+        // measured from the same point and refused while that removal stands. The next open settles it as after an unclean
+        // end: cookies the sandbox set or changed are taken home (never a removal), and the home's copy is carried in.
+        if (!this.#refusalLogged) {
+          this.#refusalLogged = true;
+          this.#deps.log(`browser ${session}: kept the home's sign-ins as they were: the browser sandbox's ${result.refused === "mass-removal" ? `cookies would have removed ${result.removed} of them at once` : "cookies were larger than any browser keeps"}`);
+        }
+        return;
+      }
+      const { merged, changed } = result;
       this.#baseline = current;
       if (changed > 0) rails.setCarried(this.#stamp, signIns.save(session, merged));
       sync.save(this.#stamp, { home: prints(merged), sandbox: prints(current) });

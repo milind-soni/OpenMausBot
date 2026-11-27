@@ -33,6 +33,14 @@ export function browserRestoreKey(session: string): string {
   return `omb-${createHash("sha256").update(session).digest("hex")}`;
 }
 
+/** The session's saved sign-ins as they were before the Cloud's browser sandbox last wrote them back (browser-sites.ts
+ * writeSignIns): one generation, encrypted like the restore file and named apart from it, so agent-browser never restores
+ * it. It goes wherever the sign-ins are cleared. */
+export function signInsBackupFile(session: string): string {
+  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
+  return `home-backup-${session}.json.enc`;
+}
+
 const PROFILES_DIR = "agent-browser-profiles";
 
 /** Where every saved session's Chrome profile lives. */
@@ -729,6 +737,7 @@ export async function clearBrowserSessionState(
   };
   try {
     for (const base of bases) for (const suffix of [".json", ".json.enc", ".json.previous", ".json.enc.previous"]) remove(join(directory, base + suffix));
+    remove(join(directory, signInsBackupFile(session)));
     const pendingDirectory = join(directory, ".tmp");
     let pendingFiles: string[] = [];
     try { pendingFiles = readdirSync(pendingDirectory); }
