@@ -887,23 +887,23 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
   }
 }
 
-function routineSnapshot(routine: Routine): RoutineRequestSnapshot | undefined {
-  if (routine.attachments?.length) return undefined;
-  if (redactSecretsInText(routine.name) !== routine.name || redactSecretsInText(routine.prompt) !== routine.prompt) return undefined;
+function routineSnapshot(routine: Routine, enabledOnly = false): RoutineRequestSnapshot | undefined {
+  const name = redactSecretsInText(routine.name), instructions = redactSecretsInText(routine.prompt);
+  if (!enabledOnly && (routine.attachments?.length || name !== routine.name || instructions !== routine.prompt)) return undefined;
   const snapshot: RoutineRequestSnapshot = {
-    name: routine.name,
-    instructions: routine.prompt,
-    schedule: requestSchedule(routine.schedule),
+    name: enabledOnly ? name.slice(0, 80) : name,
+    instructions: enabledOnly ? instructions.slice(0, 20_000) : instructions,
+    schedule: enabledOnly && routine.schedule.type === "once" ? { type: "once", at: Math.max(0, Math.trunc(routine.schedule.at)) } : requestSchedule(routine.schedule),
     runOn: routine.runOn,
     durationMinutes: routine.durationMinutes,
-    ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
-    ...(routine.continuity ? { continuity: true } : {}), ...(routine.sameConversation ? { sameConversation: true } : {}),
-    ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
-    ...(routine.runOnStartup ? { runOnStartup: true } : {}),
+    ...(enabledOnly || routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
+    ...(!enabledOnly && routine.continuity ? { continuity: true } : {}), ...(!enabledOnly && routine.sameConversation ? { sameConversation: true } : {}),
+    ...(!enabledOnly && routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(!enabledOnly && routine.runOnStartup ? { runOnStartup: true } : {}),
     enabled: routine.enabled,
-    ...(routine.target === "room-goal" ? { target: "room-goal" as const } : {}),
-    ...(routine.groupId ? { groupId: routine.groupId } : {}),
-    ...(routine.resultsThreadId ? { resultsThreadId: routine.resultsThreadId } : {}),
+    ...(!enabledOnly && routine.target === "room-goal" ? { target: "room-goal" as const } : {}),
+    ...(!enabledOnly && routine.groupId ? { groupId: routine.groupId } : {}),
+    ...(!enabledOnly && routine.resultsThreadId ? { resultsThreadId: routine.resultsThreadId } : {}),
   };
   return storedSnapshotSchema.safeParse(snapshot).success ? snapshot : undefined;
 }
@@ -1016,8 +1016,8 @@ export class RoutineRequestService {
     if (args.canCommit && !args.canCommit()) {
       throw new RoutineRequestError("The requesting turn ended before this proposal could be saved", 401);
     }
-    const before = automatic && (operation.action === "update" || operation.action === "delete")
-      ? this.snapshotOf(operation.routineId, owner)
+    const before = automatic && operation.action !== "create" && operation.action !== "run_now"
+      ? this.snapshotOf(operation.routineId, owner, operation.action === "pause" || operation.action === "resume")
       : undefined;
     if (automatic) {
       messageInput.card.options = [];
@@ -1055,9 +1055,9 @@ export class RoutineRequestService {
     throw new RoutineRequestError(result.state === "invalid" ? result.error : "The routine change could not be applied", result.state === "invalid" ? result.status : 409);
   }
 
-  private snapshotOf(routineId: string, owner: string): RoutineRequestSnapshot | undefined {
+  private snapshotOf(routineId: string, owner: string, enabledOnly = false): RoutineRequestSnapshot | undefined {
     const routine = ownedRoutine(this.routines, routineId, owner);
-    return routine ? routineSnapshot(routine) : undefined;
+    return routine ? routineSnapshot(routine, enabledOnly) : undefined;
   }
 
   private recordAutoApplied(
@@ -1133,7 +1133,7 @@ export class RoutineRequestService {
           if (!current || current.updatedAt !== undo.appliedUpdatedAt) return stale;
           const patch = operation.action === "update"
             ? restorePatch(undo.before!, now)
-            : { enabled: operation.action === "pause" };
+            : { enabled: undo.before?.enabled ?? (operation.action === "pause") };
           if (!this.routines.update(routineId, patch)) return stale;
           break;
         }
