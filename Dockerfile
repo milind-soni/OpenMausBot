@@ -14,6 +14,7 @@
 #   docker build -t openmausbot .
 #   docker build --build-arg ENGINES="@anthropic-ai/claude-code @openai/codex" -t openmausbot .
 #   docker build --target cloud-home -t omb-cloud-home .
+#   docker build --target server-dind -t openmausbot-dind .       # Docker inside, for the Local VM desktop
 #   docker buildx build --platform linux/arm64 -t openmausbot .   # Raspberry Pi 4/5, ARM servers
 #
 # HOME is the /data volume, so engine CLI logins (~/.claude, ~/.codex, ~/.grok,
@@ -254,8 +255,8 @@ USER root
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "/app/dist-server/cloud-home-start.js"]
 
-# The self-hosted server, last so a plain `docker build .` builds it.
-FROM runtime AS server
+# The self-hosted server's files; `server` and `server-dind` differ only in how they start.
+FROM runtime AS server-app
 # Optional engine CLIs baked into the image (space-separated npm packages).
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES && rm -rf /tmp/omb-build-home /tmp/node-compile-cache; fi
@@ -268,7 +269,6 @@ RUN printf '#!/bin/sh\nexec node /app/dist-server/openmausbot.js "$@"\n' > /usr/
 ENV HOME=/data \
     OMB_CLI_PREFIX="docker compose exec omb openmausbot"
 VOLUME ["/data"]
-USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
 # The launcher runs dist-server/index.js and starts it again when it asks to
@@ -278,3 +278,28 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # and collects the server's orphans as a subreaper instead of warning.
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist-server/server-launcher.js"]
+
+# The server with a Docker engine inside, for the Local VM desktop: run it with
+# `privileged: true`, `cgroup: host` (`--cgroupns host`; cgroup v2 hosts refuse nested containers
+# without it) and a volume on /var/lib/docker. The entrypoint
+# starts dockerd, then the server as `maus`; without those it starts the server
+# alone, with no container runtime.
+FROM server-app AS server-dind
+ARG DOCKER_VERSION=27.5.1
+ARG TARGETARCH
+USER root
+RUN docker_arch=x86_64 && if [ "$TARGETARCH" = arm64 ]; then docker_arch=aarch64; fi \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends iptables \
+  && rm -rf /var/lib/apt/lists/* \
+  && curl -fsSL "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 \
+  && docker --version | grep -qF "$DOCKER_VERSION" \
+  && dockerd --version | grep -qF "$DOCKER_VERSION"
+COPY --chmod=0755 deploy/dind-start.sh /usr/local/bin/omb-dind-start
+ENTRYPOINT ["/usr/local/bin/omb-dind-start"]
+CMD []
+
+# The self-hosted server, last so a plain `docker build .` builds it.
+FROM server-app AS server
+USER maus

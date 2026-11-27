@@ -168,6 +168,128 @@ docker compose exec omb openmausbot pair      # Link https://<DOMAIN>/pair#code=
 
 Caddy gets the certificate. See [Docker (with HTTPS on your own domain)](#docker-with-https-on-your-own-domain).
 
+### Docker Compose with the Local VM desktop
+
+A bot's **Local VM** is a desktop that runs in a container. When the server
+itself runs in a container, that takes Docker inside it. The `dind` image
+(`ghcr.io/milind-soni/openmausbot:dind`) is the server image with a Docker
+engine added. The setup screen's **Prepare** step downloads and builds the
+desktop on demand; nothing else is installed up front. The image is published
+for x86-64 and arm64 (a Raspberry Pi 4 or 5, a Rock Pi, an ARM server), and the
+desktop image it pulls has both builds too. No checkout and no build: save this
+as `compose.yaml` and run it.
+
+```yaml
+services:
+  omb:
+    image: ghcr.io/milind-soni/openmausbot:dind
+    restart: unless-stopped
+    # To turn on the Local VM desktop, uncomment `privileged`, `cgroup` and the
+    # `/var/lib/docker` mount below, and the `docker` volume at the bottom.
+    # dockerd needs privileged to mount filesystems and set up networking.
+    # privileged: true
+    # A cgroup v2 host refuses to start the nested container without this.
+    # cgroup: host
+    init: true
+    shm_size: 512m
+    volumes:
+      - data:/data
+      - edge:/run/openmausbot
+      # The nested Docker's images and containers; overlay2 cannot sit on the
+      # container's own filesystem, so keep this on a real disk.
+      # - docker:/var/lib/docker
+    environment:
+      OMB_PUBLIC_URL: http://localhost:8080
+      OMB_WEBHOOK_PUBLIC_URL: http://localhost:8080
+      OMB_TUNNEL_SOCKET: /run/openmausbot/http.sock
+      OMB_WEBHOOK_SOCKET: /run/openmausbot/hooks.sock
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      omb:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - edge:/run/openmausbot
+
+volumes:
+  data:
+  # docker:
+  edge:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: mode=1777,size=1m
+
+configs:
+  caddyfile:
+    content: |
+      :8080 {
+        encode zstd gzip
+        handle /hooks/* {
+          reverse_proxy unix//run/openmausbot/hooks.sock
+        }
+        handle {
+          reverse_proxy unix//run/openmausbot/http.sock {
+            flush_interval -1
+            header_up -Accept-Encoding
+          }
+        }
+      }
+```
+
+As written, the Local VM is off and the server runs as usual. To turn it on,
+uncomment `privileged`, `cgroup`, the `/var/lib/docker` mount and the `docker`
+volume, then:
+
+```sh
+docker compose up -d --wait
+docker compose exec omb docker info            # Server Version: 27.x
+docker compose exec omb openmausbot pair       # a code, and a sign-in link
+```
+
+Open the sign-in link, go to the Local VM setup screen and click **Prepare**.
+The first run pulls the desktop image and builds on it, which takes a few
+minutes and a few GB, kept in the `docker` volume.
+
+The three commented settings are what make Docker inside the container work:
+
+| Setting | Why |
+|---|---|
+| `privileged: true` | `dockerd` needs it to mount filesystems and set up networking. |
+| `cgroup: host` | Without it, a host on cgroup v2 refuses to start the nested container (`cannot enter cgroupv2 … threaded mode`). |
+| a volume on `/var/lib/docker` | `overlay2` cannot sit on the container's own filesystem. Use a real disk, not a network share. |
+
+The host's kernel has to provide overlayfs, cgroup v2 and netfilter NAT.
+Current Debian, Ubuntu and Fedora kernels do, on x86-64 and arm64 alike; some
+vendor kernels on small ARM boards do not, and there `dockerd` cannot start (the
+server still does, as above). The desktop wants 4 GB of memory, so a board with
+2 GB will struggle.
+
+The image starts as root, runs `dockerd`, then runs the server as the
+unprivileged `maus` user. If `dockerd` cannot start (no `privileged`, no
+volume), it logs why and starts the server anyway: everything but the Local VM
+works, and the setup screen reports `Start docker first`.
+
+A privileged container has the host's full access, so use this on a machine you
+control, and use the regular image where the Local VM is not needed. On Unraid
+or another platform that takes an image, volumes and variables, give the
+container this image, the **Privileged** switch, the extra cgroup setting and a
+path for `/var/lib/docker`. `docker compose down -v` removes the volumes to
+start again. To build the image yourself, use
+`docker build --target server-dind -t openmausbot-dind .` from a checkout.
+
 ### Keep it running (a service)
 
 ```sh
