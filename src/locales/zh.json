@@ -8538,6 +8538,7 @@
   "chat.notice.acpStopFailed": "{provider} 忽略了停止请求，而且它的进程无法结束",
   "chat.notice.toolCount": "{provider} 拒绝了这个轮次，因为这个模型最多接受 {limit} 个工具，而这个机器人提供的更多——即使精简了工具列表也还是更多，所以什么也没运行。请关掉这个机器人的一些应用或 MCP 服务，或把机器人切换到别的模型。",
   "chat.notice.toolCountUnknown": "{provider} 拒绝了这个轮次，因为这个模型能接受的工具数量有限，而这个机器人提供的更多——即使精简了工具列表也还是更多，所以什么也没运行。请关掉这个机器人的一些应用或 MCP 服务，或把机器人切换到别的模型。",
+  "chat.notice.imageContent": "{provider} 以无效请求为由拒绝了这个轮次：这个模型只能读取文字，而这段对话里带着一张图片——聊天中附上的，或是某个工具读入的——所以之后每条消息都会同样失败。请把这个机器人切换到能看图片的模型，或开始一段新的对话。",
   "chat.notice.goalRetry": "{name} 的轮次没有正常结束（{why}）——正在重试一次。",
   "chat.notice.part.providerFailed": "模型提供方失败",
   "chat.notice.part.dispatchFailed": "派发失败",
