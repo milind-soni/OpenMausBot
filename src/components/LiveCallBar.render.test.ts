@@ -171,7 +171,9 @@ describe("LiveCallSettings", () => {
     expect(plain).toMatch(/<option value="Puck" selected="">Puck — upbeat \(default\)<\/option>/);
     expect(plain).toContain("Charon — informative");
     expect(plain).not.toContain("Marin (default)");
-    expect(withLive({ ...base, geminiVoice: "Kore" })).toMatch(/<option value="Kore" selected="">/);
+    expect(plain).toMatch(/<option value="gemini-3\.8-live" selected="">gemini-3\.8-live \(default\)<\/option>/);
+    expect(withLive({ ...base, geminiVoice: "Kore", geminiModel: "gemini-3.1-flash-live-preview" })).toMatch(/<option value="Kore" selected="">/);
+    expect(withLive({ ...base, geminiModel: "gemini-3.1-flash-live-preview" })).toMatch(/<option value="gemini-3\.1-flash-live-preview" selected="">/);
   });
 
   it("offers the bot on the call a voice of its own beside the default for every other bot", () => {

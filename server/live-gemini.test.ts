@@ -17,9 +17,13 @@ describe("Gemini Live endpoint", () => {
     expect(ENDPOINT).toEqual({ provider: "gemini", apiBase: "https://generativelanguage.googleapis.com/v1beta", model: GEMINI_LIVE_MODEL });
   });
 
-  it("takes a model id from OMB_GEMINI_LIVE_MODEL and ignores anything else", () => {
-    expect(geminiLiveEndpoint({ OMB_GEMINI_LIVE_MODEL: "models/gemini-3.8-live-extended-thinking" }).model).toBe("gemini-3.8-live-extended-thinking");
-    expect(geminiLiveEndpoint({ OMB_GEMINI_LIVE_MODEL: "../evil?x=1" }).model).toBe(GEMINI_LIVE_MODEL);
+  it("takes a model id from OMB_GEMINI_LIVE_MODEL, else the configured model, and ignores anything else", () => {
+    expect(geminiLiveEndpoint({ OMB_GEMINI_LIVE_MODEL: "models/gemini-3.8-live-extended-thinking" }, "gemini-3.1-flash-live-preview").model)
+      .toBe("gemini-3.8-live-extended-thinking");
+    expect(geminiLiveEndpoint({}, "models/gemini-3.1-flash-live-preview").model).toBe("gemini-3.1-flash-live-preview");
+    expect(geminiLiveEndpoint({}, "../evil?x=1").model).toBe(GEMINI_LIVE_MODEL);
+    expect(geminiLiveEndpoint({ OMB_GEMINI_LIVE_MODEL: "../evil?x=1" }, "gemini-3.1-flash-live-preview").model)
+      .toBe("gemini-3.1-flash-live-preview");
   });
 
   it("accepts only a loopback override of the API's address", () => {

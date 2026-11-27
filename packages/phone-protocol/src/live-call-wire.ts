@@ -86,6 +86,8 @@ export interface LiveSettings {
   voice: string;
   /** The Gemini Live voice for "gemini" calls; absent means Gemini's default. */
   geminiVoice?: string;
+  /** The Gemini Live model for "gemini" calls; absent means Gemini's default. */
+  geminiModel?: string;
   readTypedReplies: boolean;
   idleMinutes: number;
 }

@@ -194,6 +194,24 @@ export const GEMINI_LIVE_VOICE_OPTIONS: ReadonlyArray<{ id: string; label: strin
 ];
 
 export const GEMINI_LIVE_DEFAULT_VOICE = "Puck";
+export const GEMINI_LIVE_DEFAULT_MODEL = "gemini-3.8-live";
+export const GEMINI_LIVE_MODEL_PATTERN = /^[\w.-]{1,80}$/;
+
+export const GEMINI_LIVE_MODEL_OPTIONS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "gemini-3.8-live", label: "gemini-3.8-live (default)" },
+  { id: "gemini-3.1-flash-live-preview", label: "gemini-3.1-flash-live-preview" },
+];
+
+/** A valid Gemini Live model id (with any leading `models/` stripped), else undefined. */
+export function parseGeminiLiveModel(raw: string | undefined): string | undefined {
+  const model = raw?.trim().replace(/^models\//, "") ?? "";
+  return GEMINI_LIVE_MODEL_PATTERN.test(model) ? model : undefined;
+}
+
+/** A saved or overridden Gemini Live model when valid, else the default. */
+export function geminiLiveModel(model: string | undefined): string {
+  return parseGeminiLiveModel(model) ?? GEMINI_LIVE_DEFAULT_MODEL;
+}
 
 /** A saved Gemini voice when it is one of Gemini's, else the default. */
 export function geminiLiveVoice(voice: string | undefined): string {

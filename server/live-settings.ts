@@ -41,7 +41,7 @@ export function liveCallEndpoint(cfg: LiveConfig, env: NodeJS.ProcessEnv = proce
   if (cfg.live?.provider === "azure") return azureLiveEndpoint(cfg.live.azureEndpoint, cfg.live.azureDeployment);
   if (cfg.live?.provider === "custom") return customLiveEndpoint(cfg.live.customEndpoint, cfg.live.customModel);
   if (cfg.live?.provider === "fish") return fishLiveEndpoint(usableFishAgent(cfg.live, cfg.tts?.fishKey ?? ""), env);
-  if (cfg.live?.provider === "gemini") return geminiLiveEndpoint(env);
+  if (cfg.live?.provider === "gemini") return geminiLiveEndpoint(env, cfg.live.geminiModel);
   if (cfg.live?.provider === "elevenlabs") return elevenLabsLiveEndpoint(usableElevenLabsAgent(cfg.live, cfg.tts?.key ?? ""), env);
   return openAiLiveEndpoint(env);
 }
@@ -85,6 +85,7 @@ export function liveSettingsFor(cfg: AppConfig): LiveSettings {
     ...(cfg.live?.customModel ? { customModel: cfg.live.customModel } : {}),
     voice: cfg.live?.voice ?? "",
     ...(cfg.live?.geminiVoice ? { geminiVoice: cfg.live.geminiVoice } : {}),
+    ...(cfg.live?.geminiModel ? { geminiModel: cfg.live.geminiModel } : {}),
     readTypedReplies: cfg.live?.readTypedReplies ?? true,
     idleMinutes: Number.isInteger(minutes) && minutes! >= 1 && minutes! <= 60 ? minutes! : LIVE_IDLE_MINUTES_DEFAULT,
   };

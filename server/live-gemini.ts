@@ -1,15 +1,14 @@
 // Gemini Live calls. The Gemini key never leaves the harness: the client gets only a single-use ephemeral token whose setup
 // (model, instructions, the `delegate` tool) the harness locks here, and it relays what was said as a Fish Audio call does.
 import { randomBytes } from "node:crypto";
-import { geminiLiveVoice } from "../shared/live-call.ts";
+import { GEMINI_LIVE_DEFAULT_MODEL, geminiLiveVoice, parseGeminiLiveModel } from "../shared/live-call.ts";
 import type { LiveGeminiSession } from "../shared/wire.ts";
 import { LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import { FISH_DELEGATE_TOOL, fishInstructions } from "./live-fish.ts";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com";
 const API_VERSION = "v1beta";
-export const GEMINI_LIVE_MODEL = "gemini-3.8-live";
-const MODEL = /^[\w.-]{1,80}$/;
+export const GEMINI_LIVE_MODEL = GEMINI_LIVE_DEFAULT_MODEL;
 const CREATE_TIMEOUT_MS = 20_000;
 /** How long the client has to connect, and how long the call may then run, reconnecting with session resumption. */
 const CONNECT_WITHIN_MS = 60_000;
@@ -22,10 +21,10 @@ export function geminiLiveBaseUrl(env: NodeJS.ProcessEnv = process.env): string 
   return /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(override) ? override : GEMINI_BASE;
 }
 
-/** `model` is OMB_GEMINI_LIVE_MODEL when that is a model id, else the default Live model. */
-export function geminiLiveEndpoint(env: NodeJS.ProcessEnv = process.env): LiveEndpoint {
-  const model = env.OMB_GEMINI_LIVE_MODEL?.trim().replace(/^models\//, "") ?? "";
-  return { provider: "gemini", apiBase: `${geminiLiveBaseUrl(env)}/${API_VERSION}`, model: MODEL.test(model) ? model : GEMINI_LIVE_MODEL };
+/** `model` is OMB_GEMINI_LIVE_MODEL when that is a model id, else the configured model, else the default Live model. */
+export function geminiLiveEndpoint(env: NodeJS.ProcessEnv = process.env, configuredModel?: string): LiveEndpoint {
+  const model = parseGeminiLiveModel(env.OMB_GEMINI_LIVE_MODEL) ?? parseGeminiLiveModel(configuredModel) ?? GEMINI_LIVE_MODEL;
+  return { provider: "gemini", apiBase: `${geminiLiveBaseUrl(env)}/${API_VERSION}`, model };
 }
 
 /** The setup every connection of the call gets, whatever the client sends: Gemini Live API `BidiGenerateContentSetup`. */
