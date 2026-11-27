@@ -81,6 +81,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [fullscreen, setFullscreen] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [passkeyDismissed, setPasskeyDismissed] = useState("");
+  const [profileNoteDismissed, setProfileNoteDismissed] = useState(false);
   const floating = useBrowserPictureInPicture();
   const pageVisible = usePageVisible();
   const panel = useRef<HTMLDivElement>(null);
@@ -427,6 +428,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     {(error || (notReaching && connected)) && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{notReaching && connected ? t("browser.input.notReaching") : error}</span>{(!connected || notReaching) && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
+    {stream && !profileNoteDismissed && <div role="status" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 py-1.5 pl-3 pr-1.5 text-[12px] text-ink-secondary"><span>{t("browser.panel.chromeProfileNote")}</span><button type="button" className="rounded-md p-1 text-ink-tertiary hover:bg-inset hover:text-ink" aria-label={t("browser.panel.dismissProfileNote")} onClick={() => setProfileNoteDismissed(true)}><X size={14} /></button></div>}
     <div ref={pageArea} {...(paneMode ? { "data-native-view-host": "" } : {})} className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
       {shown ? (
         <StreamSurface
