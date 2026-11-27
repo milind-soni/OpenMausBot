@@ -1,13 +1,6 @@
 // Security: model text never turns an arbitrary local path into a browser request; transcript paths resolve through
 // attachmentImageUrl.
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
@@ -39,6 +32,7 @@ import { CopyImageButton } from "./CopyImageButton";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu"; import { serverFetch } from "@/lib/relay-server";
+import { usePreviewZoom } from "./preview-zoom";
 
 export interface PreviewImage {
   src: string;
@@ -468,6 +462,8 @@ export function AttachmentPreviewDialog({
   const [loadedSources, setLoadedSources] = useState<Set<string>>(() => new Set());
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const zoom = usePreviewZoom();
+  useLayoutEffect(() => zoom.reset(), [current.src, zoom.reset]);
 
   useLayoutEffect(() => {
     closeRef.current = onClose;
@@ -532,6 +528,7 @@ export function AttachmentPreviewDialog({
 
   return createPortal(
     <div
+      ref={zoom.overlay}
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
@@ -586,7 +583,7 @@ export function AttachmentPreviewDialog({
             </button>
           </div>
         </header>
-        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8">
+        <div ref={zoom.stage} className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8">
           {!loaded && !failed && (
             <div className="absolute inset-4 flex animate-pulse items-center justify-center rounded-xl bg-white/[0.055] sm:inset-8" role="status">
               <span className="flex items-center gap-2 text-[13px] text-white/55">
@@ -609,6 +606,8 @@ export function AttachmentPreviewDialog({
           ) : (
             <img
               key={`${current.src}:${attempt}`}
+              ref={zoom.image}
+              style={zoom.style}
               src={current.src}
               alt={current.name}
               onLoad={() => setLoadedSources((sources) => new Set(sources).add(current.src))}
