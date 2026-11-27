@@ -371,7 +371,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const revealOnClick = fileOutsideWorkspace === true && canRevealHostPath(shownPath) && revealHere;
   const [revealProblem, setRevealProblem] = useState("");
   if (!message) {
-    return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
+    return <span title={t("chat.file.legacy")} className="max-w-full min-w-0 break-all [overflow-wrap:anywhere] text-ink-secondary">{children}</span>;
   }
   // Only the desktop app probes; elsewhere the hook stays null and the link must stay usable.
   const probing = revealHere && canRevealHostPath(filePath) && fileOutsideWorkspace === null;
@@ -399,7 +399,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
   const pathTitle = preview.opens ? preview.label : revealOnClick ? t("attach.showInFolder") : t("chat.file.saveCopy");
 
   return (
-    <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
+    <span dir="ltr" className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
       {revealMenu.menu}
       {preview.opens
         ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
@@ -409,9 +409,9 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
         onClick={(event) => void pathAction(event)}
         disabled={!preview.opens && (save.state === "saving" || probing)}
         title={pathTitle}
-        className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
+        className="inline-flex max-w-full min-w-0 items-center gap-1 break-all [overflow-wrap:anywhere] text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
       >
-        {children}
+        <span className="min-w-0 flex-1 break-all [overflow-wrap:anywhere]">{children}</span>
         {preview.opens ? (
           <Eye size={12} className="shrink-0" aria-hidden="true" />
         ) : probing ? (
@@ -439,7 +439,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
         </span>
       )}
       {save.state === "failed" && save.outsideWorkspace && !revealOnClick && (
-        <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
+        <span className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-1.5 text-[12px]">
           <OutsideWorkspaceFile filePath={shownPath} />
         </span>
       )}
