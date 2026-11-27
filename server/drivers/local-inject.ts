@@ -1,4 +1,4 @@
-// Shared local-host inject: probe oMLX / Ollama / EXO / LM Studio / Unsloth, list what they serve
+// Shared local-host inject: probe oMLX / Ollama / EXO / LM Studio / Unsloth / Rapid-MLX, list what they serve
 // under Custom, and decode a pick into a host + API id.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -23,6 +23,7 @@ export const LOCAL_HOSTS: LocalHost[] = [
   { id: "lmstudio", label: "LM Studio", baseUrl: "http://127.0.0.1:1234/v1", apiKey: "lm-studio" },
   { id: "unsloth", label: "Unsloth", baseUrl: "http://127.0.0.1:8888/v1", apiKeyEnv: "UNSLOTH_STUDIO_AUTH_TOKEN" },
   { id: "unsloth_api", label: "Unsloth", baseUrl: "http://127.0.0.1:8888/v1", apiKeyEnv: "UNSLOTH_STUDIO_AUTH_TOKEN" },
+  { id: "rapid_mlx", label: "Rapid-MLX", baseUrl: "http://127.0.0.1:8000/v1", apiKey: "rapid-mlx", apiKeyEnv: "RAPID_MLX_API_KEY" },
 ];
 
 export const INJECT_SEP = "::";
@@ -203,7 +204,7 @@ function readUnslothKey(env: Record<string, string | undefined>): string | null 
   }
 }
 
-function idsFromModelsPayload(payload: unknown): string[] {
+function idsFromModelsPayload(payload: unknown, ownedBy?: string): string[] {
   const records = Array.isArray(payload)
     ? payload
     : payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown }).data)
@@ -212,13 +213,20 @@ function idsFromModelsPayload(payload: unknown): string[] {
         ? (payload as { models: unknown[] }).models
         : [];
   return records.flatMap((record) => {
+    if (ownedBy) {
+      if (!record || typeof record !== "object") return [];
+      const row = record as { owned_by?: unknown; capabilities?: unknown };
+      if (row.owned_by !== ownedBy) return [];
+      // Rapid-MLX also serves embedding and rerank models; only chat models are picks.
+      if (!Array.isArray(row.capabilities) || !row.capabilities.includes("text")) return [];
+    }
     if (typeof record === "string") return MODEL_ID.test(record) ? [record] : [];
     if (!record || typeof record !== "object") return [];
     const id = (record as { id?: unknown; name?: unknown }).id ?? (record as { name?: unknown }).name;
     if (typeof id !== "string" || !MODEL_ID.test(id)) return [];
     const low = id.toLowerCase();
     // Our own names for a model's window are that model, not another one to pick.
-    if (low.includes("embed") || low.includes("bge-") || low.includes("nomic") || isContextName(id)) return [];
+    if (isContextName(id) || (!ownedBy && (low.includes("embed") || low.includes("bge-") || low.includes("nomic")))) return [];
     return [id];
   });
 }
@@ -233,10 +241,25 @@ async function timedJson(
   const timer = setTimeout(() => controller.abort(), 1200);
   timer.unref?.();
   try {
-    const response = await fetchImpl(url, {
+    const rapidMlx = host.id === "rapid_mlx";
+    let response = await fetchImpl(url, {
       signal: controller.signal,
-      headers: { Authorization: `Bearer ${hostApiKey(host, env)}` },
+      ...(rapidMlx ? { redirect: "manual" as const } : { headers: { Authorization: `Bearer ${hostApiKey(host, env)}` } }),
     });
+    if (rapidMlx && response.status === 401 && env.RAPID_MLX_API_KEY) {
+      const healthResponse = await fetchImpl(`${anthropicBaseUrl(host)}/health`, { signal: controller.signal, redirect: "manual" });
+      if (!healthResponse.ok) return null;
+      const health: unknown = await healthResponse.json();
+      if (!health || typeof health !== "object" || Array.isArray(health)) return null;
+      const row = health as Record<string, unknown>;
+      if (typeof row.ready !== "boolean" || typeof row.model_loaded !== "boolean" ||
+          typeof row.engine_type !== "string" || !("model_lifecycle" in row)) return null;
+      response = await fetchImpl(url, {
+        signal: controller.signal,
+        redirect: "manual",
+        headers: { Authorization: `Bearer ${env.RAPID_MLX_API_KEY}` },
+      });
+    }
     if (!response.ok) return null;
     return await response.json();
   } catch {
@@ -382,6 +405,9 @@ export async function probeLocalInjects(
       ]);
       const native = host.id === "lmstudio" ? lmStudioV1Catalog(nativePayload) : null;
       if (native) return { host, ids: native.ids, loaded: native.loaded, windows: native.windows };
+      if (host.id === "rapid_mlx") {
+        return { host, ids: idsFromModelsPayload(catalog, "rapid-mlx"), loaded: new Set<string>(), windows: new Map<string, number>() };
+      }
       const catalogIds = catalog ? idsFromModelsPayload(catalog) : [];
       const extraIds = extra ? idsFromModelsPayload(extra) : [];
       const loaded = loadedIdsFromPayloads(host, catalog ?? extra, extra);

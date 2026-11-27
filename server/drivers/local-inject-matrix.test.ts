@@ -198,7 +198,7 @@ describe("Codex provider dialect", () => {
     expect(codexLocalProviderArgs({}, "lmstudio::qwen2.5-coder:32b")).toEqual([]);
   });
 
-  it.each(["omlx", "exo", "unsloth"] as const)("emits a -c provider for %s without putting the secret on argv", (hostId) => {
+  it.each(["omlx", "exo", "unsloth", "rapid_mlx"] as const)("emits a -c provider for %s without putting the secret on argv", (hostId) => {
     const env: Record<string, string | undefined> = { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" };
     const args = codexLocalProviderArgs(env, encodeInjectId(hostId, "gemma-4-31b-it-bf16"));
     const rendered = JSON.stringify(args);

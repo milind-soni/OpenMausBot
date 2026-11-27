@@ -23,6 +23,7 @@ import {
   loadedIdsFromPayloads,
   LOCAL_HOSTS,
   mergeLocalInject,
+  probeLocalInjects,
   resolveInjectId,
 } from "./local-inject.ts";
 
@@ -43,6 +44,125 @@ describe("inject ids", () => {
   it("rejects official cloud slugs", () => {
     expect(decodeInjectId("claude-sonnet-5")).toBeNull();
     expect(decodeInjectId("gpt-5.6-sol")).toBeNull();
+  });
+
+  it("decodes a Rapid-MLX model id", () => {
+    expect(decodeInjectId("rapid_mlx::mlx-community/Qwen3.5-4B-MLX-4bit")).toEqual({
+      host: "rapid_mlx",
+      model: "mlx-community/Qwen3.5-4B-MLX-4bit",
+    });
+  });
+});
+
+describe("Rapid-MLX discovery", () => {
+  it.each([undefined, "rapid-secret"])("lists only Rapid-MLX records with API key %s", async (apiKey) => {
+    const rapidRequests: string[] = [];
+    const catalog = await mergeLocalInject(
+      { default: "keep", options: [{ id: "keep", label: "Keep" }] },
+      { VITEST: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "1", RAPID_MLX_API_KEY: apiKey },
+      async (url, init) => {
+        if (String(url).startsWith("http://127.0.0.1:8000/")) rapidRequests.push(String(url));
+        if (String(url) !== "http://127.0.0.1:8000/v1/models") return new Response("nope", { status: 500 });
+        expect(new Headers(init?.headers).get("Authorization")).toBeNull();
+        return new Response(JSON.stringify({
+          default_model: "other-chat",
+          data: [
+            { id: "mlx-community/Qwen3.5-4B-MLX-4bit", owned_by: "rapid-mlx", capabilities: ["text", "vision", "tools"] },
+            { id: "nomic-ai/chat", owned_by: "rapid-mlx", capabilities: ["text"] },
+            { id: "chat-omb-32k", owned_by: "rapid-mlx", capabilities: ["text"] },
+            { id: "other-chat", owned_by: "vllm", loaded: true },
+            { id: "unknown-chat", loaded: true },
+            { id: "missing-capabilities-chat", owned_by: "rapid-mlx" },
+            { id: "null-capabilities-chat", owned_by: "rapid-mlx", capabilities: null },
+            { id: "string-capabilities-chat", owned_by: "rapid-mlx", capabilities: "text" },
+            { id: "nomic-embed", owned_by: "rapid-mlx" },
+            { id: "mlx-community/Qwen3-Reranker-0.6B-4bit", owned_by: "rapid-mlx", capabilities: ["rerank"] },
+            { id: "mlx-community/embeddinggemma-2-4bit", owned_by: "rapid-mlx", capabilities: ["embedding"] },
+          ],
+        }));
+      },
+    );
+    expect(rapidRequests).toEqual(["http://127.0.0.1:8000/v1/models"]);
+    expect(catalog.options).toEqual([
+      { id: "keep", label: "Keep" },
+      {
+        id: "rapid_mlx::mlx-community/Qwen3.5-4B-MLX-4bit",
+        label: "mlx-community/Qwen3.5-4B-MLX-4bit (Rapid-MLX)",
+        custom: true,
+      },
+      { id: "rapid_mlx::nomic-ai/chat", label: "nomic-ai/chat (Rapid-MLX)", custom: true },
+    ]);
+  });
+
+  it.each([
+    {},
+    { ready: true, model_loaded: false, engine_type: "mlx" },
+    { ready: "true", model_loaded: false, engine_type: "mlx", model_lifecycle: null },
+    { ready: true, model_loaded: "false", engine_type: "mlx", model_lifecycle: null },
+    { ready: true, model_loaded: false, engine_type: null, model_lifecycle: null },
+    null,
+    [],
+  ])("never sends the key to a listener with non-Rapid health %j", async (health) => {
+    const rapidRequests: Array<[string, string | null]> = [];
+    const models = await probeLocalInjects({ RAPID_MLX_API_KEY: "rapid-secret" }, async (url, init) => {
+      if (!String(url).startsWith("http://127.0.0.1:8000/")) return new Response("nope", { status: 500 });
+      rapidRequests.push([String(url), new Headers(init?.headers).get("Authorization")]);
+      if (String(url).endsWith("/health")) return Response.json(health);
+      return new Response("unauthorized", { status: 401 });
+    });
+    expect(models).toEqual([]);
+    expect(rapidRequests).toEqual([
+      ["http://127.0.0.1:8000/v1/models", null],
+      ["http://127.0.0.1:8000/health", null],
+    ]);
+  });
+
+  it("does not follow redirects while verifying a listener before sending the key", async () => {
+    const rapidRequests: Array<[string, string | null, RequestInit["redirect"]]> = [];
+    const models = await probeLocalInjects({ RAPID_MLX_API_KEY: "rapid-secret" }, async (url, init) => {
+      if (!String(url).startsWith("http://127.0.0.1:8000/")) return new Response("nope", { status: 500 });
+      rapidRequests.push([String(url), new Headers(init?.headers).get("Authorization"), init?.redirect]);
+      if (String(url).endsWith("/health")) {
+        return new Response(null, { status: 302, headers: { Location: "http://127.0.0.1:9999/health" } });
+      }
+      return new Response("unauthorized", { status: 401 });
+    });
+    expect(models).toEqual([]);
+    expect(rapidRequests).toEqual([
+      ["http://127.0.0.1:8000/v1/models", null, "manual"],
+      ["http://127.0.0.1:8000/health", null, "manual"],
+    ]);
+  });
+
+  it("retries with the key only after a public Rapid-MLX health response", async () => {
+    const rapidRequests: Array<[string, string | null]> = [];
+    const models = await probeLocalInjects({ RAPID_MLX_API_KEY: "rapid-secret" }, async (url, init) => {
+      if (!String(url).startsWith("http://127.0.0.1:8000/")) return new Response("nope", { status: 500 });
+      const authorization = new Headers(init?.headers).get("Authorization");
+      rapidRequests.push([String(url), authorization]);
+      if (String(url).endsWith("/health")) {
+        return Response.json({ ready: false, model_loaded: false, engine_type: "mlx", model_lifecycle: null });
+      }
+      if (!authorization) return new Response("unauthorized", { status: 401 });
+      return Response.json({ data: [{ id: "nomic-ai/chat", owned_by: "rapid-mlx", capabilities: ["text"] }] });
+    });
+    expect(rapidRequests).toEqual([
+      ["http://127.0.0.1:8000/v1/models", null],
+      ["http://127.0.0.1:8000/health", null],
+      ["http://127.0.0.1:8000/v1/models", "Bearer rapid-secret"],
+    ]);
+    expect(models.map((model) => model.id)).toEqual(["rapid_mlx::nomic-ai/chat"]);
+  });
+
+  it.each(["vllm", undefined])("ignores a server on port 8000 with owned_by %s", async (ownedBy) => {
+    const models = await probeLocalInjects({}, async (url) => {
+      if (String(url) !== "http://127.0.0.1:8000/v1/models") return new Response("nope", { status: 500 });
+      return new Response(JSON.stringify({
+        default_model: "other-chat",
+        data: [{ id: "other-chat", owned_by: ownedBy, loaded: true }],
+      }));
+    });
+    expect(models).toEqual([]);
   });
 });
 
