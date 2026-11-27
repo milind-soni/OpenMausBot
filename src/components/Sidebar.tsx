@@ -82,6 +82,7 @@ import { MENU_ITEM, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { ELEVATED_CONTROL } from "./elevated";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
+import { SidebarPinnedArea } from "./SidebarPinnedArea";
 import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
@@ -1303,11 +1304,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       </div>}
       {!q && <TeamSideSwitch compact={density === "icons"} listOnly={phone} />}{!q && <SidebarInboxRow icons={density === "icons"} large={!advanced} running={showAttention ? attentionHasRunningWork(attention) : hasCrossBotRunningWork(state.bots, state.pendingQueued, state.groups)} onOpened={phone ? onClose : undefined} />}
       {universalPins && pinnedBots.length > 0 && !simpleDesk && (
-        <div
-          data-sidebar-universal-pins=""
-          // vh, not %: a percentage has no height to resolve against inside the glass head.
-          className="max-h-[min(40vh,280px)] shrink-0 overflow-y-auto border-b border-hairline/40 px-2 pb-2"
-        >
+        <SidebarPinnedArea resizable={pinnedCircles && density !== "icons" && !phone}>
           {density !== "icons" && !pinnedCircles && (
             <div className="px-2 pb-1 pt-1 text-[12px] font-medium leading-4 text-ink-secondary">
               {t("sidebar.section.pinned")}
@@ -1320,7 +1317,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             row={botRow}
             listItem={BotListItem}
           />
-        </div>
+        </SidebarPinnedArea>
       )}
 
       {attentionPinned && density !== "icons" && (
