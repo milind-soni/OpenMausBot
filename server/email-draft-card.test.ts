@@ -358,3 +358,129 @@ describe("POST /api/email-draft", () => {
     expect(checked).toHaveLength(0);
   });
 });
+
+describe("POST /api/email-draft: Send only sends what its own card shows", () => {
+  const update: ConnectorCall = { slug: "GMAIL_UPDATE_DRAFT", arguments: { user_id: "me", draft_id: "r-123", subject: "Changed" } };
+  const updated = () => new TextEncoder().encode(JSON.stringify(answer("GMAIL_UPDATE_DRAFT", { successful: true, data: { id: "r-123" } })));
+  const errorKey = (sent: { body?: unknown }) => (sent.body as { errorKey?: string }).errorKey;
+  type Relay = Extract<DraftConnection, { ok: true }>;
+  /** Cards for the same draft in two conversations. */
+  function twoConversations() {
+    const threads = new Map<string, ReturnType<typeof memoryStore>>();
+    const of = (threadId: string) => threads.get(threadId) ?? threads.set(threadId, memoryStore()).get(threadId)!;
+    const store: DraftCardStore = {
+      messagesFor: (threadId) => of(threadId).messagesFor(threadId),
+      appendMessage: (threadId, message) => of(threadId).appendMessage(threadId, message),
+      patchMessage: (threadId, id, patch) => of(threadId).patchMessage(threadId, id, patch),
+    };
+    const card = draftCardFrom([createCall], created(), "bot-1")!;
+    return { store, inA: showDraftCard(store, "tA", card)!, inB: showDraftCard(store, "tB", card)! };
+  }
+
+  it("sends nothing from a card in another conversation after the bot changed the draft there", async () => {
+    const { store, inA, inB } = twoConversations();
+    const { connection, ran } = relayed(() => ({ successful: true, data: {} }));
+    const { route, guard } = setup({ store }, connection);
+    await guard.run(["r-123"], async () => showDraftAnswer(store, "tB", "bot-1", [update], updated(), 7, undefined, guard));
+    const fromA = request({ threadId: "tA", messageId: inA.id, action: "send", revision: confirmed });
+    await route(fromA.context);
+    expect(fromA.sent.status).toBe(409);
+    expect(errorKey(fromA.sent)).toBe("serverError.emailDraft.changed");
+    expect(ran).toHaveLength(0);
+    const fromB = request({ threadId: "tB", messageId: inB.id, action: "send", revision: draftRevision({ ...shownDraft, subject: "Changed" }) });
+    await route(fromB.context);
+    expect(fromB.sent.status).toBe(200);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_SEND_DRAFT"]);
+  });
+
+  it("sends nothing from a card in another conversation after a Save from this one", async () => {
+    const { store, inA, inB } = twoConversations();
+    const { connection, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+    const { route } = setup({ store }, connection);
+    const save = request({ threadId: "tB", messageId: inB.id, action: "save", draft: edit });
+    await route(save.context);
+    expect(save.sent.status).toBe(200);
+    const fromA = request({ threadId: "tA", messageId: inA.id, action: "send", revision: confirmed });
+    await route(fromA.context);
+    expect(fromA.sent.status).toBe(409);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_UPDATE_DRAFT"]);
+  });
+
+  it("sends nothing after one bot call changed several drafts, since no card shows them", async () => {
+    const { connection, ran } = relayed(() => ({ successful: true, data: {} }));
+    const { store, row, route, guard } = setup({}, connection);
+    const both = [update, { slug: "GMAIL_UPDATE_DRAFT", arguments: { user_id: "me", draft_id: "r-456", subject: "Other" } }];
+    await guard.run(["r-123", "r-456"], async () => showDraftAnswer(store, "t1", "bot-1", both, updated(), 7, undefined, guard));
+    const { context, sent } = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
+    await route(context);
+    expect(sent.status).toBe(409);
+    expect(errorKey(sent)).toBe("serverError.emailDraft.changed");
+    expect(ran).toHaveLength(0);
+  });
+
+  it("sends nothing after a Save whose answer never came back, until a Save shows the draft", async () => {
+    let lost = true;
+    const { connection: gmail, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+    const connection: DraftConnection = { ok: true, relay: async (payload, session, signal) => {
+      const reply = await (gmail as Relay).relay(payload, session, signal);
+      return lost && (payload as { method: string }).method === "tools/call" ? { status: 504, bytes: new Uint8Array() } : reply;
+    } };
+    const { row, route } = setup({}, connection);
+    const save = request({ threadId: "t1", messageId: row.id, action: "save", draft: edit });
+    await route(save.context);
+    expect(save.sent.status).toBe(502);
+    const send = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
+    await route(send.context);
+    expect(send.sent.status).toBe(409);
+    expect(errorKey(send.sent)).toBe("serverError.emailDraft.changed");
+    lost = false;
+    const again = request({ threadId: "t1", messageId: row.id, action: "save", draft: edit });
+    await route(again.context);
+    expect(again.sent.status).toBe(200);
+    const sendSaved = request({ threadId: "t1", messageId: row.id, action: "send", revision: draftRevision(edit) });
+    await route(sendSaved.context);
+    expect(sendSaved.sent.status).toBe(200);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_UPDATE_DRAFT", "GMAIL_UPDATE_DRAFT", "GMAIL_SEND_DRAFT"]);
+  });
+
+  it("still sends after a Save that was refused before it went out", async () => {
+    let refuse = true;
+    const { connection: gmail, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+    const connection: DraftConnection = { ok: true, relay: async (payload, session, signal) => {
+      if (refuse && (payload as { method: string }).method === "tools/call") throw new DraftRefused({ error: "Not now." });
+      return (gmail as Relay).relay(payload, session, signal);
+    } };
+    const { row, route } = setup({}, connection);
+    const save = request({ threadId: "t1", messageId: row.id, action: "save", draft: edit });
+    await route(save.context);
+    expect(save.sent.status).toBe(403);
+    refuse = false;
+    const send = request({ threadId: "t1", messageId: row.id, action: "send", revision: confirmed });
+    await route(send.context);
+    expect(send.sent.status).toBe(200);
+    expect(ran.map((one) => one.slug)).toEqual(["GMAIL_SEND_DRAFT"]);
+  });
+
+  it("runs nothing when the person loses the conversation or the bot while the call is being set up", async () => {
+    for (const lose of ["sees", "mayChat", "inRoom"] as const) {
+      for (const press of [{ action: "send", revision: confirmed }, { action: "save", draft: edit }]) {
+        let lost = false;
+        const { connection: gmail, ran } = relayed(() => ({ successful: true, data: { id: "r-123" } }));
+        const connection: DraftConnection = { ok: true, relay: async (payload, session, signal) => {
+          if ((payload as { method: string }).method === "initialize") lost = true;
+          return (gmail as Relay).relay(payload, session, signal);
+        } };
+        const { store, row, route } = setup({
+          sees: () => !(lost && lose === "sees"), mayChat: () => !(lost && lose === "mayChat"), inRoom: () => lost && lose === "inRoom",
+        }, connection);
+        const { context, sent } = request({ threadId: "t1", messageId: row.id, ...press });
+        await route(context);
+        expect(sent.status).toBe(404);
+        expect(errorKey(sent)).toBe("serverError.emailDraft.notHere");
+        expect(ran).toHaveLength(0);
+        expect(store.rows[0]!.emailDraft).toMatchObject({ ...shownDraft, draftId: "r-123" });
+        expect(store.rows[0]!.emailDraft?.sentAt).toBeUndefined();
+      }
+    }
+  });
+});

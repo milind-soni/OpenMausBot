@@ -123,12 +123,19 @@ export const draftIdsIn = (calls: readonly ConnectorCall[]): string[] =>
     .map((call) => text(record(call.arguments)?.draft_id)).filter((one): one is string => one !== undefined);
 
 /** One Gmail call per draft at a time, shared by the card's Save and Send and the bot's own draft calls, so a bot's change
- *  can't land between Send's check of what the person confirmed and the send. `stale` holds drafts Gmail changed whose card
- *  couldn't be written: their card no longer shows what Send would send. */
+ *  can't land between Send's check of what the person confirmed and the send. `shownBy` holds, for each draft Gmail changed
+ *  or may have changed, the one card that shows what Gmail now holds (cardKey), or undefined when none does: Send from
+ *  any other card of that draft, in any conversation, would send something its card doesn't show. */
 export interface DraftGuard {
   run<T>(draftIds: readonly string[], work: () => Promise<T>): Promise<T>;
-  readonly stale: Set<string>;
+  readonly shownBy: Map<string, string | undefined>;
 }
+
+export const cardKey = (threadId: string, messageId: string): string => `${threadId}:${messageId}`;
+
+/** Whether the card `key` shows what Gmail holds for `draftId`, so Send from it sends what it shows. */
+export const showsGmail = (guard: DraftGuard, draftId: string, key: string): boolean =>
+  !guard.shownBy.has(draftId) || guard.shownBy.get(draftId) === key;
 
 export function createDraftGuard(): DraftGuard {
   const tails = new Map<string, Promise<unknown>>();
@@ -140,7 +147,7 @@ export function createDraftGuard(): DraftGuard {
     return ran;
   };
   return {
-    stale: new Set(),
+    shownBy: new Map(),
     // Several drafts are taken in sorted order, so two callers never each hold one the other waits for.
     run: <T>(draftIds: readonly string[], work: () => Promise<T>) =>
       [...new Set(draftIds)].sort().reduceRight((next: () => Promise<T>, draftId) => () => one(draftId, next), work)(),
@@ -149,11 +156,11 @@ export function createDraftGuard(): DraftGuard {
 
 /** After the bot's relayed Gmail call succeeds (raw JSON or event-stream bytes): a saved draft shows or updates its card,
  *  a sent one turns its card into what was sent. Never throws: the card only shows the call, which already ran. A draft the
- *  call changed stays in `guard.stale` when its card couldn't be shown. */
+ *  call changed has no card showing it (`guard.shownBy`) until its card here is written. */
 export function showDraftAnswer(store: DraftCardStore, threadId: string, botId: string, calls: readonly ConnectorCall[], bytes: Uint8Array, id: unknown, language?: string, guard?: DraftGuard): void {
   if (!calls.some((call) => isDraftTool(call.slug) || call.slug === GMAIL_SEND_DRAFT)) return;
   const changed = draftIdsIn(calls.filter((call) => call.slug === GMAIL_UPDATE_DRAFT));
-  for (const draftId of changed) guard?.stale.add(draftId);
+  for (const draftId of changed) guard?.shownBy.set(draftId, undefined);
   let frame: Row | null;
   try {
     frame = parseMcpResponse(new TextDecoder().decode(bytes), id);
@@ -162,9 +169,10 @@ export function showDraftAnswer(store: DraftCardStore, threadId: string, botId: 
   }
   try {
     const card = draftCardFrom(calls, frame, botId, (draftId) => cardOf(store, threadId, draftId, botId)?.emailDraft);
-    if (card) showDraftCard(store, threadId, card, language);
-    for (const draftId of changed) guard?.stale.delete(draftId);
+    const message = card ? showDraftCard(store, threadId, card, language) : null;
+    if (card && message) guard?.shownBy.set(card.draftId, cardKey(threadId, message.id));
     const sent = sentDraftFrom(calls, frame);
+    if (sent) guard?.shownBy.delete(sent);
     const shown = sent ? cardOf(store, threadId, sent, botId) : undefined;
     if (shown?.emailDraft && !shown.emailDraft.sentAt) {
       const next = { ...shown.emailDraft, sentAt: Date.now() };
@@ -180,9 +188,11 @@ type Refusal = UserError | { error: string };
 /** Thrown by a relay that checks the Rules and the bot's app permissions again right before it sends, and finds a refusal. */
 export class DraftRefused extends Error {
   readonly refusal: Refusal;
-  constructor(refusal: Refusal) {
+  readonly status: number;
+  constructor(refusal: Refusal, status = 403) {
     super(refusal.error);
     this.refusal = refusal;
+    this.status = status;
   }
 }
 
@@ -238,7 +248,8 @@ export function draftCall(card: EmailDraftCardData, draft?: EmailDraftEdit): Con
 
 const unreachable = (status: number) => userErrorThrown("serverError.emailDraft.unreachable", { status });
 
-async function runCall(connection: Extract<DraftConnection, { ok: true }>, call: ConnectorCall): Promise<unknown> {
+/** Runs `call`; `dispatch` runs right before the tool call goes out to Gmail, and may refuse it by throwing DraftRefused. */
+async function runCall(connection: Extract<DraftConnection, { ok: true }>, call: ConnectorCall, dispatch: () => void): Promise<unknown> {
   const signal = AbortSignal.timeout(CALL_TIMEOUT_MS);
   const init = await connection.relay({
     jsonrpc: "2.0", id: `${CALL_ID}-init`, method: "initialize",
@@ -246,6 +257,7 @@ async function runCall(connection: Extract<DraftConnection, { ok: true }>, call:
   }, undefined, signal);
   if (init.status !== 200) throw unreachable(init.status);
   await connection.relay({ jsonrpc: "2.0", method: "notifications/initialized" }, init.transportSessionId, signal).catch(() => undefined);
+  dispatch();
   const answer = await connection.relay({
     jsonrpc: "2.0", id: CALL_ID, method: "tools/call",
     params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: call.slug, arguments: call.arguments, ...(call.account ? { account: call.account } : {}) }] } },
@@ -268,7 +280,7 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
     const card = () => deps.store.messagesFor(threadId).find((message) => message.id === messageId)?.emailDraft;
     const shown = deps.sees(auth, threadId) && !deps.inRoom(threadId) ? card() : undefined;
     if (!shown || !deps.mayChat(auth, shown.botId)) return json(res, 404, userError("serverError.emailDraft.notHere"));
-    const key = `${threadId}:${messageId}`;
+    const key = cardKey(threadId, messageId);
     if (pressing.has(key)) return json(res, 409, userError("serverError.emailDraft.busy"));
     pressing.add(key);
     try {
@@ -277,16 +289,30 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
         const now = card();
         if (!now) return json(res, 404, userError("serverError.emailDraft.notHere"));
         if (now.sentAt) return json(res, 409, userError("serverError.emailDraft.alreadySent"));
-        if (parsed.data.action === "send" && (deps.guard.stale.has(now.draftId) || draftRevision(now) !== parsed.data.revision)) return json(res, 409, userError("serverError.emailDraft.changed"));
+        if (parsed.data.action === "send" && (!showsGmail(deps.guard, now.draftId, key) || draftRevision(now) !== parsed.data.revision)) return json(res, 409, userError("serverError.emailDraft.changed"));
         const draft = parsed.data.action === "save" ? parsed.data.draft : undefined;
         const call = draftCall(now, draft);
         const connection = await deps.connection(auth, now.botId, [call]);
         if (!connection.ok) return json(res, 403, connection.refusal);
+        const had = deps.guard.shownBy.has(now.draftId);
+        const was = deps.guard.shownBy.get(now.draftId);
         let data: unknown;
         try {
-          data = await runCall(connection, call);
+          data = await runCall(connection, call, () => {
+            // The person may have lost the conversation or the bot while the call waited for the draft or was set up.
+            if (!deps.sees(auth, threadId) || deps.inRoom(threadId) || !deps.mayChat(auth, now.botId)) {
+              throw new DraftRefused(userError("serverError.emailDraft.notHere"), 404);
+            }
+            // From here a Save may change the draft in Gmail even if its answer never comes back: no card shows it yet.
+            if (draft) deps.guard.shownBy.set(now.draftId, undefined);
+          });
         } catch (error) {
-          if (error instanceof DraftRefused) return json(res, 403, error.refusal);
+          if (error instanceof DraftRefused) {
+            // Refused before it went out, so Gmail didn't change.
+            if (had) deps.guard.shownBy.set(now.draftId, was);
+            else deps.guard.shownBy.delete(now.draftId);
+            return json(res, error.status, error.refusal);
+          }
           const known = userErrorFields(error);
           const message = error instanceof Error ? error.message : String(error);
           return json(res, 502, known.errorKey ? { error: message, ...known } : userError("serverError.emailDraft.refused", { detail: message.slice(0, 300) }));
@@ -296,10 +322,9 @@ export function createEmailDraftRoutes(deps: EmailDraftRouteDeps): RouteHandler 
         const next: EmailDraftCardData = draft
           ? { ...current, ...draft, draftId: text(record(data)?.id) ?? current.draftId }
           : { ...current, sentAt: Date.now() };
-        // Until the card shows the saved draft, Send refuses it.
-        if (draft) deps.guard.stale.add(current.draftId);
-        deps.store.patchMessage(threadId, messageId, { text: draftCardText(next, deps.language?.(threadId)), emailDraft: next });
-        if (draft) deps.guard.stale.delete(current.draftId);
+        const written = deps.store.patchMessage(threadId, messageId, { text: draftCardText(next, deps.language?.(threadId)), emailDraft: next });
+        if (!draft) deps.guard.shownBy.delete(now.draftId);
+        else if (written) deps.guard.shownBy.set(next.draftId, key);
         return json(res, 200, { ok: true });
       });
     } finally {
