@@ -100,6 +100,7 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
   const routineAction = card.routineRequest?.operation.action;
   if (routineAction) return t(ROUTINE_SETTLED_LABEL[routineAction]);
   const skillAction = card.skillRequest?.action;
+  if (card.skillRequest?.teammates) return t("approval.status.teammateSkills");
   if (skillAction) return t(SKILL_SETTLED_LABEL[skillAction]);
   if (card.profileRequest) return t("approval.status.profileUpdated");
   if (card.modelRequest) return t("approval.status.modelChanged");
@@ -190,7 +191,7 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
   const skill = card.skillRequest;
   if (skill) {
     return {
-      line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.allBots ? `${skill.name} · ${t("skills.allBots.tag")}` : skill.name }),
+      line: t(skill.teammates ? "approval.applied.skill.teammates" : SKILL_APPLIED_LINE[skill.action], { name, title: skill.allBots ? `${skill.name} · ${t("skills.allBots.tag")}` : skill.name }),
       canUndo: skill.action === "create" || skill.action === "enable" || skill.action === "disable" || Boolean(skill.previous),
     };
   }

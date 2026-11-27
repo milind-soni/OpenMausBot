@@ -395,7 +395,7 @@ import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotApproval, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSystemPrompt, type SetupConnectedApps } from "./setup-mode.ts"; import { forgetSetupPresser, setupPresser, setupTurnText, takeSetupRequest } from "./setup-request.ts"; import { setupSuggestionsFor } from "./setup-suggestions.ts"; import { createSetupRequestRoutes } from "./routes/setup-request.ts";
-import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts";
+import { isSkillSwitchAction, type SkillRequestCardData } from "../shared/skill-request.ts"; import { createSkillSwitchHost } from "./host/skill-switch-host.ts"; import { createTeammateSkillsHost } from "./host/teammate-skills-host.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
   botPersona,
@@ -9262,7 +9262,7 @@ function undoSkillCard(botId: string, threadId: string, messageId: string): Undo
     return { claimed: true, state: "invalid", error: "Only a change that applied on its own can be undone here.", status: 409 };
   }
   if (request.botId !== botId || request.threadId !== threadId) return { claimed: true, state: "invalid", error: "this skill request belongs to a different bot", status: 403 };
-  const action = request.action; if (request.allBots) return allBotsSkills.undo(botId, threadId, message, request); if (isSkillSwitchAction(action)) return skillSwitch.undo(botId, threadId, message, { ...request, action });
+  const action = request.action; if (request.teammates) return teammateSkills.undo(botId, threadId, message, request); if (request.allBots) return allBotsSkills.undo(botId, threadId, message, request); if (isSkillSwitchAction(action)) return skillSwitch.undo(botId, threadId, message, { ...request, action });
   if (request.shared) return skillsHost.undoReceipt(botId, threadId, message, { ...request, action, shared: request.shared });
   const undone = undoSkillWrite(botId, { stagedId: request.stagedId, name: request.name, action,
     ...(request.previous ? { previous: { skillMd: request.previous.preview, source: request.previous.source, references: request.previous.references ?? [] } } : {}),
@@ -11142,7 +11142,7 @@ function appendSkillRequestCard(args: {
   };
 }
 
-const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) }); wireAllBotsSkills({ team: Boolean(CLOUD_TEAM), sharedWithoutTeam: () => !CLOUD_TEAM && sharedMembership(), bot: (id) => store.bot(id), bots: () => store.bots }); const allBotsSkills = createSkillsForAllBotsHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
+const skillSwitch = createSkillSwitchHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, listBotSkills, readBotSkillFile, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) }); const teammateSkills = createTeammateSkillsHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, refusal: chiefPeerTargetRule("skills"), skill: skillSwitch.switchableSkill, turn: skillSwitch.turn, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) }); wireAllBotsSkills({ team: Boolean(CLOUD_TEAM), sharedWithoutTeam: () => !CLOUD_TEAM && sharedMembership(), bot: (id) => store.bot(id), bots: () => store.bots }); const allBotsSkills = createSkillsForAllBotsHost({ store, dataDir: DATA_DIR, persistence: skillProposalPersistence, noteSkillChange: (botId, threadId) => skillReview.noteSkillChange(botId, threadId) });
 function resolveSkillRequest(args: {
   botId: string;
   botName?: string;
@@ -11163,7 +11163,7 @@ function resolveSkillRequest(args: {
   if (request.botId !== args.botId) {
     return { claimed: true, status: 403, error: "this skill request belongs to a different bot" };
   }
-  if (request.allBots) return allBotsSkills.resolve(args, message.id, card, request); if (isSkillSwitchAction(request.action)) return skillSwitch.resolve(args, message.id, card, { ...request, action: request.action });
+  if (request.teammates) return teammateSkills.resolve(args, message.id, card, request); if (request.allBots) return allBotsSkills.resolve(args, message.id, card, request); if (isSkillSwitchAction(request.action)) return skillSwitch.resolve(args, message.id, card, { ...request, action: request.action });
   if (card.answered || card.dismissed) {
     const cleanup = rejectStagedSkillWrite(args.botId, request.stagedId);
     if ("applied" in cleanup && cleanup.applied && card.answered !== "allow") {
@@ -13402,6 +13402,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
+        if (received.action === "teammates") { const staged = teammateSkills.stage(from, fromThreadId, received, appliesDirectly(from.id, fromThreadId)); return json(res, staged.status, staged.body); }
         const everywhere = await allBotsSkills.stage(from, fromThreadId, received, () => appliesDirectly(from.id, fromThreadId), (asked) => importedSkillRequest(asked, fetch, callSignal, () => skillImportToken(gitAudience(fromThreadId))), () => internalCapabilityIsActive(internalCapability) && skillAuthoringEnabled(cfg), () => (CLOUD_TEAM ? actingPeople.requester(fromThreadId, internalCapability.generation) : null)); if (everywhere) return json(res, everywhere.status, everywhere.body); if (isSkillSwitchAction(received.action)) { const staged = skillSwitch.stage(from, fromThreadId, received.action, received, appliesDirectly(from.id, fromThreadId)); return json(res, staged.status, staged.body); }
         const body = await importedSkillRequest(received, fetch, callSignal, () => skillImportToken(gitAudience(fromThreadId))); if ("importError" in body) return json(res, 422, { error: body.importError }); if (!internalCapabilityIsActive(internalCapability)) return json(res, 401, { error: TURN_ENDED_REFUSAL }); if (!skillAuthoringEnabled(cfg)) return json(res, 403, { error: "skill authoring is not enabled in Settings" });
         const direct = appliesDirectly(from.id, fromThreadId);

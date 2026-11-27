@@ -723,6 +723,17 @@ describe("ApprovalCard for a change that applied on its own", () => {
       },
     }));
     expect(skill).toContain("Scout added a skill: file-expense");
+    const teammates = render(applied({
+      tool: "stage_skill",
+      skillRequest: {
+        version: 1, requestId: "s2", botId: "bot-1", threadId: "thread-1", stagedId: "teammates-s2", action: "enable",
+        name: "research, lint", gist: "", warnings: [], createdAt: 1,
+        teammates: [{ botId: "b2", botName: "Mira", name: "research", action: "enable" }, { botId: "b3", botName: "Ada", name: "lint", action: "disable" }],
+      },
+    }));
+    expect(teammates).toContain("Scout changed skills on the team: research, lint");
+    expect(teammates).not.toContain("turned on a skill");
+    expect(teammates).toContain(">Undo<");
   });
 
   it("reads team setup and team memory as one line, with Undo except for a deletion", () => {

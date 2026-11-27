@@ -4550,7 +4550,15 @@
       "room.feed.closedOne": "6792d51731f6be16a6353dbd331b4440bb594d60db6030c155b9f294a4cd3e82",
       "room.feed.closedMany": "1ede71ae8b3ba54d101766e0955aca958b399e0f1ca1531e3753c702c2cc6023",
       "room.thread.backToFeed": "11b2bf44df264af7dbb26dfd164187bd2ce06ba8cf6a756567c49b6ca1604041",
-      "room.thread.closedBy": "7bf48be497dd9e969da16b8530b7176c21a8738d7653ef965f516da79e51928e"
+      "room.thread.closedBy": "7bf48be497dd9e969da16b8530b7176c21a8738d7653ef965f516da79e51928e",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -40052,7 +40060,15 @@
       "localApps.install.uninstall": "fe199528850a4e24c14d9ece87a07b40bdcfa5fe504c175c117b997c29259ca6",
       "localApps.install.installed": "f8b32f4e92bd84ce1fcd177bec17d43093de3ee8303bb40c1b9ea521ed6a70f6",
       "localApps.install.failed": "9b0331da691337f15b40d786c9e501c73e2751e11904b083ea961196889b0e2e",
-      "localApps.install.uninstallFailed": "71fe76dda0814876ed5386f4cd9ea801883d4e430f6cb1c3b58f58136e0e9214"
+      "localApps.install.uninstallFailed": "71fe76dda0814876ed5386f4cd9ea801883d4e430f6cb1c3b58f58136e0e9214",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -50527,7 +50543,15 @@
       "together.notice.background": "060d0df4c05d254b755e1d72633dc83f312cb0016bc847751608863c9b330ef6",
       "rail.together": "63e2f9d95311f58cf165f5f0a29ce9cac35cd36d88c1f393ec15148acae4157a",
       "settings.features.suggestedReplies": "ad9bf4351095386d5bac872bb520ff9168787e3cb055f3b054c8e0b2b5f30120",
-      "settings.features.suggestedRepliesLine": "e7617f08b418ada91e6ad48ed1e07ce796dc576ce7410af5e85b618cd7fe0816"
+      "settings.features.suggestedRepliesLine": "e7617f08b418ada91e6ad48ed1e07ce796dc576ce7410af5e85b618cd7fe0816",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -61092,7 +61116,15 @@
       "together.notice.background": "060d0df4c05d254b755e1d72633dc83f312cb0016bc847751608863c9b330ef6",
       "rail.together": "63e2f9d95311f58cf165f5f0a29ce9cac35cd36d88c1f393ec15148acae4157a",
       "settings.features.suggestedReplies": "ad9bf4351095386d5bac872bb520ff9168787e3cb055f3b054c8e0b2b5f30120",
-      "settings.features.suggestedRepliesLine": "e7617f08b418ada91e6ad48ed1e07ce796dc576ce7410af5e85b618cd7fe0816"
+      "settings.features.suggestedRepliesLine": "e7617f08b418ada91e6ad48ed1e07ce796dc576ce7410af5e85b618cd7fe0816",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -104853,7 +104885,15 @@
       "together.notice.background": "060d0df4c05d254b755e1d72633dc83f312cb0016bc847751608863c9b330ef6",
       "rail.together": "63e2f9d95311f58cf165f5f0a29ce9cac35cd36d88c1f393ec15148acae4157a",
       "settings.features.suggestedReplies": "ad9bf4351095386d5bac872bb520ff9168787e3cb055f3b054c8e0b2b5f30120",
-      "settings.features.suggestedRepliesLine": "e7617f08b418ada91e6ad48ed1e07ce796dc576ce7410af5e85b618cd7fe0816"
+      "settings.features.suggestedRepliesLine": "e7617f08b418ada91e6ad48ed1e07ce796dc576ce7410af5e85b618cd7fe0816",
+      "server.teammateSkills.title": "80aee94b9f40f525d5de4676927f6ea143dd9d76091069df83be0d73e2951733",
+      "server.teammateSkills.body": "81f507037b13cb3be602ffdc3f88a985cb89fd02df63a4a7ed059d5eee802e5c",
+      "server.teammateSkills.done": "ef24e04d065b92d8d2d213decc94d4d9f4e1d6235851bdfde5c617458524cbf5",
+      "server.teammateSkills.on": "f447b4e3c84611c45abf3ca8d7174dc77514ffea33c7a81e30024483a2ff15eb",
+      "server.teammateSkills.off": "78c859c67fae46c022defa20fa5432aa40d72b661bf98a197e439d100c554831",
+      "approval.status.teammateSkills": "b830163e051fe1a5a3e4d90cc7ea09da116ea95efa75360c6cf175e25de95aeb",
+      "approval.applied.skill.teammates": "a9f337ca8c48f80ae0f963dd024d2b721c2ee9bfa40667f427a15f2c64d3a913",
+      "skills.request.reviewTeammates": "5a034d3c78251df4a06bd944b7ed73f154e6af862400ba2cf3e386555092f62d"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
