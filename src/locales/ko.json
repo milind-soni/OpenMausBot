@@ -1572,6 +1572,8 @@
   "notifications.railUnread": "알림, 읽지 않음 {count}개",
   "notifications.unread": "읽지 않음 {count}개",
   "notifications.markAllRead": "모두 읽음으로 표시",
+  "notifications.clearAll": "모두 지우기",
+  "notifications.cleared": "알림을 지웠습니다",
   "notifications.pin": "알림 고정해서 열어 두기",
   "notifications.unpin": "알림 고정 해제",
   "notifications.close": "알림 닫기",

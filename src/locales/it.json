@@ -2049,6 +2049,8 @@
   "notifications.railUnread": "Notifiche, {count} non lette",
   "notifications.unread": "{count} non lette",
   "notifications.markAllRead": "Segna tutte come lette",
+  "notifications.clearAll": "Cancella tutto",
+  "notifications.cleared": "Notifiche cancellate",
   "notifications.pin": "Tieni aperto Notifiche",
   "notifications.unpin": "Sgancia Notifiche",
   "notifications.close": "Chiudi Notifiche",

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Info, KeyRound, LogIn, Newspaper, Pin, RotateCcw, Trash2, Wallet, X, type LucideIcon } from "lucide-react";
 import { api, useStore, openThread, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -11,6 +11,7 @@ import { threadUpdatedLabel } from "./SidebarThreadRow";
 import type { NotificationLogEntry, NotifyKind } from "../../shared/notification";
 import { plainPreviewText } from "../../shared/plain-preview";
 import { Select } from "./Select";
+import { UndoToast, useUndoToast } from "./UndoToast";
 
 const KIND_LOOK: Record<NotifyKind, { Icon: LucideIcon; className: string; status: LocaleKey }> = {
   done: { Icon: CheckCircle2, className: "text-success", status: "notifications.status.done" },
@@ -119,6 +120,18 @@ export async function postNotificationRead(path: string, dispatch: (action: Acti
 
 export function NotificationsPanel() {
   const { state, dispatch } = useStore();
+  const [toast, setToast] = useUndoToast();
+  const pendingClear = useRef<number | null>(null);
+  const commitClear = useCallback(() => {
+    const before = pendingClear.current;
+    if (before === null) return;
+    pendingClear.current = null;
+    void postNotificationRead(`/api/notifications/clear?before=${before}`, dispatch);
+  }, [dispatch]);
+  useEffect(() => {
+    if (!toast) commitClear();
+  }, [toast, commitClear]);
+  useEffect(() => commitClear, [commitClear]);
   const showThreads = useShowThreads();
   const [now, setNow] = useState(() => Date.now());
   const [botFilter, setBotFilter] = useState(ALL_BOTS);
@@ -151,6 +164,22 @@ export function NotificationsPanel() {
     void postNotificationRead("/api/notifications/read-all", dispatch);
   };
 
+  const clearAll = () => {
+    const cleared = state.notifications;
+    if (cleared.length === 0) return;
+    commitClear();
+    const before = Math.max(...cleared.map((entry) => entry.at)) + 1;
+    pendingClear.current = before;
+    dispatch({ type: "notificationsCleared", before });
+    setToast({
+      text: t("notifications.cleared"),
+      undo: () => {
+        pendingClear.current = null;
+        dispatch({ type: "notificationsHydrated", notifications: cleared });
+      },
+    });
+  };
+
   return (
     <aside
       aria-label={t("notifications.title")}
@@ -163,6 +192,15 @@ export function NotificationsPanel() {
         </span>
         <button type="button" onClick={markAllRead} className="shrink-0 whitespace-nowrap text-[12px] text-accent hover:underline">
           {t("notifications.markAllRead")}
+        </button>
+        <button
+          type="button"
+          onClick={clearAll}
+          aria-label={t("notifications.clearAll")}
+          title={t("notifications.clearAll")}
+          className="flex size-[26px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <Trash2 size={14} />
         </button>
         <button
           type="button"
@@ -210,6 +248,7 @@ export function NotificationsPanel() {
       <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[12px] text-ink-tertiary">
         {t("notifications.retention")}
       </div>
+      <UndoToast toast={toast} onDone={() => setToast(null)} />
     </aside>
   );
 }

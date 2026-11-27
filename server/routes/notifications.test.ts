@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
-import { forgetNotificationReader, insertNotificationLog, markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
+import { clearNotificationLog, forgetNotificationReader, insertNotificationLog, markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createNotificationRoutes, notificationListedFor, readThreadNotifications } from "./notifications.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -21,7 +21,7 @@ async function serve(
   shown?: (auth: RequestAuth) => (threadId: string) => boolean,
   reaches?: (auth: RequestAuth, entry: NotificationLogEntry) => boolean,
 ) {
-  const deps = { recent: vi.fn(() => entries), markRead: vi.fn() };
+  const deps = { recent: vi.fn(() => entries), markRead: vi.fn(), clear: vi.fn() };
   const routes = [createNotificationRoutes(deps, notificationListedFor(shown, reaches))];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -71,6 +71,18 @@ describe("notification routes", () => {
     expect(deps.markRead).toHaveBeenCalledTimes(1);
   });
 
+  it("clears what the viewer's own list shows, all of it or what came before a time", async () => {
+    const old = { ...sample, id: "n2", at: 10 };
+    const hidden = { ...sample, id: "n3", threadId: "private" };
+    const { base, deps } = await serve([sample, old, hidden], () => (threadId) => threadId !== "private");
+    expect((await fetch(`${base}/api/notifications/clear?before=5`, { method: "POST" })).status).toBe(200);
+    expect(deps.clear).toHaveBeenLastCalledWith(["n1"]);
+    expect((await fetch(`${base}/api/notifications/clear`, { method: "POST" })).status).toBe(200);
+    expect(deps.clear).toHaveBeenLastCalledWith(["n1", "n2"]);
+    expect((await fetch(`${base}/api/notifications/clear?before=soon`, { method: "POST" })).status).toBe(400);
+    expect(deps.clear).toHaveBeenCalledTimes(2);
+  });
+
   it("opening a conversation reads only what the opener's own list shows", () => {
     const ask = { ...sample, id: "n2", kind: "question" as const };
     const elsewhere = { ...sample, id: "n3", threadId: "t2" };
@@ -117,6 +129,18 @@ describe("notification routes", () => {
     const unread = (person: string) => recentNotificationLog(undefined, person).filter((entry) => entry.threadId === "leave-t" && !entry.read).map((entry) => entry.id).sort();
     expect(unread("p_ada")).toEqual(["f1", "f2"]);
     expect(unread("p_cleo")).toEqual(["f1"]);
+  });
+
+  it("clearing deletes the entries, and on a team hides them from that person alone", () => {
+    for (const id of ["c1", "c2", "c3"]) insertNotificationLog({ ...sample, id, threadId: "clear-t" });
+    const ids = (person?: string) => recentNotificationLog(undefined, person).filter((entry) => entry.threadId === "clear-t").map((entry) => entry.id).sort();
+    clearNotificationLog(["c1"]);
+    expect(ids()).toEqual(["c2", "c3"]);
+    clearNotificationLog(["c2"], "p_ada");
+    expect(ids("p_ada")).toEqual(["c3"]);
+    expect(ids("p_cleo")).toEqual(["c2", "c3"]);
+    forgetNotificationReader("p_ada");
+    expect(ids("p_ada")).toEqual(["c2", "c3"]);
   });
 
   it("leaves other paths and methods to the next handler", async () => {

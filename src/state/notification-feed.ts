@@ -7,10 +7,11 @@ export type NotificationFeedAction =
   | { type: "notificationReceived"; entry: NotificationLogEntry }
   | { type: "notificationRead"; id: string }
   | { type: "notificationsRead"; ids: string[] }
-  | { type: "notificationsMarkAllRead" };
+  | { type: "notificationsMarkAllRead" }
+  | { type: "notificationsCleared"; before?: number };
 
 const FEED_ACTIONS: ReadonlySet<string> = new Set<NotificationFeedAction["type"]>([
-  "notificationsHydrated", "notificationReceived", "notificationRead", "notificationsRead", "notificationsMarkAllRead",
+  "notificationsHydrated", "notificationReceived", "notificationRead", "notificationsRead", "notificationsMarkAllRead", "notificationsCleared",
 ]);
 
 /** The feed's own actions, which the app's reducer hands straight to reduceNotificationFeed. */
@@ -37,5 +38,9 @@ export function reduceNotificationFeed(feed: NotificationLogEntry[], action: Not
     }
     case "notificationsMarkAllRead":
       return feed.map((entry) => (entry.read ? entry : { ...entry, read: true }));
+    case "notificationsCleared": {
+      const { before } = action;
+      return before === undefined ? [] : feed.filter((entry) => entry.at >= before);
+    }
   }
 }

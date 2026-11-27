@@ -1036,6 +1036,8 @@
   "notifications.railUnread": "Bildirimler, {count} okunmamış",
   "notifications.unread": "{count} okunmamış",
   "notifications.markAllRead": "Tümünü okundu olarak işaretle",
+  "notifications.clearAll": "Tümünü temizle",
+  "notifications.cleared": "Bildirimler temizlendi",
   "notifications.pin": "Bildirimleri açık sabitle",
   "notifications.unpin": "Bildirimlerin sabitlemesini kaldır",
   "notifications.close": "Bildirimleri kapat",
