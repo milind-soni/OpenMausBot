@@ -7,11 +7,13 @@ const ERROR_BODY = '403 {"type":"error","error":{"type":"permission_error","mess
 /** A turn whose buffered text is `text`, flushed as core.ts does: a non-blank text becomes a reply. */
 function turnWith(
   text: string,
-  state: { stopped?: boolean; replied?: string; toolsEnded?: boolean; thoughtAfterTools?: boolean; replyAfterTools?: string } = {},
+  state: { stopped?: boolean; replied?: string; toolsEnded?: boolean; toolRunning?: boolean; thoughtAfterTools?: boolean; replyAfterTools?: string } = {},
 ) {
   const replies: string[] = [];
   const current = {
     state: { text: state.replied ?? "", stopped: false, producedItem: false, repliedText: false, toolsSinceShown: false, thoughtSinceTool: false },
+    runningTools: new Set<string>(state.toolRunning ? ["call"] : []),
+    endedToolIds: new Set<string>(state.toolsEnded ? ["call"] : []),
     flushAssistantText() {
       const said = current.state.text;
       current.state.text = "";
@@ -110,5 +112,45 @@ describe("endTurn on a turn that goes wordless after its tools", () => {
   it("after the person's Stop, stays a stop even mid-reasoning after a tool", () => {
     const { current } = turnWith("", { replied: "Working through the folder.", toolsEnded: true, thoughtAfterTools: true, stopped: true });
     expect(endTurn(current, true, null, "omp")).toEqual({ ok: true, stopReason: "cancelled" });
+  });
+});
+
+describe("endTurn on a reply that ends on tool-call markup", () => {
+  it.each([
+    ["a closing parameter tag", 'Opening src/app.ts now.\n<parameter name="path">src/app.ts\n</parameter>'],
+    ["a closing invoke tag", "Applying the edit.\n</invoke>"],
+    ["a tool_call tag", "Reading the file.\n<tool_call>"],
+    ["an unclosed parameter tag", 'Creating the file.\n<parameter name="path"'],
+  ])("fails the turn on %s and still shows the text", (_name, text) => {
+    const { current, replies } = turnWith(text);
+    expect(endTurn(current, true, null, "Grok")).toMatchObject({
+      ok: false,
+      stopReason: "tool_call_fragment",
+      error: { text: { key: "chat.notice.acpToolCallFragment", params: { provider: "Grok" } } },
+    });
+    expect(replies).toEqual([text]);
+  });
+
+  it("leaves prose that ends on plain JSON alone", () => {
+    const { current, replies } = turnWith('The answer is:\n{"ok":true}');
+    expect(endTurn(current, true, null, "Grok")).toEqual({ ok: true, stopReason: null });
+    expect(replies).toEqual(['The answer is:\n{"ok":true}']);
+  });
+
+  it("leaves an ordinary announcement alone", () => {
+    const { current } = turnWith("I'll keep that in mind.");
+    expect(endTurn(current, true, null, "Grok")).toEqual({ ok: true, stopReason: null });
+  });
+
+  it("leaves a turn that ran a tool alone", () => {
+    const running = turnWith("</parameter>", { toolRunning: true });
+    expect(endTurn(running.current, true, null, "Grok")).toEqual({ ok: true, stopReason: null });
+    const ended = turnWith("</parameter>", { toolsEnded: true });
+    expect(endTurn(ended.current, true, null, "Grok")).toEqual({ ok: true, stopReason: null });
+  });
+
+  it("leaves a cut-off fenced example alone", () => {
+    const { current } = turnWith('Here is the shape:\n```xml\n<tool_call>\n<parameter name="path">src/a.ts</parameter>');
+    expect(endTurn(current, true, null, "Grok")).toEqual({ ok: true, stopReason: null });
   });
 });

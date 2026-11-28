@@ -136,6 +136,17 @@ export interface AcpTurnEnd {
   error?: Omit<ErrorReplyFailure, "stopReason">;
 }
 
+const TOOL_CALL_TAIL = ["</parameter>", "</invoke>", "<tool_call>"];
+
+/** A reply whose tail is tool-call markup no tool ran: the model wrote the call as text. A tag inside an unclosed ```
+ * example block is a cut-off sample, not a leak. */
+export function endsOnToolCallMarkup(text: string): boolean {
+  const trimmed = text.trimEnd();
+  if (!trimmed || (trimmed.match(/```/g)?.length ?? 0) % 2 === 1) return false;
+  const tail = trimmed.slice(-64).toLowerCase();
+  return TOOL_CALL_TAIL.some((tag) => tail.endsWith(tag)) || /<parameter(?:\s[^<>]*)?>?$/i.test(trimmed);
+}
+
 /** How a settling turn ends, once its last text is out. A Stop the agent answers with end_turn (OpenCode does) is the
  * person's stop. A reply that is only a provider's error body fails the turn in plain words. Otherwise `end_turn` with
  * nothing to show is a lost turn: a provider may cut a reasoning-only stream and still answer end_turn, and a turn that
@@ -144,12 +155,15 @@ export interface AcpTurnEnd {
 export function endTurn(current: AcpTurn, ok: boolean, stopReason: string | null, ai: string): AcpTurnEnd {
   const ended = ok && stopReason === null;
   const errorReply = ended && !current.state.stopped && !current.state.repliedText ? errorReplyFailure(ai, current.state.text) : null;
+  const toolCallTail = ended && !current.state.stopped && !errorReply && current.runningTools.size === 0 && current.endedToolIds.size === 0
+    && endsOnToolCallMarkup(current.state.text);
   if (!errorReply) current.flushAssistantText();
   if (ended && current.state.stopped) return { ok, stopReason: "cancelled" };
   if (errorReply) {
     const { stopReason: failed, ...error } = errorReply;
     return { ok: false, stopReason: failed, error };
   }
+  if (toolCallTail) return { ok: false, stopReason: "tool_call_fragment", error: noticeFailure("chat.notice.acpToolCallFragment", { provider: ai }) };
   if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: noticeFailure("chat.notice.acpEmpty", { provider: ai }) };
   if (ended && current.state.repliedText && current.state.thoughtSinceTool) return { ok: false, stopReason: "ended_after_tools", error: noticeFailure("chat.notice.acpEndedAfterTools", { provider: ai }) };
   return { ok, stopReason };
