@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -616,6 +616,33 @@ describe("a restart in the middle of a snapshot", () => {
       warn.mockRestore();
     }
   }, 60_000);
+
+  it("removes leftover tmp_pack files an interrupted checkpoint repack left, once they are too old to be in use", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "turn X", undefined, { pin: "dispatch-X" });
+    await drain(bot, cwd);
+    const packDir = join(shadow, ".git", "objects", "pack");
+    mkdirSync(packDir, { recursive: true });
+    const leftover = join(packDir, "tmp_pack_leftover");
+    const fresh = join(packDir, "tmp_pack_fresh");
+    writeFileSync(leftover, "interrupted repack");
+    writeFileSync(fresh, "maybe still in use");
+    utimesSync(leftover, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    const packsBefore = readdirSync(packDir).filter((name) => name.startsWith("pack-"));
+    vi.resetModules();
+    const next = await import("./checkpoints.ts");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    writeFileSync(join(cwd, "a.txt"), "next start");
+    expect(await next.snapshot(bot, cwd, "turn Y", undefined, { pin: "dispatch-Y" })).toMatch(/^[0-9a-f]{40}$/);
+    expect(existsSync(leftover)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    for (const name of packsBefore) expect(existsSync(join(packDir, name)), name).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    await next.release(bot, cwd, "dispatch-Y");
+  });
 
   it("writes nothing while a collection its last server left running could still prune it", async () => {
     const { bot, cwd } = workspace();

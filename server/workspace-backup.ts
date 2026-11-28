@@ -33,6 +33,8 @@ const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 const WAITS_FILE = "waits.json";
 const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
+  // Per-turn rewind snapshots (checkpoints.ts): shadow-git history, not user data; taken again after restore.
+  "checkpoints",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
   // Slack messages a Cloud took from the Admin (team-slack.ts): this machine's own, of no use anywhere else.
@@ -72,6 +74,7 @@ const EXCLUSION_NOTES = [
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
   "Waits bots set up: they end within a week, so ask the bot again after restoring.",
+  "Per-turn rewind checkpoints (they can be taken again after restoring).",
 ];
 const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, ends every wait, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
 
