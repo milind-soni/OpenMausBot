@@ -557,8 +557,8 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
 });
 
 // Modelled on a real day: the mail bot asked the chief of staff for yesterday's mailbox details, and before that was answered
-// the chief of staff, asked by the person in its own chat, asked the mail bot why mail failed. Both waited on each other and
-// worked the same problem in two places, each with its own plan.
+// the chief of staff, asked by the person in its own chat, asked the mail bot why mail failed. Each conversation answers its
+// own request; only a request from or into the conversation that holds the waiting one would leave both waiting on each other.
 describe("RuntimeCoordinator: a request back to a bot that is waiting on you", () => {
   const mail: RoomAddress = { botId: "mail", threadId: "mail-chat" };
   const cos: RoomAddress = { botId: "cos", threadId: "cos-chat" };
@@ -566,9 +566,38 @@ describe("RuntimeCoordinator: a request back to a bot that is waiting on you", (
   const mailWork: RoomAddress = { botId: "mail", threadId: "mail-work-from-cos" };
   const holdCos: Script = (node) => node.botId === "cos" && node.parentId !== undefined ? "hold" : undefined;
 
-  it("refuses it while the request it would answer is open, says which, and writes nothing", async () => {
+  it("lets a request from another of your conversations through while the asker waits, and both get their answers", async () => {
     const w = world(holdCos);
     const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    const back = send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?");
+    expect(back.node).toMatchObject({ botId: "mail", status: "queued" });
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(asked.node.id)?.status).toBe("running");
+    expect(w.coordinator.node(back.node.id)?.status).toBe("completed");
+    await w.host.release(asked.node.id, { ok: true, text: "No details stored" });
+    expect(w.coordinator.node(asked.node.id)?.status).toBe("completed");
+  });
+
+  it("refuses it from the conversation that holds the request it would answer, says so, and writes nothing", () => {
+    const w = world(holdCos);
+    const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    expect(() => send(w, cosWork, "gen-cos-work", undefined, mailWork, "Why can't you fetch mail?"))
+      .toThrow(`@mail is already waiting on you: it handed you a request in this conversation (assignment ${asked.node.id}), and you have not finished it yet.`);
+    expect(w.coordinator.children("gen-cos-work")).toEqual([]);
+  });
+
+  it("names the request held in this conversation even when an older one waits in the thread the new request goes to", () => {
+    const w = world(holdCos);
+    send(w, mailWork, "gen-mail-work", undefined, { botId: "cos", threadId: "cos-elsewhere" }, "Which mailbox should I check?");
+    const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
+    expect(() => send(w, cosWork, "gen-cos-work", undefined, mailWork, "Why can't you fetch mail?"))
+      .toThrow(`@mail is already waiting on you: it handed you a request in this conversation (assignment ${asked.node.id}), and you have not finished it yet.`);
+  });
+
+  it("refuses it into the conversation that waits, a thread you opened on the asker, says which, and lets it through once answered", async () => {
+    const w = world(holdCos);
+    // The mail bot asks from the work thread the chief of staff opened on it; a new hand-off to the mail bot goes to that thread.
+    const asked = send(w, mailWork, "gen-mail-work", undefined, cosWork, "Do you have the mailbox details from yesterday?");
     expect(() => send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?"))
       .toThrow(`@mail is already waiting on you: it handed you a request (assignment ${asked.node.id}), and that has not reached you yet.`);
     expect(w.coordinator.children("gen-cos")).toEqual([]);
@@ -580,13 +609,13 @@ describe("RuntimeCoordinator: a request back to a bot that is waiting on you", (
     expect(send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", status: "queued" });
   });
 
-  it("refuses a consultation the same way, and while the request waits on a question", async () => {
+  it("refuses a consultation the same way while the request waits on a question in that conversation", async () => {
     const w = world((node) => node.botId === "cos" && node.parentId !== undefined ? { ok: true, text: "NEEDS INPUT: Which mailbox?" } : undefined);
     const asked = send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
     w.coordinator.tick(); await flush();
     expect(w.coordinator.node(asked.node.id)?.status).toBe("waiting");
-    begun(w, cos, "gen-cos");
-    expect(() => w.coordinator.enqueue(cos, "gen-cos", undefined, mailWork, "Which mailbox do you mean?", { mode: "consult" }))
+    begun(w, cosWork, "gen-cos-work");
+    expect(() => w.coordinator.enqueue(cosWork, "gen-cos-work", undefined, mailWork, "Which mailbox do you mean?", { mode: "consult" }))
       .toThrow(/@mail is already waiting on you/);
   });
 
@@ -597,15 +626,15 @@ describe("RuntimeCoordinator: a request back to a bot that is waiting on you", (
     // The chief of staff's own request is another line of the person's than the one they stopped.
     begun(w, cos, "gen-cos", "Mail worked yesterday", { origin: { kind: "user", request: "Mail worked yesterday, find out why" } });
     w.coordinator.stopAwaitingDirect("mail-chat");
-    expect(send(w, cos, "gen-cos", undefined, mailWork, "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", status: "queued" });
+    expect(send(w, cos, "gen-cos", undefined, mail, "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", status: "queued" });
     if (w.host.held.has(asked.node.id)) await w.host.release(asked.node.id, { ok: true, text: "No details stored" });
   });
 
   it("leaves a one-way notice, other teammates, rooms and the bot's own requester alone", async () => {
     const w = world(holdCos);
     send(w, mail, "gen-mail", undefined, cosWork, "Do you have the mailbox details from yesterday?");
-    begun(w, cos, "gen-cos");
-    expect(w.coordinator.enqueue(cos, "gen-cos", undefined, mailWork, "FYI: the person says it worked yesterday", { mode: "notify", reply: "none" }).node)
+    begun(w, cosWork, "gen-cos-work");
+    expect(w.coordinator.enqueue(cosWork, "gen-cos-work", undefined, mailWork, "FYI: the person says it worked yesterday", { mode: "notify", reply: "none" }).node)
       .toMatchObject({ botId: "mail", reply: "none" });
     expect(send(w, cos, "gen-cos", undefined, tester, "Check the mail server").node).toMatchObject({ botId: "tester" });
     expect(send(w, inRoom("cos"), "gen-room", undefined, inRoom("mail"), "Why can't you fetch mail?").node).toMatchObject({ botId: "mail", groupId: "g1" });
