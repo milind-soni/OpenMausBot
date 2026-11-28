@@ -329,6 +329,14 @@ describe("a url server's sign-in app", () => {
     });
   });
 
+  it("returns a cleared redirect uri to the default loopback address", () => {
+    const configured = { ...saved, oauth: { clientId: "corp-app", redirectUri: "https://maus.example/mcp-oauth/callback" } };
+    expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "corp-app", redirectUri: "" } }, configured)).toEqual({
+      ok: true,
+      server: { type: "http", url, headers: {}, oauth: { clientId: "corp-app" }, enabled: true },
+    });
+  });
+
   it("keeps a saved secret behind a placeholder only for the same client id", () => {
     expect(parseMcpServerMutation("docs", { url, oauth: { clientId: "corp-app", clientSecret: true } }, saved)).toEqual({
       ok: true,

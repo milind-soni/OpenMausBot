@@ -74,7 +74,7 @@ describe("MCP server form", () => {
   });
 
   it("sends a sign-in app only with a client id, keeping a saved secret behind a blank", () => {
-    const blank = { clientId: "", clientSecret: "", scopes: "", forgetSecret: false };
+    const blank = { clientId: "", clientSecret: "", scopes: "", redirectUri: "", forgetSecret: false };
     expect(parseMcpOAuthClient(blank)).toBeUndefined();
     expect(parseMcpOAuthClient({ ...blank, clientId: "  corp-app ", scopes: "offline_access, api://x/read  " })).toEqual({
       clientId: "corp-app",
@@ -83,6 +83,15 @@ describe("MCP server form", () => {
     expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app" }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app", clientSecret: true });
     expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app", forgetSecret: true }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app" });
     expect(parseMcpOAuthClient({ ...blank, clientId: "corp-app", clientSecret: "new" }, { clientSecretConfigured: true })).toEqual({ clientId: "corp-app", clientSecret: "new" });
+  });
+
+  it("sends a typed redirect URI, and an emptied one only when the app named its own", () => {
+    const blank = { clientId: "corp-app", clientSecret: "", scopes: "", redirectUri: "", forgetSecret: false };
+    const uri = "https://maus.example/mcp-oauth/callback";
+    expect(parseMcpOAuthClient({ ...blank, redirectUri: ` ${uri} ` })).toEqual({ clientId: "corp-app", redirectUri: uri });
+    expect(parseMcpOAuthClient(blank, { clientSecretConfigured: false })).toEqual({ clientId: "corp-app" });
+    expect(parseMcpOAuthClient(blank, { clientSecretConfigured: false, redirectUriDefault: true })).toEqual({ clientId: "corp-app" });
+    expect(parseMcpOAuthClient(blank, { clientSecretConfigured: false, redirectUriDefault: false })).toEqual({ clientId: "corp-app", redirectUri: "" });
   });
 
   it("retains the offending name while an existing error changes language", () => {

@@ -40,8 +40,10 @@ export interface McpOAuthClientConfig {
   redirectUri?: string;
 }
 
-/** The return address a configured app may name: this server's https address, at the callback path. */
+/** The return address a configured app may name: this server's https address, at the callback path. An empty value asks
+ * for the default loopback address instead. */
 export function mcpConfiguredRedirectError(value: string): string | null {
+  if (!value) return null;
   let url: URL;
   try {
     url = new URL(value);
@@ -85,7 +87,7 @@ export interface RemoteMcpServerListing {
   enabled: boolean;
   resultBudget?: number;
   apps: boolean;
-  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean; redirectUri?: string };
+  oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean; redirectUri?: string; redirectUriDefault?: boolean };
   runsOn?: McpRunsOn;
   bot?: string;
 }
@@ -294,11 +296,13 @@ function resolveOAuthClient(
     clientSecret = incoming.clientSecret;
   }
   const scopes = [...new Set(incoming.scopes ?? [])];
-  if (incoming.redirectUri !== undefined) {
+  if (incoming.redirectUri) {
     const redirectError = mcpConfiguredRedirectError(incoming.redirectUri);
     if (redirectError) return { ok: false, error: redirectError };
   }
-  const redirectUri = incoming.redirectUri ?? (saved?.clientId === incoming.clientId ? saved.redirectUri : undefined);
+  const redirectUri = incoming.redirectUri === ""
+    ? undefined
+    : incoming.redirectUri ?? (saved?.clientId === incoming.clientId ? saved.redirectUri : undefined);
   return {
     ok: true,
     value: {
