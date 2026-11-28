@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SEES_EVERYTHING, VisibleSet } from "../bot-visibility.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
@@ -21,8 +22,8 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function serve(store: Store) {
-  const deps = { store, defaultPage: 50, pageSize, ...messagePages(store), viewerFor: () => ({}), visibleTo: () => ({ bot: () => true, group: () => true }), workspaceAccess: () => null,
+async function serve(store: Store, visible = new VisibleSet(store.bots, store.groups, SEES_EVERYTHING)) {
+  const deps = { store, defaultPage: 50, pageSize, ...messagePages(store), viewerFor: () => ({}), visibleTo: () => visible, workspaceAccess: () => null,
     desktopMutationToken: () => undefined, companionMutationToken: () => undefined, cliOwnerToken: () => undefined } as unknown as ThreadRouteDeps;
   const routes = [createThreadRoutes(deps)];
   const server = createServer(async (req, res) => {
@@ -36,7 +37,7 @@ async function serve(store: Store) {
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   return async (path: string) => {
     const res = await fetch(`${base}${path}`);
-    return { status: res.status, body: await res.json() as { messages: Message[]; hasMore: boolean; activeLeafId: string | null } };
+    return { status: res.status, body: await res.json() as { messages: Message[]; hasMore: boolean; activeLeafId: string | null; nextBefore?: string | null } };
   };
 }
 
@@ -163,6 +164,63 @@ describe("GET /api/threads/:threadId/messages", () => {
       expect(read).not.toHaveBeenCalled();
     } finally {
       read.mockRestore();
+    }
+  });
+});
+
+describe("GET /api/threads/:threadId/goals", () => {
+  it("pages goal cards newest first even when thousands of unrelated rows follow them", async () => {
+    const store = new Store(() => sonnet);
+    const bot = store.createBot({}, { seedMessages: false });
+    const { threadId } = bot;
+    const makeGoal = (id: string, status: "working" | "completed"): Message => row(id, {
+      kind: "goal.run", role: "bot", at: 10,
+      goalRun: { runId: id, goal: id, status, startedAt: 10, turnCount: 1, maxTurns: 20, coordinatorBotId: bot.id, coordinatorName: bot.name },
+    });
+    const older = makeGoal("m1", "completed");
+    const latest = makeGoal("m2", "working");
+    const tail = Array.from({ length: 2_400 }, (_, index) => row(`m${index + 3}`, { parentId: null }));
+    mdb.importThread(threadId, [latest, older, ...tail], tail.at(-1)!.id);
+    const otherThread = store.createGroup("Room", [bot.id]).threadId;
+    const otherGoal = makeGoal("m9999", "completed");
+    mdb.insertMessage(otherThread, otherGoal);
+    const emptyThread = store.createBot({}, { seedMessages: false }).threadId;
+    const get = await serve(store);
+    const route = `/api/threads/${threadId}/goals`;
+    const readTranscript = vi.spyOn(store, "messagesFor");
+    const readTail = vi.spyOn(store, "messagesTail");
+    try {
+      expect(await get(`${route}?limit=1`)).toEqual({ status: 200, body: { messages: [latest], nextBefore: latest.id } });
+      expect(await get(`${route}?before=${latest.id}&limit=1`)).toEqual({ status: 200, body: { messages: [older], nextBefore: null } });
+      expect(await get(`/api/threads/${otherThread}/goals`)).toEqual({ status: 200, body: { messages: [otherGoal], nextBefore: null } });
+      expect(await get(`/api/threads/${emptyThread}/goals?limit=1`)).toEqual({ status: 200, body: { messages: [], nextBefore: null } });
+      expect((await get(`${route}?before=${otherGoal.id}`)).status).toBe(404);
+      expect((await get(`${route}?before=${tail[0]!.id}`)).status).toBe(404);
+      expect((await get(`${route}?limit=0`)).status).toBe(400);
+      expect(readTranscript).not.toHaveBeenCalled();
+      expect(readTail).not.toHaveBeenCalled();
+    } finally {
+      readTranscript.mockRestore();
+      readTail.mockRestore();
+    }
+  });
+
+  it("hides a private conversation from another member and a team admin before reading goals", async () => {
+    const store = new Store(() => sonnet);
+    const { threadId } = store.createBot({}, { seedMessages: false });
+    const goal = row("m1", { kind: "goal.run", role: "bot", text: "Private goal" });
+    mdb.insertMessage(threadId, goal);
+    const audience = { of: (id: string) => id === threadId ? "member:alice" as const : undefined, person: "alice" };
+    const alice = new VisibleSet(store.bots, store.groups, { kind: "member", email: "alice@example.org" }, undefined, audience);
+    const aliceGet = await serve(store, alice);
+    expect((await aliceGet(`/api/threads/${threadId}/goals`)).body.messages).toEqual([goal]);
+
+    for (const kind of ["member", "all"] as const) {
+      const bob = new VisibleSet(store.bots, store.groups, { kind, email: "bob@example.org" }, undefined, { ...audience, person: "bob" });
+      const get = await serve(store, bob);
+      const expected = { status: 404, body: { error: "no such conversation" } };
+      expect(await get(`/api/threads/${threadId}/goals?limit=0&before=m1`)).toEqual(expected);
+      expect(await get("/api/threads/missing-thread/goals")).toEqual(expected);
     }
   });
 });

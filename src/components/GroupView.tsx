@@ -47,6 +47,7 @@ import { SignInRequestCard } from "./SignInRequestCard";
 import { isPinnedSignIn, NO_PINNED_SIGN_INS, PinnedSignInSlot } from "./PinnedSignInSlot";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
+import { ThreadGoals } from "./ThreadGoals";
 import { OptionCard } from "./OptionCard";
 import { GroupCallOverlay } from "./GroupCallView";
 
@@ -491,6 +492,7 @@ export function GroupView({ group, inForkPanel = false, bare = false }: { group:
         </div>
       )}
       <PinnedSignInSlot cards={pinnedSignIns} />
+      <ThreadGoals key={group.threadId} thread={group} inForkPanel={inForkPanel} />
 
       </GlassBar>
 

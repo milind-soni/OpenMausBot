@@ -95,7 +95,10 @@ describe("the conversation of a My Cloud bot, through this computer's server", (
     expect((await ask("/api/bots/cloud:scout/messages", { method: "POST", body: JSON.stringify({ threadId: "cloud:t1", text: "cloud: hi", attachments: [{ path: "cloud--aa11-bb22.png" }] }) })).status).toBe(200);
     expect((await ask("/api/bots/cloud:scout/interrupt", { method: "POST", body: JSON.stringify({ threadId: "cloud:t1" }) })).status).toBe(200);
     expect((await ask("/api/threads/cloud%3At2/messages?limit=40&before=m1")).status).toBe(200);
-    expect(seen.map(({ method, url }) => `${method} ${url}`)).toEqual(["POST /api/bots/scout/messages", "POST /api/bots/scout/interrupt", "GET /api/threads/t2/messages?limit=40&before=m1"]);
+    expect((await ask("/api/threads/cloud%3At2/goals?limit=1&before=m1")).status).toBe(200);
+    expect(seen.map(({ method, url }) => `${method} ${url}`)).toEqual([
+      "POST /api/bots/scout/messages", "POST /api/bots/scout/interrupt", "GET /api/threads/t2/messages?limit=40&before=m1", "GET /api/threads/t2/goals?limit=1&before=m1",
+    ]);
     expect(JSON.parse(seen[0]!.body)).toEqual({ threadId: "t1", text: "cloud: hi", attachments: [{ path: "/data/attachments/aa11-bb22.png" }] });
     expect(JSON.parse(seen[1]!.body)).toEqual({ threadId: "t1" });
   });

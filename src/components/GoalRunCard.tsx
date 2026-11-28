@@ -30,6 +30,14 @@ const COPY = {
   { label: LocaleKey; tone: string; border: string }
 >;
 
+export function goalRunStatus(run: GroupGoalRunCardData): string {
+  return t(COPY[run.status].label);
+}
+
+export function goalRunTurnCount(run: GroupGoalRunCardData): string {
+  return run.turnCount === 1 ? t("routines.goal.turnsOne") : t("routines.goal.turnsMany", { count: run.turnCount });
+}
+
 function compact(value: string | undefined, limit: number): string {
   const clean = value?.replace(/\s+/g, " ").trim() ?? "";
   return clean.length > limit ? `${clean.slice(0, limit - 1).trimEnd()}…` : clean;
@@ -39,7 +47,7 @@ function StatusIcon({ status }: { status: GroupGoalRunCardData["status"] }) {
   const className = "size-4 shrink-0";
   switch (status) {
     case "working":
-      return <Loader2 aria-hidden="true" className={cn(className, "animate-spin text-accent")} />;
+      return <Loader2 aria-hidden="true" className={cn(className, "animate-spin text-accent motion-reduce:animate-none")} />;
     case "completed":
       return <CheckCircle2 aria-hidden="true" className={cn(className, "text-success")} />;
     case "needs-input":
@@ -55,6 +63,29 @@ function StatusIcon({ status }: { status: GroupGoalRunCardData["status"] }) {
   }
 }
 
+function goalRunDisplay(run: GroupGoalRunCardData) {
+  return {
+    goal: compact(run.goal, 180) || t("routines.goal.groupGoal"),
+    detail: compact(routineLineText(run.detailCode, run.detail ?? "", run.detailParams), DETAIL_LIMIT),
+    status: goalRunStatus(run),
+    turns: run.status === "working"
+      ? t("routines.goal.turnOf", { turn: Math.min(run.turnCount + 1, run.maxTurns), max: run.maxTurns })
+      : goalRunTurnCount(run),
+  };
+}
+
+export function PinnedGoalSummary({ run }: { run: GroupGoalRunCardData }) {
+  const { goal, detail, status, turns } = goalRunDisplay(run);
+  return <>
+    <StatusIcon status={run.status} />
+    <div className="min-w-0 flex-1">
+      <h2 dir="auto" title={run.goal} className="truncate text-[13px] font-medium text-ink">{goal}</h2>
+      <p aria-live="polite" className="truncate text-[12px] tabular-nums text-ink-secondary">{status} · {turns}</p>
+      {detail && <p dir="auto" title={detail} className="truncate text-[12px] text-ink-secondary">{detail}</p>}
+    </div>
+  </>;
+}
+
 /** `solo` is a one-on-one chat's run, where the bot works alone; `onStop` ends a working run from the card. */
 export function GoalRunCard({ message, solo = false, onStop }: { message: Message; solo?: boolean; onStop?: () => void }) {
   const run = message.goalRun;
@@ -68,15 +99,11 @@ export function GoalRunCard({ message, solo = false, onStop }: { message: Messag
   }
 
   const copy = COPY[run.status];
-  const goal = compact(run.goal, 180);
-  const detail = compact(routineLineText(run.detailCode, run.detail ?? "", run.detailParams), DETAIL_LIMIT);
-  const turns = run.status === "working"
-    ? t("routines.goal.turnOf", { turn: Math.min(run.turnCount + 1, run.maxTurns), max: run.maxTurns })
-    : run.turnCount === 1 ? t("routines.goal.turnsOne") : t("routines.goal.turnsMany", { count: run.turnCount });
+  const { goal, detail, status, turns } = goalRunDisplay(run);
 
   return (
     <section
-      aria-label={t("routines.goal.runLabel", { status: t(copy.label) })}
+      aria-label={t("routines.goal.runLabel", { status })}
       className={cn("w-full max-w-[680px] rounded-2xl border bg-card px-3.5 py-3 shadow-sm", copy.border)}
     >
       <div className="flex items-start gap-3">
@@ -85,9 +112,9 @@ export function GoalRunCard({ message, solo = false, onStop }: { message: Messag
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="truncate text-[14px] font-semibold text-ink">{goal || t("routines.goal.groupGoal")}</h3>
+            <h3 className="truncate text-[14px] font-semibold text-ink">{goal}</h3>
             <span aria-live="polite" className={cn("text-[12px] font-medium", copy.tone)}>
-              {t(copy.label)}
+              {status}
             </span>
           </div>
           {detail && <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-secondary">{detail}</p>}

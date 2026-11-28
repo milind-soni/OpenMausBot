@@ -65,7 +65,7 @@ const ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
   ["POST", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/reactions$/],
   ["GET", /^\/api\/threads\/[\w-]+\/job$/],
   ["POST", /^\/api\/threads\/[\w-]+\/job\/[\w-]+\/stop$/],
-  ["GET", /^\/api\/threads\/[\w-]+\/messages$/],
+  ["GET", /^\/api\/threads\/[\w-]+\/(?:messages|goals)$/],
   ["GET", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/(?:image|file|tool)$/],
   // A file a message names: its bytes, a folder's list, or a link a <video> or <audio> element can play (`?media=`).
   ["POST", /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/],
