@@ -3,9 +3,10 @@
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
+import { writeFileAtomic } from "../atomic.ts";
 import { engineInstallRoots } from "../engine-roots.ts";
 import { homeProgramDirs, resetPathCache } from "../env-path.ts";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
@@ -232,7 +233,10 @@ export interface BoxReport {
 export function writeSeccompFile(dir: string): string | null {
   if (!seccompSupported()) return null;
   const file = join(dir, "seccomp.bpf");
-  writeFileSync(file, seccompBytes(), { mode: 0o600 });
+  // Security: writeFileSync's mode applies only when it creates the file, so a seccomp.bpf left with looser
+  // permissions would keep them and a local writer could swap in a filter that allows everything. A fresh
+  // inode with the mode, renamed over it, makes the 0600 above true whatever was there before.
+  writeFileAtomic(file, seccompBytes(), { mode: 0o600 });
   return file;
 }
 

@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, writeSeccompFile } f
 import { processStart, seesProcess } from "./box-probe.ts";
 import { procHidepid } from "./hidepid.ts";
 import { boxUploadsDir, visibleInBox } from "./plan.ts";
-import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
+import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
@@ -122,6 +122,19 @@ describe("the box's hardening (T0c)", () => {
     expect(none.extraFds).toEqual([]);
     expect(writeSeccompFile(dir)).toBe(process.platform === "linux" && process.arch === "x64" ? file : null);
     expect(DENIED_SYSCALLS.length).toBeGreaterThan(30);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("gives the filter file 0600 even when a looser file is already there", () => {
+    // writeFileSync's mode applies only when it creates the file, so this is the case that used to slip through.
+    if (process.platform === "win32" || !seccompSupported()) return;
+    const dir = mkdtempSync(join(tmpdir(), "omb-seccomp-mode-"));
+    const file = join(dir, "seccomp.bpf");
+    writeFileSync(file, "a stale filter");
+    chmodSync(file, 0o644);
+    expect(writeSeccompFile(dir)).toBe(file);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(file)).toEqual(seccompBytes());
     rmSync(dir, { recursive: true, force: true });
   });
 
