@@ -26,6 +26,7 @@ import {
   type OpenCodeRefreshSchedule,
 } from "./opencode-model-refresh.ts";
 import { openCodePromptUnreachedModel } from "./opencode-unreached.ts";
+import { unconfirmedModelCatalog } from "../../startup-model-catalog.ts";
 import { parseOpenCodeLogLine } from "./quiet-status.ts";
 import type { ModelCatalog, ModelVariantOption, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { execCliBoxed } from "../../procs.ts";
@@ -237,6 +238,41 @@ function withEfforts(
   return efforts.length ? { ...rest, variants: efforts } : rest;
 }
 
+/** Whether a Go login is still on file: the `opencode-go` entry of `auth.json` (or `OPENCODE_AUTH_CONTENT`). */
+function storedGoLogin(env: Record<string, string | undefined>): boolean {
+  const texts = [env.OPENCODE_AUTH_CONTENT?.trim()];
+  for (const path of storedAuthPaths(env)) {
+    try { texts.push(readFileSync(path, "utf8")); } catch {}
+  }
+  for (const raw of texts) {
+    if (!raw) continue;
+    try {
+      const entry = (JSON.parse(raw) as Record<string, unknown>)["opencode-go"];
+      const record = entry && typeof entry === "object" && !Array.isArray(entry)
+        ? entry as { key?: unknown; access?: unknown; refresh?: unknown } : undefined;
+      if (record && (record.key || record.access || record.refresh)) return true;
+    } catch {}
+  }
+  return false;
+}
+
+/** A partial listing (OpenCode 2's shared background service can answer before its catalog refetch has reached the
+ * Go provider) must not silently hide the Go models an account still holds: keep the earlier read's Go models and
+ * mark the read unconfirmed, so the next start reads the catalog again instead of the partial one standing for hours. */
+function withHeldGoModels(
+  catalog: ModelCatalog,
+  previous: ModelCatalog,
+  environment: Record<string, string | undefined>,
+): ModelCatalog {
+  if (!storedGoLogin(environment)) return catalog;
+  if (catalog.options.some((option) => option.id.startsWith(OPENCODE_GO_MODEL_PREFIX))) return catalog;
+  const held = previous.options.filter((option) => option.id.startsWith(OPENCODE_GO_MODEL_PREFIX)
+    && !catalog.options.some((present) => present.id === option.id));
+  if (!held.length) return catalog;
+  unconfirmedModelCatalog(catalog);
+  return { ...catalog, options: [...catalog.options, ...held] };
+}
+
 /** `models --verbose` is OpenCode 1 only (2 rejects the flag). Plain `opencode models` on 2 answers from a
  * shared background service that keeps the env it started with, and its first answer is empty. */
 export async function discoverOpenCodeModels(
@@ -277,7 +313,9 @@ export async function discoverOpenCodeModels(
     const previous = lastSuccessfulCatalog.get(cli);
     return previous ? { ...previous } : NO_MODELS;
   }
-  if (options.refresh && !sameModelIds(lastSuccessfulCatalog.get(cli), catalog)) {
+  const previous = lastSuccessfulCatalog.get(cli);
+  if (previous) catalog = withHeldGoModels(catalog, previous, environment);
+  if (options.refresh && !sameModelIds(previous, catalog)) {
     catalogRevisions.set(cli, (catalogRevisions.get(cli) ?? 0) + 1);
   }
   lastSuccessfulCatalog.set(cli, catalog);
