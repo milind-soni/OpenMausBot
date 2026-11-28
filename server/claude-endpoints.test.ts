@@ -6,6 +6,8 @@ import {
   claudeEndpointSchema,
   claudeEndpointUpdateSchema,
   claudeEndpointInfo,
+  claudeEndpointKeepWarmOptIn,
+  cacheKeepWarmUnavailableReason,
   isClaudeEndpoint,
   newClaudeEndpoint,
   updateClaudeEndpoint,
@@ -99,6 +101,7 @@ describe("custom Claude endpoint", () => {
     expect(info).toEqual({
       baseUrl: BASE.baseUrl.replace(/\/$/u, ""),
       models: ["deepseek-chat"],
+      cacheKeepWarm: false,
       tokenSaved: true,
       opusModel: "", sonnetModel: "", haikuModel: "", smallFastModel: "",
     });
@@ -128,6 +131,31 @@ describe("custom Claude endpoint", () => {
       .instances[instanceId].environment).toMatchObject({ ANTHROPIC_AUTH_TOKEN: "sk-replaced", ANTHROPIC_API_KEY: "sk-replaced" });
     // Nothing else in the fleet moves.
     expect(updated.instances.claude).toEqual(instances.claude);
+  });
+
+  it("opts a verified one-hour-cache endpoint into keep-warm, on by explicit choice only", () => {
+    const off = newClaudeEndpoint(cfg(), BASE);
+    expect(claudeEndpointKeepWarmOptIn(off.instances[off.instanceId])).toBe(false);
+    const on = newClaudeEndpoint(cfg(), { ...BASE, cacheKeepWarm: true });
+    expect(claudeEndpointKeepWarmOptIn(on.instances[on.instanceId])).toBe(true);
+    expect(claudeEndpointInfo(on.instances[on.instanceId]).cacheKeepWarm).toBe(true);
+    // An update can turn it on and back off; other account entries never opt in.
+    const edited = updateClaudeEndpoint({ instances: off.instances }, off.instanceId, { cacheKeepWarm: true });
+    expect(claudeEndpointKeepWarmOptIn(edited.instances[off.instanceId])).toBe(true);
+    const reverted = updateClaudeEndpoint({ instances: edited.instances }, off.instanceId, { cacheKeepWarm: false });
+    expect(claudeEndpointKeepWarmOptIn(reverted.instances[off.instanceId])).toBe(false);
+    expect((reverted.instances[off.instanceId].config as Record<string, unknown>)).not.toHaveProperty("cacheKeepWarm");
+    expect(claudeEndpointKeepWarmOptIn(reverted.instances.claude)).toBe(false);
+    expect(claudeEndpointKeepWarmOptIn(undefined)).toBe(false);
+
+    const refusal = "keep-warm runs only on a Claude subscription sign-in or an endpoint opted in with a verified one-hour cache";
+    const opted = on.instances[on.instanceId];
+    const plain = off.instances[off.instanceId];
+    expect(cacheKeepWarmUnavailableReason("subscription", plain)).toBeNull();
+    expect(cacheKeepWarmUnavailableReason("subscription", undefined)).toBeNull();
+    expect(cacheKeepWarmUnavailableReason("api", opted)).toBeNull();
+    expect(cacheKeepWarmUnavailableReason("api", plain)).toBe(refusal);
+    expect(cacheKeepWarmUnavailableReason(undefined, undefined)).toBe(refusal);
   });
 
   it("keeps a discovered catalog when only a model mapping changes", () => {
