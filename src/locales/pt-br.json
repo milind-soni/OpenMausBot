@@ -3765,6 +3765,8 @@
   "browser.panel.asleep": "Este navegador foi fechado depois de ficar sem uso, para economizar memória.",
   "browser.panel.wake": "Abrir novamente",
   "browser.panel.waking": "Abrindo…",
+  "browser.panel.chromeProfileNote": "O Chrome usa um perfil próprio. Os logins salvos no navegador integrado não são compartilhados com ele.",
+  "browser.panel.dismissProfileNote": "Dispensar o aviso sobre o perfil",
   "browser.control.yours": "Você está usando o navegador",
   "browser.control.yoursHint": "As ferramentas de navegador de {name} ficam pausadas enquanto você usa o navegador. O controle volta para {name} depois de alguns segundos sem interação.",
   "browser.control.waiting": "Esperando {name} terminar…",
