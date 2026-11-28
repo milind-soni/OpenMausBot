@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { skillCalls, skillCommandTurnText } from "../../shared/skill-command.ts";
 import { isSkillSwitchAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
+import { allowsTool } from "../../shared/tool-scope.ts";
 import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
@@ -67,6 +68,8 @@ export interface SkillsLibraryHostDeps {
   engineConfig?(instanceId: string): { config?: unknown; environment?: Record<string, string> } | undefined;
   /** The engine instance a bot's new turns run on, for listings made outside a turn. */
   instanceOf?(instanceId: string): TurnInstance | undefined;
+  /** A configured Local VM workspace for the Skills page, without starting or reserving a VM. */
+  projectVmWorkspace?(bot: BotRecord, threadId: string): string | undefined;
 }
 
 /** The engine instance a turn runs on. */
@@ -97,13 +100,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const live = store.bot(bot.id) ?? bot;
     return [live.name, live.description, live.soul, live.section, readSectionContext(live.section)?.text].filter(Boolean).join("\n");
   };
-  const listBotSkills = (bot: BotRecord, threadId = bot.threadId): SkillListing[] => {
+  const listBotSkills = (bot: BotRecord, threadId = bot.threadId, includeVm = true): SkillListing[] => {
     const own = ownSkills(bot);
     const listed = [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)), aboutBot(bot))];
     const names = new Set(listed.map((skill) => skill.name));
     const natives = nativesFor(bot, threadId).filter((skill) => !names.has(skill.name));
     for (const skill of natives) names.add(skill.name);
-    const project = projectFor(bot, threadId).filter((skill) => !names.has(skill.name));
+    const project = (includeVm ? projectForListing(bot, threadId) : projectFor(bot, threadId)).filter((skill) => !names.has(skill.name));
     return [
       ...listed, ...natives.map((skill) => nativeSkillListing(skill, isNativeSkillEnabled(bot.id, skill.name))),
       ...project.map(projectSkillListing),
@@ -117,7 +120,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     // The library fallback is by assignment only, never by name alone.
     if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
-    const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
+    const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectForListing(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
   };
   /** The files beside the SKILL.md readBotSkillFile reads, from the same copy: none for a skill shared from this
@@ -194,11 +197,17 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
   /** What the project a turn works in ships for any agent; none for an engine that cannot read files. `cwd` undefined:
    * the thread's own folder. */
-  const projectFor = (bot: BotRecord, threadId: string, cwd?: string | null, instance = deps.instanceOf?.(bot.modelSelection.instanceId)): NativeSkill[] => {
+  const vmExecAllowed = (bot: BotRecord) => allowsTool(bot.toolScope, { kind: "mcp", server: "agents", name: "vm_exec" });
+  const projectFor = (bot: BotRecord, threadId: string, cwd?: string | null, instance = deps.instanceOf?.(bot.modelSelection.instanceId), vmWorkspace?: string): NativeSkill[] => {
     const engine = engineOf(instance);
-    if (!engine || !supportsWorkspaceFiles(engine.driverKind)) return [];
+    if (!engine || (!supportsWorkspaceFiles(engine.driverKind) && (!vmWorkspace || !vmExecAllowed(bot)))) return [];
     const folder = cwd === undefined ? threadFolder(bot, threadId) : cwd;
-    return folder ? projectSkills(engine, { cwd: folder, dataDir: DATA_DIR }) : [];
+    return folder ? projectSkills(engine, { cwd: folder, dataDir: DATA_DIR, vmWorkspace }) : [];
+  };
+  const projectForListing = (bot: BotRecord, threadId: string): NativeSkill[] => {
+    const instance = deps.instanceOf?.(bot.modelSelection.instanceId);
+    const vmWorkspace = instance && !supportsWorkspaceFiles(instance.driverKind) ? deps.projectVmWorkspace?.(bot, threadId) : undefined;
+    return projectFor(bot, threadId, undefined, instance, vmWorkspace);
   };
   /** The project's skills a turn's prompt and `/` menu use, found by themselves as Claude Code finds `.claude/skills`: none
    * of a name the bot already has or its engine loads by itself. */
@@ -309,6 +318,10 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
     /** A turn's skills index, or the preview's without a thread: the bot's own and library skills, then the ones from
      * this computer, then the ones the project in `cwd` ships, each with a budget of its own. */
+    vmProjectIndex(bot: BotRecord, threadId: string, instance: TurnInstance, vmWorkspace?: string, cwd?: string | null): string {
+      return vmWorkspace ? projectSkillsPrompt(projectFor(bot, threadId, cwd, instance, vmWorkspace), vmWorkspace) : "";
+    },
+
     skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance, cwd?: string | null): string {
       const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined) : conversationSkills(bot, threadId);
       const available = importsFor(bot, assigned, instance);

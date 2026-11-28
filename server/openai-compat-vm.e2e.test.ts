@@ -2,6 +2,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -199,6 +200,41 @@ describe("openai-compat Local VM tools", () => {
     expect(toolNames(requests[0])).toContain("agents_select_computer");
     await until(() => nativeToolNames(bot.threadId), names => names.length > 0);
     expect(nativeToolNames(bot.threadId)).toContain("computer_screenshot");
+  }, 60_000);
+
+  it("lists project skills by their guest path only on the VM that mounts them", async () => {
+    vmState({ containers: [] });
+    const { bot } = await api("POST", "/api/bots", { name: "VM project skills" });
+    const seat = createHash("sha256").update(bot.id).digest("hex").slice(0, 16);
+    const project = join(fixtureHome, "data", "vm-homes", seat, "project");
+    const skill = join(".agents", "skills", "vm-fixture", "SKILL.md");
+    mkdirSync(join(project, dirname(skill)), { recursive: true });
+    mkdirSync(join(project, ".git"));
+    writeFileSync(join(project, skill), "Read the project's VM fixture.\n");
+    const outside = join(fixtureHome, "outside-project");
+    mkdirSync(join(outside, dirname(skill)), { recursive: true });
+    writeFileSync(join(outside, skill), "This host-only description must stay out.\n");
+    await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "openaiCompat", model: "fixture-model" });
+    const send = async (text: string) => {
+      requests.length = 0;
+      await api("POST", `/api/bots/${bot.id}/messages`, { text });
+      await until(() => requests.length, count => count > 0);
+      await idle(bot.id);
+      return requests[0]!.messages.map(message => message.content).join("\n");
+    };
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm", cwd: project });
+    const vmPrompt = await send("Use the project skills.");
+    expect(toolNames(requests[0])).toContain("agents_vm_exec");
+    expect(vmPrompt).toContain('/workspace/project/.agents/skills/vm-fixture/SKILL.md');
+    expect(vmPrompt).toContain("with vm_exec");
+    expect(vmPrompt).not.toContain(join(project, skill));
+    const { skills } = await api("GET", `/api/bots/${bot.id}/skills`);
+    expect(skills).toContainEqual(expect.objectContaining({ name: "vm-fixture", origin: "project", editable: false }));
+
+    await api("PATCH", `/api/bots/${bot.id}`, { cwd: outside });
+    expect(await send("Work on the host folder.")).not.toContain("host-only description");
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: "off", cwd: project });
+    expect(await send("Work without the desktop.")).not.toContain("vm-fixture");
   }, 60_000);
 
   it("mounts the Local VM tools on the select_computer continuation", async () => {
