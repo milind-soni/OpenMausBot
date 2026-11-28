@@ -2158,6 +2158,7 @@
   "sidebar.section.channels": "Chats em grupo",
   "sidebar.section.botChats": "Conversas dos bots",
   "sidebar.section.bots": "Bots",
+  "sidebar.section.recentConversations": "Conversas recentes",
   "sidebar.section.moved": "{name} foi para a posição {position} de {count}",
   "sidebar.section.moveToContext": "Mover para equipe",
   "sidebar.section.newContext": "Nova equipe…",
