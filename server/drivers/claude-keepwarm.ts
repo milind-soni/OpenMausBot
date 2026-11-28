@@ -14,6 +14,7 @@
 // The CLI starts every command server in its MCP config as it launches, before any tool call, and the bot's own servers
 // are in that config (the tool list is part of the prefix). So a fork runs where the bot's turns run: in the bot box
 // where that is on, with the same plan a turn gets (forkSpawnOptions).
+import { appendSubagentMemory } from "./claude-project-memory.ts";
 import { claudeCostSnapshot, readCostHistory, restoredCostBase, turnCostFromRunningTotal, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,11 +33,12 @@ export interface KeepWarmContract {
   env: NodeJS.ProcessEnv;
   cwd: string;
   system: string | null;
+  subagentSystem?: string;
   mcpServers: Record<string, unknown> | null;
   settings: Record<string, unknown> | null;
 }
 
-const VALUE_FLAGS = new Set(["--output-format", "--input-format", "--mcp-config", "--settings", "--append-system-prompt-file", "--resume", "--session-id"]);
+const VALUE_FLAGS = new Set(["--output-format", "--input-format", "--mcp-config", "--settings", "--append-system-prompt-file", "--append-subagent-system-prompt-file", "--resume", "--session-id"]);
 const BARE_FLAGS = new Set(["--verbose", "--include-partial-messages", "--replay-user-messages"]);
 
 /** `persist`: the fork is kept as a session of its own (a summary the conversation moves to), not thrown away. */
@@ -181,6 +183,7 @@ export function runForkedPrompt<T>(opts: {
       writeFileSync(systemPromptPath, contract.system, { mode: 0o600 });
     }
     args = keepWarmArgs(contract.args, { sessionId: opts.sessionId, mcpConfigPath, settingsPath, systemPromptPath }, opts.persist);
+    appendSubagentMemory(args, dir, contract.subagentSystem);
     // The harness's hook helper must never hear about a fork.
     for (const key of Object.keys(env)) if (key.startsWith("OMB_HOOK_")) delete env[key];
     // In the packaged app process.execPath is Electron: the deny hook runs it as node.

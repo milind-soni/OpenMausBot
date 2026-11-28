@@ -1666,6 +1666,32 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(text.endsWith("hi")).toBe(true);
   });
 
+  it("launches with the working folder's project memory in the system prompt file, excluded from the CLI's own loading", async () => {
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.332" });
+    await instance.snapshot();
+    const dump = join(scratch, "project-memory.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const botFolder = join(scratch, "memory-bot");
+    mkdirSync(botFolder);
+    writeFileSync(join(botFolder, "AGENTS.md"), "Keep replies short.");
+
+    await instance.adapter.sendTurn({
+      threadId: "t-project-memory", text: "hi", cwd: botFolder,
+      system: "You are Testy.", systemStable: "You are Testy.",
+      integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: {} } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // The memory shares the system prompt's cached prefix instead of following the first message.
+    expect(seen.systemPromptFile).toBe(`You are Testy.\n\nInstructions from ${join(botFolder, "AGENTS.md")}:\n\nKeep replies short.`);
+    expect(seen.argv).toContain("--append-subagent-system-prompt-file");
+    expect(seen.settings.claudeMdExcludes).toEqual([...personalMemory(), join(botFolder, "AGENTS.md")]);
+    const content = seen.prompt.message.content;
+    const text = typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");
+    expect(text).not.toContain("Keep replies short.");
+  });
+
   it("refreshes a resumed session's recorded prompt on every turn when the CLI supports it", async () => {
     await create(undefined, { FAKE_CLAUDE_DUMP: join(scratch, "coordination-snapshot.json"), FAKE_CLAUDE_VERSION: "2.1.267" });
     // After an Engines snapshot, the cached version is what admits the flag.
