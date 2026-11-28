@@ -196,12 +196,13 @@ export function trimMemoryJournal(botId: string, maxBytes = journalMaxBytes()): 
   const firstBreak = text.indexOf("\n");
   const kept = firstBreak >= 0 ? text.slice(firstBreak + 1) : "";
   // No whole record fits in the window: the newest one alone is past the cap, so keeping any of it would leave the
-  // journal unbounded. Emptying the file is the only bounded state.
-  if (!kept.trim()) {
-    writeFileAtomic(file, "", { mode: 0o600 });
-    return true;
+  // journal unbounded. Emptying the file is the only bounded state. Retention is best-effort: a failed write leaves
+  // the journal as it was and says so.
+  try {
+    writeFileAtomic(file, kept.trim() ? kept : "", { mode: 0o600 });
+  } catch {
+    return false;
   }
-  writeFileAtomic(file, kept, { mode: 0o600 });
   return true;
 }
 
