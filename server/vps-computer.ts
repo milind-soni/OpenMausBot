@@ -989,23 +989,20 @@ export async function vpsComputerAction(
         assertUsableContainer(before);
         await applyResourcesBeforeStart(containerRef, vpsResources(cfg), run);
         await run(["start", containerRef]);
-      } else if (action === "remove") {
-        // Skips the usability check (remove escapes a broken container); the ownership labels are the only gate.
-        if (before.container === "missing") return before;
+      } else {
+        // Skips the usability check (stop and remove shut down a broken or outdated container); ownership labels are the only gate.
+        if (action === "remove" && before.container === "missing") return before;
+        if (action === "stop" && before.container !== "running") throw Object.assign(new Error("The VPS container is not running"), { status: 409 });
         if (!before.managed) {
           throw Object.assign(
             new Error("The VPS container name is occupied by a container OpenMausBot did not create — remove it on the VPS yourself"),
             { status: 409 },
           );
         }
-        await run(["rm", "-f", containerRef]);
+        await run(action === "remove" ? ["rm", "-f", containerRef] : ["stop", containerRef]);
         return await computeVpsComputerStatus(cfg, botId, runner);
-      } else {
-        if (before.container !== "running") throw Object.assign(new Error("The VPS container is not running"), { status: 409 });
-        assertUsableContainer(before);
-        await run(["stop", containerRef]);
       }
-      return await (action === "stop" ? computeVpsComputerStatus(cfg, botId, runner) : waitForVpsReady(cfg, botId, runner));
+      return await waitForVpsReady(cfg, botId, runner);
     } finally {
       invalidateVpsStatus(key);
     }
