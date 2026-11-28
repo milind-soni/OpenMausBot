@@ -162,7 +162,7 @@ export function createAppSettings(deps: AppSettingsDeps) {
     if (!bot) return refuse(404, "This bot no longer exists.");
     if (entry.tier === "owner-only") return refuse(403, personOnly(entry.label, entry.where));
     const notOwner = notOwners(turn);
-    if (notOwner) return refuse(403, `Settings change only in the owner's own conversation. Nothing changed; you may still read settings. ${whyNotOwners(notOwner, placePath(entry.where))}`);
+    if (notOwner) return refuse(403, `Settings change only in the owner's own conversation. Nothing changed; you may still read settings. ${whyNotOwners(notOwner, placePath(entry.where), entry.where === "bot-settings")}`);
     if (entry.tier === "secret") {
       if (body.value !== undefined) return refuse(400, `Never send a key or token as a value. Call set on ${entry.id} with no value: a secure card asks the user for it, and you never see it.`);
       const budget = spendWrite(turn);
@@ -281,12 +281,15 @@ export function createAppSettings(deps: AppSettingsDeps) {
 
 type NotOwners = TurnOwnerRefusal | "guest" | "unknown";
 
-/** Why a turn is not the owner's own, and what the person can do instead, in words the bot can pass on. */
-export function whyNotOwners(why: NotOwners, where: string): string {
-  const themselves = `The person can change it themselves in ${where}.`;
+/** Why a turn is not the owner's own, and what the person can do instead, in words the bot can pass on. `perBot`: the
+ * setting is kept per bot, so the person changes it on each bot they want it for. */
+export function whyNotOwners(why: NotOwners, where: string, perBot = false): string {
+  const themselves = `The person can change it themselves in ${where}.${perBot ? " It is set for each bot on its own, so they change it on every bot they want it for." : ""}`;
   const fresh = "Or they ask again in a new conversation with this bot that only they write in.";
   switch (why) {
-    case "shared": return `Several people share this server, so bots never change its settings. ${themselves}`;
+    case "shared": return perBot
+      ? `Several people share this server, so bots never change settings here, not even a bot's own. ${themselves}`
+      : `Several people share this server, so bots never change its settings. ${themselves}`;
     case "service": return `This server is set up as a shared or hosted server, so bots never change its settings. ${themselves}`;
     case "guest": return `A guest writes in this conversation, so it is not the owner's own. ${themselves}`;
     case "someone-else": return `Someone else wrote or answered in this conversation, or a bot opened it, so asking again here won't work. ${themselves} ${fresh}`;

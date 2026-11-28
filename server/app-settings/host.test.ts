@@ -176,6 +176,22 @@ describe("reads", () => {
     expect(await said({ owner: false })).toContain("can't be tied to a message the owner sent here");
   });
 
+  it("on a shared server, a refused bot setting says it is each bot's own and where to change it", async () => {
+    const { host, turn, set, botPatches } = fixture({ owner: false, ownerRefusal: "shared" });
+    const where = (JSON.parse(String((await host.handle({ action: "get", id: "bots.settings" }, turn)).body.text)) as { where: string }).where;
+    const refused = await set("bots.settings", JSON.stringify({ botIds: "all", replyStyle: "conversational" }));
+    expect(refused.status).toBe(403);
+    expect(botPatches).toEqual([]);
+    const error = String(refused.body.error);
+    expect(error).toContain("Several people share this server, so bots never change settings here, not even a bot's own.");
+    expect(error).toContain(`The person can change it themselves in ${where}.`);
+    expect(error).toContain("It is set for each bot on its own, so they change it on every bot they want it for.");
+    // A server-wide setting keeps the plain words.
+    const serverWide = String((await set("general.language", "de")).body.error);
+    expect(serverWide).toContain("Several people share this server, so bots never change its settings.");
+    expect(serverWide).not.toContain("for each bot on its own");
+  });
+
   it("refuses writes in a guest-driven conversation", async () => {
     const { set, saved } = fixture({ guest: true });
     expect((await set("general.language", "de")).status).toBe(403);
