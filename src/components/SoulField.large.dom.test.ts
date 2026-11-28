@@ -57,7 +57,9 @@ describe("the standing instructions editor opened large", () => {
     const large = panel.querySelector("textarea")!;
     expect(large.value).toBe("# Rules\nBe brief.");
     expect(document.activeElement).toBe(large);
-    expect(panel.textContent).toContain("17 / 24,000 bytes");
+    expect(document.getElementById(large.getAttribute("aria-labelledby")!)!.textContent).toBe("Standing instructions (SOUL.md)");
+    expect(panel.getAttribute("aria-labelledby")).toBe(large.getAttribute("aria-labelledby"));
+    expect(document.getElementById(large.getAttribute("aria-describedby")!)!.textContent).toBe("17 / 24,000 bytes");
 
     type(large, "# Rules\nBe brief and kind.");
     expect(onPatch).toHaveBeenLastCalledWith({ soul: "# Rules\nBe brief and kind." });
@@ -73,11 +75,27 @@ describe("the standing instructions editor opened large", () => {
     expect(document.activeElement).toBe(openLarge());
   });
 
-  it("closes with Done", () => {
+  it("shows an edit over the limit as not saved", () => {
+    const onPatch = vi.fn();
+    render(bot("Be brief."), onPatch);
+    flushSync(() => openLarge()!.click());
+    const large = dialog()!.querySelector("textarea")!;
+    type(large, "x".repeat(24_001));
+    expect(onPatch).not.toHaveBeenCalled();
+    expect(large.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(large.getAttribute("aria-describedby")!)!.textContent).toBe("24,001 / 24,000 bytes — not saved");
+  });
+
+  it("closes with Done or a click outside", () => {
     render(bot(""), vi.fn());
     flushSync(() => openLarge()!.click());
     const done = [...dialog()!.querySelectorAll("button")].find((button) => button.textContent === "Done")!;
     flushSync(() => done.click());
+    expect(dialog()).toBeNull();
+
+    flushSync(() => openLarge()!.click());
+    const scrim = dialog()!.parentElement!;
+    flushSync(() => scrim.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })));
     expect(dialog()).toBeNull();
   });
 });
