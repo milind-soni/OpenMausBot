@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { APP_POINT_SOURCE, marksMessage, POINT_ENDED_METHOD, POINT_LIMITS, POINTED_METHOD, pointedLabel, pointMessage, readPointEvent } from "./point.ts";
+import { APP_POINT_SOURCE, highlightSelectionMessage, marksMessage, POINT_ENDED_METHOD, POINT_LIMITS, POINT_SELECTION_METHOD, POINTED_METHOD, pointedLabel, pointMessage, readPointEvent } from "./point.ts";
 
 const frame = { name: "the page's window" };
 const pick = (params: Record<string, unknown>) => ({ jsonrpc: "2.0", method: POINTED_METHOD, params });
@@ -30,6 +30,21 @@ describe("readPointEvent", () => {
     expect(Array.from(long.part.html)).toHaveLength(POINT_LIMITS.html);
   });
 
+  it("bounds selected text and refuses bad range anchors from a page", () => {
+    const range = { start: 0, end: 21, fingerprint: 0 };
+    const read = (params: Record<string, unknown>) => readPointEvent({ source: frame, data: pick({ ...PART, ...params }) }, frame);
+    expect(read({ range, text: "a".repeat(POINT_LIMITS.selection + 1) })).toMatchObject({
+      kind: "pointed", part: { range, text: `${"a".repeat(POINT_LIMITS.selection - 1)}…` },
+    });
+    for (const bad of [null, [], { ...range, start: -1 }, { ...range, start: 21 }, { ...range, end: 1.5 },
+      { ...range, end: 2 * POINT_LIMITS.selection + 1 }, { ...range, fingerprint: 2 ** 32 }, { ...range, extra: true }]) {
+      expect(read({ range: bad })).toBeNull();
+    }
+    expect(read({ range, text: "\u0000  " })).toBeNull();
+    expect(read({ range, selector: "p[data-name=\"A  B\"]" })).toMatchObject({ part: { selector: "p[data-name=\"A  B\"]" } });
+    expect(read({ range, selector: `#${"x".repeat(POINT_LIMITS.selector)}` })).toBeNull();
+  });
+
   it("labels a chip by the part's own words, or not at all", () => {
     expect(pointedLabel({ text: "Choose Pro" })).toBe("“Choose Pro”");
     expect(pointedLabel({ text: "   " })).toBeNull();
@@ -43,7 +58,12 @@ describe("the page's point script", () => {
   // Point stays on after a pick, and every boot listens on the one window, so each test turns its scripts off after it.
   const booted: Array<(data: unknown) => void> = [];
   afterEach(() => {
-    for (const say of booted.splice(0)) say(pointMessage(false));
+    for (const say of booted.splice(0)) {
+      say(pointMessage(false));
+      say(marksMessage([]));
+    }
+    document.getSelection()?.removeAllRanges();
+    vi.restoreAllMocks();
     posted.length = 0;
     document.body.innerHTML = "";
     document.documentElement.style.cursor = "";
@@ -96,6 +116,71 @@ describe("the page's point script", () => {
     expect(document.documentElement.style.cursor).toBe("");
     click(pro);
     expect(posted).toHaveLength(2);
+  });
+
+  it("allows native selection, commits only on request, and redraws separate ranges of the same paragraph", async () => {
+    const { say } = boot();
+    document.body.innerHTML = `<p id="total">42 <b>units</b> and 42 <i>units</i></p>`;
+    const paragraph = document.querySelector("p")!;
+    const select = (start: Node, offset: number, end: Node) => {
+      const range = document.createRange();
+      range.setStart(start, offset);
+      range.setEnd(end, 5);
+      document.getSelection()!.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    };
+    vi.spyOn(Range.prototype, "getClientRects").mockReturnValue([new DOMRect(11, 29, 45, 15)] as unknown as DOMRectList);
+    say(pointMessage(true));
+    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    const pageDown = vi.fn();
+    paragraph.addEventListener("mousedown", pageDown);
+    paragraph.dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(false);
+    expect(pageDown).not.toHaveBeenCalled();
+    select(paragraph.firstChild!, 0, paragraph.querySelector("b")!.firstChild!);
+    click(paragraph);
+    say(highlightSelectionMessage(), { name: "another window" });
+    expect(posted).toEqual([{ jsonrpc: "2.0", method: POINT_SELECTION_METHOD, params: { state: "ready" } }]);
+    say(highlightSelectionMessage());
+    const first = posted.map((data) => readPointEvent({ source: frame, data }, frame)).find((event) => event?.kind === "pointed")!;
+    expect(first).toMatchObject({ kind: "pointed", part: { text: "42 units", html: "", selector: "#total", range: { start: 0, end: 8 } } });
+    expect(document.getSelection()!.rangeCount).toBe(0);
+    select(paragraph.childNodes[2]!, 5, paragraph.querySelector("i")!.firstChild!);
+    const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    window.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(true);
+    const marks = posted.flatMap((data) => {
+      const event = readPointEvent({ source: frame, data }, frame);
+      return event?.kind === "pointed" && event.part.range ? [{ selector: event.part.selector, range: event.part.range }] : [];
+    });
+    expect(marks.map(({ range }) => [range.start, range.end])).toEqual([[0, 8], [13, 21]]);
+    const shown = () => Array.from(document.querySelectorAll<HTMLElement>("[data-mausbot-point=mark]"))
+      .filter((box) => box.style.display !== "none").map((box) => box.textContent);
+    say(marksMessage(marks));
+    expect(shown()).toEqual(["1", "2"]);
+    const fragments = document.querySelectorAll<HTMLElement>("[data-mausbot-point=mark] > div");
+    expect(Array.from(fragments, (box) => box.style.width)).toEqual(["45px", "45px"]);
+    say(marksMessage(marks.slice(1)));
+    expect(shown()).toEqual(["1"]);
+    paragraph.remove();
+    await new Promise((done) => setTimeout(done, 0));
+    await new Promise((done) => requestAnimationFrame(() => done(null)));
+    expect(shown()).toEqual([]);
+    say(marksMessage([]));
+    expect(document.querySelector("[data-mausbot-point=mark]")).toBeNull();
+  });
+
+  it("offers a shorter selection when a highlighted passage would exceed the send limit", () => {
+    const { say } = boot();
+    const paragraph = document.createElement("p");
+    paragraph.textContent = "x".repeat(POINT_LIMITS.selection + 1);
+    document.body.append(paragraph);
+    say(pointMessage(true));
+    document.getSelection()!.selectAllChildren(paragraph);
+    document.dispatchEvent(new Event("selectionchange"));
+    say(highlightSelectionMessage());
+    expect(posted).toEqual([{ jsonrpc: "2.0", method: POINT_SELECTION_METHOD, params: { state: "too-long" } }]);
+    expect(document.getSelection()!.isCollapsed).toBe(false);
   });
 
   it("outlines the parts waiting in the composer with their numbers, only on the parent's word, and never picks an outline", () => {

@@ -191,8 +191,10 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   }, [arrived, message.id, rev]);
 
   const current = slot.live ? loaded?.doc : undefined;
+  const pointReady = arrived && current?.rev === rev;
   const point = usePagePoint({
     frame: () => (fullScreen ? wide.current : frame.current)?.iframe, view: fullScreen ? "full" : "inline", frameKey: loaded?.key,
+    ready: pointReady,
     // In the pane the message box stays usable, so the page stays open while the person writes about what they picked.
     threadId, appId: message.id, rev, title: payload.title, picked: () => { if (!pane) setFullScreen(false); },
   });
@@ -212,7 +214,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const save = usePageSave(threadId, message.id, payload.title);
   const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
   const saveApp = useSaveAsApp({ botId, threadId, messageId: message.id }, room || !page || !payload.doc);
-  const tools = { version, point, share, save, room, pin, saveApp, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const tools = { version, point, share, save, room, pin, saveApp, ready: pointReady, fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
@@ -392,7 +394,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       )}
       {!room && canWrite && (
         <PageCitationButton
-          selection={selection && { text: selection.text, point: { left: selection.left, top: selection.bottom + 8 } }}
+          selection={!point.pointing && selection ? { text: selection.text, point: { left: selection.left, top: selection.bottom + 8 } } : null}
           source={{ ownerType: "bot", ownerId: botId, threadId, messageId: message.id }}
           onAdd={(citation) => appendDraftAttachments(`bot:${botId}:${threadId}`, [citation])}
           onDismiss={() => setSelection(null)}

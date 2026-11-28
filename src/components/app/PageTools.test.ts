@@ -13,7 +13,7 @@ import { MAX_WEB_PANELS } from "@/lib/web-panels";
 import type { AppPayload } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
-import { marksMessage, POINT_LIMITS, POINTED_METHOD } from "../../../shared/app-frame/point";
+import { highlightSelectionMessage, marksMessage, POINT_LIMITS, POINT_SELECTION_METHOD, POINTED_METHOD } from "../../../shared/app-frame/point";
 import { createAppPool, type AppPool } from "./app-pool";
 import { AppMessage, forgetAppRows } from "./AppMessage";
 import { PAGE_HEIGHT } from "./PageTools";
@@ -37,16 +37,19 @@ const LIVE: PublishedPageCard = { state: "live", title: "Pricing", pageId: "page
 let host: HTMLDivElement;
 let root: Root;
 let pool: AppPool;
+let newestRev: number;
 
 function Chips() {
   const chips = usePointedChips("t1");
   return createElement("output", { "data-chips": JSON.stringify(chips.map(({ id: _id, ...chip }) => chip)) });
 }
 const render = async (message: Message) => {
+  newestRev = message.app?.rev ?? 0;
   await act(async () => {
     root.render(createElement(BotEditorStore, { value: store, children: [
       createElement(AppMessage, { key: "row", botId: "pepper", botName: "Pepper", threadId: "t1", message, pool }),
       createElement(Chips, { key: "chips" }),
+      createElement(PointedChips, { key: "points", threadId: "t1" }),
     ] }));
   });
   await settle();
@@ -75,7 +78,7 @@ beforeEach(() => {
     if (url.pathname.endsWith("/app/publish")) return json(200, { ok: true, card: LIVE });
     if (url.pathname.endsWith("/unpublish")) return json(200, { ok: true, card: { ...LIVE, state: "unpublished" } });
     const rev = url.searchParams.get("rev");
-    return json(200, botHtmlDocument({ messageId: "a1", rev: rev === null ? 0 : Number(rev), html: `<p>${rev === null ? "newest" : `version ${Number(rev) + 1}`}</p>` }));
+    return json(200, botHtmlDocument({ messageId: "a1", rev: rev === null ? newestRev : Number(rev), html: `<p>${rev === null ? "newest" : `version ${Number(rev) + 1}`}</p>` }));
   });
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("ogb", { openExternal });
@@ -130,7 +133,7 @@ describe("a bot's page in the chat", () => {
     expect(chips()).toEqual([]);
     await click("Point", card());
     expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: true } }, "*");
-    expect(card().textContent).toContain("Click the part of the page you want changed.");
+    expect(card().textContent).toContain("select text and choose Highlight selection");
     await fromFrame(PICK, window);
     expect(chips()).toEqual([]);
     await fromFrame(PICK, inlineFrame().contentWindow);
@@ -147,6 +150,56 @@ describe("a bot's page in the chat", () => {
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(button("Point", card()).getAttribute("aria-pressed")).toBe("false");
     expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");
+  });
+
+  it("sends highlights and their notes with element picks and clears or restores marks with the visible version", async () => {
+    const page = payload({ doc: "d1", rev: 1, history: ["d0"] });
+    await render(row(page));
+    await click("Point", card());
+    const select = { jsonrpc: "2.0", method: POINT_SELECTION_METHOD, params: { state: "ready" } };
+    const highlight = button("Highlight selection", card());
+    const posted = vi.spyOn(inlineFrame().contentWindow!, "postMessage").mockImplementation(() => {});
+    await fromFrame(select, window);
+    expect(highlight.disabled).toBe(true);
+    await fromFrame(select, inlineFrame().contentWindow);
+    expect(highlight.disabled).toBe(false);
+    await click("Highlight selection", card());
+    expect(posted).toHaveBeenCalledWith(highlightSelectionMessage(), "*");
+    const first = { start: 0, end: 2, fingerprint: 7 };
+    const second = { start: 6, end: 8, fingerprint: 7 };
+    const { selector } = PICK.params;
+    const highlightPick = (range: typeof first) => ({ ...PICK, params: { ...PICK.params, range, text: "42", html: "" } });
+    await fromFrame(PICK, inlineFrame().contentWindow);
+    await fromFrame(highlightPick(first), inlineFrame().contentWindow);
+    await fromFrame(highlightPick(second), inlineFrame().contentWindow);
+    await fromFrame(highlightPick(first), inlineFrame().contentWindow);
+    expect(chips()).toHaveLength(3);
+    expect(posted).toHaveBeenLastCalledWith(marksMessage([selector, { selector, range: first }, { selector, range: second }]), "*");
+
+    await click("Earlier version", card());
+    await settle();
+    const older = vi.spyOn(inlineFrame().contentWindow!, "postMessage").mockImplementation(() => {});
+    await act(async () => { inlineFrame().dispatchEvent(new Event("load")); });
+    expect(older).toHaveBeenLastCalledWith(marksMessage(["", "", ""]), "*");
+    await click("Later version", card());
+    await settle();
+    const newer = vi.spyOn(inlineFrame().contentWindow!, "postMessage").mockImplementation(() => {});
+    await act(async () => { inlineFrame().dispatchEvent(new Event("load")); });
+    expect(newer).toHaveBeenLastCalledWith(marksMessage([selector, { selector, range: first }, { selector, range: second }]), "*");
+    await click("Remove “42”", host);
+    expect(newer).toHaveBeenLastCalledWith(marksMessage([selector, { selector, range: second }]), "*");
+    await click("Write a note on “42”", host);
+    const note = host.querySelector<HTMLInputElement>("[data-pointed-note]")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(note, "Wrong total");
+      note.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const sent = await act(async () => takePointedChips("t1")!);
+    expect(sent.pointed).toMatchObject([{ selector }, { selector, rev: 1, text: "42", range: second, note: "Wrong total" }]);
+    expect(newer).toHaveBeenLastCalledWith(marksMessage([]), "*");
+    await act(async () => { sent.restore(); });
+    await click("Clear all", host);
+    expect(newer).toHaveBeenLastCalledWith(marksMessage([]), "*");
   });
 
   it("sends Point and the numbered outlines again to the frame a reload puts in place", async () => {
@@ -281,6 +334,16 @@ describe("pointed chips", () => {
     const kept = takePointedChips("t1")!.pointed.map((element) => element.selector);
     expect(kept).toHaveLength(POINT_LIMITS.perMessage);
     expect(kept[0]).toBe("s0");
+  });
+
+  it("shows the count and clears only this conversation's points", () => {
+    for (let n = 0; n < 55; n++) addPointedChip("t1", chip(`s${n}`));
+    addPointedChip("t2", chip("other"));
+    act(() => root.render(createElement(PointedChips, { threadId: "t1" })));
+    expect(host.textContent).toContain("55 points");
+    act(() => button("Clear all", host).click());
+    expect(takePointedChips("t1")).toBeNull();
+    expect(takePointedChips("t2")!.pointed).toHaveLength(1);
   });
 
   it("carry the person's note on a part, trimmed and clipped, and keep it when the same part is picked again", () => {
