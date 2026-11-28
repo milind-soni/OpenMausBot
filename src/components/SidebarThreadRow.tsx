@@ -130,6 +130,37 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
   </div>;
 }
 
+const UNGROUPED_THREAD_LIMIT = 10;
+
+export function UngroupedThreadList<T extends ThreadRowTask>({ botId, tasks, activeId, heading, expanded: forceExpanded, renderThread }: {
+  botId: string;
+  tasks: T[];
+  activeId?: string;
+  heading: boolean;
+  expanded: boolean;
+  renderThread: (task: T) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { if (forceExpanded || tasks.length <= UNGROUPED_THREAD_LIMIT) setExpanded(false); }, [forceExpanded, tasks.length]);
+  const priority = (task: T) => task.threadId === activeId ? 0 : task.pinned ? 1 : 2;
+  const ordered = [...tasks].sort((a, b) => priority(a) - priority(b));
+  const disclosure = tasks.length > UNGROUPED_THREAD_LIMIT && !forceExpanded;
+  const visible = disclosure ? ordered.slice(0, UNGROUPED_THREAD_LIMIT) : tasks;
+  const hidden = disclosure ? ordered.slice(UNGROUPED_THREAD_LIMIT) : [];
+  const listId = `ungrouped-threads-${botId}`;
+  return <>
+    {(heading && tasks.length > 0 || disclosure) && <div className="pl-6 pr-3 pb-1 pt-2 text-[12px] leading-4 text-ink-tertiary">{t("task.list")}</div>}
+    {visible.map(renderThread)}
+    {disclosure && <>
+      <button type="button" data-sidebar-ungrouped-disclosure="" aria-expanded={expanded} aria-controls={listId} onClick={() => setExpanded((value) => !value)}
+        className="inline-flex h-7 items-center pl-6 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">
+        {expanded ? t("attach.showLess") : t("attach.showMore", { count: hidden.length })}
+      </button>
+      <div id={listId} role="group" aria-label={t("task.list")} hidden={!expanded}>{expanded && hidden.map(renderThread)}</div>
+    </>}
+  </>;
+}
+
 /** A bot's main thread leads every list of its threads, above pinned ones and whatever was written in last. */
 export function mainThreadFirst<T extends { threadId: string }>(tasks: T[], mainId?: string): T[] {
   const main = tasks.find((task) => task.threadId === mainId);
