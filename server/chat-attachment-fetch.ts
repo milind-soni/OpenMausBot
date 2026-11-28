@@ -27,7 +27,7 @@ async function statIfPresent(path: string) {
 }
 
 async function readChunks(file: FileHandle, size: number, check: () => void, consume: (chunk: Buffer, position: number) => Promise<void>) {
-  const buffer = Buffer.allocUnsafe(64 * 1024);
+  const buffer = Buffer.allocUnsafe(256 * 1024);
   for (let position = 0; position < size;) {
     check();
     const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, size - position), position);

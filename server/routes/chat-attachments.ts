@@ -39,3 +39,18 @@ export function createChatAttachmentRoutes<Vm extends { workspaceDir: string }>(
     }
   };
 }
+
+/** Applies the current turn's computer gate before resolving an attachment's Local VM. */
+export async function resolveAttachmentVm<Vm>(deps: {
+  claimed: boolean;
+  gate: () => Promise<string | null>;
+  current: () => Vm | undefined;
+  active: (vm: Vm) => boolean;
+}): Promise<Vm | undefined> {
+  if (!deps.claimed) return undefined;
+  const refusal = await deps.gate();
+  if (refusal) throw Object.assign(new Error(refusal), { status: 409 });
+  const vm = deps.current();
+  if (!vm || !deps.active(vm)) throw Object.assign(new Error("This turn no longer owns the Local VM."), { status: 409 });
+  return vm;
+}

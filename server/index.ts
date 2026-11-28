@@ -1,6 +1,6 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
-import { createChatAttachmentRoutes } from "./routes/chat-attachments.ts";
+import { createChatAttachmentRoutes, resolveAttachmentVm } from "./routes/chat-attachments.ts";
 import { startFailureText } from "./start-failure-text.ts";
 import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
@@ -10962,15 +10962,10 @@ function saveTurnFile(capability: InternalCapability, botId: string, vm: LocalVm
 
 async function attachmentVmForTurn(capability: InternalCapability): Promise<LocalVmTarget | undefined> {
   const slot = autoVmClaims.get(capability.threadId);
-  if (!localVmThreadTargets.has(capability.threadId) &&
-      !(slot?.localVm && slot.owner.generation === capability.generation)) return undefined;
-  const gate = await computerCallGate(capability);
-  if (gate.held) throw Object.assign(new Error(controlRefusal(gate)), { status: 409 });
-  const vm = localVmThreadTargets.get(capability.threadId);
-  if (!vm || !internalCapabilityIsActive({ ...capability, localVmTarget: vm })) {
-    throw Object.assign(new Error("This turn no longer owns the Local VM."), { status: 409 });
-  }
-  return vm;
+  return resolveAttachmentVm({ claimed: localVmThreadTargets.has(capability.threadId) || Boolean(slot?.localVm && slot.owner.generation === capability.generation),
+    gate: async () => { const gate = await computerCallGate(capability); return gate.held ? controlRefusal(gate) : null; },
+    current: () => localVmThreadTargets.get(capability.threadId), active: (vm) => internalCapabilityIsActive({ ...capability, localVmTarget: vm }),
+  });
 }
 
 function connectorThread(botId: string, threadId: string) {

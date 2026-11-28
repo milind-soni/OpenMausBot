@@ -148,7 +148,7 @@ it.skipIf(process.platform !== "linux")("bounds bulk reads and lets the event lo
   try {
     await fetchChatAttachment(scope, ref);
     expect(reads).toBeGreaterThan(1);
-    expect(largest).toBeLessThanOrEqual(64 * 1024);
+    expect(largest).toBeLessThanOrEqual(256 * 1024);
     expect(yieldedDuringReads).toBe(true);
   } finally { vi.mocked(open).mockImplementation(actual.open); }
 });
