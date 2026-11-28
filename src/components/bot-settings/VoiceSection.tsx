@@ -55,6 +55,7 @@ export function VoiceSection({
               onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) event.currentTarget.blur(); }}
               onBlur={(event) => {
                 const id = event.currentTarget.value.trim();
+                event.currentTarget.value = id;
                 if (!event.currentTarget.reportValidity() || id === fishAgentId) return;
                 patch({ liveOverride: id ? { provider: "fish", fishAgentId: id } : { provider: "fish" } });
               }} />

@@ -40,8 +40,8 @@ const { newChatThreadId } = await import("@/state/new-chat");
 let root: Root;
 let container: HTMLDivElement;
 const onStart = vi.fn();
-const render = (threadId = "thread-atlas") => flushSync(() => root.render(createElement(CallTargetButton, {
-  targetId: "atlas", targetName: "Atlas", threadId, voices: ["v"],
+const render = (threadId = "thread-atlas", targetId = "atlas") => flushSync(() => root.render(createElement(CallTargetButton, {
+  targetId, targetName: targetId, threadId, voices: ["v"],
   requireExplicitVoices: false, liveCapable: true, placement: "composer", fill: "#8057C8", onStart,
 })));
 const remount = () => {
@@ -97,6 +97,17 @@ describe("a call started from the composer's + menu", () => {
     flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
     await Promise.resolve();
     expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "made" });
+  });
+
+  it("keeps the newer Turns call when another bot's pending Live start finishes", async () => {
+    render(newChatThreadId("atlas"));
+    flushSync(() => requestCallStart("atlas", "live"));
+    render("thread-juniper", "juniper");
+    flushSync(() => requestCallStart("juniper", "turns"));
+    flushSync(() => fixture.dispatch.mock.calls[0][0].onMade("made"));
+    await Promise.resolve();
+    expect(currentCall()).toBe("juniper");
+    expect(liveMedia().phase).toBe("idle");
   });
 
   it("waits for the blank chat's Live start when Live is pressed again before its settings are saved", async () => {

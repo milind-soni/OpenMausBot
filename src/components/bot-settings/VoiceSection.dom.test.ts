@@ -88,7 +88,7 @@ describe("a bot's Live call voice in its voice settings", () => {
     render(openAiLive, { ...atlas, liveOverride: { provider: "fish" } });
     const agent = card()?.querySelector("input");
     expect(agent).toBeDefined();
-    agent!.value = "fish-atlas";
+    agent!.value = " fish-atlas ";
     flushSync(() => agent!.dispatchEvent(new Event("focusout", { bubbles: true })));
     expect(patch).toHaveBeenLastCalledWith({ liveOverride: { provider: "fish", fishAgentId: "fish-atlas" } });
 

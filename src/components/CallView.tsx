@@ -196,6 +196,12 @@ export function CallTargetButton({
   const start = (next: CallMode) => {
     setHelpOpen(false);
     setMenuOpen(false);
+    for (const [other, start] of liveStarts) {
+      if (other !== targetId) {
+        start.request++;
+        liveStarts.delete(other);
+      }
+    }
     const pending = liveStartOf(targetId);
     if (next === "live" && pending.waiting && pending.waiting === pending.request) return;
     const request = ++pending.request;
