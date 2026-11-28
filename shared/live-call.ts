@@ -2,6 +2,8 @@ import { FULL_ANSWER_IN_CHAT } from "../packages/phone-protocol/src/live-call.ts
 
 export * from "../packages/phone-protocol/src/live-call.ts";
 
+export const LIVE_STANDBY_IDLE_SECONDS_DEFAULT = 15;
+
 /** GPT-Live caps each append at 500 tokens. A 500 UTF-8 byte budget is
  * conservative even for emoji/CJK, unlike a prose-only character estimate.
  * Byte-level tokenization cannot produce more tokens than input bytes. */

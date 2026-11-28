@@ -12,6 +12,7 @@ export interface FakeLiveSession {
   body: Record<string, unknown>;
   commands: Array<Record<string, unknown>>;
   attached: boolean;
+  paused: boolean;
   closed: boolean;
 }
 
@@ -152,7 +153,7 @@ export async function startFakeOpenAiLive(options: { port?: number; closeOnReque
       }
       let body: Record<string, unknown> = {};
       try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; } catch {}
-      const session: FakeLiveSession = { id: `sess_fake_${++counter}`, key: bearer(req), body, commands: [], attached: false, closed: false };
+      const session: FakeLiveSession = { id: `sess_fake_${++counter}`, key: bearer(req), body, commands: [], attached: false, paused: false, closed: false };
       sessions.push(session);
       wake();
       res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({
@@ -223,6 +224,9 @@ export async function startFakeOpenAiLive(options: { port?: number; closeOnReque
     emit(sessionId, event) {
       const socket = sockets.get(sessionId);
       if (!socket) throw new Error(`fake GPT-Live: ${sessionId} has no sideband`);
+      const session = sessions.find((candidate) => candidate.id === sessionId)!;
+      if (event.type === "session.paused") session.paused = true;
+      if (event.type === "session.resumed") session.paused = false;
       send(socket, event);
     },
     waitForAttach(sessionId, timeoutMs = 5_000) {

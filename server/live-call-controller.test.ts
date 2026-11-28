@@ -491,6 +491,18 @@ describe("LiveCallController lifecycle", () => {
     expect(t.frames.at(-1)).toMatchObject({ status: "ended", endReason: "idle" });
   });
 
+  it("keeps a standby call live while paused, then applies the app idle hang-up", async () => {
+    const t = setup();
+    t.settings.idleMinutes = 1;
+    const { call } = await t.start();
+    t.socket().receive({ type: "session.paused" });
+    expect(t.controller.current()).toMatchObject({ callId: call.callId, status: "live" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(t.socket().sent.at(-1)).toMatchObject({ type: "session.close" });
+    t.socket().receive({ type: "session.closed", reason: "close_requested" });
+    expect(t.frames.at(-1)).toMatchObject({ callId: call.callId, status: "ended", endReason: "idle" });
+  });
+
   it("does not hang up while the bot works, but does while an approval waits", async () => {
     const t = setup();
     await t.start();

@@ -210,6 +210,19 @@ the delegate result, End and Fish's own end), `server/routes/live.test.ts`
 `src/components/keys/KeysPage.dom.test.ts`. No call has been placed against
 Fish Audio's live service.
 
+## GPT-Live standby
+
+The Live settings dialog can opt direct OpenAI GPT-Live WebRTC calls into standby. It sends `session.wake_policy.type: "speech"` and `session.idle_timeout_s` (whole seconds, 5–60; default 15), as [OpenAI documents](https://developers.openai.com/api/docs/guides/live-conversations#configure-standby). Standby is off by default and does not apply to Azure or custom endpoints. The microphone track and WebRTC session remain connected; `idleMinutes` still controls the app's own idle hang-up.
+
+```sh
+OMB_VITEST_WORKERS=3 pnpm exec vitest run server/live-call.test.ts server/live-settings.test.ts server/routes/live.test.ts server/config.test.ts server/live-call-controller.test.ts src/components/LiveCallBar.render.test.ts
+OMB_VITEST_WORKERS=3 pnpm exec vitest run server/live-call.e2e.test.ts
+pnpm typecheck
+pnpm i18n:check
+```
+
+The e2e uses the fake provider to check the request payload, persisted settings, `session.paused`/`session.resumed`, the call remaining live while a bot reply is appended during standby, and reuse of the same provider session afterward. OpenAI documents that the same session retains conversation history on resume; this fixture does not contact OpenAI to verify that behavior, billing or microphone audio.
+
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act

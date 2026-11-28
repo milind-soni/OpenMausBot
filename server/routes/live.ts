@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { LiveFishRelayCommand, LiveFishRelayEvent, LiveProvider, LiveSettings } from "../../shared/wire.ts";
 import { GEMINI_LIVE_VOICE_OPTIONS } from "../../shared/live-call.ts";
 import { azureLiveDeployment, azureOpenAiRoot, customLiveApiBase, customLiveModel, LiveSessionError, MAX_SDP_BYTES } from "../live-call.ts";
+import { LIVE_STANDBY_IDLE_SECONDS_MAX, LIVE_STANDBY_IDLE_SECONDS_MIN } from "../live-config.ts";
 import { LiveCallBusyError, type LiveCallController } from "../live-call-controller.ts";
 import { RELAY_POLL_MS } from "../live-fish.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
@@ -14,7 +15,7 @@ export interface LiveRouteDeps {
   deviceRevoked?: (device: string) => void;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
-  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; customEndpoint?: string; customModel?: string; voice?: string; geminiVoice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
+  saveSettings(patch: { provider?: LiveProvider; azureEndpoint?: string; azureDeployment?: string; customEndpoint?: string; customModel?: string; voice?: string; geminiVoice?: string; readTypedReplies?: boolean; idleMinutes?: number; standby?: boolean; standbyIdleSeconds?: number }): Promise<LiveSettings>;
   /** A running relayed (Fish Audio, Gemini or ElevenLabs) call's relay, only for the token its start answered with. */
   fishRelay(sessionId: string, token: string): { receive(events: LiveFishRelayEvent[], from?: number): void; poll(waitMs: number): Promise<{ commands: LiveFishRelayCommand[]; closed: boolean }> } | null;
 }
@@ -60,6 +61,8 @@ const settingsBody = z.object({
   geminiVoice: z.string().trim().refine((name) => name === "" || GEMINI_LIVE_VOICE_OPTIONS.some((option) => option.id === name)).optional(),
   readTypedReplies: z.boolean().optional(),
   idleMinutes: z.number().int().min(1).max(60).optional(),
+  standby: z.boolean().optional(),
+  standbyIdleSeconds: z.number().int().min(LIVE_STANDBY_IDLE_SECONDS_MIN).max(LIVE_STANDBY_IDLE_SECONDS_MAX).optional(),
 }).strict();
 
 const DEVICE_ID = /^[\w-]{1,128}$/;

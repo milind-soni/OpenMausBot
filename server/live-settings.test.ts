@@ -12,6 +12,13 @@ describe("live settings", () => {
     expect(liveSettingsFor({} as AppConfig)).toEqual({ configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 });
   });
 
+  it("defaults the standby timeout only when standby is opted into", () => {
+    expect(liveSettingsFor({} as AppConfig)).not.toHaveProperty("standby");
+    expect(liveSettingsFor({ live: { standby: true } } as AppConfig)).toMatchObject({ standby: true, standbyIdleSeconds: 15 });
+    expect(liveSettingsFor({ live: { standby: true, standbyIdleSeconds: 60 } } as AppConfig)).toMatchObject({ standby: true, standbyIdleSeconds: 60 });
+    expect(liveSettingsFor({ live: { standbyIdleSeconds: 30 } } as AppConfig)).toMatchObject({ standbyIdleSeconds: 30 });
+  });
+
   it("reports saved values and where the key comes from, never the key", () => {
     const settings = liveSettingsFor({ live: { key: "sk-test", voice: "sol", readTypedReplies: false, idleMinutes: 12 } } as AppConfig);
     expect(settings).toEqual({ configured: true, keySource: "live", voice: "sol", readTypedReplies: false, idleMinutes: 12 });

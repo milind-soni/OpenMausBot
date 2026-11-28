@@ -72,7 +72,7 @@ export interface LiveCallDeps {
   activity(botId: string, threadId: string): LiveActivity;
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
   /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
-  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; geminiVoice?: string; readTypedReplies: boolean; idleMinutes: number };
+  settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; geminiVoice?: string; readTypedReplies: boolean; idleMinutes: number; standby?: boolean; standbyIdleSeconds?: number };
   /** The called bot's own Live call voice, used over the app's when it is the call provider's. */
   botVoice?(botId: string): string | undefined;
   /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
@@ -82,7 +82,7 @@ export interface LiveCallDeps {
   geminiRefusal(auth: RequestAuth): string | null;
   elevenlabsRefusal(auth: RequestAuth): string | null;
   /** `sdp` is "" on relayed calls, which answer with `fish`, `gemini` or `elevenlabs` instead of an SDP answer. */
-  createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string }): Promise<LiveSessionAnswer>;
+  createSession(input: { key: string; endpoint: LiveEndpoint; sdp: string; botId: string; threadId: string; voice: string; standby?: boolean; standbyIdleSeconds?: number }): Promise<LiveSessionAnswer>;
   openSocket(url: string, key: string, endpoint: LiveEndpoint): LiveSocket;
   attachUrl(sessionId: string, endpoint: LiveEndpoint): string;
   speakable(text: string): string[];
@@ -222,7 +222,8 @@ export class LiveCallController {
     this.call = call;
     let session: LiveSessionAnswer;
     try {
-      session = await this.deps.createSession({ key, endpoint, sdp: relayed ? "" : input.sdp ?? "", botId: input.botId, threadId: input.threadId, voice });
+      session = await this.deps.createSession({ key, endpoint, sdp: relayed ? "" : input.sdp ?? "", botId: input.botId, threadId: input.threadId, voice,
+        ...(endpoint.provider === "openai" && settings.standby ? { standby: true, standbyIdleSeconds: settings.standbyIdleSeconds } : {}) });
     } catch (error) {
       if (this.call === call) this.call = null;
       this.deps.log(`[live] call failed bot=${input.botId} client=${input.client} status=${error instanceof LiveSessionError ? error.status : "error"}`);

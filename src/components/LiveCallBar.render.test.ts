@@ -136,12 +136,24 @@ describe("LiveCallSettings", () => {
     expect(markup).toContain('aria-label="Call settings"');
     expect(markup).toContain("Marin (default)");
     expect(markup).toContain("Read replies to typed messages");
+    expect(markup).toContain("Use lower-cost standby during silence");
+    expect(markup).not.toContain("Pause after this many seconds");
     expect(markup).toContain(`When this is off, messages you type during a call and the bot&#x27;s answers to them are not sent to OpenAI.`);
     expect(markup).toContain(`A Live call sends your voice to OpenAI, along with the chat&#x27;s recent messages, the bot&#x27;s answers and the details of any approval it asks for. The OpenAI key stays on your computer.`);
     expect(markup).toMatch(/<option value="5" selected="">5<\/option>/);
     expect(markup).toContain("Change key");
     expect(markup).not.toContain("Remove key");
     expect(markup).toMatch(/role="dialog" tabindex="-1"/);
+  });
+
+  it("offers a bounded standby timeout only for OpenAI calls", () => {
+    const withLive = (live: LiveSettings) => {
+      const value = { state: { ...initialState, config: { live } as AppState["config"] }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+      return renderToStaticMarkup(createElement(BotEditorStore, { value, children: createElement(LiveCallSettings, { onClose: vi.fn() }) }));
+    };
+    const base = { configured: true, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    expect(withLive({ ...base, standby: true, standbyIdleSeconds: 10 })).toMatch(/<option value="10" selected="">10s<\/option>/);
+    expect(withLive({ ...base, provider: "azure", standby: true, standbyIdleSeconds: 10 })).not.toContain("Use lower-cost standby during silence");
   });
 
   it("says which key Live calls use, and removes only a separate Live key", () => {

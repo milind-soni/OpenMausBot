@@ -149,7 +149,9 @@ describe("live routes", () => {
     expect((await request(d, "PATCH", "/api/live/settings", { geminiVoice: "marin" })).status).toBe(400);
     expect((await request(d, "PATCH", "/api/live/settings", { geminiVoice: "Kore" })).status).toBe(200);
     expect((await request(d, "PATCH", "/api/live/settings", { geminiVoice: "" })).status).toBe(200);
-    expect(d.saved).toEqual([{ idleMinutes: 10, readTypedReplies: false }, { geminiVoice: "Kore" }, { geminiVoice: "" }]);
+    expect(await request(d, "PATCH", "/api/live/settings", { standby: true, standbyIdleSeconds: 15 })).toMatchObject({ status: 200, body: { live: { standby: true, standbyIdleSeconds: 15 } } });
+    for (const standbyIdleSeconds of [4, 61, 10.5]) expect((await request(d, "PATCH", "/api/live/settings", { standbyIdleSeconds })).status).toBe(400);
+    expect(d.saved).toEqual([{ idleMinutes: 10, readTypedReplies: false }, { geminiVoice: "Kore" }, { geminiVoice: "" }, { standby: true, standbyIdleSeconds: 15 }]);
   });
   it("saves an Azure provider, endpoint and deployment, refusing a host the key must not reach", async () => {
     const d = deps();
