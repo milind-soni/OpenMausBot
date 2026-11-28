@@ -99,6 +99,29 @@ describe("LiveCallController lifecycle", () => {
     expect(t.frames.map((f) => f?.status)).toEqual(["connecting", "live"]);
   });
 
+  it("uses Codex without an API key and refuses a phone before starting the session", async () => {
+    const endpoint: LiveEndpoint = { provider: "codex", apiBase: "", model: "" };
+    const t = setup({
+      settings: () => ({ provider: "codex", key: "", endpoint, voice: "marin", readTypedReplies: true, idleMinutes: 5 }),
+      codexRefusal: (_auth, client) => client === "desktop" ? null : "Desktop only.",
+    });
+    await expect(t.controller.start({ auth: owner, ...BOT, client: "ios", sdp: "offer-sdp" })).rejects.toMatchObject({ status: 403 });
+    expect(t.deps.createSession).not.toHaveBeenCalled();
+    await t.start();
+    expect(t.deps.createSession).toHaveBeenCalledWith({ key: "", endpoint, sdp: "offer-sdp", botId: "bot1", threadId: "t1", voice: "juniper" });
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "Calculate 17 times 23", start_ms: 10, end_ms: 20 });
+    t.socket().receive({ type: "session.delegation.created", delegation: { target: "client", id: "codex-1" }, offset_ms: 20 });
+    await vi.advanceTimersByTimeAsync(DELEGATION_SETTLE_MS);
+    expect(t.deps.send).toHaveBeenCalledWith(expect.objectContaining({ botId: BOT.botId, threadId: BOT.threadId, text: "Calculate 17 times 23" }));
+    t.message({ id: "approval", kind: "options", card: { title: "Approval needed", subtitle: "echo hello", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash" } });
+    await vi.advanceTimersByTimeAsync(0);
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "yes", start_ms: 2000, end_ms: 2100 });
+    t.socket().receive({ type: "session.delegation.created", delegation: { target: "client", id: "codex-2" }, offset_ms: 2100 });
+    await vi.advanceTimersByTimeAsync(CONSENT_SETTLE_MS + DELEGATION_SETTLE_MS);
+    expect(t.deps.respond).not.toHaveBeenCalled();
+    expect(t.deps.send).toHaveBeenCalledTimes(1);
+  });
+
   it("speaks in the called bot's own Live voice; a bot without one keeps the app's", async () => {
     const voices: Record<string, string> = { bot1: "cedar" };
     const own = setup({ botVoice: (botId) => voices[botId] });

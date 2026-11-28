@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { desktopCapabilitiesNow } from "@/lib/desktop";
 import { t } from "@/lib/i18n";
 import { api, useStore } from "@/state/store";
 import type { LiveProvider, LiveSettings } from "../../shared/wire";
@@ -15,6 +16,8 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
   const { state, dispatch } = useStore();
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const provider: LiveProvider = live.provider ?? "openai";
+  const desktop = desktopCapabilitiesNow();
+  const offerCodex = desktop.host.platform === "darwin" && desktop.dictation.reasonCode !== "remote-server" && !state.config?.cloudHome;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +47,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
           disabled={saving || locked}
           onChange={(event) => void save({ provider: event.target.value as LiveProvider })}
         >
+          {(offerCodex || provider === "codex") && <option value="codex">{t("call.live.provider.codex")}</option>}
           <option value="openai">{t("call.live.provider.openai")}</option>
           <option value="azure">{t("call.live.provider.azure")}</option>
           <option value="fish">{t("call.live.provider.fish")}</option>
@@ -55,6 +59,7 @@ export function LiveProviderSettings({ locked = false, onSaving }: { locked?: bo
       {(provider === "azure" || provider === "custom") && (
         <EndpointForm key={provider} custom={provider === "custom"} live={live} disabled={saving || locked} save={save} />
       )}
+      {provider === "codex" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.disclosureCodex")}</div>}
       {provider === "fish" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.fishHint")}</div>}
       {provider === "gemini" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.geminiHint")}</div>}
       {provider === "elevenlabs" && <div className="text-[12px] leading-4 text-ink-secondary">{t("call.live.elevenLabsHint")}</div>}

@@ -7125,6 +7125,8 @@
   "call.live.openApiKeys": "Open AI › Other services",
   "call.live.provider": "Service",
   "call.live.provider.openai": "OpenAI",
+  "call.live.provider.codex": "Codex (ChatGPT sign-in)",
+  "call.live.disclosureCodex": "This desktop call uses your Codex CLI sign-in and sends your microphone audio and the bot’s spoken replies to OpenAI. Approve actions in the chat.",
   "call.live.provider.azure": "Azure OpenAI",
   "call.live.azureEndpoint": "Azure resource endpoint",
   "call.live.azureDeployment": "GPT-Live deployment name",

@@ -9,7 +9,7 @@ import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveElevenLabsTransport, LiveEndReason, LiveFishTransport, LiveGeminiTransport, LiveProvider } from "../shared/wire.ts";
 import { FISH_AGENT_VOICE } from "./live-fish.ts";
 import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
-import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
+import { LIVE_CODEX_REFUSAL, LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import { scrubHeldSecrets } from "./redact.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
@@ -42,7 +42,7 @@ export interface LiveSocket {
 }
 
 export type LiveActivity = "idle" | "working" | "waiting";
-export type LiveSessionAnswer = { sessionId: string; sdp: string } | { sessionId: string; fish: LiveFishTransport } | { sessionId: string; gemini: LiveGeminiTransport }
+export type LiveSessionAnswer = { sessionId: string; sdp: string; socket?: LiveSocket } | { sessionId: string; fish: LiveFishTransport } | { sessionId: string; gemini: LiveGeminiTransport }
   | { sessionId: string; elevenlabs: LiveElevenLabsTransport };
 export type LiveCallStarted =
   | { call: LiveCallState; sdp: string; fish?: undefined; gemini?: undefined; elevenlabs?: undefined }
@@ -77,6 +77,7 @@ export interface LiveCallDeps {
   botVoice?(botId: string): string | undefined;
   /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
   azureRefusal(auth: RequestAuth): string | null;
+  codexRefusal?(auth: RequestAuth, client: LiveClient): string | null;
   /** The same for the relayed providers, where the harness hears the call only through its client's reports. Required too. */
   fishRefusal(auth: RequestAuth): string | null;
   geminiRefusal(auth: RequestAuth): string | null;
@@ -186,8 +187,16 @@ export class LiveCallController {
     return this.call && this.call.state.status !== "ended" ? { ...this.call.state } : null;
   }
 
+  codexRefusal(auth: RequestAuth, client: LiveClient = "desktop"): string | null {
+    return this.deps.codexRefusal ? this.deps.codexRefusal(auth, client) : LIVE_CODEX_REFUSAL;
+  }
+
   async start(input: { auth: RequestAuth; device?: string; botId: string; botName: string; threadId: string; client: LiveClient; sdp?: string; relays?: readonly LiveRelayClient[] }): Promise<LiveCallStarted> {
     const settings = this.deps.settings();
+    if (settings.provider === "codex") {
+      const refusal = this.codexRefusal(input.auth, input.client);
+      if (refusal) throw new LiveSessionError(refusal, 403);
+    }
     // First: someone refused here is not told about a running call, or sent to set Azure or a relayed service up.
     // The chosen relayed service comes before a key's endpoint, so its refusal and its mismatch check apply.
     const relayedChoice = relayedProvider(settings.provider);
@@ -212,10 +221,10 @@ export class LiveCallController {
     if (input.device && this.revokedDevices.has(input.device)) throw new LiveCallSignedOutError();
     const key = settings.key.trim();
     const endpoint = settings.endpoint;
-    if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
+    if (settings.setupProblem || !endpoint || (!key && endpoint.provider !== "codex")) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
     if (relayed !== relayedProvider(endpoint.provider)) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
     const botVoice = this.deps.botVoice?.(input.botId);
-    const voice = relayed === "gemini" ? geminiLiveVoice(botCallVoice(botVoice, settings.geminiVoice, true))
+    const voice = endpoint.provider === "codex" ? "juniper" : relayed === "gemini" ? geminiLiveVoice(botCallVoice(botVoice, settings.geminiVoice, true))
       : relayed ? FISH_AGENT_VOICE : liveVoice(botCallVoice(botVoice, settings.voice, false));
     const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
@@ -228,8 +237,10 @@ export class LiveCallController {
       this.deps.log(`[live] call failed bot=${input.botId} client=${input.client} status=${error instanceof LiveSessionError ? error.status : "error"}`);
       throw error;
     }
+    const socket = "socket" in session ? session.socket : undefined;
     if (this.call !== call) {
-      this.closeOrphan(session.sessionId, key, endpoint);
+      if (socket) socket.close();
+      else this.closeOrphan(session.sessionId, key, endpoint);
       throw new LiveSessionError("The call was cancelled.", 503);
     }
     try {
@@ -244,11 +255,14 @@ export class LiveCallController {
       // Set before attach: a sideband that fails at once runs finish, which clears this interval.
       call.idleTimer = setInterval(() => this.guarded(call, () => this.checkIdle(call)), IDLE_CHECK_MS);
       call.idleTimer.unref?.();
-      this.attach(call);
+      this.attach(call, socket);
     } catch (error) {
       const sidebandOpened = call.socket !== null;
       this.finish(call, "error", "The call could not start.");
-      if (!sidebandOpened) this.closeOrphan(session.sessionId, key, endpoint);
+      if (!sidebandOpened) {
+        if (socket) socket.close();
+        else this.closeOrphan(session.sessionId, key, endpoint);
+      }
       throw error;
     }
     const state = { ...call.state };
@@ -335,10 +349,10 @@ export class LiveCallController {
     };
   }
 
-  private attach(call: Call): void {
+  private attach(call: Call, connected?: LiveSocket): void {
     let socket: LiveSocket;
     try {
-      socket = this.deps.openSocket(this.deps.attachUrl(call.sessionId, call.endpoint), call.key, call.endpoint);
+      socket = connected ?? this.deps.openSocket(this.deps.attachUrl(call.sessionId, call.endpoint), call.key, call.endpoint);
     } catch {
       this.finish(call, "sideband-lost", `The call could not connect to ${liveProviderName(call.endpoint.provider)}.`);
       return;
@@ -365,6 +379,10 @@ export class LiveCallController {
       if (call.pendingEnd) this.finish(call, call.pendingEnd);
       else this.finish(call, "sideband-lost", `The call connection to ${liveProviderName(call.endpoint.provider)} dropped.`);
     };
+    if (connected) {
+      if (socket.readyState === SOCKET_OPEN) socket.onopen(undefined);
+      else socket.onclose(undefined);
+    }
   }
 
   private closeOrphan(sessionId: string, key: string, endpoint: LiveEndpoint): void {
@@ -498,7 +516,7 @@ export class LiveCallController {
         call.transcript.addInput(String(event.delta ?? ""), Number(event.start_ms), Number(event.end_ms));
         call.heardThroughMs = Math.max(call.heardThroughMs, Number(event.end_ms) || 0);
         this.touch(call);
-        if (call.approval && !call.approval.submitted) this.scheduleConsentCheck(call);
+        if (call.endpoint.provider !== "codex" && call.approval && !call.approval.submitted) this.scheduleConsentCheck(call);
         return;
       case "session.output_transcript.delta":
         call.transcript.addOutput(Number(event.start_ms), Number(event.end_ms));
@@ -537,7 +555,7 @@ export class LiveCallController {
 
   private async delegate(call: Call, id: string, offsetMs: number): Promise<void> {
     if (call.state.status !== "live" || call.goodbye) return;
-    const heard = call.transcript.takeRequestParts(offsetMs);
+    const heard = call.transcript.takeRequestParts(offsetMs, call.endpoint.provider === "codex" ? 0 : undefined);
     const said = heard.text;
     // Only the person's own words, never what the voice said back, and all of them: "don't" may be lost in the echo.
     if (spokenHangUp(heard.withoutEcho) && spokenHangUp(said)) {
@@ -547,7 +565,8 @@ export class LiveCallController {
       return;
     }
     if (call.approval && !call.approval.submitted) {
-      await this.decide(call, heard.withoutEcho, id, said);
+      if (call.endpoint.provider === "codex") this.append(call, "commentary", "Answer the approval request in the chat.", id);
+      else await this.decide(call, heard.withoutEcho, id, said);
       return;
     }
     const question = call.question;
@@ -782,7 +801,8 @@ export class LiveCallController {
     } else if (kind === "approval") {
       call.approval = { requestId: card.requestId, messageId: message.id, submitted: false };
       call.transcript.consumeAll();
-      this.append(call, "instructions", LIVE_COPY.permissionRequest(spokenApprovalPrompt(card)));
+      const prompt = call.endpoint.provider === "codex" ? "The bot needs approval. Review the request in the chat." : LIVE_COPY.permissionRequest(spokenApprovalPrompt(card));
+      this.append(call, "instructions", prompt);
     } else {
       call.question = { requestId: card.requestId, messageId: message.id, submitted: false };
       call.transcript.consumeAll();

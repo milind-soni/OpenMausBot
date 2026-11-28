@@ -1,8 +1,9 @@
+import { createCodexLiveSession, type LiveCodexCli } from "./live-codex.ts";
 import { productName } from "./brand.ts";
 import type { LiveCallDeps } from "./live-call-controller.ts";
 import { openLiveSocket, relayedProvider } from "./live-call-controller.ts";
-import { createLiveSession, liveAttachUrl, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
-import { elevenLabsLiveCallRefusal, fishLiveCallRefusal, geminiLiveCallRefusal } from "./live-access.ts";
+import { createLiveSession, liveAttachUrl, LiveSessionError, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
+import { codexLiveCallRefusal, elevenLabsLiveCallRefusal, fishLiveCallRefusal, geminiLiveCallRefusal } from "./live-access.ts";
 import type { LiveConfig } from "./live-config.ts";
 import { createFishLiveSession, endFishLiveSession, fishKeyPrint, FishRelays, fishSpeakingLanguage, setFishAgentLanguage, setUpFishAgent } from "./live-fish.ts";
 import { createElevenLabsLiveSession, setUpElevenLabsAgent } from "./live-elevenlabs.ts";
@@ -18,6 +19,7 @@ export interface LiveSessionWiringInput {
   saveAgent(agent: Required<Pick<LiveConfig, "fishAgentId" | "fishAgentFor" | "fishAgentLanguage">> | Required<Pick<LiveConfig, "elevenlabsAgentId" | "elevenlabsAgentFor">>): void;
   /** The app's language, which a Fish Audio agent speaks; English when unset. */
   language?(): string | undefined;
+  codex?(): LiveCodexCli | null;
   /** The language the saved Fish Audio agent was last set to speak (`LiveConfig.fishAgentLanguage`). */
   fishAgentLanguage?(): string | undefined;
   /** The name a person reads, which names the agent on their account; the brand's own by default. */
@@ -29,7 +31,7 @@ export interface LiveSessionWiringInput {
 /** How a Live call's session starts and is followed, per provider: GPT-Live's WebRTC session and sideband on OpenAI or
  * Azure, or a Fish Audio agent, Gemini Live session or ElevenLabs agent conversation followed through its client's relay. */
 export function liveSessionWiring(input: LiveSessionWiringInput): {
-  calls: Pick<LiveCallDeps, "fishRefusal" | "geminiRefusal" | "elevenlabsRefusal" | "createSession" | "openSocket" | "attachUrl">;
+  calls: Pick<LiveCallDeps, "codexRefusal" | "fishRefusal" | "geminiRefusal" | "elevenlabsRefusal" | "createSession" | "openSocket" | "attachUrl">;
   fishRelay: LiveRouteDeps["fishRelay"];
 } {
   const relays = new FishRelays();
@@ -98,10 +100,16 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
   return {
     fishRelay: (sessionId, token) => relays.find(sessionId, token),
     calls: {
+      codexRefusal: (auth, client) => codexLiveCallRefusal(auth, Boolean(input.codex?.()), client),
       fishRefusal: (auth) => fishLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       geminiRefusal: (auth) => geminiLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       elevenlabsRefusal: (auth) => elevenLabsLiveCallRefusal(auth, { othersOnLoopback: input.othersOnLoopback() }),
       createSession: async ({ key, endpoint, sdp, botId, threadId, voice }) => {
+        if (endpoint.provider === "codex") {
+          const config = input.codex?.();
+          if (!config) throw new LiveSessionError("Set up the local Codex CLI in Settings → AI.", 503);
+          return createCodexLiveSession({ ...config, sdp, voice });
+        }
         if (endpoint.provider === "gemini") {
           const session = await createGeminiLiveSession({ key, endpoint, voice, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl });
           // Gemini has nothing to end: the session ends when the client closes it, and the token is single use.

@@ -380,7 +380,7 @@ export function CallTargetButton({
                 start("live");
               }}
               className="mt-2.5 mr-2 rounded-lg border border-hairline px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised"
-              title={callModeHint("live", { cloudHome })}
+              title={callModeHint("live", { cloudHome, config: state.config })}
             >
               {t("call.live.startInstead")}
             </button>
