@@ -66,6 +66,9 @@ export interface PublicPushDevice {
   environment: ApnsEnvironment;
   pairing?: string;
   kinds: PushKind[];
+  /** FCM only: the bots registered with a channel of their own. A computer that takes `botChannels` always lists it
+   * (maybe empty), so a phone sends its list only to one that answers with it. */
+  botChannels?: string[];
   updatedAt: number;
 }
 

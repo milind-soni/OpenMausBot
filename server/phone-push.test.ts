@@ -255,7 +255,7 @@ describe("registering a phone", () => {
 describe("offering a notify frame", () => {
   it("tells the relay a bot's push may use the bot's own Android channel, only for bots the phone made one for", async () => {
     const { push, relay } = harness();
-    await push.register(OTHER, { platform: "fcm", token: FCM, botChannels: ["bot_1", "bot_1"] });
+    expect((await push.register(OTHER, { platform: "fcm", token: FCM, botChannels: ["bot_1", "bot_1"] })).device?.botChannels).toEqual(["bot_1"]);
     push.offer({ notification: notification({ kind: "done", threadId: "th_a" }), seq: 1 }, everyone);
     push.offer({ notification: notification({ kind: "done", botId: "bot_2", botName: "Atlas", threadId: "th_b" }), seq: 2 }, everyone);
     await push.flush();
@@ -263,7 +263,7 @@ describe("offering a notify frame", () => {
       [expect.objectContaining({ botId: "bot_1" }), true],
       [expect.objectContaining({ botId: "bot_2" }), undefined],
     ]);
-    await push.register(OTHER, { platform: "fcm", token: FCM });
+    expect((await push.register(OTHER, { platform: "fcm", token: FCM })).device?.botChannels).toEqual([]);
     push.offer({ notification: notification({ kind: "done", threadId: "th_c" }), seq: 3 }, everyone);
     await push.flush();
     expect(relay.sends().at(-1)?.body).not.toHaveProperty("botChannel");

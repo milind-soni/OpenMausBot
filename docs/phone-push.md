@@ -359,7 +359,10 @@ in order (all done; kept as the record and for a new environment):
   The server never names a bot the phone did not list, because Android shows
   a push for a missing channel under "Miscellaneous". A Cloud home leaves the
   field out, since its Admin's copy of the send schema does not take it yet,
-  so its phones keep the shared `bot_messages` channel.
+  so its phones keep the shared `bot_messages` channel. The answer's `device`
+  lists the registered `botChannels` (empty when none) on a computer that
+  takes the field; an older one answers without it, and the phone then leaves
+  the list out, since that computer refuses fields it does not know.
 - The categories (Allow and Deny on an approval, Answer on a question) are the
   ones the app registers today.
 

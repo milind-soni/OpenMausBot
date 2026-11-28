@@ -241,7 +241,7 @@ export class PhonePush {
   private publicDevice(key: string): PublicPushDevice | null {
     const device = this.devices.find((candidate) => candidate.key === key);
     if (!device) return null;
-    return { platform: device.platform, environment: device.environment, ...(device.pairing ? { pairing: device.pairing } : {}), kinds: [...device.kinds], updatedAt: device.updatedAt };
+    return { platform: device.platform, environment: device.environment, ...(device.pairing ? { pairing: device.pairing } : {}), kinds: [...device.kinds], ...(device.platform === "fcm" ? { botChannels: [...(device.botChannels ?? [])] } : {}), updatedAt: device.updatedAt };
   }
 
   /** The device token a phone registered, for the Live Activity and ongoing-notification pushes that share its relay. */
