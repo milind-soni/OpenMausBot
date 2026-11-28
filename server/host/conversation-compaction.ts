@@ -63,7 +63,7 @@ export interface ConversationCompactionDeps {
   resumesSession(input: CompactConversationInput, session: string): boolean;
   /** The engine instance and model the conversation's next turn would run on now. */
   currentSelection(botId: string, threadId: string): { instanceId: string; model: string | null } | undefined;
-  generateText(botId: string, instance: CompactionInstance): ((prompt: string, options?: { signal?: AbortSignal }) => Promise<string>) | undefined;
+  generateText(botId: string, instance: CompactionInstance): ((prompt: string, options?: { signal?: AbortSignal; threadId?: string }) => Promise<string>) | undefined;
   claimIsCurrent(botId: string, generation: string, threadId: string): boolean;
   controllers: Map<string, { generation: string; controller: AbortController }>;
   cancelled(reason: string): Error;
@@ -126,7 +126,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
       if (engine !== "skipped") return;
       if (seededFloor && manual) store.patchTask(bot.id, threadId, { contextFloor: floor });
       if (!idle && deps.summarizing) { shown = true; deps.summarizing(threadId, true); }
-      const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance) });
+      const summary = await draftSummary(fold.folded, { signal: controller.signal, threadId, generateText: deps.generateText(bot.id, instance) });
       if (!idle && !deps.claimIsCurrent(bot.id, generation, threadId)) throw deps.cancelled("context summarization stopped");
       controller.signal.throwIfAborted();
       if (prefix !== JSON.stringify(sinceFreshStart(store.activePath(threadId)).slice(0, messages.length))) {

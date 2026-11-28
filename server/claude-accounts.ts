@@ -7,6 +7,7 @@ import { z } from "zod";
 import { DATA_DIR, persistableInstanceConfigs, type AppConfig } from "./config.ts";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
 import { addEndpointSchema } from "./openai-compat-endpoints.ts";
+import { customHeadersPatchSchema } from "./drivers/openai-compat-headers.ts";
 import { CLAUDE_ACCOUNT_ENV_KEYS, resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { resolveCli } from "./procs.ts";
 
@@ -27,6 +28,8 @@ export const instanceSettingsSchema = z.object({
   url: addEndpointSchema.shape.url.optional(),
   /** Its new API key; omitted keeps the saved one, unless the URL's host changes. */
   apiKey: addEndpointSchema.shape.key.optional(),
+  /** Opt-in outbound HTTP headers with trusted runtime variables, or null to clear. */
+  customHeaders: customHeadersPatchSchema.nullable().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 function rawConfig(entry: InstanceConfig): Record<string, unknown> {

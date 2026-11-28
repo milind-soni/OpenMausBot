@@ -12,6 +12,11 @@ export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApi
 
 export interface ImageSlotStatus { provider: ImageProvider; model: string; configured: boolean }
 
+export interface OpenAiCompatCustomHeadersSummary {
+  enabled: boolean;
+  headers: Array<{ name: string; value?: string; configured: boolean; required: boolean; secret: boolean }>;
+}
+
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
   /** The workspace's banner picture (GET /api/workspace/banner), by a version that changes with it; null without one. */
@@ -37,7 +42,10 @@ export interface ConfigStatus {
   anthropic?: SavedKey & { everyClaudeBot?: boolean };
   openai?: SavedKey;
   openrouter?: SavedKey;
-  openaiCompat?: SavedKey & { url?: string };
+  openaiCompat?: SavedKey & {
+    url?: string;
+    customHeaders?: OpenAiCompatCustomHeadersSummary | { configured: boolean };
+  };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */

@@ -218,6 +218,58 @@ describe("changing an added server's base URL", () => {
     expect(cfg.instances?.[ID]?.config).toEqual({ key: "ollama", url: "http://192.168.1.20:11434", catalog: "ollama" });
   });
 
+  it("drops saved secret custom headers on cross-origin edits while preserving same-origin and freshly entered headers", async () => {
+    const seededHeaders = {
+      enabled: true,
+      headers: [
+        { name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false },
+        { name: "X-Gateway-Token", value: "gw-secret-origin-123", required: true, secret: true },
+      ],
+    };
+    const same = await serve();
+    seed(same.cfg, { key: SECRET, url: "https://old.example.com/v1", customHeaders: seededHeaders });
+    expect((await same.call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" })).status).toBe(200);
+    expect(same.cfg.instances?.[ID]?.config).toMatchObject({ customHeaders: seededHeaders });
+
+    const cross = await serve();
+    seed(cross.cfg, { key: SECRET, url: "https://old.example.com/v1", customHeaders: seededHeaders });
+    expect((await cross.call("PATCH", `/api/instances/${ID}`, { url: "https://new.example.com/v1", apiKey: "sk-new" })).status).toBe(200);
+    expect(cross.cfg.instances?.[ID]?.config).toMatchObject({
+      url: "https://new.example.com/v1",
+      key: "sk-new",
+      customHeaders: {
+        enabled: true,
+        headers: [{ name: "X-Maus-Thread-ID", value: "{threadId}", required: true, secret: false }],
+      },
+    });
+
+    const ollama = await serve();
+    seed(ollama.cfg, {
+      key: "ollama", url: "http://127.0.0.1:11434", catalog: "ollama",
+      customHeaders: { enabled: true, headers: [{ name: "X-Gateway-Token", value: "gw-secret-origin-123", required: true, secret: true }] },
+    });
+    expect((await ollama.call("PATCH", `/api/instances/${ID}`, { url: "http://192.168.1.20:11434" })).status).toBe(200);
+    expect(ollama.cfg.instances?.[ID]?.config).not.toHaveProperty("customHeaders");
+
+    const keepCross = await serve();
+    seed(keepCross.cfg, { key: SECRET, url: "https://old.example.com/v1", customHeaders: seededHeaders });
+    expect((await keepCross.call("PATCH", `/api/instances/${ID}`, {
+      url: "https://new.example.com/v1",
+      apiKey: "sk-new",
+      customHeaders: { enabled: true, headers: [{ name: "X-Gateway-Token", keepExisting: true, secret: true }] },
+    })).status).toBe(400);
+    expect((await keepCross.call("PATCH", `/api/instances/${ID}`, {
+      url: "https://new.example.com/v1",
+      apiKey: "sk-new",
+      customHeaders: { enabled: true, headers: [{ name: "X-Gateway-Token", value: "gw-new-origin-456", secret: true }] },
+    })).status).toBe(200);
+    expect(keepCross.cfg.instances?.[ID]?.config).toMatchObject({
+      url: "https://new.example.com/v1",
+      key: "sk-new",
+      customHeaders: { enabled: true, headers: [{ name: "X-Gateway-Token", value: "gw-new-origin-456", required: true, secret: true }] },
+    });
+  });
+
   it("saves an address whose model list can't be read, says so, and reads it after the busy guard", async () => {
     let busyWhileReading: boolean | undefined;
     const asked: Array<{ url: string; key: string }> = [];

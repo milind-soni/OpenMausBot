@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
+import { customHeadersPatchSchema, decodeCustomHeaders, stripSensitiveCustomHeaders, summarizeCustomHeaders } from "./drivers/openai-compat-headers.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, probeOllama } from "./drivers/ollama.ts";
+
+export { summarizeCustomHeaders };
 
 export const ADDED_ENDPOINT_PREFIX = "openai-compat-";
 
@@ -32,6 +35,7 @@ export const addEndpointSchema = z.object({
   key: z.string().trim().min(1).max(4096),
   models: z.array(z.string().trim().min(1).max(200)).max(64).optional(),
   catalog: z.enum(["lmstudio", "ollama"]).optional(),
+  customHeaders: customHeadersPatchSchema.optional(),
 }).strict();
 
 export type AddEndpoint = z.infer<typeof addEndpointSchema>;
@@ -53,9 +57,10 @@ export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { 
   if (/^https?:\/\//i.test(body.key)) return { error: "That API key looks like a URL. Paste the secret key itself, not a web address." };
   const instanceId = `${ADDED_ENDPOINT_PREFIX}${randomUUID()}`;
   const models = [...new Set(body.models ?? [])];
+  const customHeaders = body.customHeaders !== undefined ? decodeCustomHeaders(body.customHeaders) : undefined;
   instances[instanceId] = {
     driver: "openai-compat", displayName: body.displayName, access: "api",
-    config: { key: body.key, url, ...(models.length ? { managedModels: models } : {}), ...(body.catalog ? { catalog: body.catalog } : {}) },
+    config: { key: body.key, url, ...(models.length ? { managedModels: models } : {}), ...(body.catalog ? { catalog: body.catalog } : {}), ...(customHeaders ? { customHeaders } : {}) },
   };
   return { instanceId };
 }
@@ -74,7 +79,8 @@ export function changeEndpointAddress(
   if (change.apiKey !== undefined && /^https?:\/\//i.test(change.apiKey)) {
     return { status: 400, error: "That API key looks like a URL. Paste the secret key itself, not a web address." };
   }
-  if (change.apiKey === undefined && config.key !== OLLAMA_PLACEHOLDER_KEY && (!saved || new URL(url).origin !== new URL(saved).origin)) {
+  const originChanged = !saved || new URL(url).origin !== new URL(saved).origin;
+  if (change.apiKey === undefined && config.key !== OLLAMA_PLACEHOLDER_KEY && originChanged) {
     return { status: 400, error: "Enter the API key again: a saved key is only sent to the server it was entered for." };
   }
   if (config.catalog && url !== saved) {
@@ -82,7 +88,9 @@ export function changeEndpointAddress(
     const duplicate = localServerAlreadyAdded(others, url);
     if (duplicate) return { status: 409, error: duplicate };
   }
-  entry.config = { ...config, url, ...(change.apiKey !== undefined ? { key: change.apiKey } : {}) };
+  const { customHeaders: priorHeaders, ...restConfig } = config;
+  const nextHeaders = originChanged && priorHeaders !== undefined ? stripSensitiveCustomHeaders(priorHeaders) : priorHeaders;
+  entry.config = { ...restConfig, url, ...(change.apiKey !== undefined ? { key: change.apiKey } : {}), ...(nextHeaders !== undefined ? { customHeaders: nextHeaders } : {}) };
   return { addressChanged: url !== saved };
 }
 
@@ -101,14 +109,29 @@ export async function endpointModelsReadable(config: { url: string; key: string;
   }
 }
 
+export function openAiCompatSummaryFields(entry: InstanceConfig | undefined): Record<string, unknown> {
+  if (!entry || entry.driver !== "openai-compat") return {};
+  const config = entry.config as { replyWaitMinutes?: unknown; customHeaders?: unknown } | undefined;
+  const replyWaitMinutes = typeof config?.replyWaitMinutes === "number" ? config.replyWaitMinutes : undefined;
+  const customHeaders = config?.customHeaders !== undefined ? summarizeCustomHeaders(config.customHeaders) : undefined;
+  return {
+    ...(replyWaitMinutes !== undefined ? { replyWaitMinutes } : {}),
+    ...(customHeaders ? { customHeaders } : {}),
+  };
+}
+
 export function withEndpointUrls(described: unknown, configs: InstanceConfigMap): unknown {
   if (!Array.isArray(described)) return described;
   return described.map((instance: { instanceId?: string }) => {
     const entry = instance.instanceId ? configs[instance.instanceId] : undefined;
-    if (!entry || !isAddedEndpoint(instance.instanceId!, entry)) return instance;
+    if (!entry) return instance;
+    const compat = openAiCompatSummaryFields(entry);
+    if (!isAddedEndpoint(instance.instanceId!, entry)) {
+      return Object.keys(compat).length ? { ...instance, ...compat } : instance;
+    }
     const url = endpointDisplayUrl(entry.config);
     const managedModels = (entry.config as { managedModels?: unknown } | undefined)?.managedModels;
     const placeholderKey = (entry.config as { key?: unknown } | undefined)?.key === OLLAMA_PLACEHOLDER_KEY;
-    return { ...instance, ...(url ? { url } : {}), ...(Array.isArray(managedModels) ? { managedModels } : {}), ...(placeholderKey ? { placeholderKey } : {}) };
+    return { ...instance, ...compat, ...(url ? { url } : {}), ...(Array.isArray(managedModels) ? { managedModels } : {}), ...(placeholderKey ? { placeholderKey } : {}) };
   });
 }

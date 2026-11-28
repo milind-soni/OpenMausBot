@@ -9,7 +9,7 @@ import { existsSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts"; import { startToolResultsSweep } from "./host/tool-results-sweep.ts";
+import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts"; import { startToolResultsSweep } from "./host/tool-results-sweep.ts"; import { openAiCompatSummaryFields, summarizeCustomHeaders } from "./openai-compat-endpoints.ts";
 import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
@@ -11575,7 +11575,7 @@ function configStatus() {
     billing: { currency: cfg.billing?.currency ?? "USD", prices: cfg.billing?.prices ?? {} },
     decisions: { retentionDays: decisionRetentionDays(cfg.decisions?.retentionDays) },
     safetyFloor: { enabled: safetyFloorOn() },
-    openaiCompat: { ...keyStatus(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
+    openaiCompat: { ...keyStatus(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "", ...(cfg.openaiCompat?.customHeaders ? { customHeaders: summarizeCustomHeaders(cfg.openaiCompat.customHeaders) } : {}) },
     composio: {
       ...(composio.connectionMode(cfg) === "self-hosted" ? keyHint(cfg.composio?.apiKey) : {}),
       configured: composio.configured(cfg), mode: composio.connectionMode(cfg),
@@ -11650,7 +11650,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] }, live: liveSettingsForClient(status.live), everyBotRules: undefined,
     vps: { configured: status.vps.configured, sshAlias: "", servers: [], memoryGb: status.vps.memoryGb, cpus: status.vps.cpus },
-    opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] },
+    opencodeGo: { configured: status.opencodeGo.configured, providerKeys: [] }, openaiCompat: { configured: status.openaiCompat.configured, url: status.openaiCompat.url, ...(status.openaiCompat.customHeaders ? { customHeaders: { configured: status.openaiCompat.customHeaders.enabled && status.openaiCompat.customHeaders.headers.length > 0 } } : {}) },
     ...(CLOUD_TEAM ? { onboarding } : {}), profile: CLOUD_TEAM ? profile : { name: profile.name, email: "", ...(profile.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}) },
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
   };
@@ -11687,7 +11687,7 @@ async function describeInstances() {
     const described = {
       ...instance, ...testedAi.info(instance), ...engineUpdates.shown(instance.driverKind, "version" in instance.snapshot ? instance.snapshot.version : null),
       ...instanceLook(entry),
-      ...(entry?.access ? { access: entry.access } : {}), ...(entry?.driver === "openai-compat" && typeof (entry.config as { replyWaitMinutes?: unknown } | undefined)?.replyWaitMinutes === "number" ? { replyWaitMinutes: (entry.config as { replyWaitMinutes: number }).replyWaitMinutes } : {}), ...(heldKeys?.refusal(instance.instanceId) ? { snapshot: { state: "unavailable" as const, reason: TRIAL_KEY_HELD } } : {}),
+      ...(entry?.access ? { access: entry.access } : {}), ...openAiCompatSummaryFields(entry), ...(heldKeys?.refusal(instance.instanceId) ? { snapshot: { state: "unavailable" as const, reason: TRIAL_KEY_HELD } } : {}),
     };
     if (hostedModels) return { ...described, readOnly: true,
       install: undefined, authentication: undefined, cli: undefined, cliCandidates: [],

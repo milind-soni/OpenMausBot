@@ -41,9 +41,10 @@ export function summaryPrompt(history: readonly ReplayEntry[]): string {
 }
 
 interface SummaryOptions {
-  generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
+  generateText?: (prompt: string, options?: { signal?: AbortSignal; threadId?: string }) => Promise<string>;
   signal: AbortSignal;
   timeoutMs?: number;
+  threadId?: string;
   /** Told true when the summary starts and false once it is written, failed or stopped. */
   onSummarizing?: (active: boolean) => void;
 }
@@ -71,7 +72,7 @@ async function summarize(history: readonly ReplayEntry[], options: SummaryOption
     model = await new Promise<string>((resolve, reject) => {
       abort = () => reject(signal.reason);
       signal.addEventListener("abort", abort, { once: true });
-      Promise.resolve().then(() => options.generateText!(summaryPrompt(history), { signal }))
+      Promise.resolve().then(() => options.generateText!(summaryPrompt(history), { signal, ...(options.threadId ? { threadId: options.threadId } : {}) }))
         .then(resolve, reject);
     });
   } catch {}

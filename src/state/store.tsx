@@ -404,8 +404,8 @@ function openedUnreadDivider(state: AppState, threadId: string, unread: boolean,
   return unread ? unreadDividerFor(threadId, messages, lastReadMessageId, hasMore) : placeUnreadDivider(state.unreadDivider?.threadId === threadId ? state.unreadDivider : null, threadId, messages, Boolean(hasMore));
 }
 
-import type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary } from "./config-status";
-export type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary };
+import type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary, OpenAiCompatCustomHeadersSummary } from "./config-status";
+export type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicySummary, OpenAiCompatCustomHeadersSummary };
 
 import { configStatusFromFrame, type ConfigStatusFrame } from "@/lib/config-status-frame";
 export { configStatusFromFrame, type ConfigStatusFrame };
@@ -462,7 +462,7 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   cliDefault?: string;
   cliCandidates?: string[];
   claudeAccount?: { configDir: string; signInCommand: string; signInShell: "powershell" | "sh"; isDefault: boolean };
-  freeUpSpace?: boolean; replyWaitMinutes?: number; modelsUnconfirmed?: true; /** Why the engine's last read of its list failed. */ modelsUnreadable?: "signedOut" | "timedOut" | "failed"; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
+  freeUpSpace?: boolean; replyWaitMinutes?: number; customHeaders?: OpenAiCompatCustomHeadersSummary; modelsUnconfirmed?: true; /** Why the engine's last read of its list failed. */ modelsUnreadable?: "signedOut" | "timedOut" | "failed"; /** The app updated its own copy of this engine to this version lately. */ autoUpdated?: { version: string; at: number };
 }
 
 /** A Settings page (`SettingsPageId`) or an older page name that `settings-index.ts` sends to its new page and section. */
