@@ -74,6 +74,8 @@ type Handle = (req: IncomingMessage, res: ServerResponse) => Promise<unknown>;
 
 export interface TailnetShareOptions {
   port: number;
+  /** The existing primary server's live address, for reusing its listener. */
+  primaryAddress?: () => ReturnType<Server["address"]>;
   handle: Handle;
   /** WebSocket upgrades through the same handler. */
   attach: (server: Server, handle: Handle) => void;
@@ -87,6 +89,8 @@ export function createTailnetShare(options: TailnetShareOptions) {
   let started = false;
   let desired: TailnetShareConfig | null = null;
   let listeners = new Map<string, Server>();
+  let covered: string[] = [];
+  const listening = () => [...covered, ...listeners.keys()];
   const connections = new WeakMap<Server, Set<Socket>>();
   let allowed: ReadonlySet<string> = new Set();
   let error: string | null = null;
@@ -128,7 +132,7 @@ export function createTailnetShare(options: TailnetShareOptions) {
     const held = new Set<Socket>();
     connections.set(server, held);
     server.on("connection", (socket) => {
-      if (!tailnetPeerAllowed(socket.remoteAddress, [...listeners.keys()])) return void socket.destroy();
+      if (!tailnetPeerAllowed(socket.remoteAddress, listening())) return void socket.destroy();
       held.add(socket);
       socket.once("close", () => held.delete(socket));
     });
@@ -143,16 +147,22 @@ export function createTailnetShare(options: TailnetShareOptions) {
   }
 
   async function bind(config: TailnetShareConfig | null): Promise<void> {
-    const wanted = config && "addresses" in config ? (config.addresses === "interface" ? tailnetInterfaceAddresses(interfaces()) : config.addresses) : [];
+    const primary = options.primaryAddress?.();
+    const wildcard = primary && typeof primary === "object" && primary.port === options.port && primary.address === "0.0.0.0";
+    const currentInterfaces: ReturnType<typeof networkInterfaces> = config && "addresses" in config && (config.addresses === "interface" || wildcard) ? interfaces() : {};
+    const wanted = config && "addresses" in config ? (config.addresses === "interface" ? tailnetInterfaceAddresses(currentInterfaces) : config.addresses) : [];
+    const local = Object.values(currentInterfaces).flatMap((entries) => (entries ?? []).map((entry) => bareAddress(entry.address)));
+    covered = primary && typeof primary === "object" && primary.port === options.port
+      ? wanted.filter((address) => primary.address === address || (wildcard && isIP(address) === 4 && local.includes(address))) : [];
     for (const [address, server] of listeners) {
-      if (!wanted.includes(address)) {
+      if (!wanted.includes(address) || covered.includes(address)) {
         listeners.delete(address);
         await close(server);
       }
     }
     const failures: string[] = [];
     for (const address of wanted) {
-      if (listeners.has(address)) continue;
+      if (listeners.has(address) || covered.includes(address)) continue;
       try {
         listeners.set(address, await open(address));
         log(`tailnet: listening on ${address.includes(":") ? `[${address}]` : address}:${options.port} for ${config!.name}`);
@@ -160,8 +170,8 @@ export function createTailnetShare(options: TailnetShareOptions) {
         failures.push(`${address}: ${(failure as NodeJS.ErrnoException).code ?? (failure as Error).message}`);
       }
     }
-    allowed = config ? tailnetHosts({ name: config.name, addresses: [...listeners.keys()], port: options.port }) : new Set();
-    error = config && "addresses" in config && listeners.size === 0
+    allowed = config ? tailnetHosts({ name: config.name, addresses: listening(), port: options.port }) : new Set();
+    error = config && "addresses" in config && listening().length === 0
       ? failures.length ? `could not listen on the tailnet (${failures.join("; ")})` : "Tailscale's interface has no address on this computer"
       : failures.length ? `could not listen on ${failures.join("; ")}` : null;
     if (error) log(`tailnet: ${error}`);
@@ -196,10 +206,10 @@ export function createTailnetShare(options: TailnetShareOptions) {
     origin(): string | null {
       if (!desired) return null;
       if ("served" in desired) return desired.served;
-      return listeners.size ? tailnetOrigin(desired.name, options.port) : null;
+      return listening().length ? tailnetOrigin(desired.name, options.port) : null;
     },
     state(): TailnetShareState {
-      return { origin: share.origin(), listening: [...listeners.keys()], error: desired && "served" in desired ? null : error };
+      return { origin: share.origin(), listening: listening(), error: desired && "served" in desired ? null : error };
     },
     /** The desktop app's private message; anything else is not ours. Replies with the state once it is applied. */
     receive(message: unknown, reply: (answer: object) => void): boolean {
@@ -218,6 +228,7 @@ export function createTailnetShare(options: TailnetShareOptions) {
       await applying;
       const open = [...listeners.values()];
       listeners = new Map();
+      covered = [];
       allowed = new Set();
       await Promise.all(open.map(close));
     },
