@@ -2010,11 +2010,7 @@ body {
   0%, 94% { --settings-fade: 10px; }
   100% { --settings-fade: 0px; }
 }
-/* A thin thumb that stays visible, so a long Settings page shows it goes on. */
-.settings-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-scrollbar) transparent;
-}
+/* Settings scroll-mask; thumb colour comes from the overflow-* rules below. */
 @property --settings-fade-top {
   syntax: "<length>";
   inherits: false;
@@ -2304,6 +2300,25 @@ body {
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Firefox does not inherit scrollbar-color from :root; every overflow pane
+   (dialogs, menus, settings, chat) gets the same thumb as WebKit above.
+   The gate is the engine, not a selector: -moz-appearance is a Gecko property
+   that Chromium does not recognize, so this holds in every Firefox version and
+   never in Chromium. Testing a webkit selector instead is fragile, because a
+   Firefox release can answer it differently. In Chromium, setting
+   scrollbar-color on an element turns off its ::-webkit-scrollbar rules there,
+   which drops the glass track margins (.glass-scroller). */
+@supports (-moz-appearance: none) {
+  :is(.overflow-y-auto, .overflow-auto, .overflow-x-auto, .overflow-y-scroll, .overflow-x-scroll, .overflow-scroll) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar) transparent;
+  }
+}
+[class*="scrollbar-width:none"],
+[class*="scrollbar]:hidden"] {
+  scrollbar-width: none;
 }
 
 @keyframes panel-in {
