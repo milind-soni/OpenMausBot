@@ -9,7 +9,7 @@
 // snapshot-before-every-turn cadence follows Cline.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
@@ -313,7 +313,30 @@ async function clearStaleLocks(shadow: string, staleMs = STALE_LOCK_MS): Promise
       await sleep(Math.min(250, staleMs - age));
     }
   }
+  dropStaleTmpPacks(shadow, staleMs);
   locksCleared.add(shadow);
+}
+
+/** Leftovers from a `git repack` or `git gc` that was stopped part-way. They are not packs git will finish or
+ * collect, and they can grow to many gigabytes. Only when no git of this process is running on the shadow, same
+ * as clearStaleLocks. */
+function dropStaleTmpPacks(shadow: string, staleMs: number): void {
+  const packDir = join(shadow, ".git", "objects", "pack");
+  let names: string[];
+  try {
+    names = readdirSync(packDir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith("tmp_pack_")) continue;
+    const path = join(packDir, name);
+    const stat = statSync(path, { throwIfNoEntry: false });
+    if (!stat || !stat.isFile()) continue;
+    const age = Date.now() - stat.mtimeMs;
+    if (staleMs > 0 && age >= 0 && age < staleMs) continue;
+    rmSync(path, { force: true });
+  }
 }
 
 /** While a collection runs, the second it prunes up to. A collection outlives a server that dies, and what the next

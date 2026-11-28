@@ -117,6 +117,10 @@ afterEach(() => { for (const root of scratch.splice(0)) rmSync(root, { recursive
 
 describe("encrypted full workspace backups", () => {
   it("leaves waits out of backups and Cloud sends", () => expect(omittedFromWorkspaceBackup("waits.json")).toBe(true));
+  it("leaves rewind checkpoints out of backups", () => {
+    expect(omittedFromWorkspaceBackup("checkpoints")).toBe(true);
+    expect(omittedFromWorkspaceBackup("checkpoints/bot/snap/.git/objects/pack/tmp_pack_x")).toBe(true);
+  });
 
   it("carries no waits, and a restore ends the waits already here, keeping them in the safety copy", async () => {
     const source = directory();
@@ -151,6 +155,85 @@ describe("encrypted full workspace backups", () => {
     const manifest = readJson(join(target, ".backups", staged.id, "staged", "manifest.json"));
     expect(manifest.entries.some((entry: { path: string }) => entry.path === "sync" || entry.path.startsWith("sync/"))).toBe(false);
     expect(manifest.entries.some((entry: { path: string }) => entry.path === "notes.md")).toBe(true);
+  });
+
+  it("leaves rewind checkpoints out of a full backup, and keeps the destination's checkpoints in place", async () => {
+    const source = directory();
+    writeFileSync(join(source, "notes.md"), "kept");
+    const pack = join(source, "checkpoints", "bot-id", "snap", ".git", "objects", "pack");
+    mkdirSync(pack, { recursive: true });
+    writeFileSync(join(pack, "tmp_pack_leftover"), "interrupted repack leftovers");
+    writeFileSync(join(source, "checkpoints", "bot-id", "snap", "tree.txt"), "rewind history");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    expect(exported.summary.exclusions).toContain("Per-turn rewind checkpoints (they can be taken again after restoring).");
+    const target = directory();
+    mkdirSync(join(target, "checkpoints", "kept-bot"), { recursive: true });
+    writeFileSync(join(target, "checkpoints", "kept-bot", "local.txt"), "destination rewind");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const manifest = readJson(join(target, ".backups", staged.id, "staged", "manifest.json"));
+    expect(manifest.entries.some((entry: { path: string }) => entry.path === "checkpoints" || entry.path.startsWith("checkpoints/"))).toBe(false);
+    expect(manifest.entries.some((entry: { path: string }) => entry.path === "notes.md")).toBe(true);
+    commitPendingWorkspaceRestore(target, staged.id);
+    const result = applyPendingWorkspaceRestore(target);
+    expect(result).toMatchObject({ restored: true });
+    expect(readFileSync(join(target, "notes.md"), "utf8")).toBe("kept");
+    expect(readFileSync(join(target, "checkpoints", "kept-bot", "local.txt"), "utf8")).toBe("destination rewind");
+    expect(existsSync(join(target, "checkpoints", "bot-id"))).toBe(false);
+  });
+
+  it("keeps a legacy backup containing checkpoints restorable: validated, staged, but left out of the restored tree", async () => {
+    const source = directory();
+    writeFileSync(join(source, "notes.md"), "kept");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    mkdirSync(join(target, "checkpoints", "kept-bot"), { recursive: true });
+    writeFileSync(join(target, "checkpoints", "kept-bot", "local.txt"), "destination rewind");
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    // Rewrite the staged manifest the way a pre-exclusion backup wrote it: with top-level checkpoints entries.
+    const job = join(target, ".backups", staged.id);
+    const manifestPath = join(job, "staged", "manifest.json");
+    const manifest = readJson(manifestPath);
+    const tree = Buffer.from("legacy rewind history");
+    manifest.entries.push({ path: "checkpoints", type: "directory", size: 0, mode: 0o700 });
+    manifest.entries.push({ path: "checkpoints/bot", type: "directory", size: 0, mode: 0o700 });
+    manifest.entries.push({ path: "checkpoints/bot/snap", type: "directory", size: 0, mode: 0o700 });
+    manifest.entries.push({ path: "checkpoints/bot/snap/tree.txt", type: "file", size: tree.length, mode: 0o600, sha256: createHash("sha256").update(tree).digest("hex") });
+    manifest.summary.files += 1;
+    manifest.summary.directories += 3;
+    manifest.summary.bytes += tree.length;
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    mkdirSync(join(job, "staged", "data", "checkpoints", "bot", "snap"), { recursive: true });
+    writeFileSync(join(job, "staged", "data", "checkpoints", "bot", "snap", "tree.txt"), tree);
+    commitPendingWorkspaceRestore(target, staged.id);
+    const result = applyPendingWorkspaceRestore(target);
+    expect(result).toMatchObject({ restored: true });
+    expect(readFileSync(join(target, "notes.md"), "utf8")).toBe("kept");
+    expect(readFileSync(join(target, "checkpoints", "kept-bot", "local.txt"), "utf8")).toBe("destination rewind");
+    expect(existsSync(join(target, "checkpoints", "bot"))).toBe(false);
+  });
+
+  it("reads a legacy recovery journal that recorded a checkpoints entry, and rolls it back", async () => {
+    const source = directory();
+    writeFileSync(join(source, "notes.md"), "kept");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    applyPendingWorkspaceRestore(target);
+    // Simulate an interrupted legacy restore: its journal recorded a checkpoints dir it had already moved into the
+    // safety copy — before checkpoints were excluded — and it died mid-apply.
+    const root = join(target, ".backups");
+    const journalPath = join(root, "restore-journal.json");
+    const journal = readJson(journalPath);
+    expect(journal.existing).not.toContain("checkpoints");
+    const safetyData = join(root, `safety-${journal.id}`, "data");
+    mkdirSync(join(safetyData, "checkpoints", "bot"), { recursive: true });
+    writeFileSync(join(safetyData, "checkpoints", "bot", "moved.txt"), "moved by legacy restore");
+    writeFileSync(journalPath, JSON.stringify({ ...journal, phase: "applying", existing: [...journal.existing, "checkpoints"] }));
+    const result = applyPendingWorkspaceRestore(target);
+    expect(result).toMatchObject({ rolledBack: true });
+    expect(readFileSync(join(target, "checkpoints", "bot", "moved.txt"), "utf8")).toBe("moved by legacy restore");
+    expect(existsSync(join(safetyData, "checkpoints", "bot", "moved.txt"))).toBe(false);
   });
 
   it("round-trips WAL conversations, binary files, drafts and IDs; preserves destination identity and connections", async () => {
