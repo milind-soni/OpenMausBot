@@ -15047,7 +15047,7 @@ for (const row of chatFollowups()) {
     role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
     sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
-    ...(row.kind === "bot" ? spokenLineFields(row.payload.via, row.payload.callId) : {}),
+    ...(row.kind === "bot" ? { ...spokenLineFields(row.payload.via, row.payload.callId), ...(row.payload.peerAsk ? { peerAsk: row.payload.peerAsk } : {}) } : {}),
   });
   const recoveredTask = row.kind !== "channel" ? store.taskByThread(row.ownerId, row.threadId) : undefined;
   const order = sinceFreshStart(store.activePath(row.threadId)).filter(isContextMessage).map((m) => m.id);
