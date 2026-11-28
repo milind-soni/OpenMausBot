@@ -794,7 +794,9 @@ describe("Voice server address in Other services", () => {
     expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "http://127.0.0.1:4124" } }) });
 
     fx.api.mockResolvedValueOnce({ ...fx.config, tts: { provider: "elevenlabs", configured: true, ready: true, voice: "v1", baseUrl: "", model: "" } });
-    await answered(() => voiceAction("Remove").click());
+    flushSync(() => voiceAction("Remove").click());
+    expect(voiceInput().value).toBe("");
+    await answered(() => {});
     expect(fx.api).toHaveBeenLastCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: "" } }) });
     expect(voiceInput().value).toBe("");
   });

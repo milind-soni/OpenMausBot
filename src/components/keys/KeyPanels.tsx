@@ -206,9 +206,10 @@ export function VoiceServerUrl() {
     savingRef.current = true;
     setSaving(true);
     setError(null);
+    setValue(next);
     api("/api/config", { method: "PUT", body: JSON.stringify({ tts: { baseUrl: next } }) })
       .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
-      .catch((e: Error) => setError(e.message))
+      .catch((e: Error) => { setError(e.message); setValue(saved); })
       .finally(() => { savingRef.current = false; setSaving(false); });
   };
 
