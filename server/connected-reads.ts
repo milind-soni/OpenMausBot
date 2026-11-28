@@ -41,6 +41,8 @@ export interface EmailHeader {
   app?: MailApp;
   /** Outlook's own web address for the message. */
   link?: string;
+  /** False once the person has read it; left out when the app did not say. */
+  unread?: boolean;
 }
 
 export interface ThreadMessage {
@@ -48,6 +50,7 @@ export interface ThreadMessage {
   at: number;
   /** The sender's lower-case address, or "" when the answer named none. */
   from: string;
+  unread?: boolean;
 }
 
 const SIGNED_OUT = /\b(?:unauthori[sz]ed|unauthenticated|invalid[_ ]grant|expired|re-?connect|not connected|no connected account|not active|initiated|initializing|permission denied|forbidden|401|403)\b/i;
@@ -183,7 +186,8 @@ function oneLine(value: unknown, max: number): string {
   return Array.from(flat(typeof value === "string" ? value.replace(/[^\P{C}\s]/gu, "") : "")).slice(0, max).join("").trim();
 }
 
-function addressIn(sender: string): string {
+/** The lower-case address in a From line, or "" when it holds none. */
+export function addressIn(sender: string): string {
   const candidate = (/<([^<>\s]+)>/.exec(sender)?.[1] ?? sender).trim().toLowerCase();
   return ADDRESS.test(candidate) ? candidate : "";
 }
@@ -256,6 +260,11 @@ function messageId(item: Record<string, unknown> | undefined): string | undefine
   return typeof id === "string" && id ? id : undefined;
 }
 
+/** Gmail's read state from the message's labels; nothing when the answer carried no labels. */
+function gmailUnread(item: Record<string, unknown>): { unread?: boolean } {
+  return Array.isArray(item.labelIds) ? { unread: item.labelIds.includes("UNREAD") } : {};
+}
+
 function emailHeader(raw: unknown): EmailHeader | null {
   const item = record(raw);
   const id = messageId(item);
@@ -268,6 +277,7 @@ function emailHeader(raw: unknown): EmailHeader | null {
     from: senderOf(item),
     subject: flat(item.subject ?? preview?.subject ?? headerValue(item, "subject")),
     preview: flat(preview?.body ?? item.snippet ?? item.messageText).slice(0, PREVIEW_MAX),
+    ...gmailUnread(item),
   };
 }
 
@@ -336,6 +346,7 @@ function outlookHeader(raw: unknown): EmailHeader | null {
     preview: flat(item.bodyPreview).slice(0, PREVIEW_MAX),
     app: "outlook",
     ...(typeof item.webLink === "string" && item.webLink ? { link: item.webLink } : {}),
+    ...(typeof item.isRead === "boolean" ? { unread: !item.isRead } : {}),
   };
 }
 
@@ -368,7 +379,7 @@ export function threadFromData(data: unknown): ThreadMessage[] {
   const messages = list.flatMap((raw): ThreadMessage[] => {
     const item = record(raw);
     const id = messageId(item);
-    return item && id ? [{ id, at: sentAt(item), from: addressIn(senderOf(item)) }] : [];
+    return item && id ? [{ id, at: sentAt(item), from: addressIn(senderOf(item)), ...gmailUnread(item) }] : [];
   });
   if (list.length > 0 && messages.length === 0) throw new Error("none of the thread's messages could be read");
   return messages;
@@ -629,7 +640,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         for (;;) {
           const data = await call(OUTLOOK_LIST_TOOL, {
             user_id: "me", folder: "inbox", top: size, received_date_time_ge: new Date(sinceMs).toISOString(),
-            select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink"],
+            select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink", "isRead"],
           }, { shortened: size > GMAIL_PAGE_MIN, pin });
           if (data === SHORTENED) {
             size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
@@ -640,7 +651,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       },
       async outlookMessage(id) {
         const data = await call(OUTLOOK_MESSAGE_TOOL, {
-          user_id: "me", message_id: id, select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink"],
+          user_id: "me", message_id: id, select: ["id", "subject", "from", "receivedDateTime", "bodyPreview", "conversationId", "webLink", "isRead"],
         }, { gone: messageGone });
         return data === GONE ? null : parsed("outlook", () => outlookMessageFromData(data));
       },

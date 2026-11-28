@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { NeedsYouItem } from "../../shared/today.ts";
 import { widgetActions, type WidgetRoot } from "../../shared/widget.ts";
-import type { CalendarEvent, EmailHeader } from "../connected-reads.ts";
+import type { CalendarEvent, EmailHeader, ReadSession, ThreadMessage } from "../connected-reads.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
 import { Store, type Message } from "../store.ts";
@@ -25,7 +25,7 @@ const standup: CalendarEvent = {
   attendees: [{ email: "me@x.test", self: true, organizer: true }, { email: "ada@x.test", name: "Ada", self: false, organizer: false }],
 };
 
-function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string; ideas?: string[] } = {}) {
+function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string; ideas?: string[]; session?: ReadSession } = {}) {
   let watching = true;
   const dir = mkdtempSync(join(tmpdir(), "omb-brief-"));
   dirs.push(dir);
@@ -42,7 +42,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
   const make = () => createBrief({
     store, dataDir: dir, now: () => now, hosted: options.hosted ?? false, watching: () => watching, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => busy,
     notify: (_bot, _thread, detail) => notified.push(detail), runs: () => runs, needsYou: () => options.needsYou ?? [], engineName: () => "Claude",
-    hostTimeZone: () => "UTC", language: () => options.language, session: () => null, address: () => "me@x.test",
+    hostTimeZone: () => "UTC", language: () => options.language, session: () => options.session ?? null, address: () => "me@x.test",
     failRun: (id, why) => failed.push([id, why]), keep: (key) => kept.push(key), items: (key) => items.get(key) ?? null,
     ideas: (botId) => (botId === chief.id && options.ideas ? { ideas: options.ideas, conversations: 3 } : { ideas: [], conversations: 0 }),
   });
@@ -399,5 +399,82 @@ describe("the brief", () => {
     const opens = widgetActions(s.card()!.widget!.root as WidgetRoot).filter((entry) => entry.action.type === "open_url").map((entry) => [entry.label, entry.action.payload]);
     expect(opens).toEqual([["Open in Outlook", { url: webLink }]]);
     expect(s.shown()).not.toContain("mail.google.com");
+  });
+});
+
+/** Gmail threads and Outlook messages by id, changed in place by a test. */
+function mailSession(threads: Record<string, ThreadMessage[]>, outlook: Record<string, EmailHeader | null> = {}): ReadSession {
+  return {
+    events: async () => [], emails: async () => ({ emails: [], more: false }), message: async () => null, address: async () => "me@x.test",
+    thread: async (threadId) => threads[threadId] ?? [], outlookMessage: async (id) => outlook[id] ?? null,
+  };
+}
+
+describe("the brief's email rows", () => {
+  const bob: EmailHeader = { id: "o1", threadId: "conv-1", at: 0, from: "Bob <bob@outlook.test>", subject: "Invoice", preview: "Due Friday", app: "outlook" };
+
+  it("never lists mail already read or sent from a no-reply address", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], picked: [
+      { email: { ...ada, id: "m-read", threadId: "t-read", subject: "Already read", unread: false }, why: "Seen.", needsReply: true },
+      { email: { ...ada, id: "m-shop", threadId: "t-shop", from: "Shop <no-reply@shop.test>", subject: "Your order shipped" }, why: "Shipped.", needsReply: false },
+      { email: { ...ada, id: "m-bounce", threadId: "t-bounce", from: "MAILER-DAEMON@mx.test", subject: "Undeliverable" }, why: "Bounced.", needsReply: false },
+      { email: { ...ada, unread: true }, why: "Ada needs the numbers.", needsReply: true },
+    ] });
+    expect(s.shown()).toContain("Ada: Q3 numbers");
+    expect(s.shown()).not.toMatch(/Already read|Your order shipped|Undeliverable/);
+  });
+
+  it("drops a row once the person has read the mail, in Gmail or Outlook", async () => {
+    const threads: Record<string, ThreadMessage[]> = { t1: [{ id: "m1", at: 0, from: "ada@x.test", unread: true }] };
+    const outlook: Record<string, EmailHeader | null> = { o1: { ...bob, unread: true } };
+    const session = mailSession(threads, outlook);
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session, picked: [{ email: ada, why: "Ada needs the numbers.", needsReply: true }, { email: bob, why: "Due Friday.", needsReply: false }] });
+    expect(s.shown()).toContain("Ada: Q3 numbers");
+    expect(s.shown()).toContain("Invoice");
+
+    threads.t1 = [{ id: "m1", at: 0, from: "ada@x.test", unread: false }];
+    outlook.o1 = { ...bob, unread: false };
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session });
+    expect(s.shown()).not.toContain("Q3 numbers");
+    expect(s.shown()).not.toContain("Invoice");
+  });
+
+  it("keeps a row whose read state the app did not say, waiting on a reply until the person replies after it", async () => {
+    const threads: Record<string, ThreadMessage[]> = { t1: [{ id: "m1", at: 0, from: "ada@x.test" }] };
+    const session = mailSession(threads);
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session, picked: [{ email: ada, why: "Ada needs the numbers.", needsReply: true }] });
+    expect(s.shown()).toContain("Waiting on your reply · Ada needs the numbers.");
+
+    threads.t1 = [...threads.t1!, { id: "m2", at: 1, from: "me@x.test" }];
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session });
+    expect(s.shown()).not.toContain("Q3 numbers");
+  });
+
+  it("does not say an email waits on a reply when the person already wrote in its thread before it", async () => {
+    const at = Date.parse("2026-10-22T07:00:00Z");
+    const session = mailSession({ t1: [{ id: "m0", at: at - 60 * MINUTE, from: "me@x.test" }, { id: "m1", at, from: "ada@x.test", unread: true }] });
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session, picked: [{ email: { ...ada, at, subject: "Re: Q3 numbers" }, why: "Ada says thanks.", needsReply: true }] });
+    expect(s.shown()).toContain("Ada: Re: Q3 numbers");
+    expect(s.shown()).toContain("Ada says thanks.");
+    expect(s.shown()).not.toContain("Waiting on your reply");
+  });
+
+  it("checks a watch run's picks the same way before showing them", async () => {
+    const at = Date.parse("2026-10-22T07:00:00Z");
+    const s = setup({ session: mailSession({ t1: [{ id: "m0", at: at - 60 * MINUTE, from: "me@x.test" }, { id: "m1", at, from: "ada@x.test" }] }) });
+    await s.brief.active("desktop", "UTC");
+    s.items.set("chk-1", { mail: [{ ...ada, at }, { ...ada, id: "m-shop", threadId: "t-shop", from: "noreply@shop.test", subject: "Your order shipped" }], prep: [] });
+    await s.brief.consume(s.watchRun("chk-1", '{"important": [{"id": "m1", "why": "Ada says thanks.", "needsReply": true}, {"id": "m-shop", "why": "Shipped.", "needsReply": false}], "prep": []}'), "turn-1");
+    expect(s.shown()).toContain("Ada says thanks.");
+    expect(s.shown()).not.toContain("Waiting on your reply");
+    expect(s.shown()).not.toContain("Your order shipped");
   });
 });

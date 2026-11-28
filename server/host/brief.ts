@@ -19,7 +19,7 @@ import { recordsBlock, clean } from "../records-block.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
+import { answered, automatedSender, localDate, qualifies, repliedEarlier, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
 import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, moment, prepCard, reminderCard, words, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
@@ -333,8 +333,8 @@ export function createBrief(deps: BriefDeps) {
     for (const row of missing.slice(0, 12)) {
       try {
         const header = row.app === "outlook" ? await session.outlookMessage?.(row.messageId) : await session.message(row.messageId);
-        if (header) headers.set(row.messageId, header);
-        else if (header === null) state.important = state.important.filter((one) => one.messageId !== row.messageId);
+        if (header === null || header?.unread === false) state.important = state.important.filter((one) => one.messageId !== row.messageId);
+        else if (header) headers.set(row.messageId, header);
       } catch {
         return;
       }
@@ -421,6 +421,7 @@ export function createBrief(deps: BriefDeps) {
 
   /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process. */
   function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number, whyText?: ServerText): void {
+    if (email.unread === false || automatedSender(email.from)) return;
     headers.set(email.id, { ...email, why, ...(whyText ? { whyText } : {}) });
     state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply, ...(email.app === "outlook" ? { app: "outlook" as const } : {}) }].slice(-MAX_ROWS);
   }
@@ -438,23 +439,40 @@ export function createBrief(deps: BriefDeps) {
     const picked = found.picked ?? [];
     for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at, pick.whyText);
     if (picked.length) save();
-    await followUpReplies(found.session);
+    await followUp(found.session);
     if (picked.length) await render({ create: true, notify: true });
     else if (state.lastActiveAt !== undefined) await render({ create: false, notify: true });
   }
 
-  /** An email waiting on a reply leaves the brief once the person has replied in its thread. */
-  async function followUpReplies(session: ReadSession | undefined): Promise<void> {
+  /** An email leaves the brief once the person has read it, or replied in its thread after it. One in a thread they had
+   * already written in is not waiting on their reply. */
+  async function followUp(session: ReadSession | null | undefined): Promise<void> {
     const address = deps.address();
-    const open = liveImportant(now()).filter((row) => row.needsReply && row.app !== "outlook");
-    if (!session || !address || !open.length) return;
+    const open = liveImportant(now());
+    if (!session || !open.length) return;
+    let changed = false;
+    const drop = (row: Important) => {
+      state.important = state.important.filter((one) => one.messageId !== row.messageId);
+      changed = true;
+    };
     for (const row of open.slice(0, 10)) {
       try {
-        if (answered({ at: row.at }, await session.thread(row.threadId), address)) state.important = state.important.filter((one) => one.messageId !== row.messageId);
+        if (row.app === "outlook") {
+          const header = await session.outlookMessage?.(row.messageId);
+          if (header === null || header?.unread === false) drop(row);
+          continue;
+        }
+        const thread = await session.thread(row.threadId);
+        if (thread.find((message) => message.id === row.messageId)?.unread === false || (row.needsReply && answered(row, thread, address))) drop(row);
+        else if (row.needsReply && repliedEarlier(row, thread, address)) {
+          row.needsReply = false;
+          changed = true;
+        }
       } catch {
-        return;
+        break;
       }
     }
+    if (changed) save();
   }
 
   /** A watch run ended: its answer becomes rows and prep cards, or the run fails and its items go back. */
@@ -482,8 +500,10 @@ export function createBrief(deps: BriefDeps) {
       }
     }
     deps.keep(key);
+    const picked = !result.quiet && result.important.length > 0;
+    if (picked) await followUp(deps.session());
     save();
-    if (!result.quiet && result.important.length) await render({ create: true, notify: true });
+    if (picked) await render({ create: true, notify: true });
   }
 
   /** The person arrived: the first open of a day, or a return after 3 hours away, shows today's brief when it has anything

@@ -2,7 +2,7 @@
 // clash, and which new emails go to the AI to sort. Pure, so every rule is tested without a clock or a connected app.
 import { createHash } from "node:crypto";
 
-import type { CalendarEvent, EmailHeader, ThreadMessage } from "../connected-reads.ts";
+import { addressIn, type CalendarEvent, type EmailHeader, type ThreadMessage } from "../connected-reads.ts";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -156,6 +156,16 @@ export function planMail(input: { now: number; emails: readonly EmailHeader[]; j
   const quiet = fresh.filter((email) => input.now - email.at > EMAIL_MAX_AGE_MS);
   const recent = fresh.filter((email) => input.now - email.at <= EMAIL_MAX_AGE_MS).sort((a, b) => b.at - a.at);
   return { batch: recent.slice(0, TRIAGE_BATCH), quiet, waiting: recent.slice(TRIAGE_BATCH) };
+}
+
+/** Mail from an address nobody reads replies at (no-reply, do-not-reply, bounce notices): never one to list. */
+export function automatedSender(from: string): boolean {
+  return /^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer-daemon)(?![a-z0-9])/.test(addressIn(from));
+}
+
+/** The person already wrote in the thread before this email arrived. */
+export function repliedEarlier(email: Pick<EmailHeader, "at">, thread: readonly ThreadMessage[], address: string | undefined): boolean {
+  return address !== undefined && thread.some((message) => message.at < email.at && message.from === address);
 }
 
 /** The person replied in the thread after this email arrived. */

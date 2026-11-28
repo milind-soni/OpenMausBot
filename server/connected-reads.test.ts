@@ -44,6 +44,15 @@ describe("reading Composio's answers", () => {
     expect(event).toMatchObject({ id: "teams-1", joinUrl: teams });
   });
 
+  it("reads whether Gmail and Outlook mail is still unread, and says nothing when the answer did not", () => {
+    expect(messageFromData({ messageId: "m-1", threadId: "t-1", labelIds: ["INBOX"] }).unread).toBe(false);
+    expect(threadFromData({ messages: [{ messageId: "m-1", labelIds: ["UNREAD"] }, { messageId: "m-2", labelIds: [] }, { messageId: "m-3" }] }).map((message) => message.unread))
+      .toEqual([true, false, undefined]);
+    expect(outlookMessagesFromData({ value: [{ id: "o-1", isRead: false }, { id: "o-2", isRead: true }, { id: "o-3" }] }).map((message) => message.unread))
+      .toEqual([true, false, undefined]);
+    expect(outlookMessageFromData({ id: "o-1", isRead: true }).unread).toBe(false);
+  });
+
   it("reads mail headers, profiles, single messages, threads and the calendar list", () => {
     const emails = emailsFromData(fixture("composio-gmail-fetch"));
     expect(emails.map((email) => [email.id, email.threadId, email.from, email.subject])).toEqual([
@@ -51,6 +60,7 @@ describe("reading Composio's answers", () => {
       ["newsletter-1", "thread-news", "News <news@example.test>", "This week in tech"],
     ]);
     expect(emails[0]!.preview).toBe("Can you send the Q3 numbers by Friday? Thanks");
+    expect(emails.map((email) => email.unread)).toEqual([true, undefined]);
     expect(profileFromData(fixture("composio-gmail-profile"))).toBe("admin@example.test");
     expect(messageFromData(fixture("composio-gmail-message"))).toMatchObject({ id: "m-1", threadId: "t-1", subject: "Q3 numbers" });
     expect(threadFromData(fixture("composio-gmail-thread")).map((message) => message.from)).toEqual(["ada@pin.example", "omkar@example.test"]);

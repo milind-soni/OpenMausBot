@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CalendarEvent, EmailHeader } from "../connected-reads.ts";
 import {
-  answered, clashes, EMAIL_MAX_AGE_MS, emailSince, FIRST_MAIL_LOOK_BACK_MS, fingerprint, mergeMeetings, nextMeetingDue, planMail, planMeetings, PREP_LEAD_MS, REMINDER_LEAD_MS, TRIAGE_BATCH,
+  answered, automatedSender, clashes, EMAIL_MAX_AGE_MS, emailSince, FIRST_MAIL_LOOK_BACK_MS, fingerprint, mergeMeetings, nextMeetingDue, planMail, planMeetings, PREP_LEAD_MS, REMINDER_LEAD_MS, repliedEarlier, TRIAGE_BATCH,
 } from "./check-plan.ts";
 
 const MINUTE = 60_000;
@@ -74,5 +74,24 @@ describe("mail", () => {
     expect(answered(sent, [{ id: "r", at: now - MINUTE, from: "me@x.test" }], "me@x.test")).toBe(true);
     expect(answered(sent, [{ id: "r", at: now - MINUTE, from: "ada@x.test" }], "me@x.test")).toBe(false);
     expect(answered(sent, [{ id: "r", at: now - 2 * 60 * MINUTE, from: "me@x.test" }], "me@x.test")).toBe(false);
+  });
+});
+
+describe("mail senders and threads", () => {
+  it("knows no-reply and bounce senders, and only those", () => {
+    for (const from of ["noreply@x.test", "No-Reply <no-reply@shop.test>", "no_reply+tag@x.test", "donotreply@bank.test", "Do-Not-Reply@x.test", "MAILER-DAEMON@mx.test", "noreply-billing@x.test"]) {
+      expect(automatedSender(from), from).toBe(true);
+    }
+    for (const from of ["Ada <ada@x.test>", "replies@x.test", "noreplying@x.test", "info@noreply.test", "Noreply Team <ada@x.test>"]) {
+      expect(automatedSender(from), from).toBe(false);
+    }
+  });
+
+  it("tells a reply before an email from one after it", () => {
+    const thread = [{ id: "a", at: now - 2 * MINUTE, from: "me@x.test" }, { id: "b", at: now - MINUTE, from: "ada@x.test" }];
+    expect(repliedEarlier({ at: now - MINUTE }, thread, "me@x.test")).toBe(true);
+    expect(answered({ at: now - MINUTE }, thread, "me@x.test")).toBe(false);
+    expect(repliedEarlier({ at: now - 3 * MINUTE }, thread, "me@x.test")).toBe(false);
+    expect(repliedEarlier({ at: now - MINUTE }, thread, undefined)).toBe(false);
   });
 });
