@@ -8033,6 +8033,7 @@
   "chat.preview.closePage": "Fechar página",
   "chat.preview.kind": "Página",
   "chat.preview.pointedPart": "uma parte da página",
+  "chat.preview.onePoint": "1 ponto",
   "chat.preview.pointCount": "Pontos: {count}",
   "chat.preview.clearPoints": "Limpar tudo",
   "chat.preview.removePoint": "Remover {label}",

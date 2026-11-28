@@ -8253,6 +8253,7 @@
   "chat.preview.closePage": "Close page",
   "chat.preview.kind": "Page",
   "chat.preview.pointedPart": "a part of the page",
+  "chat.preview.onePoint": "1 point",
   "chat.preview.pointCount": "{count} points",
   "chat.preview.clearPoints": "Clear all",
   "chat.preview.removePoint": "Remove {label}",

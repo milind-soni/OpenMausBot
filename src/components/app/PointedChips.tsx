@@ -16,7 +16,7 @@ export function PointedChips({ threadId }: { threadId: string }) {
   return (
     <div data-pointed-chips className="mb-2">
       <div className="mb-1 flex items-center gap-2 text-[12px] text-ink-secondary">
-        <span>{t("chat.preview.pointCount", { count: chips.length })}</span>
+        <span>{chips.length === 1 ? t("chat.preview.onePoint") : t("chat.preview.pointCount", { count: chips.length })}</span>
         <button type="button" onClick={() => { clearPointedChips(threadId); setEditing(null); }} className="hover:text-ink hover:underline">{t("chat.preview.clearPoints")}</button>
       </div>
       <div ref={list} className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
