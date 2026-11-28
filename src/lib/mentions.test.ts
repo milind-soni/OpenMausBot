@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mentionChoicesForQuery, mentionClassName, mentionQueryAt, mentionRanges, mentionRowDescription } from "./mentions";
+import { departmentChoices, mentionChoicesForQuery, mentionClassName, mentionQueryAt, mentionRanges, mentionRowDescription } from "./mentions";
 
 const peers = [{ name: "Atlas" }, { name: "New Bot" }, { name: "New Bot 2" }, { name: "調査担当" }, { name: "Hidden", hidden: true }];
 const matches = (text: string, everyone = false) => mentionRanges(text, peers, everyone).map(({ start, end }) => text.slice(start, end));
@@ -44,6 +44,16 @@ describe("mention display ranges", () => {
   it("accepts Markdown and opening punctuation boundaries", () => {
     expect(matches("**@Atlas** (@New Bot 2) 【@調査担当】")).toEqual(["@Atlas", "@New Bot 2", "@調査担当"]);
     expect(matches("user@Atlas /@Atlas")).toEqual([]);
+  });
+  it("lists a room's departments only when it has more than one", () => {
+    const maya = { name: "Maya", section: "Research" };
+    const theo = { name: "Theo", section: "Research" };
+    const solo = { name: "Solo" };
+    expect(departmentChoices([maya, theo])).toEqual([]);
+    expect(departmentChoices([maya, theo, solo])).toEqual([
+      { id: "team:Research", name: "Research", team: { count: 2 } },
+      { id: "team:General", name: "General", team: { count: 1 } },
+    ]);
   });
   it("only decorates everyone in channels and rejects longer words", () => {
     expect(matches("@everyone @Everyone! @everyone_else @everyone2", true)).toEqual(["@everyone", "@Everyone"]);

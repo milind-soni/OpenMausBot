@@ -3,6 +3,7 @@ import { MAUS_COLORS, type MausColor } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { personTagAt, personTagNames } from "../../shared/person-mention";
 import { devsTagAt } from "../../shared/devs-mention";
+import { taggableDepartments } from "../../shared/department-mention";
 import { blankCode } from "../../shared/skill-command";
 
 /** A name the @ list offers: a bot's, or (`person`) a teammate's on a Team Cloud. */
@@ -28,6 +29,13 @@ export function mentionChoicesForQuery<T extends { name: string }>(pool: readonl
   const normalized = query.trim().toLowerCase();
   if (query.endsWith(" ") && pool.some((choice) => choice.name.toLowerCase() === normalized)) return [];
   return pool.filter((choice) => !normalized || choice.name.toLowerCase().includes(normalized));
+}
+
+/** A room's departments as rows of the @ list and names to highlight. A room with one department has none: @everyone
+ * already reaches it. */
+export function departmentChoices(members: readonly { name: string; section?: string; hidden?: boolean }[]): Array<{ id: string; name: string; team: { count: number } }> {
+  const departments = taggableDepartments(members);
+  return departments.length > 1 ? departments.map(({ name, members: bots }) => ({ id: `team:${name}`, name, team: { count: bots.length } })) : [];
 }
 
 export type MentionRowDetail =

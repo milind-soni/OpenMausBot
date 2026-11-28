@@ -50,6 +50,17 @@ describe("roomRespondersForComposer", () => {
     expect(roomRespondersForComposer("İ @Milind", members, mentionsOnly)).toEqual([members[1]]);
   });
 
+  it("routes a department tag to each member of that department", () => {
+    const maya = { id: "maya", name: "Maya", section: "Research" };
+    const theo = { id: "theo", name: "Theo", section: "Research" };
+    const nora = { id: "nora", name: "Nora", section: "Design" };
+    const room = [maya, theo, nora, ...members];
+    const led = { defaultResponder: { kind: "member", botId: members[0]!.id } } as const;
+    expect(roomRespondersForComposer("@Research status", room, led)).toEqual([maya, theo]);
+    expect(roomRespondersForComposer("@Nora and @research", room, led)).toEqual([nora, maya, theo]);
+    expect(roomRespondersForComposer("@Researchers status", room, led)).toEqual([members[0]]);
+  });
+
   it("supports everyone and mentions-only room policies", () => {
     expect(roomRespondersForComposer("hello", members, { defaultResponder: { kind: "everyone" } })).toEqual(members);
     expect(roomRespondersForComposer("hello", members, { defaultResponder: { kind: "mentions" } })).toEqual([]);

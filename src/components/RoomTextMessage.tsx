@@ -1,3 +1,4 @@
+import { departmentChoices } from "@/lib/mentions";
 import { memo, useEffect, useMemo, useState } from "react";
 import { formattedReplyWidth, isFormattedReply, splitReplyBlocks } from "@/lib/formatted-reply";
 import { intlLocale, t } from "@/lib/i18n";
@@ -109,7 +110,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
   useEffect(() => { if (focusedSearch && collapsible) setExpanded(true); }, [focusedSearch, collapsible, focusNonce]);
   const simple = !useAdvancedMode();
   const speakerBot = members.find((member) => member.id === m.from?.botId);
-  const botText = rawText; const teammates = useTeammates(); const peers = useMemo(() => [...members, ...teammates.peers], [members, teammates]);
+  const botText = rawText; const teammates = useTeammates(); const peers = useMemo(() => [...members, ...(dm ? [] : departmentChoices(members)), ...teammates.peers], [members, dm, teammates]);
   const pin = roomPin({ id: groupId, pinnedMessageId: pinned ? m.id : undefined }, m, dispatch);
   const forkAction = !phone && !dm && m.kind === "text" && !m.id.startsWith("optimistic-")
     ? [forkMessageItem({ kind: "group", ownerId: groupId, threadId, messageId: m.id }, dispatch, working)] : [];

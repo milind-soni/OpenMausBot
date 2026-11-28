@@ -26,7 +26,7 @@ import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
-import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts"; import { resolveMentions } from "../shared/room-mentions.ts";
+import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts"; import { resolveMentions } from "../shared/room-mentions.ts"; import { departmentMentions } from "../shared/department-mention.ts";
 import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
@@ -214,7 +214,7 @@ export function normalizeGroupDefaultResponder(
   return { kind: "member", botId: memberIds[0] };
 }
 
-export function roomResponders<T extends { id: string; name: string; hidden?: boolean }>(
+export function roomResponders<T extends { id: string; name: string; section?: string; hidden?: boolean }>(
   text: string,
   members: T[],
   defaultResponder: GroupDefaultResponder,
@@ -233,7 +233,8 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
     }
   }
   const { bots, ambiguous } = resolveMentions(text, available, picked);
-  const mentioned = bots.filter((bot) => !ambiguous.some((sharing) => sharing.includes(bot)));
+  const named = bots.filter((bot) => !ambiguous.some((sharing) => sharing.includes(bot)));
+  const mentioned = [...new Set([...named, ...departmentMentions(text, available)])];
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;
   if (defaultResponder.kind === "member") {
