@@ -208,6 +208,7 @@ export function SidebarFooterNav({
   );
 
   if (iconsOnly) {
+    if (collapsed) return null;
     return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-1">{rows}</nav>;
   }
   return (

@@ -214,6 +214,15 @@ describe("Tools header", () => {
     expect(render("comfortable", { collapsed: true }).html).not.toContain('data-testid="section-alert"');
   });
 
+  it("hides the icon rows when the shared Tools section is collapsed", () => {
+    fixture.advanced = true;
+    const { html } = render("icons", { collapsed: true });
+    for (const id of ["automations", "team-map", "published-apps", "apps"]) {
+      expect(html).not.toContain(`data-sidebar-nav="${id}"`);
+    }
+    expect(html).not.toContain(">Tools<");
+  });
+
   it("draws no Tools header in the avatars-only density or in Simple mode", () => {
     fixture.advanced = true;
     expect(render("icons").html).not.toContain(">Tools<");

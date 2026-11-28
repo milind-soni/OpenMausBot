@@ -11,6 +11,7 @@ import {
   sameSectionOrder,
   sidebarLayoutInteractive,
   sidebarSectionCollapsed,
+  TOOLS_SECTION_ID,
   simpleOrderedSections,
   userSectionId,
   withDepartmentOrder,
@@ -78,9 +79,13 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
     announcement,
     announce: setAnnouncement,
     focusHeader,
-    collapsed: (id: string) => sidebarSectionCollapsed(id, collapsedIds, density, query),
+    // The Tools footer keeps its collapsed flag in the avatar column. Other sections stay open there, because that
+    // column has no section headers to fold.
+    collapsed: (id: string) => id === TOOLS_SECTION_ID
+      ? collapsedIds.includes(id)
+      : sidebarSectionCollapsed(id, collapsedIds, density, query),
     toggle: (id: string) => {
-      if (!interactive) return;
+      if (!interactive && id !== TOOLS_SECTION_ID) return;
       const next = toggleCollapsedSection(collapsedIds, id);
       setCollapsedIds(next);
       saveCollapsedSections(next);
