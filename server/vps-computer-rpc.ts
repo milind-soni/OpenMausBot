@@ -96,12 +96,12 @@ export async function vpsComputerTurn(turn: {
   // a desktop a person took while it waited is never acted on.
   const previous = queues.get(turn.botId) ?? Promise.resolve();
   const queued = previous.then(async (): Promise<Record<string, unknown>> => {
+    const child = await childFor(turn.botId, targets.get(turn.botId)!);
     if (method === "tools/call") {
       const state = await turn.gate(arrivedAt);
       if (state.held) return failedResult(controlRefusal(state));
       turn.assertActive();
     }
-    const child = await childFor(turn.botId, targets.get(turn.botId)!);
     try {
       return await child.rpc(method, turn.body.params ?? {}, turn.signal);
     } catch (error) {
@@ -192,7 +192,7 @@ function openChild(botId: string, target: VpsTarget): Child {
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(unanswered("The VPS computer did not answer in time. It may still have run; check its state before repeating anything."));
-    }, COMPUTER_PROXY_TIMEOUT_MS);
+    }, COMPUTER_PROXY_TIMEOUT_MS - 5_000);
     timer.unref?.();
     const onAbort = () => {
       pending.delete(id);

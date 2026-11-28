@@ -194,10 +194,12 @@ describe("the boxed VPS computer's host-side proxy", () => {
   });
 
   it("a person who takes the desktop while a call waits for an earlier one refuses that call", async () => {
-    serve("slow", ["slow"]);
+    const marker = join(home, "taken.txt");
+    serve("slow", ["slow", marker]);
     const first = call("tools/call", { name: "screenshot" }, 20);
     const second = call("tools/call", { name: "click" }, 21);
     await until(() => turns.length, (arrived: number) => arrived >= 2);
+    await until(() => callsReceived(marker), count => count === 1);
     takes.lastTake = ++takes.now;
     await expect(first).resolves.toMatchObject({ result: { content: [{ text: "did screenshot #1 on slow" }] } });
     expect((await second).result).toEqual({ content: [{ type: "text", text: HANDED_BACK }], isError: true });
@@ -211,6 +213,7 @@ describe("the boxed VPS computer's host-side proxy", () => {
     const first = call("tools/call", { name: "screenshot" }, 30);
     const second = call("tools/call", { name: "click" }, 31);
     await until(() => turns.length, (arrived: number) => arrived >= 2);
+    await until(() => callsReceived(marker), count => count === 1);
     turns[1]!.abort();
     await expect(first).resolves.toMatchObject({ result: { content: [{ text: "did screenshot #1 on slow" }] } });
     expect((await second).result).toMatchObject({ isError: true, content: [{ text: "The turn ended before this call reached the VPS computer, so nothing was run." }] });
@@ -238,12 +241,16 @@ describe("the boxed VPS computer's host-side proxy", () => {
 
   it("a turn of a bot with no VPS computer answers 403", async () => {
     mountedBot = "other-bot";
+    const response = await fetch(harnessUrl + "/api/internal/computer/mcp", { method: "POST", body: JSON.stringify({ method: "tools/list" }) });
+    expect(response.status).toBe(403);
+    await response.text();
     const answer = await call("tools/list", {}, 13);
     expect(answer.error?.code).toBe(-32603);
     expect(answer.error?.message).toContain("no cloud computer");
   });
 
   it("a re-provisioned container drops the child that pointed at the old one", async () => {
+    await expect(call("tools/list")).resolves.toMatchObject({ result: { tools: [{ name: "screenshot-a" }] } });
     serve("b", ["b"]);
     await expect(call("tools/call", { name: "screenshot" }, 14)).resolves.toMatchObject({ result: { content: [{ text: "did screenshot #1 on b" }] } });
     await expect(call("tools/list", {}, 15)).resolves.toMatchObject({ result: { tools: [{ name: "screenshot-b" }] } });

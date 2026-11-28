@@ -12934,7 +12934,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const abort = new AbortController();
         res.once("close", () => { if (!res.writableEnded) abort.abort(); });
         // A boxed turn's VPS computer is served from the host's own proxy (vps-computer-rpc.ts); no Boat is named.
-        if (internalCapability.boxId === undefined) return vpsComputerTurn({ body, res, json, botId: internalCapability.botId, assertActive: requireActiveInternalCapability, takeSequence: () => sharedVm.takeSequence(), gate: (since) => computerCallGate(internalCapability, abort.signal, undefined, since), signal: abort.signal });
+        if (internalCapability.boxId === undefined) return await vpsComputerTurn({ body, res, json, botId: internalCapability.botId, assertActive: requireActiveInternalCapability, takeSequence: () => sharedVm.takeSequence(), gate: (since) => computerCallGate(internalCapability, callSignal, undefined, since), signal: callSignal });
         return json(res, 200, { result: await cloudComputerRpc(body, {
           cfg, signal: abort.signal, folder: () => messageFileRootsForThread(internalCapability.botId, internalCapability.threadId)[0],
           boxId: () => internalCapability.boxId ?? claimedBoatId(internalCapability),
