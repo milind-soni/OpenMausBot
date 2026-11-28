@@ -9,7 +9,7 @@
 // fold without them would leave the CLI attaching the same files too. The user's own scope stays out, as it already is
 // for isolated turns, whose claudeMdExcludes hold out the personal memory and rules: project-only settings still find
 // them via the ancestor walk when a bot lives under HOME, so nothing under the home's .claude folder is folded.
-import { closeSync, constants, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // Claude Code skips a project memory file over 4 MiB entirely, so a larger file is neither folded nor excluded.
@@ -83,4 +83,12 @@ export function claudeProjectMemory(cwd: string, home: string): ClaudeProjectMem
 export function withProjectMemory(launchSystem: string | undefined, memory: ClaudeProjectMemory | null): string | undefined {
   if (!memory) return launchSystem;
   return launchSystem ? `${launchSystem}\n\n${memory.text}` : memory.text;
+}
+
+
+export function appendSubagentMemory(args: string[], dir: string, text: string | undefined): void {
+  if (!text) return;
+  const path = join(dir, "subagent.txt");
+  writeFileSync(path, text, { mode: 0o600 });
+  args.push("--append-subagent-system-prompt-file", path);
 }

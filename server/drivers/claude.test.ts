@@ -1667,7 +1667,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("launches with the working folder's project memory in the system prompt file, excluded from the CLI's own loading", async () => {
-    await create();
+    await create(undefined, { FAKE_CLAUDE_VERSION: "2.1.332" });
+    await instance.snapshot();
     const dump = join(scratch, "project-memory.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
     const botFolder = join(scratch, "memory-bot");
@@ -1684,6 +1685,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     // The memory shares the system prompt's cached prefix instead of following the first message.
     expect(seen.systemPromptFile).toBe(`You are Testy.\n\nInstructions from ${join(botFolder, "AGENTS.md")}:\n\nKeep replies short.`);
+    expect(seen.argv).toContain("--append-subagent-system-prompt-file");
     expect(seen.settings.claudeMdExcludes).toEqual([...personalMemory(), join(botFolder, "AGENTS.md")]);
     const content = seen.prompt.message.content;
     const text = typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");

@@ -47,7 +47,7 @@ import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-m
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { PRESTART_IDLE_MS, armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
-import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts"; import { claudeProjectMemory, withProjectMemory } from "./claude-project-memory.ts";
+import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts"; import { appendSubagentMemory, claudeProjectMemory, withProjectMemory } from "./claude-project-memory.ts";
 import { versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
@@ -1057,9 +1057,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // in the packaged app process.execPath is Electron — run the helper as node
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
-      // Every MCP server without alwaysLoad loads on demand behind ToolSearch (claude-tool-search.ts).
       const own: Record<string, unknown> = { ...authSettings, env: { ...authSettings.env, ENABLE_TOOL_SEARCH: toolSearch, ...(isolated ? CLAUDE_OWN_MEMORY_OFF : {}) } };
-      const projectMemory = isolated && mcpConfigPath ? claudeProjectMemory(cwd, homedir()) : null;
+      const projectMemory = isolated && !shellOff(turn) && mcpConfigPath && turnCliVersion && versionAtLeast(turnCliVersion, [2, 1, 332]) ? claudeProjectMemory(cwd, homedir()) : null;
       if (isolated) own.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md"), join(homedir(), ".claude", "rules", "**"), ...(projectMemory?.excludes ?? [])];
       if (hooks) own.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (shellOff(turn)) own.permissions = GUEST_CLAUDE_PERMISSIONS;
@@ -1149,6 +1148,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           systemPromptPath = join(mkdtempSync(join(tmpdir(), "omb-system-")), "prompt.txt");
           writeFileSync(systemPromptPath, systemText, { mode: 0o600 });
           args.push("--append-system-prompt-file", systemPromptPath);
+          appendSubagentMemory(args, dirname(systemPromptPath), projectMemory?.text);
         }
         if (socketPath) {
           const askTools = new Map<string, string | undefined>();
@@ -1235,7 +1235,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (shellOff(turn)) warmContracts.delete(threadId);
       else {
         warmContracts.set(threadId, {
-          args: [...args], env: { ...env }, cwd, system: systemText ?? null,
+          args: [...args], env: { ...env }, cwd, system: systemText ?? null, subagentSystem: projectMemory?.text,
           mcpServers: mcpConfigPath ? JSON.parse(JSON.stringify(mcpServers)) : null,
           settings: authSettingsPath ? JSON.parse(JSON.stringify(settings)) : null,
         });
