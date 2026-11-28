@@ -19,7 +19,7 @@ import { compactionReading } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
 import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
-import { createRoomSessions } from "./host/room-sessions.ts";
+import { createRoomSessions } from "./host/room-sessions.ts"; import { createRoomSpeakers, type RoomSpeaker } from "./host/room-speaker.ts";
 import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOperation } from "./shared-computers.ts"; import { lentScreenResult } from "./lent-screen-guidance.ts"; import { DeviceLinks } from "./device-links.ts"; import { createLentMcp, isLentMcpPath } from "./lent-mcp.ts";
 import { cloudHomeLendingRefusal, cloudHomeOwnTurnRefusal, createCloudRoutineAuthors, ownerOnlyConversation } from "./cloud-lending.ts"; import { createOwnHome, oneOwner, selfHostedPersonName } from "./own-home.ts"; import { createPlacesElsewhere } from "./places-elsewhere.ts"; import { createPlacesElsewhereRoutes } from "./routes/places-elsewhere.ts"; import { assertRoomFolder } from "./room-folder.ts"; import { cloudConnectedAppsBrokerUrl, startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts"; import { createTeamConnectionsHost } from "./host/team-connections-host.ts"; import { createCloudLendingTurns } from "./host/cloud-lending-turns.ts"; import { createTeamConnectionRoutes } from "./routes/team-connections.ts";
 import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
@@ -3470,37 +3470,25 @@ type GroupTurnOperation = {
 
 // Wider than busyBotId (setup and queued responders too), so polling clients never mistake a handoff for completion.
 const groupTurnOperations = new Map<string, Set<GroupTurnOperation>>();
-const groupSpeakers = new Map<string, { botId: string; name: string; color: string; since?: number }>();
+const groupSpeakers = new Map<string, RoomSpeaker>();
+const roomSpeakers = createRoomSpeakers({
+  speakers: groupSpeakers, operations: groupTurnOperations, group: (id) => store.group(id), groupTasks: (id) => store.groupTasks(id), groupByThread: (threadId) => store.groupByThread(threadId),
+  engine: (threadId) => runningTurnEngines.has(threadId), liveTurn: (threadId) => liveTurns.running(threadId) !== undefined, settling: (threadId) => settlingTurns.has(threadId),
+  botBusy: (botId) => Boolean(store.bot(botId)?.busy), now: Date.now,
+  forget: (threadId, groupId, speaker, remaining) => {
+    markGroupThreadUnreadAfterTurn(store, groupId, threadId, remaining?.botId ?? null);
+    store.patchGroup(groupId, { busyBotId: remaining?.botId ?? null });
+    console.warn(`rooms: dropped a stale speaker (${speaker.name}) on ${threadId}${remaining ? `; ${remaining.name} still holds the room` : ""}`);
+  },
+});
+const groupThreadIsWorking = (groupId: string, threadId: string) => roomSpeakers.working(groupId, threadId);
+const activeGroupSpeaker = (groupId: string) => roomSpeakers.active(groupId);
 const roomMemberContexts = new RoomContextTracker({
   heldUntil: (threadId) => cacheKeepWarmStatus(threadId)?.until,
   expired: (threadId) => { const room = store.groupByThread(threadId); if (room) broadcast({ kind: "group", group: publicGroupState(room) }); },
 });
 /** Holds a member for the thread it was handed to until that turn marks the bot busy. */
 const roomMemberLock = new RoomMemberLock();
-
-function groupThreadIsWorking(groupId: string, threadId: string): boolean {
-  if (groupSpeakers.has(threadId)) return true;
-  const activeOps = groupTurnOperations.get(groupId);
-  if (activeOps) {
-    for (const op of activeOps) {
-      if (!op.cancelled && op.threadId === threadId) return true;
-    }
-  }
-  return false;
-}
-
-function activeGroupSpeaker(groupId: string): { botId: string; name: string; color: string } | undefined {
-  const group = store.group(groupId);
-  if (!group) return undefined;
-  const activeSpeaker = groupSpeakers.get(group.threadId);
-  if (activeSpeaker) return activeSpeaker;
-  const tasks = store.groupTasks(groupId);
-  for (const task of tasks) {
-    const s = groupSpeakers.get(task.threadId);
-    if (s) return s;
-  }
-  return undefined;
-}
 
 const goalTurns = createGoalTurns({ retireProviderTurn });
 const goalCards = createGoalCards({ store, routines: () => routines, notify, routineSourceOwner, routineSourceThread });
@@ -7034,6 +7022,7 @@ function drainQueuedSends() {
   }
 }
 function drainQueuedSendsNow() {
+  if (roomSpeakers.forgetStale() > 0) drainQueuedChannelSends(); // a freed room may also hold channel messages
   automationReports.flush();
   drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended, head) =>
     new Promise<void>((resolve, reject) => {
@@ -15024,6 +15013,7 @@ const pruneDecisionLog = () => {
 };
 pruneDecisionLog();
 setInterval(pruneDecisionLog, 6 * 60 * 60_000).unref();
+setInterval(() => { if (roomSpeakers.forgetStale() > 0) { drainQueuedSends(); drainQueuedChannelSends(); } }, 15_000).unref();
 workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
 // With the bridge's five-second deadline, this bounds stale portal access on quiet streams to fifteen seconds.
 const workspaceAccessTimer = workspaceAccess ? setInterval(() => {
