@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canManage,
+  canManageSetup,
   canReach,
   departmentRefusal,
   hasAuthority,
@@ -137,6 +138,35 @@ describe("department refusals name the department and what unlocks it", () => {
     expect(departmentRefusal(clive, { ...fleet[4]!, visibility: "admins" })).toBeNull();
     expect(departmentRefusal({ ...clive, createdBy: "ada@acme.test" }, fleet[4]!)).toBeNull();
     expect(departmentRefusal(clive, { ...fleet[4]!, chiefOfStaff: true, createdBy: "ada@acme.test" })).toBeNull();
+  });
+});
+
+describe("a Chief changes the setup of every bot in its departments", () => {
+  const clive: RosterMember = { id: "chief", name: "Clive", section: "Work", chiefOfStaff: true, managedSections: ["Editing"] };
+  const shared = { visibility: { people: ["ada@example.test"] } };
+  const editor: RosterMember = { id: "editor", name: "Editor", section: "Editing", ...shared };
+
+  it("even one shared with different people, while reach between them stays closed", () => {
+    expect(canManageSetup(clive, editor)).toBe(true);
+    expect(canManageSetup(clive, { ...editor, section: "Work" })).toBe(true);
+    expect(canReach(clive, editor)).toBe(false);
+    expect(canManage(clive, editor)).toBe(false);
+  });
+
+  it("still refuses a shared bot outside its departments, a bot without the Chief role, and hidden, own or a person's bots", () => {
+    expect(canManageSetup(clive, { ...editor, section: "Personal" })).toBe(false);
+    expect(canManageSetup({ ...clive, chiefOfStaff: false }, { ...editor, section: "Work" })).toBe(false);
+    expect(canManageSetup(clive, { ...editor, hidden: true })).toBe(false);
+    expect(canManageSetup({ ...clive, ...shared }, { ...clive, ...shared })).toBe(false);
+    expect(canManageSetup(clive, { ...editor, defaultBot: { person: "ada@example.test" } })).toBe(false);
+    expect(canManageSetup({ ...clive, createdBy: "bo@example.test" }, editor)).toBe(false);
+    expect(canManageSetup(clive, { ...editor, chiefOfStaff: true, createdBy: "ada@example.test" })).toBe(false);
+  });
+
+  it("keeps every bot the department rule already allowed", () => {
+    expect(canManageSetup(clive, fleet[1]!)).toBe(true);
+    expect(canManageSetup(self, fleet[1]!)).toBe(true);
+    expect(canManageSetup(self, fleet[4]!)).toBe(false);
   });
 });
 

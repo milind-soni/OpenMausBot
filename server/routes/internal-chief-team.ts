@@ -1,4 +1,4 @@
-import { hasTeamAuthority, peerAllowed } from "../peer-roster.ts"; import { chiefLevel } from "../chief-level.ts";
+import { canManageSetup, hasTeamAuthority, peerAllowed } from "../peer-roster.ts"; import { chiefLevel } from "../chief-level.ts";
 import type { BotRecord } from "../store.ts";
 import { libraryTeamRoles } from "../team-library.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -47,7 +47,7 @@ export function createInternalChiefTeamRoutes(deps: {
     if (!current) return json(res, 403, { error: NOT_CHIEF });
     return json(res, 200, {
       teams: deps.teams().filter((name) => hasTeamAuthority(current, name)),
-      bots: deps.bots().filter((bot) => !bot.hidden && hasTeamAuthority(current, bot.section) && (bot.id === current.id || peerAllowed(current, bot)))
+      bots: deps.bots().filter((bot) => !bot.hidden && hasTeamAuthority(current, bot.section) && (bot.id === current.id || peerAllowed(current, bot) || canManageSetup(current, bot)))
         .map((bot) => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section ?? "", modelSelection: bot.modelSelection, chiefOfStaff: Boolean(bot.chiefOfStaff) })),
       instances: instances.map((instance) => ({ instanceId: instance.instanceId, driverKind: instance.driverKind, displayName: instance.displayName,
         state: instance.snapshot.state, models: instance.models, effortLevels: instance.capabilities?.effortLevels ?? [] })),
