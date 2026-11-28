@@ -65,7 +65,7 @@ import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts"; import { LiveSwitchRefused, SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
 import { exitBeforeResult } from "./exit-report.ts"; import { readNodeVersion } from "./node-version.ts";
-import { decodeAcpConfig } from "./config-decode.ts";
+import { decodeAcpConfig } from "./config-decode.ts"; import { ToolCallDetails } from "./tool-call-details.ts";
 import { endTurn, receiveText, trackAssistantImage, trackAssistantWords, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
@@ -589,7 +589,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (!allow) missing("allow");
             return send({ jsonrpc: "2.0", id: msg.id, result: allow ? { outcome: { outcome: "selected", optionId: allow } } : cancelled });
           }
-          const kind = String(toolCall.kind ?? "");
+          const kind = String(toolCall.kind ?? ""), shown = isQuestion ? toolCall : current.toolDetails.merged(toolCall); // shown: card text only
           const operationKey = isQuestion || current.controlsHost ? null : acpSessionOperationKey(toolCall);
           if (operationKey && acpAnswersAlone(toolCall.rawInput) && sessionAllows.get(threadId)?.has(operationKey)) {
             const allow = optionFor("allow");
@@ -600,8 +600,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const mcpTitle = !isQuestion && !/^(?:execute|edit|delete|move)$/.test(kind) && typeof toolCall.title === "string" && /^mcp__[\w-]+__[\w.-]+$/.test(toolCall.title) ? toolCall.title : undefined; // an MCP call keeps its name, so a saved grant finds it
           const tool = mcpTitle ?? (kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool");
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
-          const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
-          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200) + (!isQuestion && typeof toolCall.rawInput?.justification === "string" ? `\nReason: ${toolCall.rawInput.justification.slice(0, 300)}` : "");
+          const rawSummary = String(shown.rawInput?.command ?? shown.title ?? tool);
+          const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200) + (!isQuestion && typeof shown.rawInput?.justification === "string" ? `\nReason: ${shown.rawInput.justification.slice(0, 300)}` : "");
           const questionChoices = isQuestion
             ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
             : [];
@@ -750,7 +750,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "tool_call": {
               current.flushAssistantText();
-              trackRunningTool(current, u, "pending");
+              trackRunningTool(current, u, "pending"); current.toolDetails.record(u, true);
               // ACP can send a tool_call already marked completed or failed (e.g. on a denied permission) with no
               // tool_call_update after it.
               const itemId = (typeof u.toolCallId === "string" && u.toolCallId) ? u.toolCallId
@@ -768,7 +768,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               break;
             }
             case "tool_call_update": {
-              trackRunningTool(current, u);
+              trackRunningTool(current, u); current.toolDetails.record(u);
               if (finished) toolEnded((typeof u.toolCallId === "string" && u.toolCallId) ? u.toolCallId : current.unkeyedToolIds.shift());
               break;
             }
@@ -1020,7 +1020,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           asks,
           runningTools: new Set(),
           unkeyedToolIds: [],
-          endedToolIds: new Set(),
+          endedToolIds: new Set(), toolDetails: new ToolCallDetails(),
           interruptTimer: null,
           stopQuietWatch: null,
           flushAssistantText,

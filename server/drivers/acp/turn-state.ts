@@ -8,6 +8,7 @@ import type { AcpConfig } from "./core.ts";
 import type { AcpDriverHooks } from "./driver-hooks.ts";
 import type { AcpHost, AcpLink } from "./host.ts"; import type { AppliedConfig } from "./applied-config.ts";
 import type { AcpTurnSteering } from "./steer.ts";
+import type { ToolCallDetails } from "./tool-call-details.ts";
 
 export type AcpAskFinish = (
   behavior: string,
@@ -41,6 +42,8 @@ export interface AcpTurn {
   runningTools: Set<string>;
   unkeyedToolIds: string[];
   endedToolIds: Set<string>;
+  /** What this turn's tool call notifications said, for a permission request that names only the call. */
+  toolDetails: ToolCallDetails;
   interruptTimer: ReturnType<typeof setTimeout> | null;
   stopQuietWatch: (() => void) | null;
   flushAssistantText: () => void;
