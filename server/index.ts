@@ -6876,7 +6876,7 @@ function runtimeWorkPending(threadId: string): boolean {
 
 const { reportIncident, incidentRefused, retryThread } = createChiefNotices({
   store, notify, threadBusy, botAtThreadCapacity, startTurn, quietThread: (_botId, threadId) => proactive.fence.confines(threadId) || botApiThread(threadId), privateThread: (threadId) => teamHost.ownTurn(threadId), confined: cloudGuestDriven, threadLanguage,
-  assignerOf: (threadId) => coordinator.assignerOf(threadId), failedRequester: (threadId) => failedRequester(coordinator, threadId),
+  assignerOf: (threadId) => coordinator.assignerOf(threadId), failedRequester: (threadId) => failedRequester(coordinator, threadId), handedOffWorkPending: runtimeWorkPending,
   threadSettling: (threadId) => settlingTurns.has(threadId), threadQueued: (botId, threadId) => queuedThreadPosition(botId, threadId) !== null,
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   ...(teamOwners.noticeRouting ? { routing: teamOwners.noticeRouting } : {}),

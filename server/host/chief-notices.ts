@@ -38,6 +38,8 @@ export interface ChiefNoticeDeps {
   /** Starts this thread's request again where it stopped: a continuation of the request the harness recorded, never a line
    * of the person's. Absent: a run stopped for memory with no Chief to retry it is only reported. */
   continueRequest?(botId: string, threadId: string, text: string): Promise<unknown>;
+  /** Work the thread's failed run handed on is still running: its result resumes the thread, so nothing may start there. */
+  handedOffWorkPending?(threadId: string): boolean;
   /** A self-hosted server where turns wait for room: a run stopped for memory there is the server's shortage, as a start
    * it had no room for is, and no Chief is asked about it. */
   selfHosted?(): boolean;
@@ -77,6 +79,10 @@ export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itse
 
 /** A run the server had no room to start is the server's shortage: it starts again by itself, and no AI is asked about it. */
 export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
+  + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
+
+/** How a Chief's own run that failed on an error that may not repeat starts again, once, before the person is told. */
+export const TRANSIENT_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run failed on an error that may not repeat. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
 /** The bot that asked, with reply resume, for this thread's newest assignment, and whether it asked a question (consult). */
@@ -307,7 +313,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       if (group || input.kind === "routine-failed" || !retryForRoom(bot, threadId, person, noRoom ? ROOM_RETRY_TEXT : SERVER_MEMORY_RETRY_TEXT)) person();
       return;
     }
-    if (input.kind === "failed" && !group && !chiefRetries && memoryStopped(input.detail) && retryForRoom(bot, threadId, report)) return;
+    // A Chief has no Chief to retry its own thread: a run of its own that failed on an error that may not repeat starts
+    // once more by itself, as one stopped for memory does, in the thread's own request.
+    const failed = input.kind === "failed";
+    const stoppedForMemory = failed && memoryStopped(input.detail);
+    const passing = failed && bot.chiefOfStaff && !chief && count.mayRetry && deps.confined?.(threadId) !== true
+      && deps.handedOffWorkPending?.(threadId) !== true && retriesTeammateThread(input.detail, input.facts);
+    if (!group && !chiefRetries && (stoppedForMemory || passing)
+      && retryForRoom(bot, threadId, report, stoppedForMemory ? MEMORY_RETRY_TEXT : TRANSIENT_RETRY_TEXT)) return;
     if (!chief || !chiefRetries) return report();
     const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";
     if (answered.startsWith(AUTO_RETRY_LEAD)) return report({ retried: true });
