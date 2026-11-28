@@ -22,7 +22,7 @@ const TOKEN = `ops_fake-team-${randomBytes(8).toString("hex")}`;
 
 type Card = { requestId?: string; requestType?: string; options?: string[]; subtitle?: string; answered?: string; answeredText?: string; stopped?: boolean };
 type Row = { id: string; role: string; kind: string; at: number; text?: string; card?: Card; replyToId?: string; tool?: { name: string };
-  inbox?: { kind: string; from: { name: string }; origin?: { threadId: string } } };
+  inbox?: { kind: string; from: { name: string }; origin?: { threadId: string; messageId?: string } } };
 type Task = { threadId: string; title: string; inbox?: true; openedBy?: { botId: string } };
 type Bot = { id: string; name: string; threadId: string; busy?: boolean; activity?: string; tasks?: Task[] };
 type Frame = { kind: string; notification?: { kind: string; botId: string; threadId: string; title: string; body: string; forPerson?: string } };
@@ -237,10 +237,12 @@ it("lets only the authorized session answer a handoff card from a chat outside t
   const since = Date.now();
   await say(scout, source, "QC5-JOB: Have Ledger review the fix.");
   const { work, row } = await cardIn(since, (card) => card.subtitle === QUESTION);
-  const copyIn = async (threadId: string) => (await messages(threadId)).find((line) => line.card?.requestId === row.card!.requestId);
+  const copyIn = async (threadId: string) => (await messages(threadId)).find((line) => line.id === row.id || line.inbox?.origin?.messageId === row.id);
   await until(async () => Boolean(await copyIn(source)) && Boolean(await copyIn(inbox)));
   const bob = (await team.pair({ email: "bob@acme.test", role: "member" })).token!;
-  const decision = { requestId: row.card!.requestId, behavior: "answer", message: CHOICES[2] };
+  const copyId = (await copyIn(source))?.card?.requestId;
+  expect(copyId).toBe(`handoff-copy:${row.id}`);
+  const decision = { requestId: copyId, behavior: "answer", message: CHOICES[2] };
   const refused = await team.as(bob, "POST", `/api/threads/${source}/respond`, decision);
   expect([403, 404]).toContain(refused.status);
   expect((await copyIn(source))?.card?.answered).toBeUndefined();

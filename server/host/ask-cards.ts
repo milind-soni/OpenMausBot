@@ -30,6 +30,15 @@ const SPENT_SEND_MS = 60_000;
 export const CARD_SETTLE_MS = 1_500;
 type Typed = { status: number; message?: Message; error?: string } | null;
 
+export function copiedQuestionAnswer(store: Pick<Store, "messagesFor">, threadId: string, requestId: string) {
+  if (!requestId.startsWith("handoff-copy:")) return undefined;
+  const copy = store.messagesFor(threadId).find(row => row.card?.requestId === requestId && row.inbox?.kind === "ask");
+  const origin = copy?.inbox?.origin;
+  if (!origin || copy?.card?.handoffQuestion?.copyTo !== threadId || origin.threadId === threadId) return undefined;
+  const original = store.messagesFor(origin.threadId).find(row => row.id === origin.messageId);
+  return original?.card?.requestId ? { threadId: origin.threadId, requestId: original.card.requestId } : undefined;
+}
+
 export interface AskCardsDeps {
   store: Pick<Store, "bot" | "messagesFor" | "activePath" | "appendMessage" | "patchMessage" | "taskByThread" | "patchTask" | "group"
     | "groupTaskByThread" | "patchGroup" | "groupByThread" | "markGroupThreadUnread" | "onChange">;
@@ -137,7 +146,7 @@ export function createAskCards(deps: AskCardsDeps) {
       const route = card?.handoffQuestion;
       if (!route?.copyTo || route.from !== change.threadId) return;
       const copy = store.messagesFor(route.copyTo).find((row) => row.inbox?.origin?.messageId === change.message.id);
-      if (copy) store.patchMessage(route.copyTo, copy.id, { card });
+      if (copy) store.patchMessage(route.copyTo, copy.id, { card: { ...card, requestId: copy.card?.requestId } });
     }
   });
 
@@ -149,7 +158,7 @@ export function createAskCards(deps: AskCardsDeps) {
       const from = { botId: asker.id, name: asker.name, color: asker.color };
       const group = store.groupByThread(threadId);
       const title = group?.name ?? store.taskByThread(asker.id, threadId)?.title ?? asker.name;
-      store.appendMessage(copyTo, { role: "bot", kind: "options", text: original.card.subtitle, card: original.card, from,
+      store.appendMessage(copyTo, { role: "bot", kind: "options", text: original.card.subtitle, card: { ...original.card, requestId: `handoff-copy:${original.id}` }, from,
         inbox: { kind: "ask", from, origin: { botId: asker.id, threadId, title, messageId: original.id, ...(group ? { groupId: group.id } : {}) } } });
       const root = store.groupByThread(copyTo);
       if (root) store.markGroupThreadUnread(root.id, copyTo, true);
