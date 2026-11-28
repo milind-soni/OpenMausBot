@@ -462,7 +462,7 @@ describe("a Starter Cloud", () => {
     f.finish(b.threads[0]!);
     await send(f, c.botId, c.threads[0]!, "Cyd's own job");
     await whenStarted(c.threads[0]!);
-    // From a third bot: Ben asking Ada back from the thread that holds Ada's request would be refused as a loop.
+    // From a third bot: Ben asking Ada back while Ada waits on Ben would be refused as a loop (crossed-handoffs.e2e).
     const toAda = await startThread(c.threads[0]!, "For Ada", a.botId);
     expect(toAda.status, JSON.stringify(toAda.body)).toBeLessThan(300);
     await whenStarted(await ownThread(a.botId, "For Ada"));
