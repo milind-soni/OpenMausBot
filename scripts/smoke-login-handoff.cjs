@@ -61,7 +61,7 @@ app.whenReady().then(async () => {
     return { status: response.status, body: await response.json() };
   };
   await until(() => fetch(`http://127.0.0.1:${port}/api/health`).then((response) => response.ok).catch(() => false));
-  harness.postMessage({ type: "openmausbot:desktop-mutation-token", token: owner });
+  harness.postMessage({ type: "openmausbot:desktop-mutation-token", token: owner, companionToken: randomBytes(32).toString("base64url") });
   await until(() => api("/api/logins").then((answer) => answer.status === 200).catch(() => false));
   const saved = await api("/api/logins", "POST", { site: "https://accounts.example.test/login", username: "alice", password, totp: "JBSWY3DPEHPK3PXP" });
   assert.equal(saved.status, 201);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import {
@@ -6,9 +7,59 @@ import {
   BOOT_PROBE_FAST_WINDOW_MS,
   BOOT_PROBE_INTERVAL_MS,
   bootFailureMessage,
+  confirmDesktopAuthorization,
   listeningSignal,
   pollServerIdentity,
 } from "./server-boot-probe.mjs";
+
+const ownerCapability = { token: "owner-fixture", companionToken: "companion-fixture", timeoutMs: 30 };
+const ownerAccepted = { type: "openmausbot:desktop-mutation-token-accepted" };
+
+test("registers the private acknowledgement listener before sending the credential", async () => {
+  const child = new EventEmitter();
+  const sent = [];
+  child.postMessage = (message) => {
+    sent.push(message);
+    child.emit("message", ownerAccepted);
+  };
+
+  assert.equal(await confirmDesktopAuthorization(child, ownerCapability), true);
+  assert.deepEqual(sent, [{
+    type: "openmausbot:desktop-mutation-token",
+    token: ownerCapability.token,
+    companionToken: ownerCapability.companionToken,
+  }]);
+  assert.equal(child.listenerCount("message"), 0);
+  assert.equal(child.listenerCount("exit"), 0);
+});
+
+test("a different child or an unrelated message cannot confirm desktop authorization", async () => {
+  const child = new EventEmitter();
+  const other = new EventEmitter();
+  child.postMessage = () => {
+    other.emit("message", ownerAccepted);
+    child.emit("message", { type: "health-ready" });
+  };
+
+  assert.equal(await confirmDesktopAuthorization(child, ownerCapability), false);
+  child.emit("message", ownerAccepted);
+  assert.equal(child.listenerCount("message"), 0);
+  assert.equal(child.listenerCount("exit"), 0);
+});
+
+test("a child that exits or cannot receive its credential fails closed", async () => {
+  const exited = new EventEmitter();
+  exited.postMessage = () => exited.emit("exit", 1);
+  const disconnected = new EventEmitter();
+  disconnected.postMessage = () => { throw new Error("closed pipe"); };
+
+  for (const child of [exited, disconnected]) {
+    assert.equal(await confirmDesktopAuthorization(child, ownerCapability), false);
+    assert.equal(child.listenerCount("message"), 0);
+    assert.equal(child.listenerCount("exit"), 0);
+  }
+  assert.match(bootFailureMessage(8799, { outcome: "owner-auth-unavailable" }), /could not confirm desktop authorization/);
+});
 
 const OUR_BODY = () => ({ app: "openmausbot", pid: 4242, static: true });
 

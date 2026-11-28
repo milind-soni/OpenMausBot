@@ -280,7 +280,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const startDesktop = async (dataDir?: string) => {
     const child = await start("desktop", { OMB_DESKTOP_PARENT: "1", ...(dataDir ? { OMB_DATA_DIR: dataDir } : {}),
       ...(broker && desktopInstallation ? { OMB_COMPOSIO_BROKER_URL: broker.url, OMB_COMPOSIO_BROKER_TOKEN: desktopInstallation.token } : {}) }, desktopPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
-    child.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability });
+    child.send({ type: "openmausbot:desktop-mutation-token", token: ownerCapability, companionToken: randomBytes(32).toString("base64url") });
     return child;
   };
   let desktop = await startDesktop();
@@ -503,7 +503,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const capability = randomBytes(32).toString("base64url");
     const startIt = async () => {
       const child = await start(name, { OMB_DESKTOP_PARENT: "1", OMB_ENVIRONMENT_LABEL: label }, deskPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
-      child.send({ type: "openmausbot:desktop-mutation-token", token: capability });
+      child.send({ type: "openmausbot:desktop-mutation-token", token: capability, companionToken: randomBytes(32).toString("base64url") });
       return child;
     };
     let child = await startIt();
