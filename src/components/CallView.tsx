@@ -558,6 +558,8 @@ function Call({ bot }: { bot: Bot }) {
     });
   }, [bridge, bot.id, move]);
 
+  const playbackRate = useRef(bot.voicePlaybackRate ?? state.config?.tts?.playbackRate ?? 1);
+  playbackRate.current = bot.voicePlaybackRate ?? state.config?.tts?.playbackRate ?? 1;
   const say = useCallback(
     async (text: string) => {
       if (!alive.current || currentCall() !== bot.id) return false;
@@ -566,7 +568,7 @@ function Call({ bot }: { bot: Bot }) {
       // mic.
       move("speaking");
       hush();
-      await speaker.speak(text, { botId: bot.id, voiceId: bot.voice });
+      await speaker.speak(text, { botId: bot.id, voiceId: bot.voice, playbackRate: playbackRate.current });
       return alive.current && currentCall() === bot.id && sayGeneration.current === mine;
     },
     [bot.id, bot.voice, hush, move],

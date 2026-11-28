@@ -12,6 +12,7 @@ type SpeakArgs = {
   botId?: string;
   messageId: string;
   voiceId?: string;
+  playbackRate?: number;
   tts: ConfigStatus["tts"];
   localVoice: boolean;
 };
@@ -21,7 +22,7 @@ export function speakReady(tts: ConfigStatus["tts"], voiceId: string | undefined
   return localVoice || (Boolean(tts?.configured) && Boolean(voiceId || tts?.voice));
 }
 
-export function useSpeakAction({ text, botId, messageId, voiceId, tts, localVoice }: SpeakArgs) {
+export function useSpeakAction({ text, botId, messageId, voiceId, playbackRate, tts, localVoice }: SpeakArgs) {
   const speech = useSpeech();
   const configured = localVoice || Boolean(tts?.configured);
   const ready = speakReady(tts, voiceId, localVoice);
@@ -36,7 +37,7 @@ export function useSpeakAction({ text, botId, messageId, voiceId, tts, localVoic
       : t("chat.speak.read");
   const toggle = () => {
     if (mine) return speaker.stop();
-    void speaker.speak(text, { botId, messageId, voiceId });
+    void speaker.speak(text, { botId, messageId, voiceId, playbackRate });
   };
   return { ready, mine, preparing, label, toggle };
 }

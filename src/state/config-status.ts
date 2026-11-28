@@ -2,6 +2,7 @@
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { ImageComplexity, ImageProvider } from "../../shared/image-generation";
 import type { ToolGroup } from "../../shared/tool-groups";
+import type { VoicePlaybackRate } from "../../shared/voice-playback";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
 
@@ -100,6 +101,7 @@ export interface ConfigStatus {
     model?: string;
     /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
     everyReply?: boolean;
+    playbackRate?: VoicePlaybackRate;
     /** "elevenlabs": the person chose to be heard through their own ElevenLabs key (Scribe). Absent: the default. */
     hearWith?: "elevenlabs";
     /** The language the person speaks to Scribe (ISO 639 code); absent lets Scribe detect it. */

@@ -83,6 +83,19 @@ describe("VoiceSettings", () => {
     expect(onPatch).not.toHaveBeenCalled();
   });
 
+  it("lets a bot override and then follow the workspace playback speed", async () => {
+    fixture.api.mockResolvedValue({ voices: [] });
+    const onPatch = vi.fn();
+    await render({ ...bot("pepper"), voicePlaybackRate: 1.5 }, onPatch);
+    const select = host.querySelector<HTMLSelectElement>("[data-bot-voice-playback-rate] select")!;
+    expect(select.value).toBe("1.5");
+    await act(async () => {
+      select.value = "";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onPatch).toHaveBeenCalledExactlyOnceWith({ voicePlaybackRate: null });
+  });
+
   it("lays the eight voice services out four to a row, OpenAI beside the other online services", async () => {
     fixture.api.mockResolvedValue({ voices: [] });
     await render(bot("pepper"), vi.fn());

@@ -89,6 +89,12 @@ describe("parseBotProfilePatch (both modes)", () => {
     expect(parseBotProfilePatch({ avatarFocusX: -0.1 }, true).ok).toBe(false);
   });
 
+  it("accepts supported playback speeds and clears the per-bot override to follow the workspace", () => {
+    expect(parseBotProfilePatch({ voicePlaybackRate: 1.5 }, true)).toEqual({ ok: true, patch: { voicePlaybackRate: 1.5 } });
+    expect(parseBotProfilePatch({ voicePlaybackRate: null }, true)).toEqual({ ok: true, patch: { voicePlaybackRate: undefined } });
+    expect(parseBotProfilePatch({ voicePlaybackRate: 1.1 }, true).ok).toBe(false);
+  });
+
   it("maps an avatarCrop issue to the readable message", () => {
     expect(parseBotProfilePatch({ avatarCrop: "hexagon" } as never, true)).toEqual({
       ok: false,

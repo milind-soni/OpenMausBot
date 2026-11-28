@@ -9,6 +9,8 @@ class FakeAudio {
   static latest: FakeAudio | null = null;
 
   src: string;
+  playbackRate = 1;
+  preservesPitch = false;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
   pause = vi.fn();
@@ -89,11 +91,13 @@ describe("Speaker lifecycle", () => {
       }),
     );
     const speaker = new Speaker();
-    const speaking = speaker.speak("Distinct voice.", { voiceId: "voice-bot" });
+    const speaking = speaker.speak("Distinct voice.", { voiceId: "voice-bot", playbackRate: 1.5 });
     await vi.waitFor(() => expect(FakeAudio.latest).not.toBeNull());
     FakeAudio.latest!.onended?.();
     await speaking;
 
+    expect(FakeAudio.latest!.playbackRate).toBe(1.5);
+    expect(FakeAudio.latest!.preservesPitch).toBe(true);
     expect(bodies).toEqual([
       { text: "Distinct voice.", voiceId: "voice-bot" },
       { text: "Distinct voice.", voiceId: "voice-bot" },
@@ -642,6 +646,7 @@ describe("local system voice stream", () => {
   class FakeUtterance {
     text: string;
     voice: SpeechSynthesisVoice | null = null;
+    rate = 1;
     onstart: (() => void) | null = null;
     onend: (() => void) | null = null;
     onerror: ((event: { error: string }) => void) | null = null;
@@ -680,7 +685,7 @@ describe("local system voice stream", () => {
     const speaker = new Speaker();
     const first = speaker.begin({ botId: "bot" });
     first.push("Stale words.");
-    const second = speaker.begin({ botId: "bot" });
+    const second = speaker.begin({ botId: "bot", playbackRate: 1.75 });
     second.identify("m2");
 
     await first.end();
@@ -688,6 +693,7 @@ describe("local system voice stream", () => {
 
     second.push("Fresh words.");
     await vi.waitFor(() => expect(spoken.map((utterance) => utterance.text)).toEqual(["Fresh words."]));
+    expect(spoken[0]!.rate).toBe(1.75);
     spoken[0]!.onstart?.();
     expect(speaker.state).toEqual({ status: "speaking", botId: "bot", messageId: "m2", caption: "Fresh words." });
     spoken[0]!.onend?.();

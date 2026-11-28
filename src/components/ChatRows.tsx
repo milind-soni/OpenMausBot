@@ -15,7 +15,7 @@ import { ToolActivity } from "./ToolActivity";
 
 export interface ChatRows {
   botId: string; threadId: string; botName: string; botColor: Bot["color"]; voiceId?: string;
-  tts: ConfigStatus["tts"]; localVoice: boolean;
+  tts: ConfigStatus["tts"]; localVoice: boolean; playbackRate: number;
   hasMore: boolean; bots: readonly Bot[];
   mentionPeers: readonly MentionPeer[]; mentionPerson: { profileName?: string };
   speakerViewer?: string | null;

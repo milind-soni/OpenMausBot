@@ -274,7 +274,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "mascotBodyColor" | "mascotMaterial" | "access" | "yourAccess" | "onlyPeopleAdded" | "voicePlaybackRate"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -3047,7 +3047,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            const owner = speechOwner(stateRef.current, frame.threadId);
+            const owner = speechOwner(stateRef.current, frame.threadId, stateRef.current.config?.tts?.playbackRate);
             spokenReplyStream.completeBotText(frame.threadId, frame.message.turnId, frame.message.text ?? "", owner, frame.message.id);
           }
           break;
@@ -3114,7 +3114,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "webhookDeleted", webhookId: frame.webhookId });
           break;
         case "runtime": {
-          spokenReplyStream.onRuntimeEvent(frame.event, speechOwner(stateRef.current, frame.event.threadId));
+          spokenReplyStream.onRuntimeEvent(frame.event, speechOwner(stateRef.current, frame.event.threadId, stateRef.current.config?.tts?.playbackRate));
           const action = runtimeFrameAction(frame.event);
           if (action) rawDispatch(action);
           break;

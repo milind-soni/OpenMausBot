@@ -21,6 +21,7 @@ interface SpeakOptions {
   voiceId?: string;
   botId?: string;
   messageId?: string;
+  playbackRate?: number;
 }
 
 /** One spoken reply, fed block by block: blocks come from the committed
@@ -253,7 +254,7 @@ export class Speaker {
           return;
         }
         this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: pending[at]! });
-        const played = await this.play(rendered.blob, live, opts.messageId, at);
+        const played = await this.play(rendered.blob, live, opts.messageId, at, opts.playbackRate ?? 1);
         if (!played || !live()) {
           if (live()) this.set({ ...IDLE, error: t("voice.error.clip") });
           controller.abort();
@@ -326,6 +327,7 @@ export class Speaker {
 
     const synth = window.speechSynthesis;
     const utterance = new window.SpeechSynthesisUtterance(value);
+    utterance.rate = opts.playbackRate ?? 1;
     const selected = resolveLocalSystemVoice(remoteSystemVoice(opts.botId));
     if (selected) utterance.voice = selected;
     this.localUtterance = utterance;
@@ -398,12 +400,14 @@ export class Speaker {
     return res.blob();
   }
 
-  private play(blob: Blob, live: () => boolean, probeMessageId?: string, probeBlock?: number): Promise<boolean> {
+  private play(blob: Blob, live: () => boolean, probeMessageId?: string, probeBlock?: number, playbackRate = 1): Promise<boolean> {
     return new Promise((resolve) => {
       if (!live()) return resolve(false);
       this.teardownAudio();
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
+      audio.playbackRate = playbackRate;
+      audio.preservesPitch = true;
       this.audio = audio;
       this.objectUrl = url;
       let settled = false;

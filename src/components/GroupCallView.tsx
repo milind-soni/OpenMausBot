@@ -151,6 +151,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     [group.id, listen],
   );
 
+  const defaultPlaybackRate = useRef(state.config?.tts?.playbackRate ?? 1);
+  defaultPlaybackRate.current = state.config?.tts?.playbackRate ?? 1;
   const say = useCallback(
     async (text: string, member?: Bot) => {
       if (!alive.current || currentCall() !== group.id) return false;
@@ -158,7 +160,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       move("speaking");
       setSpeakingMemberId(member?.id ?? null);
       hush();
-      await speaker.speak(text, { botId: member?.id, voiceId: member?.voice });
+      await speaker.speak(text, { botId: member?.id, voiceId: member?.voice, playbackRate: member?.voicePlaybackRate ?? defaultPlaybackRate.current });
       return alive.current && currentCall() === group.id && sayGeneration.current === mine;
     },
     [group.id, hush, move],

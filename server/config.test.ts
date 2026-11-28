@@ -151,6 +151,13 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
+  it("accepts only supported voice playback rates", () => {
+    for (const playbackRate of [0.75, 1, 1.25, 1.5, 1.75, 2]) {
+      expect(parseConfigPatch({ tts: { playbackRate } }).tts).toEqual({ playbackRate });
+    }
+    expect(() => parseConfigPatch({ tts: { playbackRate: 1.1 } })).toThrow("playbackRate");
+  });
+
   it("keeps how the person is heard and the language they speak, and refuses anything else", () => {
     expect(parseConfigPatch({ tts: { hearWith: "elevenlabs", hearLanguage: " ES " } }).tts).toEqual({ hearWith: "elevenlabs", hearLanguage: "es" });
     expect(parseConfigPatch({ tts: { hearWith: "device", hearLanguage: "" } }).tts).toEqual({ hearWith: "device", hearLanguage: "" });

@@ -342,6 +342,21 @@ describe("PATCH /api/bots/:id toolsOff", () => {
   });
 });
 
+describe("PATCH /api/bots/:id voicePlaybackRate", () => {
+  it("saves a supported per-bot speed, rejects unsupported speeds, and clears back to workspace", async () => {
+    const { store, bot, patch } = fixture();
+    const saved = await patch(bot.id, { voicePlaybackRate: 1.5 });
+    expect(saved.status).toBe(200);
+    expect(saved.body.bot.voicePlaybackRate).toBe(1.5);
+    expect(store.bot(bot.id)?.voicePlaybackRate).toBe(1.5);
+
+    expect((await patch(bot.id, { voicePlaybackRate: 1.1 })).status).toBe(400);
+    expect(store.bot(bot.id)?.voicePlaybackRate).toBe(1.5);
+    expect((await patch(bot.id, { voicePlaybackRate: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.voicePlaybackRate).toBeUndefined();
+  });
+});
+
 describe("PATCH /api/bots/:id liveVoice", () => {
   it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("saves %s as the bot's Live call voice", async (liveVoice) => {
     const { store, bot, patch } = fixture();

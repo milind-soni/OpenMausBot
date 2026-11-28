@@ -24,6 +24,7 @@ import { VoicePicker, type PickerVoice } from "./VoicePicker";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 import { KeysLink } from "./keys/KeysLink";
+import { VOICE_PLAYBACK_RATES } from "../../shared/voice-playback";
 
 const FISH_MODELS = [
   { value: "s2.1-pro", label: "voice.fish.modelPro" },
@@ -37,7 +38,7 @@ export function VoiceSettings({
   workspaceConfigurationLocked = false,
 }: {
   bot: Bot;
-  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes" | "voiceNoteEveryReply">>) => void;
+  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes" | "voiceNoteEveryReply">> & { voicePlaybackRate?: number | null }) => void;
   workspaceConfigurationLocked?: boolean;
 }) {
   const { state, dispatch } = useStore();
@@ -556,7 +557,7 @@ export function VoiceSettings({
               </Select>
             )}
             <button
-              onClick={() => void speaker.speak(t("voice.sample"), { voiceId: bot.voice, botId: bot.id })}
+              onClick={() => void speaker.speak(t("voice.sample"), { voiceId: bot.voice, botId: bot.id, playbackRate: bot.voicePlaybackRate ?? tts?.playbackRate ?? 1 })}
               disabled={!ready || preparingSample}
               aria-busy={preparingSample}
               title={ready ? t("voice.hear") : t("voice.pickFirst")}
@@ -604,6 +605,18 @@ export function VoiceSettings({
           aria-label={t("voice.notes")}
           onClick={() => onPatch({ voiceNotes: bot.voiceNotes === false })}
         />
+      </div>
+
+      <div data-bot-voice-playback-rate className="mt-4 flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-ink">{t("voice.playbackRate")}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("voice.playbackRate.botHelp")}</div>
+        </div>
+        <Select size="sm" aria-label={t("voice.playbackRate")} value={String(bot.voicePlaybackRate ?? "")}
+          onChange={(event) => onPatch({ voicePlaybackRate: event.target.value ? Number(event.target.value) : null })}>
+          <option value="">{t("voice.playbackRate.default")}</option>
+          {VOICE_PLAYBACK_RATES.map((rate) => <option key={rate} value={rate}>{rate}×</option>)}
+        </Select>
       </div>
 
       <div data-voice-every-reply className="mt-4 flex items-center justify-between gap-4">

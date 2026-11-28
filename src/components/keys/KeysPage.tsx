@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 import { BoatOfferPanel } from "../BoatOffer";
 import { LiveProviderSettings } from "../LiveProviderSettings";
 import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
+import { VoicePlaybackRateSetting } from "../VoicePlaybackRateSetting";
 import { VoiceHearingSetting } from "../VoiceHearingSetting";
 import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { OllamaServer } from "../OllamaServer";
@@ -110,6 +111,7 @@ function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyE
       </button>
       <div id={bodyId} hidden={!open} className="flex flex-col gap-0.5 border-t border-hairline/40 px-1 py-1.5 in-data-[settings-look=simple]:border-t-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge)">
         {rows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open} />)}
+        {id === "voice" && <VoicePlaybackRateSetting />}
         {id === "voice" && <VoiceEveryReplySetting />}
         {id === "voice" && <VoiceHearingSetting />}
       </div>
@@ -184,6 +186,7 @@ export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclu
                 value={count > 0 ? t("keys.section.connected", { count }) : undefined} open={open.has(id)} onToggle={() => toggle(id)}>
                 <div data-keys-section={id} className="flex flex-col gap-0.5 py-1.5">
                   {sectionRows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open.has(id)} />)}
+                  {id === "voice" && <VoicePlaybackRateSetting />}
                   {id === "voice" && <VoiceEveryReplySetting />}
                   {id === "voice" && <VoiceHearingSetting />}
                 </div>
