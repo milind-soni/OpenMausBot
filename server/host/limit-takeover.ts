@@ -193,8 +193,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     return engine.models.default === selection.model || engine.models.options.some((model) => model.id === selection.model) ? null : { why: "unknown-model" };
   };
 
-  /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit, when the person chose
-   * any backup, the same AI's own default model first, then the backups the person chose. A bot with no backup chosen gets
+  /** The AIs that may carry on while `from` is limited or signed out, best first: the backups the person chose, in their
+   * order, then for one model's limit or its credits the same AI's own default model, so the person's explicit picks are
+   * never overridden. A bot with no backup chosen gets
    * none, and no other AI is picked for it: with none usable the bot waits for the reset or a sign-in. `approval`: the thread's
    * level, when known. `chosen`: the backups to weigh instead of the bot's and the installation's. `skipped`: each backup
    * left out, and why. */
@@ -217,11 +218,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       else out.push(pick);
     };
     const picked = chosen ?? deps.chosen(botId);
-    if ((scope === "model" || scope === "credits") && picked.length) {
-      const sameAccountDefault = picked.find((entry) => entry.instanceId === current.instanceId && entry.model === current.models.default);
-      add(sameAccountDefault ?? { instanceId: current.instanceId, model: current.models.default });
-    }
     for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? picked : picked)) add(selection);
+    // The same AI's own default model may carry on for one model's limit or its credits, but only after the backups the person chose, in their order.
+    if ((scope === "model" || scope === "credits") && picked.length) add({ instanceId: current.instanceId, model: current.models.default });
     return { backups: out, skipped: left };
   }
 

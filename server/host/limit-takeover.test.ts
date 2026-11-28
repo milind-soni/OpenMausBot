@@ -68,11 +68,11 @@ const REASONING = { ...TOOLS, effortLevels: ["low", "medium", "high"], modelVari
 const REASONING_ENGINES = () => [CLAUDE, CODEX, GO].map((one) => ({ ...one, capabilities: REASONING }));
 
 describe("which AI carries on while one is limited", () => {
-  it("keeps the chosen reasoning when the first backup is also the same account's default model", () => {
+  it("keeps the chosen reasoning when a backup is also the same account's default model, in the person's order", () => {
     const sameAccount = { ...on("codex", "gpt-6"), effort: "medium" } as const;
     const other = { ...on("opencode", "go-default"), variant: "thinking" };
     const { instance } = takeover({ engines: REASONING_ENGINES, chosen: () => [other, sameAccount] });
-    expect(instance.backups("kai", on("codex", "gpt-6-mini"), "model")).toEqual([sameAccount, other]);
+    expect(instance.backups("kai", on("codex", "gpt-6-mini"), "model")).toEqual([other, sameAccount]);
   });
 
   it("preserves configured reasoning effort and model variant on chosen backups", () => {
@@ -155,9 +155,9 @@ describe("which AI carries on while one is limited", () => {
     expect(told[0]!.text).toMatch(/^Codex reached its limit until .+, so Kai waits until then: no backup you chose can take over\.$/);
   });
 
-  it("for one model's own limit tries that AI's default model first, and never the limited model", () => {
+  it("for one model's own limit offers that AI's default model only after the backups the person chose, and never the limited model", () => {
     const { instance } = takeover({ chosen: () => [on("codex", "gpt-6")] });
-    expect(instance.backups("kai", on("claude", "claude-sonnet-5"), "model")).toEqual([on("claude", "claude-opus-5-5"), on("codex", "gpt-6")]);
+    expect(instance.backups("kai", on("claude", "claude-sonnet-5"), "model")).toEqual([on("codex", "gpt-6"), on("claude", "claude-opus-5-5")]);
     expect(instance.backups("kai", on("claude", "claude-opus-5-5"), "credits")).toEqual([on("codex", "gpt-6")]);
     expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "model"), "no backup chosen: no other model is picked").toEqual([]);
     expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "credits"), "no backup chosen: none for credits either").toEqual([]);
