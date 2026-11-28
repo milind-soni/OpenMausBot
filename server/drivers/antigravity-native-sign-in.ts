@@ -77,10 +77,11 @@ export async function ensureNativeAccessToken(
   instanceId: string,
   env: NodeJS.ProcessEnv,
   now: number,
-  options: { store?: NativeSignInStore; wake?: NativeTokenWake } = {},
+  options: { store?: NativeSignInStore; wake?: NativeTokenWake; clock?: () => number } = {},
 ): Promise<string | null> {
   const store = options.store ?? defaultNativeSignInStore();
   const wake = options.wake ?? ((id, environment) => wakeNativeCliSignIn(id, environment));
+  const clock = options.clock ?? Date.now;
   const token = await readNativeAccessToken(instanceId, env, now, store);
   if (token) return token;
   if (!await nativeSignInFilePresent(instanceId, store)) return null;
@@ -91,20 +92,26 @@ export async function ensureNativeAccessToken(
     await pending.catch(() => undefined);
     return readNativeAccessToken(instanceId, env, now, store);
   }
-  const work = wake(instanceId, env).finally(() => {
-    waking.delete(instanceId);
-  });
+  const work = wake(instanceId, env);
   waking.set(instanceId, work);
+  // The `waking` entry must stay registered through the post-wake reread and hold decision: removing it as soon as
+  // the wake settles leaves a window where a concurrent read sees no pending wake and no hold yet and starts a
+  // duplicate wake for the same instance.
   try {
     await work;
+    // The clock is read again after the wake finishes: `now` was captured before it, so a slow wake would otherwise
+    // record a hold deadline that has already expired.
+    const finishedAt = clock();
+    const refreshed = await readNativeAccessToken(instanceId, env, finishedAt, store);
+    if (!refreshed) holdWake(instanceId, finishedAt);
+    else wakeHolds.delete(instanceId);
+    return refreshed;
   } catch {
-    holdWake(instanceId, now);
+    holdWake(instanceId, clock());
     return null;
+  } finally {
+    waking.delete(instanceId);
   }
-  const refreshed = await readNativeAccessToken(instanceId, env, now, store);
-  if (!refreshed) holdWake(instanceId, now);
-  else wakeHolds.delete(instanceId);
-  return refreshed;
 }
 
 function holdWake(instanceId: string, now: number): void {
