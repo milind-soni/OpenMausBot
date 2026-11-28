@@ -483,6 +483,14 @@ const support: AcpSupport = {
         { sessionId, configId: "reasoning_effort", value: turn.effort },
         `effort "${turn.effort}"`,
       );
+    } else {
+      // Reset a pooled session to Hermes' default; older Hermes builds without the option may refuse, which is harmless.
+      await applySetting(
+        request,
+        "session/set_config_option",
+        { sessionId, configId: "reasoning_effort", value: "" },
+        "default effort",
+      ).catch(() => undefined);
     }
   },
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),

@@ -17,7 +17,6 @@ import {
   HERMES_CONFIG_MODEL_ID,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL,
-  HermesAgentDriver,
   bindHermesScreenshotCompat,
   fetchHermesAcpModels,
   hermesAcpModelId,
