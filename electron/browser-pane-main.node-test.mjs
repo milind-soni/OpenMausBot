@@ -16,8 +16,10 @@ function fakeElectron(hints = null) {
   const window = {
     webContents: new EventEmitter(),
     destroyed: false,
+    focused: false,
     children: [],
     isDestroyed() { return this.destroyed; },
+    isFocused() { return this.focused; },
     getContentSize: () => [1400, 900],
     contentView: {
       addChildView(view) { window.children = window.children.filter((child) => child !== view).concat(view); },
@@ -40,6 +42,7 @@ function fakeElectron(hints = null) {
       loadURL(url) { this.loaded.push(url); return Promise.resolve(); },
       setWindowOpenHandler(handler) { this.openHandler = handler; },
       isDestroyed() { return this.closed; },
+      isFocused: () => false,
       close() { this.closed = true; },
       devtoolsClosed: 0,
       closeDevTools() { this.devtoolsClosed++; },
@@ -118,14 +121,14 @@ function fakeWindow() {
   return window;
 }
 
-function setup({ captureMs, keepsRunning = false, hints = null, quitting = () => false } = {}) {
+function setup({ captureMs, keepsRunning = false, hints = null, quitting = () => false, platform } = {}) {
   const electron = fakeElectron(hints);
   let clock = 0;
   const logged = [];
   const parkings = [];
   const createParking = () => { const window = fakeWindow(); parkings.push(window); return window; };
   electron.windowsMade = () => parkings.length + electron.popups.length + electron.views.length;
-  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, createParking, keepsRunning: () => keepsRunning, quitting, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, log: (line) => logged.push(line), ...(captureMs ? { captureMs } : {}) });
+  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, createParking, keepsRunning: () => keepsRunning, quitting, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, log: (line) => logged.push(line), platform, ...(captureMs ? { captureMs } : {}) });
   electron.parkings = parkings;
   const posted = [];
   const server = { postMessage: (message) => posted.push(message) };
@@ -261,6 +264,75 @@ test("shows the bot's tab in front over the panel's rectangle and hides it under
   assert.deepEqual(await panes.show({ botId: "a", threadId: null, bounds: { x: 300, y: 120, width: 900, height: 700 }, visible: false }), { shown: false });
   assert.equal(back.visible, false);
   await assert.rejects(panes.show({ botId: "../a", visible: true }), /invalid/);
+});
+
+test("on macOS restores host focus before hiding or closing the focused pane, and still relays input to hidden tabs", async (t) => {
+  const { send, panes, last, electron } = setup({ platform: "darwin" });
+  const win = electron.window;
+  const panel = { botId: "a", bounds: { x: 300, y: 120, width: 900, height: 700 }, visible: true };
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
+  await tick();
+  send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
+  send({ op: "create", browser: "bot:a", req: 2, url: "about:blank", background: true });
+  await tick();
+  const showing = panes.show(panel);
+  send({ op: "resolved", req: last("which").req, browser: "bot:a" });
+  await showing;
+  const [view] = electron.views;
+  const contents = view.webContents;
+  const order = [];
+  win.focused = true;
+  win.webContents.isDestroyed = () => false;
+  win.webContents.focus = () => order.push("host focus");
+  contents.isFocused = () => true;
+  t.mock.method(view, "setVisible", (visible) => { view.visible = visible; order.push(visible ? "show" : "hide"); });
+  t.mock.method(contents, "close", () => { contents.closed = true; order.push("close"); });
+
+  const beforeInput = contents.debugger.sent.length;
+  send({ op: "front", browser: "bot:a", tab: "p2" });
+  assert.deepEqual(order, ["host focus", "hide"]);
+  assert.equal(electron.views[1].visible, true);
+  await panes.show({ ...panel, visible: false });
+  assert.equal(order.filter((event) => event === "host focus").length, 1);
+
+  const params = { text: "synthetic-password" };
+  send({ op: "cdp", browser: "bot:a", req: 3, tab: "p1", method: "Input.insertText", params });
+  await tick();
+  assert.deepEqual(last("answer"), { type: MSG, op: "answer", browser: "bot:a", req: 3, result: {} });
+  assert.deepEqual(contents.debugger.sent.slice(beforeInput), [{ method: "Input.insertText", params, sessionId: undefined }]);
+
+  send({ op: "front", browser: "bot:a", tab: "p1" });
+  order.length = 0;
+  await panes.show(panel);
+  send({ op: "close-tab", browser: "bot:a", tab: "p1" });
+  assert.deepEqual(order, ["show", "host focus", "hide", "close"]);
+});
+
+test("hiding a browser tab leaves focus alone when the tab or its host is unfocused, or on other platforms", async () => {
+  for (const { platform, windowFocused, paneFocused } of [
+    { platform: "darwin", windowFocused: true, paneFocused: false },
+    { platform: "darwin", windowFocused: false, paneFocused: true },
+    { platform: "linux", windowFocused: true, paneFocused: true },
+  ]) {
+    const { send, panes, last, electron } = setup({ platform });
+    send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
+    await tick();
+    send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
+    await tick();
+    const showing = panes.show({ botId: "a", bounds: { x: 300, y: 120, width: 900, height: 700 }, visible: true });
+    send({ op: "resolved", req: last("which").req, browser: "bot:a" });
+    await showing;
+    const [view] = electron.views;
+    const win = electron.window;
+    let focusCalls = 0;
+    win.focused = windowFocused;
+    win.webContents.isDestroyed = () => false;
+    win.webContents.focus = () => focusCalls++;
+    view.webContents.isFocused = () => paneFocused;
+    await panes.show({ botId: "a", visible: false });
+    assert.equal(view.visible, false);
+    assert.equal(focusCalls, 0, JSON.stringify({ platform, windowFocused, paneFocused }));
+  }
 });
 
 test("makes a page's popup another tab of the same profile, with its opener", async () => {
