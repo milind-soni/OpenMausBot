@@ -229,6 +229,24 @@ describe("journalMemoryWrite / readMemoryJournal", () => {
     }
   });
 
+  it("keeps the journal bounded when one entry alone is larger than the cap", async () => {
+    const bot = freshBot();
+    const previous = process.env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+    process.env.OMB_MEMORY_JOURNAL_MAX_BYTES = "1024";
+    try {
+      journalMemoryWrite(bot, "memory/huge.md", `${"x".repeat(64_000)}\n`, { actor: "bot", via: "turn" });
+      await flushMemoryJournal(bot);
+      expect(statSync(journalFile(bot)).size).toBe(0);
+      journalMemoryWrite(bot, "memory/small.md", "small\n", { actor: "bot", via: "turn" });
+      await flushMemoryJournal(bot);
+      expect(readMemoryJournal(bot, 1)[0].path).toBe("memory/small.md");
+      expect(statSync(journalFile(bot)).size).toBeLessThanOrEqual(1024);
+    } finally {
+      if (previous === undefined) delete process.env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+      else process.env.OMB_MEMORY_JOURNAL_MAX_BYTES = previous;
+    }
+  });
+
   it("reads the cap from the environment only when it is a sane byte count", () => {
     expect(journalMaxBytes({})).toBe(DEFAULT_JOURNAL_MAX_BYTES);
     expect(journalMaxBytes({ OMB_MEMORY_JOURNAL_MAX_BYTES: "0" })).toBe(DEFAULT_JOURNAL_MAX_BYTES);

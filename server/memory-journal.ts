@@ -195,7 +195,12 @@ export function trimMemoryJournal(botId: string, maxBytes = journalMaxBytes()): 
   // The first line of a tail read is usually cut mid-row; everything after it is a whole record.
   const firstBreak = text.indexOf("\n");
   const kept = firstBreak >= 0 ? text.slice(firstBreak + 1) : "";
-  if (!kept.trim()) return false;
+  // No whole record fits in the window: the newest one alone is past the cap, so keeping any of it would leave the
+  // journal unbounded. Emptying the file is the only bounded state.
+  if (!kept.trim()) {
+    writeFileAtomic(file, "", { mode: 0o600 });
+    return true;
+  }
   writeFileAtomic(file, kept, { mode: 0o600 });
   return true;
 }
@@ -249,6 +254,7 @@ export async function adoptMemoryJournal(botId: string, entries: readonly Memory
   const at = (line: string) => { try { return Number((JSON.parse(line) as { at?: unknown }).at) || 0; } catch { return 0; } };
   mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
   writeFileAtomic(journalFile(botId), `${rows.map((line, index) => ({ line, index, at: at(line) })).sort((a, b) => a.at - b.at || a.index - b.index).map((row) => row.line).join("\n")}\n`, { mode: 0o600 });
+  trimMemoryJournal(botId);
   return added.length;
 }
 
