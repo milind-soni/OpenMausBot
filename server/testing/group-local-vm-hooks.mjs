@@ -72,12 +72,14 @@ registerHooks({
         // An old desktop: made by OpenMausBot, on an image this release no longer runs (and maybe not yet rebuilt).
         const image = !read().imageMissing;
         const outdated = !missing && Boolean(read().outdated?.includes(target.key));
-        const ready = !missing && !stopped && !outdated && image && !read().failed;
+        const { booting, missingMount, failed } = read();
+        const ready = !missing && !stopped && !outdated && image && !failed && !booting && !missingMount;
+        if (booting && !stopped) writeFileSync(file + '.booting', target.key);
         return { runtime: 'podman', daemonUp: true, image, create_supported: true, managed: !missing,
           container: missing ? 'missing' : stopped ? 'stopped' : 'running', ready,
-          imageMatches: !outdated && image, network: 'loopback', security: 'hardened', persistence: 'durable', resumable: Boolean(stopped) && !outdated && image,
+          imageMatches: !outdated && image, network: 'loopback', security: 'hardened', persistence: missingMount ? 'unsafe' : 'durable', resumable: Boolean(stopped) && !outdated && image,
           stopped_at: stopped ? read().stoppedAt : null,
-          problem: ready ? null : outdated ? 'The existing Local VM uses an older desktop or Cua Driver; recreate it' : 'fixture desktop unavailable',
+          problem: ready ? null : missingMount ? 'The existing Local VM is missing its durable folder; recreate it' : outdated ? 'The existing Local VM uses an older desktop or Cua Driver; recreate it' : 'fixture desktop unavailable',
           viewer_port: ready ? (read().viewerPort ?? 6080) : null, viewer_url: ready ? 'http://127.0.0.1:' + (read().viewerPort ?? 6080) + '/vnc.html#autoconnect=true&resize=scale&password=fixture-vnc' : '',
           container_name: target.containerName, target_key: target.key, workspace_path: target.workspaceDir };
       }
@@ -100,6 +102,7 @@ registerHooks({
           state.stopped = [...(state.stopped ?? []), target.key];
           state.stoppedAt = new Date().toISOString();
         } else if (action === 'start') {
+          if (state.failStart) throw new Error('Fixture runtime refused to start');
           state.stopped = (state.stopped ?? []).filter(key => key !== target.key);
         } else {
           state.containers = state.containers.filter(key => key !== target.key);

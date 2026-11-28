@@ -1,3 +1,29 @@
+import type { ContainerComputerStatus } from "./container-computer.ts";
+
+const DESKTOP_WAIT_MS = 90_000;
+const DESKTOP_POLL_MS = 2_000;
+
+export function canProbeLocalVmDesktop(status: ContainerComputerStatus): boolean {
+  return status.container === "running" && status.imageMatches && status.managed &&
+    status.network === "loopback" && status.security === "hardened" && status.persistence === "durable";
+}
+
+export async function waitForLocalVmDesktop(
+  status: ContainerComputerStatus,
+  probe: () => Promise<ContainerComputerStatus>,
+  isCurrent: () => boolean,
+): Promise<ContainerComputerStatus> {
+  const deadline = Date.now() + DESKTOP_WAIT_MS;
+  while (isCurrent() && !status.ready && status.image && canProbeLocalVmDesktop(status)) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return { ...status, problem: `Timed out waiting for the Local VM desktop. ${status.problem ?? ""}`.trim() };
+    await new Promise<void>(resolve => setTimeout(resolve, Math.min(remaining, DESKTOP_POLL_MS)));
+    if (!isCurrent()) break;
+    if (Date.now() < deadline) status = await probe();
+  }
+  return status;
+}
+
 // Whether this server can give a bot a Local VM: a supported container runtime is installed on the host. A runtime
 // whose daemon is down still counts, since a turn that needs the VM starts a stopped Podman machine itself. The answer
 // is kept, so the tools a conversation is listed do not change from turn to turn; while it is "no" it is read again at

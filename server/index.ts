@@ -282,7 +282,7 @@ import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts"; import { m
 import { type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost, type MemberProfile } from "./host/cloud-team-host.ts"; import { createTeamFilesHost } from "./host/team-files-host.ts"; import { createTeamFilesRoutes } from "./routes/team-files.ts"; import { engineHomes } from "./engine-homes/engine-homes.ts"; import { audienceMember, layerId, memberAudience } from "./audience.ts"; import { createPersonRooms, createRoomReads, type OwnGroupFrames } from "./host/room-reads.ts"; import { createPersonBotOrder } from "./host/person-bot-order.ts"; import { createMeRoutes } from "./routes/me.ts"; import { createPersonNames } from "./host/person-names.ts"; import { createTeamPhoneRoutes } from "./routes/team-phone.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts"; import { createTeamSlackHost } from "./host/team-slack-host.ts"; import { createTeamSlackMessages } from "./team-slack.ts"; import { createTeamSlackRoutes } from "./routes/team-slack.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts"; import { installCrashGuard, SERVER_ERROR_CAUSE } from "./crash-guard.ts"; import { markRequestArrival } from "./perf/loop-stalls.ts"; import { createThreadMaps, keepThreadEntry } from "./host/thread-maps.ts"; import { botLimitRefusal } from "./bot-limit.ts";
-import { applyIncludedXMessage, holdIncludedServices, hostingCredential, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { applyPhoneLinkMessage, phoneLinkPart } from "./phone-link.ts"; import { createLocalVmAvailability } from "./local-vm-availability.ts"; import { createResearchAvailability } from "./research.ts";
+import { applyIncludedXMessage, holdIncludedServices, hostingCredential, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { applyPhoneLinkMessage, phoneLinkPart } from "./phone-link.ts"; import { createLocalVmAvailability, waitForLocalVmDesktop } from "./local-vm-availability.ts"; import { createResearchAvailability } from "./research.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts"; import { tellTurnedBackOn } from "./host/routines-turned-back-on.ts";
 import { TRIAL_CREDIT_OWN_AI, TRIAL_KEY_HELD } from "./trial-credit.ts"; import { createHeldKeys } from "./cloud-held-keys.ts";
@@ -5604,7 +5604,6 @@ const boatInventoryRequestsBusyIds = new Set<string>();
 type RemoteComputerProvider = "box" | "vps";
 const computerProviderConfigTransitions = new Set<RemoteComputerProvider>();
 const localVmIdleMs = () => localVmIdleTimeoutMinutes(cfg) * 60_000;
-const LOCAL_VM_DESKTOP_WAIT_MS = 90_000;
 const localVmIdles = new Map<string, ComputerIdleTimer>();
 const { activeVpsThreads, vpsThreadStarted, vpsThreadEnded, vpsIdles, vpsIdleMs, cancelVpsIdle, touchVpsIdle, vpsServerSwitched, recover: recoverVpsIdles, cancelAll: cancelAllVpsIdles } = createVpsIdleHost({ cfg, store, botHasActiveTurn, hasActiveRoutine: (id) => Boolean(routines?.activeRunForBot(id)), isSharedVmHeld: (id) => sharedVm.snapshot(id).held, hasComputerPreview: (id) => computerPreviews.has(id), isVpsConfigTransitioning: () => computerProviderConfigTransitions.has("vps"), isLifecycleBusy: (id) => boatLifecycleBusyBots.has(id), claimBotComputerLifecycle, isShuttingDown: () => companyShutdown });
 
@@ -7898,7 +7897,9 @@ async function beginTurn(
         };
         let localVm: Awaited<ReturnType<typeof readyLocalVmForTurn>>;
         try {
-          localVm = await readyLocalVmForTurn(bot.id, localVmTarget);
+          const isCurrent = () => activeInternalGenerationByThread.get(claimThreadId) === resourceOwner.generation && !companyShutdown;
+          localVm = await readyLocalVmForTurn(bot.id, localVmTarget, isCurrent, opts?.automationSource === "schedule");
+          if (!isCurrent()) throw new DirectTurnSetupCancelled("turn stopped while its Local VM was being prepared");
         } catch (error) {
           dropLease();
           throw error;
@@ -7971,7 +7972,7 @@ async function beginTurn(
         const localVmTarget = { ...localVmTargetForThread(bot.id, threadId) };
         let lazyReadyVm: { runtime: Runtime } | null = null;
         if (strict) {
-          const seen = await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
+          const seen = opts?.automationSource === "schedule" ? null : await containerComputerStatus(undefined, undefined, localVmTarget).catch(() => null);
           if (seen?.ready && seen.runtime && !localVmUpdates.observe(localVmTarget, seen) && !localVmImageBusy && !localVmModeChangeBusy && !localVmLifecycleBusy.has(localVmTarget.key)) lazyReadyVm = { runtime: seen.runtime };
         } else {
           if (!localVmSeen.has(localVmTarget.key) && !opts?.automationSource) return false;
@@ -11490,7 +11491,7 @@ async function localVmPayload(target: LocalVmTarget, auth: RequestAuth) {
   };
 }
 
-async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurrent = () => true) {
+async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurrent: () => boolean, waitForRunning = false) {
   localVmLifecycleBusy.add(target.key);
   // Fence before the first await, so two concurrent turns cannot both pass the per-bot limit between count and create.
   const pooled = target.key.startsWith("pool:");
@@ -11503,7 +11504,8 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
     noteLocalVmSeen(target, status);
     if (!isCurrent()) return status;
     const action = localVmWakeAction(status);
-    if (status.ready || !action || !status.runtime) return status;
+    if (status.ready || !status.runtime) return status;
+    if (!action) return waitForRunning ? waitForLocalVmDesktop(status, () => containerComputerStatus(undefined, undefined, target), isCurrent) : status;
     if (action === "run" && target.key.startsWith("bot:")) {
       const limit = perBotLocalVmLimitProblem(cfg, await existingPerBotLocalVmCount(status.runtime));
       if (!isCurrent() || limit) return { ...status, problem: limit ?? status.problem };
@@ -11517,7 +11519,7 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
     } catch {
       // `run` can throw after the container exists, so arm the idle backstop anyway.
       localVmIdleFor(target).touch();
-      return status;
+      return { ...status, problem: "The container runtime could not start the Local VM. Check the runtime and try again" };
     }
   } finally {
     if (ownsProvision) localVmProvisionBusy = false;
@@ -11525,14 +11527,7 @@ async function readyLocalVmForTurn(botId: string, target: LocalVmTarget, isCurre
   }
   localVmIdleFor(target).touch();
 
-  // The container is up before Cua Driver is: wait rather than fail the turn.
-  const deadline = Date.now() + LOCAL_VM_DESKTOP_WAIT_MS;
-  while (isCurrent() && !status.ready && status.container === "running" && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-    if (!isCurrent()) break;
-    status = await containerComputerStatus(undefined, undefined, target);
-  }
-  return status;
+  return waitForLocalVmDesktop(status, () => containerComputerStatus(undefined, undefined, target), isCurrent);
 }
 
 async function existingPerBotLocalVmCount(runtime: Runtime) {
