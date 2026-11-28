@@ -103,7 +103,7 @@ export interface OwnerPages {
  * answers first. POST /api/published-pages/<pageId>/unpublish: the card's Unpublish. POST .../messages/<id>/app/publish: a
  * page card's Share. All admin-scope routes, so only the owner's own app. */
 export function createPublishedPageRoutes(publisher: PagePublisher, apps?: AppPages, ownerPages?: OwnerPages): RouteHandler {
-  return async ({ req, res, path, method, auth, json, readBody }) => {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     const match = UNPUBLISH_ROUTE.exec(path);
     if (match && method === "POST") {
       const outcome = await publisher.unpublish({ pageId: match[1] });
@@ -115,14 +115,14 @@ export function createPublishedPageRoutes(publisher: PagePublisher, apps?: AppPa
         // Security: a member, a guest and a service-trust bot shell read this as a page that does not exist.
         if (!ownerOrAdmin(auth)) return void json(res, 404, { error: "Not found." });
         if (page[2] === undefined) {
-          res.writeHead(308, { location: `${path}/`, "cache-control": "private, no-store" });
+          res.writeHead(308, { location: `${path}/${url.search}`, "cache-control": "private, no-store" });
           res.end();
           return;
         }
         // Its sandbox sends no cookie with the page's own files, so it loads from a token folder minted for this viewer.
         const viewer: OwnerPageViewer = { key: auth.kind === "session" ? `session:${auth.session.id}` : auth.kind,
           allowed: () => auth.kind !== "session" || (ownerPages.sessionLive?.(auth.session.id) ?? true) };
-        res.writeHead(303, { location: `${ownerPages.folder(page[1]!, viewer)}${page[2].slice(1)}`, "cache-control": "private, no-store" });
+        res.writeHead(303, { location: `${ownerPages.folder(page[1]!, viewer)}${page[2].slice(1)}${url.search}`, "cache-control": "private, no-store" });
         res.end();
         return;
       }

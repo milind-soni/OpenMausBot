@@ -103,24 +103,27 @@ describe("an owner-only page's stable link", () => {
     return { ownerOnly: () => only, sessionLive, folder: (pageId, viewer) => `/api/owner-page-files/${pageId}-${viewer.key}/` };
   }
 
-  function serve(ownerPages: OwnerPages | undefined, path = `/api/published-pages/${PAGE}/`, method = "GET", auth: RequestAuth = OWNER) {
+  function serve(ownerPages: OwnerPages | undefined, target = `/api/published-pages/${PAGE}/`, method = "GET", auth: RequestAuth = OWNER) {
     const sent: { status?: number; body?: any; headers?: Record<string, string>; written?: unknown; out?: typeof PASS | void } = {};
     const res = {
       headersSent: false, writableEnded: false,
       writeHead: (status: number, headers: Record<string, string>) => { sent.status = status; sent.headers = headers; },
       end: (body?: unknown) => { sent.written = body; },
     };
+    const url = new URL(target, "https://cloud.example.test");
     return createPublishedPageRoutes(fakePublisher(), undefined, ownerPages)({ req: {} as never, res: res as never,
-      url: new URL(path, "https://cloud.example.test"), path, method, auth,
+      url, path: url.pathname, method, auth,
       json: ((_res: unknown, status: number, body: unknown) => { sent.status = status; sent.body = body; }) as never,
       readBody: async () => ({}) } as RouteContext).then((out) => Object.assign(sent, { out }));
   }
 
-  it("moves the owner to the token folder the page loads from, at any file of it", async () => {
+  it("moves the owner to the token folder the page loads from, at any file of it, keeping the query string", async () => {
     expect(await serve(ownerPage())).toMatchObject({ status: 303, headers: { location: `/api/owner-page-files/${PAGE}-session:s1/`,
       "cache-control": "private, no-store" } });
     expect(await serve(ownerPage(), `/api/published-pages/${PAGE}/data.csv`, "HEAD", HOME)).toMatchObject({ status: 303,
       headers: { location: `/api/owner-page-files/${PAGE}-loopback/data.csv` } });
+    expect(await serve(ownerPage(), `/api/published-pages/${PAGE}/data.csv?period=2026-11`, "GET", HOME)).toMatchObject({ status: 303,
+      headers: { location: `/api/owner-page-files/${PAGE}-loopback/data.csv?period=2026-11` } });
   });
 
   it("refuses a viewer who is not the owner, and any page that is not owner-only", async () => {
@@ -130,7 +133,9 @@ describe("an owner-only page's stable link", () => {
     expect((await serve(undefined)).out).toBe(PASS);
   });
 
-  it("moves a page opened without its trailing slash to the folder its files are relative to", async () => {
+  it("moves a page opened without its trailing slash to the folder its files are relative to, keeping the query string", async () => {
     expect(await serve(ownerPage(), `/api/published-pages/${PAGE}`)).toMatchObject({ status: 308, headers: { location: `/api/published-pages/${PAGE}/` } });
+    expect(await serve(ownerPage(), `/api/published-pages/${PAGE}?period=2026-11`)).toMatchObject({ status: 308,
+      headers: { location: `/api/published-pages/${PAGE}/?period=2026-11` } });
   });
 });
