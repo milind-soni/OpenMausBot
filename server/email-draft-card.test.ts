@@ -150,8 +150,8 @@ function request(body: unknown) {
 
 /** Composio's GMAIL_GET_DRAFT answer for a draft Gmail holds: its headers, as Gmail writes them, and its text. */
 function heldAnswer(draft: EmailDraftEdit, over: Record<string, unknown> = {}): Record<string, unknown> {
-  const headers = [["To", draft.to], ["Cc", draft.cc], ["Bcc", draft.bcc], ["Subject", [draft.subject]]]
-    .filter(([, values]) => values.length && values.some(Boolean)).map(([name, values]) => ({ name, value: (values as string[]).join(", ") }));
+  const fields: Array<[string, readonly string[]]> = [["To", draft.to], ["Cc", draft.cc], ["Bcc", draft.bcc], ["Subject", [draft.subject]]];
+  const headers = fields.filter(([, values]) => values.some(Boolean)).map(([name, values]) => ({ name, value: values.join(", ") }));
   return { successful: true, data: { id: "r-123", message: { to: draft.to.join(", "), subject: draft.subject, messageText: draft.body, payload: { headers }, ...over } } };
 }
 
