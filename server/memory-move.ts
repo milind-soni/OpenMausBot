@@ -6,7 +6,7 @@ import { dirname, join, relative } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { serverLine } from "./server-lines.ts";
-import { flushMemoryJournal, journalFile, JOURNAL_DIR } from "./memory-journal.ts";
+import { flushMemoryJournal, journalFile, JOURNAL_DIR, trimMemoryJournal } from "./memory-journal.ts";
 import { ensureWorkspace, isMemorySeed, readMemoryText, syncMemoryIndex, workspaceDir } from "./workspace.ts";
 
 function filesUnder(dir: string): string[] {
@@ -57,7 +57,10 @@ export async function moveMemoryLayer(from: string, to: string, language?: strin
       try { return [JSON.stringify({ ...JSON.parse(line), botId: to, before: null, canRevert: false, revertUnavailableReason: serverLine(language, "server.memory.movedNote") })]; } catch { return []; }
     });
     mkdirSync(JOURNAL_DIR, { recursive: true, mode: 0o700 });
-    if (rows.length) appendFileSync(journalFile(to), `${rows.join("\n")}\n`, { mode: 0o600 });
+    if (rows.length) {
+      appendFileSync(journalFile(to), `${rows.join("\n")}\n`, { mode: 0o600 });
+      trimMemoryJournal(to);
+    }
     rmSync(journal, { force: true });
     moved ||= rows.length > 0;
   }

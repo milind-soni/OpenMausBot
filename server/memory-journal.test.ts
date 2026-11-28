@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BEFORE_CAP,
+  DEFAULT_JOURNAL_MAX_BYTES,
   DIFF_CAP,
   JOURNAL_DIR,
   beginMemoryTurn,
@@ -13,6 +14,7 @@ import {
   forgetBotMemoryJournal,
   flushMemoryJournal,
   journalFile,
+  journalMaxBytes,
   journalMemoryDelete,
   journalMemoryWrite,
   journalTurnWrite,
@@ -20,6 +22,7 @@ import {
   recordMemoryChange,
   resetMemoryJournalState,
   revertMemoryChange,
+  trimMemoryJournal,
   unifiedDiff,
 } from "./memory-journal.ts";
 import { MEMORY_INDEX, hashMemoryText, readMemoryDoc } from "./memory-store.ts";
@@ -192,6 +195,62 @@ describe("journalMemoryWrite / readMemoryJournal", () => {
     await flushMemoryJournal(bot);
     expect(readFileSync(journalFile(bot), "utf8")).not.toContain("AAAABBBB");
     expect(revertMemoryChange(bot, secret!.id)).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("keeps the journal bounded: the oldest rows go once the file passes its cap", async () => {
+    const bot = freshBot();
+    for (let i = 0; i < 60; i++) journalMemoryWrite(bot, `memory/${i}.md`, `entry ${i}\n`, { actor: "person", via: "ui" });
+    await flushMemoryJournal(bot);
+    const before = statSync(journalFile(bot)).size;
+    expect(before).toBeGreaterThan(2048);
+    expect(trimMemoryJournal(bot, 2048)).toBe(true);
+    expect(statSync(journalFile(bot)).size).toBeLessThan(before);
+    const rows = readMemoryJournal(bot, 500);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].path).toBe("memory/59.md");
+    expect(rows.some((row) => row.path === "memory/0.md")).toBe(false);
+    for (const line of readFileSync(journalFile(bot), "utf8").trimEnd().split("\n")) expect(() => JSON.parse(line)).not.toThrow();
+    if (process.platform !== "win32") expect(statSync(journalFile(bot)).mode & 0o777).toBe(0o600);
+  });
+
+  it("honours OMB_MEMORY_JOURNAL_MAX_BYTES after each write", async () => {
+    const bot = freshBot();
+    const previous = process.env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+    process.env.OMB_MEMORY_JOURNAL_MAX_BYTES = "1024";
+    try {
+      for (let i = 0; i < 40; i++) journalMemoryWrite(bot, `memory/cap-${i}.md`, `row ${i}\n`, { actor: "bot", via: "turn" });
+      await flushMemoryJournal(bot);
+      expect(statSync(journalFile(bot)).size).toBeLessThan(4096);
+      expect(readMemoryJournal(bot, 1)[0].path).toBe("memory/cap-39.md");
+      expect(journalMaxBytes()).toBe(1024);
+    } finally {
+      if (previous === undefined) delete process.env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+      else process.env.OMB_MEMORY_JOURNAL_MAX_BYTES = previous;
+    }
+  });
+
+  it("keeps the journal bounded when one entry alone is larger than the cap", async () => {
+    const bot = freshBot();
+    const previous = process.env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+    process.env.OMB_MEMORY_JOURNAL_MAX_BYTES = "1024";
+    try {
+      journalMemoryWrite(bot, "memory/huge.md", `${"x".repeat(64_000)}\n`, { actor: "bot", via: "turn" });
+      await flushMemoryJournal(bot);
+      expect(statSync(journalFile(bot)).size).toBe(0);
+      journalMemoryWrite(bot, "memory/small.md", "small\n", { actor: "bot", via: "turn" });
+      await flushMemoryJournal(bot);
+      expect(readMemoryJournal(bot, 1)[0].path).toBe("memory/small.md");
+      expect(statSync(journalFile(bot)).size).toBeLessThanOrEqual(1024);
+    } finally {
+      if (previous === undefined) delete process.env.OMB_MEMORY_JOURNAL_MAX_BYTES;
+      else process.env.OMB_MEMORY_JOURNAL_MAX_BYTES = previous;
+    }
+  });
+
+  it("reads the cap from the environment only when it is a sane byte count", () => {
+    expect(journalMaxBytes({})).toBe(DEFAULT_JOURNAL_MAX_BYTES);
+    expect(journalMaxBytes({ OMB_MEMORY_JOURNAL_MAX_BYTES: "0" })).toBe(DEFAULT_JOURNAL_MAX_BYTES);
+    expect(journalMaxBytes({ OMB_MEMORY_JOURNAL_MAX_BYTES: "2048" })).toBe(2048);
   });
 
   it("skips a torn last line rather than failing the read", async () => {
