@@ -209,7 +209,7 @@ export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HO
 export const CPU_LIST_FILES = ["/sys/devices/system/cpu/possible", "/sys/devices/system/cpu/online"] as const;
 
 /** The bots' browser folders under /opt, the only part of it the box shows: the image's and deb's browser, and an
- * installed Google Chrome. /opt and /var/lib are not bound whole (issue #4011): on a self-hosted host they hold other
+ * installed Google Chrome. /opt and /var/lib are not bound whole: on a self-hosted host they hold other
  * services' files a bot must not read. What an install needs beyond the browser is the server's own code, which
  * `codeRoots` already carries. */
 export const BROWSER_ROOTS = ["/opt/openmausbot-browser", "/opt/google/chrome"] as const;
