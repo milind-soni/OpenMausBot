@@ -385,7 +385,7 @@ describe("the Chief's own run that failed on an error that may not repeat", () =
   const fails = (f: ReturnType<typeof ownFixture>) =>
     f.notices.reportIncident({ kind: "failed", bot: f.chief as never, threadId: "chief-main", detail: CRASH });
 
-  it("starts once more by itself in the thread's own request, and the person hears only if that run fails too", () => {
+  it.each([CRASH, memoryStopText(true)])("retries the original request only once even when the retry ends with %s", (detail) => {
     const f = ownFixture();
     ask(f);
     fails(f);
@@ -396,8 +396,7 @@ describe("the Chief's own run that failed on an error that may not repeat", () =
     expect(f.store.activePath("chief-main").map((line) => line.text)).toEqual(["Book the train to Leeds."]);
     f.settle();
     expect(f.continued).toEqual([{ botId: "chief", threadId: "chief-main", text: TRANSIENT_RETRY_TEXT }]);
-    // That run fails the same way: the person hears how the retry ended, and nothing starts again.
-    fails(f);
+    f.notices.reportIncident({ kind: "failed", bot: f.chief as never, threadId: "chief-main", detail });
     expect(f.waiting).toEqual([]);
     f.settle();
     expect(f.continued).toHaveLength(1);
