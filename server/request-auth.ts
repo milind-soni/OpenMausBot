@@ -368,6 +368,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/stop-line$/ },
   // One suggested next line for a conversation the caller reads and may write in (routes/suggested-reply.ts).
   { methods: ["POST"], path: /^\/api\/suggested-reply$/ },
+  // Save or send a draft card in a conversation the caller reads and may write in (email-draft-card.ts).
+  { methods: ["POST"], path: /^\/api\/email-draft$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
   { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
