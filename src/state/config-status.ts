@@ -248,6 +248,8 @@ export interface BrowserProfile {
   /** "chrome": the profile's bots use the person's own Chrome (My Chrome).
    * Absent is the built-in browser. */
   browser?: "chrome";
+  /** The server config supplies a CDP address for this profile. */
+  attachedChrome?: true;
   /** Read-only durable Electron routing inherited from legacy profiles.
    * Config PATCH payloads must omit it. */
   partitionId?: string;

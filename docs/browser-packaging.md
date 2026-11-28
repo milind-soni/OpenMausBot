@@ -94,9 +94,26 @@ That computer lends Chrome only by its own **Your Chrome** switch, off by
 default and dropped when lending is turned off; Chrome then travels over the
 device link, to the DevTools port the computer finds itself, and only the
 person's own conversations and routines use it. My Chrome works only on a
-personal Cloud home: on a Team Cloud and on self-hosted servers profiles stay
-built-in. Details: [the browser engine plan, step 5](plans/browser-engine.md)
-and [MausBot Cloud](cloud-pro.md#your-chrome).
+personal Cloud home when connecting over the device link. Details: [the browser
+engine plan, step 5](plans/browser-engine.md) and [MausBot Cloud](cloud-pro.md#your-chrome).
+
+On a self-hosted server, add a `cdpUrl` to each My Chrome profile that needs
+its own running browser. Set it in the server’s `config.json` and restart
+OpenMausBot. Assign each bot the corresponding profile in its Browser panel.
+
+```json
+{
+  "browserProfiles": [
+    { "id": "scout-chrome", "name": "Scout Chrome", "browser": "chrome", "cdpUrl": "http://127.0.0.1:9333" },
+    { "id": "chief-chrome", "name": "Chief Chrome", "browser": "chrome", "cdpUrl": "http://127.0.0.1:9444" }
+  ]
+}
+```
+
+A My Chrome profile without `cdpUrl` uses `browserEngine.attachCdpUrl` when
+set. Switching a profile to Built-in in Settings removes its configured
+CDP address. Each address must point to a separately running Chrome if you
+want separate tabs and sign-ins. Keep DevTools endpoints on a network you control.
 
 ## What a bot's browser can reach
 

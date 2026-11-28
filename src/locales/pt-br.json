@@ -3856,6 +3856,7 @@
   "settings.profiles.deleteUsers": "Bots que passarão a usar o próprio navegador: {names}.",
   "settings.profiles.browserLabel": "Navegador",
   "settings.profiles.builtIn": "Integrado",
+  "settings.profiles.myChromeConfigured": "Este perfil usa o Chrome definido na configuração do servidor. Entre e saia dos sites nesse Chrome.",
   "settings.profiles.myChrome": "Meu Chrome",
   "settings.profiles.myChromeHint": "Bots neste perfil agem dentro do seu Chrome de verdade, com sua conta de usuário, seus cookies e suas abas abertas. Use para sites que recusam o navegador integrado, como o login do Google. Para conectar, abra chrome://inspect/#remote-debugging no Chrome e ligue a depuração remota; o Chrome pede para você permitir a conexão. Entre e saia dos sites no próprio Chrome.",
   "settings.profiles.myChromeUnavailable": "A opção “Meu Chrome” funciona no app para computador, onde os bots rodam no seu próprio computador. Em outros lugares, como o Cloud, seu Chrome não está disponível. Por isso, todos os perfis usam o navegador integrado.",

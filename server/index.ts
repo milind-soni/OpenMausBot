@@ -2352,7 +2352,7 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 
 const {
   browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
-  currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, lentChromeSummary, browserSessionSpec, browserIntegration,
+  currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, browserProfilesForStatus, usesMyChrome, lentChromeSummary, browserSessionSpec, browserIntegration,
   browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary, browserSessionsOf, signedInSitesTarget, uploadPaths, eraseAudienceBrowsers, browserOwners, closeCapBrowsers, cloudBrowserBusy, cloudBrowserReport, signInBackupRoutes,
 } = createBrowserHost({ cloudBrowser: CLOUD_PERSONAL ? { used: (owner, windowMs) => cloudComputerPower.used(owner, windowMs), folder: (botId) => { const bot = store.bot(botId); return bot ? bot.cwd || workspaceDir(bot.id) : null; } } : undefined, cfg, language: appLanguage, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, HOSTED_WORKSPACE, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), lendRefusal: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }), device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const }, lentChrome: CLOUD_PERSONAL ? { route: () => deviceLinks.chromeRoute(CLOUD_HOME_LENDER), lender: () => sharedComputers.chromeLender(CLOUD_HOME_LENDER) } : undefined });
 
@@ -11632,8 +11632,8 @@ function configStatus() {
       ...(cfg.onboarding?.firstTurnAt ? { firstTurnAt: cfg.onboarding.firstTurnAt } : {}),
     },
     browserEngine: browserEngineSummary(),
-    // partitionId is read-only routing metadata: config PATCH rejects callers that try to choose it.
-    browserProfiles: cfg.browserProfiles ?? [],
+    // partitionId and CDP address are read-only routing metadata: config PATCH cannot select either.
+    browserProfiles: browserProfilesForStatus(),
     signIn: { admins: cfg.signIn?.admins ?? [], members: cfg.signIn?.members ?? [] },
     membership: workspaceMembership(), workspaceBanner: workspaceBannerSummary(),
   };

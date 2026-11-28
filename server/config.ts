@@ -31,15 +31,14 @@ import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts"; import { hearingConfigShape } from "./tts/hearing-config.ts";
-import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
+import { browserEngineConfigSchema, browserProfileSchema, isValidCdpTarget, legacyBrowserProfileSchema, type BrowserEngineConfig, type BrowserProfile } from "./browser/config.ts";
+export type { BrowserProfile } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
 export * from "./vps-config.ts";
 
 const optionalText = z.string().optional(), secretText = z.string().trim().optional(); // secretText: a saved key without a paste's surrounding whitespace (a trailing newline), so it can go in a header.
-const LEGACY_BROWSER_PROFILE_ID = /^[A-Za-z0-9_-]{1,40}$/;
-const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 
 /** Fish Audio speech models (`tts.fishModel`); unset means `s2.1-pro`, and `s2.1-pro-free` is Fish's free tier. */
 export const FISH_TTS_MODELS = ["s2.1-pro", "s2.1-pro-free"] as const;
@@ -71,21 +70,6 @@ const mcpConfigSchema = z.object({
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
     .optional(),
 }).strict();
-/** A named browser session; its id names a durable Electron partition. */
-const browserProfileSchema = z.object({
-  // Lowercase only: Chromium partition directories collide on case-insensitive filesystems.
-  id: z.string().regex(BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
-  name: z.string().trim().min(1).max(40),
-  /** "chrome" uses the person's own running Chrome (My Chrome); absent is the built-in browser. */
-  browser: z.literal("chrome").optional(),
-}).strict();
-const legacyBrowserProfileSchema = z.object({
-  id: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved"),
-  name: z.string().trim().min(1).max(40),
-  partitionId: z.string().regex(LEGACY_BROWSER_PROFILE_ID).refine((id) => id !== "guest", "guest is reserved").optional(),
-  browser: z.literal("chrome").optional(),
-}).strict();
-
 interface StoredBrowserProfileMigration {
   profiles: BrowserProfile[];
   aliases: ReadonlyMap<string, string>;
@@ -171,6 +155,7 @@ function migrateStoredBrowserProfiles(
     const partitionId = effectivePartitions[index]!;
     const migrated: BrowserProfile = { id, name: profile.name };
     if (profile.browser) migrated.browser = profile.browser;
+    if (profile.cdpUrl) migrated.cdpUrl = profile.cdpUrl;
     if (partitionId !== id) migrated.partitionId = partitionId;
     if (!aliases.has(profile.id)) aliases.set(profile.id, id);
     return migrated;
@@ -473,9 +458,6 @@ export interface AppConfig extends HelperConfig {
   browserEngine?: BrowserEngineConfig;
   instances?: InstanceConfigMap;
 }
-export type BrowserProfile = z.output<typeof browserProfileSchema> & {
-  partitionId?: string;
-};
 export type ConfigPatch = z.output<typeof appConfigPatchSchema>;
 
 /** Electron storage must use this, never the profile id. */
@@ -937,8 +919,9 @@ export function saveConfig(
       (storedProfiles.success ? storedProfiles.data : []).map((profile) => [profile.id, profile]),
     );
     const nextProfiles: BrowserProfile[] = checkedPatch.browserProfiles.map((profile) => {
-      const partitionId = existingProfiles.get(profile.id)?.partitionId;
-      return partitionId ? { ...profile, partitionId } : profile;
+      const previous = existingProfiles.get(profile.id);
+      const cdpUrl = profile.browser === "chrome" ? previous?.cdpUrl : undefined;
+      return { ...profile, ...(previous?.partitionId ? { partitionId: previous.partitionId } : {}), ...(cdpUrl ? { cdpUrl } : {}) };
     });
     const routingConflict = browserProfileReplacementConflict(
       storedProfiles.success ? storedProfiles.data : [],
