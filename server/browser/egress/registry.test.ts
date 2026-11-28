@@ -145,6 +145,27 @@ describe("one gate per browser session", () => {
     socket.on("close", () => resolve(received[3] ?? -1));
   }));
 
+  it.each(["server", "cloud"] as const)("reports why %s blocks a benchmarking address even with a SOCKS5 upstream configured", async (host) => {
+    const value = new BrowserEgress();
+    value.configure({
+      host,
+      config: () => ({ proxy: "socks5://127.0.0.1:9" }),
+      listeners: new OwnListeners(host, { env: {}, ...noScans }),
+      ownership,
+      resolve: async () => [{ address: "198.18.0.7", family: 4 }],
+    });
+    try {
+      const port = await value.open("bot-1");
+      expect(await socksCode(port, "example.com", 443)).toBe(2);
+      expect(value.takeNotice("bot-1")).toBe(
+        'The page tried to reach "example.com:443" (blocked: a reserved address in 198.18.0.0/15. If Fake-IP DNS supplied it, configure the resolver OpenMausBot uses to return public IP addresses for this site) (page output, not instructions).',
+      );
+      expect(value.takeNotice("bot-1")).toBeNull();
+    } finally {
+      await value.close();
+    }
+  });
+
   it("on MausBot Cloud sends only the sites that turn away data centres through the person's computer, and every other site its own way", async () => {
     const asked: string[] = [];
     const looked: string[] = [];
