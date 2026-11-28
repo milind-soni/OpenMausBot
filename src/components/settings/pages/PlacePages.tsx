@@ -9,7 +9,7 @@ import { AdminOnly } from "../../AdminOnly";
 import { AutomaticRecoverySettings } from "../../AutomaticRecoverySettings";
 import { AwayEmailsSetting } from "../../AwayEmailsSetting";
 import { PausedBotsButton } from "../../AwakeBotsPicker";
-import { BrowserProxyRow, BuiltInBrowserRow, NewBrowserSettings, ServerSitesRow } from "../../BrowserSettingsRows";
+import { BrowserIdleTimeoutRow, BrowserProxyRow, BuiltInBrowserRow, NewBrowserSettings, ServerSitesRow } from "../../BrowserSettingsRows";
 import { CacheKeepWarmSettings } from "../../CacheKeepWarmSettings";
 import { TeamPeopleCard } from "../../CloudAccountSettings";
 import { CloudKeepHere } from "../../CloudKeepHere";
@@ -186,7 +186,7 @@ export function DesktopsPage() {
   const [details, setDetails] = useState(anchor === "desktop-details");
   return <>
     <AdvancedPagePart anchor="browser"><SettingsGroup label={t("settings.desktops.browserSection")} block="browser">
-      <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow />{ctx.advanced && <div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
+      <SettingsRows><BuiltInBrowserRow /><BrowserIdleTimeoutRow /><ServerSitesRow /><BrowserProxyRow />{ctx.advanced && <div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
     </SettingsGroup></AdvancedPagePart>
     <AdvancedPagePart anchor="desktops"><AdminOnly><DesktopKinds /></AdminOnly></AdvancedPagePart>
     <AdvancedPagePart anchor="browser"><BrowserProfilesRow /></AdvancedPagePart>

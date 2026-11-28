@@ -5,6 +5,7 @@ import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } fro
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, type ConfigStatus } from "@/state/store";
+import { Select } from "./Select";
 import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
@@ -66,6 +67,40 @@ export function BuiltInBrowserRow() {
           onClick={() => void save({ features: { browser: !browser } })}
           className="disabled:cursor-wait disabled:opacity-50"
       />
+    </SettingRow>
+  );
+}
+
+const IDLE_TIMEOUT_PRESETS = [3, 5, 10, 15, 30, 60] as const;
+
+export function BrowserIdleTimeoutRow() {
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
+  const { saving, error, save } = useConfigSave();
+  if (!builtInBrowserEnabled(state.config)) return null;
+
+  const fallback = state.config?.cloudHome ? 3 : 10;
+  const current = state.config?.browserEngine?.idleTimeoutMinutes ?? fallback;
+  const options = current > 0 && !IDLE_TIMEOUT_PRESETS.includes(current as (typeof IDLE_TIMEOUT_PRESETS)[number])
+    ? [...IDLE_TIMEOUT_PRESETS, current].sort((a, b) => a - b)
+    : IDLE_TIMEOUT_PRESETS;
+
+  return (
+    <SettingRow
+      title={t("settings.browser.idleTimeout")}
+      subtitle={t("settings.browser.idleTimeoutHint")}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <Select
+        aria-label={t("settings.browser.idleTimeout")}
+        value={String(current)}
+        disabled={saving}
+        onChange={(event) => void save({ browserEngine: { idleTimeoutMinutes: Number(event.target.value) } })}
+      >
+        {options.map((minutes) => (
+          <option key={minutes} value={String(minutes)}>{t("settings.browser.idleMinutes", { minutes })}</option>
+        ))}
+        <option value="0">{t("settings.browser.idleNever")}</option>
+      </Select>
     </SettingRow>
   );
 }

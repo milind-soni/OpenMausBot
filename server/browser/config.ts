@@ -22,7 +22,7 @@ export type BrowserEngineKind = "agent-browser" | "chrome";
 export const browserEngineConfigSchema = z.object({
   attachCdpUrl: z.string().trim().max(2048).refine((value) => value === "" || isValidCdpTarget(value),
     { message: "browserEngine.attachCdpUrl must be a CDP port (1-65535) or an http(s)/ws(s) URL" }).optional(),
-  idleTimeoutMinutes: z.number().int().min(1).max(60).optional(), // an unused browser closes after this; 10 when unset, 3 on MausBot Cloud
+  idleTimeoutMinutes: z.number().int().min(0).max(60).optional(), // an unused browser closes after this in minutes (0 keeps it open; 10 when unset, 3 on MausBot Cloud)
   egress: browserEgressConfigSchema.optional(),
   /** "chrome" runs the bots' browsers on OpenMausBot's own Chrome driver, an early test; agent-browser is the default. */
   engine: z.enum(["agent-browser", "chrome"]).optional(),
@@ -33,6 +33,10 @@ export const browserEngineConfigSchema = z.object({
   cloudDisplay: z.boolean().optional(),
   /** The user agent the desktop pane presents: Electron's own ("native", the default) or without its Electron token ("cleaned"). */
   paneIdentity: z.enum(["native", "cleaned"]).optional(),
+});
+
+export const browserEnginePatchSchema = browserEngineConfigSchema.extend({
+  idleTimeoutMinutes: browserEngineConfigSchema.shape.idleTimeoutMinutes.nullable(),
 });
 
 export interface BrowserEngineConfig {

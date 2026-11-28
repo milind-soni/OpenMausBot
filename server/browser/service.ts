@@ -20,6 +20,7 @@ import type { CdpBrowser } from "./cdp/browser.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { isUnanswered } from "./cdp/errors.ts";
 import type { CdpPage } from "./cdp/page.ts";
+import { remountCookies, snapshotCookies } from "./chrome/cookie-jar.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
 import { executeTool, personUrl, readsDuringHold, toolFailure, type ToolContext } from "./dispatch.ts";
@@ -162,6 +163,7 @@ export class BrowserService {
     return this.#lanes.run(profile.key, () => profile.control.agent(null, clear), this.#options.laneWaitMs).then((ran) => ran !== null);
   });
   readonly #scrub: (text: string) => string;
+  readonly #lastCookieSnapshot = new Map<string, number>();
 
   constructor(options: BrowserServiceOptions) {
     this.#options = { callBudgetMs: BROWSER_CALL_DEFAULTS.callBudgetMs, laneWaitMs: BROWSER_CALL_DEFAULTS.laneWaitMs, takeoverMs: 15_000, capacityWaitMs: CAPACITY_WAIT_MS, ...options };
@@ -222,7 +224,8 @@ export class BrowserService {
     profile.fresh = false;
     rmSync(profile.downloadDir, { recursive: true, force: true });
     mkdirSync(profile.downloadDir, { recursive: true, mode: 0o700 });
-    const opened = await this.#options.backend(profile.key).open({ key: profile.key, mode: "headless", fresh, viewport: profile.hub.viewport(), downloadDir: profile.downloadDir });
+    const backend = this.#options.backend(profile.key);
+    const opened = await backend.open({ key: profile.key, mode: "headless", fresh, viewport: profile.hub.viewport(), downloadDir: profile.downloadDir });
     const run: Running = { opened, browser: opened.browser, offs: [], closing: false };
     const browser = opened.browser;
     const adopt = (page: CdpPage, origin: Tab["origin"]) => {
@@ -264,6 +267,11 @@ export class BrowserService {
     }));
     try {
       this.#stillWanted(profile, epoch);
+      if (!profile.temporary && backend.kind === "local") {
+        await remountCookies(browser, this.#options.dataDir, profile.key).catch(() => 0);
+        this.#lastCookieSnapshot.set(profile.key, Date.now());
+        this.#stillWanted(profile, epoch);
+      }
       // A Chrome that dies before any tab runs says so at once, not when the wait ends.
       const firstTab = browser.waitForPage(() => true, FIRST_TAB_MS);
       const died = opened.exited.then(() => { throw new Error("Chrome closed before its first tab opened."); });
@@ -306,6 +314,7 @@ export class BrowserService {
     for (const off of run.offs) off();
     profile.run = null;
     profile.tabs.clear();
+    this.#lastCookieSnapshot.delete(profile.key);
     if (run.closing) return;
     try {
       rmSync(profile.downloadDir, { recursive: true, force: true });
@@ -335,6 +344,10 @@ export class BrowserService {
         if (run) {
           run.closing = true;
           for (const off of run.offs) off();
+          if (!erase && !profile.temporary && run.browser.connected && this.#options.backend(profile.key).kind === "local") {
+            await snapshotCookies(run.browser, this.#options.dataDir, profile.key, undefined, () => this.#profiles.get(profile.key) === profile).catch(() => undefined);
+          }
+          this.#lastCookieSnapshot.delete(profile.key);
           profile.hub.stopped(reopened?.kind === "idle" ? "asleep" : "closed");
           await run.opened.close().catch(() => undefined);
         }
@@ -520,6 +533,25 @@ export class BrowserService {
     control.call = parsed.call.name;
     try {
       const result = await executeTool(this.#context(profile, run, deadline), parsed.call);
+      if (
+        !profile.temporary &&
+        !run.closing &&
+        !profile.stopping &&
+        !readsDuringHold(parsed.call) &&
+        run.browser.connected &&
+        this.#options.backend(profile.key).kind === "local" &&
+        deadline - Date.now() > 500 &&
+        Date.now() - (this.#lastCookieSnapshot.get(profile.key) ?? 0) >= 30_000
+      ) {
+        this.#lastCookieSnapshot.set(profile.key, Date.now());
+        void snapshotCookies(
+          run.browser,
+          this.#options.dataDir,
+          profile.key,
+          undefined,
+          () => !run.closing && !profile.stopping && this.#profiles.get(profile.key) === profile,
+        ).catch(() => undefined);
+      }
       beforeDispatch?.();
       return shapeResult(result, parsed.call.name);
     } catch (error) {

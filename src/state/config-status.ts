@@ -240,6 +240,8 @@ export interface BrowserEngineSummary {
   proxySaved?: boolean;
   /** Team Cloud only: whether this caller may change the shared SOCKS5 upstream. */
   proxyEditable?: boolean;
+  /** Idle close timeout in minutes (0 keeps browsers open; unset means 10 min on desktop or 3 min on Cloud). */
+  idleTimeoutMinutes?: number;
 }
 
 export interface BrowserProfile {
