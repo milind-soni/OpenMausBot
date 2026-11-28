@@ -477,6 +477,31 @@ describe("the brief's email rows", () => {
     expect(s.shown()).not.toContain("Q3 numbers");
   });
 
+  it("does not let rows of an app it can't read use up the reads for other rows", async () => {
+    const session: ReadSession = { ...mailSession({ t1: [{ id: "m1", at: 0, from: "ada@x.test", unread: false }] }), outlookMessage: async () => { throw new Error("signed out"); } };
+    const outlookRows = Array.from({ length: 10 }, (_, n) => ({ email: { ...bob, id: `o${n}`, threadId: `conv-${n}`, subject: `Invoice ${n}` }, why: "Due Friday.", needsReply: true }));
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], picked: [...outlookRows, { email: ada, why: "Ada needs the numbers.", needsReply: false }] });
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session });
+    expect(s.shown()).not.toContain("Q3 numbers");
+  });
+
+  it("drops a row it stopped calling waiting once the person replies after it", async () => {
+    const at = Date.parse("2026-10-22T07:00:00Z");
+    const threads: Record<string, ThreadMessage[]> = { t1: [{ id: "m0", at: at - 60 * MINUTE, from: "me@x.test" }, { id: "m1", at, from: "ada@x.test" }] };
+    const session = mailSession(threads);
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session, picked: [{ email: { ...ada, at, subject: "Re: Q3 numbers" }, why: "Ada says thanks.", needsReply: true }] });
+    expect(s.shown()).toContain("Ada says thanks.");
+    expect(s.shown()).not.toContain("Waiting on your reply");
+
+    threads.t1 = [...threads.t1!, { id: "m2", at: at + MINUTE, from: "me@x.test" }];
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session });
+    expect(s.shown()).not.toContain("Q3 numbers");
+  });
+
   it("checks a watch run's picks the same way before showing them", async () => {
     const at = Date.parse("2026-10-22T07:00:00Z");
     const s = setup({ session: mailSession({ t1: [{ id: "m0", at: at - 60 * MINUTE, from: "me@x.test" }, { id: "m1", at, from: "ada@x.test" }] }) });

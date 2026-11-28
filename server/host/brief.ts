@@ -461,9 +461,11 @@ export function createBrief(deps: BriefDeps) {
       state.important = state.important.filter((one) => one.messageId !== row.messageId);
       changed = true;
     };
-    for (const row of open.slice(0, 10)) {
+    let reads = 0;
+    for (const row of open) {
       const app = row.app ?? "gmail";
       if (unreadable.has(app)) continue;
+      if (reads++ >= 10) break;
       try {
         if (app === "outlook") {
           const header = await session.outlookMessage?.(row.messageId);
@@ -471,7 +473,7 @@ export function createBrief(deps: BriefDeps) {
           continue;
         }
         const thread = await session.thread(row.threadId);
-        if (thread.find((message) => message.id === row.messageId)?.unread === false || (row.needsReply && answered(row, thread, address))) drop(row);
+        if (thread.find((message) => message.id === row.messageId)?.unread === false || answered(row, thread, address)) drop(row);
         else if (row.needsReply && repliedEarlier(row, thread, address)) {
           state.important = state.important.map((one) => (one.messageId === row.messageId ? { ...one, needsReply: false } : one));
           changed = true;
