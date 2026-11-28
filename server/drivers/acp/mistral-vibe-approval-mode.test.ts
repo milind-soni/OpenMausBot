@@ -89,6 +89,19 @@ describe("Mistral Vibe approval mode", () => {
     expect(recorder!.events.some((event) => event.type === "runtime.error" && event.message.includes('"ask" mode'))).toBe(true);
   });
 
+  it("sends ask, not a custom default agent, when Vibe advertises both", async () => {
+    await create({ FAKE_ACP_SESSION_MODES: "default,ask,accept-edits" });
+    await expect(turn("full")).resolves.toMatchObject({ ok: true });
+    expect(setModes()).toEqual([{ sessionId: "fake-acp-session", modeId: "ask" }]);
+  });
+
+  it("fails the turn when Vibe advertises a default agent but no ask", async () => {
+    await create({ FAKE_ACP_SESSION_MODES: "default,accept-edits,auto-approve" });
+    await expect(turn("ask")).resolves.toMatchObject({ ok: false });
+    expect(methods()).not.toContain("session/set_mode");
+    expect(methods()).not.toContain("session/prompt");
+  });
+
   it.each([-32602, -32603])("rethrows a set_mode rejection with code %i", async (code) => {
     const request = async () => { throw Object.assign(new Error("refused"), { code }); };
     await expect(mistralVibeSupport.configureSession!({

@@ -26,7 +26,6 @@ import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
 import { acpModelOption } from "./config-options.ts";
 import { MISTRAL_VIBE_STANDALONE } from "./mistral-vibe-release.ts";
-import { selectAdvertisedMode } from "./session-modes.ts";
 
 /** The stock chat-capable models mistral.ai lists for Vibe (only some ship per version; a signed-in
  * session's own list replaces these on Refresh). The `mistral-medium-3.5` id is the CLI's current default. */
@@ -202,11 +201,14 @@ export const mistralVibeSupport: AcpSupport = {
 
   // vibe-acp 3.1.2 opens every session in config.toml's `default_agent`: "accept-edits" unless set, which writes files
   // without a permission request; "auto-approve" also runs shell commands without one. Every level OMB offers for
-  // Vibe maps to "ask"; OMB answers the requests itself.
-  async configureSession({ request, sessionId, config, turn, sessionModes }) {
-    const modeId = sessionModes ? selectAdvertisedMode(sessionModes.availableModes, turn.approvalMode, config.fullAuto) : "ask";
+  // Vibe maps to "ask" by exact id, not the generic ACP aliases: a custom Vibe agent named "default" can have any
+  // policy. OMB answers the requests itself.
+  async configureSession({ request, sessionId, sessionModes }) {
+    const modeId = "ask";
     // vibe-acp 3.1.2 answers session/set_mode for a mode it does not offer (`disabled_agents`) with success and keeps its own.
-    if (!modeId) throw new Error(`Mistral Vibe does not offer its "ask" mode; enable the "ask" agent in Vibe's config.toml`);
+    if (sessionModes && !sessionModes.availableModes.some((mode) => mode.id === modeId)) {
+      throw new Error(`Mistral Vibe does not offer its "ask" mode; enable the "ask" agent in Vibe's config.toml`);
+    }
     try {
       await request("session/set_mode", { sessionId, modeId });
     } catch (error) {
