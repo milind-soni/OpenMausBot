@@ -210,14 +210,16 @@ const HYPOTHETICAL = /\b(?:suppose|supposing|imagine|pretend|hypothetical(?:ly)?
 function statedIn(said: string, evidence: string): boolean {
   const text = foldForMatch(said);
   const quote = foldForMatch(evidence).replace(/[\s.!]+$/, "");
-  const at = quote.length >= 3 ? text.indexOf(quote) : -1;
-  if (at < 0 || QUESTION.test(quote)) return false;
-  let start = at;
-  while (start > 0 && !SENTENCE_END.test(text[start - 1]!)) start -= 1;
-  const rest = text.slice(at + quote.length);
-  const stop = rest.search(SENTENCE_END);
-  const sentence = text.slice(start, at + quote.length + (stop < 0 ? rest.length : stop + 1));
-  return !QUESTION.test(sentence.slice(-1)) && !HYPOTHETICAL.test(sentence);
+  if (quote.length < 3 || QUESTION.test(quote)) return false;
+  for (let at = text.indexOf(quote); at >= 0; at = text.indexOf(quote, at + 1)) {
+    let start = at;
+    while (start > 0 && !SENTENCE_END.test(text[start - 1]!)) start -= 1;
+    const rest = text.slice(at + quote.length);
+    const stop = rest.search(SENTENCE_END);
+    const sentence = text.slice(start, at + quote.length + (stop < 0 ? rest.length : stop + 1));
+    if (!QUESTION.test(sentence.slice(-1)) && !HYPOTHETICAL.test(sentence)) return true;
+  }
+  return false;
 }
 
 /** A preference or fact is kept only when what was said to the bot states it in so many words; for About me

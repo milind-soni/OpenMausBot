@@ -9,6 +9,7 @@ is off, and every memory write is a journaled, undoable row. See [the memory gui
 
 ```sh
 pnpm exec vitest run server/memory-layer.e2e.test.ts
+pnpm exec vitest run server/memory-evidence-repeat.e2e.test.ts server/memory-capture-calls.test.ts server/memory-fact-checks.test.ts
 pnpm exec vitest run server/reply-behaviour.e2e.test.ts
 pnpm exec vitest run server/memory-forget.test.ts server/drivers/agents-call.test.ts
 pnpm exec vitest run server/memory-capture-restart.e2e.test.ts
@@ -35,6 +36,7 @@ Evidence covers:
 - Upkeep on: core facts are appended as dated, `(noticed)` entries with their until date; detail is filed into a topic file created with a title and aliases; all journaled as upkeep.
 - `Balance is -10` captured twice is kept once; `Balance is 10` is a different fact.
 - A fact about the person reaches About me on its own as a dated, attributed line in the prompt; Remove takes it out and a second Remove is refused.
+- A quote first used in a question or hypothetical can still support a later statement in the same message. The isolated Codex fixture verifies the resulting memory file, capture journal and About me entry; repeated questions alone produce none of them.
 - The tidy-up archives the expired entry and strikes the contradicted one, reports it, and Undo restores the file.
 - A routine run is not captured as a person's conversation and never adds owner facts to About me.
 - A turn still waiting for the quiet spell when the server stops is saved as ids only, read back from the transcript after a restart, and captured then (POSIX: a Windows SIGTERM skips the shutdown hooks).
