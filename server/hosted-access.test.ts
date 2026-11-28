@@ -328,16 +328,18 @@ describe("hosted bridge in the full server", () => {
     await refuseFullTask();
   }, 25_000);
   it("withdraws hosted readiness the moment the running server's license grace period ends", async () => {
-    // Expired 14 days ago less eight seconds: inside the 14-day grace, which ends mid-test.
-    state("admin", false, { expiresAt: new Date(Date.now() + 8_000 - 14 * 24 * 60 * 60_000).toISOString() });
+    // The clock starts here, before restart. Shutdown may take its 5s signal plus 2s kill, then the health poll its 20s.
+    // The grace stays open through that, and the poll covers whatever is left after a fast restart.
+    const remainMs = 30_000;
+    state("admin", false, { expiresAt: new Date(Date.now() + remainMs - 14 * 24 * 60 * 60_000).toISOString() });
     await restart({ OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" });
     expect((await call("/api/health/hosted")).status).toBe(200);
     await policyHealth(true);
-    await expect.poll(async () => (await call("/api/health/hosted")).status, { timeout: 10_000, interval: 100 }).toBe(503);
+    await expect.poll(async () => (await call("/api/health/hosted")).status, { timeout: remainMs, interval: 200 }).toBe(503);
     expect((await call("/api/health")).status).toBe(200);
     await policyHealth(false);
     await refuseFullTask();
-  }, 30_000);
+  }, 90_000);
   it("never activates the shared Full policy in a desktop-managed process", async () => {
     state();
     await policyBot();

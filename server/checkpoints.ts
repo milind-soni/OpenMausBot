@@ -9,7 +9,7 @@
 // snapshot-before-every-turn cadence follows Cline.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
@@ -111,6 +111,10 @@ Thumbs.db
 const GITCONFIG = "[commit]\n\tgpgsign = false\n[core]\n\tautocrlf = false\n[gc]\n\tauto = 0\n";
 
 const GIT_TIMEOUT_MS = 120_000;
+/** Longer than one git call. An interrupted `git gc` or repack leaves `tmp_pack_*` files that `git gc --prune` never
+ * removes, and they are not loose objects, so a collection is never owed for them. The next snapshot deletes only the
+ * ones no git is still writing. */
+export const STALE_PACK_TEMP_MS = 10 * 60 * 1000;
 
 export const GC_EVERY_COMMITS = 25;
 const GC_LOOSE_OBJECTS = 6_700;
@@ -737,6 +741,22 @@ async function collectionDue(shadow: string, result: CommitResult, cwd: string, 
   return due;
 }
 
+/** Drops pack files an interrupted `git gc` or repack left behind. A file still being written is newer than
+ * {@link STALE_PACK_TEMP_MS} and stays. Never throws into the turn. */
+export function sweepStalePackTemps(shadow: string, now = Date.now()): void {
+  const packDir = join(shadow, ".git", "objects", "pack");
+  let names: string[];
+  try { names = readdirSync(packDir); } catch { return; }
+  for (const name of names) {
+    if (!name.startsWith("tmp_pack_")) continue;
+    const file = join(packDir, name);
+    try {
+      if (statSync(file).mtimeMs > now - STALE_PACK_TEMP_MS) continue;
+      rmSync(file, { force: true });
+    } catch { /* a git that still holds this file keeps it */ }
+  }
+}
+
 /** Prunes what was unreachable when it started and nothing newer: a collection this process no longer waits for (it died,
  * or was restarted) can then never prune what a later git is writing. Windows ends a stopped git by force, with its locks
  * left in place, so there a collection that has started runs to its end and the turn waits for it. */
@@ -745,6 +765,7 @@ async function collectObsolete(shadow: string, cwd: string, env: NodeJS.ProcessE
   const marker = join(shadow, ".git", COLLECTING);
   const before = Math.floor(Date.now() / 1000);
   const collect = async () => {
+    sweepStalePackTemps(shadow);
     await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env, signal);
     stop.signal.throwIfAborted();
     await runGit(["gc", `--prune=${before}`, "--quiet"], cwd, env, signal);
@@ -795,6 +816,7 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
     const hash = await serialize(shadow, async () => {
       // A read-ahead this snapshot waited behind may have found the folder too big: the turn takes that answer.
       if (disabledFolders.has(shadow)) return null;
+      sweepStalePackTemps(shadow);
       const capture = async () => commitAll(worktree, env, shadow, await prepare(worktree, env, shadow, signal), label, opts?.pin, signal);
       const result = await capture().catch(async (e: unknown) => {
         if (e instanceof GitTimeoutError || signal?.aborted) throw e;
