@@ -1,15 +1,18 @@
 import { constants } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
+import { lstat, open, opendir, readlink, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import { planSkillFolder, SKILL_FOLDER_LIMITS, SKILL_IMPORT_SKIP_REPORT_MAX, skillFilePathProblem } from "./skill-folder-plan.mjs";
 
 const MAX_ENTRIES = 4096;
-const OPEN_FILE = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+// Darwin rejects links in every path component with O_NOFOLLOW_ANY.
+const NOFOLLOW_ANY = process.platform === "darwin" ? 0x20000000 : 0;
+const OPEN_FILE = NOFOLLOW_ANY | constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
 async function selectedFile(target, expected) {
   const file = await open(target, OPEN_FILE);
   try {
+    if (process.platform === "linux" && await readlink(`/proc/self/fd/${file.fd}`) !== target) throw new Error("Skill file changed");
     const info = await file.stat();
     // The opened file must still be the listed, single-link file inside the chosen folder.
     if (!info.isFile() || info.nlink !== 1 || info.dev !== expected.dev || info.ino !== expected.ino ||
