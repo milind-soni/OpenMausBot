@@ -21,12 +21,18 @@ const unsafeCharacter = (char: string) => char < " " || char === "\u007f" || '<>
 const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\..*)?$/i;
 const SCRIPT = /\.(?:sh|bash|zsh|fish|ps1|psm1|bat|cmd|py|rb|pl|php|lua|js|mjs|cjs|ts)$/i;
 
+/** Why one path segment may not name a file: characters a filesystem or Windows refuses, a trailing dot or space,
+ *  a Windows device name, or more than 255 bytes. Null when the segment may be used. */
+export function unsafeFileNameProblem(part: string): "name" | null {
+  return !part || part === "." || part === ".." || [...part].some(unsafeCharacter) || /[. ]$/.test(part) ||
+    WINDOWS_DEVICE.test(part) || Buffer.byteLength(part, "utf8") > 255 ? "name" : null;
+}
+
 /** Why `path` (relative, "/"-separated) may not be written inside a skill folder; null when it may. */
 export function skillFilePathProblem(path: string, folder = false): SkippedSkillFileReason | null {
   const parts = path.split("/");
   for (const part of parts) {
-    if (!part || part === "." || part === ".." || [...part].some(unsafeCharacter) || /[. ]$/.test(part) ||
-      WINDOWS_DEVICE.test(part) || Buffer.byteLength(part, "utf8") > 255) return "name";
+    if (unsafeFileNameProblem(part)) return "name";
     if (part.startsWith(".")) return "hidden";
     if (GENERATED.has(part.toLowerCase())) return "generated";
   }

@@ -62,6 +62,22 @@ describe("where a Skill Burger's steps run", () => {
     }
   });
 
+  it("refuses a file name the folders cannot store as an ordinary file", async () => {
+    const cwd = folder();
+    try {
+      const exec = createExecutors({ botId: "b", cwd, internal: async () => ({ ok: false, body: {} }) });
+      // A Windows device name opens the device, stores nothing, and the step would still report success.
+      expect(await exec.file({ path: "NUL", content: "x", signal: signal() })).toMatchObject({ ok: false });
+      expect(await exec.file({ path: "notes/COM1.txt", content: "x", signal: signal() })).toMatchObject({ ok: false });
+      // An NTFS alternate stream keeps the bytes out of the person's view of the file.
+      expect(await exec.file({ path: "report.txt:notes", content: "x", signal: signal() })).toMatchObject({ ok: false });
+      // An ordinary name in an ordinary folder still lands.
+      expect(await exec.file({ path: "notes/report.txt", content: "x", signal: signal() })).toMatchObject({ ok: true });
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it.skipIf(process.platform === "win32")("runs a command as the bot, reading its inputs from OMB_ARG_ variables, and stops one that says too much", async () => {
     const cwd = folder();
     const exec = createExecutors({ botId: "b", cwd, internal: async () => ({ ok: false, body: {} }) });
