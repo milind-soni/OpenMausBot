@@ -451,10 +451,10 @@ export function createBrief(deps: BriefDeps) {
 
   /** An email leaves the brief once the person has read it, or replied in its thread after it. One in a thread they had
    * already written in is not waiting on their reply. */
-  async function followUp(session: ReadSession | null | undefined): Promise<void> {
+  async function followUp(session: ReadSession | null | undefined): Promise<boolean> {
     const address = deps.address();
     const open = liveImportant(now()).sort((a, b) => Number(b.needsReply) - Number(a.needsReply));
-    if (!session || !open.length) return;
+    if (!session || !open.length) return false;
     const unreadable = new Set<string>();
     let changed = false;
     const drop = (row: Important) => {
@@ -473,7 +473,7 @@ export function createBrief(deps: BriefDeps) {
         const thread = await session.thread(row.threadId);
         if (thread.find((message) => message.id === row.messageId)?.unread === false || (row.needsReply && answered(row, thread, address))) drop(row);
         else if (row.needsReply && repliedEarlier(row, thread, address)) {
-          row.needsReply = false;
+          state.important = state.important.map((one) => (one.messageId === row.messageId ? { ...one, needsReply: false } : one));
           changed = true;
         }
       } catch {
@@ -481,6 +481,7 @@ export function createBrief(deps: BriefDeps) {
       }
     }
     if (changed) save();
+    return changed;
   }
 
   /** A watch run ended: its answer becomes rows and prep cards, or the run fails and its items go back. */
@@ -508,10 +509,10 @@ export function createBrief(deps: BriefDeps) {
       }
     }
     deps.keep(key);
-    const picked = !result.quiet && result.important.length > 0;
-    if (picked) await followUp(deps.session());
     save();
-    if (picked) await render({ create: true, notify: true });
+    if (result.quiet || !result.important.length) return;
+    await render({ create: true, notify: true });
+    if (await followUp(deps.session())) await render({ create: false, notify: false });
   }
 
   /** The person arrived: the first open of a day, or a return after 3 hours away, shows today's brief when it has anything
