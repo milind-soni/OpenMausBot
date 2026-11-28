@@ -69,6 +69,16 @@ describe("turn image admission", () => {
     expect(result.text).toContain(root);
   });
 
+  it("extracts a handoff picture before a following coordination reminder", () => {
+    const root = store();
+    const png = image(root, 0);
+    const source = `Files with this assignment:\n\n<attached-image path="${png}" name="tiny.png" />\n\nIts words are the request above.`;
+
+    const result = extractTurnImages(source, { attachmentsDir: root });
+    expect(result.images).toEqual([{ path: png, mime: "image/png", bytes: 4 }]);
+    expect(result.text).toBe(source.replace("<attached-image", "<attached-file"));
+  });
+
   it("emits the admitted path while preserving the encoded display name", () => {
     const root = store("&uploads");
     const path = image(root, 0);

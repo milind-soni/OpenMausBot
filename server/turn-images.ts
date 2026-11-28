@@ -181,6 +181,10 @@ export function extractTurnImages(
   return { text: providerText, images: admittedImages.map((item) => item.image), videos };
 }
 
+export function extractContinuationImages(text: string | undefined, nativeImageInput: boolean): ReturnType<typeof extractTurnImages> {
+  return nativeImageInput && text ? extractTurnImages(text, { maxVideoCount: 0 }) : { text: text ?? "", images: [], videos: [] };
+}
+
 const mediaUrlBytes = (media: readonly { mime: string; bytes: number }[]) => media.reduce((total, item) => total + chatMediaUrlBytes(item), 0);
 
 /** The clips an engine that takes video gets as they are, each file once: those within its byte limit that also keep the turn's `images` inside the request's media budget. */

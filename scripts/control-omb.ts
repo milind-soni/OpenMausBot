@@ -370,7 +370,7 @@ export async function launchVerificationServer(
       ...(extraProviders.includes("customAcp") ? { myAgent: {
         driver: "customAcp", displayName: "Verification custom ACP",
         config: { cli: fileURLToPath(new URL("../server/testing/fake-acp-cli.ts", import.meta.url)) },
-        environment: { FAKE_ACP_MODELS: "fixture-fast,fixture-deep", FAKE_ACP_DUMP: join(dataDir, "custom-acp-launch.json") },
+        environment: { FAKE_ACP_MODELS: "fixture-fast,fixture-deep", FAKE_ACP_DUMP: join(dataDir, "custom-acp-launch.json"), FAKE_ACP_DUMP_PROMPT: "1" },
       } } : {}),
       claude: {
         driver: "claudeAgent",
