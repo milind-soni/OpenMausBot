@@ -276,3 +276,92 @@ describe("set_main_thread on the sender's own threads", () => {
     for (const threadId of ["t-ops-busy", "t-run", "t-archived"]) expect((await setMain({ mainThreadId: threadId })).patched).toEqual([]);
   });
 });
+
+describe("chat_folders on the sender's own folders and threads", () => {
+  function setup(opts: { owns?: boolean } = {}) {
+    const bot = { ...lead, projects: [{ id: "f-clients", name: "Clients", emoji: "💼" }, { id: "f-a", name: "Same" }, { id: "f-b", name: "same" }] } as BotRecord;
+    const own = [{ ...task("t-own", "Today"), projectId: "f-clients" } as TaskRecord, task("t-old", "Acme review"), { ...task("t-hidden", "Owner only"), projectId: "f-clients" } as TaskRecord];
+    const created: Array<[string, string, string | null | undefined]> = [];
+    const patched: Array<[string, string, Partial<TaskRecord>]> = [];
+    const store = {
+      bot: (id: string) => id === lead.id ? bot : ops, bots: [bot, ops],
+      tasks: (id: string) => id === lead.id ? own : tasks[id] ?? [],
+      taskByThread: (botId: string, threadId: string) => (botId === lead.id ? own : tasks[botId] ?? []).find((one) => one.threadId === threadId),
+      project: (botId: string, id: string) => botId === lead.id ? bot.projects!.find((one) => one.id === id) : undefined,
+      createProject: (botId: string, name: string, emoji?: string | null) => {
+        created.push([botId, name, emoji]);
+        const project = { id: `f-new-${created.length}`, name, ...(emoji ? { emoji } : {}) };
+        bot.projects = [...bot.projects!, project];
+        return project;
+      },
+      patchTask: (botId: string, threadId: string, patch: Partial<TaskRecord>) => { patched.push([botId, threadId, patch]); return own[0]; },
+    };
+    async function call(method: string, path: string, body: unknown = {}) {
+      const route = createInternalThreadRoutes({
+        store: store as never, coordinator: {} as never,
+        from: lead, fromThreadId: "t-own", ownsThread: () => opts.owns ?? true, shown: (id) => id !== "t-hidden", mainThreadTasks: () => [],
+        threadBusy: () => false, queuedThreadPosition: () => null, queuedReason: () => "",
+        readBody: async () => body,
+      });
+      let status = 0;
+      let answer: Record<string, unknown> | undefined;
+      await route({ res: {}, url: new URL(`http://x${path}`), path, method, json: (_res: unknown, code: number, value: never) => { status = code; answer = value; } } as never);
+      return { status, answer: answer! };
+    }
+    return { call, created, patched };
+  }
+
+  it("lists its own folders with the threads it may see in each", async () => {
+    const { status, answer } = await setup().call("GET", "/api/internal/folders");
+    expect(status).toBe(200);
+    expect(answer.folders).toEqual([
+      { id: "f-clients", name: "Clients", emoji: "💼", threads: [{ threadId: "t-own", title: "Today" }] },
+      { id: "f-a", name: "Same", threads: [] },
+      { id: "f-b", name: "same", threads: [] },
+    ]);
+  });
+
+  it("creates a folder, and gives back the one it already has under that name instead of a second", async () => {
+    const { call, created } = setup();
+    const made = await call("POST", "/api/internal/folders", { name: "  Acme  ", emoji: "📁" });
+    expect(made.status).toBe(200);
+    expect(created).toEqual([["bot-lead", "Acme", "📁"]]);
+    expect(made.answer).toMatchObject({ folder: { name: "Acme", emoji: "📁" } });
+    const again = await call("POST", "/api/internal/folders", { name: "clients" });
+    expect(again.answer).toMatchObject({ folder: { id: "f-clients" }, existed: true });
+    expect(created).toHaveLength(1);
+  });
+
+  it("refuses a missing or too long name, a bad emoji and a sender that does not own its conversation", async () => {
+    const { call, created } = setup();
+    for (const body of [{}, { name: "   " }, { name: 7 }, { name: "x".repeat(81) }, { name: "Ok", emoji: "folder" }]) {
+      expect((await call("POST", "/api/internal/folders", body)).status, JSON.stringify(body)).toBe(400);
+    }
+    expect((await setup({ owns: false }).call("POST", "/api/internal/folders", { name: "Ok" })).status).toBe(403);
+    expect((await setup({ owns: false }).call("GET", "/api/internal/folders")).status).toBe(403);
+    expect(created).toEqual([]);
+  });
+
+  it("moves one of its own threads into a folder by id or name, and out of its folder", async () => {
+    const { call, patched } = setup();
+    const byName = await call("POST", "/api/internal/folders/move", { moveThreadId: "t-old", folder: "CLIENTS" });
+    expect(byName.status).toBe(200);
+    expect(byName.answer).toMatchObject({ threadId: "t-old", title: "Acme review", folder: { id: "f-clients", name: "Clients" } });
+    expect((await call("POST", "/api/internal/folders/move", { folder: "f-a" })).status).toBe(200);
+    const out = await call("POST", "/api/internal/folders/move", { moveThreadId: "t-old", folder: "" });
+    expect(out.answer).toMatchObject({ threadId: "t-old", folder: null });
+    expect(patched).toEqual([["bot-lead", "t-old", { projectId: "f-clients" }], ["bot-lead", "t-own", { projectId: "f-a" }], ["bot-lead", "t-old", { projectId: undefined }]]);
+  });
+
+  it("refuses a teammate's or hidden thread, an unknown or ambiguous folder, a bad argument and a sender that does not own its conversation", async () => {
+    const { call, patched } = setup();
+    expect((await call("POST", "/api/internal/folders/move", { moveThreadId: "t-ops-busy", folder: "Clients" })).status).toBe(404);
+    expect((await call("POST", "/api/internal/folders/move", { moveThreadId: "t-hidden", folder: "Clients" })).status).toBe(404);
+    expect((await call("POST", "/api/internal/folders/move", { moveThreadId: "t-old", folder: "Nope" })).status).toBe(404);
+    expect((await call("POST", "/api/internal/folders/move", { moveThreadId: "t-old", folder: "same" })).status).toBe(409);
+    expect((await call("POST", "/api/internal/folders/move", { moveThreadId: "t-old" })).status).toBe(400);
+    expect((await call("POST", "/api/internal/folders/move", { moveThreadId: 3, folder: "Clients" })).status).toBe(400);
+    expect((await setup({ owns: false }).call("POST", "/api/internal/folders/move", { folder: "Clients" })).status).toBe(403);
+    expect(patched).toEqual([]);
+  });
+});

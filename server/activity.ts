@@ -88,6 +88,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   close_thread: "activity.tool.team.closeThread",
   rename_thread: "activity.tool.team.renameThread",
   set_main_thread: "activity.tool.team.setMainThread",
+  chat_folders: "activity.tool.team.chatFolders",
   coordinate_bots: "activity.tool.team.coordinateBots",
   create_bot: "activity.tool.team.createBot",
   create_room: "activity.tool.team.createRoom",

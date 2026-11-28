@@ -9680,6 +9680,7 @@
   "activity.tool.team.closeThread": "Fechar conversa",
   "activity.tool.team.renameThread": "Renomear conversa",
   "activity.tool.team.setMainThread": "Definir conversa principal",
+  "activity.tool.team.chatFolders": "Pastas de conversa",
   "activity.tool.team.coordinateBots": "Coordenar bots",
   "activity.tool.team.createBot": "Criar bot",
   "activity.tool.team.createRoom": "Criar grupo",

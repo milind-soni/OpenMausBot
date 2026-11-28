@@ -12,6 +12,7 @@ import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
 import { APP_SETTINGS_TOOL_DEFINITION } from "./agents-app-settings-tool.ts";
 import { THREAD_POST_TOOL_DEFINITION } from "./agents-thread-post-tool.ts";
 import { RENAME_THREAD_TOOL_DEFINITION } from "./agents-thread-title-tool.ts";
+import { CHAT_FOLDERS_TOOL_DEFINITION } from "./agents-chat-folders-tool.ts";
 import { SET_MAIN_THREAD_TOOL_DEFINITION } from "./agents-main-thread-tool.ts";
 import { WORKFLOW_TOOL_DEFINITIONS, WORKFLOW_TOOL_NAMES } from "./agents-workflow-tool.ts";
 import { WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts"; import { CHECK_BACK_TOOL_DEFINITIONS, CHECK_BACK_TOOL_NAMES } from "./agents-check-back-tool.ts"; import { BOARD_TOOL_DEFINITIONS, BOARD_TOOL_NAMES } from "./agents-board-tools.ts";
@@ -257,6 +258,7 @@ const TOOL_DEFINITIONS = [
   },
   RENAME_THREAD_TOOL_DEFINITION,
   SET_MAIN_THREAD_TOOL_DEFINITION,
+  CHAT_FOLDERS_TOOL_DEFINITION,
   ...WORKFLOW_TOOL_DEFINITIONS,
   {
     name: "start_thread",
@@ -840,7 +842,7 @@ const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
 /** Refused in a room's thread (routes/waits.ts), and list_waits, since a room holds no wait. */
-const ROOM_REFUSED_TOOL_NAMES = new Set([...WAIT_TOOL_NAMES, ...CHECK_BACK_TOOL_NAMES, "burst", "rename_thread", "set_main_thread"]);
+const ROOM_REFUSED_TOOL_NAMES = new Set([...WAIT_TOOL_NAMES, ...CHECK_BACK_TOOL_NAMES, "burst", "rename_thread", "set_main_thread", "chat_folders"]);
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",

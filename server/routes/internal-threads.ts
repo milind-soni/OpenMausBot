@@ -2,7 +2,7 @@ import { chiefTidies } from "../chief-of-staff.ts";
 import type { Coordinator, HandoffView } from "../coordinator.ts";
 import { mainThreadChoicePatch } from "../main-thread.ts";
 import { reachablePeers } from "../peer-roster.ts";
-import { threadTitleFrom, type BotRecord, type Store, type TaskRecord } from "../store.ts";
+import { isProjectEmoji, threadTitleFrom, type BotRecord, type Store, type TaskRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { closeRoomThreadAtTurnEnd } from "../room-thread-close.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
@@ -24,7 +24,7 @@ interface ThreadRow {
 
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps: {
-  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask" | "patchBot" | "groupByThread" | "groupTaskByThread">;
+  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask" | "patchBot" | "groupByThread" | "groupTaskByThread" | "createProject">;
   coordinator: Pick<Coordinator, "threadActivity" | "awaitingAnswer" | "activeDirect">;
   from: BotRecord;
   fromThreadId: string;
@@ -130,6 +130,50 @@ export function createInternalThreadRoutes(deps: {
       }
       store.patchBot(from.id, choice);
       return json(res, 200, { threadId, title: task.title });
+    }
+    // chat_folders: a bot lists and creates its own sidebar folders and moves its own threads, under the person's rules.
+    if ((method === "GET" && path === "/api/internal/folders") || (method === "POST" && (path === "/api/internal/folders" || path === "/api/internal/folders/move"))) {
+      if (!deps.ownsThread(from.id, fromThreadId)) {
+        return json(res, 403, { error: "source conversation does not belong to sender" });
+      }
+      if (method === "GET") {
+        const folders = store.bot(from.id)?.projects ?? [];
+        const own = store.tasks(from.id).filter((one) => one.projectId && deps.shown(one.threadId));
+        return json(res, 200, {
+          folders: folders.map((folder) => ({
+            ...folder, threads: own.filter((one) => one.projectId === folder.id).map((one) => ({ threadId: one.threadId, title: one.title })),
+          })),
+        });
+      }
+      const body = await deps.readBody() as Record<string, unknown> | null;
+      // Read after the body: the person may have added or removed a folder meanwhile.
+      const folders = store.bot(from.id)?.projects ?? [];
+      const sameName = (name: string) => folders.filter((folder) => folder.name.toLowerCase() === name.toLowerCase());
+      if (path === "/api/internal/folders") {
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        if (!name || name.length > 80) return json(res, 400, { error: "the folder needs a name of 1 to 80 characters" });
+        if (body?.emoji != null && !isProjectEmoji(body.emoji)) return json(res, 400, { error: "emoji must be a single emoji, or left out" });
+        const existing = sameName(name)[0];
+        if (existing) return json(res, 200, { folder: existing, existed: true });
+        const folder = store.createProject(from.id, name, isProjectEmoji(body?.emoji) ? body.emoji : undefined);
+        if (!folder) return json(res, 404, { error: "your bot is gone" });
+        return json(res, 200, { folder });
+      }
+      if (body?.moveThreadId != null && typeof body.moveThreadId !== "string") return json(res, 400, { error: "thread_id must be a thread id from list_threads, or left out for this thread" });
+      if (typeof body?.folder !== "string") return json(res, 400, { error: "folder must be a folder name or id, or \"\" to take the thread out of its folder" });
+      const threadId = typeof body.moveThreadId === "string" && body.moveThreadId.trim() ? body.moveThreadId.trim() : fromThreadId;
+      const task = store.taskByThread(from.id, threadId);
+      if (!task || !deps.shown(threadId)) {
+        return json(res, 404, { error: "that is not one of your own threads (a room's thread or a teammate's stays where it is) — call list_threads" });
+      }
+      const wanted = body.folder.trim();
+      const byId = folders.find((folder) => folder.id === wanted);
+      const named = byId ? [byId] : wanted ? sameName(wanted) : [];
+      if (wanted && named.length === 0) return json(res, 404, { error: `you have no folder named "${wanted}" — create it first, or call chat_folders with action list` });
+      if (named.length > 1) return json(res, 409, { error: `you have ${named.length} folders named "${wanted}" — use the folder id from chat_folders list` });
+      const folder = named[0];
+      if (!store.patchTask(from.id, threadId, { projectId: folder?.id })) return json(res, 404, { error: "that thread is gone" });
+      return json(res, 200, { threadId, title: task.title, folder: folder ?? null });
     }
     // close_thread folds a thread, never deletes it (a person's confirmed action), and never while it runs.
     const closeMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/close$/) : null;
