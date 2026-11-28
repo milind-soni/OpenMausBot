@@ -670,6 +670,117 @@ describe("a typed answer to a card the server refuses", () => {
   });
 });
 
+describe('a plain send with answer: "never"', () => {
+  const question = (store: Store, threadId: string) => store.appendMessage(threadId, {
+    role: "bot", kind: "options", text: "Which color?", card: {
+      title: "A question", subtitle: "Which color?", options: ["Blue", "Green"], requestId: "req-question", requestType: "question",
+    },
+  });
+  const approval = (store: Store, threadId: string) => store.appendMessage(threadId, {
+    role: "bot", kind: "options", text: "Run the command?", card: {
+      title: "An approval", subtitle: "Run the command?", options: [], requestId: "req-approval", requestType: "permission", tool: "Bash",
+    },
+  });
+  const credential = (store: Store, threadId: string) => store.appendMessage(threadId, {
+    role: "bot", kind: "secret", text: "Enter the key", secret: {
+      target: "xaiApiKey", label: "xAI API key", description: "", placeholder: "", helpUrl: "", requestKey: "secret-1",
+    },
+  });
+  const signIn = (store: Store, threadId: string) => store.appendMessage(threadId, {
+    role: "bot", kind: "signin", text: "Sign in to example.test", signIn: {
+      url: "https://example.test/", site: "example.test", place: "browser",
+    },
+  });
+  const REFUSED = {
+    error: "a question, approval, sign-in or credential request is waiting in this conversation, so nothing was sent; answer it, then send again",
+    code: "card_waiting",
+  };
+
+  it("still answers a waiting card when the option is omitted", async () => {
+    let store!: Store;
+    let cardId = "";
+    const typedCardAnswer = vi.fn(async (_auth: RequestAuth, threadId: string, text: string) => ({
+      status: 202, message: store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId: cardId }),
+    }));
+    const { threadId, state, post, sent, store: opened } = await fixture({ typedCardAnswer });
+    store = opened;
+    cardId = question(store, threadId).id;
+
+    const answered = await post({ threadId, sendId: SEND, text: "Blue" });
+    expect(answered.status, JSON.stringify(answered.body)).toBe(202);
+    expect(typedCardAnswer).toHaveBeenCalledOnce();
+    expect(sent()).toMatchObject([{ text: "Blue", replyToId: cardId }]);
+    expect(state.accepted).toEqual([]);
+  });
+
+  it.each([
+    ["question", question],
+    ["approval", approval],
+    ["credential", credential],
+    ["sign-in", signIn],
+  ])("refuses the send while a %s is waiting, and appends nothing", async (_kind, append) => {
+    const typedCardAnswer = vi.fn(async () => null);
+    const { store, threadId, state, post, sent } = await fixture({ typedCardAnswer });
+    append(store, threadId);
+
+    const refused = await post({ threadId, sendId: SEND, text: "Start the next task", answer: "never" });
+    expect(refused).toEqual({ status: 409, body: REFUSED });
+    expect(typedCardAnswer).not.toHaveBeenCalled();
+    expect(state.accepted).toEqual([]);
+    expect(sent()).toEqual([]);
+  });
+
+  it("sends normally when no card waits, and never reaches the typed-answer path", async () => {
+    const typedCardAnswer = vi.fn(async () => null);
+    const { threadId, post, sent } = await fixture({ typedCardAnswer });
+
+    const sentMessage = await post({ threadId, sendId: SEND, text: "Start the next task", answer: "never" });
+    expect(sentMessage.status, JSON.stringify(sentMessage.body)).toBe(202);
+    expect(sent()).toMatchObject([{ text: "Start the next task", sendId: SEND }]);
+    expect(typedCardAnswer).not.toHaveBeenCalled();
+  });
+
+  it("does not refuse for a waiting card left on an abandoned branch", async () => {
+    const { store, threadId, post, sent } = await fixture();
+    const asked = question(store, threadId);
+    // A new line under the question's parent makes its own branch the active one; the question stays on the old branch.
+    store.branchMessage(threadId, asked.id, "Start the next task");
+
+    const send = await post({ threadId, sendId: SEND, text: "Start the next task", answer: "never" });
+    expect(send.status, JSON.stringify(send.body)).toBe(202);
+    expect(sent().filter((message) => message.sendId === SEND)).toMatchObject([{ text: "Start the next task", sendId: SEND }]);
+  });
+
+  it("keeps a sendId retry idempotent when a card starts waiting after the first send", async () => {
+    const { store, threadId, post, sent } = await fixture();
+    const first = await post({ threadId, sendId: SEND, text: "Start the next task", answer: "never" });
+    expect(first.status, JSON.stringify(first.body)).toBe(202);
+    question(store, threadId);
+
+    const again = await post({ threadId, sendId: SEND, text: "Start the next task", answer: "never" });
+    expect(again.status, JSON.stringify(again.body)).toBe(202);
+    expect(again.body.message.id).toBe(first.body.message.id);
+    expect(sent()).toHaveLength(1);
+  });
+
+  it("rejects any other answer value", async () => {
+    const { threadId, post } = await fixture();
+    for (const answer of ["auto", "always", null, 1]) {
+      expect(await post({ threadId, text: "Start", answer }), JSON.stringify(answer))
+        .toEqual({ status: 400, body: { error: 'answer must be "never" when set' } });
+    }
+    expect((await post({ threadId, text: "Start" })).status).toBe(202);
+  });
+
+  it("applies only to a typed message", async () => {
+    const { threadId, post, show } = await fixture();
+    const widgetId = show("pullRequests");
+    const refusal = { status: 400, body: { error: 'answer: "never" applies only to a typed message' } };
+    expect(await post({ threadId, sendId: SEND, text: "Hi", answer: "never" }, "/guarded")).toEqual(refusal);
+    expect(await post({ threadId, sendId: SEND, widgetAction: { messageId: widgetId, ref: "confirm" }, answer: "never" })).toEqual(refusal);
+  });
+});
+
 describe("POST /api/bots/:id/messages/guarded with a reaction another app relayed", () => {
   const relay = (threadId: string, replyToId: string | undefined, leaf: string | null, patch: Record<string, unknown> = {}) => ({
     threadId, sendId: SEND, reaction: "+1", replyToId, expectedActiveLeafId: leaf, expectedApprovalMode: "ask",

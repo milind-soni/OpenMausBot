@@ -24,7 +24,7 @@ let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; fixture.dispatch.mockClear(); fixture.find.mockClear(); });
 const show = (work?: { kind: "needs" | "done"; label: string }) => {
   root = createRoot(document.body.appendChild(document.createElement("header")));
-  act(() => root!.render(createElement(ThreadPanelHeading, { group, task, messages: [], working: false, work })));
+  act(() => root!.render(createElement(ThreadPanelHeading, { group, task, messages: [], working: false, work, onClose: vi.fn() })));
 };
 const open = () => {
   show();

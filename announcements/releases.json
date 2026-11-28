@@ -1,8 +1,100 @@
 {
   "$schema": "./releases.schema.json",
   "version": 1,
-  "updatedAt": "2026-11-26T23:22:24Z",
+  "updatedAt": "2026-11-27T20:55:17Z",
   "releases": [
+    {
+      "version": "0.1.186",
+      "date": "2026-11-27T20:54:59Z",
+      "sections": [
+        {
+          "title": "Apps",
+          "items": [
+            "**Four sample apps to try:** Ledger, Cohorts, Corridor and Rowfall are in your apps list. Each is marked Sample and can be removed for good.",
+            "**Add to Desktop:** put a saved app on your Desktop from its menu.",
+            "**Fixed:** the menu on an app card was cut off."
+          ]
+        },
+        {
+          "title": "Bots and pages",
+          "items": [
+            "**What's new shows once more,** with new slides for Apps and for publishing your bots, then the Cloud and Team. If you already have a Cloud or a team, you see what changed for you.",
+            "**Publish a bot from its ⋯ menu.** Publish now opens its choices right there: Publish to community, Your GitHub repo, your team's templates, Save folder or Download. The template is made at once, with no message to the bot first.",
+            "**Shared templates leave out switched-off skills,** and list them under Left out.",
+            "**In a room, a bot the first answer @mentions can save its own skill.**",
+            "**A file open beside a conversation comes back** when you return to that conversation."
+          ]
+        },
+        {
+          "title": "This computer and My Cloud",
+          "items": [
+            "**My Cloud's bots get their own section in the sidebar** when your bots are shown together. Drag them into any order or into any department, and they stay where you put them."
+          ]
+        },
+        {
+          "title": "Sidebar and menus",
+          "items": [
+            "**The + menu is no longer cut by a dark band** when the sidebar list is scrolled.",
+            "**A department's ⋯ menu is shorter and clearer:** Add bots, Rename department, Settings for all bots…, Pause, Mark all as read, Share and Delete. Its icons no longer disappear next to long labels, and Move up / Move down are only on the phone, where you can't drag.",
+            "**Department order is the same on every device** for owners and admins."
+          ]
+        },
+        {
+          "title": "Signing in",
+          "items": [
+            "**Signing an AI in on a Cloud is more dependable.** A sign-in that's refused or cut short now says why and lets you start again straight away, instead of sitting on \"Waiting…\". Pasting the code Claude emails you now says to use the longer code from Claude's page instead. ChatGPT shows the \"turn on device code sign-in\" step up front and again after a refusal.",
+            "**The browser sign-in names the right AI.**",
+            "**The Devices check says where to sign in for the relay,** and that it is separate from Your account.",
+            "**Saved logins fill more sign-in pages,** such as addresses ending in `/login.html`."
+          ]
+        },
+        {
+          "title": "Models and providers",
+          "items": [
+            "**OpenAI-compatible models:** A reply cut at the output limit is continued and shown as one message, instead of failing. A stream the provider cuts is retried, also after earlier tool steps. Two conversations switching the same model's route at once no longer fail. An added server at its own address keeps its own models.",
+            "**Text-only models (such as Z.ai GLM):** an image in the conversation no longer makes every later message fail.",
+            "**Claude:** An older Claude CLI starts a fresh session when the bot's instructions change. Claude Opus 5.5 (1M) through a gateway now uses its full 1M context.",
+            "**Codex:** A conversation nearing the provider's instruction limit moves to a fresh session. The model list is read once more before falling back to the built-in list. The update card updates the copy the app actually runs.",
+            "**Cursor:** no longer clears its own sign-in when a session starts, and keeps the full model list on a slow start.",
+            "**Grok:** a provider's brief throttle reads as a rate limit, not the plan's quota.",
+            "**Devin:** works with an API key.",
+            "**DeepSeek Harness:** found again in the Windows desktop app.",
+            "**Gemini and Antigravity:** compacted tool lists keep every list field's item type.",
+            "**MCP:** A server whose start check only timed out stays on, unless that happens three times in a row. Servers that can't sign in apps say why on the Sign in card."
+          ]
+        },
+        {
+          "title": "Lending this computer",
+          "items": [
+            "**Windows:** lend the whole C:\\ drive, and allow edits on your whole home folder, each after a clear warning. Hidden files, Library, AppData and the app's own data stay out of reach.",
+            "**A server's own Settings page has \"Choose what it can use\".**"
+          ]
+        },
+        {
+          "title": "Self-hosted servers",
+          "items": [
+            "**A server you host yourself can take its licence from a file.** It picks up a new or renewed licence within a minute or two with no restart, and keeps working for 14 days past a licence's end date before paid features switch off."
+          ]
+        },
+        {
+          "title": "Fixes",
+          "items": [
+            "**Chief:** A Chief that retries its own failed request is woken with the result. Retrying a busy teammate's thread now waits in that thread's queue instead of failing.",
+            "**Backup AIs:** bot settings refuse a backup AI that could never take over the bot's work.",
+            "**Typing stop:** \"stop @Todo\" in a room no longer stops the bot you're talking to.",
+            "**Routines:** a scheduled run waits while an earlier run of the same routine is still working.",
+            "**Team backups:** keep cron and limit-reset routines.",
+            "**Goal runs:** ask the coordinator again when its reply is malformed.",
+            "**Results:** a result the store couldn't save is kept and retried.",
+            "**Windows:** helper windows no longer flash a console.",
+            "**Safety check:** shell commands are read more strictly.",
+            "**Titles:** written in the conversation's language.",
+            "**Inbox:** opens faster.",
+            "**Linked files outside a bot's folder:** a file link to one can be opened, except hidden files, key and credential files, the Keychain and browser profiles."
+          ]
+        }
+      ]
+    },
     {
       "version": "0.1.184",
       "date": "2026-11-26T23:22:08Z",
@@ -1185,90 +1277,6 @@
             "**A system stop is no longer counted as your stop.**",
             "**A read-only HighLevel grant lets HighLevel's reads through.**",
             "**A paired client shows and opens the host's Local VM** for a bot that runs there."
-          ]
-        }
-      ]
-    },
-    {
-      "version": "0.1.154",
-      "date": "2026-11-12T00:19:37Z",
-      "sections": [
-        {
-          "title": "Settings, reorganised",
-          "items": [
-            "**Three groups, always in the same order:** the place you are in (This computer or a Cloud), Your account, and This app. Every page says what it applies to.",
-            "**Simple mode shows fewer pages.** Turn on Advanced mode at the bottom of Settings to see the rest.",
-            "**One AI page** for engines, provider keys and models.",
-            "**Search settings** from the top of the window. A result names the page it lives on.",
-            "**Phone & devices is in the profile menu,** so pairing a phone is two clicks from anywhere."
-          ]
-        },
-        {
-          "title": "Replies appear as they are written",
-          "items": [
-            "**A bot's reply now streams into the chat** instead of arriving all at once, in chats and in rooms.",
-            "**Streamed text is shown as the bot produces it.** Saved secrets are masked once the message is saved, as before."
-          ]
-        },
-        {
-          "title": "Put a site or web app online",
-          "items": [
-            "**Publish to Netlify.** A bot can put a site or web app online on your own Netlify account.",
-            "**Included hosting.** On a Cloud plan, a bot can publish to the hosting your plan includes, with no Netlify account of your own.",
-            "**Published apps.** One page lists everything your bots have put online, with a preview beside the chat and Delete."
-          ]
-        },
-        {
-          "title": "Pairing a phone is clearer",
-          "items": [
-            "**Only the pairing code is a QR code now.** The desktop app no longer shows store codes or download links: install MausBot from the App Store or Google Play, then pair.",
-            "**The pairing screen says what to scan with:** open MausBot on your phone and scan the code from inside the app.",
-            "**A paired phone can delete a bot.**"
-          ]
-        },
-        {
-          "title": "Apps",
-          "items": [
-            "**Gmail or Google Calendar added as an MCP server and not signed in?** The bot now offers the one-step connect card in the chat, or uses the app if it is already connected.",
-            "**A bot is told when an app it asked to connect already has an account.**"
-          ]
-        },
-        {
-          "title": "My Cloud",
-          "items": [
-            "**A clear reason when a cloud computer can't start:** hours used up, too many at once, or started too often, with the date the hours come back. A free trial gets its own wording.",
-            "**Empty files move to My Cloud,** files changed without a new timestamp are picked up, and two files with the same name are reported before a folder syncs."
-          ]
-        },
-        {
-          "title": "Team Cloud",
-          "items": [
-            "**A bot is its maker's until they share it** with the team.",
-            "**A secret a member types in their private chat stays theirs.**",
-            "**Simpler team screens,** with \"Owner\" wording throughout and nothing shown that a member can't use."
-          ]
-        },
-        {
-          "title": "Update a self-hosted server from the app",
-          "items": [
-            "**Update server.** When a server you're connected to is behind, Settings has an **Update server** button. It backs up first, updates to the stable version, and goes back by itself if the new version doesn't work. If the app is then older than the server, the same row offers **Update app**.",
-            "It works on servers set up with the one-command installer. On a hand-made Docker setup, run `sudo./update-runner.sh --install` once. Servers installed with npm are shown the commands to run.",
-            "**The installer sets file permissions itself.** If you installed a server from a root shell with unusual settings, run the install command again: it closes the install folder to other users and tells you if it changed anything."
-          ]
-        },
-        {
-          "title": "Fixes",
-          "items": [
-            "**A chat you watched to the end no longer shows as unread** on your phone or after a reload.",
-            "**Stop reaches the running turn** after the connection restarts.",
-            "**OpenCode never runs a model it can't route,** and says so plainly.",
-            "**Goals:** a decision is recovered when its closing tag is missing or followed by extra text.",
-            "**Memory:** Japanese words with a long vowel mark are recalled, and tidying only touches notes the model was shown.",
-            "**Search** matches upper and lower case in every language.",
-            "**Calendar:** every page is read before a bot reports when you're free.",
-            "**Data:** decimals sort correctly, export file names don't collide, and compressed files load with a folder.",
-            "**Notion integration tokens are masked** in chats and logs.",
-            "**Emailed sign-in codes stop being read** when the turn ends."
           ]
         }
       ]

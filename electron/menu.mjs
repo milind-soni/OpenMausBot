@@ -124,11 +124,14 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
   };
   const atLogin = openAtLogin ? [{ id: "open-at-login", label: t("native.menu.openAtLogin"), type: "checkbox", checked: openAtLogin.checked, click: () => openAtLogin.onToggle(!openAtLogin.checked) }] : [];
   const roles = roleMenus(t, isMac);
+  const settings = { label: t("native.menu.settings"), accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() };
+  const file = !isMac && openAtLogin ? { ...roles.file, submenu: [...atLogin, { type: "separator" }, role(t, "quit", "native.role.quit")] } : roles.file;
+  if (!isMac) file.submenu.push({ ...settings, visible: false });
   const appMenu = {
     label: app.name,
     submenu: [
       role(t, "about", "native.role.about", { app: app.name }),
-      { label: t("native.menu.settings"), accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() },
+      settings,
       ...atLogin,
       { type: "separator" },
       role(t, "hide", "native.role.hide", { app: app.name }),
@@ -140,7 +143,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
   };
   const template = [
     ...(isMac ? [appMenu] : []),
-    !isMac && openAtLogin ? { ...roles.file, submenu: [...atLogin, { type: "separator" }, role(t, "quit", "native.role.quit")] } : roles.file,
+    file,
     roles.edit,
     ...(home && !others.length ? [] : [server]),
     roles.view,

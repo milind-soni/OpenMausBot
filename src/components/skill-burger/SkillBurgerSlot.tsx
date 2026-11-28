@@ -6,6 +6,31 @@ import { fetchBurgerDraft, fetchBurgerSummary, useRunnable, type DraftView } fro
 import { RunBurger } from "./RunBurger";
 import { layerLine, SkillBurger } from "./SkillBurger";
 
+/** How many times the person has closed the Skill Burger offer in a row, and when the last close was. */
+const CLOSE_KEY = "omb-skill-burger-closes";
+const CLOSE_COOLDOWN_MS = 7 * 24 * 60 * 60_000;
+const CLOSE_LIMIT = 3;
+
+function closeState(): { count: number; lastClose: number } {
+  try {
+    const raw = globalThis.localStorage?.getItem(CLOSE_KEY);
+    if (!raw) return { count: 0, lastClose: 0 };
+    const parsed = JSON.parse(raw);
+    return { count: typeof parsed.count === "number" ? parsed.count : 0, lastClose: typeof parsed.lastClose === "number" ? parsed.lastClose : 0 };
+  } catch {
+    return { count: 0, lastClose: 0 };
+  }
+}
+
+function saveCloseState(count: number, lastClose: number): void {
+  try { globalThis.localStorage?.setItem(CLOSE_KEY, JSON.stringify({ count, lastClose })); } catch {}
+}
+
+function burgerOfferRests(): boolean {
+  const { count, lastClose } = closeState();
+  return count >= CLOSE_LIMIT && Date.now() - lastClose < CLOSE_COOLDOWN_MS;
+}
+
 /** The turn's change to a saved burger's steps, if it made one: the burger's name and the change's Undo. */
 export function editIn(messages: readonly RunMessage[]): { id: string; name: string; undo: string } | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -61,7 +86,11 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
     return () => { current = false; };
   }, [finished, runKey, botId, threadId, drafts]);
 
-  const close = (key: string) => () => setClosed((current) => new Map(current).set(transcriptKey, key));
+  const close = (key: string) => () => {
+    const state = closeState();
+    saveCloseState(state.count + 1, Date.now());
+    setClosed((current) => new Map(current).set(transcriptKey, key));
+  };
   if (seen || edit) {
     const key = seen ? `run:${seen.run}` : `edit:${edit!.id}`;
     if (!runnable || closed.get(transcriptKey) === key) return null;
@@ -74,7 +103,7 @@ export function SkillBurgerSlot({ botId, threadId, busy, canWrite, messages, liv
     );
   }
   // The pill shows from the first step while the bot works; a run that ends with too little to keep goes.
-  if (!run || !(burgerWorthy(layers) || (busy && layers.length > 0)) || closed.get(transcriptKey) === run) return null;
+  if (!run || !(burgerWorthy(layers) || (busy && layers.length > 0)) || closed.get(transcriptKey) === run || burgerOfferRests()) return null;
   const summary = named.get(runKey) ?? askOf(messages) ?? layers.map(layerLine).join(", ");
   return (
     <div className="flex justify-end px-4 pb-2">

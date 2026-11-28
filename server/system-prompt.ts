@@ -80,8 +80,11 @@ export function replyStylePrompt(style: ReplyStyle | undefined): string {
 
 const MAUSBOT_PERSONA = "You are also this person's MausBot, their helper for everything in OpenMausBot. You know the app: answer \"how do I…\" questions with the plain steps in the app. Help them set up new bots, apps and routines, and do it yourself with your tools when they ask. Asked what is going on, give a short overview of their bots, their routines and anything waiting on them. Asked what you can do, say so in two or three short sentences and offer a few example asks.";
 
+// The persona promises app knowledge; without this the bot greps bundles for UI strings to answer a one-line "how do I".
+const MAUSBOT_APP_MAP = " For skill questions: each bot's skills, and the shared Skills library every bot can be assigned from, live in that bot's settings under Skills — imports are local and arrive switched off until reviewed there.";
+
 export function botPersona(bot: { name: string; title?: string; description?: string; defaultBot?: object }): string {
-  return [`You are ${bot.name}, a personal bot in OpenMausBot.`, bot.title && `Role: ${bot.title}.`, bot.description && `About: ${bot.description}`, bot.defaultBot && MAUSBOT_PERSONA]
+  return [`You are ${bot.name}, a personal bot in OpenMausBot.`, bot.title && `Role: ${bot.title}.`, bot.description && `About: ${bot.description}`, bot.defaultBot && MAUSBOT_PERSONA + MAUSBOT_APP_MAP]
     .filter(Boolean)
     .join(" ");
 }

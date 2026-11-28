@@ -245,6 +245,9 @@ export class ChromeEngine {
 export interface RuntimeRouterOptions {
   /** What a tool call is told instead of reaching either engine, or null to run it. */
   refusal?(session: string, spec: BrowserSpawnSpec, params: unknown): string | null;
+  /** Asked next, only for a session it returns a check for (null runs the call as before): what a tool call is told after
+   * a check that has to wait (a name looked up), or null to run it. */
+  vet?(session: string, spec: BrowserSpawnSpec, params: unknown): Promise<string | null> | null;
   /** Asked next, before an opt-in engine's tool call that may open the session's browser: what it is told while the server
    * has no room to run one (a self-hosted server's pids limit), or null once it has. agent-browser's calls ask the same
    * room through its BrowserRoom, after its count of browsers. */
@@ -275,6 +278,7 @@ export class RuntimeRouter {
   readonly #old: BrowserRuntime;
   readonly #chrome: ChromeEngine;
   readonly #refusal: RuntimeRouterOptions["refusal"];
+  readonly #vet: RuntimeRouterOptions["vet"];
   readonly #room: RuntimeRouterOptions["room"];
   readonly #afterClaim: RuntimeRouterOptions["afterClaim"];
   readonly #annotate: RuntimeRouterOptions["annotate"];
@@ -288,6 +292,7 @@ export class RuntimeRouter {
     this.#old = old;
     this.#chrome = chrome;
     this.#refusal = options.refusal;
+    this.#vet = options.vet;
     this.#room = options.room;
     this.#afterClaim = options.afterClaim;
     this.#annotate = options.annotate;
@@ -306,6 +311,9 @@ export class RuntimeRouter {
     };
     const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
     if (refusal) return refuse(refusal);
+    const vetting = method === "tools/call" ? this.#vet?.(session, spec, params) ?? null : null;
+    const vetted = vetting ? await vetting : null;
+    if (vetted) return refuse(vetted);
     const full = method === "tools/call" && target ? await this.#room?.(session, spec, params) : null;
     if (full) return refuse(full, "no_room");
     const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
