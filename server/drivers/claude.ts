@@ -22,7 +22,7 @@ import { claudeOwnMcpOverHttp, withLoopbackNoProxy } from "./own-mcp-http.ts"; i
 import { claudeElicitations } from "./claude-elicitation.ts"; import { claudePrestartTools, type ClaudePrestartTools } from "./claude-prestart.ts"; import { spawnContractDiff } from "./claude-spawn-contract.ts"; import { claudeContextUsage, liveContextBreakdown, writeControlFrame } from "./claude-context-usage.ts";
 import { claudeCostSnapshot, readCostHistory, recordCostState, restoredCostBase, turnCostFromRunningTotal } from "./claude-cost-history.ts";
 export { claudeCostSnapshot, restoredCostBase, turnCostFromRunningTotal, type ClaudeCostSnapshot } from "./claude-cost-history.ts";
-import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
+import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts"; import { CLAUDE_REPLAY_FLOOR, type ClaudeCliVersion, claudeCliSupports, claudeCliUpdate, parseClaudeCliVersion } from "./claude-cli-version.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
 import type {
@@ -48,7 +48,7 @@ import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
 import { PRESTART_IDLE_MS, armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
 import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
-import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
+import { versionAtLeast } from "./acp/version-probe.ts";
 import {
   applyClaudeInject,
   decodeInjectId,
@@ -180,35 +180,18 @@ export function readClaudeAuthSettings(
   }
 }
 
-/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off"; unset, 1M for the "Claude Opus 5.5 (1M)" pick, else 200K.
- * The CLI rejects a window outside 100k-1M as an argument error, so a configured value is clamped. */
+/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off"; unset, 1M for the "Claude Opus 5.5 (1M)" pick
+ * (also as a gateway names it, after a slash or provider dot), else 200K. The CLI rejects a window outside 100k-1M as an argument error, so a configured value is clamped. */
 export function autoCompactWindow(env: NodeJS.ProcessEnv, model?: string | null): string | null {
   const raw = (env.OMB_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
   if (raw === "off") return null;
   if (raw === "auto") return "auto";
-  const fallback = model?.toLowerCase() === "claude-opus-5-5[1m]" ? 1_000_000 : DEFAULT_AUTOCOMPACT_TOKENS, parsed = raw ? Number(raw) : fallback;
+  const fallback = model && OPUS_1M_PICK.test(model.toLowerCase()) ? 1_000_000 : DEFAULT_AUTOCOMPACT_TOKENS, parsed = raw ? Number(raw) : fallback;
   if (!Number.isFinite(parsed) || parsed <= 0) return String(fallback);
   return String(Math.min(1_000_000, Math.max(100_000, Math.floor(parsed))));
 }
 
-const DEFAULT_AUTOCOMPACT_TOKENS = 200_000;
-
-/** The first Claude CLI to accept each flag; an unknown flag is a hard argument error. Checked
- * against the published binaries (the changelog never records --autocompact): --strict-mcp-config
- * 1.0.60, --setting-sources 1.0.122, --autocompact 2.1.122. */
-export const CLAUDE_FLAG_FLOORS = {
-  "--strict-mcp-config": [1, 0, 60],
-  "--setting-sources": [1, 0, 122],
-  "--autocompact": [2, 1, 122],
-  "--system-prompt-snapshot": [2, 1, 267],
-  // 2.1.248 takes --restricted; 2.1.257 honours blockReadsOutsideWorkingDirectories.
-  "--restricted": [2, 1, 257],
-  // Keep-warm pings only. Not bisected: both are in every 2.1 build checked.
-  "--fork-session": [2, 1, 0],
-  "--no-session-persistence": [2, 1, 0],
-  // Background calls. Not bisected: the guest path passes it from 2.1.257.
-  "--tools": [2, 1, 257],
-} as const satisfies Record<string, ClaudeCliVersion>;
+const DEFAULT_AUTOCOMPACT_TOKENS = 200_000, OPUS_1M_PICK = /(?:^|[/.])claude-opus-5-5\[1m\]$/;
 
 const withWhy = (refusal: string, why: string | undefined) => why ? `${refusal} ${why}` : refusal;
 
@@ -220,44 +203,6 @@ export const GUEST_CLAUDE_PERMISSIONS = {
   blockReadsOutsideWorkingDirectories: true,
   deny: ["Bash", "PowerShell", "WebFetch", "Read(//proc/**)"],
 } as const;
-
-export type ClaudeCliVersion = readonly [number, number, number];
-
-export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--system-prompt-snapshot"];
-
-/** The first CLI seen to echo a stdin user message with its uuid as a model call takes it in
- * (--replay-user-messages, 2.1.282): a steer written during a tool call is echoed after that
- * tool's result, one written during the last model call only after the turn's `result`. */
-export const CLAUDE_REPLAY_FLOOR: ClaudeCliVersion = [2, 1, 282];
-
-/** `claude --version` prints "2.1.232 (Claude Code)". */
-export function parseClaudeCliVersion(stdout: string | null | undefined): ClaudeCliVersion | null {
-  return parseVersionTriple(stdout ?? "");
-}
-
-export function claudeCliSupports(version: ClaudeCliVersion | null, flag: keyof typeof CLAUDE_FLAG_FLOORS): boolean {
-  return version === null || versionAtLeast(version, CLAUDE_FLAG_FLOORS[flag]);
-}
-
-export function claudeCliUpdate(version: string | null, cli: string): ProviderSnapshot["update"] | undefined {
-  const parsed = parseClaudeCliVersion(version);
-  if (!parsed || versionAtLeast(parsed, CLAUDE_CONTEXT_CONTROL_MIN_VERSION)) return undefined;
-  const floor = CLAUDE_CONTEXT_CONTROL_MIN_VERSION.join(".");
-  const missing = (Object.keys(CLAUDE_FLAG_FLOORS) as (keyof typeof CLAUDE_FLAG_FLOORS)[])
-    .filter((flag) => !claudeCliSupports(parsed, flag));
-  const effects = [
-    ...(missing.includes("--autocompact") ? ["no compaction window picked by OpenMausBot"] : []),
-    ...(missing.includes("--setting-sources") ? ["bots still see this machine's own Claude Code setup"] : []),
-    ...(missing.includes("--system-prompt-snapshot") ? ["resumed turns cannot refresh stale system prompts"] : []),
-  ];
-  return {
-    title: "Update Claude Code for context controls",
-    message:
-      `Claude Code ${parsed.join(".")} predates ${floor}, so bots run without ${missing.join(", ")}: ` +
-      `${effects.join("; ")}. Update it, then refresh Engines.`,
-    command: cli === "claude" ? "claude update" : `${cli} update`,
-  };
-}
 
 const DRIVER_KIND = "claudeAgent";
 
@@ -786,8 +731,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       spare?: boolean; spareMs?: number; spareAt?: number; resumed?: string;
       take?: (turnId: string) => void;
       tools?: ClaudePrestartTools;
-      /** The engine could not start the `agents` MCP server: retired after this turn so the next one reconnects. */
-      teamToolsFailed?: boolean;
+      /** The engine could not start the `agents` MCP server, or a configured one (the CLI connects them only when a process starts): retired after this turn so the next one reconnects. */ teamToolsFailed?: boolean; customMcpFailed?: boolean;
       stderr: string;
       costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
@@ -798,6 +742,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     }
     const sessions = new Map<string, Session>();
     const warmContracts = new Map<string, KeepWarmContract>();
+    /** The system prompt each thread's native session is known to hold: a fresh session holds what it launched with, and
+     * a resumed one only when the CLI refreshed it (--system-prompt-snapshot); an older CLI's resume keeps what it started with. */
+    const recordedPrompts = new Map<string, { session: string; prompt: string }>();
     const warmHolds = new Map<string, number>();
     const spares = new Map<string, Promise<unknown>>(), spareTools = claudePrestartTools();
     const sessionIdle = sessionIdlePolicy("CLAUDE");
@@ -929,8 +876,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (controlsHost && permissionMode === "bypassPermissions" && turn.approvalMode !== "full") {
         throw new Error("local computer control requires the interactive approval broker");
       }
-      // Before any broker or process, so a bad attachment leaves nothing live.
-      const promptMsg = claudeUserMessage(turn.text, turn.images);
       let turnId = logicalTurnId ?? newId();
       const retryAbort = new AbortController();
       const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
@@ -940,8 +885,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       if (!spare) retryState.set(threadId, retry);
       const retryScale = Number(process.env.FAKE_CLAUDE_RETRY_SCALE ?? "1");
-      const sessionId = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-      const newSessionId = sessionId ? null : newId();
+      let sessionId = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+      let newSessionId = sessionId ? null : newId();
 
       const args = [
         "-p",
@@ -982,7 +927,27 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const compactWindow = autoCompactWindow(turnEnvironment, injected.model);
       const passedAutocompact = Boolean(compactWindow) && ownCli && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
-      if (ownCli && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) args.push("--system-prompt-snapshot", "off");
+      const refreshesRecordedPrompt = ownCli && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot");
+      const knowsRecordedPrompt = refreshesRecordedPrompt && cliVersion !== null;
+      if (refreshesRecordedPrompt) args.push("--system-prompt-snapshot", "off");
+      // Before any broker or process, so a bad attachment leaves nothing live.
+      let promptMsg = claudeUserMessage(turn.text, turn.images);
+      // A new process gets the stable half only; the volatile half rides its first message, so a relaunch reuses the cached prefix.
+      const halves = promptHalves(turn);
+      const launchSystem = halves.stable ?? turn.system;
+      // A CLI without the snapshot flag reopens a session with the prompt it recorded at launch, so a changed prompt
+      // would never reach it: rebuild the turn from the recovery text in a fresh session instead of resuming stale.
+      const recordedPrompt = createHash("sha256").update(keyedStable(turn) ?? turn.system ?? "").digest("hex");
+      const recorded = sessionId === null ? undefined : recordedPrompts.get(threadId);
+      if (sessionId !== null && !knowsRecordedPrompt && recorded !== undefined && recorded.session === sessionId && recorded.prompt !== recordedPrompt) {
+        const recovery = recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure: "before-accept" });
+        console.error(`claude (${instanceId}): session ${sessionId} for thread ${threadId} holds a system prompt this CLI cannot refresh, starting a new one`);
+        turn = { ...turn, text: recovery.text, resumeCursor: undefined, recoveryText: undefined };
+        sessionId = null;
+        newSessionId = newId();
+        promptMsg = claudeUserMessage(turn.text, turn.images);
+        retry.rebuilt = recovery.replayed;
+      }
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
 
@@ -1160,9 +1125,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       // The old process and its tree end before the new one starts, so two never share the session.
       if (live) { closeSession(threadId, turn.sessionReset ? "context reset" : imagesOver ? "images over the request limit" : "spawn contract changed", turn.sessionReset || imagesOver ? undefined : spawnContractDiff(live.argsKey, argsKey)); await (live.spare ? stopEngineTree(live.child, 0, 0) : stopEngineTree(live.child)); } // an unused spare has nothing to save: no wait for it to leave by itself
-      // A new process gets the stable half only; the volatile half rides its first message, so a relaunch reuses the cached prefix.
-      const halves = promptHalves(turn);
-      const launchSystem = halves.stable ?? turn.system;
 
       // Until sessions.set() below, this turn owns every launch resource and must release it on failure.
       const cleanupUnownedLaunch = () => {
@@ -1328,7 +1290,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         retryState.delete(threadId);
         // `claude update` cannot change code this child already loaded, and a signed-out child can keep holding the shared OAuth refresh lock: retire both before completing.
         if (stopReason === "update_required" || stopReason === "auth_required") closeSession(threadId, stopReason === "auth_required" ? "authentication required" : "update required");
-        else if (session.teamToolsFailed) closeSession(threadId, "team tools did not connect");
+        else if (session.teamToolsFailed || session.customMcpFailed) closeSession(threadId, session.teamToolsFailed ? "team tools did not connect" : "an MCP server did not connect");
         const cost = turnCostFromRunningTotal(total, session.costTotal ?? null);
         if (total !== null) session.costTotal = total;
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}), ...(unsent ? { unsent } : {}) });
@@ -1394,6 +1356,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               if (session.turn) session.turn.awaitingInit = false;
               session.nativePermissionMode = typeof o.permissionMode === "string" ? o.permissionMode : null;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
+              if (session.sessionId && (sessionId === null || knowsRecordedPrompt)) recordedPrompts.set(threadId, { session: session.sessionId, prompt: recordedPrompt });
               const held = session.turn;
               if (held?.continuationGrace) {
                 clearTimeout(held.continuationGrace);
@@ -1408,9 +1371,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 }, STEERED_CONTINUATION_SILENCE_MS * steerSilenceScale());
                 held.continuationSilence.unref?.();
               }
-              emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}), ...failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom) });
-              if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
-              retry.rebuilt = false;
+              const currentRetry = retryState.get(threadId) ?? retry;
+              const failedMcp = failedCustomMcp(o.mcp_servers, session.turn?.input.integrations?.custom); if (failedMcp.mcpFailed?.length) session.customMcpFailed = true;
+              emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(currentRetry.rebuilt ? { rebuilt: true } : {}), ...failedMcp });
+              if (currentRetry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
+              currentRetry.rebuilt = false;
             } else if (o.subtype === "compact_boundary") {
               session.volatile = null; session.roster.now = session.roster.launched; if (!o.parent_tool_use_id) emit({ ...base(threadId, currentTurnId()), type: "context.compacted" }); // only the system prompt survives a compaction, so the next turn re-sends the volatile half; a subagent's own compaction is not the chat's
             } else if (o.subtype === "thinking_tokens") {

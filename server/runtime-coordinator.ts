@@ -94,6 +94,14 @@ export function needsInputQuestion(text: string): string | undefined {
   return question || undefined;
 }
 
+export function handoffReply(text: string): Pick<HostTurnResult, "text" | "question"> {
+  return { text: text.slice(0, BRIEF_MAX), question: needsInputQuestion(text) ?? null };
+}
+
+export function handoffQuestion(result: Pick<HostTurnResult, "text" | "question">): string | undefined {
+  return result.question === undefined ? needsInputQuestion(result.text) : result.question ?? undefined;
+}
+
 export function view(a: Assignment, parent?: Assignment): HandoffView {
   const groupId = a.assignee.destination.groupId;
   const status: HandoffView["status"] = hostFirstTurn(a) ? "source" : a.status === "needs_input" ? "waiting" : a.status;
@@ -253,6 +261,27 @@ export class RuntimeCoordinator implements Coordinator {
     return this.live().map(row => this.project(row));
   }
 
+  threadActivity(threads: ReadonlyMap<string, ReadonlySet<string>>): {
+    awaitingAnswer: Set<string>; activeDirect: Set<string>; queued: Map<string, Map<string, HandoffView>>;
+  } {
+    this.ready();
+    const awaitingAnswer = new Set<string>();
+    const activeDirect = new Set<string>();
+    const queued = new Map<string, Map<string, HandoffView>>();
+    for (const row of this.live()) {
+      const { threadId, groupId } = row.assignee.destination;
+      const bots = threads.get(threadId);
+      if (!bots) continue;
+      if (row.status === "needs_input") awaitingAnswer.add(threadId);
+      if (groupId === undefined) activeDirect.add(threadId);
+      if (row.status !== "queued" || groupId || !bots.has(row.assignee.botId)) continue;
+      let byBot = queued.get(threadId);
+      if (!byBot) { byBot = new Map(); queued.set(threadId, byBot); }
+      if (!byBot.has(row.assignee.botId)) byBot.set(row.assignee.botId, this.project(row));
+    }
+    return { awaitingAnswer, activeDirect, queued };
+  }
+
   children(id: string): HandoffView[] {
     this.ready();
     const parent = this.store.get(id);
@@ -275,7 +304,10 @@ export class RuntimeCoordinator implements Coordinator {
     const assignee: Assignee = { botId: target.botId, destination: { kind: target.groupId ? "room_thread" : thread === "standing" ? "standing_thread" : "work_thread",
       threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } };
     const own = ownThread(lineage, assignee, options.ownThread);
-    if (!answersSender(parent, mode, target) && (own ? lineage.slice(0, -1) : lineage).some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
+    const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
+    const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
+    // Same rule as the runtime's admit: only a reply that would wait on the ancestor's completion closes a wait cycle.
+    if (!answersSender(parent, mode, target) && reply === "resume" && (own ? lineage.slice(0, -1) : lineage).some(n => ancestorOf(address(n), target))) throw new Error(ANCESTOR);
     if (this.stoppedFor(root, target.botId)) throw new Error(STOPPED_AGAIN);
     const siblings = this.store.children(parent.id);
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode
@@ -289,8 +321,6 @@ export class RuntimeCoordinator implements Coordinator {
     // A bot's own threads wait on it by design and can never ask it back (the ancestor rule above), so no two bots can cross.
     const waiting = own || mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source.botId, target.botId);
     if (waiting) throw new Error(crossed(this.host.names(this.project(waiting.request), this.project(waiting.parent)).requester, waiting.request));
-    const wanted: Reply = mode === "notify" ? "none" : options.reply ?? "resume";
-    const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
     const level = this.host.levelOf(target, this.project(parent));
@@ -691,7 +721,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (signal.aborted) return { kind: "failed", outcome: "stopped", text: result.text };
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
-    const question = root ? undefined : needsInputQuestion(result.text);
+    const question = root ? undefined : handoffQuestion(result);
     if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };

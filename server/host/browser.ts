@@ -61,8 +61,9 @@ import { createBrowserReclaim, reclaimable } from "./browser-reclaim.ts";
 import { createCloudBrowser, type HomeReason } from "../cloud-browser/index.ts";
 import { providerOps } from "../cloud-browser/remote.ts";
 import { boatAccount, boatConfigured } from "../boat.ts";
-import { localSchemeRefusal } from "../cloud-browser/guards.ts";
-import { readSignIns, writeSignIns } from "../browser-sites.ts";
+import { addressGuard, localSchemeRefusal } from "../cloud-browser/guards.ts";
+import { backupSignIns, readSignIns, restoreSignIns, signInBackups, writeSignIns } from "../browser-sites.ts";
+import { createSignInBackupRoutes } from "../routes/browser-sign-in-backups.ts";
 import { browserSessionsDirectory } from "../browser-engine.ts";
 import { BrowserUploadRefusal } from "../browser-upload.ts";
 import { BROWSER_TASKS, processBudget } from "../process-room.ts";
@@ -241,11 +242,24 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const url = doorUrls.get(session);
     return url !== undefined && spec.env.AGENT_BROWSER_CDP === url;
   }
+  const sandboxAddresses = addressGuard();
+  /** A call the sandbox's guards refused before its browser opened (cloudBrowserUrl), so no wake was spent on it: answered
+   * with that refusal when the same call reaches the router. */
+  const refusedOpens = new Map<string, { call: string; refusal: string }>();
+  const callKey = (params: unknown) => JSON.stringify([(params as { name?: unknown } | null)?.name ?? null, (params as { arguments?: unknown } | null)?.arguments ?? null]);
   // A tool call that would open Reddit from MausBot Cloud is refused before it reaches the browser. My Chrome is the
   // person's own, outside the egress gate too; on My Cloud a call that can't reach it now says why instead.
   const browserRuntime = new RuntimeRouter(agentBrowserRuntime, chromeEngine, {
     refusal: (session, spec, params) => (cloudBrowser?.attached(session) ? localSchemeRefusal(params) ?? browserEgress.callRefusal(params)
       : attachesToChrome(spec.env) ? null : browserEgress.callRefusal(params)),
+    // A browser in the sandbox is kept from the addresses the home's own browsers are (the egress gate covers those).
+    vet: (session, _spec, params) => {
+      if (cloudBrowser?.attached(session)) return sandboxAddresses(params);
+      const early = refusedOpens.get(session);
+      if (!early) return null;
+      refusedOpens.delete(session);
+      return early.call === callKey(params) ? Promise.resolve(early.refusal) : null;
+    },
     // The opt-in engine's browsers wait for the server's room here; agent-browser's wait in browserRoom above. The
     // person's own Chrome runs outside this server, and a close frees room.
     room: (session, spec, params) => (!processRoom || attachesToChrome(spec.env) || (params as { name?: unknown } | null)?.name === "agent_browser_close"
@@ -305,19 +319,41 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     signIns: {
       load: (session) => readSignIns(sessionsDirectory(session), session, browserEngineEncryptionKey()),
       save: (session, cookies) => writeSignIns(sessionsDirectory(session), session, browserEngineEncryptionKey(), cookies),
+      backup: (session) => { backupSignIns(sessionsDirectory(session), session, browserEngineEncryptionKey()); },
     },
   }) : null;
+  /** The owner's way back to a bot's sign-ins from before one of its sessions in the browser sandbox. */
+  const signInBackupRoutes = createSignInBackupRoutes({
+    backups: (botId) => {
+      if (!store.bot(botId)) return null;
+      const session = currentBrowserSession(botId, undefined);
+      return signInBackups(sessionsDirectory(session), session);
+    },
+    restore: async (botId, id) => {
+      if (!store.bot(botId)) return "no-bot";
+      const session = currentBrowserSession(botId, undefined);
+      if (cloudBrowser?.active(session) || browserRunning(session, usedBrowserSessions.get(session))) return "open";
+      return restoreSignIns(sessionsDirectory(session), session, browserEngineEncryptionKey(), id) ? "restored" : "no-backup";
+    },
+  });
   function sessionsDirectory(session: string): string {
     return browserSessionsDirectory(browserRuntimeEnv({ ...usedBrowserSessions.get(session)?.env, AGENT_BROWSER_SESSION: session }));
   }
   /** Where a session's browser opens, decided once when it opens: in the Cloud's browser sandbox (its address returned),
    * or in the home (undefined). A browser already running stays where it runs. */
-  async function cloudBrowserUrl(botId: string, profile: string | undefined, session: string, audience: Audience, opening: string | null | undefined): Promise<string | undefined> {
+  async function cloudBrowserUrl(botId: string, profile: string | undefined, session: string, audience: Audience, opening: string | null | undefined, params?: unknown): Promise<string | undefined> {
     if (!cloudBrowser) return undefined;
     const live = cloudBrowser.active(session);
     if (live) return live;
     if (!opening || opening === "agent_browser_close" || browserRunning(session, usedBrowserSessions.get(session))) return undefined;
-    const opened = await cloudBrowser.open({ session, botId, refusal: cloudBrowserRefusal(profile, session, audience) });
+    const refusal = cloudBrowserRefusal(profile, session, audience);
+    // A call the sandbox's guards will refuse never wakes it: it is refused at the router, and nothing opens.
+    const guarded = params === undefined || refusal !== null ? null : localSchemeRefusal(params) ?? await sandboxAddresses(params);
+    if (guarded) {
+      refusedOpens.set(session, { call: callKey(params), refusal: guarded });
+      return undefined;
+    }
+    const opened = await cloudBrowser.open({ session, botId, refusal });
     return "cdpUrl" in opened ? opened.cdpUrl : undefined;
   }
   /** The sessions this slice keeps in the home: a shared, temporary or someone else's profile (the sandbox keeps one
@@ -579,7 +615,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     };
   }
   /** `opening`: the name of a browser tool call about to run, which may open the session's browser. */
-  async function browserIntegration(botId: string, profile: string | undefined, turn?: { threadId: string; generation: string }, audience = browserAudience(turn?.threadId), options: { opening?: string | null } = {}) {
+  async function browserIntegration(botId: string, profile: string | undefined, turn?: { threadId: string; generation: string }, audience = browserAudience(turn?.threadId), options: { opening?: string | null; params?: unknown } = {}) {
     const profileTarget = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
     const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
     const browserProfileId = profileTarget?.profileId ?? profile;
@@ -596,7 +632,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const session = currentBrowserSession(botId, profile, audience);
     const lent = lentChromeSession(browserProfileId);
     const cdpUrl = lent ? await lentChromeDoor(session) : undefined;
-    const cloudUrl = lent ? undefined : await cloudBrowserUrl(botId, profile, session, audience, options.opening);
+    const cloudUrl = lent ? undefined : await cloudBrowserUrl(botId, profile, session, audience, options.opening, options.params);
     const spec = browserSessionSpec(status.binaryPath, session, browserProfileId, usesMyChrome(browserProfileId) || cloudUrl ? undefined : await browserEgress.open(session), cdpUrl, cloudUrl);
     // On a Cloud the place a session's browser runs can change between a turn's tools/list (which starts the engine's client)
     // and its first call, or after the sandbox's browser closed: an unused client of the other place goes, never a running browser.
@@ -860,7 +896,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
-    eraseAudienceBrowsers, browserOwners, closeCapBrowsers,
+    eraseAudienceBrowsers, browserOwners, closeCapBrowsers, signInBackupRoutes,
     cloudBrowserBusy: (owner: string) => cloudBrowser?.busy(owner) ?? false,
     cloudBrowserReport: () => cloudBrowser?.report() ?? null,
     /** The browser sandbox's idle sweep, run now (it runs on its own every 30 s while a session is open). */

@@ -1,4 +1,4 @@
-// The Team Board's three agents tools (docs/team-board.md), mounted only on a Team Cloud with the board on. Each is a
+// The Team Board's three agents tools (docs/team-board.md), mounted on every Team Cloud bot. Each is a
 // thin call to its internal route (server/routes/board-tools.ts), which checks the bot, its rooms and every move.
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
@@ -17,7 +17,7 @@ const LABELS = { type: "object", additionalProperties: { type: "string", maxLeng
 export const BOARD_TOOL_DEFINITIONS = [
   {
     name: "board_add",
-    description: "Add work items to a room's board, each on a new thread; the server gives ready ones to free bots of the room.",
+    description: "Split work into items, each on a new room thread; free bots of the room take the ready ones.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -46,7 +46,7 @@ export const BOARD_TOOL_DEFINITIONS = [
   },
   {
     name: "board_list",
-    description: "The board items of your rooms, with state, holder and needs.",
+    description: "Your rooms' work items: state, holder, needs.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -58,7 +58,7 @@ export const BOARD_TOOL_DEFINITIONS = [
   },
   {
     name: "board_update",
-    description: "Settle the board item you hold (default: this thread's): done or failed with text as the result, ask a person (text = question), later (look again in minutes; text = note) or release it.",
+    description: "Settle the item you hold (default: this thread's): done or failed (text = result), ask a person (text = question), later (minutes; text = note) or release.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

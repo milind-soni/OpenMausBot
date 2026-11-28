@@ -14,7 +14,7 @@ import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
-import { antigravityHarnessLimit, antigravityLimitFacts, antigravityQuotaFamily, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
+import { antigravityHarnessFailure, antigravityLimitFacts, antigravityQuotaFamily, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const USER_INPUT = 14;
@@ -42,6 +42,9 @@ const TIMESTAMP_ERROR = errorText(
 // Adapted from pingdotgg/t3code@f9a3c38c505 and f68d36d8aa9 (AntigravityTurnOutcome.test.ts fixtures).
 const MISSING_SIGNATURE_ERROR = errorText(
   'Error 400, Message: {"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0.thinking.signature: Field required"}}, Status: INVALID_ARGUMENT, Details: []',
+);
+const CORRUPT_MEDIA_ERROR = errorText(
+  "Error 400, Message: Unable to process input: the file or media data is empty, corrupted, or malformed., Status: INVALID_ARGUMENT, Details: []",
 );
 const INVALID_SIGNATURE_ERROR = errorText(
   'Error 400, Message: {"type":"error","error":{"type":"invalid_request_error","message":"messages.3.content.0: Invalid `signature` in `thinking` block"}}, Status: INVALID_ARGUMENT, Details: []',
@@ -137,7 +140,7 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(refusal!.facts.limitResetsAt).toBeUndefined();
   });
 
-  it("reads a lost thinking signature as a broken session, a 404 by when it came, and restarts the runtime after any of them", async () => {
+  it("reads a lost thinking signature or an undecodable media part as a broken session, a 404 by when it came, and restarts the runtime after any of them", async () => {
     const { directory, conversations } = profile();
     const sessionId = "4c2b7d1e-5472-4277-b6ee-27b2e05570a7";
     const turn = async (steps: ReadonlyArray<readonly [number, string]>) => {
@@ -146,7 +149,7 @@ describe("watchAntigravityPromptOutcome", () => {
       return check({ stopReason: "end_turn" });
     };
     expect(await turn([[USER_INPUT, "hello"], [PLANNER_RESPONSE, "fine"]])).toBeUndefined();
-    for (const error of [MISSING_SIGNATURE_ERROR, INVALID_SIGNATURE_ERROR]) {
+    for (const error of [MISSING_SIGNATURE_ERROR, INVALID_SIGNATURE_ERROR, CORRUPT_MEDIA_ERROR]) {
       expect(await turn([[USER_INPUT, "again"], [ERROR_MESSAGE, error]])).toMatchObject({
         acpSessionBroken: true, acpSessionFailure: true, acpUsageLimit: false,
         message: `${NAME}'s saved conversation can no longer be sent to the model. The next message starts a fresh ${NAME} session with this conversation's context.`,
@@ -212,14 +215,16 @@ describe("watchAntigravityPromptOutcome", () => {
     expect(antigravityLimitFacts(undefined, known)).toEqual({ limit: "model" });
   });
 
-  it("reads a harness failure line on stderr that reports an exhausted quota as a usage limit, and no other one", () => {
+  it("reads a harness failure line on stderr that reports an exhausted quota as a usage limit, an undecodable media part as a broken session, and no other one", () => {
     const harness = (error: string) => `E1124 14:52:01.000001 4242 local_connection.py:551] harness stderr: Agent run failed: ${error}`;
-    expect(antigravityHarnessLimit(NAME, harness(QUOTA_ERROR.split("\n")[1]!), 0))
+    expect(antigravityHarnessFailure(NAME, harness(QUOTA_ERROR.split("\n")[1]!), 0))
       .toMatchObject({ acpUsageLimit: true, message: expect.stringContaining("has reached its usage limit"), facts: { limitResetsAt: 3_600_000 } });
-    expect(antigravityHarnessLimit(NAME, harness("RESOURCE_EXHAUSTED (code 429): Quota exceeded. reason:QUOTA_EXHAUSTED quotaResetDelay:38m0s]"), 0))
+    expect(antigravityHarnessFailure(NAME, harness("RESOURCE_EXHAUSTED (code 429): Quota exceeded. reason:QUOTA_EXHAUSTED quotaResetDelay:38m0s]"), 0))
       .toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: 38 * 60_000 } });
-    expect(antigravityHarnessLimit(NAME, harness("failed to handle call hook response: no pending hook for ID hook_request_2"), 0)).toBeUndefined();
-    expect(antigravityHarnessLimit(NAME, harness(UNAVAILABLE_ERROR.split("\n")[1]!), 0)).toBeUndefined();
+    expect(antigravityHarnessFailure(NAME, harness("failed to handle call hook response: no pending hook for ID hook_request_2"), 0)).toBeUndefined();
+    expect(antigravityHarnessFailure(NAME, harness(UNAVAILABLE_ERROR.split("\n")[1]!), 0)).toBeUndefined();
+    expect(antigravityHarnessFailure(NAME, harness(CORRUPT_MEDIA_ERROR.split("\n")[1]!), 0))
+      .toMatchObject({ acpSessionBroken: true, acpSessionFailure: true, acpUsageLimit: false, message: expect.stringContaining("starts a fresh") });
   });
 
   it("gives no failure for a session id that is no file name, a missing profile, or a log replaced during the prompt", async () => {

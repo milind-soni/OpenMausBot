@@ -7,7 +7,8 @@ import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { opensRowMenuFromKey } from "@/lib/bulk-select";
 import { intlLocale, t } from "@/lib/i18n";
 import { MAUS_COLOR_NAMES } from "@/lib/mascot";
-import type { Bot } from "@/state/store";
+import { WORK_INK, type WorkStatus } from "@/lib/room-work";
+import type { Bot, ThreadCloser } from "@/state/store";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import { BotAvatar } from "../Avatar";
 import { ChatMarkdown } from "../ChatMarkdown";
@@ -35,6 +36,10 @@ export interface FeedRowData {
   title?: string;
   pinned?: boolean;
   archived?: boolean;
+  /** Its work was marked finished; a new line opens it again. */
+  closedBy?: ThreadCloser;
+  /** Where its piece of work stands, when a bot split it off as one. */
+  work?: WorkStatus | null;
 }
 
 /** What a thread row's menu does, the same as the sidebar's room thread rows. */
@@ -43,6 +48,7 @@ export interface FeedRowActions {
   onDelete: (task: { threadId: string }) => void;
   onPin: (task: { threadId: string; title: string }, pinned: boolean) => void;
   onArchive: (task: { threadId: string }, archivedAt: number | null) => void;
+  onSetClosed: (task: { threadId: string }, closed: boolean) => void;
   /** False while the room has only this thread, which it keeps. */
   deletable: boolean;
 }
@@ -103,10 +109,10 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, groupId, bots, you, 
   const [renaming, setRenaming] = useState(false);
   const moreRef = useRef<HTMLButtonElement>(null);
   const titled = row.title !== undefined && row.threadId !== "" && actions ? row.title : undefined;
-  const task = useMemo(() => ({ threadId: row.threadId, title: titled ?? "", pinned: row.pinned, archivedAt: row.archived ? 0 : undefined, busy: row.working }),
-    [row.threadId, titled, row.pinned, row.archived, row.working]);
+  const task = useMemo(() => ({ threadId: row.threadId, title: titled ?? "", pinned: row.pinned, archivedAt: row.archived ? 0 : undefined, busy: row.working, closedBy: row.closedBy }),
+    [row.threadId, titled, row.pinned, row.archived, row.working, row.closedBy]);
   const menuSheet = useThreadRowMenu({ task, displayTitle: localizedTaskTitle(task.title), ownerId: groupId, menu, setMenu, actionRef: moreRef,
-    onStartRename: () => { setMenu(null); setRenaming(true); }, onDelete: actions?.onDelete ?? (() => {}), onPin: actions?.onPin, onArchive: actions?.onArchive,
+    onStartRename: () => { setMenu(null); setRenaming(true); }, onDelete: actions?.onDelete ?? (() => {}), onPin: actions?.onPin, onArchive: actions?.onArchive, onSetClosed: actions?.onSetClosed,
     deletable: actions?.deletable !== false });
   const fromBot = "botId" in row.speaker;
   const text = useMemo(() => previewText(row, fromBot), [row, fromBot]);
@@ -118,7 +124,10 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, groupId, bots, you, 
   const workingBot = row.workingBotId ? bots.find((bot) => bot.id === row.workingBotId) : undefined;
   const replies = row.replies === 1 ? t("room.feed.replyOne") : t("room.feed.replyMany", { count: row.replies });
   const markLabel = row.mark === "waiting" ? t("sidebar.preview.waiting") : row.mark === "unread" ? t("task.unread") : null;
-  const label = [speaker.name, text || t("room.feed.attachment"), row.replies > 0 ? replies : t("room.feed.noReplies"), markLabel].filter(Boolean).join(", ");
+  // A work status stands where "Closed" would; a bot working on it now is already said by the line under it.
+  const work = row.work && !row.archived && !(row.work.kind === "working" && row.working) ? row.work : null;
+  const label = [speaker.name, text || t("room.feed.attachment"), row.replies > 0 ? replies : t("room.feed.noReplies"), work ? work.label : row.closedBy ? t("task.closed") : null, markLabel].filter(Boolean).join(", ");
+  const quiet = row.archived || Boolean(row.closedBy);
   const openMenuAt = (x: number, y: number) => setMenu(threadMenuAt(x, y));
   const rename = (title: string | null) => {
     setRenaming(false);
@@ -143,13 +152,15 @@ export const RoomFeedRow = memo(function RoomFeedRow({ row, groupId, bots, you, 
           <time dateTime={new Date(row.at).toISOString()} title={new Date(row.at).toLocaleString(intlLocale())}
             className="shrink-0 text-[12px] font-medium leading-4 text-ink-tertiary tabular-nums">{threadUpdatedLabel(row.at, now)}</time>
           {row.pinned && <Pin size={11} data-feed-pinned="" className="shrink-0 self-center text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
-          {row.archived && <span className="min-w-0 truncate text-[12px] leading-4 text-ink-tertiary">{t("task.archived")}</span>}
+          {row.archived ? <span className="min-w-0 truncate text-[12px] leading-4 text-ink-tertiary">{t("task.archived")}</span>
+            : work ? <span data-feed-work={work.kind} className={cn("min-w-0 truncate text-[12px] leading-4", WORK_INK[work.kind])}>{work.label}</span>
+              : row.closedBy && <span data-feed-closed="" className="min-w-0 truncate text-[12px] leading-4 text-ink-tertiary">{t("task.closed")}</span>}
           {markLabel && <span aria-hidden="true" data-feed-mark={row.mark} title={markLabel}
             className={cn("size-2 shrink-0 self-center rounded-full", row.mark === "waiting" ? "bg-warning" : "bg-accent")} />}
         </div>
         {renaming && titled !== undefined ? <ThreadRenameField title={titled} onDone={rename} className="mt-1 w-full" /> : (
           <div dir="auto" className={cn("chat-text mt-0.5 max-h-[110px] overflow-hidden text-[15px] leading-[22px] text-ink [overflow-wrap:anywhere]",
-            long && "[mask-image:linear-gradient(to_bottom,black_60%,transparent)]", !text && "text-ink-secondary", row.archived && "text-ink-secondary")}>
+            long && "[mask-image:linear-gradient(to_bottom,black_60%,transparent)]", !text && "text-ink-secondary", quiet && "text-ink-secondary")}>
             {!text ? t("room.feed.attachment")
               : fromBot ? <ChatMarkdown text={text} mentionPeers={bots} everyone />
                 : <div className="whitespace-pre-wrap"><ThreadRefText text={text} peers={bots} everyone /></div>}

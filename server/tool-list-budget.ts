@@ -1,14 +1,14 @@
 // A byte budget over the MCP tool definitions an engine shows its model, for an engine that shows every tool eagerly and,
 // past its budget, silently leaves out the largest tools first. Google's native Antigravity CLI (1.5.x over ACP) is one
-// (google-antigravity/antigravity-cli#1530): it writes each tool to <app-data-dir>/mcp/<server>/<tool>.json as
-// {name, description, parameters} and counts those files across every server of the session. On 1.5.16 the drop
-// started between 58,700 and 60,600 bytes; on 1.5.17 one tool alone was kept up to 56,608 bytes, about 38 more per
-// further tool and about 6 fewer per character of the profile's path. A session's own servers share out
-// ANTIGRAVITY_CLI_TOOL_BUDGET and each fits its list into its share, least loss first: the schema compacted, then
-// shorter parameter descriptions, then shorter tool descriptions. No tool is left out, and every call is still checked
-// against the tool's own full schema.
+// (google-antigravity/antigravity-cli#1530): it counts every server's tool definitions ({name, description, parameters})
+// together. On 1.5.16 the drop started between 58,700 and 60,600 bytes; on 1.5.17 one tool alone was kept up to 56,608
+// bytes, on 1.5.18 up to about 56,780, about 38 more per further tool. There is no limit for one tool: with many tools
+// the cut only looks like one, since every tool over some size goes. A session's servers share out
+// ANTIGRAVITY_CLI_TOOL_BUDGET and each fits its list into its share, least loss first: the schema compacted, then its
+// annotations, shorter parameter descriptions, shorter tool descriptions, and last nested fields. No tool is left out,
+// no name or required field changes, and every call is still checked against the tool's own full schema.
 import { compactAdvertisedSchema } from "./advertised-schema.ts";
-import { schemaBytes } from "./tool-schema-profile.ts";
+import { itemsOf, schemaBytes } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 export type ListedTool = { name: string; description?: string; inputSchema?: unknown } & Json;
@@ -42,8 +42,11 @@ export function definitionListBytes(tools: readonly ListedTool[]): number {
  * fit these are made smaller still. */
 export const PROTECTED_TOOLS: readonly string[] = ["coordinate_bots", "start_thread", "show_html", "trigger", "memory_update", "attach_file"];
 
-/** A tool description is never cut below this many characters while fitting; past it the list is over its share. */
+/** Tool descriptions are cut to this many characters before any is cut further. */
 export const TOOL_DESCRIPTION_FLOOR = 120;
+
+/** A tool description is never cut below this many characters while fitting; past it the list is over its share. */
+export const TOOL_DESCRIPTION_MIN = 40;
 
 /** `text` cut to at most `max` characters: at the last sentence end that fits, else at a word with an ellipsis; undefined
  * when nothing is left. The kept length never shrinks as `max` grows, so a search over `max` is sound. */
@@ -66,32 +69,69 @@ function isObject(value: unknown): value is Json {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Every `description` inside a schema, at any depth, cut to `max` characters (gone at 0). */
-function withParameterDescriptions(node: unknown, max: number): unknown {
+/** Keywords that tell a model nothing a call must follow: they go before any description does. */
+const ANNOTATIONS = new Set(["title", "examples", "example", "$comment", "deprecated", "readOnly", "writeOnly", "$schema", "$id"]);
+
+/** A schema with every `description`, at any depth, cut to `parameters` characters (gone at 0), and with `annotations`
+ * its ANNOTATIONS left out. Property names are never touched. */
+function withSchemaLevel(node: unknown, parameters: number, annotations: boolean): unknown {
   if (!isObject(node)) return node;
   const result: Json = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === "description" && typeof value === "string") {
-      const kept = cutText(value, max);
+      const kept = cutText(value, parameters);
       if (kept !== undefined) result[key] = kept;
-    } else if (SCHEMA_MAPS.has(key) && isObject(value)) {
-      result[key] = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, withParameterDescriptions(child, max)]));
-    } else if (SCHEMA_LISTS.has(key) && Array.isArray(value)) result[key] = value.map((child) => withParameterDescriptions(child, max));
-    else if (SCHEMA_SLOTS.has(key) && isObject(value)) result[key] = withParameterDescriptions(value, max);
+    } else if (annotations && ANNOTATIONS.has(key)) continue;
+    else if (SCHEMA_MAPS.has(key) && isObject(value)) {
+      result[key] = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, withSchemaLevel(child, parameters, annotations)]));
+    } else if (SCHEMA_LISTS.has(key) && Array.isArray(value)) result[key] = value.map((child) => withSchemaLevel(child, parameters, annotations));
+    else if (SCHEMA_SLOTS.has(key) && isObject(value)) result[key] = withSchemaLevel(value, parameters, annotations);
     else result[key] = value;
   }
   return result;
 }
 
-/** How much of each description a list keeps, in characters; Infinity keeps all of it. */
-export interface DescriptionLevel { parameters: number; tools: number }
+function acceptsArray(type: unknown): boolean {
+  return type === "array" || (Array.isArray(type) && type.includes("array"));
+}
+
+/** A top-level field that holds an object, or a nested value, as just its type and choices. Gemini requires `items` on
+ * every array: a list of objects keeps `{type:"object"}`, and any other array keeps its item type (a string when that
+ * type cannot be named). A field that is not nested stays as it was, except an array that would otherwise go out with
+ * no `items`. A field with no `type` of its own stays as it was. */
+function collapsedField(property: unknown, root: Json): unknown {
+  if (!isObject(property) || !("type" in property)) return property;
+  const listOfObjects = isObject(property.items) && (isObject(property.items.properties) || isObject(property.items.additionalProperties));
+  const nested = isObject(property.properties) || isObject(property.additionalProperties) || listOfObjects
+    || Array.isArray(property.anyOf) || Array.isArray(property.oneOf) || Array.isArray(property.allOf);
+  if (!nested) {
+    if (acceptsArray(property.type) && !("items" in property)) return { ...property, items: itemsOf(property, root) };
+    return property;
+  }
+  const kept: Json = Object.fromEntries(["type", "enum"].filter((key) => key in property).map((key) => [key, property[key]]));
+  if (listOfObjects) return { ...kept, items: { type: "object" } };
+  return acceptsArray(property.type) ? { ...kept, items: itemsOf(property, root) } : kept;
+}
+
+/** A schema with each top-level field collapsed as above; the field names and `required` as they were. The handler still
+ * checks every nested field. */
+function withTopLevelFields(schema: unknown): unknown {
+  if (!isObject(schema) || !isObject(schema.properties)) return schema;
+  return { ...schema, properties: Object.fromEntries(Object.entries(schema.properties).map(([name, property]) => [name, collapsedField(property, schema)])) };
+}
+
+/** How much of each tool a list keeps: description lengths in characters (Infinity keeps all), whether schema
+ * annotations are left out, and whether tools other than PROTECTED_TOOLS keep only their top-level fields. */
+export interface DescriptionLevel { parameters: number; tools: number; annotations?: boolean; topLevelOnly?: boolean }
 
 export const FULL_DESCRIPTIONS: DescriptionLevel = { parameters: Infinity, tools: Infinity };
 
 export function withDescriptionLevel<T extends ListedTool>(tools: readonly T[], level: DescriptionLevel): T[] {
+  const annotations = level.annotations === true;
   return tools.map((tool) => {
     const description = typeof tool.description === "string" ? cutText(tool.description, level.tools) ?? "" : tool.description;
-    const inputSchema = level.parameters === Infinity ? tool.inputSchema : withParameterDescriptions(tool.inputSchema, level.parameters);
+    let inputSchema = level.parameters === Infinity && !annotations ? tool.inputSchema : withSchemaLevel(tool.inputSchema, level.parameters, annotations);
+    if (level.topLevelOnly && !PROTECTED_TOOLS.includes(tool.name)) inputSchema = withTopLevelFields(inputSchema);
     return description === tool.description && inputSchema === tool.inputSchema ? tool : { ...tool, description, inputSchema };
   });
 }
@@ -124,21 +164,27 @@ function largestFitting(low: number, high: number, fits: (value: number) => bool
   return low;
 }
 
-/** The least cut that brings `tools` (already compacted) to `budget` bytes: parameter descriptions first, then tool
- * descriptions down to TOOL_DESCRIPTION_FLOOR. `fits` is false when even that is over. */
+/** The least cut that brings `tools` (already compacted) to `budget` bytes, each step only when the one before is not
+ * enough: schema annotations; parameter descriptions; tool descriptions down to TOOL_DESCRIPTION_FLOOR, then down to
+ * TOOL_DESCRIPTION_MIN; then nested fields, PROTECTED_TOOLS aside. `fits` is false when even that is over. */
 export function descriptionLevelFor(tools: readonly ListedTool[], budget: number): { level: DescriptionLevel; fits: boolean } {
   const bytesAt = (level: DescriptionLevel) => definitionListBytes(withDescriptionLevel(tools, level));
   if (bytesAt(FULL_DESCRIPTIONS) <= budget) return { level: FULL_DESCRIPTIONS, fits: true };
+  const plain = { parameters: Infinity, tools: Infinity, annotations: true };
+  if (bytesAt(plain) <= budget) return { level: plain, fits: true };
   const maxParameter = longest(tools, (tool) => parameterDescriptions(tool.inputSchema));
-  if (bytesAt({ parameters: 0, tools: Infinity }) <= budget) {
-    const parameters = largestFitting(0, maxParameter, (chars) => bytesAt({ parameters: chars, tools: Infinity }) <= budget);
-    return { level: { parameters, tools: Infinity }, fits: true };
+  if (bytesAt({ ...plain, parameters: 0 }) <= budget) {
+    const parameters = largestFitting(0, maxParameter, (chars) => bytesAt({ ...plain, parameters: chars }) <= budget);
+    return { level: { ...plain, parameters }, fits: true };
   }
-  const floor = { parameters: 0, tools: TOOL_DESCRIPTION_FLOOR };
-  if (bytesAt(floor) > budget) return { level: floor, fits: false };
   const maxTool = longest(tools, (tool) => (typeof tool.description === "string" ? [tool.description] : []));
-  const chars = largestFitting(TOOL_DESCRIPTION_FLOOR, Math.max(TOOL_DESCRIPTION_FLOOR, maxTool), (max) => bytesAt({ parameters: 0, tools: max }) <= budget);
-  return { level: { parameters: 0, tools: chars }, fits: true };
+  const shortest = (floor: number) => largestFitting(floor, Math.max(floor, maxTool), (max) => bytesAt({ ...plain, parameters: 0, tools: max }) <= budget);
+  if (bytesAt({ ...plain, parameters: 0, tools: TOOL_DESCRIPTION_FLOOR }) <= budget) return { level: { ...plain, parameters: 0, tools: shortest(TOOL_DESCRIPTION_FLOOR) }, fits: true };
+  if (bytesAt({ ...plain, parameters: 0, tools: TOOL_DESCRIPTION_MIN }) <= budget) return { level: { ...plain, parameters: 0, tools: shortest(TOOL_DESCRIPTION_MIN) }, fits: true };
+  const floor = { ...plain, parameters: 0, tools: TOOL_DESCRIPTION_MIN, topLevelOnly: true };
+  if (bytesAt(floor) > budget) return { level: floor, fits: false };
+  const chars = largestFitting(TOOL_DESCRIPTION_MIN, Math.max(TOOL_DESCRIPTION_MIN, maxTool), (max) => bytesAt({ ...floor, tools: max }) <= budget);
+  return { level: { ...floor, tools: chars }, fits: true };
 }
 
 /** A protected tool as small as it gets while still naming every top-level field, its type and its choices: its first
@@ -146,26 +192,30 @@ export function descriptionLevelFor(tools: readonly ListedTool[], budget: number
  * handler still checks every nested field and answers a wrong one with what it expects. */
 function smallest<T extends ListedTool>(tool: T): T {
   const description = typeof tool.description === "string" ? cutText(tool.description.split(/(?<=[.!?])\s/)[0] ?? "", TOOL_DESCRIPTION_FLOOR) ?? "" : tool.description;
-  const schema = tool.inputSchema;
-  if (!isObject(schema) || !isObject(schema.properties)) return { ...tool, description };
-  const properties = Object.fromEntries(Object.entries(schema.properties).map(([name, property]) => {
-    if (!isObject(property)) return [name, property];
-    const nested = isObject(property.properties) || (isObject(property.items) && isObject(property.items.properties)) || isObject(property.additionalProperties);
-    return [name, nested ? Object.fromEntries(["type", "enum"].filter((key) => key in property).map((key) => [key, property[key]])) : property];
-  }));
-  return { ...tool, description, inputSchema: { ...schema, properties } };
+  return { ...tool, description, inputSchema: withTopLevelFields(tool.inputSchema) };
+}
+
+/** What `tools` come to at the deepest cut there is, protected tools kept whole. */
+export function toolListFloorBytes(tools: readonly ListedTool[]): number {
+  return definitionListBytes(withDescriptionLevel(withCompactSchemas(tools), { parameters: 0, tools: TOOL_DESCRIPTION_MIN, annotations: true, topLevelOnly: true }));
 }
 
 export interface FittedToolList<T> { tools: T[]; bytes: number; from: number; level: DescriptionLevel; fits: boolean }
 
 /** `tools` as this engine is shown them within `share` bytes. A list that cannot fit keeps every tool at its shortest,
- * with PROTECTED_TOOLS shrunk further, so the engine's largest-first drop takes others before them. */
+ * with PROTECTED_TOOLS shrunk further; another tool keeps its nested fields only where leaving them out would take it
+ * below the largest protected tool, so the engine's largest-first drop still takes it before them. */
 export function fitToolListToShare<T extends ListedTool>(tools: readonly T[], share: number): FittedToolList<T> {
   const compacted = withCompactSchemas(tools);
   const from = definitionListBytes(compacted);
   const { level, fits } = descriptionLevelFor(compacted, share);
   let fitted = withDescriptionLevel(compacted, level);
-  if (!fits) fitted = fitted.map((tool) => (PROTECTED_TOOLS.includes(tool.name) ? smallest(tool) : tool));
+  if (!fits) {
+    const nested = withDescriptionLevel(compacted, { ...level, topLevelOnly: false });
+    fitted = fitted.map((tool, index) => (PROTECTED_TOOLS.includes(tool.name) ? smallest(nested[index]!) : tool));
+    const largestProtected = Math.max(0, ...fitted.filter((tool) => PROTECTED_TOOLS.includes(tool.name)).map(definitionBytes));
+    fitted = fitted.map((tool, index) => (definitionBytes(tool) < largestProtected && definitionBytes(nested[index]!) >= largestProtected ? nested[index]! : tool));
+  }
   return { tools: fitted, bytes: definitionListBytes(fitted), from, level, fits };
 }
 

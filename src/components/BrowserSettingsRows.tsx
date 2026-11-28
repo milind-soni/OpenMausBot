@@ -118,7 +118,7 @@ export function BrowserProxyRow() {
           aria-label={t("settings.browser.proxy")}
           autoComplete="off"
           spellCheck={false}
-          placeholder="socks5://127.0.0.1:1080"
+          placeholder={saved ? t("settings.browser.proxySavedPlaceholder") : "socks5://127.0.0.1:1080"}
           value={endpoint}
           onChange={(event) => setEndpoint(event.target.value)}
           className="min-w-0 flex-1 rounded-lg border border-control bg-app px-3 py-2 text-[13px] text-ink sm:w-64 sm:flex-none"

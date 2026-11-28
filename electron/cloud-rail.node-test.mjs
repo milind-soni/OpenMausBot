@@ -365,7 +365,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "probe", "look", "color", "recolor", "remove", "rename", "makeHome", "homeOffers", "onChanged", "local", "onNewLocal"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "probe", "look", "color", "recolor", "remove", "rename", "makeHome", "homeOffers", "together", "onChanged", "local", "onNewLocal"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet", "organization"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -378,6 +378,7 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.cloudAdd.organization("Client B", "rose"), /Create organization/);
   await assert.rejects(page.bridge.workspaces.color("rose"), /Choose a color/, "a page changes its place's colour only from the person's click");
   await assert.rejects(page.bridge.workspaces.recolor("vps", "rose"), /Choose a color/);
+  await assert.rejects(page.bridge.workspaces.together(true), /Show bots together/, "a Cloud's page turns Show bots together only from the person's click");
   await assert.rejects(page.bridge.workspaces.remove("old"), /Choose Remove from list/, "Remove from list only from the person's click");
   await assert.rejects(page.bridge.workspaces.rename("vps", "Office"), /Choose Rename/, "Rename only from the person's click");
   await assert.rejects(page.bridge.workspaces.makeHome("vps"), /Choose Make my home/, "a move starts only from the person's click");
@@ -522,4 +523,15 @@ test("＋'s new workspace and a workspace's menu: only while main offers it, onl
   assert.throws(() => r.call("workspaces:local-new", "Notes", null), /only available/, "a Cloud's page never makes one");
   creatable = false; r.w.trusted = true;
   assert.throws(() => r.call("workspaces:local-new", "Notes", null), /isn't something to add/);
+});
+
+test("Show bots together: in the menu of This computer and My Cloud while this computer is home; of the workspace that runs and My Cloud once My Cloud is home; nowhere else, and nowhere where it is not offered", () => {
+  const marked = (places) => places.filter(place => "together" in place).map(place => [place.id, place.together]);
+  const alone = { activeId: "local", environments: [{ id: "home", kind: "remote", name: "My Cloud", origin: HOME }] };
+  const clouds = session({ teams: [], clouds: parseCloudList([PRIMARY]) });
+  assert.deepEqual(marked(railPlaces({ saved: alone, home: null, mine: HOME, state: clouds, profiles: [{ id: "work", name: "Work" }], together: { on: true, profile: null } })),
+    [["local", true], ["home", true]], "a named workspace beside This computer is not the one that joins");
+  assert.deepEqual(marked(railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }, { id: "work", name: "Work" }], together: { on: false, profile: "default" } })),
+    [["profile:default", false], ["home", false]], "My Cloud as home: This Mac, which runs, and My Cloud; never Client A, a team's Cloud or a server");
+  assert.deepEqual(marked(railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session(), profiles: [{ id: "default" }], together: null })), [], "not offered (the frozen copy runs): no row");
 });

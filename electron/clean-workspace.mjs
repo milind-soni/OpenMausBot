@@ -47,7 +47,7 @@ export function cleanWorkspaceConfig(language = null, now = new Date()) {
  * @param {{
  *   dataDir(): string,
  *   running(): string | null,
- *   swap(dir: string): Promise<{ ok: boolean }>,
+ *   swap(dir: string, how?: { background: true }): Promise<{ ok: boolean }>,
  *   allowed?(): boolean,
  *   changed?(): void,
  *   log?(line: string): void,
@@ -86,15 +86,15 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
     try { fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(cleanWorkspaceConfig(language)), { mode: 0o600, flag: "wx" }); }
     catch (error) { if (error?.code !== "EEXIST") throw error; }
   }
-  async function swapTo(dir) {
+  async function swapTo(dir, how) {
     swapping = true;
-    const done = await swap(dir).catch((error) => ({ ok: false, error })).finally(() => { swapping = false; });
+    const done = await (how ? swap(dir, how) : swap(dir)).catch((error) => ({ ok: false, error })).finally(() => { swapping = false; });
     if (done?.ok !== true) { log(`clean workspace: could not start on ${dir} (${done?.error?.message ?? done?.error ?? "no answer"})`); return false; }
     changed();
     return true;
   }
-  /** The frozen copy's server again; true once it is the one running. */
-  const leave = () => inTurn(() => (active() ? swapTo(dataDir()) : true));
+  /** The frozen copy's server again; true once it is the one running. `background`: the window stays where it is. */
+  const leave = ({ background = false } = {}) => inTurn(() => (active() ? swapTo(dataDir(), background ? { background: true } : undefined) : true));
   /** This computer's freeze marker, as the frozen copy's own server would say it. */
   function marker() {
     const text = readOwn("moved.json");
@@ -122,14 +122,16 @@ export function createCleanWorkspace({ dataDir, running, swap, allowed = () => t
       try { seed(folder()); } catch (error) { log(`clean workspace: could not set it up (${error?.message ?? error})`); return false; }
       return swapTo(folder());
     }),
-    /** Opens profile `id`, set up fresh the first time; true once it runs. */
-    open: (id = DEFAULT_PROFILE) => inTurn(async () => {
+    /** Opens profile `id`, set up fresh the first time; true once it runs. `background`: its server only, the window stays
+     * where it is (this computer and My Cloud together, together-background.mjs), and only one that exists already. */
+    open: (id = DEFAULT_PROFILE, { background = false } = {}) => inTurn(async () => {
       if (!PROFILE_ID.test(id)) return false;
       if (profile() === id) return true;
       if (!allowed() || held > 0) return false;
       const dir = profileDir(dataDir(), id);
+      if (background && !fs.existsSync(dir)) return false;
       try { seed(dir); } catch (error) { log(`profile ${id}: could not set it up (${error?.message ?? error})`); return false; }
-      return swapTo(dir);
+      return swapTo(dir, background ? { background: true } : undefined);
     }),
     leave,
     /** Settles once the swaps asked for so far are done. */

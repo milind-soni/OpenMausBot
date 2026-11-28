@@ -1,12 +1,12 @@
 // A throwaway Team Cloud on this computer for a real-model pass over the Team Board (docs/verification/team-board.md).
-// Everything lives in a new temp folder (its HOME and its data folder), the board is switched on, an Owner and a Member
+// Everything lives in a new temp folder (its HOME and its data folder), an Owner and a Member
 // are paired the way the Admin pairs them, and the tokens and a few curl lines are printed. It runs until Ctrl-C and
 // then removes the folder. Only the provider keys named below cross from this shell into the server.
 //   node --experimental-strip-types scripts/launch-team-board.ts [--offline]
 // --offline: the server reaches nothing but this computer (a check that it starts and pairs, with no model to answer).
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -31,7 +31,6 @@ const freePort = () => new Promise<number>((resolve, reject) => {
 const root = mkdtempSync(join(tmpdir(), "omb-team-board-"));
 const dataDir = join(root, ".openmausbot");
 mkdirSync(dataDir, { recursive: true });
-writeFileSync(join(dataDir, "config.json"), JSON.stringify({ features: { teamBoard: true } }));
 const port = await freePort();
 const secret = randomBytes(32).toString("base64url");
 const base = `http://127.0.0.1:${port}`;
@@ -74,7 +73,7 @@ const owner = await pair("olive@board.test", "owner");
 const member = await pair("mira@board.test", "member");
 const headers = `-H 'host: ${HOST}' -H 'x-forwarded-proto: https' -H 'x-forwarded-for: 203.0.113.9' -H 'origin: https://${HOST}' -H 'content-type: application/json'`;
 console.log(`
-Team Cloud with the board on: ${base}   (data: ${dataDir})
+Team Cloud: ${base}   (data: ${dataDir})
 Provider keys passed: ${Object.keys(passed).join(", ") || "none"}
 OWNER=${owner}
 MEMBER=${member}

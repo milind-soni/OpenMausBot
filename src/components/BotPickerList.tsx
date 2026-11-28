@@ -3,9 +3,10 @@ import type { Bot } from "@/state/store";
 import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { BotAvatar } from "./Avatar";
 import { cn } from "@/lib/cn";
+import { isPlaceId } from "@/lib/place-chat";
 
 export function BotPickerList({
-  bots,
+  bots: offered,
   picked,
   onToggle,
   emptyHint,
@@ -16,6 +17,8 @@ export function BotPickerList({
   emptyHint: string;
 }) {
   const team = useTeamPeople();
+  // A My Cloud bot open in place is in this page's store but not this computer's: no room, team or routine here takes it.
+  const bots = offered.filter((bot) => !isPlaceId(bot.id));
   return (
     <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
       {bots.length === 0 && <div className="px-2 py-4 text-center text-[13px] text-ink-secondary">{emptyHint}</div>}

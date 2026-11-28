@@ -16,6 +16,7 @@ const fixture = vi.hoisted(() => {
     find: vi.fn(),
     team: false,
     open: vi.fn(),
+    ownerOrAdmin: null as boolean | null,
   };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -26,6 +27,7 @@ vi.mock("./conversation-share/conversation-share", async (importOriginal) => ({
   ...await importOriginal<typeof import("./conversation-share/conversation-share")>(),
   openConversationDialog: fixture.open,
 }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced && fixture.threadsChosen }));
 vi.mock("@/lib/chat-find", async (importOriginal) => ({
@@ -74,6 +76,7 @@ beforeEach(() => {
   fixture.threadsChosen = true;
   fixture.inspectorOpen = false;
   fixture.team = false;
+  fixture.ownerOrAdmin = null;
   fixture.open.mockClear();
   fixture.dispatch.mockClear();
   fixture.find.mockClear();
@@ -92,7 +95,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 
   it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
+    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "start-fresh", "publish", "copy", "download", "activity", "inspector"]);
     for (const item of menu.items) {
       expect(item.disabled, item.key).toBeFalsy();
       expect(item.heading ?? "", item.key).not.toBe("In Advanced mode");
@@ -115,6 +118,11 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(menuOf(createElement(ChatMoreMenu, { bot: fresh })).items.find((one) => one.key === "start-fresh")!.disabled).toBe(true);
   });
 
+  it("does not start fresh while a thread switch is pending", () => {
+    const item = menuOf(createElement(ChatMoreMenu, { bot: { ...bot, switchingTo: "other" } })).items.find((one) => one.key === "start-fresh")!;
+    expect(item.disabled).toBe(true);
+  });
+
   it("starts a new thread with the bot and displays the platform shortcut hint", () => {
     const win = globalThis.window as { ogb?: { platform?: string } };
     try {
@@ -127,6 +135,22 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     } finally {
       delete win.ogb;
     }
+  });
+
+  it("shows the platform Start fresh chord beside the menu item", () => {
+    const win = globalThis.window as { ogb?: { platform?: string } };
+    try {
+      for (const [platform, expected] of [["darwin", "⌘ ⇧ K"], ["win32", "Ctrl Shift K"]] as const) {
+        win.ogb = { platform };
+        const item = menuOf(createElement(ChatMoreMenu, { bot })).items.find((one) => one.key === "start-fresh")!;
+        expect(renderToStaticMarkup(createElement("div", null, item.trailing))).toContain(expected);
+      }
+    } finally {
+      delete win.ogb;
+    }
+  });
+
+  it("starts a new thread with the bot", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     menu.items.find((item) => item.key === "new-thread")!.onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "pepper" });
@@ -154,7 +178,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 
   it("leaves All threads out while the bot has one thread", () => {
     const single = { ...bot, threadId: "main", tasks: [task("main", "Our chat", 1), task("routine", "Morning digest", 5, { routineRunId: "run-1" })] };
-    expect(keys(menuOf(createElement(ChatMoreMenu, { bot: single })).items)).toEqual(["find", "new-thread", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
+    expect(keys(menuOf(createElement(ChatMoreMenu, { bot: single })).items)).toEqual(["find", "new-thread", "start-fresh", "publish", "copy", "download", "activity", "inspector"]);
     expect(keys(menuOf(createElement(ChatMoreMenu, { bot: { ...bot, tasks: undefined } })).items)).not.toContain("threads");
   });
 
@@ -205,7 +229,7 @@ describe("the phone header's ⋯", () => {
 describe("ChatShareMenu, the bot panel's Share", () => {
   it("shares the bot as a template, or copies or downloads the conversation, in those words", () => {
     const menu = menuOf(createElement(ChatShareMenu, { bot, className: "" }));
-    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["as-template", "Share as template"], ["copy", "Copy conversation"], ["download", "Download conversation"]]);
+    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["publish", "Publish"], ["copy", "Copy conversation"], ["download", "Download conversation"]]);
   });
 });
 
@@ -213,7 +237,7 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
   it("keeps main's items, trigger and hover menu below the header", () => {
     fixture.advanced = true;
     const menu = menuOf(createElement(ChatHeaderMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
+    expect(keys(menu.items)).toEqual(["find", "start-fresh", "publish", "copy", "download", "activity", "inspector"]);
     expect(menu.items.find((item) => item.key === "inspector")).toMatchObject({ separatorBefore: true });
     expect(menu.items.every((item) => !item.disabled && item.heading !== "In Advanced mode")).toBe(true);
     expect(menu).toMatchObject({ placement: "below", openOnHover: true });
@@ -231,6 +255,45 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
     const items = menuOf(createElement(ChatHeaderMenu, { bot })).items;
     expect(keys(items)).toEqual(expect.arrayContaining(["new-thread", "threads"]));
     expect(items.find((item) => item.key === "threads")!.submenu).toHaveLength(3);
+  });
+});
+
+describe("Set as main thread, for the conversation on screen", () => {
+  const withSide = (extra: Partial<Task>): Bot => ({ ...bot, tasks: bot.tasks!.map((each) => (each.threadId === "side" ? { ...each, ...extra } : each)) });
+  const setMain = (item: Bot, menu: typeof ChatMoreMenu | typeof ChatHeaderMenu = ChatHeaderMenu) =>
+    menuOf(createElement(menu, { bot: item })).items.find((one) => one.key === "set-main");
+
+  it("makes the open conversation the bot's main thread, in Simple and Advanced", () => {
+    fixture.ownerOrAdmin = true;
+    for (const advanced of [false, true]) {
+      fixture.advanced = advanced;
+      fixture.dispatch.mockClear();
+      const item = setMain(bot, ChatMoreMenu)!;
+      expect(item).toMatchObject({ label: "Set as main thread", disabled: false });
+      item.onSelect();
+      expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "pepper", patch: { mainThreadChoice: "side" } });
+    }
+  });
+
+  it("stays shown but off on the main thread, saying why", () => {
+    fixture.ownerOrAdmin = true;
+    expect(setMain({ ...bot, mainThreadId: "side" })).toMatchObject({ disabled: true, title: "This is already the main thread" });
+  });
+
+  it("is left out for automation runs, private, archived and bot-opened threads, and for a blank new chat", () => {
+    fixture.ownerOrAdmin = true;
+    expect(setMain(withSide({ routineRunId: "run-2" }))).toBeUndefined();
+    expect(setMain(withSide({ private: true }))).toBeUndefined();
+    expect(setMain(withSide({ archivedAt: 1 }))).toBeUndefined();
+    expect(setMain(withSide({ openedBy: { botId: "scout", name: "Scout", at: 1 } }))).toBeUndefined();
+    expect(setMain({ ...bot, threadId: "not-saved-yet" })).toBeUndefined();
+  });
+
+  it("is only for the owner or an admin, as the sidebar's item is", () => {
+    for (const allowed of [false, null]) {
+      fixture.ownerOrAdmin = allowed;
+      expect(setMain(bot)).toBeUndefined();
+    }
   });
 });
 
@@ -259,5 +322,25 @@ describe("sharing the conversation on screen, on a team", () => {
 
   it("is not offered off a team", () => {
     expect(shareKeys(withSide({ private: true }))).toEqual([]);
+  });
+});
+
+describe("Publish's choices", () => {
+  const choices = () => menuOf(createElement(ChatMoreMenu, { bot })).items.find((item) => item.key === "publish")!.submenu!.map((item) => item.key);
+  afterAll(() => { (window as { ogb?: unknown }).ogb = undefined; });
+
+  it("offers the team's templates to its admins only, and the repository to no member", () => {
+    fixture.team = true;
+    fixture.ownerOrAdmin = true;
+    expect(choices()).toEqual(["publish:community", "publish:repo", "publish:team", "publish:download"]);
+    fixture.ownerOrAdmin = false;
+    expect(choices()).toEqual(["publish:community", "publish:download"]);
+  });
+
+  it("offers Save folder… on the desktop, not to a remote client", () => {
+    (window as { ogb?: unknown }).ogb = { pickFolder: vi.fn() };
+    expect(choices()).toEqual(["publish:community", "publish:repo", "publish:save", "publish:download"]);
+    (window as { ogb?: unknown }).ogb = { pickFolder: vi.fn(), remoteClient: { active: true } };
+    expect(choices()).toEqual(["publish:community", "publish:repo", "publish:download"]);
   });
 });

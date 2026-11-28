@@ -169,6 +169,7 @@ export class BoxRunner {
     if (plan.net === "isolated") {
       const proxy = `http://127.0.0.1:${this.options.egressPort ?? BOX_EGRESS_PORT}`;
       for (const name of BOX_PROXY_ENV) env[name] = proxy;
+      if (request.engine === "commandCodeAgent") env.NODE_USE_ENV_PROXY = "1";
       // Node's env proxy matches an IPv6 host only bracketed; curl and the engines take the plain forms.
       for (const name of BOX_NO_PROXY_ENV) env[name] = "127.0.0.1,localhost,::1,[::1]";
     }

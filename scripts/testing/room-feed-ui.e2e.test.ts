@@ -4,6 +4,8 @@
 // room's current thread stays where it was. A row's menu pins, archives and deletes its thread, archived ones come back
 // under Show archived threads, and the panel beside the feed renames and deletes the thread it holds. Below 768px the
 // room is its single transcript.
+// Closed threads fold into one quiet row that opens ten at a time, the panel says who closed its thread and reopens it,
+// a new line opens a closed thread, and the sidebar marks a closed thread and offers Reopen.
 // Needs the pinned agent-browser binary: runs when one resolves (tools directory, OMB_AGENT_BROWSER_PATH or PATH) or
 // OMB_UI_E2E=1 asks for the verified download; otherwise skipped.
 import { spawn } from "node:child_process";
@@ -103,6 +105,20 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     await until(() => evaluate("document.querySelector('[data-thread-panel]').textContent.includes('Who has the logo files?')"), "the thread's lines in the panel");
     expect(await current()).toBe(room.threadId);
     await ui("screenshot", "--out", join(evidenceDir, "room-feed-thread.png"));
+
+    const revisitRoom = async () => {
+      await evaluate(`document.querySelector('[data-sidebar-bot-row="${basil.id}"]').click(); true`);
+      await until(() => evaluate("!document.querySelector('[data-room-feed], [data-thread-panel]')"), "leaving the room");
+      await evaluate(`document.querySelector('[data-sidebar-group-row="${room.id}"]').click(); true`);
+      await until(() => evaluate(`Boolean(document.querySelector('[data-room-feed="${room.id}"]'))`), "returning to the room");
+    };
+    await revisitRoom();
+    await until(() => evaluate(`Boolean(document.querySelector('[data-thread-panel="${opened}"]'))`), "the last viewed thread beside the feed");
+    expect(await current()).toBe(room.threadId);
+    await evaluate("document.querySelector(`[data-thread-panel] button[aria-label='Close thread']`).click(); true");
+    await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the thread panel to close");
+    await revisitRoom();
+    expect(await evaluate("Boolean(document.querySelector('[data-thread-panel]'))")).toBe(false);
 
     await browse("click", "[data-room-feed-composer] textarea");
     await browse("type", "[data-room-feed-composer] textarea", "Draft the outage email");
@@ -230,6 +246,103 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
 
     await browse("set", "viewport", "700", "900");
     await until(() => evaluate("!document.querySelector('[data-room-feed]') && Boolean(document.querySelector('[data-look=\"chat\"] [role=\"log\"]'))"), "the room's transcript below 768px");
+    const logs = await ui("console");
+    expect((logs.messages as Array<{ type: string; text: string }>).filter((message) => message.type === "error")).toEqual([]);
+  } finally {
+    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    expect(existsSync(info.dataDir)).toBe(false);
+  }
+}, LAUNCH_TIMEOUT_MS + 240_000);
+
+(enabled ? it : it.skip)("folds a room's closed threads, says who closed one beside the feed, and opens it again", async () => {
+  const { child, info } = await launch();
+  try {
+    const api = fixtureApi(info.url, { headers: { origin: info.url } });
+    const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
+    const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
+    const browser = JSON.parse(readFileSync(info.ui, "utf8")) as UiHandle;
+    const browse = (...args: string[]) => agentBrowser(browser.binary, sessionEnv(browser), args);
+    const shot = async (name: string) => {
+      for (const skin of ["midnight", "daylight"]) {
+        await evaluate(`import('/src/lib/skins.ts').then(({ applySkin }) => { applySkin(${JSON.stringify(skin)}); return true; })`);
+        await new Promise((done) => setTimeout(done, 400));
+        await ui("screenshot", "--out", join(evidenceDir, `${name}-${skin}.png`));
+      }
+      await evaluate("import('/src/lib/skins.ts').then(({ applySkin }) => { applySkin('midnight'); return true; })");
+    };
+    await browse("set", "viewport", "1440", "900");
+    const idle = () => until(async () => ((await api("GET", "/api/bots")).bots as Array<{ busy?: boolean }>).every((bot) => !bot.busy), "the bots to settle");
+
+    const room = (await api("POST", "/api/groups", {
+      memberIds: [info.botId], name: "Docs room", setup: { bulletin: "", defaultResponder: { kind: "member", botId: info.botId } },
+    })).group;
+    const lines = ["Outline the API guide", "Fix the README typo", "Rename the config page", "Update the changelog", "Plan the docs sprint"];
+    const threads: string[] = [];
+    for (const [index, text] of lines.entries()) {
+      const threadId = index === 0 ? room.threadId : (await api("POST", `/api/groups/${room.id}/tasks`, { activate: false })).task.threadId;
+      threads.push(threadId);
+      await api("POST", `/api/groups/${room.id}/messages`, { text, threadId });
+      await idle();
+      await api("POST", `/api/groups/${room.id}/read`, { threadId });
+    }
+    const tasks = async () => ((await api("GET", "/api/bots")).groups as Array<{ id: string; tasks: Array<{ threadId: string; closedAt?: number; closedBy?: { kind: string; name: string } }> }>)
+      .find((group) => group.id === room.id)!.tasks;
+    const row = (threadId: string) => `[data-feed-thread="${threadId}"]`;
+    const menuItem = (label: string) => `[...[...document.querySelectorAll('[data-thread-overlay]')].at(-1)?.querySelectorAll('button') ?? []].find((button) => button.textContent === ${JSON.stringify(label)})`;
+
+    await evaluate(`document.querySelector('[data-sidebar-group-row="${room.id}"]').click(); true`);
+    await until(() => evaluate("document.querySelectorAll('[data-feed-thread]').length === 5"), "the feed to list the room's five threads");
+    await shot("close-before");
+
+    await evaluate(`document.querySelector('${row(threads[1]!)} button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Close")})`), "Close in the row's menu");
+    await evaluate(`${menuItem("Close")}.click(); true`);
+    await until(async () => (await tasks()).find((task) => task.threadId === threads[1])?.closedBy?.kind === "person", "the thread to be closed by the person");
+    for (const threadId of threads.slice(2, 4)) await api("PATCH", `/api/groups/${room.id}/tasks/${threadId}`, { closed: true });
+    await until(() => evaluate("document.querySelectorAll('[data-feed-thread]').length === 2"), "the closed threads to fold");
+    expect(await evaluate("[...document.querySelectorAll('[data-feed-fold]')].map((fold) => fold.textContent)")).toEqual(["3 closed threads"]);
+    await shot("close-folded");
+
+    await evaluate("document.querySelector('[data-feed-fold]').click(); true");
+    await until(() => evaluate("document.querySelectorAll('[data-feed-thread]').length === 5 && !document.querySelector('[data-feed-fold]')"), "the fold to open in place");
+    expect(await evaluate("[...document.querySelectorAll('[data-feed-thread]')].map((item) => Boolean(item.querySelector('[data-feed-closed]')))")).toEqual([false, true, true, true, false]);
+    await shot("close-unfolded");
+
+    await evaluate(`document.querySelector('${row(threads[2]!)} > button:first-child').click(); true`);
+    await until(() => evaluate(`document.querySelector('[data-thread-panel]')?.getAttribute('data-thread-panel') === ${JSON.stringify(threads[2])}`), "the closed thread beside the feed");
+    await until(() => evaluate("document.querySelector('[data-thread-closed]')?.textContent.startsWith('Closed by ')"), "who closed it, in the panel");
+    expect(await evaluate("document.querySelectorAll('[data-feed-thread]').length === 5 && !document.querySelector('[data-feed-fold]')")).toBe(true);
+    await shot("close-panel");
+    await browse("set", "viewport", "900", "900");
+    await new Promise((done) => setTimeout(done, 400));
+    await ui("screenshot", "--out", join(evidenceDir, "close-panel-narrow-midnight.png"));
+    await browse("set", "viewport", "1440", "900");
+    await evaluate("document.querySelector('[data-thread-reopen]').click(); true");
+    await until(async () => (await tasks()).find((task) => task.threadId === threads[2])?.closedAt === undefined, "Reopen to open the thread");
+    await until(() => evaluate("!document.querySelector('[data-thread-closed]') && !document.querySelector('[data-thread-reopen]')"), "the panel to drop its closed line");
+    await browse("click", "[data-thread-panel] header button[aria-expanded]");
+    await until(() => evaluate(`Boolean(${menuItem("Close")})`), "Close in the panel's menu");
+    await evaluate(`${menuItem("Close")}.click(); true`);
+    await until(() => evaluate("Boolean(document.querySelector('[data-thread-reopen]'))"), "the panel to show its thread closed again");
+    await evaluate("document.querySelector('[data-thread-panel] header button[aria-label=\"Close thread\"]').click(); true");
+
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "One more README fix", threadId: threads[1] });
+    await until(async () => (await tasks()).find((task) => task.threadId === threads[1])?.closedAt === undefined, "a new line to open the thread");
+    await idle();
+    await until(() => evaluate(`Boolean(document.querySelector('${row(threads[1]!)}')) && !document.querySelector('${row(threads[1]!)} [data-feed-closed]')`), "the reopened thread as an ordinary row");
+
+    await browse("set", "viewport", "700", "900");
+    await until(() => evaluate("!document.querySelector('[data-room-feed]')"), "the room's transcript below 768px");
+    await evaluate(`document.querySelector('button[aria-label="Open bot list"]').click(); true`);
+    await until(() => evaluate(`Boolean(document.querySelector('[aria-label="Expand Docs room threads"], [aria-label="Collapse Docs room threads"]'))`), "the room in the bot list");
+    await evaluate(`document.querySelector('[aria-label="Expand Docs room threads"]')?.click(); true`);
+    await until(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${threads[3]}"]'))`), "the room's threads in the sidebar");
+    expect(await evaluate(`document.querySelector('[data-sidebar-thread-row="${threads[3]}"]').textContent`)).toContain("closed by");
+    await evaluate(`document.querySelector('[data-sidebar-thread-row="${threads[3]}"]').parentElement.querySelector('button[aria-expanded]').click(); true`);
+    await until(() => evaluate(`Boolean(${menuItem("Reopen")})`), "Reopen in the sidebar row's menu");
+    await shot("close-sidebar");
+    await evaluate(`${menuItem("Reopen")}.click(); true`);
+    await until(async () => (await tasks()).find((task) => task.threadId === threads[3])?.closedAt === undefined, "the sidebar's Reopen to open the thread");
     const logs = await ui("console");
     expect((logs.messages as Array<{ type: string; text: string }>).filter((message) => message.type === "error")).toEqual([]);
   } finally {

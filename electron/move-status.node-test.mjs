@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { CloudSendError } from "./cloud-send.mjs";
 import { failureCode, safeSentence, SENTENCE_MAX } from "./move-failure.mjs";
-import { createMoveStatusReport, MOVE_STATUS_GAP_MS, MOVE_STATUS_HEARTBEAT_MS, MOVE_STATUS_OFF_MS, MOVE_STATUS_SETTLE_MS, moveStatus } from "./move-status.mjs";
+import { createMoveStatusReport, MOVE_STATUS_GAP_MS, MOVE_STATUS_HEARTBEAT_MS, MOVE_STATUS_IDLE_HEARTBEAT_MS, MOVE_STATUS_OFF_MS, MOVE_STATUS_SETTLE_MS, moveStatus } from "./move-status.mjs";
 import { CHECK_PASSES, createOneHome, INCOMPLETE, parseJournal, QUIET_MS } from "./one-home.mjs";
 import { installOneHome, oneHomeCloud } from "./one-home-main.mjs";
 
@@ -282,11 +282,31 @@ test("what leaves this computer is ids and fixed words: quotes, what My Cloud sa
   assert.equal(failureCode(new CloudSendError("no_cloud", "This computer has no My Cloud yet."), "copy"), "no_cloud");
 });
 
-test("a report goes a moment after it changes, at most once a minute, and every 15 minutes while it doesn't", async () => {
+/** createMoveStatusReport over a fake clock; `pass(ms)` moves it on, running each timer due on the way. */
+function reporter(initial, { random = () => 0.5 } = {}) {
+  const h = { clock: 1_800_000_000_000, body: initial, who: "device-1", sent: [], answer: async () => true };
+  const timers = [];
+  h.timers = timers;
+  h.r = createMoveStatusReport({ status: () => h.body, signIn: () => h.who, send: async (report) => { h.sent.push(structuredClone(report)); return h.answer(); }, now: () => h.clock, random,
+    timers: { set: (work, ms) => { const timer = { work, at: h.clock + ms }; timers.push(timer); return timer; }, clear: (timer) => { const at = timers.indexOf(timer); if (at >= 0) timers.splice(at, 1); } } });
+  h.pass = async (ms) => {
+    const until = h.clock + ms;
+    for (let next = timers.sort((a, b) => a.at - b.at)[0]; next && next.at <= until; next = timers.sort((a, b) => a.at - b.at)[0]) {
+      timers.splice(timers.indexOf(next), 1);
+      h.clock = next.at;
+      next.work();
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    h.clock = until;
+  };
+  return h;
+}
+
+test("a report goes a moment after it changes, at most once a minute, and every 15 minutes during a move while it doesn't", async () => {
   let clock = 1_800_000_000_000, body = { v: 1, phase: "copy", reason: null }, who = "device-1";
   const timers = [], sent = [];
   let answer = async () => true;
-  const r = createMoveStatusReport({ status: () => body, signIn: () => who, send: async (report) => { sent.push(structuredClone(report)); return answer(); }, now: () => clock,
+  const r = createMoveStatusReport({ status: () => body, signIn: () => who, send: async (report) => { sent.push(structuredClone(report)); return answer(); }, now: () => clock, random: () => 0.5,
     timers: { set: (work, ms) => { const timer = { work, at: clock + ms }; timers.push(timer); return timer; }, clear: (timer) => { const at = timers.indexOf(timer); if (at >= 0) timers.splice(at, 1); } } });
   /** Moves the clock on, running each timer due on the way. */
   const pass = async (ms) => {
@@ -328,7 +348,7 @@ test("a report goes a moment after it changes, at most once a minute, and every 
   body = { ...body, phase: "check" };
   r.changed();
   await pass(MOVE_STATUS_GAP_MS);
-  assert.equal(sent.length, 6, "a failed send goes again at the next change");
+  assert.equal(sent.length, 6, "a failed send goes again once its wait (a minute after the first failure) is over");
   body = { ...body, phase: "switch" };
   r.changed();
   await pass(MOVE_STATUS_OFF_MS - 60_000);
@@ -341,6 +361,68 @@ test("a report goes a moment after it changes, at most once a minute, and every 
   assert.equal(timers.length, 0);
 });
 
+test("a send that fails waits longer each time, whatever changes meanwhile, and never before the Admin's Retry-After", async () => {
+  const h = reporter({ v: 1, phase: "copy", reason: null });
+  h.answer = async () => { throw Object.assign(new Error("Cloud request failed."), { status: 503 }); };
+  h.r.changed();
+  await h.pass(MOVE_STATUS_SETTLE_MS);
+  assert.equal(h.sent.length, 1);
+  // The app's session is read each minute, and each read says "changed": none of them sends until the wait is over.
+  const tries = [];
+  for (let minute = 0; minute < 60; minute++) {
+    h.body = { ...h.body, passes: minute % 2 };
+    h.r.changed();
+    await h.pass(60_000);
+    tries.push(h.sent.length);
+  }
+  const at = [...new Set(tries)].map((count) => tries.indexOf(count));
+  assert.deepEqual(at, [0, 2, 7, 17, 47], "tried again after 1, 2, 5 and 10 minutes, then every 30, instead of each minute");
+  assert.equal(h.sent.length, 6, "6 sends in the hour where each minute's change sent one before");
+  h.answer = async () => { throw Object.assign(new Error("Too many."), { status: 429, retryAfter: 3600 }); };
+  await h.pass(18 * 60_000);
+  assert.equal(h.sent.length, 7, "the next half hour's try is refused for an hour");
+  await h.pass(57 * 60_000);
+  assert.equal(h.sent.length, 7, "an hour, as the Admin asked (spread only later), rather than the next half hour");
+  h.answer = async () => true;
+  await h.pass(10 * 60_000);
+  assert.equal(h.sent.length, 8);
+  h.body = { ...h.body, passes: 3 };
+  h.r.changed();
+  await h.pass(MOVE_STATUS_GAP_MS);
+  assert.equal(h.sent.length, 9, "an answer starts the count again: the next change goes within the minute");
+  h.r.close();
+});
+
+test("with no move under way, the same report goes again only after 6 hours; once one starts, every 15 minutes", async () => {
+  for (const phase of ["none", "done", "back"]) {
+    const h = reporter({ v: 1, phase, reason: phase === "none" ? "no_cloud" : null });
+    h.r.changed();
+    for (let minute = 0; minute < 6 * 60 - 1; minute++) { h.r.changed(); await h.pass(60_000); }
+    assert.equal(h.sent.length, 1, `${phase}: once, though the session is read each minute`);
+    await h.pass(2 * 60_000);
+    assert.equal(h.sent.length, 2, `${phase}: and again 6 hours later`);
+    h.body = { ...h.body, phase: "copy", reason: null };
+    h.r.changed();
+    await h.pass(MOVE_STATUS_SETTLE_MS);
+    assert.equal(h.sent.length, 3, "a move starting goes at once");
+    await h.pass(MOVE_STATUS_HEARTBEAT_MS);
+    assert.equal(h.sent.length, 4);
+    h.r.close();
+  }
+  // Spread by up to a fifth either way, so apps started together never report together.
+  for (const [drawn, hours] of [[0, 4.8], [1, 7.2]]) {
+    const h = reporter({ v: 1, phase: "none", reason: "no_cloud" }, { random: () => drawn });
+    h.r.changed();
+    await h.pass(MOVE_STATUS_SETTLE_MS);
+    await h.pass(hours * 3_600_000 - 1_000);
+    assert.equal(h.sent.length, 1);
+    await h.pass(2_000);
+    assert.equal(h.sent.length, 2);
+    h.r.close();
+  }
+  assert.equal(MOVE_STATUS_IDLE_HEARTBEAT_MS, 6 * 3_600_000);
+});
+
 test("the move's own changes send the report by themselves, a moment later", async () => {
   const timers = [];
   const f = installed({ state: signedIn({ machine: { status: "ready", origin: CLOUD } }),
@@ -351,8 +433,18 @@ test("the move's own changes send the report by themselves, a moment later", asy
     timers.shift().work();
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(f.sent.map((report) => report.reason), ["moves_off"]);
-    assert.equal(timers.at(-1)?.ms, MOVE_STATUS_HEARTBEAT_MS, "and again in 15 minutes");
+    const next = timers.at(-1)?.ms;
+    assert.ok(next >= 0.8 * MOVE_STATUS_IDLE_HEARTBEAT_MS && next <= 1.2 * MOVE_STATUS_IDLE_HEARTBEAT_MS, "and, with no move under way, again in about 6 hours");
   } finally { f.main.close(); }
+});
+
+test("a move under way keeps the session read every minute (underWay); none, a finished one, a paused one or one come back does not", async () => {
+  const cases = [[null, false], [journalOf(), true], [journalOf({ phase: "wait" }), true], [journalOf({ phase: "keeping" }), true], [journalOf({ phase: "home-again" }), true],
+    [journalOf({ paused: true }), false], [journalOf({ phase: "done" }), false], [journalOf({ phase: "back" }), false]];
+  for (const [journal, under] of cases) {
+    const f = installed({ state: signedIn(), journal });
+    try { assert.equal(f.main.underWay(), under, JSON.stringify(journal?.phase ?? null)); } finally { f.main.close(); }
+  }
 });
 
 test("reporting never touches the move: a send that fails or never answers changes nothing and holds nothing up", async () => {

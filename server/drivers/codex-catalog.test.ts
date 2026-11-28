@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,6 +100,40 @@ describe("readCodexModelCatalog", () => {
         { id: "gpt-page-two", label: "GPT Page Two" },
       ],
     });
+  });
+
+  it("reads the app-server catalog again when the first listing fails", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({});
+    const attempts = join(home, "catalog-attempts");
+    const catalog = await readCodexModelCatalog(
+      { HOME: home, PATH: process.env.PATH, FAKE_CODEX_CATALOG_FAILURES: "1", FAKE_CODEX_STATE: attempts },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog).toEqual({
+      default: "gpt-fake-default",
+      options: [
+        { id: "gpt-fake-default", label: "GPT Fake Default" },
+        { id: "gpt-page-two", label: "GPT Page Two" },
+      ],
+    });
+    expect(readFileSync(attempts, "utf8")).toBe("2");
+  });
+
+  it("falls back to the static catalog when the second listing also fails", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({});
+    const attempts = join(home, "catalog-attempts");
+    const catalog = await readCodexModelCatalog(
+      { HOME: home, PATH: process.env.PATH, FAKE_CODEX_CATALOG_FAILURES: "2", FAKE_CODEX_STATE: attempts },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog).toEqual(STATIC_CODEX_MODELS);
+    expect(readFileSync(attempts, "utf8")).toBe("2");
   });
 
   it("sends a model_catalog_json listing to the provider that serves it", async () => {

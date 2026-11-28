@@ -18,6 +18,7 @@ export const KEPT_TOTAL_MAX_BYTES = 256 * 1024 * 1024;
 
 const STORED_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.([a-z0-9]+)$/i;
 const DOCUMENT = new Set(["md", "txt", "csv", "tsv", "json", "rtf", "doc", "docx", "odt", "xls", "xlsx", "ods", "ppt", "pptx", "odp"]);
+const pendingCopies = new Map<string, Promise<void>>();
 
 export function isKeptDocumentName(name: string): boolean {
   const match = STORED_NAME.exec(name);
@@ -53,6 +54,12 @@ async function makeRoom(keptDir: string, size: number, total: number): Promise<v
 export async function keepUploadedOriginal(path: string, keptDir = KEPT_ORIGINALS_DIR, total = KEPT_TOTAL_MAX_BYTES): Promise<void> {
   const name = basename(path);
   if (!isKeptDocumentName(name)) return;
+  const directory = resolve(keptDir);
+  const previous = pendingCopies.get(directory) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  pendingCopies.set(directory, current);
+  await previous;
   const target = join(keptDir, name);
   const partial = `${target}.${process.pid}.partial`;
   try {
@@ -68,6 +75,8 @@ export async function keepUploadedOriginal(path: string, keptDir = KEPT_ORIGINAL
     // The upload stands; it simply has no kept copy, and a comparison says so.
   } finally {
     await rm(partial, { force: true }).catch(() => undefined);
+    release();
+    if (pendingCopies.get(directory) === current) pendingCopies.delete(directory);
   }
 }
 

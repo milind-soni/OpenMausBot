@@ -78,7 +78,7 @@ export function idleReclaimMode(env: NodeJS.ProcessEnv = process.env): IdleRecla
   return "off";
 }
 
-type Stamped = { threadId: string; createdAt?: number; updatedAt?: number; archivedAt?: number; closedBy?: { at?: number } };
+type Stamped = { threadId: string; createdAt?: number; updatedAt?: number; archivedAt?: number; closedAt?: number; closedBy?: { at?: number } | { kind: string } };
 /** The records with each conversation's stamps (the store's bots and rooms). */
 export interface StampedRecords extends LiveRecords {
   readonly bots: ReadonlyArray<LiveRecords["bots"][number] & { tasks?: ReadonlyArray<Stamped & { cwd?: string | null; pinnedCwd?: string | null }> }>;
@@ -90,7 +90,8 @@ export function lastActivity(records: StampedRecords): Map<string, number> {
   const at = new Map<string, number>();
   for (const owner of [...records.bots, ...records.groups]) {
     for (const task of owner.tasks ?? []) {
-      const newest = Math.max(task.updatedAt ?? 0, task.createdAt ?? 0, task.closedBy?.at ?? 0, task.archivedAt ?? 0);
+      const closed = task.closedAt ?? (task.closedBy && "at" in task.closedBy ? task.closedBy.at : undefined);
+      const newest = Math.max(task.updatedAt ?? 0, task.createdAt ?? 0, closed ?? 0, task.archivedAt ?? 0);
       at.set(task.threadId, Math.max(at.get(task.threadId) ?? 0, newest));
     }
   }

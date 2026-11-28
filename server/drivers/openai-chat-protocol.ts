@@ -19,6 +19,33 @@ export const MAX_REASONING_DETAIL_CHARS = 4_000_000;
 
 export class ChatProtocolError extends Error {}
 
+export const CUT_REPLY_NOTE = "[OpenMausBot: your reply was cut at the output limit. Continue exactly where you stopped.]";
+/** Continuations per turn, shared by every reply the turn produces, so one turn cannot bill forever. */
+const MAX_LENGTH_CONTINUATIONS = 8;
+
+/** Null when the completion is not a cut reply that can be continued; `exhausted` when the turn's budget is spent. A
+ * local model writes tool calls as text, so a cut reply there may be half a call and stays a failure. */
+function cutReplyOutcome(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): "continue" | "exhausted" | null {
+  if (completion.finishReason !== "length" || !completion.text.trim() || localTools) return null;
+  return state.count < MAX_LENGTH_CONTINUATIONS ? "continue" : "exhausted";
+}
+
+/** True when a cut reply has a continuation left in this turn's budget. */
+export function cutReplyWillContinue(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
+  return cutReplyOutcome(state, completion, localTools) === "continue";
+}
+
+/** True when a cut reply should be continued and consumes one continuation; throws once the turn's budget is spent. */
+export function cutReplyContinues(state: { count: number }, completion: { finishReason: string | null; text: string }, localTools: boolean): boolean {
+  const outcome = cutReplyOutcome(state, completion, localTools);
+  if (outcome === "exhausted") {
+    throw new ChatProtocolError(`The reply was still cut at the output limit after ${MAX_LENGTH_CONTINUATIONS} continuations; the turn was stopped.`);
+  }
+  if (!outcome) return false;
+  state.count += 1;
+  return true;
+}
+
 export function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined;

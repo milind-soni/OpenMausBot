@@ -6,7 +6,7 @@ import { commitRegistryChange, deferrablePatch, keptRevocation, saveRegistryFor,
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts"; import { dropRetiredApps } from "./retired-apps.ts";
 import { reorderInPlace } from "../shared/bot-order.ts"; import { trimOutboundPolicy } from "../shared/outbound.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts"; import { reshowWhenMoved } from "../shared/default-bot.ts";
-import { ensureSections, readSections, changeEmptySection } from "./section-context.ts"; import { grantNewDepartments } from "./department-grants.ts";
+import { ensureSections, readSections, changeEmptySection, reorderSectionNames } from "./section-context.ts"; import { grantNewDepartments } from "./department-grants.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
@@ -40,14 +40,14 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
-import { lastMessageId, messagesBefore } from "./thread-history.ts";
+import { lastMessageId, messagesBefore, newestMessageId } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, unreadTargetTask, UNTITLED_THREAD, type NewThreadLevel } from "./task-record.ts";
 import { repairLegacyWorkThreads } from "./legacy-work-threads.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
 import { branchLeafFrom } from "../shared/conversation-branch.ts";
 import { createThreadBotIndex } from "./thread-bot-index.ts";
-import { endHeldUnread } from "./held-unread.ts";
+import { afterNewLine } from "./room-thread-close.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -118,7 +118,7 @@ const TASK_PATCH_FIELDS = [
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
-export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null };
+export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null; closed?: { at: number; by: NonNullable<GroupTaskRecord["closedBy"]> } | null };
 
 
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
@@ -653,8 +653,8 @@ export class Store {
     this.registry.writeGroups(groups);
   }
 
-  get sections(): string[] { return readSections(); }
-
+  get sections(): string[] { return readSections(); } /** A stable partial reorder of the departments (reorderSectionNames); null, and nothing changes, for a refused list. */
+  reorderSections(names: readonly string[], first = false): string[] | null { const changed = reorderSectionNames(names, first); if (changed === null) return null; if (changed) this.emit({ type: "sections" }); return this.sections; }
   private rememberSections(names: (string | undefined)[]) {
     try {
       const added = ensureSections(names); // a name an older save left unregistered at startup is not a new department
@@ -994,9 +994,9 @@ export class Store {
     if (!group || !task) return null;
     this.commitGroupChange(group, "the thread change", () => {
       if (patch.title !== undefined) task.title = patch.title.trim().slice(0, 80) || UNTITLED_TASK;
-      if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned;
-      if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
+      if (patch.pinned) task.pinned = true; else if (patch.pinned === false) delete task.pinned; if (patch.activity) task.activity = patch.activity; else if (patch.activity === null) delete task.activity;
       for (const key of ["turnTimeoutMinutes", "archivedAt"] as const) if (patch[key] === null) delete task[key]; else if (patch[key] !== undefined) task[key] = patch[key];
+      if (patch.closed) Object.assign(task, { closedAt: patch.closed.at, closedBy: structuredClone(patch.closed.by) }); else if (patch.closed === null) { delete task.closedAt; delete task.closedBy; }
     });
     this.emit({ type: "group", groupId });
     return task;
@@ -1069,9 +1069,8 @@ export class Store {
     return busy;
   }
 
-  messagesFor(threadId: string): Message[] {
-    return this.thread(threadId).messages;
-  }
+  messagesFor(threadId: string): Message[] { return this.thread(threadId).messages; }
+  newestMessageId(threadId: string): string | undefined { return newestMessageId(threadId, this.threads.get(threadId)); }
 
   messagesBefore(threadId: string, before: string, limit: number) {
     return messagesBefore(threadId, before, limit, this.threads.get(threadId), () => this.thread(threadId));
@@ -1146,7 +1145,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
+    this.emit({ type: "message", threadId, message: full }); afterNewLine(this, threadId, full);
     if (full.role === "user" && full.kind === "text") this.dismissOnboardingCard(threadId);
     return full;
   }
@@ -1166,7 +1165,7 @@ export class Store {
       }
     }
     this.noteThreadActivity(threadId, full.at, movesThreadToTop(full), full.turnCompletedAt ?? full.at);
-    this.emit({ type: "message", threadId, message: full }); endHeldUnread(this, threadId, full);
+    this.emit({ type: "message", threadId, message: full }); afterNewLine(this, threadId, full);
     // After the insert, so no client ever sees two siblings claiming the same parent.
     for (const child of children) this.patchMessage(threadId, child.id, { parentId: full.id });
     return full;
@@ -1214,10 +1213,9 @@ export class Store {
       ...(dataContext ? { dataContext } : {}), ...from,
     };
     t.messages.push(full); this.threads.grew(threadId, full);
-    t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
+    t.activeLeafId = full.id; mdb.appendMessage(threadId, full);
     this.noteThreadActivity(threadId, full.at, true);
-    this.emit({ type: "message", threadId, message: full });
+    this.emit({ type: "message", threadId, message: full }); afterNewLine(this, threadId, full);
     // A client adopts a new message as its leaf only when it chains onto its leaf; a sibling needs this pointer.
     this.emit({ type: "thread", threadId, activeLeafId: full.id });
     return full;

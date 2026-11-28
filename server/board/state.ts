@@ -26,7 +26,7 @@ export type BoardMove =
   | { move: "take"; botId: string }
   | { move: "done"; result?: string }
   | { move: "failed"; result?: string }
-  | { move: "ask"; question: string; person?: string }
+  | { move: "ask"; question: string; person?: string; name?: string }
   /** The holder sets the item aside until `at`; the dispatcher's `wake` starts it again then, with `note`. */
   | { move: "later"; at: number; note: string }
   | { move: "wake" }
@@ -152,7 +152,7 @@ export function applyMove(item: BoardItem, move: BoardMove, actor: BoardActor, i
       if (!text) throw badInput("Say what you want to ask.");
       if (text.length > BOARD_LIMITS.questionMax) throw badInput(`A question is at most ${BOARD_LIMITS.questionMax} characters.`);
       const { later: _later, ...rest } = item;
-      return { ...rest, state: "needs_person", question: { text, askedAt: now, ...(move.person ? { person: move.person } : {}) }, updatedAt: now };
+      return { ...rest, state: "needs_person", question: { text, askedAt: now, ...(move.person ? { person: move.person, ...(move.name ? { name: move.name } : {}) } : {}) }, updatedAt: now };
     }
     case "later": {
       const note = typeof move.note === "string" ? move.note.trim() : "";

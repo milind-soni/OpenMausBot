@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   GROUP_GOAL_CONTROL_CLOSE,
   GROUP_GOAL_CONTROL_OPEN,
+  GROUP_GOAL_CONTROL_MISSES,
   GROUP_GOAL_MAX_TURNS,
   groupGoalAssignmentKey,
   groupGoalCompletionTurnId,
@@ -91,6 +92,10 @@ describe("group goal runs", () => {
 
   it("reserves the final bounded turn for coordinator evaluation", () => {
     expect(GROUP_GOAL_MAX_TURNS % 2).toBe(1);
+  });
+
+  it("re-asks a malformed control envelope a bounded number of times", () => {
+    expect(GROUP_GOAL_CONTROL_MISSES).toBe(3);
   });
 });
 
@@ -206,8 +211,45 @@ describe("one goal-run loop for a room and a one-on-one chat", () => {
   it("never takes a reply without a valid marker as done", async () => {
     const goal = goalRun({ solo: true, steps: [settled("All done, trust me.")] });
     await goal.done;
-    expect(goal.calls).toHaveLength(1);
-    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision." }]);
+    expect(goal.calls).toHaveLength(3);
+    expect(goal.finished).toEqual([{ status: "blocked", detail: "Solo did not provide a valid next-step decision after 3 replies." }]);
+  });
+
+  it("asks the coordinator again after a malformed envelope and carries on", async () => {
+    const goal = goalRun({
+      solo: true,
+      steps: [
+        settled("All done, trust me."),
+        settled(envelope({ status: "continue", next: "solo-id", instruction: "Fix the parser test", detail: "Working" })),
+        settled(envelope({ status: "completed", detail: "Every test passes." })),
+      ],
+    });
+    await goal.done;
+    expect(goal.calls).toHaveLength(3);
+    expect(goal.calls[1]!.instructions).toContain("Harness note: Your last reply did not end with exactly one valid control envelope");
+    expect(goal.progress).toContain("Solo's reply did not end with a valid control envelope. Asking again (1/3).");
+    expect(goal.finished).toEqual([{ status: "completed", detail: "Every test passes." }]);
+  });
+
+  it("counts control-envelope misses in a row, not across the run", async () => {
+    const goal = goalRun({
+      solo: true,
+      steps: [
+        settled("All done, trust me."),
+        settled("Still no envelope."),
+        settled(envelope({ status: "continue", next: "solo-id", instruction: "First step", detail: "Working" })),
+        settled("Still no envelope."),
+        settled(envelope({ status: "completed", detail: "Done." })),
+      ],
+    });
+    await goal.done;
+    expect(goal.calls).toHaveLength(5);
+    expect(goal.progress.filter((line) => line.includes("Asking again"))).toEqual([
+      "Solo's reply did not end with a valid control envelope. Asking again (1/3).",
+      "Solo's reply did not end with a valid control envelope. Asking again (2/3).",
+      "Solo's reply did not end with a valid control envelope. Asking again (1/3).",
+    ]);
+    expect(goal.finished).toEqual([{ status: "completed", detail: "Done." }]);
   });
 
   it("blocks a room of one that repeats the same next step", async () => {

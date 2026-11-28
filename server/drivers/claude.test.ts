@@ -16,12 +16,9 @@ import { claudeHookSettings } from "./claude-hooks.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
-  claudeCliSupports,
-  claudeCliUpdate,
   ClaudeDriver,
   createPermissionBroker,
   hookTokenFile,
-  parseClaudeCliVersion,
   permissionSocketPath,
   readClaudeAuthSettings,
   claudeCostSnapshot,
@@ -30,6 +27,7 @@ import {
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
+import { claudeCliSupports, claudeCliUpdate, parseClaudeCliVersion } from "./claude-cli-version.ts";
 import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { sumNativeTurnResults } from "./claude-turn-result.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
@@ -1710,6 +1708,51 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.prompt.message.content).toContain("Add the new header row.");
   });
 
+  it("does not resume a session holding a system prompt the CLI cannot refresh, and rebuilds from the recovery text", async () => {
+    const dump = join(scratch, "stale-recorded-prompt.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-stale-recorded-prompt", text: "one", system: "Always answer MARK_V1." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+
+    const rebuild = "[Your previous session for this conversation could not be resumed, so this is a new session.] one";
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-stale-recorded-prompt", text: "two", system: "Always answer MARK_V2.", resumeCursor: announced, recoveryText: rebuild,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--system-prompt-snapshot");
+    expect(seen.argv).not.toContain("--resume");
+    expect(seen.argv).toContain("--session-id");
+    expect(seen.systemPromptFile).toBe("Always answer MARK_V2.");
+    const content = seen.prompt.message.content;
+    expect(typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("")).toBe(rebuild);
+    expect(recorder.events.filter((e) => e.type === "session.started").at(-1)).toMatchObject({ rebuilt: true });
+
+    // From then on the replacement session resumes normally.
+    const replacement = (recorder.events.filter((e) => e.type === "session.started").at(-1) as { sessionId: string }).sessionId;
+    const rebuiltPid = seen.pid;
+    const third = await instance.adapter.sendTurn({ threadId: "t-stale-recorded-prompt", text: "three", effort: "high", system: "Always answer MARK_V2.", resumeCursor: replacement });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
+    const resumed = JSON.parse(readFileSync(dump, "utf8"));
+    expect(resumed.pid).not.toBe(rebuiltPid);
+    expect(resumed.argv[resumed.argv.indexOf("--resume") + 1]).toBe(replacement);
+  });
+
+  it("resumes a session on a CLI without the snapshot flag when the system prompt is unchanged", async () => {
+    const dump = join(scratch, "unchanged-recorded-prompt.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-unchanged-recorded-prompt", text: "one", system: "You are Testy." });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstPid = dumpedPid(dump);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({ threadId: "t-unchanged-recorded-prompt", text: "two", effort: "high", system: "You are Testy.", resumeCursor: announced });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.pid).not.toBe(firstPid);
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe(announced);
+  });
+
   it("replaces the previous computer prompt when a normal conversation changes its place", async () => {
     const dump = join(scratch, "surface-snapshot.json");
     await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.267" });
@@ -1774,6 +1817,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("1000000");
   });
 
+  it("compacts Claude Opus 5.5 (1M) at 1M when a gateway names it with a provider prefix", async () => {
+    await create();
+    await instance.snapshot();
+    const dump = join(scratch, "compact-1m-gateway.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-compact-1m-gateway", text: "hi", model: "claude/claude-opus-5-5[1m]" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude/claude-opus-5-5[1m]");
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("1000000");
+  });
+
   it("clamps a configured compaction window into the range the CLI accepts", () => {
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
@@ -1789,6 +1846,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" }, "claude-opus-5-5[1m]")).toBe("1000000");
     expect(autoCompactWindow({}, "claude-opus-5-5")).toBe("200000");
     expect(autoCompactWindow({}, "claude-sonnet-4-6[1m]")).toBe("200000");
+    expect(autoCompactWindow({}, "claude/claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({}, "openrouter/anthropic/claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({}, "us.anthropic.claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({}, "claude/claude-sonnet-5-5[1m]")).toBe("200000");
+    expect(autoCompactWindow({}, "my-claude-opus-5-5[1m]")).toBe("200000");
+    expect(autoCompactWindow({}, "omlx::claude-opus-5-5[1m]")).toBe("200000");
     expect(autoCompactWindow({}, null)).toBe("200000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "300000" }, "claude-opus-5-5[1m]")).toBe("300000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" }, "claude-opus-5-5[1m]")).toBe(null);
@@ -3782,6 +3845,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "session.started").map((e) => (e as { mcpFailed?: string[] }).mcpFailed)).toEqual([["blender"]]);
   });
 
+  it("starts the next turn in a new process after a configured server did not connect, so it reconnects", async () => {
+    await create(undefined, { FAKE_CLAUDE_MCP_FAILED: "blender" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const custom = { blender: { command: "/usr/bin/python3", args: ["/srv/blender.py"], env: {} } };
+    const first = await instance.adapter.sendTurn({ threadId: "t-custom-reconnect", text: "one", integrations: { custom } });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const failedLaunch = dumpedPid(dump);
+    const second = await instance.adapter.sendTurn({ threadId: "t-custom-reconnect", text: "two", integrations: { custom } });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(dumpedPid(dump)).not.toBe(failedLaunch);
+  });
+
   it("books each turn of a retained process at its own cost, not the process's running total", async () => {
     await create();
     const dump = join(scratch, "dump.json");
@@ -3811,7 +3887,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       await instance.dispose();
       await create(undefined, { FAKE_CLAUDE_COST_STATE: costState });
     }
-    const second = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const second = await instance.adapter.sendTurn({ threadId, text: "two", effort: "high", system: "Before.", systemStable: "Before.", resumeCursor: announced });
     const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);
     expect([firstDone, secondDone].map((e) => (e as { cost?: unknown }).cost)).toEqual([0.01, 0.01]);
@@ -3827,10 +3903,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const first = await instance.adapter.sendTurn({ threadId, text: "one", system: "Before.", systemStable: "Before." });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
-    const failed = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const failed = await instance.adapter.sendTurn({ threadId, text: "two", effort: "high", system: "Before.", systemStable: "Before.", resumeCursor: announced });
     expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false, cost: null });
     const launch = dumpedPid(dump);
-    const third = await instance.adapter.sendTurn({ threadId, text: "three", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const third = await instance.adapter.sendTurn({ threadId, text: "three", effort: "high", system: "Before.", systemStable: "Before.", resumeCursor: announced });
     const thirdDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
     expect(dumpedPid(dump)).toBe(launch);
     expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);

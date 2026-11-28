@@ -62,6 +62,46 @@ describe("checking that command servers start", () => {
     expect(JSON.parse(readFileSync(deps.file, "utf8")).notes.told).toBeTruthy();
   });
 
+  it("treats a check that ran out of time as no verdict: the server stays in turns, is not said to be off, and is tried again soon", async () => {
+    const { deps, servers, told, tick } = fixture({ servers: { notes } });
+    const starts: string[] = [];
+    const health = createMcpHealth({ ...deps, start: async (name, _server, botId) => {
+      starts.push(`${name}:${botId}`);
+      return { ok: false, error: "The server did not answer in time.", timeout: true };
+    } });
+    await health.prepare("paul", ["notes"]);
+    expect(health.usable("paul", servers), "a timed-out probe is not a failed start").toEqual(servers);
+    expect(health.off("paul", ["notes"])).toEqual([]);
+    expect(health.offFor("notes")).toEqual([]);
+    expect(told).toEqual([]);
+    expect(JSON.parse(readFileSync(deps.file, "utf8")).notes.checks["*"], "recorded, with why it is no verdict").toMatchObject({ ok: false, timeout: true });
+    tick(60_000 - 1);
+    await health.prepare("paul", ["notes"]);
+    expect(starts).toEqual(["notes:paul"]);
+    tick(1);
+    await health.prepare("paul", ["notes"]);
+    expect(starts, "tried again after a minute, not half an hour").toEqual(["notes:paul", "notes:paul"]);
+    await health.settled();
+    const again = createMcpHealth(deps);
+    expect(again.usable("paul", servers), "kept across a restart").toEqual(servers);
+  });
+
+  it("counts a server whose check runs out of time three times in a row as not starting", async () => {
+    const { deps, servers, told, tick } = fixture({ servers: { notes } });
+    const health = createMcpHealth({ ...deps, start: async () => ({ ok: false, error: "The server did not answer in time.", timeout: true }) });
+    for (let round = 0; round < 2; round += 1) {
+      await health.prepare("paul", ["notes"]);
+      await health.settled();
+      expect(health.usable("paul", servers)).toEqual(servers);
+      tick(60_000);
+    }
+    await health.prepare("paul", ["notes"]);
+    await health.settled();
+    expect(health.usable("paul", servers)).toEqual({});
+    expect(health.off("paul", ["notes"])).toEqual([{ name: "notes", error: "The server did not answer in time." }]);
+    expect(told).toHaveLength(1);
+  });
+
   it("names the bot whose own server does not start", async () => {
     const { health, told } = fixture({ startsFor: (name) => name !== "blender" });
     await health.prepare("iris", ["blender"]);

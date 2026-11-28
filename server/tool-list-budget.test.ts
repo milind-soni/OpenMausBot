@@ -4,7 +4,7 @@ import fullAgents from "./drivers/agents-catalog-goldens/full.tools-list.json" w
 import { compactAdvertisedSchema } from "./advertised-schema.ts";
 import { cliDrops } from "./testing/cli-tool-drop.ts";
 import {
-  cutText, definitionBytes, withCompactSchemas, withDescriptionLevel, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, TOOL_DESCRIPTION_FLOOR, toolListShare, toolListShareProfile,
+  cutText, definitionBytes, withCompactSchemas, withDescriptionLevel, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, TOOL_DESCRIPTION_FLOOR, TOOL_DESCRIPTION_MIN, toolListShare, toolListShareProfile,
   toolsForShareProfile, toolsListResultForShareProfile, type ListedTool,
 } from "./tool-list-budget.ts";
 
@@ -94,10 +94,10 @@ describe("fitting a list into its share", () => {
   });
 
   it("over its share even at its shortest, keeps every tool and shrinks the protected ones, so the CLI's largest-first drop takes others first", () => {
-    const fitted = fitToolListToShare(agents, 25_000);
+    const fitted = fitToolListToShare(agents, 14_000);
     expect(fitted.fits).toBe(false);
     expect(names(fitted.tools)).toEqual(names(agents));
-    const shortest = withDescriptionLevel(withCompactSchemas(agents), { parameters: 0, tools: TOOL_DESCRIPTION_FLOOR });
+    const shortest = withDescriptionLevel(withCompactSchemas(agents), { parameters: 0, tools: TOOL_DESCRIPTION_MIN, annotations: true });
     // Past the largest unprotected tool, trigger (23 named fields) is next: shrinking cannot take it lower without hiding fields.
     const overBy = 1_000;
     expect(cliDrops(shortest, definitionListBytes(shortest) - overBy).filter((name) => PROTECTED_TOOLS.includes(name))).not.toEqual([]);
@@ -125,11 +125,85 @@ describe("fitting a list into its share", () => {
     expect(toolsListResultForShareProfile(result, "gemini")).toBe(result);
     expect(toolsListResultForShareProfile({ error: "x" }, toolListShareProfile(1))).toEqual({ error: "x" });
     const logged: string[] = [];
-    const fitted = toolsListResultForShareProfile(result, toolListShareProfile(25_000), (line) => logged.push(line)) as { tools: ListedTool[] };
+    const fitted = toolsListResultForShareProfile(result, toolListShareProfile(14_000), (line) => logged.push(line)) as { tools: ListedTool[] };
     expect(names(fitted.tools)).toEqual(names(agents));
-    expect(logged).toEqual([expect.stringMatching(/^tool list is \d+ bytes at its shortest, \d+ over its 25000-byte share of the session's tool budget$/)]);
+    expect(logged).toEqual([expect.stringMatching(/^tool list is \d+ bytes at its shortest, \d+ over its 14000-byte share of the session's tool budget$/)]);
     // The same list under the same share again, as every request of a turn builds it: the fitted list reused, no second line.
-    expect(toolsForShareProfile(structuredClone(agents), toolListShareProfile(25_000), (line) => logged.push(line))).toBe(fitted.tools);
+    expect(toolsForShareProfile(structuredClone(agents), toolListShareProfile(14_000), (line) => logged.push(line))).toBe(fitted.tools);
     expect(logged).toHaveLength(1);
+  });
+
+  it("at its deepest cut keeps a list of objects an array of objects, and leaves a field with no type of its own as it was", () => {
+    const tool: ListedTool = {
+      name: "plain_tool", description: "Does one thing. ".repeat(20),
+      inputSchema: { type: "object", required: ["rows"], properties: {
+        rows: { type: "array", description: "d".repeat(200), items: { type: "object", properties: { a: { type: "string" }, b: { type: "number" } } } },
+        target: { type: "object", properties: { id: { type: "string" } } },
+        either: { anyOf: [{ type: "string" }, { type: "object", properties: { id: { type: "string" } } }] },
+        mode: { type: "string", enum: ["a", "b"] },
+      } },
+    };
+    const fitted = fitToolListToShare([tool], definitionBytes(withDescriptionLevel([tool], { parameters: 0, tools: TOOL_DESCRIPTION_MIN, annotations: true })[0]!) - 20);
+    expect(fitted.level.topLevelOnly).toBe(true);
+    expect(fitted.tools[0]!.inputSchema).toEqual({ type: "object", required: ["rows"], properties: {
+      rows: { type: "array", items: { type: "object" } },
+      target: { type: "object" },
+      either: { anyOf: [{ type: "string" }, { type: "object", properties: { id: { type: "string" } } }] },
+      mode: { type: "string", enum: ["a", "b"] },
+    } });
+  });
+
+  it("rebuilds an oversized array with its item type, and leaves a plain string array as it was", () => {
+    const tool: ListedTool = {
+      name: "sample", description: "A sample tool.",
+      inputSchema: { type: "object", required: ["keys", "labels"], properties: {
+        keys: { type: "array", items: { type: "integer" }, allOf: Array.from({ length: 200 }, () => ({ maxItems: 16 })) },
+        labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+      } },
+    };
+    const fitted = fitToolListToShare([tool], 500);
+    expect(fitted.from).toBeGreaterThan(500);
+    expect(fitted.level.topLevelOnly).toBe(true);
+    expect(fitted.fits).toBe(true);
+    expect(fitted.bytes).toBeLessThanOrEqual(500);
+    expect(fitted.tools[0]!.inputSchema).toEqual({ type: "object", required: ["keys", "labels"], properties: {
+      keys: { type: "array", items: { type: "integer" } },
+      labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+    } });
+  });
+
+  it("keeps a nullable, nested, missing, or recursive array's items when the field is rebuilt", () => {
+    const tool: ListedTool = {
+      name: "sample", description: "A sample tool.",
+      inputSchema: {
+        type: "object", required: ["keys", "nullable"],
+        $defs: { node: { type: "array", items: { $ref: "#/$defs/node" } } },
+        properties: {
+          keys: { type: "array", items: { type: "integer" }, allOf: Array.from({ length: 200 }, () => ({ maxItems: 16 })) },
+          nullable: { type: ["array", "null"], items: { type: "integer", minimum: 0 }, allOf: [{ maxItems: 4 }] },
+          nested: { type: "array", items: { type: "array", items: { type: "boolean", description: "drop me" } }, allOf: [{ maxItems: 4 }] },
+          bare: { type: "array" },
+          tree: { type: "array", allOf: [{ maxItems: 4 }], $ref: "#/$defs/node" },
+          labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+        },
+      },
+    };
+    const fitted = fitToolListToShare([tool], 700);
+    expect(fitted.from).toBeGreaterThan(700);
+    expect(fitted.level.topLevelOnly).toBe(true);
+    expect(fitted.fits).toBe(true);
+    expect(fitted.bytes).toBeLessThanOrEqual(700);
+    expect(fitted.tools[0]!.inputSchema).toEqual({
+      type: "object", required: ["keys", "nullable"],
+      $defs: { node: { type: "array", items: { $ref: "#/$defs/node" } } },
+      properties: {
+        keys: { type: "array", items: { type: "integer" } },
+        nullable: { type: ["array", "null"], items: { type: "integer" } },
+        nested: { type: "array", items: { type: "array", items: { type: "boolean" } } },
+        bare: { type: "array", items: { type: "string" } },
+        tree: { type: "array", items: { type: "array", items: { type: "string" } } },
+        labels: { type: "array", items: { type: "string" }, maxItems: 16 },
+      },
+    });
   });
 });

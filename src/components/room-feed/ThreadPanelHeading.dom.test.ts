@@ -22,12 +22,27 @@ const group = { id: "room", name: "Launch room", threadId: "current", memberIds:
 
 let root: Root | null = null;
 afterEach(() => { act(() => root?.unmount()); root = null; document.body.innerHTML = ""; fixture.dispatch.mockClear(); fixture.find.mockClear(); });
-const open = () => {
+const show = (work?: { kind: "needs" | "done"; label: string }) => {
   root = createRoot(document.body.appendChild(document.createElement("header")));
-  act(() => root!.render(createElement(ThreadPanelHeading, { group, task, messages: [], working: false })));
+  act(() => root!.render(createElement(ThreadPanelHeading, { group, task, messages: [], working: false, work, onClose: vi.fn() })));
+};
+const open = () => {
+  show();
   act(() => document.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
 };
 const menuItem = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("[data-thread-overlay] button")].find((button) => button.textContent?.trim() === label);
+
+describe("the heading of a room thread beside its feed", () => {
+  it("says where its piece of work stands after the room's name, and nothing for a thread that is not one", () => {
+    show({ kind: "needs", label: "Needs Mira" });
+    expect(document.querySelector("header p")!.textContent).toBe("Launch room · Needs Mira");
+    expect(document.querySelector("[data-thread-work]")?.getAttribute("data-thread-work")).toBe("needs");
+    act(() => root!.unmount());
+    show();
+    expect(document.querySelector("header p")!.textContent).toBe("Launch room");
+    expect(document.querySelector("[data-thread-work]")).toBeNull();
+  });
+});
 
 describe("the menu of a room thread beside its feed", () => {
   it("finds in that thread, not the room's current one", () => {

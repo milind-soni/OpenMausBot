@@ -57,6 +57,7 @@ const {
   offerAttachmentClear,
   cleanupStaleAttachmentPartials,
   deleteAttachment,
+  deleteAttachments,
   extensionForFileMime,
   extensionForMime,
   parseAudioRange,
@@ -66,6 +67,7 @@ const {
   saveFile,
   saveImage,
   saveImageUpload,
+  saveNamedAttachment,
   validateAttachmentUploadId,
 } = await import("./attachments.ts");
 
@@ -354,6 +356,17 @@ describe("aggregate attachment storage", () => {
     expect(existsSync(orphan)).toBe(false);
   });
 
+  it("leaves a path outside the attachments folder alone", () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true, mode: 0o700 });
+    const outside = join(DATA_ROOT, "notes.txt");
+    writeFileSync(outside, "keep me");
+
+    deleteAttachments([outside, `${ATTACHMENTS_DIR}/../notes.txt`]);
+
+    expect(existsSync(outside)).toBe(true);
+    expect(readFileSync(outside, "utf8")).toBe("keep me");
+  });
+
   it("frees quota after deleteAttachment, without a rescan, for a file the cache already knows about", () => {
     const first = saveImage(Buffer.from("x"), "image/png");
     truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
@@ -480,6 +493,16 @@ describe("readAttachment name lock", () => {
     expect(readAttachment("no-extension")).toBeNull();
     expect(readAttachment("uuid.jpeg")).toBeNull(); // saved as .jpg
     expect(readAttachment("note.wav")).toBeNull(); // only .mp3 audio is written
+  });
+});
+
+describe("saveNamedAttachment", () => {
+  it("refuses a name that is not a bare filename, so a synced attachment cannot land outside the folder", async () => {
+    const chunks = (async function* () {
+      yield Buffer.from("x");
+    })();
+
+    await expect(saveNamedAttachment("../escape.png", chunks)).rejects.toThrow(/filename/);
   });
 });
 

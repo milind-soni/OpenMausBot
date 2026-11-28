@@ -142,7 +142,7 @@ const READS: Record<string, number> = {
   "src/components/TeamSettingsDialog.tsx": 1,
   "src/components/TeamSideSwitch.tsx": 2,
   "src/components/TeamWelcome.tsx": 1,
-  "src/components/TemplateCard.tsx": 4,
+  "src/components/TemplateCard.tsx": 2,
   "src/components/ThreadChip.tsx": 1,
   "src/components/ThreadRefs.tsx": 1,
   "src/components/TrialCreditNotice.tsx": 1,

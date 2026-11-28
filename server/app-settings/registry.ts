@@ -165,7 +165,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
 
   const safe: SettingEntry[] = [
     windowPref("appearance.skin", "Skin", "The window's built-in look; \"system\" follows the computer's light or dark mode. A custom look (any colours, fonts, CSS, pictures) is a theme: use action theme.", "theme", ["theme", "dark mode", "light mode", "colors", "look"], enumOf(WINDOW_PREFS["appearance.skin"].options)),
-    windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones.", "advanced-mode", ["simple mode", "advanced mode", "interface mode"], "true or false"),
+    windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones. Change it only when the person asks for Simple or Advanced mode by name, never to reach another setting: those change in either mode.", "advanced-mode", ["simple mode", "advanced mode", "interface mode"], "true or false"),
     windowPref("appearance.font", "Font", "The app's typeface.", "tool-calls", ["typeface", "typography"], enumOf(WINDOW_PREFS["appearance.font"].options)),
     windowPref("appearance.chatWidth", "Chat width", "How wide the chat column is.", "tool-calls", ["layout", "column", "wide"], enumOf(WINDOW_PREFS["appearance.chatWidth"].options)),
     windowPref("general.sendKey", "Send key", "Which key sends a message in the composer.", "send-key", ["enter", "typing", "keyboard", "shortcut"], enumOf(WINDOW_PREFS["general.sendKey"].options)),
@@ -244,16 +244,21 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     }),
   ];
 
-  const provider = (id: string, label: string, synonyms: string[], current: () => string | undefined, patch: (text: string) => Record<string, unknown>): SettingEntry => writable({
+  const provider = (id: string, label: string, synonyms: string[], current: () => string | undefined, patch: (text: string) => Record<string, unknown>, keySaved?: () => boolean): SettingEntry => writable({
     id, label, help: `${label}: the address MausBot sends requests to. Empty uses the provider's own.`, where: "keys", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
-    value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "", write: config(patch),
+    value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "",
+    write: async (text: string) => {
+      // Security: this address decides where the saved key is sent, so once one is saved only the person moves it.
+      if (text !== "" && text !== (current() ?? "") && keySaved?.() === true) return personOnly(`${label} (it decides where the saved key is sent)`, "keys");
+      return config(patch)(text);
+    },
   });
   const providers: SettingEntry[] = [
-    provider("providers.anthropic.url", "Anthropic address", ["anthropic", "claude"], () => cfg().anthropic?.url, (text) => ({ anthropic: { ...cfg().anthropic, url: text } })),
-    provider("providers.xai.url", "xAI address", ["xai", "grok"], () => cfg().xai?.url, (text) => ({ xai: { ...cfg().xai, url: text } })),
-    provider("providers.groq.url", "Groq address", ["groq"], () => cfg().groq?.url, (text) => ({ groq: { ...cfg().groq, url: text } })),
-    provider("providers.meta.url", "Meta address", ["meta", "llama"], () => cfg().meta?.url, (text) => ({ meta: { ...cfg().meta, url: text } })),
-    provider("providers.openaiCompat.url", "OpenAI-compatible address", ["openai compatible", "custom provider", "ollama", "lm studio", "openrouter"], () => cfg().openaiCompat?.url, (text) => ({ openaiCompat: { ...cfg().openaiCompat, url: text } })),
+    provider("providers.anthropic.url", "Anthropic address", ["anthropic", "claude"], () => cfg().anthropic?.url, (text) => ({ anthropic: { ...cfg().anthropic, url: text } }), () => Boolean(cfg().anthropic?.key)),
+    provider("providers.xai.url", "xAI address", ["xai", "grok"], () => cfg().xai?.url, (text) => ({ xai: { ...cfg().xai, url: text } }), () => Boolean(cfg().xai?.key)),
+    provider("providers.groq.url", "Groq address", ["groq"], () => cfg().groq?.url, (text) => ({ groq: { ...cfg().groq, url: text } }), () => Boolean(cfg().groq?.key)),
+    provider("providers.meta.url", "Meta address", ["meta", "llama"], () => cfg().meta?.url, (text) => ({ meta: { ...cfg().meta, url: text } }), () => Boolean(cfg().meta?.key)),
+    provider("providers.openaiCompat.url", "OpenAI-compatible address", ["openai compatible", "custom provider", "ollama", "lm studio", "openrouter"], () => cfg().openaiCompat?.url, (text) => ({ openaiCompat: { ...cfg().openaiCompat, url: text } }), () => Boolean(cfg().openaiCompat?.key)),
     writable({
       id: "providers.openaiCompat.model", label: "OpenAI-compatible model", help: "The model name sent to the OpenAI-compatible provider.", where: "keys",
       synonyms: ["openai compatible", "custom provider", "model name"], value: z.string().trim().max(200), allowed: "a model name, or empty to clear",
@@ -343,7 +348,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       ["https", "public address"], () => "managed in Settings"),
   ];
 
-  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...pictureEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref), ...secret, ...owner];
+  return [...safe, ...providers, engines, ...botEntries(deps, writable), ...pictureEntries(deps, writable), ...configEntries(deps, writable), ...windowEntries(windowPref, (id) => deps.window.read(id)), ...secret, ...owner];
 }
 
 export function findSettings(entries: readonly SettingEntry[], query: string, limit = 8): SettingEntry[] {

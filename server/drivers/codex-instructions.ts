@@ -31,7 +31,12 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
 export interface CodexInstructionReceipt {
   instructions: string;
   volatile?: string;
+  /** Characters of OpenMausBot developer blocks this native thread's history carries. */
+  injected?: number;
 }
+
+// Providers merge developer content into one system prompt with a hard character cap (GLM rejects above 100,000); 85,000 leaves room for Codex's own developer blocks.
+export const CODEX_INJECTED_CHAR_LIMIT = 85_000;
 
 const isFingerprint = (value: string) => /^[0-9a-f]{64}$/.test(value);
 
@@ -42,11 +47,12 @@ function parseReceipt(raw: string | undefined): CodexInstructionReceipt | null {
   try {
     const parsed = JSON.parse(trimmed) as unknown;
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as { instructions?: unknown; volatile?: unknown };
+      const record = parsed as { instructions?: unknown; volatile?: unknown; injected?: unknown };
       if (typeof record.instructions === "string" && isFingerprint(record.instructions)) {
         return {
           instructions: record.instructions,
           ...(typeof record.volatile === "string" && isFingerprint(record.volatile) ? { volatile: record.volatile } : {}),
+          ...(typeof record.injected === "number" && Number.isSafeInteger(record.injected) && record.injected >= 0 ? { injected: record.injected } : {}),
         };
       }
     }
@@ -78,7 +84,8 @@ export async function syncCodexInstructions(
   resumed: boolean,
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
   mentionTurn = false,
-): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; commitVolatile: (() => void) | null }> {
+  canReset = true,
+): Promise<{ deliverVolatile: boolean; hadVolatile: boolean; commitVolatile: (() => void) | null; resetSession: boolean }> {
   const directory = join(DATA_DIR, "codex-instructions");
   const path = join(directory, `${digest(JSON.stringify([key, nativeThreadId]))}.sha256`);
   const fingerprint = digest(instructions);
@@ -90,6 +97,16 @@ export async function syncCodexInstructions(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     previous = null;
   }
+  const injected = previous?.injected ?? 0;
+  const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
+  const replacement = "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
+    + (instructions || "No OpenMausBot bot-specific instructions remain.");
+  if (canReset && resumed && previous?.instructions !== fingerprint && injected + replacement.length > CODEX_INJECTED_CHAR_LIMIT) {
+    // Superseded blocks stay in the thread until codex compacts, so another injection would only push the
+    // provider's system prompt past its cap; the driver's fresh-session recovery is the only cleanup. Only a changed
+    // block is injected, so a thread whose first block alone is that long is not reset on every turn.
+    return { deliverVolatile: false, hadVolatile, commitVolatile: null, resetSession: true };
+  }
   if (resumed && previous?.instructions !== fingerprint) {
     // Codex 0.153.4 keeps the old initial developer message until compaction, so an update is appended
     // only on change. inject_items flushes history before acknowledging; only then is the receipt written.
@@ -99,11 +116,7 @@ export async function syncCodexInstructions(
         items: [{
           type: "message",
           role: "developer",
-          content: [{
-            type: "input_text",
-            text: "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
-              + (instructions || "No OpenMausBot bot-specific instructions remain."),
-          }],
+          content: [{ type: "input_text", text: replacement }],
         }],
       });
     } catch (error) {
@@ -114,17 +127,20 @@ export async function syncCodexInstructions(
     }
   }
   const deliverVolatile = !resumed || previous?.volatile !== volatileFingerprint || mentionTurn;
-  const hadVolatile = typeof previous?.volatile === "string" && previous.volatile !== digest("");
+  // A fresh thread carries its block through thread/start instead of inject_items, so it counts toward the same total.
+  const acknowledged = !resumed || previous?.instructions !== fingerprint
+    ? { instructions: fingerprint, injected: !resumed ? instructions.length : injected + replacement.length }
+    : { instructions: fingerprint, injected };
   if (!resumed || previous?.instructions !== fingerprint) {
     // The volatile digest stays pending until the provider accepts the turn, so a rejected one redelivers.
     mkdirSync(directory, { recursive: true });
-    writeFileAtomic(path, JSON.stringify({ instructions: fingerprint }), { mode: 0o600 });
+    writeFileAtomic(path, JSON.stringify(acknowledged), { mode: 0o600 });
   }
   const commitVolatile = previous?.instructions === fingerprint && previous?.volatile === volatileFingerprint
     ? null
     : () => {
         mkdirSync(directory, { recursive: true });
-        writeFileAtomic(path, JSON.stringify({ instructions: fingerprint, volatile: volatileFingerprint }), { mode: 0o600 });
+        writeFileAtomic(path, JSON.stringify({ ...acknowledged, volatile: volatileFingerprint }), { mode: 0o600 });
       };
-  return { deliverVolatile, hadVolatile, commitVolatile };
+  return { deliverVolatile, hadVolatile, commitVolatile, resetSession: false };
 }

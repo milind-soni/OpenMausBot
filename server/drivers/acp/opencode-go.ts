@@ -15,7 +15,7 @@ import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport
 import { offeredModels } from "./config-options.ts";
 import type { AcpRequestSteer } from "./steer.ts";
 import { declareTypedOpenCodeModel } from "./opencode-typed-model.ts";
-import { OPENCODE_GO_MODEL_PREFIX } from "../../../shared/opencode-model-id.ts";
+import { OPENCODE_GO_MODEL_PREFIX, typedOpenCodeModel } from "../../../shared/opencode-model-id.ts";
 import {
   declareLiveOpenCodeModels,
   keepOpenCodeModelsFresh,
@@ -777,20 +777,32 @@ const ACCOUNT_ERROR_TEXT: ReadonlyArray<readonly [RegExp, AccountErrorCode]> = [
  * refusal holds that login's free models and leaves the account available. */
 const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
 
-/** How far a usage limit OpenCode reported reaches: one provider's shared free allowance (with the free models that
- * allowance holds), the Go subscription's models, or the whole account. */
+/** A usage limit the error names as the Go subscription's, by its error name or its wording ("OpenCode Go weekly usage
+ * limit reached"), whatever model the session had selected. */
+const GO_NAMED_LIMIT = /\bGoUsageLimitError\b|\bGo\b.{0,60}\b(?:[Uu]sage|[Ww]eekly|[Mm]onthly|5-hour|[Dd]aily|[Hh]ourly)\s+[Ll]imit/u; // "Go" as named: never a lowercase "go to …"
+
+/** How far a usage limit OpenCode reported reaches: one provider's models — the Go subscription's when the refusal or
+ * the failing model names Go, else the failing model's provider's — or one provider's shared free allowance (with the
+ * free models that allowance holds). A limit that names no provider, or names one this instance lists no models of,
+ * reaches the whole account: there is nothing smaller known to hold. */
 export function openCodeLimitFacts(text: string, model?: string, catalog?: ModelCatalog): { limit: "engine" | "model"; limitModels?: string[] } {
+  const failing = model ? (typedOpenCodeModel(model) ?? model) : undefined;
   if (!FREE_MODEL_LIMIT.test(text)) {
-    if (!model?.startsWith(OPENCODE_GO_MODEL_PREFIX)) return { limit: "engine" };
+    const provider = GO_NAMED_LIMIT.test(text) || failing?.startsWith(OPENCODE_GO_MODEL_PREFIX) ? "opencode-go"
+      : failing?.includes("/") ? failing.slice(0, failing.indexOf("/")) : "";
+    if (!provider) return { limit: "engine" };
+    const prefix = `${provider}/`;
     const listed = [...lastSuccessfulCatalog.values(), ...(catalog ? [catalog] : [])].flatMap((known) => known.options.map((option) => option.id));
-    const paid = (catalog && catalogPrices.get(catalog)?.paid) ?? [];
-    return { limit: "model", limitModels: [...new Set([model, ...paid, ...listed].filter((id) => id.startsWith(OPENCODE_GO_MODEL_PREFIX)))] };
+    const paid = provider === "opencode-go" ? ((catalog && catalogPrices.get(catalog)?.paid) ?? []) : [];
+    const models = [...new Set([failing ?? "", ...paid, ...listed].filter((id) => id.startsWith(prefix)))];
+    // No model of the named provider is known to hold: the account is held rather than a wrong model guessed.
+    return models.length ? { limit: "model", limitModels: models } : { limit: "engine" };
   }
-  const provider = model?.includes("/") ? model.slice(0, model.indexOf("/")) : "";
+  const provider = failing?.includes("/") ? failing.slice(0, failing.indexOf("/")) : "";
   const offered = new Set(catalog?.options.map((option) => option.id));
   const free = catalog && catalogPrices.get(catalog)?.free;
   const shared = provider ? (free ?? []).filter((id) => offered.has(id) && id.startsWith(`${provider}/`)) : [];
-  const models = [...new Set(model ? [model, ...shared] : shared)];
+  const models = [...new Set(failing ? [failing, ...shared] : shared)];
   return models.length > 1 ? { limit: "model", limitModels: models } : { limit: "model" };
 }
 

@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { catchUpOldMarks, openFeedThread } from "@/lib/room-feed";
 import { simpleRoomHeader } from "@/lib/room-panel";
 import { roomThreadAttention, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
+import { foldClosedRuns, threadRowCloser, unfoldStep } from "@/lib/room-thread-close";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { sameDrawnBots } from "@/lib/drawn-bots";
 import type { Bot, Group } from "@/state/store";
@@ -24,13 +25,15 @@ import { FeedComposer } from "./FeedComposer";
 import { useHiddenMark } from "./unread-offscreen";
 import { RoomFeedRow, type FeedRowActions, type FeedRowData } from "./RoomFeedRow";
 import { useRoomThreads, type FeedThread } from "./use-room-threads";
+import { useRoomWorkStatuses } from "./use-room-work";
+import type { WorkStatus } from "@/lib/room-work";
 
 /** How near the foot the feed counts as being read there, so a new thread keeps it at the foot. */
 const FOOT_PX = 48;
 /** Only the person scrolling takes the feed off its foot; a row opening beside it or a window resize never does. */
 const INTENT_MS = 1_000;
 
-function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]): FeedRowData {
+function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[], work: WorkStatus | undefined): FeedRowData {
   const { waiting, unread } = roomThreadAttention(group, task, bots);
   return {
     threadId: task.threadId,
@@ -41,14 +44,22 @@ function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]
     replies: summary.replies,
     lastReplyAt: summary.lastReplyAt,
     repliers: summary.repliers,
-    mark: waiting ? "waiting" : unread ? "unread" : null,
+    // A piece of work waiting on someone else does not wait on the viewer.
+    mark: waiting && !work?.someoneElse ? "waiting" : unread ? "unread" : null,
     working: roomThreadWorking(group, task.threadId),
     workingBotId: roomThreadSpeakerId(group, task.threadId),
     title: task.title,
     pinned: task.pinned === true,
     archived: isArchived(task),
+    closedBy: threadRowCloser(task),
+    work,
   };
 }
+
+/** A closed thread folds away once nothing in it waits to be seen: not unread, not waiting, not running, not pinned and
+ * not the one open beside the feed. */
+const folds = (row: FeedRowData, openThread: string | null) =>
+  Boolean(row.closedBy) && row.mark === null && !row.working && !row.pinned && row.threadId !== openThread;
 
 /** A room as one feed of its threads, oldest at the top and the newest just above the composer, where a line starts a
  * new thread. A row opens its thread beside the feed; the room's current thread, which is everyone's, never moves. */
@@ -75,6 +86,8 @@ export function RoomFeedView({ group }: { group: Group }) {
   const deletable = (group.tasks?.length ?? 1) > 1;
   const [showArchived, setShowArchived] = useState(false);
   const { threads, failed, retry } = useRoomThreads(group, showArchived && hasArchived);
+  const work = useRoomWorkStatuses(group.id, bots);
+  const team = useStoreSelector((state) => Boolean(state.config?.team));
   const actions = useMemo<FeedRowActions>(() => {
     const room = roomThreadRowActions(group.id, dispatch);
     const leave = (threadId: string) => { if (store.state().forkPanel?.threadId === threadId) dispatch({ type: "closeForkPanel" }); };
@@ -94,14 +107,21 @@ export function RoomFeedView({ group }: { group: Group }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group.id, since]);
   const [pending, setPending] = useState<{ text: string; at: number; threadId: string | null } | null>(null);
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
 
   const rows = useMemo(() => {
     if (!threads) return null;
-    const listed = threads.map((thread) => toRow(group, thread, bots));
+    const listed = threads.map((thread) => toRow(group, thread, bots, work.get(thread.task.threadId)));
     if (!pending || (pending.threadId && listed.some((row) => row.threadId === pending.threadId))) return listed;
     return [...listed, { threadId: pending.threadId ?? "", speaker: { person: {} }, text: pending.text, at: pending.at, replies: 0, lastReplyAt: null,
       repliers: [], mark: null, working: false, workingBotId: null } satisfies FeedRowData];
-  }, [threads, pending, group, bots]);
+  }, [threads, pending, group, bots, work]);
+  const items = useMemo(() => rows && foldClosedRuns(rows, (row) => folds(row, openThread), unfolded), [rows, openThread, unfolded]);
+  const unfold = useCallback((threadIds: readonly string[]) => {
+    // The fold stays where the person pressed it, and what it shows opens under it.
+    atFoot.current = false;
+    setUnfolded((shown) => new Set([...shown, ...unfoldStep({ threadIds })]));
+  }, []);
 
   const waiting = useCallback((text: string | null) => {
     setPending(text === null ? null : { text, at: Date.now(), threadId: null });
@@ -155,7 +175,7 @@ export function RoomFeedView({ group }: { group: Group }) {
               className="mt-2 inline-flex h-7 items-center self-center rounded-md px-2 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">
               {showArchived ? t("room.feed.hideArchived") : t("room.feed.showArchived")}
             </button>}
-            {rows === null ? (
+            {rows === null || items === null ? (
               failed && (
                 <p role="alert" className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-secondary">
                   {t("room.feed.loadFailed")}
@@ -163,11 +183,21 @@ export function RoomFeedView({ group }: { group: Group }) {
                 </p>
               )
             ) : rows.length === 0 ? (
-              <p className="py-6 text-center text-[13px] text-ink-secondary">{t("room.feed.empty")}</p>
+              <div className="py-6 text-center text-[13px] leading-[18px]">
+                <p className="text-ink-secondary">{t("room.feed.empty")}</p>
+                {team && <p data-feed-split-hint="" className="mt-1 text-ink-tertiary">{t("room.feed.splitHint")}</p>}
+              </div>
             ) : (
               <ol aria-label={t("room.feed.aria", { name: group.name })} className="flex flex-col gap-0.5 py-2">
-                {rows.map((row) => (
-                  <RoomFeedRow key={row.threadId || "pending"} row={row} groupId={group.id} bots={bots} you={you} now={now} open={row.threadId !== "" && row.threadId === openThread}
+                {items.map((item) => item.kind === "fold" ? (
+                  <li key={`fold:${item.key}`} className="flex">
+                    <button type="button" data-feed-fold={item.key} onClick={() => unfold(item.threadIds)}
+                      className="ms-12 flex h-8 touch:h-10 items-center rounded-md px-2 text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors duration-[120ms] hover:bg-ink/[0.06] hover:text-ink active:bg-ink/[0.08] motion-reduce:transition-none">
+                      {item.threadIds.length === 1 ? t("room.feed.closedOne") : t("room.feed.closedMany", { count: item.threadIds.length })}
+                    </button>
+                  </li>
+                ) : (
+                  <RoomFeedRow key={item.row.threadId || "pending"} row={item.row} groupId={group.id} bots={bots} you={you} now={now} open={item.row.threadId !== "" && item.row.threadId === openThread}
                     onOpen={open} actions={actions} />
                 ))}
               </ol>

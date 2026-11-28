@@ -69,6 +69,7 @@ import { CloudSetup } from "@/components/CloudSetup";
 import { CloudWelcome } from "@/components/cloud-welcome/CloudWelcome";
 import { TeamWelcome } from "@/components/TeamWelcome";
 import { ConversationShareDialogs } from "@/components/conversation-share/ConversationShareDialogs";
+import { PublishTemplateHost } from "@/components/publish-template";
 import { invitedToTeam, teamWelcomeDue, useTeamWelcomeRecord } from "@/lib/team-welcome";
 import { WelcomeKeeper } from "@/components/cloud-welcome/WelcomeKeeper";
 import { EmptyChatShell } from "@/components/onboarding/EmptyChatShell";
@@ -77,6 +78,7 @@ import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { t } from "@/lib/i18n";
 import { botCycleStep, shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
+import { isStartFreshShortcut, startFreshRefusal } from "@/lib/start-fresh";
 import { useThreadCycleKeys } from "@/components/thread-cycle";
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
@@ -87,7 +89,7 @@ import { usePhoneBack } from "@/hooks/use-phone-back";
 import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
 import { closeSidePanels } from "@/lib/page-open";
 import { phoneBackStep, phoneBackSteps } from "@/lib/phone-back";
-import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
+import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together"; import { isPlaceId } from "@/lib/place-chat"; import { PlaceChatKeeper, PlacedBotPanel } from "@/components/PlacedBotMenu";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence"; import { useFeature } from "@/lib/use-feature";
@@ -103,6 +105,7 @@ import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 import { serverFetch } from "@/lib/relay-server";
 import { replaceUrl } from "@/lib/replace-url";
+import { api } from "@/state/api";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -120,7 +123,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
   const unreadCount =
-    state.bots.filter((bot) => !bot.hidden).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
+    state.bots.filter((bot) => !bot.hidden && !isPlaceId(bot.id)).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
@@ -180,6 +183,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
+  const freshPending = useRef(new Set<string>());
   const calendarOriginRef = useRef<"chat" | "team-map" | "web-panel">("chat");
   const loading = loadingLine({ connected: state.connected, hydrated: state.hydrated === true, developer: import.meta.env.DEV });
   const group = state.groups.find((g) => g.id === state.selectedId);
@@ -258,6 +262,24 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       const bots = shortcutBots(state.bots.filter((b) => !b.hidden), shownBotIds(document.querySelector("[data-sidebar-root]")));
       const step = e.shiftKey ? botCycleStep(e) : null;
       const newThreadKey = e.key.toLowerCase() === "t" && !e.shiftKey && !e.altKey;
+      if (isStartFreshShortcut(e)) {
+        const selected = state.bots.find((bot) => bot.id === state.selectedId && !bot.hidden);
+        if (
+          !e.repeat && selected && chatBot && state.activeView === "chat"
+          && selected.yourAccess !== "view" && !chatBot.switchingTo && startFreshRefusal(chatBot) === null
+          && !freshPending.current.has(selected.id)
+        ) {
+          e.preventDefault();
+          freshPending.current.add(selected.id);
+          void api(`/api/bots/${selected.id}/start-fresh`, {
+            method: "POST",
+            body: JSON.stringify({ threadId: chatBot.threadId }),
+          })
+            .catch((cause: unknown) => dispatch({ type: "error", message: cause instanceof Error ? cause.message : String(cause) }))
+            .finally(() => freshPending.current.delete(selected.id));
+        }
+        return;
+      }
       if ((e.key.toLowerCase() === "n" || newThreadKey) && !e.altKey) {
         e.preventDefault();
         if (e.shiftKey || newThreadKey) {
@@ -282,7 +304,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.bots, state.selectedId, state.shortcutsOpen, showThreads, dispatch]);
+  }, [state.bots, state.selectedId, state.activeView, state.shortcutsOpen, chatBot, showThreads, dispatch]);
 
   useThreadCycleKeys();
   useReadShownChatOnFocus();
@@ -400,6 +422,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <WindowFrameBar notifications={notificationTray} sidebarUpdate={!advanced && sidebarShown} />
       <BotLimitPopup />
       <ConversationShareDialogs />
+      <PublishTemplateHost />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1 overflow-x-clip">
       {!calendarFocus && <button
@@ -490,12 +513,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         </main>
       )}
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
-      {state.settingsOpen && bot && (
+      <PlaceChatKeeper />{(state.settingsOpen || state.computerOpen) && bot && isPlaceId(bot.id) && <PlacedBotPanel key={`placed:${bot.id}`} bot={bot} />}{state.settingsOpen && bot && !isPlaceId(bot.id) && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
           : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={((state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit) || botPanelFloats(sidePanels, sidebarAndBotPanelFit)} />
       )}
-      {state.computerOpen && bot && (
+      {state.computerOpen && bot && !isPlaceId(bot.id) && (
         remoteClient ? (
           <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} />
         ) : (
@@ -512,8 +535,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!state.forkPanel && roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
       )}
-      {!remoteClient && !state.forkPanel && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
-      {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
+      {!remoteClient && !state.forkPanel && state.inspectorOpen && bot && !isPlaceId(bot.id) && <InspectorPanel key={bot.threadId} bot={bot} />}
+      {!remoteClient && state.activityOpen && bot && !isPlaceId(bot.id) && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
       {inboxShown && <InboxPanel />}
       {notificationTray && state.notificationsOpen && <NotificationsPanel />}
       {notificationTray && !framed && <NotificationRail />}

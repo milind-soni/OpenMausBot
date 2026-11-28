@@ -42,9 +42,11 @@ async function sent(response, what) {
  * }} deps `guard`: this computer's own page only. `cloud()`: My Cloud's address while it is ready, and whether it sleeps
  * now (a sleeping Cloud is never asked). `account()` and `teamsRemembered`: the person's teams, read as places that have
  * bots. `lastRead`: each own place's bots as last read, kept across restarts. `tell()`: the suggestion changed, so this
- * computer's page asks again.
+ * computer's page asks again. `together()`: "This computer and My Cloud together" is on (places-together.mjs): their bots
+ * already work together, so My Cloud is never suggested. `awakeNow()`: the Admin answered just now that My Cloud is awake
+ * (main asks it again when its word is older than a few seconds): My Cloud is read or told only then.
  */
-export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetchImpl, environments, cloud, oneHome, ownHome, dismissed, lastRead = null, account = null, teamsRemembered = null, tell, log = () => {}, t = nativeText.englishText.t }) {
+export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetchImpl, environments, cloud, oneHome, ownHome, dismissed, lastRead = null, account = null, teamsRemembered = null, together = () => false, awakeNow = async () => true, tell, log = () => {}, t = nativeText.englishText.t }) {
   const put = (payload) => ({ method: "PUT", body: JSON.stringify(payload), signal: AbortSignal.timeout(10_000) });
   const teams = account && teamsRemembered ? teamPlaces({ account, fetch: fetchImpl, remembered: teamsRemembered }) : () => [];
   const places = () => {
@@ -55,13 +57,14 @@ export function installTwoPlacesMain({ ipcMain, guard, localRequest, fetch: fetc
       const request = (route, init = {}) => fetchImpl(`${mine.origin}${route}`, { credentials: "include", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000), ...init,
         headers: { accept: "application/json", origin: mine.origin, ...BACKGROUND_HEADERS, ...init.headers } });
       out.push({ key: `cloud:${mine.origin}`, name: t("cloudSetup.myCloud"), kind: "cloud",
-        read: async () => (cloud().asleep ? null : json(await request("/api/cloud-send?move=1"))),
+        // Only right after the Admin said just now that it is awake: its last word may be from before it went to sleep.
+        read: async () => (cloud().asleep || !(await awakeNow()) || cloud().asleep ? null : json(await request("/api/cloud-send?move=1"))),
         // Asleep since it was listed: still not told, as it is not read.
         ...(mine.asleep ? {} : { tell: async (payload) => {
-          if (cloud().asleep) throw new Error(`${t("cloudSetup.myCloud")} is asleep`);
+          if (cloud().asleep || !(await awakeNow())) throw new Error(`${t("cloudSetup.myCloud")} is asleep`);
           return sent(await request(ROUTE, { ...put(payload), headers: { "content-type": "application/json" } }), t("cloudSetup.myCloud"));
         } }),
-        ...(keep.on && !keep.moved && !mine.asleep ? { bring: () => oneHome.keep.set(false) } : {}) });
+        ...(keep.on && !keep.moved && !mine.asleep && !together() ? { bring: () => oneHome.keep.set(false) } : {}) });
     }
     for (const place of environments().filter((entry) => handSaved(entry) && ownHome.owns(entry))) {
       const server = serverRequests(place, fetchImpl);

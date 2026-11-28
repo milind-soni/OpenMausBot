@@ -365,3 +365,109 @@ describe("image preview copy button", () => {
     }
   });
 });
+
+describe("image preview wheel", () => {
+  const images = [
+    { src: "/api/files/tall.png", name: "tall.png" },
+    { src: "/api/files/next.png", name: "next.png" },
+  ];
+
+  it("zooms around the pointer, back to fit, and never scrolls the chat behind it", async () => {
+    const chatWheel = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement("div", { onWheel: chatWheel }, createElement(AttachmentPreviewDialog, { image: images[0]!, images, onClose: () => {} })));
+    });
+    const picture = () => document.querySelector<HTMLImageElement>("[role=dialog] img")!;
+    const wheel = async (deltaY: number, target: Element = picture()) => {
+      const event = new WheelEvent("wheel", { deltaY, bubbles: true, cancelable: true });
+      // happy-dom 21's WheelEvent drops clientX and clientY from its init.
+      Object.defineProperties(event, { clientX: { value: 120 }, clientY: { value: 80 } });
+      await act(async () => { target.dispatchEvent(event); });
+      return event;
+    };
+    const zoom = () => {
+      const [x, y, scale] = (/^translate\((\S+)px, (\S+)px\) scale\((\S+)\)$/.exec(picture().style.transform) ?? []).slice(1).map(Number);
+      return { x, y, scale };
+    };
+    try {
+      const zoomIn = await wheel(-200);
+      expect(zoomIn.defaultPrevented).toBe(true);
+      const { x, y, scale } = zoom();
+      expect(scale).toBeCloseTo(Math.E);
+      expect((120 - x!) / scale!).toBeCloseTo(120);
+      expect((80 - y!) / scale!).toBeCloseTo(80);
+
+      expect((await wheel(400)).defaultPrevented).toBe(true);
+      expect(picture().style.transform).toBe("");
+
+      expect((await wheel(-200, document.querySelector("[role=dialog] header")!)).defaultPrevented).toBe(true);
+      expect(picture().style.transform).toBe("");
+
+      const beside = picture().parentElement!;
+      expect((await wheel(-200, beside)).defaultPrevented).toBe(true);
+      expect(picture().style.transform).toBe("");
+      await wheel(-200);
+      await wheel(400, beside);
+      expect(picture().style.transform).toBe("");
+
+      await wheel(-200);
+      await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" })); });
+      expect(picture().alt).toBe("next.png");
+      expect(picture().style.transform).toBe("");
+
+      await wheel(-200);
+      expect(picture().style.transform).not.toBe("");
+      const replaced = [images[0]!, { src: "/api/files/replaced.png", name: "replaced.png" }];
+      await act(async () => {
+        root.render(createElement("div", { onWheel: chatWheel }, createElement(AttachmentPreviewDialog, { image: replaced[0]!, images: replaced, onClose: () => {} })));
+      });
+      expect(picture().alt).toBe("replaced.png");
+      expect(picture().style.transform).toBe("");
+
+      expect(chatWheel).not.toHaveBeenCalled();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+    }
+  });
+});
+
+describe("opening a single outside-workspace file when permitted by owner", () => {
+  it("preserves canOpenOutside on outside_workspace errors and omits listFolder on retry", async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: "the linked file is outside this conversation's workspace",
+        code: "outside_workspace",
+        canOpenOutside: true,
+      }), { status: 403, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(new Blob(["hello"], { type: "text/plain" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:test"), revokeObjectURL: vi.fn() });
+    const seen: { current: ReturnType<typeof useLocalFileSave> | null } = { current: null };
+    const Probe = () => {
+      seen.current = useLocalFileSave("/outside/notes.md", "notes.md", { threadId: "t1", messageId: "m1" });
+      return null;
+    };
+    const root = createRoot(document.createElement("div"));
+    try {
+      await act(async () => { root.render(createElement(Probe)); });
+      await act(async () => { await seen.current!.save(); });
+      expect(seen.current!.state).toBe("failed");
+      expect(seen.current!.outsideWorkspace).toBe(true);
+      expect(seen.current!.canOpenOutside).toBe(true);
+
+      await act(async () => { await seen.current!.save({ allowOutsideWorkspace: true }); });
+      expect(seen.current!.state).toBe("saved");
+      expect(JSON.parse(String(fetch.mock.calls[1]![1]!.body))).toEqual({
+        path: "/outside/notes.md",
+        allowOutsideWorkspace: true,
+      });
+    } finally {
+      await act(async () => { root.unmount(); });
+      vi.unstubAllGlobals();
+    }
+  });
+});

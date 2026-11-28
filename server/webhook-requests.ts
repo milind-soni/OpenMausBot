@@ -80,15 +80,15 @@ export type UndoWebhookRequestResult =
   | { claimed: true; state: "invalid"; error: string; status: number; stale?: true }
   | { claimed: true; state: "undone"; action: WebhookRequestOperation["action"]; webhookId: string };
 
-function snapshot(webhook: WebhookTrigger): WebhookRequestSnapshot {
+function snapshot(webhook: WebhookTrigger, enabledOnly = false): WebhookRequestSnapshot {
   return {
-    name: webhook.name,
-    instructions: webhook.prompt,
+    name: enabledOnly ? redactSecretsInText(webhook.name) : webhook.name,
+    instructions: enabledOnly ? redactSecretsInText(webhook.prompt) : webhook.prompt,
     runOn: webhook.runOn,
     enabled: webhook.enabled,
-    ...(webhook.eventTypes?.length ? { eventTypes: [...webhook.eventTypes] } : {}),
-    ...(webhook.payloadFilter ? { payloadFilter: { ...webhook.payloadFilter } } : {}),
-    ...(webhook.sameConversation ? { sameConversation: true } : {}),
+    ...(!enabledOnly && webhook.eventTypes?.length ? { eventTypes: [...webhook.eventTypes] } : {}),
+    ...(!enabledOnly && webhook.payloadFilter ? { payloadFilter: { ...webhook.payloadFilter } } : {}),
+    ...(!enabledOnly && webhook.sameConversation ? { sameConversation: true } : {}),
   };
 }
 
@@ -209,7 +209,7 @@ export class WebhookRequestService {
       undo: {
         name: redactSecretsInText(subject.name),
         ...(after && operation.action !== "run_now" ? { appliedUpdatedAt: after.updatedAt } : {}),
-        ...(before && (operation.action === "update" || operation.action === "delete") ? { before: snapshot(before) } : {}),
+        ...(before && operation.action !== "run_now" ? { before: snapshot(before, operation.action === "pause" || operation.action === "resume") } : {}),
       },
     };
     const message = this.options.store.appendMessage(args.threadId, {
@@ -260,7 +260,7 @@ export class WebhookRequestService {
           if (!current || current.updatedAt !== payload.undo?.appliedUpdatedAt) return stale;
           const patch = operation.action === "update"
             ? before ? { ...managerInput(before), eventTypes: before.eventTypes ?? [], payloadFilter: before.payloadFilter ?? null, sameConversation: before.sameConversation === true, enabled: before.enabled } : undefined
-            : { enabled: operation.action === "pause" };
+            : { enabled: before?.enabled ?? (operation.action === "pause") };
           if (!patch || !webhooks.update(webhookId, patch)) return stale;
           break;
         }

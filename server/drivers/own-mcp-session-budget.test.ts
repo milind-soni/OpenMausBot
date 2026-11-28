@@ -15,7 +15,7 @@ import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { AGENTS_ENV_HEADER, TOOL_SHARE_HEADER } from "../routes/own-mcp-http-path.ts";
 import { cliDrops } from "../testing/cli-tool-drop.ts";
 import {
-  ANTIGRAVITY_CLI_TOOL_BUDGET, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, toolListShare, toolListShareProfile, type ListedTool,
+  ANTIGRAVITY_CLI_TOOL_BUDGET, definitionListBytes, fitToolListToShare, PROTECTED_TOOLS, toolListFloorBytes, toolListShare, toolListShareProfile, type ListedTool,
 } from "../tool-list-budget.ts";
 import { fitToolListForBudget, TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFromEnv } from "../tool-schema-profile.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -23,6 +23,8 @@ import { agentsToolList } from "./agents-mcp.ts";
 import { antigravityCliToolBudget } from "./antigravity-acp.ts";
 import { acpSessionMcpServers } from "./own-mcp-http.ts";
 import { sessionToolShares, withSessionToolShares } from "./own-mcp-session-budget.ts";
+import { UNKNOWN_LIST_RESERVE } from "./session-tool-budget.ts";
+import { TOOL_LIST_SHARE_ENV } from "../tool-list-share.ts";
 import { acpMcpServers, type AcpMcpServer } from "./turn-mcp.ts";
 
 const GOLDEN = join(dirname(fileURLToPath(import.meta.url)), "agents-catalog-goldens", "antigravity-cli.tools-list.json");
@@ -34,7 +36,7 @@ const HARNESS = "http://127.0.0.1:8799";
 const CHIEF = { OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
 const NON_CHIEF = { OMB_CHIEF_OF_STAFF: "0", OMB_COMPUTER_SELECTION: "1" };
 const FULLEST = { ...CHIEF, OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1",
-  OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1" };
+  OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_TEAM_BOARD: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1" };
 const agentsList = (env: Record<string, string>) => agentsToolList(env).listed as ListedTool[];
 const catalog = (tools: unknown) => tools as readonly ListedTool[];
 
@@ -181,16 +183,17 @@ describe("which sessions share a budget", () => {
     const sent = acpSessionMcpServers(servers, "advertised", nativeCli, takesUrls, antigravityCliToolBudget);
     const header = (server: AcpMcpServer, name: string) => ("headers" in server ? server.headers.find((entry) => entry.name === name)?.value : undefined);
     const agentsSettings = JSON.parse(Buffer.from(header(sent[0]!, AGENTS_ENV_HEADER)!, "base64url").toString("utf8")) as Record<string, string>;
-    const expected = sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)], ANTIGRAVITY_CLI_TOOL_BUDGET).shares;
+    // The person's server, not relayed by OpenMausBot, is counted at a reserve and sent as it is.
+    const expected = sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS), UNKNOWN_LIST_RESERVE], ANTIGRAVITY_CLI_TOOL_BUDGET).shares;
     expect(toolListShare(agentsSettings[TOOL_SCHEMA_PROFILE_ENV])).toBe(expected[0]);
-    expect([header(sent[1]!, TOOL_SHARE_HEADER), header(sent[2]!, TOOL_SHARE_HEADER)].map(toolListShare)).toEqual(expected.slice(1));
+    expect([header(sent[1]!, TOOL_SHARE_HEADER), header(sent[2]!, TOOL_SHARE_HEADER)].map(toolListShare)).toEqual(expected.slice(1, 3));
     expect(sent[3]).toBe(notes);
   });
 
   it("reaches each own server as a stdio proxy too, with OMB_OWN_MCP_HTTP=0", () => {
     const sent = acpSessionMcpServers(servers, "stdio", nativeCli, takesUrls, antigravityCliToolBudget);
     expect(sent.slice(0, 3).map((server) => toolListShare(envOf(server)[TOOL_SCHEMA_PROFILE_ENV]))).toEqual(
-      sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)], ANTIGRAVITY_CLI_TOOL_BUDGET).shares);
+      sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS), UNKNOWN_LIST_RESERVE], ANTIGRAVITY_CLI_TOOL_BUDGET).shares.slice(0, 3));
   });
 });
 
@@ -215,15 +218,21 @@ describe("on Antigravity, beside the Gemini engines' schema profile", () => {
     expect((built[3] as { args: string[] }).args[0]).toBe(SPAWNED_PROXIES.mcpGate);
   });
 
-  it("the native CLI: one trim of OpenMausBot's own servers, the session's shares in place of gemini, and the person's gate as it was", () => {
+  it("the native CLI: one trim of OpenMausBot's own servers, the session's shares in place of gemini, and the person's gate given the rest", () => {
     const logged: string[] = [];
     const sent = acpSessionMcpServers(built, "advertised", nativeCli, () => true, antigravityCliToolBudget);
-    const shares = sessionToolShares([agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)], ANTIGRAVITY_CLI_TOOL_BUDGET).shares;
+    // The gate has no record yet: it is set aside what the own lists leave at their shortest.
+    const own = [agentsList(CHIEF), catalog(BROWSER_TOOLS), catalog(DATA_TOOLS)];
+    const reserve = ANTIGRAVITY_CLI_TOOL_BUDGET - own.reduce((sum, tools) => sum + toolListFloorBytes(tools), 0);
+    const shares = sessionToolShares([...own, reserve], ANTIGRAVITY_CLI_TOOL_BUDGET).shares;
     const agentsSettings = settingsOf(sent[0]!);
     expect(toolListShare(agentsSettings[TOOL_SCHEMA_PROFILE_ENV])).toBe(shares[0]);
-    expect([header(sent[1]!, TOOL_SHARE_HEADER), header(sent[2]!, TOOL_SHARE_HEADER)].map(toolListShare)).toEqual(shares.slice(1));
+    expect([header(sent[1]!, TOOL_SHARE_HEADER), header(sent[2]!, TOOL_SHARE_HEADER)].map(toolListShare)).toEqual(shares.slice(1, 3));
     expect(JSON.stringify(sent.slice(0, 3))).not.toContain("gemini");
-    expect(sent[3]).toBe(built[3]);
+    const gate = envOf(sent[3]!);
+    expect(Number(gate[TOOL_LIST_SHARE_ENV])).toBe(shares[3]);
+    expect(gate[TOOL_SCHEMA_PROFILE_ENV]).toBe("gemini");
+    expect({ ...sent[3]!, env: (sent[3] as { env: unknown[] }).env.slice(0, -2) }).toEqual(built[3]);
     // The agents endpoint under that share serves exactly the session's fit: gemini's own list budget does not run on top.
     const env = { ...agentsSettings, OMB_HARNESS_URL: HARNESS, OMB_COMMS_TOKEN: "comms" };
     const served = agentsToolList(env).listed as ListedTool[];

@@ -9,21 +9,21 @@ import { track } from "@/lib/analytics";
 import { announcementConditions, announcementPlan, announcementPlatform, announcementSurface, markLaunchAnnouncement, pickAnnouncement, providersRestricted, rememberCardSeen, rememberSponsorDay,
   reportAnnouncement, SPONSOR_CARDS_FOR_TEAM_MEMBERS, useAnnouncementCards, type SeenRecord } from "@/lib/announcements";
 import { boatOfferRuns } from "@/lib/boat-offer";
-import { modelgoOfferable } from "@/lib/modelgo-offer";
 import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, EARLIER_WHATS_NEW_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PREVIOUS_WHATS_NEW_NOTICE, PRODUCT_HUNT_NOTICE, TOGETHER_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { rememberNoticeSeen } from "@/lib/announcement-history";
 import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
 import { useTwoPlaces } from "@/lib/two-places";
+import { togetherSlideShown, useTogetherNoticeDrawn, useTogetherNoticeDue } from "@/lib/places-together";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
-import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewCarousel, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
+import { reportWhatsNew, togetherSlideDue, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewCarousel, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { useUpdaterState } from "@/lib/updater";
@@ -48,6 +48,7 @@ import { NewLookNotice, reportNewLook } from "./NewLookNotice";
 import { PhoneUpdateCard, phonesToTell, useRetiredLinkPhones } from "./PhoneUpdateNotice";
 import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
 import { TwoPlacesCard } from "./TwoPlacesCard";
+import { TogetherNotice } from "./TogetherNotice";
 import { TeamsPopup } from "./whats-new/TeamsPopup";
 import { WhatsNewPopup } from "./whats-new/WhatsNewPopup";
 
@@ -110,7 +111,18 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const mausBot = useMausBotWelcomeDue(viewer);
   // Bots in two places: this computer's page only, where main knows what lives here.
   const two = useTwoPlaces();
-  const twoFact = !local || two.suggest === null ? false : two.suggest === undefined ? null : true;
+  // Together by default: this computer's page only, where the one list is; never during a live call.
+  const togetherDue = useTogetherNoticeDue();
+  // While the notice of the default is due, or main has not said yet whether it is, the bots of this computer and My
+  // Cloud are about to work together: no suggestion to move them to My Cloud goes ahead of it.
+  const cloudHeld = two.suggest?.kind === "cloud" && togetherDue !== false;
+  const twoFact = !local || two.suggest === null || (cloudHeld && togetherDue === true) ? false : two.suggest === undefined || cloudHeld ? null : true;
+  // Once drawn it stays until closed, though main stops calling it due as soon as one of its switches is used.
+  const [togetherOpen, setTogetherOpen] = useState(false);
+  // The notice's slide in What's new, kept in this page's carousel once shown there (main stops calling it due then).
+  const togetherDrawn = useTogetherNoticeDrawn();
+  const [togetherSlideKept, setTogetherSlideKept] = useState(false);
+  const togetherFact = togetherOpen ? true : remote || !local || togetherDue === false ? false : togetherDue === null || (state.liveCall && state.liveCall.status !== "ended") ? null : true;
   // Phones whose older app lost its way in: this computer's own page only, never a Cloud, a server's page or client mode.
   const linkPhones = useRetiredLinkPhones(!remote && local);
   useEffect(() => {
@@ -137,8 +149,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const branded = brandStatus().source === "file", team = Boolean(state.config?.team);
   const liveCall = Boolean(state.liveCall && state.liveCall.status !== "ended");
   // What's new, once per person on every page but a branded build's. Its plan slides: This computer's page of a desktop that
-  // sells MausBot Cloud, never one an organization runs.
+  // sells MausBot Cloud, never one an organization runs. Its last slide is the notice of the bots together, for whom that
+  // notice is due and was never drawn; closed before that slide, the corner notice shows it on a later launch.
   const whatsNewSeen = noticeSeen(record, WHATS_NEW_NOTICE) || Boolean(desktopState?.seen.includes(WHATS_NEW_NOTICE));
+  const togetherSlide = togetherSlideDue({ here: local && !remote && !branded, due: togetherDue, drawn: togetherDrawn, kept: togetherSlideKept });
   const whatsNewHere = !branded && !whatsNewSeen;
   const plansDue = !whatsNewHere || !bridge || !desktop || organization === true ? false : !desktopState || organization === null ? null : desktopState.cloud;
   const whatsNewFor = plansDue === false ? null : whatsNewAudience(account);
@@ -174,8 +188,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const teams = teamsAction({ team: state.config?.team, viewer, account, canAddCloud: Boolean(bridge) });
   // Owed while it has a slide for this person (or may, while that is read): the Teams popup and the sponsor's card it took
   // in wait for it, and count as seen with it.
-  const whatsNewState = !whatsNewHere ? "none" : whatsNewCarousel({ plans, team: organization === true ? null : teams, teamSold,
-    modelgo: sponsorsHere && modelgoOfferable(state.config?.managedPolicy), addKey: viewer?.canSave !== false, staging: account?.staging === true });
+  // A Cloud this person has: this page is one, or this desktop's sign-in has a plan of its own or a team's.
+  const hasCloud = viewer?.cloudHome === true || whatsNewFor === "own" || whatsNewFor === "team";
+  const whatsNewState = !whatsNewHere ? "none" : togetherSlide === null ? "loading" : whatsNewCarousel({ plans, team: organization === true ? null : teams, teamSold,
+    cloud: hasCloud, apps: { place: state.config?.cloudHome === true ? "cloud" : "computer", install: local && !remote && Boolean(window.ogb?.appInstall) },
+    staging: account?.staging === true, together: togetherSlide });
   const whatsNew = typeof whatsNewState === "object" ? whatsNewState : null;
   const whatsNewOwed = whatsNewState !== "none";
   const whatsNewBlocked = useOtherDialogOpen(whatsNewOwed, true) || liveCall;
@@ -257,7 +274,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // FOLLOWERS); nothing else does.
   const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : teamsHere || cards || whatsNewOwed || consentHere || simpleDue || boatHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
+    : teamsHere || cards || whatsNewOwed || consentHere || simpleDue || boatHere || announcementNow !== false || twoFact !== false || togetherFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
     [TEAMS_NOTICE]: teamsNow,
     [GROK_MOVE_NOTICE]: grokNow,
     [PHONE_UPDATE_NOTICE]: phoneNow,
@@ -272,6 +289,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null
       : Boolean(kind && !noticeSeen(record, CLOUD_NOTICE_CARD[kind].dismissed)),
+    [TOGETHER_NOTICE]: togetherFact,
     [BOAT_OFFER_NOTICE]: !boatHere || moving || afterWelcome === true || !usedBefore(state.bots) || desktopState?.seen.includes(BOAT_OFFER_NOTICE) ? false
       : organization === null || moving === null || afterWelcome === null || mausBotFirst || (desktop && !desktopState) ? null : !organization,
     [ANNOUNCEMENT_NOTICE]: announcementNow,
@@ -305,6 +323,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       markLaunchAnnouncement(announcement.id);
       reportAnnouncement(announcement, "shown");
       if (announcement.kind === "sponsor") rememberSponsorDay(seenRecord, now(), remembering);
+    } else if (shownKey === TOGETHER_NOTICE) {
+      setTogetherOpen(true);
     } else if (shownKey === GROK_MOVE_NOTICE && !grokShown) {
       setGrokShown(true);
       reportGrokMovePopup("shown");
@@ -342,15 +362,21 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return <PhoneUpdateCard phones={retiredPhones} onOpen={() => { done(); dispatch(phonePairingSettingsAction()); }} onDismiss={done} />;
   }
 
+  if (notice === TOGETHER_NOTICE) return <TogetherNotice onClose={() => { setTogetherOpen(false); close(); }} />;
+
   if (notice === SIMPLE_MODE_NOTICE) {
     return SIMPLE_ONLY || advancedBack ? <NewLookNotice onClose={close} back={advancedBack} /> : <SimpleModePrompt onClose={close} />;
   }
 
   if (notice === WHATS_NEW_NOTICE && whatsNew) {
-    const report = (action: WhatsNewAction, slide: WhatsNewSlide) => reportWhatsNew(action, slide, whatsNew);
-    const done = () => { close(); rememberNoticeSeen(WHATS_NEW_NOTICE, record, writer, [TEAMS_NOTICE, MODELGO_OFFER_NOTICE, EARLIER_WHATS_NEW_NOTICE]); };
+    const report = (action: WhatsNewAction, slide: WhatsNewSlide) => {
+      // Shown here, the notice of the bots together is done: kept in this carousel, and never in the corner after.
+      if (action === "seen" && slide === "together" && !togetherSlideKept) { setTogetherSlideKept(true); void togetherSlideShown(); }
+      reportWhatsNew(action, slide, whatsNew);
+    };
+    const done = () => { close(); rememberNoticeSeen(WHATS_NEW_NOTICE, record, writer, [PREVIOUS_WHATS_NEW_NOTICE, EARLIER_WHATS_NEW_NOTICE, TEAMS_NOTICE, MODELGO_OFFER_NOTICE]); };
     return <WhatsNewPopup view={whatsNew} report={report} onDone={done} onBuy={slide => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES[slide] })}
-      onAddKey={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })} />;
+      onOpenApps={() => dispatch({ type: "showPublishedApps" })} />;
   }
 
   if (notice === UPDATES_CONSENT_NOTICE && consent.state) {

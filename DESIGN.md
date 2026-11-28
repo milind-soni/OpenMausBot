@@ -199,12 +199,18 @@ element's job and never a pixel value:
   thread's first line, its reply count, who replied and when; a row, a room
   thread opened from anywhere, and an Inbox line open their thread in a panel
   beside the chat (`ForkPanel`), never by moving the room's current thread,
-  which is everyone's. The feed's composer starts a new thread; the room's
+  which is everyone's. Returning from the sidebar reopens the thread that person
+  last viewed in the room on this device. Closing the panel leaves just the feed
+  on the next visit, as does a thread that was archived or deleted.
+  The feed's composer starts a new thread; the room's
   "+" in the sidebar brings the room up with the cursor in that composer. A row carries
   the sidebar thread row's menu behind a quiet More (hover, focus and touch),
   a pin mark when pinned, and its unread or waiting dot; the thread beside the
   feed has the same menu in its header, with its export. Archived threads come
-  back under "Show archived threads" at the top of the feed. The header is plain
+  back under "Show archived threads" at the top of the feed. A closed thread (its
+  work done; Close in the menu, or its bot closes it) folds with its closed
+  neighbours into one quiet "4 closed threads" row that opens in place, ten at a
+  time; one with news stays a row, and a new line opens it again. The header is plain
   words, so the feed is masked under it. Below 768px the room is today's single
   transcript.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:

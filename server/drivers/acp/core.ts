@@ -76,6 +76,7 @@ import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
+import { learnedTextOnlyTools, learnTextOnlyTools, TEXT_ONLY_PROMPT_NOTE } from "../../mcp-text-only.ts"; import { isHermesReasoningReplay } from "./hermes-replay.ts";
 
 /** Failures fixed on the provider account, not by retrying; the reporting process stays pooled. */
 export type AccountErrorCode = Extract<ProviderErrorCode,
@@ -225,16 +226,14 @@ export interface AcpSupport extends AcpDriverHooks {
   ): void;
   /** The authenticate methodId from initialize's authMethods; null skips authenticate. */
   pickAuthMethod(authMethods: Array<{ id?: string }>, env: Record<string, string | undefined>): string | null;
-  /** "fail": abort if auth is missing/errors (subscription CLIs).
-   * "fail-request": cached API credentials need no method, but a requested
-   * OAuth login must succeed. "continue": proceed on an ambient login. */
+  /** Extra authenticate params, e.g. an API key the CLI does not read from the environment. Never logged. */
+  authMeta?(env: Record<string, string | undefined>): Record<string, unknown> | undefined;
+  /** "fail": abort if auth is missing/errors (subscription CLIs). "fail-request": cached API credentials need no method,
+   * but a requested OAuth login must succeed. "continue": proceed on an ambient login. */
   authFailure: "fail" | "fail-request" | "continue";
   /** Whether this CLI can run a turn (env carries the merged config). */
-  isAuthenticated(
-    env: Record<string, string | undefined>,
-    config: AcpConfig,
-    instanceId: string, allowEnv?: readonly string[],
-  ): boolean | Promise<boolean>;
+  isAuthenticated(env: Record<string, string | undefined>, config: AcpConfig, instanceId: string, allowEnv?: readonly string[]): boolean | Promise<boolean>;
+  /** Ask isAuthenticated before authenticate: this CLI's login method, run again, clears the login it holds. */ skipAuthenticateWhenAuthenticated?: boolean;
   /** Refuse a first-party cloud turn before spawning when snapshot auth is
    * false. Local injected models deliberately bypass this subscription gate. */
   requireAuthenticationBeforeSpawn?: boolean;
@@ -242,7 +241,7 @@ export interface AcpSupport extends AcpDriverHooks {
   classifyError?(error: unknown): ProviderErrorCode | undefined;
   /** A session/prompt error saying the agent never reached its model; startup recovery then holds the ACK for it. */
   promptUnreachedModel?(error: unknown): boolean;
-  /** How far a usage limit the engine reports reaches: its whole account, or one allowance its models share (OpenCode's free models), with the models that allowance holds. */ limitFacts?(text: string, model?: string): { limit: "engine" | "model"; limitModels?: string[] };
+  /** How far a usage limit the engine reports reaches: its whole account, or one allowance its models share (OpenCode's free models, its Go subscription, one provider's key), with the models that allowance holds. */ limitFacts?(text: string, model?: string): { limit: "engine" | "model"; limitModels?: string[] };
   /** Plain words for an account failure (bad key, no credit, a used-up
    * quota, no subscription) in place of the provider's raw RPC text. */
   describeAccountError?(code: AccountErrorCode, model?: string): string;
@@ -287,12 +286,6 @@ const SHARED_SESSIONS_MAX = 6, SHARED_SESSIONS_LIFETIME = 12;
 const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
 /** ACP agents may compact their history silently; re-send the full prompt after this many bare turns. */
 const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
-function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
-  const reply = streamed.trim();
-  const replay = chunk.trim();
-  return reply !== "" && /^(?:> |-# )?💭/.test(replay) && replay.endsWith(reply)
-    && /\n\n[ \t]*$/.test(replay.slice(0, -reply.length));
-}
 
 let unkeyedToolSeq = 0;
 /** A synthetic id for a `tool_call` without `toolCallId`, paired FIFO with the first terminal update. */
@@ -895,8 +888,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env, catalog.models);
         const toolLimitKey = JSON.stringify([instanceId, resolvedModel ?? null]);
-        const ownMcp = acpOwnMcpTransport(support), mcpServers = acpMcpServers(turn, { http: loopbackUnproxied(env, ownMcp !== "stdio") && ownMcp === "http", engine: support.driverKind,
-          toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32) });
+        const textOnlyModel = learnedTextOnlyTools(toolLimitKey);
+        const ownMcp = textOnlyModel ? "stdio" as const : acpOwnMcpTransport(support), mcpServers = acpMcpServers(turn, { http: loopbackUnproxied(env, ownMcp !== "stdio") && ownMcp === "http", engine: support.driverKind,
+          toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32), ...(textOnlyModel ? { textOnlyTools: true } : {}) });
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
           threadId, mcpServers,
@@ -1090,13 +1084,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ));
               }
               if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated && !support.skipsAuthenticate?.(instanceId)) {
-                const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
-                  ? session.initResult.authMethods
-                  : [];
-                const methodId = support.pickAuthMethod(methods, spawnEnv);
-                if (methodId) {
+                const methods = Array.isArray(session.initResult?.authMethods) ? session.initResult.authMethods : [];
+                const methodId = support.pickAuthMethod(methods, spawnEnv), skip = methodId && support.skipAuthenticateWhenAuthenticated === true && await support.isAuthenticated(spawnEnv, turnConfig, instanceId, instanceEnvNames(input.environment, spawnEnv));
+                if (skip) session.authenticated = true;
+                else if (methodId) {
+                  const meta = support.authMeta?.(spawnEnv);
                   try {
-                    await session.host.once("authenticate", () => retryTransient(request, "authenticate", { methodId }, INIT_TIMEOUT));
+                    await session.host.once("authenticate", () => retryTransient(request, "authenticate", { methodId, ...(meta ? { _meta: meta } : {}) }, INIT_TIMEOUT));
                     session.authenticated = true;
                   } catch (error) {
                     const failed = signIn.authenticateFailed(error, support.authFailure); if (failed) throw failed;
@@ -1291,7 +1285,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const quiet = startQuietWatch(threadId, session, current);
             const result = await request(
               "session/prompt",
-              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : [])] },
+              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks, ...(contextNote ? [{ type: "text", text: contextNote }] : []), ...(textOnlyModel ? [{ type: "text", text: TEXT_ONLY_PROMPT_NOTE }] : [])] },
               undefined,
               undefined,
               promptIdleMs,
@@ -1355,6 +1349,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }, failed: (error) => { acknowledge(); emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null }); } })) return;
               const message = e instanceof Error ? e.message : String(e);
+              // A text-only model's image refusal poisons its session (the image is in its history) and teaches the model's key (mcp-text-only.ts).
+              if (engineFailureKind(message) === "image_content") { learnTextOnlyTools(toolLimitKey); for (const id of [session.sessionId, turn.resumeCursor]) if (typeof id === "string" && id) brokenSessions.add(id); }
               const code = support.classifyError?.(e) ?? (engineFailureKind(message) === "credits" ? "insufficient_funds" : undefined);
               const needsAuth = code === "invalid_credentials" || code === "inactive_subscription"
                 || code === "insufficient_funds" || message === support.loginNote;
@@ -1385,7 +1381,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ...base(threadId, turnId), type: "runtime.error",
                 ...acpRuntimeFailure(e, support.displayName, accountError ? { message: support.describeAccountError?.(code, cliTurn.model), text: support.accountErrorText?.(code) } : undefined),
                 ...(needsAuth ? { setup: true } : {}), ...((e as any)?.acpPromptStall === true ? { stalled: true } : {}),
-                ...((e as any)?.acpUsageLimit === true || (code === "quota_or_region_restriction" && LIMIT_WORDS.test(message)) ? modelControls.usageLimit((model) => support.limitFacts?.(message, model) ?? { limit: "engine" as const }) : {}), // waited out, or the engine gave up: another AI can carry on
+                ...((e as any)?.acpUsageLimit === true || (code === "quota_or_region_restriction" && LIMIT_WORDS.test(message)) ? modelControls.usageLimit((sessionModel) => support.limitFacts?.(message, (e as any)?.acpUsageLimitModel as string | undefined ?? sessionModel) ?? { limit: "engine" as const }) : {}), // waited out, or the engine gave up: another AI can carry on
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.
               if ((e as any)?.acpSessionBroken === true && session.sessionId) brokenSessions.add(session.sessionId);
@@ -1456,6 +1452,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             prompt,
             defaultModel: turnModel ?? catalog.models.default, model, ...(turnModel ? { configuredModel: turnModel } : {}),
             pickAuthMethod: (methods) => support.skipsAuthenticate?.(instanceId) ? null : support.pickAuthMethod(methods, spawnEnv),
+            ...(support.authMeta && !support.skipsAuthenticate?.(instanceId) ? { authMeta: support.authMeta(spawnEnv) } : {}),
             authRequired: turnModel && skipSubscriptionAuthForLocalInject(options.model ?? options.fallback?.model) ? false : !support.skipsAuthenticate?.(instanceId) && (support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail"),
             loginNote: support.loginNote, signInRefused: support.skipsAuthenticate?.(instanceId) && support.signInRequest ? (error) => { const refused = support.signInRequest!.rpcError(error, instanceId); if (refused) support.signInRequest!.required(instanceId); return refused; } : undefined,
             clientCapabilitiesMeta: support.clientCapabilitiesMeta,

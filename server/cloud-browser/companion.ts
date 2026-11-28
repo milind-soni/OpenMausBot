@@ -8,8 +8,8 @@ import type { Cdp, CdpEvent } from "../browser-sites.ts";
 import { DOWNLOAD_LIMITS, safeFileName } from "../browser/cdp/downloads.ts";
 import type { CloudBrowserRails } from "./rails.ts";
 import type { ComputerOps } from "./remote.ts";
-import { carryIn, carryOut, type SavedCookie } from "./sign-ins.ts";
-import { mergeAtOpen, mergeInSession, prints, sandboxHolds, type SyncStore } from "./sync.ts";
+import { carryIn, carryOut, cookieId, type SavedCookie } from "./sign-ins.ts";
+import { agreed, MAX_SIGN_IN_BYTES, openMerge, prints, sandboxHolds, writeBack, type SyncStore } from "./sync.ts";
 
 /** Where a download lands in the bot's working folder. */
 export const DOWNLOADS_SUBFOLDER = "downloads";
@@ -21,12 +21,15 @@ export const SESSION_DOWNLOAD_BYTES = 2 * 1024 ** 3;
 const KEEP_FREE_BYTES = 1024 ** 3;
 /** A long session's sign-ins are written home this often when they changed, so an unclean end loses minutes at most. */
 export const SIGN_IN_SYNC_MS = 10 * 60_000;
+const MAX_SIGN_IN_MIB = MAX_SIGN_IN_BYTES / 1024 / 1024;
 
 export interface SignInStore {
   /** The home's saved sign-ins for a session, when they last changed; null when none; "unreadable" when not readable now. */
   load(session: string): { state: { cookies: unknown[]; origins: unknown[] }; modified: number } | null | "unreadable";
   /** The sandbox's cookies saved as the session's; returns when the file changed. */
   save(session: string, cookies: unknown[]): number;
+  /** The home's copy kept as a backup as a session opens, before anything of the sandbox's is written to it. */
+  backup?(session: string): void;
 }
 
 export interface CompanionDeps {
@@ -80,6 +83,8 @@ export class SandboxCompanion {
   #baseline: SavedCookie[] | null = null;
   #syncedAt = 0;
   #syncing = false;
+  /** Cookies of this session were left out of the home's copy (sync.ts's bounds): said once in the log. */
+  #droppedLogged = false;
 
   constructor(deps: CompanionDeps) { this.#deps = deps; }
 
@@ -95,6 +100,10 @@ export class SandboxCompanion {
     const { session, signIns } = this.#deps;
     const loaded = signIns ? signIns.load(session) : null;
     if (loaded === "unreadable") throw new SignInsUnreadable();
+    if (signIns && loaded) {
+      try { signIns.backup?.(session); }
+      catch (error) { this.#deps.log(`browser ${session}: could not keep a backup of the home's sign-ins (${error instanceof Error ? error.name : "error"})`); }
+    }
     this.#cdp = await this.#deps.connect(cdpUrl, { event: (message) => this.#event(message) });
     if (signIns) await this.#syncAtOpen(this.#cdp, signIns, loaded);
     this.#syncedAt = this.#now();
@@ -108,7 +117,8 @@ export class SandboxCompanion {
     const last = sync.load(this.#stamp);
     const sandbox = await carryOut(cdp);
     const home = loaded?.state.cookies ?? [];
-    const { merged, fromSandbox } = mergeAtOpen(home, sandbox, last);
+    const { merged, fromSandbox, dropped } = openMerge(home, sandbox, last);
+    this.#leftOut(dropped);
     let homeAt = loaded?.modified ?? 0;
     if (fromSandbox > 0) {
       homeAt = signIns.save(session, merged);
@@ -125,8 +135,15 @@ export class SandboxCompanion {
       this.#deps.log(`browser ${session}: carried ${took} of ${merged.length} saved cookies${carried.refused ? ` (${carried.refused} refused by Chrome)` : ""} and ${carried.origins} sites' storage into the browser sandbox`);
     }
     rails.setCarried(this.#stamp, homeAt);
-    sync.save(this.#stamp, { home: prints(merged), sandbox: prints(held) });
+    sync.save(this.#stamp, { home: prints(merged), sandbox: agreed(held, dropped) });
     this.#baseline = held;
+  }
+
+  /** One log line a session, with the count, for cookies of the sandbox's left out of the home's copy. */
+  #leftOut(dropped: readonly string[]): void {
+    if (dropped.length === 0 || this.#droppedLogged) return;
+    this.#droppedLogged = true;
+    this.#deps.log(`browser ${this.#deps.session}: left ${dropped.length} of the browser sandbox's cookies out of the home's sign-ins: larger than a browser keeps, or past the ${MAX_SIGN_IN_MIB} MiB the home keeps`);
   }
 
   /** Writes the session's own cookie changes into the home's copy: set, changed and removed since what Chrome really held
@@ -141,10 +158,19 @@ export class SandboxCompanion {
       const home = signIns.load(session);
       if (home === "unreadable") return;
       const last = sync.load(this.#stamp);
-      const { merged, changed } = mergeInSession(home?.state.cookies ?? [], this.#baseline, current, last);
-      this.#baseline = current;
+      const { merged, changed, dropped } = writeBack(home?.state.cookies ?? [], this.#baseline, current, last);
+      this.#leftOut(dropped);
+      // A cookie left out stays as it was in the baseline, so the next write-back weighs it again.
+      const out = new Set(dropped);
+      const before = new Map(this.#baseline.map((cookie) => [cookieId(cookie), cookie]));
+      this.#baseline = current.flatMap((cookie) => {
+        const id = cookieId(cookie);
+        if (!out.has(id)) return [cookie];
+        const was = before.get(id);
+        return was ? [was] : [];
+      });
       if (changed > 0) rails.setCarried(this.#stamp, signIns.save(session, merged));
-      sync.save(this.#stamp, { home: prints(merged), sandbox: prints(current) });
+      sync.save(this.#stamp, { home: prints(merged), sandbox: agreed(current, dropped) });
     } finally {
       this.#syncing = false;
     }
@@ -164,7 +190,8 @@ export class SandboxCompanion {
     if (size > UPLOAD_MAX_BYTES) return { error: `${shown} is over ${UPLOAD_MAX_BYTES / 1024 / 1024} MiB, which this browser can't take from the Cloud yet. Tell the person in one sentence and ask them to upload it themselves.` };
     const target = `${this.#deps.home}/.omb-browser/.uploads/${this.#deps.key}/${safeFileName(name ?? shown) || "upload"}`;
     const sent = await this.#deps.ops.sendFile(this.#deps.boxId, dirname(file), shown, target);
-    return "error" in sent ? { error: `${shown} could not be given to the browser: ${sent.error}` } : { path: target };
+    if (!("error" in sent)) return { path: target };
+    return { error: `${shown} could not be given to the browser: ${sent.error}${sent.final ? " Tell the person in one sentence and ask them to upload it themselves." : ""}` };
   }
 
   /** A clean close: downloads still waiting are tried once more, and the sandbox's cookies are saved as the home's. */
@@ -232,6 +259,13 @@ export class SandboxCompanion {
     if (disk.free - pending.bytes < Math.max(KEEP_FREE_BYTES, disk.total / 10)) return failed("the Cloud's disk is too full for it");
     const to = unusedName(folder, pending.name);
     const fetched = await ops.fetchFile(boxId, `${this.downloadDir}/${pending.guid}`, folder, to).catch((error: unknown) => ({ error: error instanceof Error ? error.message : "it failed" }));
+    if ("error" in fetched && "final" in fetched && fetched.final) {
+      // Never copyable this way (too large while the sandbox takes no direct connections): not kept, nor tried again.
+      this.#pending.delete(pending.guid);
+      await ops.removeDownload(boxId, key, pending.guid).catch(() => undefined);
+      this.#notes.push(`"${pending.name}" was downloaded in the browser but could not be brought to your working folder: ${fetched.error}`);
+      return;
+    }
     if ("error" in fetched) return failed(fetched.error);
     this.#pending.delete(pending.guid);
     this.#delivered += fetched.bytes;

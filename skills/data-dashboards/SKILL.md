@@ -15,11 +15,37 @@ that with `show_html` and the page's `app_id`; the same card refreshes.
 | The person wants | Build |
 |---|---|
 | A quick answer or one chart | No page. Use the Data tools (`data_sql`, `data_show`) or a markdown table. |
+| A dashboard here on data in your database | A chat page shown with `uses: ["data"]` that reads it with `mausbot.data.query` (below). It shows the data as it is when the page opens: nothing to export or embed. |
 | A small summary to look at here | A chat page (`show_html`) with pre-aggregated rows embedded as CSV. |
-| To explore bigger data, or a link to share | Query with the Data tools, export the slice with `data_export` (`format: "parquet"`) into a folder beside `index.html`, show the folder in the chat with `show_html` `path`, and `publish_page` it when the person wants a link: the same card gains it. |
+| A link to share, or data not in your database | Query with the Data tools, export the slice with `data_export` (`format: "parquet"`) into a folder beside `index.html`, show the folder in the chat with `show_html` `path`, and `publish_page` it when the person wants a link: the same card gains it. |
 | "Keep it up to date", "live" | The folder page with `live: true` on `show_html` (and on `publish_page` for a link), plus a schedule (`trigger`, `action=create`, `when=schedule`) whose instructions only re-run the export into the same folder and set `CONFIG.updated`. A live chat card reloads within seconds of the folder changing; a live link is published again by itself (at most once a minute) and open copies reload. Without `live`, the schedule must publish the same folder again; the same path keeps the same link. |
 
 Publish only when the person wants others to open it (share, send to someone, post) or asks to publish; a page just for them stays in the chat. A published page is public to anyone with its link, so say so: never put secrets, personal details or rows they didn't ask to share in it.
+
+## Live data in a chat page
+
+Show the page with `uses: ["data"]` (and `"state"` to remember the person's filters, as this example does) and query
+your Data tables from it. Every query is one `SELECT` on your own tables and views, read-only: no files, URLs or writes, at most 5,000 rows
+and 1 MB an answer, 10 seconds each, about 10 calls in 10 seconds. Aggregate in SQL and load the page in a few
+queries. Rows come as objects; whole numbers and decimals as numbers, dates as text.
+
+```html
+<select id="region"><option>All</option><option>north</option></select><ul id="out">Loading…</ul>
+<script>
+const pick = document.getElementById("region");
+async function draw() {
+  const { rows } = await mausbot.data.query("SELECT product, sum(revenue) AS revenue FROM sales WHERE $r = 'All' OR region = $r GROUP BY 1 ORDER BY 2 DESC LIMIT 10", { r: pick.value });
+  document.getElementById("out").innerHTML = rows.map((row) => `<li>${row.product}: ${row.revenue}</li>`).join("");
+  mausbot.state.set("region", pick.value);
+}
+mausbot.state.get("region").then((saved) => { if (saved) pick.value = saved; draw(); });
+pick.onchange = draw;
+</script>
+```
+
+Pass values only as parameters (`?`, `$1` or `$name`), never pasted into the SQL. `mausbot.state.get(key)`,
+`set(key, value)` (no value removes it) and `keys()` keep up to 256 KB for this page; its later versions keep it. A
+published page cannot reach your database: for a link, use the template's Parquet route below.
 
 ## Start from the template
 
@@ -105,7 +131,8 @@ Cut cards rather than adding a fifth chart.
 - `lucide-react` icons: `import { Check, ArrowRight } from "lucide-react"`, sized with `size={16}`.
 - `echarts` (6.1), or `import { Chart, useTheme } from "mausbot"`: `<Chart option={…} height={280} label="…" />`
   follows the light or dark theme; `useTheme()` returns `"light"` or `"dark"`.
-- `mausbot` also has `send(text)`, `open(url)` and `setContext(text)`, as in the tool's description.
+- `mausbot` also has `send(text)`, `open(url)` and `setContext(text)`, as in the tool's description, and `data` and
+  `state` when the page declares them (see "Live data in a chat page").
 - Tailwind classes (4.3) need no import. `dark:` follows the chat's theme.
 TypeScript types are fine. A file that doesn't read, or imports anything else, comes back as an error with the
 line: fix it and send the whole file again. Errors while it runs show on the page and reach you with the next message.
