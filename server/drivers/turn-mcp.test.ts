@@ -25,6 +25,12 @@ const turn = (extra: Partial<SendTurnInput> = {}): SendTurnInput => ({
   ...extra,
 } as SendTurnInput);
 
+const composio = { command: "/usr/local/bin/node", args: ["/app/dist-server/connector-proxy.js"], env: { OMB_CONNECTOR_TOKEN: "apps-capability" } };
+const withApps = (extra: Partial<SendTurnInput> = {}) => {
+  const base = turn(extra);
+  return { ...base, integrations: { ...base.integrations, composio } } as SendTurnInput;
+};
+
 describe("OpenMausBot's own MCP servers for an engine that reaches servers by URL", () => {
   it("turns each own proxy into this server's endpoint with the same capability, and leaves the person's servers as they are", () => {
     const servers = acpMcpServers(turn(), { http: true });
@@ -122,6 +128,43 @@ describe("the MCP servers of a turn whose model takes a limited number of tools"
       expect(env(server)[TOOL_LIMIT_ENV]).toBeUndefined();
       expect(header(server, TOOL_LIMIT_HEADER)).toBeUndefined();
     }
+  });
+});
+
+describe("where the connected-apps bridges mount", () => {
+  const env = (server: ReturnType<typeof acpMcpServers>[number]) =>
+    Object.fromEntries(("env" in server ? server.env : []).map(({ name, value }) => [name, value]));
+  const header = (server: ReturnType<typeof acpMcpServers>[number], name: string) =>
+    ("headers" in server ? server.headers : []).find((entry) => entry.name === name)?.value;
+  const agentsTools = agentsToolList(turn().integrations!.agents!.env).listed.length;
+
+  it("mounts the person's own servers ahead of composio and own apps, which come last as the fallback", () => {
+    const base = withApps();
+    const servers = acpMcpServers({ ...base, integrations: { ...base.integrations!, composioOwn: composio } } as SendTurnInput);
+    expect(servers.map((server) => server.name)).toEqual(["agents", "browser", "data", "notes", "composio", "own_apps"]);
+  });
+
+  it("a tool budget keeps the person's own server over the composio pack", () => {
+    const servers = acpMcpServers(withApps(), { http: true, toolBudget: agentsTools + 3 });
+    expect(servers.map((server) => server.name)).toEqual(["agents", "browser", "data", "notes", "composio"]);
+    expect([header(servers[1]!, TOOL_LIMIT_HEADER), header(servers[2]!, TOOL_LIMIT_HEADER)]).toEqual(["1", "1"]);
+    expect(env(servers[3]!)[TOOL_LIMIT_ENV]).toBe("1");
+    expect(env(servers[4]!)[TOOL_LIMIT_ENV]).toBe("0");
+  });
+
+  it("mounts custom servers when the corresponding app bridges are absent", () => {
+    const custom = { own_apps: composio, composio };
+    const servers = acpMcpServers(turn({ integrations: { custom } }));
+    expect(servers.map((server) => server.name)).toEqual(["own_apps", "composio"]);
+  });
+
+  it("a name collision still keeps the composio bridge over a server of the person's with the same name", () => {
+    const base = turn();
+    const servers = acpMcpServers({ ...base, integrations: { ...base.integrations!, composio,
+      custom: { ...base.integrations!.custom!, composio: { command: "npx", args: ["-y", "my-own-composio"], env: {} } } } } as SendTurnInput);
+    const named = servers.filter((server) => server.name === "composio");
+    expect(named).toHaveLength(1);
+    expect((named[0] as { args: string[] }).args).toEqual(composio.args);
   });
 });
 
