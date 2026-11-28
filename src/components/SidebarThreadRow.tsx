@@ -318,6 +318,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const displayTitle = localizedTaskTitle(task.title);
+  const previewAsTitle = !panel && Boolean(preview) && (!task.title || task.title === "New thread");
   const finishing = useRef(false);
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
@@ -343,7 +344,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     if (title) onRename(task, title);
   };
   const heading = <span className={cn("flex min-w-0 flex-1 items-baseline gap-1.5", panel && "pe-6")}>
-    <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
+    <span dir="auto" title={previewAsTitle ? preview : undefined} className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{previewAsTitle ? preview : displayTitle}</span>
     {main && <MainThreadMark className="self-center" />}
     {byline && (
       <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
@@ -374,6 +375,9 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
           {isWorking(task) && <span data-thread-working="" className="flex items-center gap-1 text-[12px] font-normal text-success">
             {t("chat.activity.working")}{task.turnStartedAt ? <><span aria-hidden="true">·</span><WorkingTimer since={task.turnStartedAt} /></> : null}
           </span>}
+        </span> : preview && !previewAsTitle ? <span className="flex min-w-0 flex-1 flex-col">
+          {heading}
+          <span dir="auto" title={preview} className="min-w-0 truncate text-[12px] font-normal leading-4 text-ink-tertiary">{preview}</span>
         </span> : heading}
       </button>}
       {advanced && task.link && <a href={task.link} target="_blank" rel="noreferrer" dir="ltr" title={task.link} aria-label={t("task.openLink", { link: threadLinkLabel(task.link) ?? task.link })}

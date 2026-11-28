@@ -254,17 +254,23 @@ describe("threads a bot closed", () => {
 });
 
 describe("formatUpdatedAt", () => {
-  it("uses the runtime locale and timezone, and skips a missing stamp", () => {
-    const at = Date.UTC(2026, 0, 15, 0, 30);
-    expect(formatUpdatedAt(at)).toBe(new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }));
-    expect(formatUpdatedAt(0)).toBe("");
-    expect(formatUpdatedAt(Number.NaN)).toBe("");
-    const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
-      task: { threadId: "t", title: "Notes", updatedAt: at },
-      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
-    }));
-    expect(markup).toContain(formatUpdatedAt(at));
-    expect(markup).toContain(new Date(at).toISOString());
+  it("uses the app and browser locale and runtime timezone, and skips a missing stamp", () => {
+    setLocale("en");
+    vi.stubGlobal("navigator", { language: "en-GB" });
+    try {
+      const at = Date.UTC(2026, 0, 15, 0, 30);
+      expect(formatUpdatedAt(at)).toBe(new Date(at).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" }));
+      expect(formatUpdatedAt(0)).toBe("");
+      expect(formatUpdatedAt(Number.NaN)).toBe("");
+      const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
+        task: { threadId: "t", title: "Notes", updatedAt: at },
+        ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
+      }));
+      expect(markup).toContain(formatUpdatedAt(at));
+      expect(markup).toContain(new Date(at).toISOString());
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

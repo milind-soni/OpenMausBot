@@ -20,33 +20,128 @@ const MAX_CACHED = 200;
 
 type Page = { messages?: Message[]; activeLeafId?: string | null };
 const fetched = new Map<string, Message[]>();
-const asked = new Set<string>();
+const requests = new Map<string, { promise: Promise<Message[] | undefined>; signal?: AbortSignal; promote?: () => void }>();
+let generation = 0;
 
 const lineKey = (task: { threadId: string; updatedAt?: number; createdAt?: number }) => `${task.threadId}@${threadRecency(task)}`;
+
+function fetchLine(key: string, signal?: AbortSignal, promote?: () => void): Promise<Message[] | undefined> {
+  const existing = requests.get(key);
+  if (existing) {
+    if (existing.signal?.aborted) {
+      const retry = () => signal?.aborted ? undefined : fetchLine(key, signal, promote);
+      return existing.promise.then(retry, retry);
+    }
+    if (!signal && existing.promote) {
+      const promote = existing.promote;
+      existing.promote = undefined;
+      promote();
+    }
+    return existing.promise;
+  }
+  const threadId = key.slice(0, key.lastIndexOf("@"));
+  const currentGeneration = generation;
+  const entry = { promise: Promise.resolve<Message[] | undefined>(undefined), signal, promote };
+  entry.promise = api<Page>(`/api/threads/${encodeURIComponent(threadId)}/messages?limit=${LAST_LINE_PAGE}`, signal ? { background: true, signal } : { background: true })
+    .then((page) => {
+      if (currentGeneration !== generation || signal?.aborted) return;
+      const lines = visibleMessages({ messages: page.messages ?? [], activeLeafId: page.activeLeafId ?? undefined });
+      fetched.set(key, lines);
+      if (fetched.size > MAX_CACHED) fetched.delete(fetched.keys().next().value!);
+      return lines;
+    })
+    .finally(() => { if (requests.get(key) === entry) requests.delete(key); });
+  requests.set(key, entry);
+  return entry.promise;
+}
 
 /** Each listed conversation's newest messages: the open one from the chat, the rest fetched once per change. */
 function useRecentMessages(bot: Bot, threads: readonly { threadId: string; updatedAt?: number; createdAt?: number }[]): (threadId: string) => Message[] | undefined {
   const [, settle] = useState(0);
-  const wanted = threads.filter((task) => task.threadId !== bot.threadId).map(lineKey);
-  const missing = wanted.filter((key) => !fetched.has(key) && !asked.has(key)).join(",");
+  const panel = useRef(new Map<string, Message[]>());
+  const wanted = JSON.stringify(threads.filter((task) => task.threadId !== bot.threadId).map(lineKey));
   useEffect(() => {
-    if (!missing) return;
-    for (const key of missing.split(",")) {
-      asked.add(key);
-      const threadId = key.slice(0, key.lastIndexOf("@"));
-      void api<Page>(`/api/threads/${encodeURIComponent(threadId)}/messages?limit=${LAST_LINE_PAGE}`, { background: true })
-        .then((page) => {
-          fetched.set(key, visibleMessages({ messages: page.messages ?? [], activeLeafId: page.activeLeafId ?? undefined }));
-          if (fetched.size > MAX_CACHED) fetched.delete(fetched.keys().next().value!);
+    let active = true;
+    const keys = new Set<string>(JSON.parse(wanted));
+    for (const key of panel.current.keys()) if (!keys.has(key)) panel.current.delete(key);
+    for (const key of keys) {
+      const cached = fetched.get(key);
+      if (cached) panel.current.set(key, cached);
+      if (!panel.current.has(key)) void fetchLine(key).then((lines) => {
+        if (active && lines) {
+          panel.current.set(key, lines);
           settle((count) => count + 1);
-        })
-        .catch(() => {})
-        .finally(() => asked.delete(key));
+        }
+      }).catch(() => {});
     }
-  }, [missing]);
+    return () => { active = false; };
+  }, [wanted]);
   const open = visibleMessages(bot);
   const byThread = new Map(threads.map((task) => [task.threadId, lineKey(task)]));
-  return (threadId) => threadId === bot.threadId ? open : fetched.get(byThread.get(threadId) ?? "");
+  return (threadId) => threadId === bot.threadId ? open : panel.current.get(byThread.get(threadId) ?? "") ?? fetched.get(byThread.get(threadId) ?? "");
+}
+
+const sidebarQueue = new Map<string, Set<() => void>>();
+const sidebarActive = new Map<string, { listeners: Set<() => void>; cancel: () => void }>();
+let sidebarRunning = 0;
+
+function startSidebarLines() {
+  if (document.visibilityState === "hidden" && sidebarQueue.size) {
+    document.addEventListener("visibilitychange", startSidebarLines, { once: true });
+    return;
+  }
+  for (const [key, listeners] of sidebarQueue) {
+    if (sidebarRunning >= 4) break;
+    sidebarQueue.delete(key);
+    if (fetched.has(key)) { for (const notify of listeners) notify(); continue; }
+    const controller = new AbortController();
+    let released = false;
+    let promoted = false;
+    let cancelled = false;
+    sidebarRunning++;
+    const release = () => {
+      if (released) return;
+      released = true;
+      clearTimeout(timeout);
+      sidebarRunning--;
+    };
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    const promote = () => { promoted = true; release(); startSidebarLines(); };
+    const cancel = () => { if (!listeners.size && !promoted) { cancelled = true; controller.abort(); } };
+    const active = { listeners, cancel };
+    sidebarActive.set(key, active);
+    const aborted = new Promise<void>((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    const existingPanelRequest = requests.has(key) && !requests.get(key)?.promote;
+    const request = fetchLine(key, controller.signal, promote);
+    if (existingPanelRequest) release();
+    void Promise.race([request, aborted]).then(() => {
+      if (!controller.signal.aborted) for (const notify of listeners) notify();
+    }).catch(() => {}).finally(() => {
+      if (sidebarActive.get(key) === active) sidebarActive.delete(key);
+      if (cancelled && listeners.size) sidebarQueue.set(key, listeners);
+      release();
+      startSidebarLines();
+    });
+  }
+}
+
+export function useSidebarRecentMessages(bot: Bot, task: { threadId: string; updatedAt?: number; createdAt?: number }, onScreen: boolean): Message[] | undefined {
+  const [, settle] = useState(0);
+  const key = lineKey(task);
+  useEffect(() => {
+    if (!onScreen || task.threadId === bot.threadId || fetched.has(key)) return;
+    const active = sidebarActive.get(key);
+    const listeners = active?.listeners ?? sidebarQueue.get(key) ?? new Set<() => void>();
+    const notify = () => settle((count) => count + 1);
+    listeners.add(notify);
+    if (!active) { sidebarQueue.set(key, listeners); startSidebarLines(); }
+    return () => {
+      listeners.delete(notify);
+      if (!listeners.size && sidebarQueue.get(key) === listeners) sidebarQueue.delete(key);
+      sidebarActive.get(key)?.cancel();
+    };
+  }, [onScreen, key, task.threadId, bot.threadId]);
+  return task.threadId === bot.threadId ? visibleMessages(bot) : fetched.get(key);
 }
 
 /** The sidebar's "N more" opens this list with every conversation showing, whether or not the panel is already open. */
@@ -59,8 +154,12 @@ export function showAllConversations(botId: string): void {
 
 /** Tests only. */
 export function forgetConversationLines(): void {
+  generation++;
   fetched.clear();
-  asked.clear();
+  sidebarQueue.clear();
+  for (const active of sidebarActive.values()) { active.listeners.clear(); active.cancel(); }
+  sidebarActive.clear();
+  requests.clear();
 }
 
 export function BotConversations({ bot }: { bot: Bot }) {
