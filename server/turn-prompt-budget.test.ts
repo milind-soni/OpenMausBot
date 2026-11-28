@@ -72,13 +72,15 @@ const PROMPT_BUDGET_BASELINE: Record<string, number> = {
   "tool-bridge": 593,
   "sign-in": 2552,
   "chief-of-staff": 4856,
-  "memory-rules": 2048,
+  // +71 on purpose: a rule for how the bot works goes in its standing instructions, not MEMORY.md.
+  "memory-rules": 2119,
   "setup": 2396,
   "meetings": 296,
   "computer-selection": 1269,
   "credential": 895,
   "routine": 2624,
-  "profile": 931,
+  // +617 on purpose: a standing rule said in chat goes into SOUL.md, everyBotRules or the AI settings, not just this chat.
+  "profile": 1548,
   "team-memory": 286,
   // Both sandbox kinds carry +130 bytes on purpose: the person's own files (C:\Users\…, /Users/…, Desktop) are reached only on This computer.
   "computer:vm-private": 5565,
@@ -86,11 +88,12 @@ const PROMPT_BUDGET_BASELINE: Record<string, number> = {
   "computer:box": 4034,
   "computer:vps": 4678,
   "computer:local": 4987,
-  "claude:direct-chat": 8718,
-  "claude:setup-chat": 11114,
+  // The four chat totals carry the profile's +617.
+  "claude:direct-chat": 9335,
+  "claude:setup-chat": 11731,
   "claude:volatile-note": 178,
-  "codex:direct-chat": 8718,
-  "codex:setup-chat": 11114,
+  "codex:direct-chat": 9335,
+  "codex:setup-chat": 11731,
   "codex:resumed-instructions": 213,
   "codex:volatile-note": 97,
 };
