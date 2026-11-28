@@ -171,12 +171,22 @@ starts; the turn's text lists the copies under a note that says they are data
 from another bot, as `inbox/...` paths where the receiver works in that folder.
 Files the teammate attaches with `attach_file` while it works come back the
 same way with its result, under `inbox/<teammate>/<assignment>-returned/`,
-unless the result itself is withheld. A bot may attach or pass on a file from
+unless the result itself is withheld. Image-capable receivers also get up to
+five handoff pictures totaling 20 MB as native input in rooms; receivers without
+native image input keep the inbox path. A bot may attach or pass on a file from
 its own inbox; that read follows no link. One assignment carries at most 20
 files and 200 MB in all, one bot passes or returns at most 100 files and 500 MB
 a day, and `files` does not travel with `answers`. Inbox copies are removed
 when their record ages out (30 days) and when the conversation or the bot is
 deleted; the rest of a conversation's folder stays, as before.
+
+The fake-engine handoff checks exercise native room images for a capable
+receiver and path-only delivery to an ACP receiver without native image input:
+
+```sh
+pnpm exec vitest run server/host/handoff-files.test.ts server/handoff-files.e2e.test.ts
+```
+
 Returned reports stay available to subsequent model turns behind the compact
 receipt, subject to the bounded retention and a fresh reach check (archived
 bots, audiences).

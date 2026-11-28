@@ -324,7 +324,7 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
    * turn that carries the brief; returned files are told once, to the turn their results resume. `undo` takes back
    * that "once" for a turn that did not run to its end. */
   async function forTurn(node: Node, resumed: boolean, turn: ComposedTurn["turn"]): Promise<{ text: string; undo(): void }> {
-    const to = { botId: node.botId, threadId: node.threadId }, shown = node.groupId ? null : { images: 0, bytes: 0 };
+    const to = { botId: node.botId, threadId: node.threadId }, shown = { images: 0, bytes: 0 };
     const notes: string[] = [], told: Array<{ batch: Batch; before: number | undefined }> = [];
     if (!resumed) {
       const batch = node.parentId ? batchOf(node.id, "sent") : undefined;

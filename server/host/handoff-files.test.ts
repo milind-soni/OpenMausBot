@@ -243,7 +243,7 @@ describe("receiving", () => {
     expect(readFileSync(landed, "utf8")).toBe("original");
   });
 
-  it("gives a picture to a direct turn as a person's upload arrives, and to a room turn by path", async () => {
+  it("gives a picture to direct and room turns as native image input", async () => {
     const files = setup();
     const { to, staged } = await handed(files, [write("chart.png", PNG)]);
     const text = (await files.forTurn(to, false, "first")).text;
@@ -253,10 +253,14 @@ describe("receiving", () => {
     expect(extracted.text).toContain(join(folderOf("ben", "t-ben"), "inbox", "ana", "a1", "chart.png"));
     const inRoom = node("a3", "ben", "t-room", { parentId: "root", groupId: "g1" });
     files.sent("a3", ANA, staged.files);
-    expect((await files.forTurn(inRoom, false, "first")).text).not.toContain("<attached-");
+    const room = extractTurnImages((await files.forTurn(inRoom, false, "first")).text);
+    expect(room.images).toHaveLength(1);
+    expect(room.images[0]!.path).toBe(staged.files[0]!.path);
+    expect(room.text).toContain(join(folderOf("ben", "t-room"), "inbox", "ana", "a3", "chart.png"));
     const many = Array.from({ length: 7 }, (_, i) => ({ ...staged.files[0]!, name: `p${i}.png` }));
     files.sent("a4", ANA, many);
-    expect(extractTurnImages((await files.forTurn(node("a4", "ben", "t-many", { parentId: "root" }), false, "first")).text).images).toHaveLength(5);
+    const roomMany = extractTurnImages((await files.forTurn(node("a4", "ben", "t-many", { parentId: "root", groupId: "g1" }), false, "first")).text);
+    expect(roomMany.images).toHaveLength(5);
   });
 
   it("keeps file names from writing outside the inbox or into the note", async () => {

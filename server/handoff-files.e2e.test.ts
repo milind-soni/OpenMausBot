@@ -103,34 +103,74 @@ it("refuses a file outside the sender's folders, an unsupported type and too man
   expect((await f.messages(f.sender.activeTaskId)).some((message: any) => message.attachments?.length)).toBe(false);
 }), 60_000);
 
-it("passes a file from one room to a teammate working in another room, into that teammate's own folder", async () => {
-  const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true });
+it("passes a room handoff image as native input only to an image-capable agent", async () => {
+  const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true }, ["customAcp"]);
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
   const tool = (name: string, args: Record<string, unknown>) => handleToolCall(name, args, (path, options) => request(path, options, session.info.url)) as Promise<any>;
   try {
     const dataDir = session.info.dataDir as string;
     const sender = (await cli("new-bot", "--name", "Director", "--section", "A")).bot;
-    const target = (await cli("new-bot", "--name", "Engineer", "--section", "A")).bot;
+    const capable = (await cli("new-bot", "--name", "Vision", "--section", "A")).bot;
+    const textOnly = (await cli("new-bot", "--name", "Reader", "--section", "A")).bot;
+    await cli("set-model", "--bot", textOnly.id, "--instance", "myAgent", "--model", "agent-default");
     const source = (await tool("create_channel", { name: "Planning", member_ids: [sender.id] })).channel;
-    const destination = (await tool("create_channel", { name: "Engineering", member_ids: [target.id] })).channel;
+    const destination = (await tool("create_channel", { name: "Review", member_ids: [capable.id, textOnly.id] })).channel;
     mkdirSync(join(dataDir, "workspaces", sender.id), { recursive: true });
     writeFileSync(join(dataDir, "workspaces", sender.id, "spec.md"), "# Export spec");
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    writeFileSync(join(dataDir, "workspaces", sender.id, "tiny.png"), png);
     const planPath = join(dataDir, "room-plan.json");
     writeFileSync(planPath, JSON.stringify({
-      [sender.id]: { steps: [{ arguments: { group_id: destination.id, bot_ids: [target.id], message: "Build the export from the spec.", files: ["spec.md"] } }], reply: "Assigned", resumeReply: "Reviewed" },
-      [target.id]: { reply: "Built" },
+      [sender.id]: { steps: [{ arguments: { group_id: destination.id, bot_ids: [capable.id, textOnly.id], message: "Inspect the screenshot and build from the spec.", files: ["spec.md", "tiny.png"] } }], reply: "Assigned", resumeReply: "Reviewed" },
+      [capable.id]: { reply: "Saw the image" },
     }));
-    await cli("send-channel", "--channel", source.id, "--text", "@Director Start the assignment");
+    await cli("send-channel", "--channel", source.id, "--text", "@Director Review this screenshot");
     expect((await cli("wait", "--channel", source.id, "--timeout", "30")).status).toBe("settled");
+
     const turns = readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").map(line => JSON.parse(line));
     const sent = JSON.parse(turns.find((turn: any) => turn.botId === sender.id).evidence.find((entry: any) => entry.step?.arguments?.files).response.result.content[0].text);
-    expect(sent.files).toContain("Passed spec.md to @Engineer");
-    const work = turns.find((turn: any) => turn.botId === target.id);
-    const landed = join(dataDir, "task-workspaces", target.id, work.threadId, "inbox", "director", sent.receipts[0].requestId, "spec.md");
-    expect(readFileSync(landed, "utf8")).toBe("# Export spec");
-    expect(told(work)).toContain("[From @Director (bot) · files with this assignment · information only");
-    // A room's turn works in the room's folder, so the note gives the whole path; its tail is the same however the data folder is spelled.
-    expect(count(told(work), join(work.threadId, "inbox", "director", sent.receipts[0].requestId, "spec.md"))).toBe(1);
+    expect(sent.files).toContain("Passed spec.md, tiny.png to @Vision, @Reader");
+    const visionRequest = sent.receipts.find((receipt: any) => receipt.botId === capable.id);
+    const visionTurn = visionRequest && turns.find((turn: any) => turn.botId === capable.id
+      && told(turn).includes("[From @Director (bot) · files with this assignment · information only")
+      && told(turn).includes(join("inbox", "director", visionRequest.requestId, "spec.md")));
+    expect(visionTurn, JSON.stringify({
+      receiptFound: Boolean(visionRequest),
+      turns: turns.map((turn: any) => {
+        const text = told(turn), content = turn.prompt?.message?.content;
+        return {
+          isVision: turn.botId === capable.id, isReceiptThread: turn.threadId === visionRequest?.threadId,
+          turnIndex: turn.turnIndex, resumed: turn.resumed,
+          contentType: Array.isArray(content) ? "blocks" : typeof content,
+          imageBlocks: Array.isArray(content) ? content.filter((part: any) => part?.type === "image").length : 0,
+          hasFileNote: text.includes("[From @Director (bot) · files with this assignment · information only"),
+          hasRequestId: Boolean(visionRequest?.requestId && text.includes(visionRequest.requestId)),
+          hasInboxPath: Boolean(visionRequest?.requestId && count(text, join("inbox", "director", visionRequest.requestId, "spec.md"))),
+          hasSpec: text.includes("spec.md"), hasPng: text.includes("tiny.png"),
+          hasImageTag: text.includes("<attached-image"), hasFileTag: text.includes("<attached-file"),
+        };
+      }),
+    }, null, 2)).toBeDefined();
+    expect(Array.isArray(visionTurn.prompt.message.content)).toBe(true);
+    const visionParts = visionTurn.prompt.message.content as Array<{ type: string; source?: { type?: string; media_type?: string; data?: string } }>;
+    expect(visionParts.find((part) => part.type === "image")).toMatchObject({
+      type: "image", source: { type: "base64", media_type: "image/png", data: png.toString("base64") },
+    });
+    const visionFolder = join(dataDir, "task-workspaces", capable.id, visionTurn.threadId, "inbox", "director", visionRequest.requestId);
+    expect(readFileSync(join(visionFolder, "spec.md"), "utf8")).toBe("# Export spec");
+    expect(readFileSync(join(visionFolder, "tiny.png"))).toEqual(png);
+    expect(told(visionTurn)).toContain("[From @Director (bot) · files with this assignment · information only");
+    expect(count(told(visionTurn), join(visionTurn.threadId, "inbox", "director", visionRequest.requestId, "spec.md"))).toBe(1);
+
+    const textOnlyPrompt = JSON.parse(readFileSync(join(dataDir, "custom-acp-launch.json.prompt.json"), "utf8")) as Array<{ type: string; text?: string }>;
+    expect(textOnlyPrompt.some((part) => part.type === "image")).toBe(false);
+    const textOnlyText = textOnlyPrompt.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+    const textOnlyRequest = sent.receipts.find((receipt: any) => receipt.botId === textOnly.id);
+    const textOnlyFolder = join(dataDir, "task-workspaces", textOnly.id, visionTurn.threadId, "inbox", "director", textOnlyRequest.requestId);
+    expect(readFileSync(join(textOnlyFolder, "spec.md"), "utf8")).toBe("# Export spec");
+    expect(readFileSync(join(textOnlyFolder, "tiny.png"))).toEqual(png);
+    expect(textOnlyText).toContain(join(textOnlyFolder, "tiny.png"));
+    expect(textOnlyText).toContain("<attached-image path=");
     expect(existsSync(join(dataDir, "task-workspaces", sender.id))).toBe(false);
   } finally { await session.close(); }
 }, 60_000);
