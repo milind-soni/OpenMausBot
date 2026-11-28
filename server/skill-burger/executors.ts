@@ -9,10 +9,12 @@ import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node
 import { appToolCall } from "../connector-app-tools.ts";
 import { toolData } from "../connected-reads.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { unsafeFileNameProblem } from "../skill-folder.ts";
 import type { ExecResult, StepExecutors } from "./runner.ts";
 
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
 const FILE_OUTSIDE = "a saved step writes files only inside this conversation's folder";
+const FILE_NAME = "a saved step's file name must be one the folders store as an ordinary file";
 const NO_FOLLOW = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
 
 function isInside(root: string, candidate: string): boolean {
@@ -25,6 +27,9 @@ function writeInside(cwd: string, path: string, content: string): ExecResult {
   const target = resolvePath(root, path);
   const inside = relative(root, target);
   if (!inside || !isInside(root, target)) return { ok: false, error: FILE_OUTSIDE };
+  // Containment alone is not enough: `NUL` opens a device and stores nothing, and `report.txt:notes` writes an NTFS
+  // alternate stream that the person's own tools do not show - both inside the folder, both reported as written.
+  for (const part of inside.split(sep)) if (unsafeFileNameProblem(part)) return { ok: false, error: FILE_NAME };
   const dir = dirname(target);
   // Check the deepest existing ancestor before creating folders so a symlinked directory cannot escape mkdirSync.
   for (let cur = dir; cur !== root;) {
