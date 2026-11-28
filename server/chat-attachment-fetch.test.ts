@@ -1,12 +1,12 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, statSync, rmSync, readdirSync } from "node:fs";
-import { link } from "node:fs/promises";
+import { link, open } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it, vi } from "vitest";
 import { collectChatAttachments, fetchChatAttachment, listChatAttachments, type AttachmentFetchScope } from "./chat-attachment-fetch.ts";
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
-  return { ...actual, link: vi.fn(actual.link) };
+  return { ...actual, link: vi.fn(actual.link), open: vi.fn(actual.open) };
 });
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -124,4 +124,54 @@ it.skipIf(process.platform !== "linux")("removes its copy if ownership is lost d
   });
   await expect(fetchChatAttachment(scope, ref)).rejects.toThrow("no longer owns");
   expect(readdirSync(join(scope.workspace, "attachments/inbox/bot-a/thread-a"))).toEqual([]);
+});
+
+it.skipIf(process.platform !== "linux")("bounds bulk reads and lets the event loop run between chunks", async () => {
+  const { scope, ref, path } = fixture();
+  writeFileSync(path, Buffer.alloc(2 * 1024 * 1024, 9));
+  scope.maxBytes = 4 * 1024 * 1024;
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  let reads = 0, largest = 0, yieldedDuringReads = false;
+  vi.mocked(open).mockImplementation(async (...args) => {
+    const file = await actual.open(...args);
+    if (String(args[0]).endsWith(ref)) {
+      const original = file.read.bind(file);
+      file.read = (async (buffer: Buffer, offset: number, length: number, position: number) => {
+        reads++;
+        largest = Math.max(largest, length);
+        if (reads === 1) setImmediate(() => { yieldedDuringReads = true; });
+        return original(buffer, offset, length, position);
+      }) as typeof file.read;
+    }
+    return file;
+  });
+  try {
+    await fetchChatAttachment(scope, ref);
+    expect(reads).toBeGreaterThan(1);
+    expect(largest).toBeLessThanOrEqual(64 * 1024);
+    expect(yieldedDuringReads).toBe(true);
+  } finally { vi.mocked(open).mockImplementation(actual.open); }
+});
+
+it.skipIf(process.platform !== "linux")("cleans the partial file when ownership is revoked during a write", async () => {
+  const { scope, ref } = fixture();
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  let active = true;
+  scope.isActive = () => active;
+  vi.mocked(open).mockImplementation(async (...args) => {
+    const file = await actual.open(...args);
+    if (String(args[0]).endsWith(".partial")) {
+      const original = file.write.bind(file);
+      file.write = (async (buffer: Buffer, offset: number, length: number, position: number) => {
+        const result = await original(buffer, offset, length, position);
+        active = false;
+        return result;
+      }) as typeof file.write;
+    }
+    return file;
+  });
+  try {
+    await expect(fetchChatAttachment(scope, ref)).rejects.toThrow("no longer owns");
+    expect(readdirSync(join(scope.workspace, "attachments/inbox/bot-a/thread-a"))).toEqual([]);
+  } finally { vi.mocked(open).mockImplementation(actual.open); }
 });
