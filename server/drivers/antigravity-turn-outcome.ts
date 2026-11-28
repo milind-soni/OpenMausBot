@@ -11,6 +11,8 @@
 //   - from pingdotgg/t3code@f9a3c38c505: a lost thinking signature marks the
 //     session broken, and the next turn starts a fresh one from this
 //     conversation's context instead of resuming it;
+//   - an undecodable media part in the history (a file the model read that
+//     Google cannot decode) marks the session broken the same way;
 //   - from pingdotgg/t3code@f68d36d8aa9: the 1.5 "STATUS (code NNN): message"
 //     form, and a 404 after the model already answered in this turn counted
 //     as a temporary server error, not a refusal (the one resend T3 sends then
@@ -41,6 +43,9 @@ const QUOTA_EXHAUSTED = /\breason:QUOTA_EXHAUSTED\b/;
 // Claude rejects a saved thinking block without a valid signature. It sits in the native history, so every later prompt
 // to that session fails the same way.
 const INVALID_THINKING_SIGNATURE = /\bmessages\.\d+\.content\.\d+(?:\.thinking\.signature: Field required|: Invalid `signature` in `thinking` block)/;
+// Google cannot decode a file the model read into its history as a media part (a cut-off PDF, say). The part stays in
+// the native history, so every later prompt to that session fails the same way.
+const UNDECODABLE_MEDIA = /\bfile or media data is empty, corrupted, or malformed\b/i;
 const RESET_TIMESTAMP = /\bquotaResetTimeStamp:([^\s\]]+)/;
 const RESET_DELAY = /\bquotaResetDelay:((?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|h|m|s))+)(?=[\s\]])/;
 // google.rpc.RetryInfo, which plain rate limits carry instead of a quota reset.
@@ -165,6 +170,11 @@ function restarting(failure: AcpReportedFailure, broken = false): AcpReportedFai
   return Object.assign(failure, { acpSessionFailure: true }, broken ? { acpSessionBroken: true } : {});
 }
 
+/** The saved native history can no longer be sent: the next turn starts a fresh session instead of resuming it. */
+function brokenSession(provider: string): AcpReportedFailure {
+  return restarting(new AcpReportedFailure({ message: `${provider}'s saved conversation can no longer be sent to the model. The next message starts a fresh ${provider} session with this conversation's context.` }, false), true);
+}
+
 /** The failure a prompt's result and the last step it added stand for; undefined for a normal reply. */
 export function antigravityTurnFailure(
   provider: string,
@@ -179,9 +189,7 @@ export function antigravityTurnFailure(
   const text = errorText ?? "";
   const apiError = API_ERROR.exec(text) ?? statusError(text);
   if (stopReason === "refusal" || QUOTA_EXHAUSTED.test(text)) return restarting(usageLimit(provider, text, now, timeZone));
-  if (INVALID_THINKING_SIGNATURE.test(text)) {
-    return restarting(new AcpReportedFailure({ message: `${provider}'s saved conversation can no longer be sent to the model. The next message starts a fresh ${provider} session with this conversation's context.` }, false), true);
-  }
+  if (INVALID_THINKING_SIGNATURE.test(text) || UNDECODABLE_MEDIA.test(text)) return brokenSession(provider);
   if (apiError === null) return restarting(new AcpReportedFailure(engineFailure(provider, "", { kind: "refused", status: null })!, false));
   const [, httpStatus, message, status] = apiError;
   if (httpStatus === "429" || status === "RESOURCE_EXHAUSTED") return restarting(usageLimit(provider, text, now, timeZone));
@@ -191,11 +199,13 @@ export function antigravityTurnFailure(
   return restarting(new AcpReportedFailure(engineFailure(provider, message!.trim(), { kind: transient ? "server" : "refused", status: http })!, false));
 }
 
-/** The usage limit a harness failure line on stderr reports, when it reports one; undefined for any other failure. */
-export function antigravityHarnessLimit(provider: string, line: string, now: number = Date.now()): AcpReportedFailure | undefined {
+/** The usage limit or broken session a harness failure line on stderr reports, when it reports one; undefined for any
+ * other failure. */
+export function antigravityHarnessFailure(provider: string, line: string, now: number = Date.now()): AcpReportedFailure | undefined {
   const apiError = API_ERROR.exec(line) ?? statusError(line);
   const exhausted = QUOTA_EXHAUSTED.test(line) || apiError?.[1] === "429" || apiError?.[3] === "RESOURCE_EXHAUSTED";
-  return exhausted ? usageLimit(provider, line, now) : undefined;
+  if (exhausted) return usageLimit(provider, line, now);
+  return UNDECODABLE_MEDIA.test(line) ? brokenSession(provider) : undefined;
 }
 
 /**

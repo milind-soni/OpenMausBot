@@ -1,7 +1,7 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudLanding, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
-import { anyOperation, OPERATION_REFRESH_MS } from "./cloud-operation.mjs";
+import { anyOperation, OPERATION_REFRESH_MS } from "./cloud-operation.mjs"; import { IDLE_REFRESH_MS, jittered, jitteredBelow, REFRESH_MS, sessionRetryWait } from "./cloud-cadence.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, failureKind, parseSignInStart, READ_WAIT_MS, resetOffered, retryAfterSeconds, settledWithin, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 import nativeText from "./native-text.cjs";
@@ -24,7 +24,6 @@ const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
 /** What the Admin says of a Cloud of this account's a computer moved to (POST moved-to). */
 const MOVED_TO = Object.freeze(["deleted", "ended", "live", "unknown"]);
 const TIER = /^[a-z][a-z0-9-]{0,23}$/;
-const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
 const SETUP_REFRESH_MS = 15_000;
 /** While My Cloud sleeps and Files or lending waits for it: the session every 15 s, so they resume soon after it wakes. */
@@ -99,7 +98,7 @@ function addOffer(result) {
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t, readWaitMs = READ_WAIT_MS }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t, readWaitMs = READ_WAIT_MS, random = Math.random, attended = () => true }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
@@ -108,7 +107,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   let resetUsed = false, unsaved = false, stuckSince = null, reading = null;
   const save = record => (unsaved ? Promise.resolve() : store.write(record));
   let value = { status: "signed-out", message: "restoring" }, generation = 0, timer = null, closed = false, clearing = null, refreshing = null;
-  let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0, failingUntil = 0;
+  let verifiedUntil = 0, restoring = false, controller = new AbortController(), failures = 0, failingUntil = 0, lastAttemptAt = 0, timerAt = Infinity, timerFor = null; // the last session read's start; the timer's due time and work
   let plan = null, savedHint = null;
   /** The plan's own Cloud that Cancel and Keep act on, as the last verified session names it. */
   let renewalCloud = null;
@@ -146,10 +145,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   const watchingAdd = () => Boolean(adding && !adding.done && now() - adding.startedAt < CHECKOUT_WATCH_MS);
   const publish = next => { value = next; onState(state()); return state(); };
   const record = (saved, hint) => ({ ...saved, ...(hint ? { planHint: hint } : {}) });
-  const stopTimer = () => { if (timer !== null) clearTimer(timer); timer = null; };
+  const stopTimer = () => { if (timer !== null) clearTimer(timer); timer = null; timerAt = Infinity; timerFor = null; };
   const schedule = (work, delay) => {
     stopTimer();
-    if (!closed) { timer = setTimer(() => { timer = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
+    if (!closed) { timerAt = now() + Math.max(1, delay); timerFor = work; timer = setTimer(() => { timer = null; timerAt = Infinity; timerFor = null; void work().catch(() => {}); }, Math.max(1, delay)); timer?.unref?.(); }
   };
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; failingUntil = 0; return generation; };
   // `quiet`: another account is taking over (quiesce to reload): this sign-in's grant is still in memory, and nothing may ask for
@@ -261,7 +260,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!grant || !current(stamp)) return state();
     if (grant.expiresAt <= now()) { stopTimer(); return publish(view("reauth-required", "expired")); }
     try {
-      const previous = grant, result = await request("session", { token: previous.token });
+      lastAttemptAt = now(); const previous = grant, result = await request("session", { token: previous.token });
       if (!current(stamp) || grant !== previous) return state();
       const next = identity(result);
       if (next.device.id !== previous.device.id || next.account.id !== previous.account.id || next.account.email !== previous.account.email || next.expiresAt <= now()) {
@@ -308,12 +307,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase) || otherOwnClouds(clouds).some(cloud => cloud.status === "setting_up");
       const added = adding ? clouds?.find(cloud => cloud.id === adding.cloudId) ?? null : null;
       const paying = watchingAdd() && Boolean(adding.url) && (!added || added.status === "checkout");
-      const delay = (watching() && planCloud?.status !== "ready") || paying ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : anyOperation(machine, clouds) ? OPERATION_REFRESH_MS : REFRESH_MS; // an operation of ours: sooner
-      schedule(refresh, Math.min(delay, verifiedUntil - now()));
+      const delay = (watching() && planCloud?.status !== "ready") || paying ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : anyOperation(machine, clouds) ? OPERATION_REFRESH_MS : attended() ? REFRESH_MS : IDLE_REFRESH_MS; // an operation of ours: sooner; nobody looking and nothing under way: every 5 minutes, spread ±20%; the rest spread only sooner
+      schedule(refresh, Math.min(delay === IDLE_REFRESH_MS ? jittered(delay, random) : jitteredBelow(delay, random), verifiedUntil - now()));
     } catch (error) {
       if (!current(stamp)) return state();
       if (signInEnded(error)) { verifiedUntil = 0; failures = 0; stopTimer(); return publish(view("reauth-required", "access-ended")); }
-      failures++; const wait = Math.min(retryDelay(failures), grant.expiresAt - now()); failingUntil = now() + Math.max(0, wait); // `failingUntil` below
+      failures++; const wait = sessionRetryWait(failures, { retryAfter: error?.retryAfter, expiresIn: grant.expiresAt - now(), verifiedIn: verifiedUntil - now(), attended: attended(), waking: awaitingWake(), random }); failingUntil = now() + Math.max(0, wait); // `failingUntil` below
       if (value.status === "connected") publish(value);
       else publish(view("unavailable", "unreachable"));
       schedule(refresh, wait);
@@ -525,7 +524,10 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       return state();
     },
     cancel: () => { if (!pending && value.status !== "connecting") return Promise.resolve(state()); opened = null; return signOut(); },
-    refresh, signOut, failingUntil: () => (failures > 0 ? failingUntil : 0), // a failing session read's next try: a caller waits for it
+    refresh, signOut, lastAttemptAt: () => lastAttemptAt, failingUntil: () => (failures > 0 ? failingUntil : 0), // when the last session read began; a failing one's next try
+    freshen() { // the window came to the front, the computer woke, or the person pressed Try again: read now when the last read began a minute ago or more (inside a failure's wait too), at once while a checkout is watched; else the next read comes a minute after the last
+      if (!grant || quiet || closed || value.status === "reauth-required") return null; if (watching() || now() - lastAttemptAt >= REFRESH_MS) return refresh().catch(() => state());
+      if (timerFor === refresh && timerAt > lastAttemptAt + REFRESH_MS) schedule(refresh, lastAttemptAt + REFRESH_MS - now()); return null; },
     /** Clear and sign in again: a saved sign-in this computer can't read or remove goes (never a working one), and isn't read again
      * this run. One that still can't be removed stays on disk; this run's next sign-in is kept in memory if it can't be saved. */
     async resetSaved() {
@@ -906,8 +908,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * it does not offer X research (404). Never kept on disk. The relay must
      * be on the Cloud's own origin: the token goes nowhere else. */
     async xResearchAccess() {
-      const current = grant;
-      if (!current) return null;
+      const current = grant; if (quiet) throw new Error("Another account is taking over."); if (!current) return null; // never the account before's sign-in
       let result;
       try { result = await request("services/x", { method: "POST", body: {}, token: current.token }); }
       catch (error) { if (error?.status === 402 || error?.status === 404) return null; throw error; }
@@ -922,8 +923,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * or null when there is no sign-in or the Admin does not offer pages yet (404). Never kept on disk. The token route
      * must be on the Cloud's own origin: the token goes nowhere else. */
     async pagesAccess() {
-      const current = grant;
-      if (!current) return null;
+      const current = grant; if (quiet) throw new Error("Another account is taking over."); if (!current) return null; // never the account before's sign-in
       let result;
       try { result = await request("services/pages", { method: "POST", body: {}, token: current.token }); }
       catch (error) { if (error?.status === 404) return null; throw error; }

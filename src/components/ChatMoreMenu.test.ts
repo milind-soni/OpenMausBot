@@ -118,6 +118,11 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(menuOf(createElement(ChatMoreMenu, { bot: fresh })).items.find((one) => one.key === "start-fresh")!.disabled).toBe(true);
   });
 
+  it("does not start fresh while a thread switch is pending", () => {
+    const item = menuOf(createElement(ChatMoreMenu, { bot: { ...bot, switchingTo: "other" } })).items.find((one) => one.key === "start-fresh")!;
+    expect(item.disabled).toBe(true);
+  });
+
   it("starts a new thread with the bot and displays the platform shortcut hint", () => {
     const win = globalThis.window as { ogb?: { platform?: string } };
     try {
@@ -130,6 +135,22 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     } finally {
       delete win.ogb;
     }
+  });
+
+  it("shows the platform Start fresh chord beside the menu item", () => {
+    const win = globalThis.window as { ogb?: { platform?: string } };
+    try {
+      for (const [platform, expected] of [["darwin", "⌘ ⇧ K"], ["win32", "Ctrl Shift K"]] as const) {
+        win.ogb = { platform };
+        const item = menuOf(createElement(ChatMoreMenu, { bot })).items.find((one) => one.key === "start-fresh")!;
+        expect(renderToStaticMarkup(createElement("div", null, item.trailing))).toContain(expected);
+      }
+    } finally {
+      delete win.ogb;
+    }
+  });
+
+  it("starts a new thread with the bot", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
     menu.items.find((item) => item.key === "new-thread")!.onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "pepper" });

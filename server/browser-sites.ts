@@ -2,11 +2,11 @@
 // it autosaves (`<restore key>-<session>.json.enc`, cli/src/native/state.rs: AES-256-GCM under SHA-256 of the key text,
 // 12-byte nonce first, 16-byte tag last); signing out clears all three. The key stays in this server process; no bot or page ever sees it.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { browserRestoreKey, browserSessionsDirectory, closeBrowserSession, inRunningBrowser, startBrowserSession } from "./browser-engine.ts";
+import { browserRestoreKey, browserSessionsDirectory, closeBrowserSession, inRunningBrowser, removeSignInsBackups, signInsBackupFile, signInsBackupId, startBrowserSession } from "./browser-engine.ts";
 import { browserRuntimeEnv } from "./browser-runtime.ts";
 
 export interface SignedInSite {
@@ -209,6 +209,8 @@ function rewriteSavedState(directory: string, session: string, key: string, site
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     }
   }
+  // The copies kept from before the browser sandbox's sessions hold the old logins too.
+  removeSignInsBackups(directory, session);
 }
 
 /** A session's saved sign-ins (its newest restore file) and when they last changed, for the Cloud's browser sandbox to carry
@@ -234,6 +236,66 @@ export function writeSignIns(directory: string, session: string, key: string, co
   const path = join(directory, `${stateBases(session)[0]}.json.enc`);
   writeState(path, { cookies: cookies.filter(isCookie), origins }, key);
   return modified(path);
+}
+
+// What a session in the Cloud's browser sandbox writes back is what its Chrome reports, so the home keeps the copy it had
+// when each such session opened: a few, for a week, so the owner can put a session's sign-ins back as they were before it
+// (routes/browser-sign-in-backups.ts). They are removed with the sign-ins (a sign-out, a reset, the bot's deletion).
+
+/** Backups older than this are removed at the next backup. */
+export const SIGN_IN_BACKUP_MS = 7 * 24 * 60 * 60_000;
+/** At most this many per session, newest kept. */
+export const SIGN_IN_BACKUPS_KEPT = 5;
+/** And at most this many bytes of them per session, newest kept. */
+export const SIGN_IN_BACKUPS_MAX_BYTES = 16 * 1024 * 1024;
+
+export interface SignInBackup { id: string; takenAt: number; bytes: number }
+
+/** The session's backups, newest first. */
+export function signInBackups(directory: string, session: string): SignInBackup[] {
+  let names: string[] = [];
+  try { names = readdirSync(directory); } catch { return []; }
+  return names.flatMap((name) => {
+    const id = signInsBackupId(session, name);
+    if (id === null) return [];
+    try { return [{ id, takenAt: Number(id), bytes: statSync(join(directory, name)).size }]; } catch { return []; }
+  }).sort((a, b) => b.takenAt - a.takenAt);
+}
+
+/** Old backups past the week, the count or the bytes, removed (newest kept). */
+function pruneSignInBackups(directory: string, session: string, now: number): void {
+  let bytes = 0;
+  signInBackups(directory, session).forEach((backup, index) => {
+    bytes += backup.bytes;
+    const keep = index < SIGN_IN_BACKUPS_KEPT && now - backup.takenAt <= SIGN_IN_BACKUP_MS && (index === 0 || bytes <= SIGN_IN_BACKUPS_MAX_BYTES);
+    if (keep) return;
+    try { unlinkSync(join(directory, signInsBackupFile(session, backup.id))); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  });
+}
+
+/** The home's copy of the session's sign-ins kept as a backup now (a session in the browser sandbox opening). Returns its
+ * id, or null when there is nothing readable to keep. */
+export function backupSignIns(directory: string, session: string, key: string, now = Date.now()): string | null {
+  const current = readSignIns(directory, session, key);
+  if (!current || current === "unreadable") return null;
+  const id = String(Math.max(1e12, Math.min(9_999_999_999_999, Math.floor(now))));
+  const path = join(directory, signInsBackupFile(session, id));
+  if (!existsSync(path)) writeState(path, current.state, key);
+  pruneSignInBackups(directory, session, now);
+  return id;
+}
+
+/** The session's sign-ins put back as one backup holds them. The copy they replace is kept as a backup first, so a restore
+ * can itself be undone. False when there is no such backup or it cannot be read. */
+export function restoreSignIns(directory: string, session: string, key: string, id: string, now = Date.now()): boolean {
+  if (!/^\d{13}$/.test(id)) return false;
+  let state: SavedState;
+  try { state = readState(join(directory, signInsBackupFile(session, id)), key); } catch { return false; }
+  backupSignIns(directory, session, key, Math.max(now, Number(id) + 1));
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  writeState(join(directory, `${stateBases(session)[0]}.json.enc`), state, key);
+  return true;
 }
 
 export function connectCdp(url: string, timeoutMs = 10_000, listeners: CdpListeners = {}): Promise<Cdp> {

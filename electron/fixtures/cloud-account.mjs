@@ -55,7 +55,7 @@ export async function fixture(t, options = {}) {
       if (req.method === "DELETE") { if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); } if (f.sessionStatus === 503) return send(503, { error: "unavailable" }); f.revoked = true; return send(200, { revoked: true }); }
       if (f.revoked) return send(401, { error: "invalid_token" });
       if (f.sessionPage) { res.writeHead(f.sessionPage, { "content-type": "text/html" }); return res.end("<!doctype html>Attention required"); }
-      if (f.sessionError) return send(f.sessionError.status, f.sessionError.body);
+      if (f.sessionError) { res.writeHead(f.sessionError.status, { "content-type": "application/json", ...f.sessionError.headers }); return res.end(JSON.stringify(f.sessionError.body)); }
       if (f.sessionStatus !== 200) return send(f.sessionStatus, { error: "unavailable" });
       return send(200, { ...identity(), ...(f.invalidIdentity ? { account: { id: "someone-else", email: "other@example.test" } } : {}),
         entitlement: f.invalidEntitlement ? { plan: "pro", status: "active" } : f.entitlement, ...(f.cloud === undefined ? {} : { cloud: f.cloud }),
@@ -68,7 +68,7 @@ export async function fixture(t, options = {}) {
   f.client = createCloudAccountClient({ origin: f.origin, fixture: true, deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.fixture", now: () => f.now,
     store: { read: async () => f.saved, write: async value => { if (f.failWrite) throw new Error("fixture storage failure"); f.saved = structuredClone(value); } },
     openBrowser: async url => { f.browsers.push(url); }, onState: state => f.states.push(state),
-    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; }, ...options });
+    setTimer: (callback, delay) => { f.timer = callback; f.delay = delay; return 1; }, clearTimer: () => { f.timer = null; f.delay = null; }, random: () => 0.5, ...options });
   f.tick = () => { const callback = f.timer; assert.ok(callback); f.timer = null; callback(); };
   f.connect = async () => { await f.client.begin(); f.approved = true; f.tick(); await until(() => f.client.state().status === "connected"); };
   t.after(async () => { f.client.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });

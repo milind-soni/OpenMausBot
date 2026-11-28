@@ -103,6 +103,8 @@ export function autoVerdict(
     toolAllowed?: boolean;
     /** The request only reads the bot's own files: its SOUL.md, skills, memory and conversation folders. */
     ownFilesRead?: boolean;
+    /** Optional prompt summary used to resolve generic ACP tool placeholders such as `tool: "other"`. */
+    summary?: string;
   },
 ): AutoVerdict {
   if (ASKS_A_PERSON.has(bareToolName(tool))) {
@@ -111,7 +113,7 @@ export function autoVerdict(
   // Full's promise is literal, sandbox widening included; entering Full is consent-gated by the bot PATCH endpoint.
   if (mode === "full") return { approve: `approved ${tool} (full access)`, source: "full-access" };
   if (context?.requiresExplicitApproval) return { approve: null, source: "explicit-approval-block" };
-  if (isOutboundTool(tool)) return { approve: null, source: "outbound-guard" };
+  if (isOutboundTool(tool, context?.summary)) return { approve: null, source: "outbound-guard" };
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
   if (context?.toolAllowed) return { approve: `approved ${tool} (always allowed)`, source: "tool-allowlist" };
   if (context?.ownFilesRead) return { approve: `approved ${tool} (its own files)`, source: "own-files" };

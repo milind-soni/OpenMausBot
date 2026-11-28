@@ -6,6 +6,7 @@ import { expect, it, vi } from "vitest";
 
 const store = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi.fn() }));
 vi.mock("@/state/store", () => ({ useStore: () => store, currentTaskBot: (bot: object) => bot }));
+vi.mock("@/lib/default-bot", () => ({ useViewerEmail: () => null }));
 vi.mock("./ChatView", () => ({ ChatView: () => createElement("div", { "data-tour": "composer" }, createElement("textarea")) }));
 vi.mock("./GroupView", () => ({ GroupView: () => createElement("div", { "data-tour": "composer" }, createElement("textarea")) }));
 

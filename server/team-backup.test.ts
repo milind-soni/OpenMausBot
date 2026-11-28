@@ -7,21 +7,30 @@ import { Store, UNTITLED_TASK } from "./store.ts";
 import { RoutineManager } from "./routines.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
+import { AFTER_RESET_MS } from "../shared/limit-reset.ts";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { WIDGET_SAMPLES } from "../shared/widget-samples.ts";
 import { soulFile, soulHash } from "./bot-folder.ts";
 import { appendMemoryLog, readMemoryFile, readMemoryLog, readMemoryTopic, searchMemoryFiles, updateMemory, workspaceDir, writeMemoryTopic } from "./workspace.ts";
 
 const selection = () => ({ instanceId: "fixture", model: "fixture-model" });
+const KNOWN_RESET_AT = Date.parse("2026-11-26T12:00:00.000Z");
+const knownLimitResetAt = (engine: string) => engine === "claude" ? KNOWN_RESET_AT : null;
 
-function fixture() {
-  const store = new Store(selection);
-  const routines = new RoutineManager({
+function openRoutines(store: Store, options: { limitResetAt?: (engine: string) => number | null; file?: string } = {}) {
+  return new RoutineManager({
+    ...(options.file ? { file: options.file } : {}),
+    ...(options.limitResetAt ? { limitResetAt: options.limitResetAt } : {}),
     botState: (id) => store.bot(id) ? "ready" : "missing",
     goalState: (id, botId) => store.group(id ?? "")?.memberIds.includes(botId) ? "ready" : "missing",
     createTask: (id, title) => store.createTask(id, title),
     startTurn: async () => { throw new Error("Import must never run a bot"); },
   });
+}
+
+function fixture(options: { limitResetAt?: (engine: string) => number | null } = {}) {
+  const store = new Store(selection);
+  const routines = openRoutines(store, options);
   const chief = store.createBot({ name: "Mira", section: "Engineering", description: "Full instructions\n".repeat(400) }, { seedMessages: false });
   store.setSoul(chief.id, "  Cite sources.\nRespect the user's current request. 🐭\n");
   const scout = store.createBot({ name: "Scout", section: "Engineering", mascotBody: "circle", mascotFaceColor: "black", mascotBodyColor: "#12ab9f", mascotMaterial: "fluffy" }, { seedMessages: false });
@@ -55,6 +64,17 @@ function fixture() {
   routines.create({ name: "Daily", prompt: "Report progress", botId: chief.id, enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] } });
   routines.create({ name: "Standup", prompt: "Discuss progress", target: "room-goal", groupId: group.id, botId: chief.id, enabled: true, schedule: { type: "interval", everyMinutes: 30, anchorAt: 0 } });
   return { store, routines, chief, scout, otherChief, archived, group };
+}
+
+function portableBackup(store: Store, routines: RoutineManager, name: string) {
+  return JSON.parse(JSON.stringify(createTeamBackup(store, routines.listRoutines(), name))) as ReturnType<typeof createTeamBackup>;
+}
+
+function restoredRoutine(store: Store, routines: RoutineManager, backup: ReturnType<typeof portableBackup>, name: string) {
+  const imported = importTeamBackup(store, routines, backup, selection());
+  const owner = imported.bots.find((bot) => bot.name === "Mira 2")!;
+  const routine = imported.routines.find((item) => item.name === name)!;
+  return { owner, routine };
 }
 
 describe("additive portable team backups", () => {
@@ -178,6 +198,111 @@ describe("additive portable team backups", () => {
     expect(readMemoryFile(chief.id).text).toBe(exported.file);
     const noMemory = result.bots.find((bot) => bot.name === "Scout 2")!;
     expect(readMemoryFile(noMemory.id).text).toBe("");
+  });
+
+  it("exports a disabled limit-reset routine and restores it paused on its new owner", () => {
+    const { store, routines, chief } = fixture();
+    const created = routines.create({
+      name: "After Claude resets", prompt: "Finish the report.", botId: chief.id, enabled: false,
+      schedule: { type: "limit_reset", engine: "claude", repeat: "once" },
+    });
+    const backup = portableBackup(store, routines, "Limit reset once");
+    const saved = backup.routines.find((routine) => routine.name === "After Claude resets")!;
+    expect(saved.schedule).toEqual(created.schedule);
+    const { owner, routine } = restoredRoutine(store, routines, backup, "After Claude resets");
+    expect(routine.schedule).toEqual(created.schedule);
+    expect(routine.botId).toBe(owner.id);
+    expect(routine.enabled).toBe(false);
+    expect(routine.nextRunAt).toBeNull();
+  });
+
+  it("exports a disabled limit-reset routine that repeats every reset", () => {
+    const { store, routines, chief } = fixture();
+    const created = routines.create({
+      name: "Every Claude reset", prompt: "Pick up the next report.", botId: chief.id, enabled: false,
+      schedule: { type: "limit_reset", engine: "claude", repeat: "every_reset" },
+    });
+    const backup = portableBackup(store, routines, "Limit reset repeat");
+    const saved = backup.routines.find((routine) => routine.name === "Every Claude reset")!;
+    expect(saved.schedule).toEqual(created.schedule);
+    const { owner, routine } = restoredRoutine(store, routines, backup, "Every Claude reset");
+    expect(routine.schedule).toEqual(created.schedule);
+    expect(routine.botId).toBe(owner.id);
+    expect(routine.enabled).toBe(false);
+    expect(routine.nextRunAt).toBeNull();
+  });
+
+  it("preserves a known limit-reset time through backup and import with the same provider", () => {
+    const { store, routines, chief } = fixture({ limitResetAt: knownLimitResetAt });
+    const created = routines.create({
+      name: "Known Claude reset", prompt: "Continue after the known reset.", botId: chief.id, enabled: false,
+      schedule: { type: "limit_reset", engine: "claude", repeat: "once" },
+    });
+    expect(created.schedule).toEqual({ type: "limit_reset", engine: "claude", repeat: "once", at: KNOWN_RESET_AT + AFTER_RESET_MS });
+    const backup = portableBackup(store, routines, "Known limit reset");
+    const saved = backup.routines.find((routine) => routine.name === "Known Claude reset")!;
+    expect(saved.schedule).toEqual(created.schedule);
+    const { owner, routine } = restoredRoutine(store, routines, backup, "Known Claude reset");
+    expect(routine.schedule).toEqual(created.schedule);
+    expect(routine.botId).toBe(owner.id);
+    expect(routine.enabled).toBe(false);
+    expect(routine.nextRunAt).toBeNull();
+  });
+
+  it("keeps a limit-reset snapshot in the file and pauses the import when the destination has no reset time", () => {
+    const { store, routines, chief } = fixture({ limitResetAt: knownLimitResetAt });
+    const created = routines.create({
+      name: "Snapshot Claude reset", prompt: "Keep the snapshot.", botId: chief.id, enabled: false,
+      schedule: { type: "limit_reset", engine: "claude", repeat: "once" },
+    });
+    const backup = portableBackup(store, routines, "Limit reset snapshot");
+    const saved = backup.routines.find((routine) => routine.name === "Snapshot Claude reset")!;
+    expect(saved.schedule).toEqual(created.schedule);
+    expect(saved.schedule).toEqual({ type: "limit_reset", engine: "claude", repeat: "once", at: KNOWN_RESET_AT + AFTER_RESET_MS });
+    const destination = openRoutines(store, { file: join(DATA_DIR, "routines-no-reset.json") });
+    const { owner, routine } = restoredRoutine(store, destination, backup, "Snapshot Claude reset");
+    expect(routine.schedule).toEqual({ type: "limit_reset", engine: "claude", repeat: "once", at: null });
+    expect(routine.botId).toBe(owner.id);
+    expect(routine.enabled).toBe(false);
+    expect(routine.nextRunAt).toBeNull();
+  });
+
+  it("exports an enabled cron routine and restores it paused", () => {
+    const { store, routines, chief } = fixture();
+    const created = routines.create({
+      name: "Weekday cron", prompt: "Send the weekday brief.", botId: chief.id, enabled: true,
+      schedule: { type: "cron", expression: "15 9 * * 1-5", timeZone: "Asia/Kuala_Lumpur" },
+    });
+    expect(created.enabled).toBe(true);
+    const backup = portableBackup(store, routines, "Cron");
+    const saved = backup.routines.find((routine) => routine.name === "Weekday cron")!;
+    expect(saved.schedule).toEqual(created.schedule);
+    const { owner, routine } = restoredRoutine(store, routines, backup, "Weekday cron");
+    expect(routine.schedule).toEqual(created.schedule);
+    expect(routine.botId).toBe(owner.id);
+    expect(routine.enabled).toBe(false);
+    expect(routine.nextRunAt).toBeNull();
+  });
+
+  it("round-trips an interval's weekdays, window and end", () => {
+    const { store, routines, chief } = fixture();
+    const anchorAt = Date.UTC(2026, 7, 17, 8, 5);
+    const endsAt = Date.UTC(2099, 0, 1);
+    const created = routines.create({
+      name: "Support hours", prompt: "Check during support hours.", botId: chief.id, enabled: true,
+      schedule: {
+        type: "interval", everyMinutes: 30, anchorAt,
+        weekdays: [1, 3, 5], window: { start: "09:00", end: "17:00" }, endsAt,
+      },
+    });
+    const backup = portableBackup(store, routines, "Constrained interval");
+    const saved = backup.routines.find((routine) => routine.name === "Support hours")!;
+    expect(saved.schedule).toEqual(created.schedule);
+    const { owner, routine } = restoredRoutine(store, routines, backup, "Support hours");
+    expect(routine.schedule).toEqual(created.schedule);
+    expect(routine.botId).toBe(owner.id);
+    expect(routine.enabled).toBe(false);
+    expect(routine.nextRunAt).toBeNull();
   });
 
   it("round-trips all bots, sections, Chiefs, rooms, tasks and branches without changing originals", () => {

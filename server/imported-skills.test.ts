@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,7 +8,8 @@ import { DATA_DIR, type AppConfig } from "./config.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
 import {
   FIT_MAX_SKILLS, IMPORTED_CHANGED_WARNING, IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, importedSkillsPrompt,
-  listedImportedSkills, nativeSkillFolders, readImportedSkillFile, setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
+  listedImportedSkills, nativeSkillFolders, purgeImportedSkill, readImportedSkillFile, readImportedSkills, removeImportedSkillForBot,
+  setImportedSkillEnabled, storeImportedSkills, syncImportedSkillLinks, type ImportedSkillInput,
 } from "./imported-skills.ts";
 import { skillCommandTurnText } from "../shared/skill-command.ts";
 import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
@@ -256,5 +257,71 @@ describe("skills brought in from this computer", () => {
     expect(listedImportedSkills(older, importedSkillsFor(older, new Set()), "sales")).toHaveLength(20);
     setImportedSkillEnabled(older, "tool-02", false);
     expect(listedImportedSkills(older, importedSkillsFor(older, new Set()), "sales")).toHaveLength(19);
+  });
+});
+
+describe("removing a skill brought in from this computer", () => {
+  const sourceFolder = (name: string) => join(HOME, ".claude", "skills", name);
+  const writeSource = (name: string) => {
+    mkdirSync(sourceFolder(name), { recursive: true });
+    writeFileSync(join(sourceFolder(name), "SKILL.md"), skillMd(name));
+  };
+
+  it("takes it out of one bot, leaving the shared copy, the source and every other bot alone", () => {
+    const [first, second] = [newBot(), newBot()];
+    store([input("pdf")]);
+    writeSource("pdf");
+    expect(importedSkillListings(first, new Set())[0]).toMatchObject({ name: "pdf", sourceGone: false });
+
+    expect(removeImportedSkillForBot(first, "pdf")).toEqual({ removed: true });
+    expect(names(importedSkillListings(first, new Set()))).not.toContain("pdf");
+    expect(names(importedSkillsFor(first, new Set()))).not.toContain("pdf");
+    expect(names(importedSkillListings(second, new Set()))).toContain("pdf");
+    expect(names(importedSkillsFor(second, new Set()))).toContain("pdf");
+    expect(readImportedSkillFile("pdf")).toBe(skillMd("pdf"));
+    expect(readFileSync(join(IMPORTED_SKILLS_DIR, "pdf", "SKILL.md"), "utf8")).toBe(skillMd("pdf"));
+    expect(readFileSync(join(sourceFolder("pdf"), "SKILL.md"), "utf8")).toBe(skillMd("pdf"));
+
+    // The switch still works for another bot.
+    expect(setImportedSkillEnabled(second, "pdf", false)).toMatchObject({ name: "pdf", enabled: false });
+    expect(names(importedSkillsFor(second, new Set()))).not.toContain("pdf");
+    expect(setImportedSkillEnabled(second, "pdf", true)).toMatchObject({ name: "pdf", enabled: true });
+    expect(names(importedSkillsFor(second, new Set()))).toContain("pdf");
+
+    // A copy brought in again stays out of the bot it was removed from until it is switched on there.
+    store([input("pdf")]);
+    expect(names(importedSkillListings(first, new Set()))).not.toContain("pdf");
+    expect(setImportedSkillEnabled(first, "pdf", true)).toMatchObject({ name: "pdf", enabled: true });
+    expect(names(importedSkillListings(first, new Set()))).toContain("pdf");
+    expect(removeImportedSkillForBot(first, "not a name")).toHaveProperty("error");
+  });
+
+  it("clears a stale entry only when its source folder no longer holds a skill", () => {
+    store([input("pdf")]);
+    writeSource("pdf");
+    expect(purgeImportedSkill("pdf")).toHaveProperty("error");
+    expect(readImportedSkills()["pdf"]).toBeDefined();
+    expect(existsSync(join(IMPORTED_SKILLS_DIR, "pdf"))).toBe(true);
+
+    rmSync(sourceFolder("pdf"), { recursive: true });
+    expect(importedSkillListings(newBot(), new Set())[0]).toMatchObject({ name: "pdf", sourceGone: true });
+    const bot = newBot();
+    expect(removeImportedSkillForBot(bot, "pdf")).toEqual({ removed: true });
+    expect(names(importedSkillListings(bot, new Set()))).not.toContain("pdf");
+    expect(names(importedSkillListings(newBot(), new Set()))).toContain("pdf");
+    expect(purgeImportedSkill("pdf")).toEqual({ removed: true });
+    expect(readImportedSkills()["pdf"]).toBeUndefined();
+    expect(existsSync(join(IMPORTED_SKILLS_DIR, "pdf"))).toBe(false);
+    expect(importedSkillListings(newBot(), new Set())).toEqual([]);
+    expect(purgeImportedSkill("pdf")).toHaveProperty("error");
+  });
+
+  it("never calls a source gone when the folder it was read from is not on this computer, as after a move to a Cloud", () => {
+    const root = join(HOME, `elsewhere-${randomUUID()}`);
+    store([input("pdf", { root })]);
+    expect(existsSync(root)).toBe(false);
+    expect(importedSkillListings(newBot(), new Set())[0]).toMatchObject({ name: "pdf", sourceGone: false });
+    expect(purgeImportedSkill("pdf")).toHaveProperty("error");
+    expect(readImportedSkills()["pdf"]).toBeDefined();
   });
 });

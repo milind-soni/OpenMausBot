@@ -28,7 +28,9 @@ function harness(start = START, file = folder(), more: Partial<RoutineManagerOpt
   const options: RoutineManagerOptions = {
     file, now: () => now, botState: () => bot, createTask: () => ({ threadId: `thread-${++task}` }),
     startTurn: async (_botId, threadId, prompt) => { started.push(threadId); prompts.push(prompt); },
-    interruptTurn: async () => {}, onRunFailed: (run) => failed.push(run), turnLive: () => live, ...more,
+    interruptTurn: async () => {}, onRunFailed: (run) => failed.push(run),
+    // The fake turn is the working run's: an ended run's conversation is idle here.
+    turnLive: (run) => (run.status === "running" || run.status === "waiting" ? live : false), ...more,
   };
   const h = {
     file, options, started, prompts, failed, manager: new RoutineManager(options),

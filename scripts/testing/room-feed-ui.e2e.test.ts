@@ -106,6 +106,20 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     expect(await current()).toBe(room.threadId);
     await ui("screenshot", "--out", join(evidenceDir, "room-feed-thread.png"));
 
+    const revisitRoom = async () => {
+      await evaluate(`document.querySelector('[data-sidebar-bot-row="${basil.id}"]').click(); true`);
+      await until(() => evaluate("!document.querySelector('[data-room-feed], [data-thread-panel]')"), "leaving the room");
+      await evaluate(`document.querySelector('[data-sidebar-group-row="${room.id}"]').click(); true`);
+      await until(() => evaluate(`Boolean(document.querySelector('[data-room-feed="${room.id}"]'))`), "returning to the room");
+    };
+    await revisitRoom();
+    await until(() => evaluate(`Boolean(document.querySelector('[data-thread-panel="${opened}"]'))`), "the last viewed thread beside the feed");
+    expect(await current()).toBe(room.threadId);
+    await evaluate("document.querySelector(`[data-thread-panel] button[aria-label='Close thread']`).click(); true");
+    await until(() => evaluate("!document.querySelector('[data-thread-panel]')"), "the thread panel to close");
+    await revisitRoom();
+    expect(await evaluate("Boolean(document.querySelector('[data-thread-panel]'))")).toBe(false);
+
     await browse("click", "[data-room-feed-composer] textarea");
     await browse("type", "[data-room-feed-composer] textarea", "Draft the outage email");
     await browse("press", "Enter");
