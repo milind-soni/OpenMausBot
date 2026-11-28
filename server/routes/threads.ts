@@ -48,7 +48,7 @@ export interface ThreadRouteDeps {
   sessions: ResolveOptions["sessions"];
   groupUsageReader: Pick<GroupUsageReader, "refresh">;
   hostedWorkspace: boolean;
-  sessionCookie: string;
+  sessionCookie(): string;
   loopback: { trust: ResolveOptions["loopbackTrust"]; localBrowsers: boolean };
   lendingEnabled(): boolean;
   workspaceAccess(): WorkspaceAccess | null;
@@ -85,7 +85,7 @@ export interface ThreadRouteDeps {
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
     store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
-    hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
+    hostedWorkspace: HOSTED_WORKSPACE, sessionCookie, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
     pageSize, messagePage, messagePageBefore, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
     botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
   } = deps;
@@ -545,7 +545,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         if (failure) return json(res, failure.status, { error: failure.error });
       }
       const current = resolveRequestAuth(req, {
-        sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events", url,
+        sessions, cookieName: sessionCookie(), streamPath: "/api/events", url,
         loopbackMutationToken: desktopMutationToken, companionMutationToken,
         features: { sharedComputers: lendingEnabled() }, loopbackTrust: LOOPBACK.trust, cliOwnerToken, trustLocalBrowser: LOOPBACK.localBrowsers,
       });

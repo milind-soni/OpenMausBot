@@ -45,7 +45,7 @@ function world(overrides: Partial<PhonesDeps> = {}) {
     cloudLendingTurn: () => ({ thread: lines, request: { ...requests.get(THREAD), generations: new Set([TURN.generation]) }, generation: TURN.generation, starters: [], reportsFromOthers: false,
       ownerPerson: () => true, cardAnswerer: () => undefined, routineRun: () => null }) as unknown as CloudLendingTurn,
     originIsUser: () => true, request: (threadId) => requests.get(threadId), nudge: () => {}, mint: () => "turn-token",
-    harnessUrl: "http://127.0.0.1:1", active: () => true,
+    harnessUrl: () => "http://127.0.0.1:1", active: () => true,
     ...overrides,
   });
   /** A person's line in the thread and the direct request it starts. */

@@ -18,7 +18,7 @@ function guard(cfg: AppConfig = {}) {
   directories.push(dataDir);
   const host = createTeamConnectionsHost({
     team: { id: "fixture", name: "Fixture" }, dataDir, cfg: () => cfg,
-    adminOrigin: null, harnessUrl: "http://127.0.0.1:1", audienceOf: () => "room:fixture", requester: () => null,
+    adminOrigin: null, harnessUrl: () => "http://127.0.0.1:1", audienceOf: () => "room:fixture", requester: () => null,
     mint: () => "fixture", mcpOAuth: {} as never, botMcp: () => ({}), isOwnerLive: () => true,
     brokerUrl: () => null, composio,
   });

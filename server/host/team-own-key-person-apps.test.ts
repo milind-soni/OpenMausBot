@@ -78,7 +78,7 @@ function setup(options: { key?: string | null; dataDir?: string; requester?: Rec
   const cfg = { composio: options.key === null ? {} : { apiKey: options.key ?? KEY, userId: "openmausbot_team" } } as AppConfig;
   const requester: Record<string, string> = { "ada-chat": ADA, "cleo-chat": CLEO, "room-chat": ADA, "main-chat": ADA, ...options.requester };
   const host = createTeamConnectionsHost({
-    team: TEAM, dataDir, cfg: () => cfg, adminOrigin: "https://cloud.example.test", harnessUrl: "http://127.0.0.1:1",
+    team: TEAM, dataDir, cfg: () => cfg, adminOrigin: "https://cloud.example.test", harnessUrl: () => "http://127.0.0.1:1",
     audienceOf: (threadId) => AUDIENCES[threadId] ?? "team",
     requester: (threadId) => requester[threadId] ?? null,
     roster: () => [{ person: BEN, email: EMAILS.ben, role: "admin" as const }, { person: ADA, email: EMAILS.ada, role: "member" as const }, { person: CLEO, email: EMAILS.cleo, role: "member" as const }],

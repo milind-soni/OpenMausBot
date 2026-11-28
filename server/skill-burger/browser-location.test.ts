@@ -76,7 +76,7 @@ async function replay(where: "computer" | "browser" | "localComputer", options: 
   const port = (server.address() as AddressInfo).port;
   const base = `http://127.0.0.1:${port}`;
   turn = burgerTurn({
-    port, cwd: () => root, mayEditBurgers: () => true, publish() {},
+    port: () => port, cwd: () => root, mayEditBurgers: () => true, publish() {},
     mint: (_turn, kind) => { minted.push(kind); return `${kind}-fixture`; },
     browser: async () => options.browserAvailable === false ? null : { env: { [harnessMcpTokenEnv("browser")]: "browser-fixture" } },
   }, { botId: "lead", threadId: "page", generation: "fixture-turn" }, "Bearer agents-fixture");

@@ -1,11 +1,13 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isWorkspaceRunning, runOnboardingCommand, runServe, type CliOptions } from "./cli.ts";
 import { qrToString } from "./cli-pairing.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const mocks = vi.hoisted(() => ({
   // the fleet path is off in these tests: no credential in the environment
@@ -53,6 +55,22 @@ let dataDir: string;
 let options: CliOptions;
 let signalListeners: Map<NodeJS.Signals, Set<unknown>>;
 const children: ChildProcess[] = [];
+const portBlockers: TcpServer[] = [];
+
+/** A real listener holding a port, the way a foreign process would. */
+function holdPort(port: number): Promise<TcpServer> {
+  return new Promise((resolve, reject) => {
+    const server = createTcpServer();
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve(server));
+    portBlockers.push(server);
+  });
+}
+
+function spawnEnv(call: number): NodeJS.ProcessEnv {
+  const [, , spawnOptions] = mocks.spawn.mock.calls[call] as [string, string[], { env: NodeJS.ProcessEnv }];
+  return spawnOptions.env;
+}
 
 function childProcess(): ChildProcess {
   const child = Object.assign(new EventEmitter(), {
@@ -98,6 +116,7 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const child of children.splice(0)) child.emit("exit", 0, null);
+  for (const blocker of portBlockers.splice(0)) blocker.close();
   for (const [signal, before] of signalListeners) {
     for (const listener of process.listeners(signal)) if (!before.has(listener)) process.removeListener(signal, listener);
   }
@@ -113,6 +132,280 @@ afterEach(() => {
 });
 
 describe("CLI startup lifecycle", () => {
+  it("passes OMB_PORT_PINNED to the server child and returns promptly when the child exits", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 503 })));
+    mocks.spawn.mockImplementation(() => {
+      const child = childProcess();
+      queueMicrotask(() => child.emit("exit", 1, null));
+      return child;
+    });
+    const log = vi.fn();
+    expect(await runServe(options, log)).toBe(1);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(spawnEnv(0).OMB_PORT_PINNED).toBe("1");
+    expect(spawnEnv(0).OMB_PORT).toBe(String(options.port));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("OpenMausBot could not start"));
+  });
+
+  it("negotiates the next free port pair when the requested ports are taken", async () => {
+    const base = await freePortBlock([0, 1, 2, 3]);
+    await holdPort(base);
+    await holdPort(base + 1);
+    options = { ...options, port: base };
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      // The pre-launch check on the requested port finds a foreign server.
+      if (address === `http://127.0.0.1:${base}/api/health`) return Response.json({}, { status: 503 });
+      if (address.endsWith("/api/health")) return Response.json({ app: "openmausbot", pid: childPid });
+      if (address.endsWith("/api/webhooks")) return Response.json({ ingress: { available: true, baseUrl: `http://127.0.0.1:${base + 3}` } });
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const log = vi.fn((line: string) => { if (line.includes("Keep this terminal open")) interrupt(); });
+    expect(await runServe(options, log)).toBe(0);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(spawnEnv(0).OMB_PORT).toBe(String(base + 2));
+    expect(spawnEnv(0).OMB_WEBHOOK_PORT).toBe(String(base + 3));
+    expect(spawnEnv(0).OMB_PORT_PINNED).toBe("1");
+    expect(log).toHaveBeenCalledWith(`note: port ${base} is in use; using http://127.0.0.1:${base + 2}`);
+    expect(log).toHaveBeenCalledWith(`Listening on 127.0.0.1:${base + 2}, reachable from this machine only.`);
+  });
+
+  it("relaunches on the next free pair when the negotiated port is claimed during startup", async () => {
+    const base = await freePortBlock([0, 1, 2]);
+    options = { ...options, port: base };
+    mocks.spawn.mockImplementation(() => {
+      const child = childProcess();
+      if (mocks.spawn.mock.calls.length === 1) {
+        // A third party claims the negotiated port in the probe→bind gap, so
+        // the pinned child exits like a real EADDRINUSE crash.
+        void holdPort(base).then(() => child.emit("exit", 1, null));
+      }
+      return child;
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      // The stolen port never serves our child; only the relaunched one does.
+      if (address === `http://127.0.0.1:${base}/api/health`) return Response.json({}, { status: 503 });
+      if (address.endsWith("/api/health")) return Response.json({ app: "openmausbot", pid: childPid });
+      if (address.endsWith("/api/webhooks")) return Response.json({ ingress: { available: true, baseUrl: `http://127.0.0.1:${base + 2}` } });
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const log = vi.fn((line: string) => { if (line.includes("Keep this terminal open")) interrupt(); });
+    expect(await runServe(options, log)).toBe(0);
+    expect(mocks.spawn).toHaveBeenCalledTimes(2);
+    expect(spawnEnv(1).OMB_PORT).toBe(String(base + 1));
+    expect(spawnEnv(1).OMB_WEBHOOK_PORT).toBe(String(base + 2));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`port ${base} was claimed while the server was starting`));
+    expect(log).toHaveBeenCalledWith(`Listening on 127.0.0.1:${base + 1}, reachable from this machine only.`);
+  });
+
+  it("relaunches on a fresh pair when the negotiated webhook port is claimed during startup", async () => {
+    const base = await freePortBlock([0, 1, 2]);
+    options = { ...options, port: base };
+    let healthCalls = 0;
+    let webhookCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        // The first health probe is the already-running check on the
+        // requested port; after that the child answers on the resolved port.
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        if (++webhookCalls === 1) {
+          // The child reports its webhook bind lost the race to a third party.
+          await holdPort(base + 1);
+          return Response.json({ ingress: { available: false } });
+        }
+        return Response.json({ ingress: { available: true, baseUrl: `http://127.0.0.1:${base + 2}` } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const log = vi.fn((line: string) => { if (line.includes("Keep this terminal open")) interrupt(); });
+    expect(await runServe(options, log)).toBe(0);
+    expect(mocks.spawn).toHaveBeenCalledTimes(2);
+    // The first child was stopped and the relaunch keeps the main port — only
+    // the webhook port moves.
+    expect(children[0]!.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(spawnEnv(1).OMB_PORT).toBe(String(base));
+    expect(spawnEnv(1).OMB_WEBHOOK_PORT).toBe(String(base + 2));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`webhook port ${base + 1} was claimed`));
+    expect(log).toHaveBeenCalledWith(`Listening on 127.0.0.1:${base}, reachable from this machine only.`);
+  });
+
+  it("fails startup when the negotiated webhook port is still foreign-held on the last attempt", async () => {
+    const base = await freePortBlock([0, 1, 2, 3, 4, 5]);
+    options = { ...options, port: base };
+    let healthCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        // Every attempt loses its negotiated webhook port to a third party:
+        // a proxy started now would forward hooks to a foreign process.
+        await holdPort(Number(spawnEnv(mocks.spawn.mock.calls.length - 1).OMB_WEBHOOK_PORT));
+        return Response.json({ ingress: { available: false } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runServe(options, vi.fn())).toBe(1);
+    expect(mocks.spawn).toHaveBeenCalledTimes(5);
+    for (const child of children) expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining(`webhook port ${base + 5} is owned by another process`));
+    error.mockRestore();
+  });
+
+  it("relaunches when the child reports no webhook receiver even though the port reads free", async () => {
+    const base = await freePortBlock([0, 1, 2, 3, 4, 5]);
+    options = { ...options, port: base };
+    let healthCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        // The first health probe is the already-running check on the requested port.
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        // The receiver failed for a reason other than a held port (a claim or
+        // socket failure): the port probe reads free, but Caddy and Tailscale
+        // would still forward hooks to a port with no listener.
+        return Response.json({ ingress: { available: false } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = runServe(options, vi.fn());
+    const exitTimer = setTimeout(() => children[0]?.emit("exit", 0, null), 2_000);
+    exitTimer.unref();
+    try {
+      expect(await run).toBe(1);
+    } finally {
+      clearTimeout(exitTimer);
+    }
+    expect(mocks.spawn).toHaveBeenCalledTimes(5);
+    for (const child of children) expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("webhook receiver did not come up"));
+    error.mockRestore();
+  });
+
+  it("waits out a webhook receiver that is still binding instead of relaunching", async () => {
+    const base = await freePortBlock([0, 1]);
+    options = { ...options, port: base };
+    let healthCalls = 0, ingressCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        // The first health probe is the already-running check on the requested port.
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        // The receiver binds right after the main socket accepts, so the first
+        // probes can land mid-walk: "starting" is pending, not down.
+        return ++ingressCalls < 3
+          ? Response.json({ ingress: { available: false, baseUrl: "", error: "the server is still starting", starting: true } })
+          : Response.json({ ingress: { available: true, baseUrl: `http://127.0.0.1:${base + 1}` } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const log = vi.fn((line: string) => { if (line.includes("Keep this terminal open")) interrupt(); });
+    expect(await runServe(options, log)).toBe(0);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(ingressCalls).toBe(3);
+    expect(log).toHaveBeenCalledWith(`Listening on 127.0.0.1:${base}, reachable from this machine only.`);
+  });
+
+  it("does not report ready when shutdown begins while the ingress probe is pending", async () => {
+    const base = await freePortBlock([0, 1]);
+    options = { ...options, port: base };
+    let healthCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        // The first health probe is the already-running check on the requested port.
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        interrupt();
+        return Response.json({ ingress: { available: true, baseUrl: `http://127.0.0.1:${base + 1}` } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const log = vi.fn();
+    expect(await runServe(options, log)).toBe(0);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    // The launcher must return through the stopping path: the ready path would
+    // start Caddy after teardown already skipped it.
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("MausBot "));
+  });
+
+  it("stops the Tailscale share when the pinned child exits before readiness", async () => {
+    const base = await freePortBlock([0, 1]);
+    options = { ...options, port: base, tailscale: true };
+    const shareStop = vi.fn().mockResolvedValue(undefined);
+    mocks.tailscaleServe.mockResolvedValue({ origin: "https://fixture.tail.test", stop: shareStop });
+    mocks.spawn.mockImplementation(() => {
+      const child = childProcess();
+      // A dead child whose port reads free is a plain startup failure: the
+      // launcher's exit path still has to run teardown for the share it raised.
+      setTimeout(() => child.emit("exit", 1, null), 0);
+      return child;
+    });
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) return Response.json({}, { status: 503 });
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runServe(options, vi.fn())).toBe(1);
+    expect(shareStop).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("rejects a webhook port below 1 before negotiating", async () => {
+    vi.stubEnv("OMB_WEBHOOK_PORT", "0");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runServe(options, vi.fn())).toBe(1);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("OMB_WEBHOOK_PORT"));
+    error.mockRestore();
+  });
+
+  it("does not spawn a retry child when shutdown begins during relaunch negotiation", async () => {
+    const base = await freePortBlock([0, 1]);
+    options = { ...options, port: base, tailscale: true };
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) return Response.json({}, { status: 503 });
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    mocks.spawn.mockImplementation(() => {
+      const child = childProcess();
+      if (mocks.spawn.mock.calls.length === 1) {
+        // The negotiated main port is stolen before the child binds.
+        void holdPort(base).then(() => child.emit("exit", 1, null));
+      }
+      return child;
+    });
+    const shareStops: ReturnType<typeof vi.fn>[] = [];
+    mocks.tailscaleServe.mockImplementation(async () => {
+      if (mocks.tailscaleServe.mock.calls.length === 2) interrupt();
+      // Each attempt's share gets its own stop spy: one shared spy could not
+      // tell a leaked second share from the stopped first one.
+      const stop = vi.fn().mockResolvedValue(undefined);
+      shareStops.push(stop);
+      return { origin: "https://fixture.tail.test", stop };
+    });
+    expect(await runServe(options, vi.fn())).toBe(130);
+    // The retry never reached spawn: onSignal already disarmed cancelStartup,
+    // so only the stopping check can veto it.
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(shareStops).toHaveLength(2);
+    for (const stop of shareStops) expect(stop).toHaveBeenCalled();
+  });
+
   it("does not enable Tailscale or spawn a server when guided logs cannot be opened", async () => {
     mocks.denyLogOpen = true;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 503 })));

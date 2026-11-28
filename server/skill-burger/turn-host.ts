@@ -9,7 +9,7 @@ import type { BurgerTurn, StepEvent } from "./runs.ts";
 export interface CallingTurn { botId: string; threadId: string; generation: string; [field: string]: unknown }
 
 export interface BurgerHostDeps {
-  port: number;
+  port(): number;
   cwd(botId: string, threadId: string): string;
   /** A bearer of `kind` for the same turn. */
   mint(turn: CallingTurn, kind: "connectors" | "computer"): string;
@@ -26,7 +26,7 @@ export interface BurgerHostDeps {
 export function burgerTurn(host: BurgerHostDeps, turn: CallingTurn, authorization: string | undefined): BurgerTurn {
   const post = async (path: string, token: string, body: unknown, signal: AbortSignal) => {
     try {
-      const res = await fetch(`http://127.0.0.1:${host.port}${path}`, body === undefined
+      const res = await fetch(`http://127.0.0.1:${host.port()}${path}`, body === undefined
         ? { method: "GET", headers: { authorization: `Bearer ${token}` }, signal }
         : { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body), signal });
       const parsed = await res.json().catch(() => ({})) as Record<string, unknown>;

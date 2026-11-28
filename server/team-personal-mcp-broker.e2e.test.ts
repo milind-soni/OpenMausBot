@@ -43,7 +43,7 @@ describe.skipIf(process.platform === "win32")("a member's own MCP server and the
       orders: { type: "http", url: gateway.url, headers: { Authorization: "Bearer team-orders", "CF-Access-Client-Id": CLIENT_ID, "CF-Access-Client-Secret": CLIENT_SECRET }, enabled: true },
     } } as unknown as AppConfig;
     const host = createTeamConnectionsHost({
-      team: { id: "team-acme-1", name: "Acme" }, dataDir: dir, cfg: () => cfg, adminOrigin: "https://cloud.example.test", harnessUrl: "http://127.0.0.1:1",
+      team: { id: "team-acme-1", name: "Acme" }, dataDir: dir, cfg: () => cfg, adminOrigin: "https://cloud.example.test", harnessUrl: () => "http://127.0.0.1:1",
       audienceOf: (threadId) => (threadId === "ada-chat" ? `member:${ADA}` : "team"),
       requester: (threadId) => (threadId === "ada-chat" ? ADA : null),
       mint: (capability) => `tok-${capability.threadId}`,

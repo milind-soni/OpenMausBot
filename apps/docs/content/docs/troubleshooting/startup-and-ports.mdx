@@ -33,7 +33,9 @@ console behavior.
 
 ## Development port overrides
 
-Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
+`OMB_PORT` sets the preferred port for a source-run harness (and `OMB_WEBHOOK_PORT` the preferred webhook port). If the preferred port is unavailable, a source-run harness walks forward to the next free port and logs the resolved value.
+
+`OMB_DESKTOP_PARENT=1` and `OMB_PORT_PINNED=1` disable that fallback: the child stays on the requested ports, exiting with an `EADDRINUSE` error when the main port is busy; a busy webhook port instead leaves the receiver unavailable (the server logs the failure and keeps serving). `openmausbot serve` negotiates the pair itself — it probes for the first free ports at or above the requested ones, then launches its child pinned to them so proxies, pairing URLs, and the readiness check all target the ports it configured. When a MausBot server already answers on the requested port it refuses to negotiate and exits instead: pair with the running server (`openmausbot pair`), or pass `--port` for a second instance. The packaged desktop parent pins its child to the port its health check polls.
 
 ## Isolate a test profile
 

@@ -155,7 +155,7 @@ export interface LentMcpDeps {
   /** A server's `vault:<id>` keys, read when it is launched or called on the computer it runs on. */
   keys?: McpKeys;
   /** This server's own loopback address, `http://127.0.0.1:<port>`. */
-  origin: string;
+  origin(): string;
   personal: boolean;
   place: string;
   here?: HereChecks;
@@ -253,7 +253,7 @@ export function createLentMcp(deps: LentMcpDeps) {
         const state = lentState(deps.computers, principal, server);
         if (state.kind !== "ready") continue;
         token ??= deps.mint(turn);
-        mounted[name] = { type: "http", url: `${deps.origin}${LENT_MCP_PATH}${name}`, headers: { authorization: `Bearer ${token}` } };
+        mounted[name] = { type: "http", url: `${deps.origin()}${LENT_MCP_PATH}${name}`, headers: { authorization: `Bearer ${token}` } };
         void tools(state.computerId, lentDefinition(name, server), principal, () => deps.active(turn)).catch(() => {});
       }
       return mounted;

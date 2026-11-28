@@ -14,7 +14,7 @@ import { PASS, type RouteHandler } from "../routes/table.ts";
 export const GIT_CREDENTIAL_TTL_MS = 24 * 60 * 60_000;
 const MAX_SECRETS = 2_000;
 
-let served: { port: number; enabled(): boolean; now(): number } | null = null;
+let served: { port(): number; enabled(): boolean; now(): number } | null = null;
 const secrets = new Map<string, number>();
 
 /** Test seam: forget every secret and the route's settings. */
@@ -32,7 +32,7 @@ export function unboxedGitCredential(env: Record<string, string | undefined>): {
   if (secrets.size >= MAX_SECRETS) secrets.delete(secrets.keys().next().value!);
   const secret = randomBytes(24).toString("base64url");
   secrets.set(secret, at + GIT_CREDENTIAL_TTL_MS);
-  return { env: { ...env, ...unboxedGitEnv({ port: served.port, secret, existing: env.GIT_CONFIG_PARAMETERS }) }, release: () => { secrets.delete(secret); } };
+  return { env: { ...env, ...unboxedGitEnv({ port: served.port(), secret, existing: env.GIT_CONFIG_PARAMETERS }) }, release: () => { secrets.delete(secret); } };
 }
 
 const known = (presented: string, now: number): boolean => {
@@ -45,7 +45,7 @@ const known = (presented: string, now: number): boolean => {
 };
 
 /** The route git's helper asks: the owner-trust loopback only (never a shared server's bot shells), with a live spawn's secret; the answer is git's credential lines. */
-export function createGitCredentialRoutes(deps: { port: number; enabled(): boolean; now?(): number }): RouteHandler {
+export function createGitCredentialRoutes(deps: { port(): number; enabled(): boolean; now?(): number }): RouteHandler {
   const now = deps.now ?? Date.now;
   served = { port: deps.port, enabled: deps.enabled, now };
   return async ({ req, res, path, method, auth }) => {

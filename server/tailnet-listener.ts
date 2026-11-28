@@ -73,7 +73,7 @@ export function hostAllowed(host: string | string[] | undefined, allowed: Readon
 type Handle = (req: IncomingMessage, res: ServerResponse) => Promise<unknown>;
 
 export interface TailnetShareOptions {
-  port: number;
+  port(): number;
   handle: Handle;
   /** WebSocket upgrades through the same handler. */
   attach: (server: Server, handle: Handle) => void;
@@ -134,7 +134,7 @@ export function createTailnetShare(options: TailnetShareOptions) {
     });
     return new Promise((resolve, reject) => {
       server.once("error", reject);
-      server.listen({ port: options.port, host: address, ipv6Only: address.includes(":") }, () => {
+      server.listen({ port: options.port(), host: address, ipv6Only: address.includes(":") }, () => {
         server.off("error", reject);
         server.on("error", (failure) => log(`tailnet: ${address} ${failure.message}`));
         resolve(server);
@@ -155,12 +155,12 @@ export function createTailnetShare(options: TailnetShareOptions) {
       if (listeners.has(address)) continue;
       try {
         listeners.set(address, await open(address));
-        log(`tailnet: listening on ${address.includes(":") ? `[${address}]` : address}:${options.port} for ${config!.name}`);
+        log(`tailnet: listening on ${address.includes(":") ? `[${address}]` : address}:${options.port()} for ${config!.name}`);
       } catch (failure) {
         failures.push(`${address}: ${(failure as NodeJS.ErrnoException).code ?? (failure as Error).message}`);
       }
     }
-    allowed = config ? tailnetHosts({ name: config.name, addresses: [...listeners.keys()], port: options.port }) : new Set();
+    allowed = config ? tailnetHosts({ name: config.name, addresses: [...listeners.keys()], port: options.port() }) : new Set();
     error = config && "addresses" in config && listeners.size === 0
       ? failures.length ? `could not listen on the tailnet (${failures.join("; ")})` : "Tailscale's interface has no address on this computer"
       : failures.length ? `could not listen on ${failures.join("; ")}` : null;
@@ -196,7 +196,7 @@ export function createTailnetShare(options: TailnetShareOptions) {
     origin(): string | null {
       if (!desired) return null;
       if ("served" in desired) return desired.served;
-      return listeners.size ? tailnetOrigin(desired.name, options.port) : null;
+      return listeners.size ? tailnetOrigin(desired.name, options.port()) : null;
     },
     state(): TailnetShareState {
       return { origin: share.origin(), listening: [...listeners.keys()], error: desired && "served" in desired ? null : error };

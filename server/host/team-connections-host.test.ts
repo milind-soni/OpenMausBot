@@ -53,7 +53,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
   };
   const host = createTeamConnectionsHost({
     team: options.team === false ? null : { id: "team-acme-1", name: "Acme" },
-    dataDir, cfg: () => cfg, adminOrigin: "https://cloud.example.test", harnessUrl: "http://127.0.0.1:1",
+    dataDir, cfg: () => cfg, adminOrigin: "https://cloud.example.test", harnessUrl: () => "http://127.0.0.1:1",
     audienceOf: (threadId) => (options.team === false ? "team" : AUDIENCES[threadId] ?? "team"),
     requester: (threadId) => requester[threadId as keyof typeof requester] ?? null,
     mint: (capability) => { minted.push(capability); return `tok-${capability.threadId}-${capability.connectorsFor ?? "team"}`; },

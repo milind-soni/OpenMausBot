@@ -69,7 +69,7 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
     DESKTOP_MANAGED: !cloudHome && !server,
     CLOUD_HOME: cloudHome ? { machineId: "m-1" } : null,
     HOSTED_WORKSPACE: hosted,
-    PORT: 4100,
+    PORT: () => 4100,
     device,
     lendRefusal,
     audienceOf,
@@ -92,7 +92,7 @@ describe("the bots' browser host and the engine memory guard", () => {
       mintInternalCapability: () => "capability-token",
       DESKTOP_MANAGED: false,
       CLOUD_HOME: { machineId: "m-1" },
-      PORT: 4100,
+      PORT: () => 4100,
       engineMemory: { useBrowsers: (browsers) => { told.push(browsers); } },
     });
     hosts.push(host);

@@ -70,7 +70,7 @@ function setup({ desktop = false, cloudBrowser = true, ownKey = false, turnHolds
     mintInternalCapability: () => "capability-token",
     DESKTOP_MANAGED: desktop,
     CLOUD_HOME: desktop ? null : { machineId: "m-1" },
-    PORT: 4100,
+    PORT: () => 4100,
     ...(cloudBrowser ? { cloudBrowser: { used: (owner: string, windowMs: number) => { used.push([owner, windowMs]); } } } : {}),
   };
   const host = createBrowserHost(deps);

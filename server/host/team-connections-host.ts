@@ -37,7 +37,7 @@ export interface TeamConnectionsHostDeps {
   cfg: () => AppConfig;
   /** The Admin's origin (OMB_CLOUD_ADMIN_URL): a member connects their own on their team's page there. */
   adminOrigin: string | null;
-  harnessUrl: string;
+  harnessUrl(): string;
   audienceOf(threadId: string): Audience;
   /** The person this turn generation acts for (the latest one when none is named), or null: server/host/acting-person.ts. */
   requester(threadId: string, generation?: string): string | null;
@@ -263,7 +263,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     async appsIntegrations(bot: Bot, threadId: string, generation: string, names: "dotted" | "plain" = "plain"): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
-      const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, appSandboxAllowed(bot) && deps.fullAccess?.(bot.id, threadId) === true) };
+      const base = { harnessUrl: deps.harnessUrl(), botId: bot.id, threadId, connectorTools: advertisedGrants(bot.connectorTools, appSandboxAllowed(bot) && deps.fullAccess?.(bot.id, threadId) === true) };
       const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
       if (shared) out.composio = await withAppTools(shared, bot, names);
       const person = personApps().length ? turnPerson(threadId, generation) : null;

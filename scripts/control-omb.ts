@@ -153,6 +153,9 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     OMB_DATA_DIR: dataDir,
     OMB_PORT: String(port),
     OMB_WEBHOOK_PORT: String(port + 1),
+    // The fixture picked these ports: a child that relocates would have the
+    // driver's checks answered by a foreign server, so it must fail instead.
+    OMB_PORT_PINNED: "1",
     // A caller's FAKE_CLAUDE_MODE overrides this below to drive failure paths.
     FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
     FAKE_CLAUDE_DUMP: join(dataDir, "fake-claude-dump.json"),
@@ -425,8 +428,8 @@ export async function launchVerificationServer(
         const response = await fetch(`${url}/api/health`, {
           signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
-        const body = response.ok ? await response.json() as { app?: string } : null;
-        if (body?.app === "openmausbot") break;
+        const body = response.ok ? await response.json() as { app?: string; pid?: number } : null;
+        if (body?.app === "openmausbot" && body.pid === child.pid) break;
       } catch {
       }
       if (Date.now() >= deadline) throw new Error(`verification server did not become ready; see ${logPath}${logTail()}`);
