@@ -419,11 +419,16 @@ export function createBrief(deps: BriefDeps) {
     return { bot, threadId, messageId };
   }
 
-  /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process. */
+  /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process.
+   * Mail already read, or from a no-reply address, is not one to list. */
   function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number, whyText?: ServerText): void {
-    if (email.unread === false || automatedSender(email.from)) return;
+    const others = state.important.filter((row) => row.messageId !== email.id);
+    if (email.unread === false || automatedSender(email.from)) {
+      state.important = others;
+      return;
+    }
     headers.set(email.id, { ...email, why, ...(whyText ? { whyText } : {}) });
-    state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply, ...(email.app === "outlook" ? { app: "outlook" as const } : {}) }].slice(-MAX_ROWS);
+    state.important = [...others, { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply, ...(email.app === "outlook" ? { app: "outlook" as const } : {}) }].slice(-MAX_ROWS);
   }
 
   /** What the checks found that needs no AI: today's meetings, clashes, reminders, other routines, trouble, and the
@@ -448,16 +453,19 @@ export function createBrief(deps: BriefDeps) {
    * already written in is not waiting on their reply. */
   async function followUp(session: ReadSession | null | undefined): Promise<void> {
     const address = deps.address();
-    const open = liveImportant(now());
+    const open = liveImportant(now()).sort((a, b) => Number(b.needsReply) - Number(a.needsReply));
     if (!session || !open.length) return;
+    const unreadable = new Set<string>();
     let changed = false;
     const drop = (row: Important) => {
       state.important = state.important.filter((one) => one.messageId !== row.messageId);
       changed = true;
     };
     for (const row of open.slice(0, 10)) {
+      const app = row.app ?? "gmail";
+      if (unreadable.has(app)) continue;
       try {
-        if (row.app === "outlook") {
+        if (app === "outlook") {
           const header = await session.outlookMessage?.(row.messageId);
           if (header === null || header?.unread === false) drop(row);
           continue;
@@ -469,7 +477,7 @@ export function createBrief(deps: BriefDeps) {
           changed = true;
         }
       } catch {
-        break;
+        unreadable.add(app);
       }
     }
     if (changed) save();

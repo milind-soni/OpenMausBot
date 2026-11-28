@@ -79,7 +79,7 @@ describe("mail", () => {
 
 describe("mail senders and threads", () => {
   it("knows no-reply and bounce senders, and only those", () => {
-    for (const from of ["noreply@x.test", "No-Reply <no-reply@shop.test>", "no_reply+tag@x.test", "donotreply@bank.test", "Do-Not-Reply@x.test", "MAILER-DAEMON@mx.test", "noreply-billing@x.test"]) {
+    for (const from of ["noreply@x.test", "No-Reply <no-reply@shop.test>", "no_reply+tag@x.test", "donotreply@bank.test", "Do-Not-Reply@x.test", "MAILER-DAEMON@mx.test", "postmaster@mx.test", "noreply-billing@x.test"]) {
       expect(automatedSender(from), from).toBe(true);
     }
     for (const from of ["Ada <ada@x.test>", "replies@x.test", "noreplying@x.test", "info@noreply.test", "Noreply Team <ada@x.test>"]) {

@@ -467,6 +467,16 @@ describe("the brief's email rows", () => {
     expect(s.shown()).not.toContain("Waiting on your reply");
   });
 
+  it("still follows up Gmail rows when Outlook can't be read", async () => {
+    const session: ReadSession = { ...mailSession({ t1: [{ id: "m1", at: 0, from: "ada@x.test", unread: false }] }), outlookMessage: async () => { throw new Error("signed out"); } };
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], picked: [{ email: bob, why: "Due Friday.", needsReply: true }, { email: ada, why: "Ada needs the numbers.", needsReply: true }] });
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [], session });
+    expect(s.shown()).toContain("Invoice");
+    expect(s.shown()).not.toContain("Q3 numbers");
+  });
+
   it("checks a watch run's picks the same way before showing them", async () => {
     const at = Date.parse("2026-10-22T07:00:00Z");
     const s = setup({ session: mailSession({ t1: [{ id: "m0", at: at - 60 * MINUTE, from: "me@x.test" }, { id: "m1", at, from: "ada@x.test" }] }) });

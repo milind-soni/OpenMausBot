@@ -160,7 +160,7 @@ export function planMail(input: { now: number; emails: readonly EmailHeader[]; j
 
 /** Mail from an address nobody reads replies at (no-reply, do-not-reply, bounce notices): never one to list. */
 export function automatedSender(from: string): boolean {
-  return /^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer-daemon)(?![a-z0-9])/.test(addressIn(from));
+  return /^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer-daemon|postmaster)(?![a-z0-9])/.test(addressIn(from));
 }
 
 /** The person already wrote in the thread before this email arrived. */
