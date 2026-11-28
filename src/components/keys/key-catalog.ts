@@ -48,7 +48,7 @@ export interface KeyTarget {
 
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
-  | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "chatterbox" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
+  | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "cartesiaTts" | "chatterbox" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
   | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
@@ -158,6 +158,11 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     target: { patch: (value) => ({ tts: { fishKey: value } }), slot: "fishAudioKey", verifiedOnSave: true,
       saved: (config) => flag(config.savedKeys?.fishAudioKey ?? { configured: config.tts?.provider === "fish" && config.tts.configured }),
       placeholder: "…", placeholderKey: "voice.fish.keyPlaceholder", href: "https://fish.audio/app/api-keys/", analytics: "fish_audio" } },
+  { id: "cartesiaTts", section: "voice", labelKey: "keys.label.cartesiaTts", purposeKey: "keys.purpose.cartesiaTts", name: "Cartesia", env: ["OMB_CARTESIA_API_KEY"],
+    words: ["cartesia", "sonic", "voice", "voices", "speech", "tts"], mark: { icon: AudioLines }, kind: "key",
+    target: { patch: (value) => ({ tts: { cartesiaKey: value } }), slot: "cartesiaTtsKey", verifiedOnSave: true,
+      saved: (config) => flag(config.savedKeys?.cartesiaTtsKey), placeholder: "…", placeholderKey: "voice.cartesia.keyPlaceholder",
+      href: "https://play.cartesia.ai/keys", analytics: "cartesia_tts" } },
   { id: "chatterbox", section: "voice", labelKey: "voice.chatterboxServer", purposeKey: "voice.chatterboxHelp", name: "Chatterbox", env: [],
     words: ["chatterbox", "voice", "tts", "speech", "base url", "server", "address", "local"], mark: { icon: AudioLines }, kind: "panel",
     status: (config) => ({ configured: Boolean(config.tts?.baseUrl?.trim()) }) },

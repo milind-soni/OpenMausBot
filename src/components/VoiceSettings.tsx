@@ -68,10 +68,13 @@ export function VoiceSettings({
   const [deviceVoice, setDeviceVoice] = useState(() => remoteSystemVoice(bot.id));
   const usesLocalSystem = localMacClient && deviceProvider === "system";
   const provider = tts?.provider ?? "elevenlabs";
-  const searchable = (provider === "fish" || provider === "elevenlabs" || provider === "gemini") && !usesLocalSystem;
+  const searchable = (provider === "fish" || provider === "elevenlabs" || provider === "gemini" || provider === "cartesia") && !usesLocalSystem;
   const voiceSearch = searchable && provider !== "gemini" ? searchedQuery : "";
   const pickedVoice = searchable && provider !== "gemini" ? (bot.voice ?? "") : "";
-  const cloudProvider = provider === "gemini"
+  const cloudProvider = provider === "cartesia"
+    ? { id: "cartesia" as const, name: "Cartesia", credential: "cartesiaTtsKey" as const, configField: "cartesiaKey" as const,
+        placeholder: t("voice.cartesia.keyPlaceholder"), keyUrl: "https://play.cartesia.ai/keys" }
+    : provider === "gemini"
     ? { id: "gemini" as const, name: "Gemini", credential: "geminiTtsKey" as const, configField: "geminiKey" as const,
         placeholder: t("voice.gemini.keyPlaceholder"), keyUrl: "https://aistudio.google.com/api-keys" }
     : provider === "fish"
@@ -94,7 +97,7 @@ export function VoiceSettings({
         }
       : null;
   const key = cloudProvider ? voiceKeyDraftValue(keyDraft, cloudProvider.id) : "";
-  const hostProviderLabel = provider === "gemini" ? t("voice.hostLabel", { provider: "Gemini" }) : provider === "fish"
+  const hostProviderLabel = provider === "cartesia" || provider === "gemini" ? t("voice.hostLabel", { provider: provider === "cartesia" ? "Cartesia" : "Gemini" }) : provider === "fish"
     ? t("voice.hostLabel", { provider: t("voice.fish.label") })
     : provider === "elevenlabs"
       ? t("voice.hostLabel", { provider: t("voice.elevenlabs.label") })
@@ -155,7 +158,7 @@ export function VoiceSettings({
     setLoadingVoices(true);
     const params = new URLSearchParams();
     if (voiceSearch) params.set("q", voiceSearch);
-    if (provider === "fish" && pickedVoice) params.set("current", pickedVoice);
+    if ((provider === "fish" || provider === "cartesia") && pickedVoice) params.set("current", pickedVoice);
     const query = params.toString();
     api(`/api/tts/voices${query ? `?${query}` : ""}`)
       .then((r: { voices?: typeof voices; error?: string }) => {
@@ -344,6 +347,7 @@ export function VoiceSettings({
               { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-1" },
               { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-1" },
               { value: "deepseek", label: "DeepSeek", available: true, span: "col-span-1" },
+              { value: "cartesia", label: "Cartesia", available: true, span: "col-span-1" },
             ] as const).map((option) => (
               <button
                 key={option.value}

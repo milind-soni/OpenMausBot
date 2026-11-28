@@ -138,6 +138,12 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { provider: "unknown" } })).toThrow("provider");
   });
 
+  it("keeps Cartesia speech settings and trims its own API key", () => {
+    const tts = { provider: "cartesia", cartesiaKey: "fixture-cartesia-key", cartesiaModel: "sonic-3.5", cartesiaLanguage: "nl", voice: "voice-dutch" };
+    expect(parseStoredConfig({ tts }).tts).toEqual(tts);
+    expect(parseConfigPatch({ tts: { ...tts, cartesiaKey: ` ${tts.cartesiaKey} ` } }).tts).toEqual(tts);
+  });
+
   it("stores OpenAI readout without changing live-call settings or enabling readout", () => {
     const patch = { tts: { provider: "openai", voice: "marin" }, openai: { key: "fixture-key" } };
     expect(parseConfigPatch(patch)).toEqual(patch);

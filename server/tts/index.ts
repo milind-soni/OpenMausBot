@@ -9,7 +9,9 @@ import * as gemini from "./gemini.ts";
 import * as deepseek from "./deepseek.ts";
 import * as systemVoices from "./system-voices.ts";
 
-export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek";
+import * as cartesia from "./cartesia.ts";
+import { voiceProviders, type VoiceProvider } from "./config.ts";
+export type { VoiceProvider } from "./config.ts";
 
 export class NoVoiceConfigured extends Error {
   // Not a parameter property: the harness runs under strip-only `node --experimental-strip-types`, which rejects one at load.
@@ -37,7 +39,7 @@ const deepseekVoice = (cfg: AppConfig, voiceId?: string) => (deepseek.isDeepSeek
  */
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
-  return provider === "deepseek" || provider === "gemini" || provider === "openai" || provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
+  return provider && voiceProviders.includes(provider) ? provider : "elevenlabs";
 }
 
 /**
@@ -48,6 +50,7 @@ export function voiceProvider(cfg: AppConfig): VoiceProvider {
 export function providerConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey);
+  if (provider === "cartesia") return Boolean(cfg.tts?.cartesiaKey);
   if (provider === "openai") return Boolean(cfg.openai?.key);
   if (provider === "deepseek") return Boolean(cfg.deepseek?.key);
   if (provider === "xai") return Boolean(cfg.xai?.key);
@@ -65,6 +68,7 @@ export function providerConfigured(cfg: AppConfig): boolean {
 export function voiceConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(cfg.tts?.voice));
+  if (provider === "cartesia") return Boolean(cfg.tts?.cartesiaKey && cfg.tts?.voice);
   if (provider === "openai") return Boolean(cfg.openai?.key && cfg.tts?.voice);
   if (provider === "deepseek") return Boolean(cfg.deepseek?.key && deepseek.isDeepSeekVoice(cfg.tts?.voice));
   if (provider === "xai") return Boolean(cfg.xai?.key && cfg.tts?.voice);
@@ -85,6 +89,7 @@ export function voiceConfigured(cfg: AppConfig): boolean {
 export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(voiceId || cfg.tts?.voice));
+  if (provider === "cartesia") return Boolean(cfg.tts?.cartesiaKey && (voiceId || cfg.tts?.voice));
   if (provider === "openai") return Boolean(cfg.openai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "deepseek") return Boolean(cfg.deepseek?.key && deepseek.isDeepSeekVoice(deepseekVoice(cfg, voiceId)));
   if (provider === "xai") return Boolean(cfg.xai?.key && (voiceId || cfg.tts?.voice));
@@ -121,11 +126,12 @@ export function describeVoice(cfg: AppConfig) {
 
 /**
  * Verifies an API key with the corresponding speech provider before saving.
- * @param provider The TTS provider name ("elevenlabs" | "fish" | "gemini").
+ * @param provider A speech provider with its own API key.
  * @param key The API key to test.
  * @returns Result indicating whether the key is valid.
  */
-export function verifyKey(provider: "elevenlabs" | "fish" | "gemini", key: string) {
+export function verifyKey(provider: "elevenlabs" | "fish" | "gemini" | "cartesia", key: string) {
+  if (provider === "cartesia") return cartesia.verifyKey(key);
   if (provider === "fish") return fish.verifyKey(key);
   if (provider === "gemini") return gemini.verifyKey(key);
   return elevenlabs.verifyKey(key);
@@ -144,6 +150,7 @@ export async function listVoices(
   search?: fish.VoiceSearch,
 ): Promise<elevenlabs.Voice[]> {
   const provider = voiceProvider(cfg);
+  if (provider === "cartesia") return cfg.tts?.cartesiaKey ? cartesia.listVoices(cfg.tts.cartesiaKey, search) : [];
   if (provider === "gemini") return cfg.tts?.geminiKey ? gemini.listVoices() : [];
   if (provider === "openai") return cfg.openai?.key ? openai.listVoices() : [];
   if (provider === "deepseek") return cfg.deepseek?.key ? deepseek.listVoices() : [];
@@ -187,6 +194,13 @@ export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voic
  */
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner, signal?: AbortSignal) {
   const provider = voiceProvider(cfg);
+  if (provider === "cartesia") {
+    const key = cfg.tts?.cartesiaKey;
+    if (!key) throw new NoVoiceConfigured("key", "Add a Cartesia API key in Voice settings.");
+    const voice = voiceId || cfg.tts?.voice;
+    if (!voice) throw new NoVoiceConfigured("voice");
+    return cartesia.synthesize(text, voice, key, cfg.tts?.cartesiaModel, cfg.tts?.cartesiaLanguage, signal);
+  }
   if (provider === "gemini") {
     const key = cfg.tts?.geminiKey;
     if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");

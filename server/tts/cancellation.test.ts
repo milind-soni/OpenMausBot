@@ -34,6 +34,11 @@ beforeAll(async () => {
   vi.stubEnv("OMB_FISH_AUDIO_API", providerUrl);
   vi.stubEnv("OMB_XAI_TTS_API", `${providerUrl}/v1`);
   vi.stubEnv("OMB_GEMINI_TTS_API", providerUrl);
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
+    const url = new URL(input);
+    return realFetch(url.origin === "https://api.cartesia.ai" ? providerUrl + url.pathname : input, init);
+  });
   const { createTtsRoutes } = await import("../routes/tts.ts");
   const route = createTtsRoutes({ config: () => config });
   api = createServer(async (req, res) => {
@@ -54,6 +59,7 @@ afterEach(() => {
 afterAll(async () => {
   await Promise.all([api, provider].map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("stopping read aloud", () => {
