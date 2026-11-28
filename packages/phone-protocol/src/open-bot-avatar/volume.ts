@@ -538,7 +538,8 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
   const xAxis = revolveAxis(body);
 
   const parts: VolumePart[] = outlines.map((o) => {
-    const cuts = holes.filter((h) => h.probe && isInside(o.polys, h.probe[0], h.probe[1]));
+    // MausBot: a part that sits inside a hole fills it (a face set into a hood); that hole cuts only the parts around it.
+    const cuts = holes.filter((h) => h.probe && isInside(o.polys, h.probe[0], h.probe[1]) && !(o.probe && isInside(h.polys, o.probe[0], o.probe[1])));
     const polys = [...o.polys, ...cuts.flatMap((h) => h.polys)];
     const b = bounds(o.polys);
     const center: Point = [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2];
@@ -548,7 +549,11 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
     // Classify: shared horizontal axis, own vertical axis (multi-part bodies only), or inflated.
     let kind: PartKind = 'inflate';
     let profile: Profile | null = null;
-    if (xAxis !== null) {
+    // MausBot: a part filling another part's hole is a face set into it: a shallow slab, never revolved.
+    const setIn = holes.some((h) => o.probe && isInside(h.polys, o.probe[0], o.probe[1]));
+    if (setIn) {
+      // stays inflated
+    } else if (xAxis !== null) {
       profile = revolveProfile(polys, false, b.minX, b.maxX, xAxis);
       if (profile) kind = 'revolve-x';
     } else if (outlines.length > 1 && cuts.length === 0) {
@@ -560,7 +565,7 @@ export function buildVolume(def: AvatarDefinition, volume = 1, body: BodyAnalysi
     let thickness: number, depth: number, rxy = 0, rz = 0, axis = 0;
     if (kind === 'inflate' || !profile) {
       thickness = gridThickness(polys, b, Math.max(step, 0.6), index);
-      depth = partDepth(thickness, b, v);
+      depth = partDepth(thickness, b, v) * (setIn ? 0.5 : 1);
       rxy = Math.min(thickness / 2, depth / 2) * 0.9;
       rz = (depth / 2) * 0.85;
     } else {

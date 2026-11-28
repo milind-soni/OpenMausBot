@@ -14,6 +14,7 @@
  * animation loop.
  */
 import { createAnimator } from '../animator.ts';
+import { FACES } from '../face.ts';
 import { pointerGaze } from '../follow.ts';
 import { resolveLook } from '../motion.ts';
 import { DEFAULT_COLOR, DEFAULT_EYE_COLOR, liveFrame, renderAvatarScene, renderAvatarSvg, sceneFrame, type SceneFrame } from '../render.ts';
@@ -219,7 +220,8 @@ export function mountAvatar(host: HTMLElement, initial: AvatarOptions): MountedA
 
   const syncHost = () => {
     host.style.color = opts.color ?? DEFAULT_COLOR;
-    host.style.setProperty('--avatar-ink', opts.eyeColor ?? DEFAULT_EYE_COLOR);
+    // MausBot: a Face's own eye colour when the host leaves it open.
+    host.style.setProperty('--avatar-ink', opts.eyeColor ?? FACES.get(opts.definition.id)?.ink ?? DEFAULT_EYE_COLOR);
     const decorative = opts.label === '';
     if (decorative) {
       host.removeAttribute('role');

@@ -214,6 +214,8 @@ export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: nu
       if (isMark(shape)) {
         if (!finish || !fluffy || !paintFluffyMark(ctx, section.box, scale, fill, finish)) ctx.fill(section.path, section.rule);
       } else if (!coat) {
+        // MausBot: a part with its own colour (Face.parts).
+        ctx.fillStyle = shape.fill ?? fill;
         ctx.fill(section.path, section.rule);
       } else if (!coatPainted) {
         // The body's slices follow one another: the coat takes the place of the first, under the root's motion.
@@ -226,7 +228,8 @@ export function paintCanvas(surface: CanvasSurface, frame: AvatarFrame, size: nu
     } else if (shape.kind === 'eye') {
       // MausBot: the coat seats only the two eyes; our mouth stays a flat mark on top of it.
       if (coat && shape.key !== 'mouth') continue;
-      ctx.fillStyle = ink;
+      ctx.fillStyle = shape.mark.fill ?? ink;
+      ctx.strokeStyle = shape.mark.fill ?? ink;
       paintEye(ctx, shape.mark);
       ctx.fillStyle = fill;
     } else {

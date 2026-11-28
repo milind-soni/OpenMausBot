@@ -26,7 +26,7 @@ import type { Rim } from './effects.ts';
 import type { Box } from './effects.ts';
 import { eyePath, plainLook } from './eyes.ts';
 import type { EyeSpot } from './eyes.ts';
-import { computePose, hashString, noise } from './motion.ts';
+import { BASE_PITCH, BASE_YAW, computePose, hashString, noise } from './motion.ts';
 import type { EyeLook, Pose } from './motion.ts';
 import type { Bounds, Point } from './path.ts';
 import { EYE_H, EYE_W, GAZE_X, GAZE_Y, HAPPY_ARC, analyzeBody, eyeCenters, gazeRange, validateAvatar } from './validate.ts';
@@ -34,6 +34,8 @@ import type { GazeRange } from './validate.ts';
 import { buildVolume } from './volume.ts';
 import type { EyePlane, Vec3, Volume, VolumeSlice } from './volume.ts';
 import type { AvatarDefinition, RenderOptions } from './types.ts';
+import { FACES } from './face.ts';
+import type { Face } from './face.ts';
 
 export const DEFAULT_COLOR = '#ff6a1a';
 export const DEFAULT_EYE_COLOR = '#151515';
@@ -152,6 +154,9 @@ export function preparedVolume(definition: AvatarDefinition, depth?: number): { 
 }
 
 function poseOf(p: Prepared, options: RenderOptions): Pose {
+  // MausBot: a front-view Face rests facing straight ahead; drag-to-turn still adds on top.
+  const front = FACES.get(p.def.id)?.front;
+  const view = front ? { yaw: (options.view?.yaw ?? 0) - BASE_YAW, pitch: (options.view?.pitch ?? 0) - BASE_PITCH } : options.view;
   return computePose({
     seed: p.seed,
     time: Number.isFinite(options.time) ? (options.time as number) : 0,
@@ -161,7 +166,7 @@ function poseOf(p: Prepared, options: RenderOptions): Pose {
     stateAge: options.stateAge,
     gaze: options.gaze,
     reducedMotion: options.reducedMotion === true,
-    view: options.view,
+    view,
     blend: options.motionBlend,
   });
 }
@@ -360,7 +365,29 @@ function happyArc(e: EyeState): string {
   return `M${f(ex - hw)} ${f(base)}Q${f(ex)} ${f(ey - e.h * HAPPY_ARC.peak)} ${f(ex + hw)} ${f(base)}`;
 }
 
-function eyeMark(e: EyeState): EyeMark {
+/** MausBot: the eye a Face asks for in place of the plain pill; null keeps the engine's own. */
+function faceEye(e: EyeState, idx: number, face: Face): EyeMark | null {
+  if (!face.eye || e.plain !== 'pill') return null;
+  const k = Math.max(0.08, e.open / e.h);
+  const cx = e.x + e.dx, cy = e.y + e.dy;
+  const W = face.eyeW ?? e.w * (face.ew ?? (face.eye === 'angry' ? 2.2 : 1.6)), H = face.eyeH ?? e.h * (face.eh ?? (face.eye === 'angry' ? 0.75 : 0.62));
+  if (face.eye === 'round' || (face.eye === 'wink' && idx === 0)) {
+    const h = H * k;
+    return { shape: 'pill', x: cx - W / 2, y: cy - h / 2, width: W, height: h, radius: Math.min(W, h) / 2 };
+  }
+  if (face.eye === 'wink') {
+    return { shape: 'arc', d: `M${f(cx - W / 2)} ${f(cy + H * 0.15)}Q${f(cx)} ${f(cy - H * 0.35)} ${f(cx + W / 2)} ${f(cy - H * 0.05)}`, strokeWidth: e.w * 0.75 };
+  }
+  // angry: a lens with a straight lid sloping down to the nose, mirrored for the right eye; a blink squashes it.
+  const pt = (x: number, y: number) => `${f(idx === 0 ? x : 2 * cx - x)} ${f(cy + (y - cy) * k)}`;
+  return { shape: 'path', d: `M${pt(cx - W / 2, cy - H / 2)}L${pt(cx + W / 2, cy - H * 0.02)}Q${pt(cx + W / 2, cy + H / 2)} ${pt(cx, cy + H / 2)}Q${pt(cx - W / 2, cy + H / 2)} ${pt(cx - W / 2, cy - H / 2)}Z` };
+}
+
+function eyeMark(e: EyeState, idx = 0, face?: Face): EyeMark {
+  // MausBot: a Face's own eyes, or none where the face is drawn into the outline or its marks.
+  if (face?.eye === 'none') return { shape: 'pill', x: e.x, y: e.y, width: 0.01, height: 0.01, radius: 0 };
+  const custom = face ? faceEye(e, idx, face) : null;
+  if (custom) return custom;
   if (e.plain === 'arc') return { shape: 'arc', d: happyArc(e), strokeWidth: e.w * HAPPY_ARC.stroke };
   if (e.plain === null) return { shape: 'path', d: eyePath(e.look, eyeSpot(e, true)) };
   const cx = e.x + e.dx, cy = e.y + e.dy + e.shift;
@@ -397,10 +424,14 @@ export type Matrix = [number, number, number, number, number, number];
  * plain happy arc (stroked, round caps), or for every other look a filled outline (a waiting
  * bot's slits, and every shape on the way from one look to the next).
  */
-export type EyeMark =
+export type EyeMark = (
   | { shape: 'pill'; x: number; y: number; width: number; height: number; radius: number }
   | { shape: 'arc'; d: string; strokeWidth: number }
-  | { shape: 'path'; d: string };
+  | { shape: 'path'; d: string }
+) & {
+  /** MausBot: a face mark's own colour (a band, a traced face region); eyes and the mouth take the ink. */
+  fill?: string;
+};
 
 export type FrameShape =
   | {
@@ -410,6 +441,8 @@ export type FrameShape =
       /** Id of an entry in AvatarFrame.paths. */
       path: string;
       matrix: Matrix;
+      /** MausBot: this part's own colour (Face.parts); otherwise the body colour. */
+      fill?: string;
     }
   | { kind: 'eye'; key: 'eye-0' | 'eye-1' | 'mouth'; matrix: Matrix; mark: EyeMark }
   | {
@@ -556,7 +589,10 @@ function flatFrame(definition: AvatarDefinition, options: RenderOptions, size: n
   const p = prepare(definition, depthOption(options));
   const { vol } = p;
   const b = vol.bounds;
-  const { color, ink } = colors(options);
+  // MausBot: a Face may colour some parts and set the eye colour the host leaves open.
+  const face = FACES.get(p.def.id);
+  const { color, ink: hostInk } = colors(options);
+  const ink = !options.eyeColor && face?.ink ? face.ink : hostInk;
   const pose = poseOf(p, options);
   const pivot = pivotOf(b);
   const v = viewBasis(pose.yaw, pose.pitch);
@@ -579,13 +615,15 @@ function flatFrame(definition: AvatarDefinition, options: RenderOptions, size: n
       }
       // Parallel slices have the same order along every viewing ray.
       const depth = stack === 'z' ? v.facing * s.at : -v.sY * v.cP * s.at;
-      items.push({ depth, shape: { kind: 'slice', key: `${i}${stack}${j}`, path: path.id, matrix: shrink(m) } });
+      items.push({ depth, shape: { kind: 'slice', key: `${i}${stack}${j}`, path: path.id, matrix: shrink(m), fill: face?.parts?.[i] } });
     });
     // Painted on the surface; each eye goes once the surface under it turns away.
     const states = eyeStates(p, pose);
+    // MausBot: a Face with a band or marks paints its eyes after them, over every slice.
+    const onTop: FrameShape[] = [];
     states.forEach((e, idx) => {
       const plane = vol.eyePlanes[idx];
-      eyes.push({ mark: eyeMark({ ...e, dx: 0, dy: 0 }), dx: e.dx, dy: e.dy });
+      eyes.push({ mark: eyeMark({ ...e, dx: 0, dy: 0 }, idx, face), dx: e.dx, dy: e.dy });
       if (!eyeVisible(v, plane)) return;
       // A slice through the middle of a mark must paint before the entire mark: sort at the near
       // edge of its footprint on the active stack.
@@ -595,10 +633,9 @@ function flatFrame(definition: AvatarDefinition, options: RenderOptions, size: n
       const depth = stack === 'z'
         ? v.facing * z + Math.abs(v.facing) * (Math.abs(plane.dzdx) * halfW + (Math.abs(plane.dzdy) * e.h) / 2)
         : xDepth * (e.x + e.dx) + Math.abs(xDepth) * halfW;
-      items.push({
-        depth: depth + 1e-6,
-        shape: { kind: 'eye', key: idx === 0 ? 'eye-0' : 'eye-1', matrix: shrink(eyeMatrix(v, plane, pivot)), mark: eyeMark(e) },
-      });
+      const shape: FrameShape = { kind: 'eye', key: idx === 0 ? 'eye-0' : 'eye-1', matrix: shrink(eyeMatrix(v, plane, pivot)), mark: eyeMark(e, idx, face) };
+      if (face?.band || face?.marks?.length) onTop.push(shape);
+      else items.push({ depth: depth + 1e-6, shape });
     });
     // MausBot: the mouth sits on the plane midway between the eye planes and shows while both eyes
     // do. It paints over every slice, as on a fluffy coat: below the eyes the face can stand
@@ -606,8 +643,15 @@ function flatFrame(definition: AvatarDefinition, options: RenderOptions, size: n
     const [pa, pb] = vol.eyePlanes;
     if (eyeVisible(v, pa) && eyeVisible(v, pb)) {
       const plane = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2, z: (pa.z + pb.z) / 2, dzdx: (pa.dzdx + pb.dzdx) / 2, dzdy: (pa.dzdy + pb.dzdy) / 2 };
-      items.push({ depth: Infinity, shape: { kind: 'eye', key: 'mouth', matrix: shrink(eyeMatrix(v, plane, pivot)), mark: mouthMark(states) } });
+      const m = shrink(eyeMatrix(v, plane, pivot));
+      // MausBot: a Face's marks and band share the mouth's plane and its key, so a fluffy coat paints them flat on top too.
+      for (const mk of face?.marks ?? []) items.push({ depth: Infinity, shape: { kind: 'eye', key: 'mouth', matrix: m, mark: { shape: 'path', d: mk.d, fill: mk.color } } });
+      const bd = face?.band;
+      if (bd) items.push({ depth: Infinity, shape: { kind: 'eye', key: 'mouth', matrix: m, mark: { shape: 'pill', x: bd.x, y: bd.y, width: bd.w, height: bd.h, radius: bd.r ?? bd.h / 2, fill: bd.color } } });
+      if (face?.mouth !== false) items.push({ depth: Infinity, shape: { kind: 'eye', key: 'mouth', matrix: m, mark: mouthMark(states) } });
     }
+    // The sort is stable, so these stay after the band and marks.
+    for (const shape of onTop) items.push({ depth: Infinity, shape: { ...shape, key: 'mouth' } as FrameShape });
     items.sort((a, c) => a.depth - c.depth);
   }
 
@@ -632,6 +676,7 @@ function flatFrame(definition: AvatarDefinition, options: RenderOptions, size: n
 // Standalone SVG still
 
 function eyeSvg(mark: EyeMark, ink: string): string {
+  ink = mark.fill ?? ink;
   if (mark.shape === 'path') return `<path d="${mark.d}" fill="${ink}"/>`;
   if (mark.shape === 'arc') {
     return `<path d="${mark.d}" fill="none" stroke="${ink}" stroke-width="${f(mark.strokeWidth)}" stroke-linecap="round"/>`;
@@ -660,7 +705,7 @@ export function renderAvatarSvg(definition: AvatarDefinition, options: RenderOpt
   const defsMarkup = frame.paths.map((d) => `<path id="${d.id}" d="${d.d}"${d.evenOdd ? ' fill-rule="evenodd"' : ''}/>`).join('');
   const body = frame.shapes
     .map((s) =>
-      s.kind === 'slice' ? `<use href="#${s.path}" transform="${mat(s.matrix)}"/>`
+      s.kind === 'slice' ? `<use href="#${s.path}" transform="${mat(s.matrix)}"${s.fill ? ` fill="${s.fill}"` : ''}/>`
       : s.kind === 'eye' ? `<g transform="${mat(s.matrix)}">${eyeSvg(s.mark, frame.ink)}</g>`
       : `<g transform="${mat(s.matrix)}">${ribbonSvg(s.d, s.gradient)}</g>`,
     )
