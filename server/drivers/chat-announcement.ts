@@ -11,7 +11,11 @@ function announcesChineseAction(prose: string): boolean {
   const opening = /^(?:(?:好的|收到)[，,。]\s*)?(?:(?:接下[来來]|下一步)[，,]?\s*)?(?:我(?:[会會将將]|先|去|[现現]在|[马馬]上|立刻|切(?:[换換])?到[^，,。！？\n]{1,40}[，,]\s*先)|[让讓]我)(?:[会會将將]|先|立即|直接|就|去|[来來]|[开開]始){0,3}\s*/u.exec(tail);
   if (!opening) return false;
   const action = tail.slice(opening[0].length).replace(/^按[^，,。！？\n]{1,80}[，,]\s*/u, "");
-  if (/^[确確][认認]\s*[:：](?:[^，,；;]*是否[^，,；;]*[，,；;]\s*(?:无需|無需)|(?!.+是否|是否).*(?:已|完毕|完畢|无需|無需)|.*的(?:检查|檢查|核对|核對)已(?:完成|结束|結束))/u.test(action)) return false;
+  const confirmation = /^[确確][认認]\s*[:：](.*)$/u.exec(action)?.[1];
+  if (confirmation) {
+    const conclusion = confirmation.split(/[，,；;]/u).at(-1)!;
+    if (!conclusion.includes("是否") && /已|完毕|完畢|无需|無需/u.test(conclusion)) return false;
+  }
   const match = /^(?:在[^。！？?，、\n]{1,40}?(?:里|裡|中|上))?(?:打[开開]|開啟|[读讀]取|查[询詢看找]|看看|[确確][认認]|[检檢]查|[执執]行|[运運]行|[创創]建|生成|整理|保存|[写寫]入|搜[索尋]|[获獲]取|[调調]用|[处處]理|核[对對实實]|[制製]作|建立|更新|拉取|同步|导出|匯出|汇总|彙總|[发發]送|把[^。！？?\n]{1,160}?(?:放[到进進入]|做成|整理|清[点點]|保存|[写寫]入|[制製]作|生成|汇总|彙總))/u.exec(action);
   return Boolean(match && !/^[了过過完]/u.test(action.slice(match[0].length)));
 }
