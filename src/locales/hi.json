@@ -1,4 +1,12 @@
 {
+  "settings.features.titleModel": "बातचीत के शीर्षक का मॉडल",
+  "settings.features.titleModelAutomatic": "स्वचालित",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (अनुपलब्ध)",
+  "settings.features.titleModelConnect": "शीर्षक का मॉडल चुनने के लिए संगत AI जोड़ें।",
+  "settings.features.titleFollowUp": "बातचीत के शीर्षक अपडेट करें",
+  "settings.features.titleFollowUpLine": "विषय बदलने पर स्वचालित शीर्षक अपडेट होते हैं। आपके दिए शीर्षक बने रहते हैं।",
+  "settings.threads.saving": "सहेजा जा रहा है…",
   "voice.gemini.keyPlaceholder": "अपनी Google AI Studio API कुंजी पेस्ट करें",
   "voice.gemini.model": "Gemini वाक् मॉडल",
   "keys.label.geminiTts": "Gemini वाक् API कुंजी",

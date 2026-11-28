@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "スレッドのタイトル生成モデル",
+  "settings.features.titleModelAutomatic": "自動",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (利用不可)",
+  "settings.features.titleModelConnect": "タイトル生成モデルを選ぶには、対応する AI を接続してください。",
+  "settings.features.titleFollowUp": "スレッドのタイトルを更新",
+  "settings.features.titleFollowUpLine": "話題が変わると自動タイトルを更新します。自分で設定したタイトルは維持されます。",
   "connectedWorkspaces.localTitle": "このコンピューターの環境",
   "connectedWorkspaces.missing": "見つかりません",
   "connectedWorkspaces.current": "使用中",

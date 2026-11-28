@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "Sohbet başlığı modeli",
+  "settings.features.titleModelAutomatic": "Otomatik",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (kullanılamıyor)",
+  "settings.features.titleModelConnect": "Başlık modeli seçmek için uyumlu bir yapay zekâ bağlayın.",
+  "settings.features.titleFollowUp": "Sohbet başlıklarını güncelle",
+  "settings.features.titleFollowUpLine": "Konu değiştiğinde otomatik başlıklar güncellenir. Sizin belirlediğiniz başlıklar korunur.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API anahtarınızı yapıştırın",
   "voice.gemini.model": "Gemini konuşma modeli",
   "keys.label.geminiTts": "Gemini konuşma API anahtarı",

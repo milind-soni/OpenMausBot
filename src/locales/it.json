@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "Modello per i titoli delle conversazioni",
+  "settings.features.titleModelAutomatic": "Automatico",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (non disponibile)",
+  "settings.features.titleModelConnect": "Collega un’IA compatibile per scegliere un modello per i titoli.",
+  "settings.features.titleFollowUp": "Aggiorna i titoli delle conversazioni",
+  "settings.features.titleFollowUpLine": "Aggiorna i titoli automatici quando cambia l’argomento. I titoli scelti da te vengono conservati.",
   "connectedWorkspaces.localTitle": "Ambienti su questo computer",
   "connectedWorkspaces.missing": "mancante",
   "connectedWorkspaces.current": "Attuale",

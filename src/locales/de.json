@@ -1,4 +1,12 @@
 {
+  "settings.features.titleModel": "Modell für Unterhaltungstitel",
+  "settings.features.titleModelAutomatic": "Automatisch",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (nicht verfügbar)",
+  "settings.features.titleModelConnect": "Verbinde eine kompatible KI, um ein Titelmodell auszuwählen.",
+  "settings.features.titleFollowUp": "Unterhaltungstitel aktualisieren",
+  "settings.features.titleFollowUpLine": "Automatische Titel werden bei einem Themenwechsel aktualisiert. Selbst gewählte Titel bleiben erhalten.",
+  "settings.threads.saving": "Wird gespeichert …",
   "voice.gemini.keyPlaceholder": "Google AI Studio API-Schlüssel einfügen",
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",

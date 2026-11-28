@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "Modelo para títulos de conversaciones",
+  "settings.features.titleModelAutomatic": "Automático",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (no disponible)",
+  "settings.features.titleModelConnect": "Conecta una IA compatible para elegir un modelo de títulos.",
+  "settings.features.titleFollowUp": "Actualizar títulos de conversaciones",
+  "settings.features.titleFollowUpLine": "Actualiza los títulos automáticos cuando cambia el tema. Se conservan los títulos que hayas elegido.",
   "voice.gemini.keyPlaceholder": "Pega tu clave de API de Google AI Studio",
   "voice.gemini.model": "Modelo de voz de Gemini",
   "keys.label.geminiTts": "Clave de API de voz de Gemini",

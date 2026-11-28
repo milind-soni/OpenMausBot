@@ -1,4 +1,11 @@
 {
+  "settings.features.titleModel": "對話標題模型",
+  "settings.features.titleModelAutomatic": "自動",
+  "settings.features.titleModelChoice": "{provider} · {model}",
+  "settings.features.titleModelUnavailable": "{model} (無法使用)",
+  "settings.features.titleModelConnect": "連接相容的 AI 後即可選擇標題模型。",
+  "settings.features.titleFollowUp": "更新對話標題",
+  "settings.features.titleFollowUpLine": "話題改變時更新自動產生的標題。你手動設定的標題會保留。",
   "connectedWorkspaces.localTitle": "這台電腦上的環境",
   "connectedWorkspaces.missing": "遺失",
   "connectedWorkspaces.current": "目前",
