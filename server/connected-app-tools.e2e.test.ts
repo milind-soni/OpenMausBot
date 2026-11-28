@@ -190,3 +190,42 @@ it("a bot's Google Drive upload of a file in its working folder reaches Composio
     rmSync(scratch, { recursive: true, force: true });
   }
 }, 120_000);
+
+it("a bot in a room receives the composio connected apps instructions and connector scopes", async () => {
+  const apps = await startFakeConnectedApps();
+  apps.connected = { gmail: true };
+  const scratch = mkdtempSync(join(tmpdir(), "omb-app-tools-"));
+  const gate = join(scratch, "finish");
+  const fixture = await launchVerificationServer({
+    ...process.env, OMB_COMPOSIO_BROKER_URL: apps.url, OMB_COMPOSIO_BROKER_TOKEN: apps.token,
+    FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate,
+  });
+  const api = apiOn(fixture.info.url);
+  try {
+    const bot = (await api("POST", "/api/bots", { name: "RoomBot" }, 201)).bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { composio: true, connectorTools: { gmail: { tools: "*" } }, connectorScopes: { apps: { gmail: "read" } } });
+    const channel = (await api("POST", "/api/groups", {
+      name: "App room",
+      memberIds: [bot.id],
+      setup: { bulletin: "", defaultResponder: { kind: "mentions" } },
+    }, 201)).group;
+
+    await api("POST", `/api/groups/${channel.id}/messages`, { text: "@RoomBot check inbox" }, 202);
+    let dump: any;
+    await expect.poll(() => {
+      try { dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")); } catch { return false; }
+      return Boolean(dump.systemPrompt);
+    }, { timeout: 20_000 }).toBe(true);
+
+    const system = String(dump.systemPrompt ?? "");
+    expect(system).toContain("gmail.search_emails");
+    expect(system).toContain("This bot may use only these connected apps: gmail (read only)");
+    expect(system).toContain("COMPOSIO_SEARCH_TOOLS");
+    writeFileSync(gate, "");
+  } finally {
+    await fixture.close();
+    await apps.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}, 120_000);
+
