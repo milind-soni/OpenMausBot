@@ -288,7 +288,7 @@ and use it everywhere, rather than styling a one-off.
 | You need | Use |
 |---|---|
 | Class merging | `cn()` from `src/lib/cn.ts` |
-| A button | `.ui-button` with `-sm` / `-md` / `-lg`, `-pill`, `-primary`, or `.ui-icon-button` |
+| A button | `.ui-button` with `-sm` / `-md` / `-lg`, `-pill`, `-primary`, or `.ui-icon-button`; `.ui-button-ghost` on either for a quiet action beside a label (no border or fill at rest) |
 | A chip or pill | `.ui-chip` (static), `.ui-pill` (clickable) |
 | A menu | `MENU_SHEET`, `MENU_ROW`, `MENU_LABEL`, `MENU_SEPARATOR`, `MENU_META` and the rest of `src/components/menu-recipe.ts`; `SidebarPopoverMenu` for anchored menus; `useMenuMotion` |
 | A dropdown | `Select` from `src/components/Select.tsx`; never a native `<select>` |

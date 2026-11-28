@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { serializeCitation, type CitationAttachment } from "@/lib/citations";
 import { t } from "@/lib/i18n";
 import type { Message } from "@/state/store";
+import { ELEVATED_FLOAT } from "./elevated";
 import { UnreadContextCard } from "./UnreadContextCard";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,7 +88,7 @@ describe("UnreadContextCard", () => {
     });
   });
 
-  it("keeps the header text-only and puts the two actions in the last row", () => {
+  it("keeps the label and time text-only, with the two actions at the end of the same row", () => {
     let jumped = 0;
     let closed = 0;
     draw(createElement(UnreadContextCard, {
@@ -105,18 +106,32 @@ describe("UnreadContextCard", () => {
 
     const actions = rendered!.querySelector<HTMLElement>("[data-unread-context-actions]");
     expect(actions).not.toBeNull();
+    expect(actions!.previousElementSibling).toBe(header);
     expect(actions!.parentElement?.lastElementChild).toBe(actions);
     const buttons = [...actions!.querySelectorAll("button")];
     expect(buttons).toHaveLength(2);
     expect(buttons[0]!.textContent).toBe(t("chat.citation.goToSource"));
-    expect(buttons[0]!.className).toContain("rounded-lg");
-    expect(buttons[0]!.className).toContain("border");
-    expect(buttons[1]!.textContent).toBe(t("common.close"));
-    expect(buttons[1]!.className).toContain("bg-accent");
+    expect(buttons[1]!.getAttribute("aria-label")).toBe(t("common.close"));
+    // One pair: the shared quiet variant on the shared button classes, which carry hover, focus, pressed and touch sizes.
+    expect(buttons[0]!.className.split(/\s+/)).toEqual(expect.arrayContaining(["ui-button", "ui-button-sm", "ui-button-ghost"]));
+    expect(buttons[1]!.className.split(/\s+/)).toEqual(expect.arrayContaining(["ui-icon-button", "ui-button-ghost", "touch:size-10"]));
+    for (const button of buttons) expect(button.className.split(/\s+/).some((name) => /^(bg-|border|hover:|active:)/.test(name))).toBe(false);
 
     act(() => buttons[0]!.click());
     act(() => buttons[1]!.click());
     expect({ jumped, closed }).toEqual({ jumped: 1, closed: 1 });
+  });
+
+  it("stays inside the conversation's column on the header's opaque floating surface, with opaque canvas around it and nothing laid over the transcript", () => {
+    renderCard("正文");
+    const surface = card()!.querySelector<HTMLElement>("[data-unread-context-surface]")!;
+    const classes = surface.className.split(/\s+/);
+    expect(classes).toContain("chat-column");
+    for (const name of ELEVATED_FLOAT.split(" ")) expect(classes).toContain(name);
+    expect(classes.some((name) => /^bg-.*\/\d/.test(name))).toBe(false);
+    expect(card()!.className.split(/\s+/)).toContain("bg-app");
+    expect(card()!.className.split(/\s+/)).toContain("pb-2");
+    expect(card()!.querySelector('[aria-hidden="true"]:not(svg)')).toBeNull();
   });
 
   it("shows the first three of four citations and counts the rest", () => {
