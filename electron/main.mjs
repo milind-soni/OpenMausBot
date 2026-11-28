@@ -31,7 +31,7 @@ import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs"; import { installDesktopNotifications } from "./desktop-notifications.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
-import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
+import { windowBackground, windowChromeOptions } from "./window-chrome.mjs"; import { applyAppIcon, installAppIconHandlers, savedAppIcon } from "./app-icon.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
 import { createSystemTray } from "./system-tray.mjs";
@@ -134,7 +134,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // vite binds IPv4; a bare "localhost" can resolve to ::1.
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
 let SERVER_PORT = 8799;
-const APP_ICON = path.join(__dirname, "resources/app-icon.png");
+const DEFAULT_APP_ICON = path.join(__dirname, "resources/app-icon.png"); let APP_ICON = DEFAULT_APP_ICON; // the person's saved picture replaces this at launch
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
 let desktopViewerContextId = null;
@@ -2198,7 +2198,7 @@ ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (ev
     ...(typeof current === "string" && current ? { defaultPath: current } : {}),
   });
   return result.canceled ? null : (result.filePaths[0] ?? null);
-}));
+})); installAppIconHandlers({ ipcMain, localOnly, dialog, BrowserWindow, app, nativeImage, defaultPath: DEFAULT_APP_ICON, t: nativeT, apply: (iconPath) => { APP_ICON = iconPath; applyAppIcon(iconPath, { platform: process.platform, app, nativeImage, windows: [...appWindows(), ...localAppWindows.windows()], trays: [desktopTray, linuxTray], activity: lendingActivity, log: slog }); lendingTray?.setIcon?.(iconPath); } });
 
 // Secrets are never read, and the report is redacted again on the way out.
 ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnostics", async (event) => {
@@ -2344,7 +2344,7 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
 }));
 
 const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech, windowsSpeech: nativeActions.windowsSpeech,
-  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT });
+  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: DEFAULT_APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog, t: nativeT });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
 function managedRemoteAccessRefusal() {
@@ -2669,7 +2669,7 @@ ipcMain.handle("environments:add-from-link", localWorkspaceOnly("environments:ad
 ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", (_event, id, purge) => forgetEnvironment(typeof id === "string" ? id : "", purge === true)));
 const savedServerStatus = createServerStatus({ entries: () => environmentsState.environments.filter((e) => e.kind === "remote" && !e.home && !e.team && !e.cloud), check: (origin) => checkServer(origin, (...args) => session.defaultSession.fetch(...args)),
   appVersion: app.getVersion(), onChange: () => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("environments:status-changed"); } });
-installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() }); installUpdateAll({ ipcMain, guard: localWorkspaceOnly, servers: savedServerStatus.saved, fetch: (...args) => session.defaultSession.fetch(...args), send: (channel, view) => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send(channel, view); } }); const appInstaller = createDesktopAppInstaller({ app, shell, nativeImage, env: process.env, platform: process.platform, log: slog }); installAppInstall({ ipcMain, guard: localWorkspaceOnly, installer: appInstaller }); installLocalAppWindows({ ipcMain, guard: localOrHome, BrowserWindow, senderOrigin: (event) => { try { return new URL(event.senderFrame.url).origin; } catch { return null; } }, webPreferences: () => ({ contextIsolation: true, preload: path.join(__dirname, "preload.cjs"), additionalArguments: [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`, ...(linuxSoftwareRendering ? [SOFTWARE_RENDERING_ARG] : [])] }), openChat: queueChatLink, openExternal: (url) => shell.openExternal(externalLinkUrl(url)), sizes: createAppWindowSizes({ file: () => path.join(app.getPath("userData"), "app-windows.json"), log: slog }), workAreas: () => screen.getAllDisplays().map((display) => display.workArea), icon: APP_ICON, background: () => windowBackground(nativeTheme.shouldUseDarkColors), log: slog, launches: appLaunches, ready: () => app.isReady() && serverReady, launchOrigin: () => rendererOrigin(), windowDetails: (id) => appInstaller.windowDetails(id) }); for (const signal of ["resume", "unlock-screen"]) powerMonitor.on(signal, () => cloudAccount?.freshen()); // a woken computer reads its MausBot Cloud sign-in at once
+installServerStatus({ ipcMain, guard: localWorkspaceOnly, status: savedServerStatus, app, powerMonitor, online: () => net.isOnline() }); installUpdateAll({ ipcMain, guard: localWorkspaceOnly, servers: savedServerStatus.saved, fetch: (...args) => session.defaultSession.fetch(...args), send: (channel, view) => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send(channel, view); } }); const appInstaller = createDesktopAppInstaller({ app, shell, nativeImage, env: process.env, platform: process.platform, log: slog }); installAppInstall({ ipcMain, guard: localWorkspaceOnly, installer: appInstaller }); const localAppWindows = installLocalAppWindows({ ipcMain, guard: localOrHome, BrowserWindow, senderOrigin: (event) => { try { return new URL(event.senderFrame.url).origin; } catch { return null; } }, webPreferences: () => ({ contextIsolation: true, preload: path.join(__dirname, "preload.cjs"), additionalArguments: [...desktopCompanionRendererArguments(rendererOrigin(), desktopRemoteAccess), ...(app.isPackaged && !desktopRemoteAccess ? ["--omb-company-desktop=1"] : []), `--omb-app-version=${app.getVersion()}`, ...(linuxSoftwareRendering ? [SOFTWARE_RENDERING_ARG] : [])] }), openChat: queueChatLink, openExternal: (url) => shell.openExternal(externalLinkUrl(url)), sizes: createAppWindowSizes({ file: () => path.join(app.getPath("userData"), "app-windows.json"), log: slog }), workAreas: () => screen.getAllDisplays().map((display) => display.workArea), icon: () => APP_ICON, background: () => windowBackground(nativeTheme.shouldUseDarkColors), log: slog, launches: appLaunches, ready: () => app.isReady() && serverReady, launchOrigin: () => rendererOrigin(), windowDetails: (id) => appInstaller.windowDetails(id) }); for (const signal of ["resume", "unlock-screen"]) powerMonitor.on(signal, () => cloudAccount?.freshen()); // a woken computer reads its MausBot Cloud sign-in at once
 
 // A cloud page may open the native chooser, never choose a destination or edit the saved list.
 // Once My Cloud is home the switcher lists only whole places, and shows only when there is more than My Cloud.
@@ -2784,7 +2784,7 @@ setCuaStateListener((connection) => {
   });
 });
 
-app.whenReady().then(async () => { launchRecord.mark("ready");
+app.whenReady().then(async () => { launchRecord.mark("ready"); APP_ICON = savedAppIcon(app, DEFAULT_APP_ICON); lendingActivity.setIcon(APP_ICON);
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),

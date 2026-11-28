@@ -165,6 +165,12 @@ const bridge = {
   softwareRendering: process.argv.includes("--omb-software-rendering=1"),
   /** This app's version, and whether this page is this app's own (served by this computer, not a server from the Server menu). */
   app: { version: appVersion, ownPage: isLocalPage },
+  /** This computer's own page: a picture the person picked for the app's Dock, window and tray icon. */
+  appIcon: {
+    state: () => ipcRenderer.invoke("desktop:app-icon:state"),
+    choose: () => ipcRenderer.invoke("desktop:app-icon:choose"),
+    reset: () => ipcRenderer.invoke("desktop:app-icon:reset"),
+  },
   // Safe on a cloud page: the person chooses in a native menu, or a circle of the rail main listed (only for this app's
   // page and a hosted Cloud's, never addresses), and only from their click; no saved-list reads, host files or secrets.
   workspaces: {

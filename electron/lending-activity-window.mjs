@@ -44,12 +44,13 @@ export function activityPage(entries, locale) {
 /** One window at a time; opening it again shows what was recorded since. */
 export function createActivityWindow({ BrowserWindow, icon, background, entries, locale }) {
   let win = null;
+  let currentIcon = icon;
   return {
     show() {
       const html = activityPage(entries(), locale());
       if (!win || win.isDestroyed()) {
         win = new BrowserWindow({
-          width: 560, height: 640, minWidth: 380, minHeight: 280, show: false, icon, backgroundColor: background(), autoHideMenuBar: true,
+          width: 560, height: 640, minWidth: 380, minHeight: 280, show: false, icon: currentIcon, backgroundColor: background(), autoHideMenuBar: true,
           title: wordsFor(locale())["lending.activity.title"],
           webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false, partition: "openmausbot-lending-activity" },
         });
@@ -63,6 +64,11 @@ export function createActivityWindow({ BrowserWindow, icon, background, entries,
         win.focus();
       }
       void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => {});
+    },
+    /** A later window, and this one when it is open, use the app's current icon. */
+    setIcon(next) {
+      currentIcon = next;
+      if (win && !win.isDestroyed() && typeof win.setIcon === "function") win.setIcon(next);
     },
     close() { if (win && !win.isDestroyed()) win.close(); win = null; },
   };

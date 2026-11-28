@@ -49,7 +49,7 @@ export function indicatorText({ clouds, using, bots = [], paused, pauseError, sc
 const NOTICE_AFTER_MS = 10 * 60_000;
 
 export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, onStartScreen = () => {}, onQuit = null, device = deviceWord(), t = nativeText.englishText.t, Notification = null, setTimer = setTimeout, clearTimer = clearTimeout }) {
-  let tray = null;
+  let tray = null, currentIconPath = iconPath;
   let shown = null;
   const dot = dotIcons(nativeImage);
   /** Each problem now, by what it says, until the notification for it goes out or it clears. */
@@ -111,12 +111,13 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       followProblems(next.problems);
       if (!next.clouds.length && !next.problems.length) { if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; return; }
       if (!tray || tray.isDestroyed()) {
-        tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 }));
+        tray = new Tray(nativeImage.createFromPath(currentIconPath).resize({ width: 18, height: 18 }));
         tray.on("click", () => tray?.popUpContextMenu?.());
       }
       draw(next);
     },
     relabel() { if (tray && !tray.isDestroyed() && shown) draw(shown); },
+    setIcon(nextPath) { currentIconPath = nextPath; if (tray && !tray.isDestroyed()) tray.setImage?.(nativeImage.createFromPath(nextPath).resize({ width: 18, height: 18 })); },
     destroy() { for (const timer of noticeTimers.values()) clearTimer(timer); noticeTimers.clear(); if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; shown = null; },
   };
 }

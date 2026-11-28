@@ -6,6 +6,7 @@ import { t } from "@/lib/i18n";
 import { useStoreDispatch } from "@/state/store-select";
 import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
+import { AppIconRow } from "../../AppIconRow";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
 import {
   ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, SendKeyRow, ShowThreadsRow,
@@ -164,6 +165,7 @@ export function AppearancePage() {
     <SettingsGroup label={t("settings.appearance.look")} block="look">
       <SettingsRows>
         <ThemeRow simple />
+        {ctx.desktop && !ctx.client && ctx.here && <AppIconRow />}
         <ThemePickerRow open={themes} onToggle={() => setThemes((open) => !open)} />
         {themes && <div data-settings-block="themes" className="p-4"><SkinPicker /></div>}
         <ColorUserBubblesRow simple />
