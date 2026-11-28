@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { cn } from "@/lib/cn";
 import { firstSentence, soulPatchFor, utf8Bytes } from "@/lib/soul";
 import { useStore, type Bot } from "@/state/store";
+import { useModalDialog } from "@/hooks/use-modal-dialog";
+import { Layer } from "./Layer";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { inputCls } from "./bot-settings/field";
 import { intlLocale, t } from "@/lib/i18n";
@@ -25,6 +27,7 @@ export function SoulField({
   const [draft, setDraft] = useState(bot.soul ?? "");
   const [info, setInfo] = useState<SoulRead | null>(null);
   const [resolving, setResolving] = useState(false);
+  const [large, setLarge] = useState(false);
 
   useEffect(() => {
     setDraft(bot.soul ?? "");
@@ -63,23 +66,46 @@ export function SoulField({
     }
   };
   const canMigrate = bot.description.length > 400 && !(bot.soul ?? "").trim();
+  const label = simple ? simple.label : t("botIdentity.soul.label");
+  const editor = (className: string, id?: string) => (
+    <textarea
+      id={id}
+      aria-label={id ? undefined : label}
+      className={cn(inputCls, className, over && "ring-2 ring-red-500/60")}
+      placeholder={simple ? simple.placeholder : t("bot.soul.placeholder")}
+      aria-invalid={over || undefined}
+      disabled={resolving}
+      value={draft}
+      onChange={(e) => change(e.target.value)}
+    />
+  );
+  const byteCount = (
+    <span className={cn("shrink-0 tabular-nums", over && "font-medium text-red-500")}>
+      {t(over ? "botIdentity.soul.bytesOver" : "botIdentity.soul.bytes", { bytes: bytes.toLocaleString(intlLocale()), limit: limit.toLocaleString(intlLocale()) })}
+    </span>
+  );
 
   return (
     <div className="block">
       <div className="mb-1.5 flex items-center justify-between gap-3">
         <label htmlFor={`bot-soul-${bot.id}`} className={simple ? "text-[12px] text-ink-secondary" : "text-[13px] text-ink-secondary"}>
-          {simple ? simple.label : t("botIdentity.soul.label")}
+          {label}
         </label>
-        {!simple && canMigrate && (
-          <button
-            type="button"
-            disabled={resolving}
-            onClick={() => onPatch({ soul: bot.description, description: firstSentence(bot.description) })}
-            className="rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10"
-          >
-            {t("botIdentity.soul.moveToFile")}
+        <div className="flex items-center gap-1">
+          {!simple && canMigrate && (
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => onPatch({ soul: bot.description, description: firstSentence(bot.description) })}
+              className={HEADER_BUTTON}
+            >
+              {t("botIdentity.soul.moveToFile")}
+            </button>
+          )}
+          <button type="button" disabled={resolving} onClick={() => setLarge(true)} className={HEADER_BUTTON}>
+            {t("botIdentity.soul.openLarge")}
           </button>
-        )}
+        </div>
       </div>
       {info?.drift && (
         <div className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-[12px] text-ink">
@@ -98,27 +124,49 @@ export function SoulField({
           </div>
         </div>
       )}
-      <textarea
-        id={`bot-soul-${bot.id}`}
-        className={cn(
-          inputCls,
-          simple ? "min-h-[140px] resize-y rounded-xl text-[14px] leading-relaxed" : "min-h-[220px] resize-y font-mono leading-relaxed",
-          over && "ring-2 ring-red-500/60",
-        )}
-        placeholder={simple ? simple.placeholder : t("bot.soul.placeholder")}
-        aria-invalid={over || undefined}
-        disabled={resolving}
-        value={draft}
-        onChange={(e) => change(e.target.value)}
-      />
+      {editor(simple ? "min-h-[140px] resize-y rounded-xl text-[14px] leading-relaxed" : "min-h-[220px] resize-y font-mono leading-relaxed", `bot-soul-${bot.id}`)}
       {(!simple || over) && <div className="mt-1.5 flex items-start justify-between gap-3 text-[11px] text-ink-secondary">
         <span>
           {!simple && <>{t("botIdentity.soul.contextHelp")}{info?.file ? <> {t("botIdentity.soul.mirroredTo")} <span className="break-all">{info.file}</span>.</> : null}</>}
         </span>
-        <span className={cn("shrink-0 tabular-nums", over && "font-medium text-red-500")}>
-          {t(over ? "botIdentity.soul.bytesOver" : "botIdentity.soul.bytes", { bytes: bytes.toLocaleString(intlLocale()), limit: limit.toLocaleString(intlLocale()) })}
-        </span>
+        {byteCount}
       </div>}
+      {large && (
+        <Layer modal>
+          <SoulLargeDialog title={label} byteCount={byteCount} onClose={() => setLarge(false)}>
+            {editor("min-h-0 flex-1 resize-none font-mono text-[14px] leading-relaxed")}
+          </SoulLargeDialog>
+        </Layer>
+      )}
+    </div>
+  );
+}
+
+const HEADER_BUTTON = "rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10 disabled:opacity-50";
+
+function SoulLargeDialog({ title, byteCount, onClose, children }: { title: string; byteCount: ReactNode; onClose: () => void; children: ReactNode }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalDialog(dialogRef, onClose);
+  useEffect(() => { dialogRef.current?.querySelector("textarea")?.focus(); }, []);
+  return (
+    <div
+      ref={dialogRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bot-soul-large-title"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-6"
+    >
+      <div className="flex h-[min(760px,90vh)] w-full max-w-3xl flex-col rounded-2xl bg-card p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 id="bot-soul-large-title" className="min-w-0 truncate text-[16px] font-semibold text-ink">{title}</h2>
+          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">
+            {t("common.done")}
+          </button>
+        </div>
+        {children}
+        <div className="mt-1.5 flex justify-end text-[11px] text-ink-secondary">{byteCount}</div>
+      </div>
     </div>
   );
 }
