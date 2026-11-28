@@ -142,9 +142,10 @@ function announcingWrites(store: RuntimeStore, wrote: () => void): RuntimeStore 
     markDelivered: announced(store.markDelivered), prune: announced(store.prune) };
 }
 
-/** A request back to a bot that waits on the asker's answer would leave each waiting on the other, as two bots did on a real
- * day, each then working the same problem with its own plan. The ancestor rule covers this within one request; this covers
- * two requests. The waiting request's words are not repeated: it may come from another person's private chat. */
+/** A request back to a bot that waits on the asker's answer in the same conversation would leave each waiting on the other.
+ * The ancestor rule covers this within one request; this covers two requests. A request from another of the asker's
+ * conversations goes through: each conversation answers its own. The waiting request's words are not repeated: it may come
+ * from another person's private chat. */
 const crossed = (asker: string, request: Assignment): string => `@${asker} is already waiting on you: it handed you a request (assignment ${
   request.id}), and ${request.status === "queued" ? "that has not reached you yet" : request.status === "running" ? "you are answering it in another conversation now"
   : "you have not finished it yet"}. Asking @${asker} for something now would leave each of you waiting on the other, so this was not sent. Answer the person here from what you know; @${
@@ -319,7 +320,7 @@ export class RuntimeCoordinator implements Coordinator {
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
     if (kind === "work" && target.groupId && lineage.some(n => n.assignee.destination.groupId === target.groupId)) throw new Error(ROOM_ANCESTOR);
     // A bot's own threads wait on it by design and can never ask it back (the ancestor rule above), so no two bots can cross.
-    const waiting = own || mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source.botId, target.botId);
+    const waiting = own || mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source, target);
     if (waiting) throw new Error(crossed(this.host.names(this.project(waiting.request), this.project(waiting.parent)).requester, waiting.request));
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
@@ -771,10 +772,12 @@ export class RuntimeCoordinator implements Coordinator {
     }
   }
 
-  /** Direct work `asker` handed to `botId` and still waits on: an open request whose requesting turn is still open. */
-  private waitingOn(botId: string, asker: string): { request: Assignment; parent: Assignment } | undefined {
+  /** Direct work `asker` handed to `bot` and still waits on: an open request whose requesting turn is still open, held in the
+   * conversation `bot` asks from or waiting in the one the new request goes to. */
+  private waitingOn(bot: RoomAddress, asker: RoomAddress): { request: Assignment; parent: Assignment } | undefined {
     for (const request of this.live()) {
-      if (request.assignee.botId !== botId || request.requester.botId !== asker || request.reply === "none" || request.assignee.destination.groupId !== undefined) continue;
+      if (request.assignee.botId !== bot.botId || request.requester.botId !== asker.botId || request.reply === "none" || request.assignee.destination.groupId !== undefined) continue;
+      if (request.assignee.destination.threadId !== bot.threadId && request.requester.threadId !== asker.threadId) continue;
       const parent = request.parentId ? this.store.get(request.parentId) : undefined;
       if (parent && !isTerminal(parent)) return { request, parent };
     }
