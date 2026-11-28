@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import type { AppPointedRef } from "../shared/app.ts";
-import { POINT_LIMITS, pointedLabel } from "../shared/app-frame/point.ts";
+import { isPointRange, POINT_LIMITS, pointedLabel, type PointRange } from "../shared/app-frame/point.ts";
 import { appRow } from "./chat-apps.ts";
 import type { AgentCardStore } from "./chat-widgets.ts";
 import { clean, recordsBlock } from "./records-block.ts";
@@ -14,11 +14,14 @@ const part = z.object({
   rev: z.number().int().min(0).max(1_000_000),
   tag: z.string().regex(/^[a-z][a-z0-9-]{0,40}$/),
   role: z.string().max(40),
-  text: z.string().max(POINT_LIMITS.text * 2),
+  text: z.string().max(POINT_LIMITS.selection * 2),
   selector: z.string().min(1).max(POINT_LIMITS.selector * 2),
   html: z.string().max(POINT_LIMITS.html * 2),
+  range: z.custom<PointRange>(isPointRange).optional(),
   note: z.string().max(POINT_LIMITS.note * 2).optional(),
-}).strict();
+}).strict().refine(({ range, text }) => range
+  ? Boolean(clean(text, POINT_LIMITS.selection)) && Array.from(text).length <= POINT_LIMITS.selection
+  : text.length <= POINT_LIMITS.text * 2);
 const parts = z.array(part).min(1).max(POINT_LIMITS.perMessage);
 
 const BAD = `pointed must list 1 to ${POINT_LIMITS.perMessage} parts of a page in this conversation.`;
@@ -41,8 +44,11 @@ export function preparePointed(store: Pick<AgentCardStore, "messagesFor">, threa
     const title = clean(row.app.title, 80);
     const current = (row.app.rev ?? 0) + 1;
     const versions = [...new Set(picks.map(({ pick }) => pick.rev + 1))].map((version) => `version ${version}`).join(" and ");
-    const lines = picks.map(({ pick, number }) =>
-      `${number}. <${pick.tag}>${pick.role ? ` role ${pick.role}` : ""}; text: ${pick.text || "(none)"}; selector: ${pick.selector}; html: ${pick.html}`);
+    const lines = picks.map(({ pick, number }) => {
+      const element = `${number}. <${pick.tag}>${pick.role ? ` role ${pick.role}` : ""}`;
+      if (pick.range) return `${element}; selected text: ${pick.text}; selector: ${pick.selector}; text offsets: ${pick.range.start}–${pick.range.end}; version ${pick.rev + 1}`;
+      return `${element}; text: ${pick.text || "(none)"}; selector: ${pick.selector}; html: ${pick.html}`;
+    });
     // The notes are the person's own words, typed beside each chip, so they sit outside the page's records.
     const notes = picks.flatMap(({ pick, number }) => (pick.note?.trim() ? [`${number}. ${clean(pick.note, POINT_LIMITS.note)}`] : []));
     blocks.push([

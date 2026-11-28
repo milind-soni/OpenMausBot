@@ -32,7 +32,12 @@ export function usePointedChips(threadId: string): readonly PointedChip[] {
  * (false), so earlier picks are never dropped. */
 export function addPointedChip(threadId: string, chip: Omit<PointedChip, "id">): boolean {
   const list = chips[threadId] ?? EMPTY;
-  const same = list.findIndex((each) => each.appId === chip.appId && each.selector === chip.selector);
+  const same = list.findIndex((each) => {
+    if (each.appId !== chip.appId || each.selector !== chip.selector) return false;
+    if (!each.range || !chip.range) return !each.range && !chip.range;
+    return each.rev === chip.rev && each.range.start === chip.range.start && each.range.end === chip.range.end
+      && each.range.fingerprint === chip.range.fingerprint;
+  });
   if (same >= 0) {
     const { note: _note, ...picked } = chip;
     set({ ...chips, [threadId]: list.map((each, index) => (index === same ? { ...each, ...picked } : each)) });
@@ -71,6 +76,12 @@ export function takePointedChips(threadId: string): { pointed: PointedElement[];
     pointed: list.map(({ id: _id, title: _title, note, ...element }) => (note?.trim() ? { ...element, note: note.trim() } : element)),
     restore: () => set({ ...chips, [threadId]: [...list, ...(chips[threadId] ?? EMPTY)].slice(0, POINT_LIMITS.perMessage) }),
   };
+}
+
+export function clearPointedChips(threadId: string): void {
+  if (!chips[threadId]) return;
+  const { [threadId]: _cleared, ...rest } = chips;
+  set(rest);
 }
 
 export function forgetPointedChips(): void {

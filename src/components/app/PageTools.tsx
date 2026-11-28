@@ -13,7 +13,7 @@ import { addPointedChip, usePointedChips } from "@/lib/pointed-chips";
 import { latestWebPanels, setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
 import { findPinnedPage, MAX_WEB_PANELS, togglePinnedPage, type PinnedChatPage } from "@/lib/web-panels";
 import type { AppDocument, AppPayload } from "../../../shared/app";
-import { marksMessage, pointMessage, readPointEvent } from "../../../shared/app-frame/point";
+import { highlightSelectionMessage, marksMessage, pointMessage, readPointEvent, type PointMark, type PointSelectionState } from "../../../shared/app-frame/point";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { canonicalDownloadFilename } from "../AttachmentPreview";
 import { appDownloadPath, publishAppPage, unpublishPage } from "./app-api";
@@ -132,8 +132,9 @@ export function usePageSave(threadId: string, messageId: string, title: string) 
 /** Point mode on whichever frame shows the page. Security: a pick counts only from that frame's own window and only
  * while the person has Point on, so a page cannot fill the composer by itself. Point stays on after a pick so several
  * parts can be marked in one pass; once it ends after any pick, `picked` runs and the composer takes focus. */
-export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; view?: string; frameKey?: string; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
+export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefined; view?: string; frameKey?: string; ready: boolean; threadId: string; appId: string; rev: number; title: string; picked(): void }) {
   const [pointing, setPointing] = useState(false);
+  const [selection, setSelection] = useState<PointSelectionState>("none");
   const on = useRef(false);
   on.current = pointing;
   const pickedAny = useRef(false);
@@ -143,6 +144,7 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
   const set = useCallback((next: boolean) => {
     on.current = next;
     setPointing(next);
+    setSelection("none");
     say(next);
     if (next || !pickedAny.current) return;
     pickedAny.current = false;
@@ -151,10 +153,13 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
   }, [say]);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      const heard = readPointEvent({ source: event.source, data: event.data }, latest.current.frame()?.contentWindow ?? null);
-      if (!heard || !on.current) return;
+      if (!on.current) return;
+      const heard = readPointEvent(event, latest.current.frame()?.contentWindow ?? null);
+      if (!heard) return;
       if (heard.kind === "ended") return set(false);
-      const { threadId, appId, rev, title } = latest.current;
+      const { threadId, appId, rev, title, ready } = latest.current;
+      if (!ready) return;
+      if (heard.kind === "selection") return setSelection(heard.state);
       if (addPointedChip(threadId, { appId, rev, title, ...heard.part })) pickedAny.current = true;
       else set(false);
     };
@@ -168,24 +173,34 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
       window.removeEventListener("keydown", onKey);
     };
   }, [set]);
-  // Numbered outlines on this version's parts waiting in the composer; a chip from another page or version keeps its
-  // number with an empty selector, so the page's numbers match the composer's.
+  // An empty selector preserves the numbering for chips from other pages and versions.
   const chips = usePointedChips(args.threadId);
-  const marks = JSON.stringify(chips.map((chip) => (chip.appId === args.appId && chip.rev === args.rev ? chip.selector : "")));
+  const marks = JSON.stringify(args.ready ? chips.map((chip): PointMark => {
+    if (chip.appId !== args.appId || chip.rev !== args.rev) return "";
+    return chip.range ? { selector: chip.selector, range: chip.range } : chip.selector;
+  }) : []);
+  useEffect(() => setSelection("none"), [args.view, args.frameKey, args.ready]);
   useEffect(() => {
     const iframe = latest.current.frame();
-    const send = () => iframe?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as string[]), "*");
+    const send = () => iframe?.contentWindow?.postMessage(marksMessage(JSON.parse(marks) as PointMark[]), "*");
     send();
     // A new frame (full screen, a reload) starts with Point off: once its page has loaded it gets the Point state, then
     // the outlines again; `frameKey` changes with each frame.
     const loaded = () => {
+      setSelection("none");
       say(on.current);
       send();
     };
     iframe?.addEventListener("load", loaded);
     return () => iframe?.removeEventListener("load", loaded);
   }, [marks, pointing, args.view, args.frameKey, say]);
-  return { pointing, toggle: () => set(!on.current), stop: () => { if (on.current) set(false); } };
+  return {
+    pointing, selection: args.ready ? selection : "none" as const,
+    toggle: () => set(!on.current), stop: () => { if (on.current) set(false); },
+    highlight: () => {
+      if (on.current && latest.current.ready) latest.current.frame()?.contentWindow?.postMessage(highlightSelectionMessage(), "*");
+    },
+  };
 }
 
 /** Pin to sidebar: the page joins the sidebar's pinned panels, which show in Advanced mode, so the button does too. */
@@ -307,7 +322,13 @@ export function PageNotes({ version, point, share, save, room, className }: Pick
     );
   }
   if (save.reason) rows.push(<p key="save" role="alert" dir="auto" className="px-1 text-[13px] text-danger">{save.reason}</p>);
-  if (point.pointing) rows.push(<div key="hint" role="status" className="rounded-2xl bg-accent/10 px-3 py-2 text-[13px] text-ink">{t("chat.preview.pointHint")}</div>);
+  if (point.pointing) rows.push(
+    <div key="hint" className="flex flex-wrap items-center gap-2 rounded-xl bg-accent/10 px-3 py-2 text-[13px] text-ink">
+      <span role="status" className="min-w-0 flex-1">{t(point.selection === "too-long" ? "chat.preview.pointSelectionTooLong" : "chat.preview.pointSelectionHint")}</span>
+      <button type="button" className={cn(ASK_CHIP, ASK_CHIP_IDLE, "disabled:opacity-50")} disabled={point.selection !== "ready"}
+        onPointerDown={(event) => event.preventDefault()} onClick={point.highlight}>{t("chat.preview.highlightSelection")}</button>
+    </div>,
+  );
   return rows.length ? <div className={cn("flex flex-col gap-2", className)}>{rows}</div> : null;
 }
 

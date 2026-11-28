@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { Crosshair, StickyNote, X } from "lucide-react";
+import { Crosshair, Highlighter, StickyNote, X } from "lucide-react";
 import { t } from "@/lib/i18n";
-import { removePointedChip, setPointedNote, usePointedChips } from "@/lib/pointed-chips";
+import { clearPointedChips, removePointedChip, setPointedNote, usePointedChips } from "@/lib/pointed-chips";
 import { pointedLabel } from "../../../shared/app-frame/point";
 
 /** The parts of a page the person pointed at, waiting to go with their next message. Each is numbered as its outline
@@ -15,13 +15,18 @@ export function PointedChips({ threadId }: { threadId: string }) {
   const openLabel = open ? pointedLabel(open) ?? t("chat.preview.pointedPart") : "";
   return (
     <div data-pointed-chips className="mb-2">
-      <div ref={list} className="flex flex-wrap gap-1.5">
+      <div className="mb-1 flex items-center gap-2 text-[12px] text-ink-secondary">
+        <span>{t("chat.preview.pointCount", { count: chips.length })}</span>
+        <button type="button" onClick={() => { clearPointedChips(threadId); setEditing(null); }} className="hover:text-ink hover:underline">{t("chat.preview.clearPoints")}</button>
+      </div>
+      <div ref={list} className="flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
         {chips.map((chip, index) => {
           const label = pointedLabel(chip) ?? t("chat.preview.pointedPart");
+          const Icon = chip.range ? Highlighter : Crosshair;
           return (
             <span key={chip.id} data-pointed-chip={chip.selector} title={`${chip.title} · <${chip.tag}> ${chip.selector}${chip.note ? `\n${chip.note}` : ""}`}
               className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--color-composer),var(--color-accent)_40%)] bg-[color-mix(in_srgb,var(--color-composer),var(--color-accent)_10%)] ps-2.5 pe-1 text-[13px] text-ink">
-              <Crosshair size={13} aria-hidden="true" className="shrink-0 text-accent-text" />
+              <Icon size={14} aria-hidden="true" className="shrink-0 text-accent-text" />
               <button type="button" data-pointed-note-for={chip.id} onClick={() => setEditing(editing === chip.id ? null : chip.id)} aria-expanded={editing === chip.id}
                 aria-label={t("chat.preview.notePoint", { label })} className="flex min-w-0 items-center gap-1.5">
                 <span className="shrink-0 text-[12px] font-semibold text-accent-text">{index + 1}</span>
