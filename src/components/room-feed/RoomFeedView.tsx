@@ -61,7 +61,7 @@ function toRow(group: Group, { task, summary }: FeedThread, bots: readonly Bot[]
 const folds = (row: FeedRowData, openThread: string | null) =>
   Boolean(row.closedBy) && row.mark === null && !row.working && !row.pinned && row.threadId !== openThread;
 
-/** A room as one feed of its threads, oldest at the top and the newest just above the composer, where a line starts a
+/** A room as one feed of its threads, oldest at the top and the newest last, nearest the composer, where a line starts a
  * new thread. A row opens its thread beside the feed; the room's current thread, which is everyone's, never moves. */
 export function RoomFeedView({ group }: { group: Group }) {
   const dispatch = useStoreDispatch();
@@ -170,20 +170,20 @@ export function RoomFeedView({ group }: { group: Group }) {
             if (foot || Date.now() - scrolledAt.current < INTENT_MS) atFoot.current = foot;
             hidden.measure();
           }}>
-          <div ref={contentRef} className="glass-scroller-content chat-column flex min-h-full w-full flex-col justify-end" style={{ paddingBottom: composerDock.pad }}>
+          <div ref={contentRef} className="glass-scroller-content chat-column flex min-h-full w-full flex-col" style={{ paddingBottom: composerDock.pad }}>
             {hasArchived && rows !== null && <button type="button" data-feed-archived-toggle="" aria-pressed={showArchived} onClick={() => setShowArchived((shown) => !shown)}
               className="mt-2 inline-flex h-7 items-center self-center rounded-md px-2 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">
               {showArchived ? t("room.feed.hideArchived") : t("room.feed.showArchived")}
             </button>}
             {rows === null || items === null ? (
               failed && (
-                <p role="alert" className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-secondary">
+                <p role="alert" className="mt-auto flex items-center justify-center gap-2 py-6 text-[13px] text-ink-secondary">
                   {t("room.feed.loadFailed")}
                   <button type="button" className="ui-button ui-button-sm" onClick={retry}>{t("chat.retry")}</button>
                 </p>
               )
             ) : rows.length === 0 ? (
-              <div className="py-6 text-center text-[13px] leading-[18px]">
+              <div className="mt-auto py-6 text-center text-[13px] leading-[18px]">
                 <p className="text-ink-secondary">{t("room.feed.empty")}</p>
                 {team && <p data-feed-split-hint="" className="mt-1 text-ink-tertiary">{t("room.feed.splitHint")}</p>}
               </div>
