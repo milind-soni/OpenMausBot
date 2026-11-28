@@ -43,10 +43,10 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
 
   return [
     section({
-      id: "ai.backupModel", label: "Automatic recovery", help: "When a bot's engine fails before any work starts, try once more on a backup model.", where: "backup-model",
+      id: "ai.backupModel", label: "Automatic recovery", help: "When a bot's engine fails before any work starts, reaches a usage limit or runs out of credit, the bot carries on with this backup model until its own engine works again.", where: "backup-model",
       synonyms: ["backup model", "fallback", "recovery", "automatic recovery"], value: F.automaticRecovery.unwrap(), allowed: '{"enabled":false} or {"enabled":true,"backup":{"instanceId","model"}} from list_models',
       current: () => cfg().automaticRecovery ?? { enabled: false }, patch: (automaticRecovery) => ({ automaticRecovery }),
-      says: ({ enabled, backup }) => (enabled && backup ? `Turn on automatic recovery: a bot whose engine fails before any work starts tries once more on ${backup.instanceId} / ${backup.model}` : "Turn off automatic recovery"),
+      says: ({ enabled, backup }) => (enabled && backup ? `Turn on automatic recovery: a bot whose engine fails before any work starts, reaches a usage limit or runs out of credit carries on with ${backup.instanceId} / ${backup.model}` : "Turn off automatic recovery"),
     }),
     section({
       id: "ai.routing", label: "Decision and extraction", help: "The small model that decides who answers in rooms and sorts the inbox (Jev, OpenRouter or the person's custom endpoint). Its keys, and a custom endpoint's address, are set only in Settings.", where: "routing",

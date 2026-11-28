@@ -4036,7 +4036,7 @@
   "placeLook.pictureLine": "Ein Bild, das oben in der Seitenleiste ausgeblendet wird.",
   "settings.glance.appsConnected": "{count} verbunden",
   "settings.glance.appsNone": "Noch keine",
-  "settings.recovery.short": "Wenn ein Anbieter vor dem Start ausfällt, wird einmal ein Ersatz versucht.",
+  "settings.recovery.short": "Wenn ein Anbieter vor dem Start ausfällt, ein Nutzungslimit erreicht oder kein Guthaben mehr hat, übernimmt ein Ersatz.",
   "decider.introShort": "Kleine, schnelle Modelle, die für deine Bots sortieren und lesen.",
   "decider.provider.title": "Anbieter",
   "decider.status.notSetUpShort": "Nicht eingerichtet",
